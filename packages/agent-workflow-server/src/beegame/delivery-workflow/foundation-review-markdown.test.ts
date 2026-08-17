@@ -147,6 +147,40 @@ describe('foundation review lane Markdown', () => {
     )
   })
 
+  test('parses tight and loose Evidence and Changes lists identically', () => {
+    const tight = parseFoundationReviewLaneMarkdown(
+      markdown({
+        candidates: candidate('C1', '胜利条件冲突').replace(
+          '  Observed: 必须同时满足 `A | B`，但关卡文档只要求 A。',
+          '  Observed: 必须同时满足 `A | B`，但关卡文档只要求 A。\n    第二行仍属于同一条证据。',
+        ),
+      }),
+      expected,
+    )
+    const loose = parseFoundationReviewLaneMarkdown(
+      markdown({
+        candidates: candidate('C1', '胜利条件冲突', {
+          evidence: [
+            '- Path: `docs/GDD.md`',
+            '',
+            '  Location: ## 胜利条件',
+            '',
+            '  Observed: 必须同时满足 `A | B`，但关卡文档只要求 A。',
+            '    第二行仍属于同一条证据。',
+          ].join('\n'),
+          changes: [
+            '- Path: `docs/GDD.md`',
+            '',
+            '  Action: 保留唯一权威条件。',
+          ].join('\n'),
+        }),
+      }),
+      expected,
+    )
+
+    expect(loose.candidates).toEqual(tight.candidates)
+  })
+
   test('rejects tables and invalid receipt identities', () => {
     expect(() =>
       parseFoundationReviewLaneMarkdown(
@@ -301,6 +335,24 @@ describe('foundation review lane Markdown', () => {
     ).toThrow('foundation review conflict change paths must be unique')
   })
 
+  test('rejects non-paragraph Evidence list item children and invalid labels', () => {
+    for (const evidence of [
+      '- Path: `docs/GDD.md`\n\n  - Location: nested list',
+      '- Path: `docs/GDD.md`\n\n  > Location: block quote',
+      '- Path: `docs/GDD.md`\n\n  ```text\n  Location: code block\n  ```',
+      '- Path: `docs/GDD.md`\n\n  ### Location: nested heading',
+      '- Path: `docs/GDD.md`\n  Observed: missing location',
+      '- Location: ## 胜利条件\n  Path: `docs/GDD.md`\n  Observed: reordered',
+    ]) {
+      expect(() =>
+        parseFoundationReviewLaneMarkdown(
+          markdown({ candidates: candidate('C1', '无效证据', { evidence }) }),
+          expected,
+        ),
+      ).toThrow('foundation review lane Markdown Evidence list item is invalid')
+    }
+  })
+
   test('publishes the complete lane receipt grammar', () => {
     expect(foundationReviewLaneMarkdownInstruction(expected)).toContain(
       '# Foundation Review Packet',
@@ -326,9 +378,7 @@ describe('foundation review lane Markdown', () => {
     ).toEqual({
       revision,
       keep: ['core-design:C1'],
-      duplicate: [
-        { source: 'technical-assets:C1', target: 'core-design:C1' },
-      ],
+      duplicate: [{ source: 'technical-assets:C1', target: 'core-design:C1' }],
       reject: ['presentation:C1'],
     })
   })
@@ -340,7 +390,10 @@ describe('foundation review lane Markdown', () => {
       'presentation:C1',
     ]
     const parse = (value: string, references = candidateReferences) =>
-      parseFoundationReviewSelectionMarkdown(value, { revision, candidateReferences: references })
+      parseFoundationReviewSelectionMarkdown(value, {
+        revision,
+        candidateReferences: references,
+      })
 
     expect(() =>
       parse(
@@ -355,7 +408,9 @@ describe('foundation review lane Markdown', () => {
           keep: '- `core-design:C1`\n- `core-design:C1`',
         }),
       ),
-    ).toThrow('foundation review selection Markdown references must be accounted exactly once')
+    ).toThrow(
+      'foundation review selection Markdown references must be accounted exactly once',
+    )
     expect(() =>
       parse(selectionMarkdown({ reject: '-' }), [
         'core-design:C1',
@@ -363,7 +418,9 @@ describe('foundation review lane Markdown', () => {
         'presentation:C1',
         'core-design:C2',
       ]),
-    ).toThrow('foundation review selection Markdown references must be accounted exactly once')
+    ).toThrow(
+      'foundation review selection Markdown references must be accounted exactly once',
+    )
     expect(() =>
       parse(
         selectionMarkdown({
@@ -372,7 +429,9 @@ describe('foundation review lane Markdown', () => {
           reject: '- `presentation:C1`',
         }),
       ),
-    ).toThrow('foundation review selection Markdown duplicate target is not retained')
+    ).toThrow(
+      'foundation review selection Markdown duplicate target is not retained',
+    )
     expect(() =>
       parse(
         selectionMarkdown({
@@ -381,20 +440,23 @@ describe('foundation review lane Markdown', () => {
           reject: '- `presentation:C1`',
         }),
       ),
-    ).toThrow('foundation review selection Markdown duplicate cannot target itself')
+    ).toThrow(
+      'foundation review selection Markdown duplicate cannot target itself',
+    )
     expect(() =>
       parse(
         selectionMarkdown({
           keep: '- `core-design:C1`',
           duplicate: '-',
-          reject: '- `core-design:C1`\n- `technical-assets:C1`\n- `presentation:C1`',
+          reject:
+            '- `core-design:C1`\n- `technical-assets:C1`\n- `presentation:C1`',
         }),
       ),
-    ).toThrow('foundation review selection Markdown references must be accounted exactly once')
+    ).toThrow(
+      'foundation review selection Markdown references must be accounted exactly once',
+    )
     expect(() =>
-      parse(
-        selectionMarkdown({ extra: '\nUnexpected prose.' }),
-      ),
+      parse(selectionMarkdown({ extra: '\nUnexpected prose.' })),
     ).toThrow('foundation review selection Markdown structure is invalid')
     expect(() =>
       parse(

@@ -16,7 +16,9 @@ import { getGameDocumentContract } from './game-document-contracts'
 const revision = 'a'.repeat(64)
 const workspaces: string[] = []
 
-function sourceDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
+function sourceDocument(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): string {
   const contract = getGameDocumentContract(path)
   return [
     `# ${contract.discipline}`,
@@ -70,7 +72,9 @@ function laneMarkdown(input: {
     '',
     '### Evidence',
     `- Path: ${path}`,
+    '',
     '  Location: Contract section',
+    '',
     '  Observed: The required outcome is ambiguous.',
     '',
     '### Required outcome',
@@ -78,6 +82,7 @@ function laneMarkdown(input: {
     '',
     '### Changes',
     `- Path: ${path}`,
+    '',
     '  Action: Define the unique outcome.',
     '',
     '### Acceptance',
@@ -86,11 +91,13 @@ function laneMarkdown(input: {
   ].join('\n')
 }
 
-function selectionMarkdown(input: {
-  keep?: string[]
-  duplicate?: Array<{ source: string; target: string }>
-  reject?: string[]
-} = {}): string {
+function selectionMarkdown(
+  input: {
+    keep?: string[]
+    duplicate?: Array<{ source: string; target: string }>
+    reject?: string[]
+  } = {},
+): string {
   const list = (values: string[]) =>
     values.length ? values.map(value => `- ${value}`) : ['-']
   return [
@@ -159,7 +166,9 @@ async function acceptLanes(
 }
 
 afterEach(async () => {
-  await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true })))
+  await Promise.all(
+    workspaces.splice(0).map(path => rm(path, { recursive: true })),
+  )
 })
 
 describe('foundation review lane dispatch barrier', () => {
@@ -213,8 +222,10 @@ describe('foundation review lane dispatch barrier', () => {
     expect(
       laneDispatches.every(
         item =>
-          item.assignment.sourcePaths.filter(path => path.endsWith('.md')).length < 8 &&
-          item.assignment.sourcePaths.filter(path => path.endsWith('.json')).length === 1 &&
+          item.assignment.sourcePaths.filter(path => path.endsWith('.md'))
+            .length < 8 &&
+          item.assignment.sourcePaths.filter(path => path.endsWith('.json'))
+            .length === 1 &&
           !Object.hasOwn(item.assignment, 'verificationSourcePaths') &&
           item.contract.reviewMode === 'initial' &&
           item.contract.projection?.digest.match(/^[a-f0-9]{64}$/u),
@@ -239,7 +250,9 @@ describe('foundation review lane dispatch barrier', () => {
         ),
       ),
     )
-    expect(synthesis[0].assignment).not.toHaveProperty('verificationSourcePaths')
+    expect(synthesis[0].assignment).not.toHaveProperty(
+      'verificationSourcePaths',
+    )
     expect(synthesis[0].contract.packetDigests).toEqual(
       Object.fromEntries(
         completed.state.reports
@@ -300,9 +313,7 @@ describe('foundation review lane dispatch barrier', () => {
               ...report,
               status: 'completed' as const,
               digest:
-                report.role === 'core-design'
-                  ? 'b'.repeat(64)
-                  : 'c'.repeat(64),
+                report.role === 'core-design' ? 'b'.repeat(64) : 'c'.repeat(64),
             }
           : report,
       ),
@@ -315,7 +326,9 @@ describe('foundation review lane dispatch barrier', () => {
     })
 
     expect(dispatches.map(dispatch => dispatch.role)).toEqual(['presentation'])
-    await expect(readFile(stagingPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(stagingPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   test('commits Markdown receipts and assembles canonical JSON with distinct authority digests', async () => {
@@ -333,11 +346,7 @@ describe('foundation review lane dispatch barrier', () => {
     })
     const finalStagingPath = synthesis.assignment.stagingOutputPaths[0]
     await mkdir(dirname(finalStagingPath), { recursive: true })
-    await writeFile(
-      finalStagingPath,
-      selection,
-      'utf8',
-    )
+    await writeFile(finalStagingPath, selection, 'utf8')
     const completed = await acceptFoundationReviewWorkerTerminal({
       state,
       workspacePath: root,
@@ -414,9 +423,7 @@ describe('foundation review lane dispatch barrier', () => {
       },
       {
         name: 'selection receipt',
-        tamper: async (input: {
-          synthesisStagingPath: string
-        }) => {
+        tamper: async (input: { synthesisStagingPath: string }) => {
           await writeFile(
             input.synthesisStagingPath,
             '# Foundation Review Selection\n\nRevision: `stale`\n',

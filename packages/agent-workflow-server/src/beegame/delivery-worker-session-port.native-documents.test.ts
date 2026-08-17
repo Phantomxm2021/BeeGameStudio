@@ -198,6 +198,20 @@ describe('native initial document authoring', () => {
       `Revision: \`${revision}\``,
       'Lane: `core-design`',
       `Projection: \`${projectionDigest}\``,
+      '## `core-design:C1` — Loose list receipt',
+      '### Problem',
+      'The authority permits incompatible implementations.',
+      '### Evidence',
+      '- Path: `docs/GDD.md`',
+      '  Location: Contract section',
+      '  Observed: The required outcome is ambiguous.',
+      '### Required outcome',
+      'Define one implementable outcome.',
+      '### Changes',
+      '- Path: `docs/GDD.md`',
+      '  Action: Define the unique outcome.',
+      '### Acceptance',
+      '- The outcome has one observable result.',
     ].join('\n\n')
     const prompts: string[] = []
     const events: Array<Record<string, unknown>> = []
@@ -404,91 +418,88 @@ describe('native initial document authoring', () => {
       `# Foundation Review Packet\n\n${'x'.repeat(2 * 1024 * 1024)}`,
       'maximum',
     ],
-  ])(
-    'rejects %s native Reviewer result text before returning a completed terminal',
-    async (_case, resultText, expectedError) => {
-      const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-invalid-'))
-      const revision = 'a'.repeat(64)
-      const stagingPath = join(workspacePath, '.beegame/reviewer.md')
-      const events: Array<Record<string, unknown>> = []
-      const sessions = {
-        start: () => ({
-          id: 'review-session',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          cwd: workspacePath,
-        }),
-        updateAuthToken: () => undefined,
-        get: () => ({
-          id: 'review-session',
-          status: 'running',
-          turnStatus: 'idle',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          cwd: workspacePath,
-        }),
-        events: () => events,
-        isWorkflowWorkerOpen: () => true,
-        sendWithDisplay: async () => {
-          events.push({
+  ])('rejects %s native Reviewer result text before returning a completed terminal', async (_case, resultText, expectedError) => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-invalid-'))
+    const revision = 'a'.repeat(64)
+    const stagingPath = join(workspacePath, '.beegame/reviewer.md')
+    const events: Array<Record<string, unknown>> = []
+    const sessions = {
+      start: () => ({
+        id: 'review-session',
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: workspacePath,
+      }),
+      updateAuthToken: () => undefined,
+      get: () => ({
+        id: 'review-session',
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: workspacePath,
+      }),
+      events: () => events,
+      isWorkflowWorkerOpen: () => true,
+      sendWithDisplay: async () => {
+        events.push({
+          type: 'result',
+          text: typeof resultText === 'string' ? resultText : '',
+          payload: {
             type: 'result',
-            text: typeof resultText === 'string' ? resultText : '',
-            payload: {
-              type: 'result',
-              ...(typeof resultText === 'string'
-                ? { result: resultText }
-                : {}),
-            },
-          })
-        },
-        stop: () => undefined,
-        disposeWorkflowWorker: async () => undefined,
-      }
-      const port = createBeeGameDeliveryWorkerPort({
-        sessions: sessions as never,
-        userId: 'user',
-      })
-      const request = {
-        dispatchId: `invalid-${_case}`,
-        runId: 'run',
-        ownerId: 'owner',
-        projectId: 'project',
-        workspacePath,
-        workerType: 'document-reviewer',
-        phase: 'DOCUMENT_REVIEW',
-        revision,
-        contract: {
-          reviewMode: 'initial',
-          reviewRole: 'core-design',
-          projection: {
-            path: '.beegame/projection.json',
-            digest: 'b'.repeat(64),
-            byteLength: 100,
+            ...(typeof resultText === 'string' ? { result: resultText } : {}),
           },
-          assignment: {
-            scope: 'foundation',
-            role: 'core-design',
-            sourcePaths: [join(workspacePath, 'docs/GDD.md')],
-            stagingOutputPaths: [stagingPath],
-            committedOutputPaths: [join(workspacePath, 'reviewer.md')],
-          },
+        })
+      },
+      stop: () => undefined,
+      disposeWorkflowWorker: async () => undefined,
+    }
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions: sessions as never,
+      userId: 'user',
+    })
+    const request = {
+      dispatchId: `invalid-${_case}`,
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath,
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision,
+      contract: {
+        reviewMode: 'initial',
+        reviewRole: 'core-design',
+        projection: {
+          path: '.beegame/projection.json',
+          digest: 'b'.repeat(64),
+          byteLength: 100,
         },
-      } as const
+        assignment: {
+          scope: 'foundation',
+          role: 'core-design',
+          sourcePaths: [join(workspacePath, 'docs/GDD.md')],
+          stagingOutputPaths: [stagingPath],
+          committedOutputPaths: [join(workspacePath, 'reviewer.md')],
+        },
+      },
+    } as const
 
-      await port.start(request as never)
-      await port.submit(request.dispatchId, 'Review the assigned lane.')
-      await expect(port.waitForTerminal?.(request.dispatchId)).rejects.toThrow(
-        expectedError,
-      )
-      await expect(readFile(stagingPath, 'utf8')).rejects.toThrow()
-      await rm(workspacePath, { recursive: true, force: true })
-    },
-  )
+    await port.start(request as never)
+    await port.submit(request.dispatchId, 'Review the assigned lane.')
+    await expect(port.waitForTerminal?.(request.dispatchId)).rejects.toThrow(
+      expectedError,
+    )
+    await expect(readFile(stagingPath, 'utf8')).rejects.toThrow()
+    await rm(workspacePath, { recursive: true, force: true })
+  })
 
   test.skip('legacy calibration session resume is removed', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-'))
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'native-document-resume-'),
+    )
     const prompts: string[] = []
     const sessionIds: string[] = []
     const disposedSessionIds: string[] = []
@@ -638,7 +649,9 @@ describe('native initial document authoring', () => {
   })
 
   test('fails closed when a requested resume session is unavailable or busy', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-gate-'))
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'native-document-resume-gate-'),
+    )
     const states = new Map<
       string,
       { status: 'running' | 'stopped'; turnStatus: 'idle' | 'running' }
@@ -669,7 +682,11 @@ describe('native initial document authoring', () => {
         userId: 'user',
       })
 
-      for (const sessionId of ['unknown-session', 'stopped-session', 'busy-session'])
+      for (const sessionId of [
+        'unknown-session',
+        'stopped-session',
+        'busy-session',
+      ])
         await expect(
           port.start(
             parallelRequest(
@@ -686,7 +703,9 @@ describe('native initial document authoring', () => {
   })
 
   test('creates a fresh native session for every document dispatch', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-sessions-'))
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'native-document-sessions-'),
+    )
     const sessionIds: string[] = []
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -701,8 +720,12 @@ describe('native initial document authoring', () => {
         userId: 'user',
       })
 
-      const first = await port.start(request(workspacePath, 'dispatch-one') as never)
-      const second = await port.start(request(workspacePath, 'dispatch-two') as never)
+      const first = await port.start(
+        request(workspacePath, 'dispatch-one') as never,
+      )
+      const second = await port.start(
+        request(workspacePath, 'dispatch-two') as never,
+      )
 
       expect(first.sessionId).not.toBe(second.sessionId)
       expect(new Set(sessionIds).size).toBe(2)
@@ -722,7 +745,12 @@ describe('native initial document authoring', () => {
         completeTestSubmission('docs/GDD.md'),
       )
       const port = createBeeGameDeliveryWorkerPort({
-        sessions: fakeSessions({ workspacePath, body, prompts, sessionIds }) as never,
+        sessions: fakeSessions({
+          workspacePath,
+          body,
+          prompts,
+          sessionIds,
+        }) as never,
         userId: 'user',
         confirmedBriefContext:
           '{"kind":"confirmed_build_brief","marker":"unique-authority"}',
@@ -735,7 +763,9 @@ describe('native initial document authoring', () => {
 
       expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(1)
-      expect(count(prompts[0]!, 'complete raw Markdown body')).toBeGreaterThan(0)
+      expect(count(prompts[0]!, 'complete raw Markdown body')).toBeGreaterThan(
+        0,
+      )
       expect(prompts[0]).toContain('Do not call tools')
       expect(count(prompts[0]!, 'confirmed_build_brief')).toBe(1)
       expect(count(prompts[0]!, 'completeDocumentContract')).toBe(1)
@@ -777,23 +807,35 @@ describe('native initial document authoring', () => {
   })
 
   test('preserves incomplete native output and reports the final contract failure', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-incomplete-'))
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'native-document-incomplete-'),
+    )
     const prompts: string[] = []
     const sessionIds: string[] = []
     const body = '# Incomplete GDD\n\nNative progress remains on disk.\n'
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       const port = createBeeGameDeliveryWorkerPort({
-        sessions: fakeSessions({ workspacePath, body, prompts, sessionIds }) as never,
+        sessions: fakeSessions({
+          workspacePath,
+          body,
+          prompts,
+          sessionIds,
+        }) as never,
         userId: 'user',
       })
 
       await port.start(request(workspacePath, 'dispatch-incomplete') as never)
-      await port.submit('dispatch-incomplete', 'original complete document prompt')
+      await port.submit(
+        'dispatch-incomplete',
+        'original complete document prompt',
+      )
       await expect(
         port.waitForTerminal?.('dispatch-incomplete'),
       ).rejects.toThrow(/complete game document/i)
-      await expect(readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).rejects.toThrow()
+      await expect(
+        readFile(join(workspacePath, 'docs/GDD.md'), 'utf8'),
+      ).rejects.toThrow()
       expect(sessionIds).toHaveLength(1)
       expect(prompts).toHaveLength(1)
     } finally {
@@ -802,7 +844,9 @@ describe('native initial document authoring', () => {
   })
 
   test('reports the authoritative commit failure appended while draining the native turn', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-drain-failure-'))
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'native-document-drain-failure-'),
+    )
     const events: Array<Record<string, unknown>> = []
     let failureAppended = false
     try {
@@ -860,7 +904,9 @@ describe('native initial document authoring', () => {
         userId: 'user',
       })
 
-      await port.start(request(workspacePath, 'dispatch-drain-failure') as never)
+      await port.start(
+        request(workspacePath, 'dispatch-drain-failure') as never,
+      )
       await port.submit('dispatch-drain-failure', 'complete document prompt')
       await expect(
         port.waitForTerminal?.('dispatch-drain-failure'),
@@ -873,7 +919,9 @@ describe('native initial document authoring', () => {
   })
 
   test('fails once without a hidden correction turn', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-correction-'))
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'native-document-correction-'),
+    )
     const prompts: string[] = []
     const sessionIds: string[] = []
     try {
@@ -899,7 +947,10 @@ describe('native initial document authoring', () => {
       })
 
       await port.start(request(workspacePath, 'dispatch-correction') as never)
-      await port.submit('dispatch-correction', 'original complete document prompt')
+      await port.submit(
+        'dispatch-correction',
+        'original complete document prompt',
+      )
       await expect(
         port.waitForTerminal?.('dispatch-correction'),
       ).rejects.toThrow(/canonical heading/i)

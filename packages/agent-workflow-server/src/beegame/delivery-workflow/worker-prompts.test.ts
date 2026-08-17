@@ -6,7 +6,10 @@ import { getGameDocumentContract } from './game-document-contracts'
 import type { WorkerDispatchRequest } from './types'
 
 test('has no Foundation remediation prompt path', () => {
-  const source = readFileSync(new URL('./worker-prompts.ts', import.meta.url), 'utf8')
+  const source = readFileSync(
+    new URL('./worker-prompts.ts', import.meta.url),
+    'utf8',
+  )
   expect(source).not.toContain("authoringMode === 'remediation'")
   expect(source).not.toContain('contract.remediation')
   expect(source).not.toContain('remediationReceipts')
@@ -377,11 +380,17 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).toContain(
       'Read exactly the three accepted lane Markdown receipts',
     )
-    expect(finalReviewerPrompt).not.toContain('Review all eight canonical foundation documents directly')
+    expect(finalReviewerPrompt).not.toContain(
+      'Review all eight canonical foundation documents directly',
+    )
     expect(finalReviewerPrompt).not.toContain('fixed coverage pass')
     expect(finalReviewerPrompt).toContain('cannot be implemented or verified')
-    expect(finalReviewerPrompt).toContain('permits incompatible implementations')
-    expect(finalReviewerPrompt).toContain('unambiguous duplicate wording is non-blocking')
+    expect(finalReviewerPrompt).toContain(
+      'permits incompatible implementations',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'unambiguous duplicate wording is non-blocking',
+    )
     expect(finalReviewerPrompt).not.toContain('one JSON object')
     expect(finalReviewerPrompt).not.toContain('version must be the integer 3')
     expect(finalReviewerPrompt).not.toContain('IDs must be B1, B2, B3')
@@ -398,13 +407,17 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).not.toContain('decision.json')
     expect(finalReviewerPrompt).not.toContain('one non-blocking register')
     expect(finalReviewerPrompt).not.toContain('one preservation list')
-    expect(finalReviewerPrompt).not.toContain('Consolidate the committed specialist')
+    expect(finalReviewerPrompt).not.toContain(
+      'Consolidate the committed specialist',
+    )
     expect(finalReviewerPrompt).not.toContain('contract-specialist')
     expect(finalReviewerPrompt).not.toContain('integration-specialist')
     expect(finalReviewerPrompt).not.toContain('TaskOutput')
     expect(finalReviewerPrompt).not.toContain('launch both specialists')
     expect(finalReviewerPrompt).toContain('Deduplicate')
-    expect(finalReviewerPrompt).not.toContain('sole canonical version 3 review.json')
+    expect(finalReviewerPrompt).not.toContain(
+      'sole canonical version 3 review.json',
+    )
     expect(finalReviewerPrompt).toContain('accepted lane Markdown receipts')
     expect(finalReviewerPrompt).toContain('launch another Agent or task')
     expect(finalReviewerPrompt).toContain(
@@ -451,11 +464,15 @@ describe('resource-content worker prompts', () => {
     expect(specialistPrompt).toContain('# Foundation Review Packet')
     expect(specialistPrompt).toContain('Lane: `core-design`')
     expect(specialistPrompt).toContain(`Projection: \`${'b'.repeat(64)}\``)
+    expect(specialistPrompt).toContain('## `<lane>:C1` — `<title>`')
     expect(specialistPrompt).toContain(
-      '## `<lane>:C1` — `<title>`',
+      '- Path: `<lane-owned-canonical-path>`\n\n  Location: `<stable-location>`\n\n  Observed: `<bounded-observation>`',
     )
     expect(specialistPrompt).toContain('### Required outcome')
     expect(specialistPrompt).toContain('### Changes')
+    expect(specialistPrompt).toContain(
+      '- Path: `<lane-owned-canonical-path>`\n\n  Action: `<required action>`',
+    )
     expect(specialistPrompt).toContain('### Acceptance')
     expect(specialistPrompt).toContain('Report at most 8 candidates')
     expect(specialistPrompt).toContain(
@@ -502,10 +519,7 @@ describe('resource-content worker prompts', () => {
     expect(integrationSpecialistPrompt).toContain(
       'runtime architecture, production feasibility and asset responsibilities',
     )
-    expect(integrationSpecialistPrompt).toContain(
-      'Lane: `technical-assets`',
-    )
-
+    expect(integrationSpecialistPrompt).toContain('Lane: `technical-assets`')
   })
 
   test('keeps resource remediation inside the same Curator task', () => {

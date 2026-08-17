@@ -201,12 +201,13 @@ function itemLines(
   heading: string,
   preserveInlineCode = false,
 ): string[] {
-  if (item.children.length !== 1 || item.children[0]?.type !== 'paragraph')
+  if (!item.children.length || item.children.some(child => !isParagraph(child)))
     fail(`${heading} list item is invalid`)
-  const paragraph = item.children[0] as Paragraph
-  return (
-    preserveInlineCode ? paragraphText(paragraph) : toString(paragraph)
-  ).split('\n')
+  return (item.children as Paragraph[]).flatMap(paragraph =>
+    (preserveInlineCode ? paragraphText(paragraph) : toString(paragraph)).split(
+      '\n',
+    ),
+  )
 }
 
 function labeledFields(
@@ -468,9 +469,7 @@ function selectionRevision(
     selectionFail('revision does not match')
 }
 
-function selectionList(
-  node: Content | undefined,
-): ListItem[] {
+function selectionList(node: Content | undefined): ListItem[] {
   if (node?.type !== 'list' || node.ordered) selectionFail('list is invalid')
   const list = node as List
   if (!list.children.length) selectionFail('list is invalid')
@@ -559,7 +558,8 @@ export function parseFoundationReviewSelectionMarkdown(
   const expectedReferences = new Set(expected.candidateReferences)
   const accounted = [...keep, ...duplicate.map(item => item.source), ...reject]
   for (const reference of [...accounted, ...duplicate.map(item => item.target)])
-    if (!expectedReferences.has(reference)) selectionFail('reference is unknown')
+    if (!expectedReferences.has(reference))
+      selectionFail('reference is unknown')
   if (
     accounted.length !== expectedReferences.size ||
     new Set(accounted).size !== accounted.length ||
@@ -571,7 +571,8 @@ export function parseFoundationReviewSelectionMarkdown(
       selectionFail('references must be accounted exactly once')
   for (const { source, target } of duplicate) {
     if (source === target) selectionFail('duplicate cannot target itself')
-    if (!keep.includes(target)) selectionFail('duplicate target is not retained')
+    if (!keep.includes(target))
+      selectionFail('duplicate target is not retained')
   }
   return { revision: expected.revision, keep, duplicate, reject }
 }
