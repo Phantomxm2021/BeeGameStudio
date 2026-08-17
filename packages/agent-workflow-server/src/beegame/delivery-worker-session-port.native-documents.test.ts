@@ -60,7 +60,11 @@ async function prepareReviewProjection(
     laneId,
     descriptor,
   })
-  return { descriptor, projectedPath: authority.allowedEvidencePaths[0]! }
+  return {
+    descriptor,
+    projectedPath: authority.allowedEvidencePaths[0]!,
+    projectedPaths: authority.allowedEvidencePaths,
+  }
 }
 
 function request(workspacePath: string, dispatchId: string) {
@@ -227,8 +231,15 @@ describe('native initial document authoring', () => {
   test('persists the native visible Reviewer lane Markdown without a schema or Write tool call', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-markdown-'))
     const revision = 'a'.repeat(64)
-    const { descriptor: projection, projectedPath } =
-      await prepareReviewProjection(workspacePath, revision, 'technical-assets')
+    const {
+      descriptor: projection,
+      projectedPath,
+      projectedPaths,
+    } = await prepareReviewProjection(
+      workspacePath,
+      revision,
+      'technical-assets',
+    )
     const projectionDigest = projection.digest
     const stagingPath = join(
       workspacePath,
@@ -351,6 +362,23 @@ describe('native initial document authoring', () => {
       'Use native read and search capabilities as needed',
     )
     expect(prompts[0]).toContain('Do not call StructuredOutput')
+    const allowedEvidencePaths = [
+      'docs/ASSET_PLAN.md',
+      'docs/TECHNICAL_DESIGN.md',
+      ...projectedPaths,
+    ]
+      .filter((path, index, paths) => paths.indexOf(path) === index)
+      .sort((left, right) =>
+        Buffer.compare(Buffer.from(left), Buffer.from(right)),
+      )
+    expect(prompts[0]).toContain(
+      `Allowed Evidence paths (exact): ${allowedEvidencePaths
+        .map(path => `\`${path}\``)
+        .join(', ')}.`,
+    )
+    expect(prompts[0]).toContain(
+      `The projection artifact \`${projection.path}\` itself is forbidden as Evidence; cite the projected content by its canonical source path instead.`,
+    )
     expect(prompts[0]).not.toContain(
       'native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged',
     )
@@ -382,12 +410,11 @@ describe('native initial document authoring', () => {
       },
     } as const
     await port.start(missingProjectionRequest as never)
-    await port.submit(
-      missingProjectionRequest.dispatchId,
-      'Review the assigned lane.',
-    )
     await expect(
-      port.waitForTerminal?.(missingProjectionRequest.dispatchId),
+      port.submit(
+        missingProjectionRequest.dispatchId,
+        'Review the assigned lane.',
+      ),
     ).rejects.toThrow('foundation review projection path is not canonical')
     await expect(readFile(missingProjectionStagingPath)).rejects.toMatchObject({
       code: 'ENOENT',
@@ -427,6 +454,41 @@ describe('native initial document authoring', () => {
     await expect(readFile(projectedChangeStagingPath)).rejects.toMatchObject({
       code: 'ENOENT',
     })
+
+    const projectionArtifactStagingPath = join(
+      workspacePath,
+      '.beegame/reviews/foundation',
+      revision,
+      '.staging/parts/projection-artifact.md',
+    )
+    nextMarkdown = markdown.replace(
+      `- Path: \`${projectedPath}\``,
+      `- Path: \`${projection.path}\``,
+    )
+    const projectionArtifactRequest = {
+      ...request,
+      dispatchId: 'review-projection-artifact',
+      contract: {
+        ...request.contract,
+        assignment: {
+          ...request.contract.assignment,
+          stagingOutputPaths: [projectionArtifactStagingPath],
+        },
+      },
+    } as const
+    await port.start(projectionArtifactRequest as never)
+    await port.submit(
+      projectionArtifactRequest.dispatchId,
+      'Review the assigned lane.',
+    )
+    await expect(
+      port.waitForTerminal?.(projectionArtifactRequest.dispatchId),
+    ).rejects.toThrow(
+      'foundation review lane Markdown evidence path is outside lane authority',
+    )
+    await expect(readFile(projectionArtifactStagingPath)).rejects.toMatchObject(
+      { code: 'ENOENT' },
+    )
     await rm(workspacePath, { recursive: true, force: true })
   })
 

@@ -37,6 +37,10 @@ import {
   parseFoundationReviewSelectionMarkdown,
 } from './delivery-workflow/foundation-review-markdown'
 import { readFoundationReviewProjectionAuthority } from './delivery-workflow/foundation-review-projection'
+import {
+  foundationDocumentLaneById,
+  type FoundationDocumentLaneId,
+} from './delivery-workflow/foundation-document-lanes'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -113,6 +117,41 @@ function reviewerAssignmentContract(request: WorkerDispatchRequest):
       committedOutputPaths: record.committedOutputPaths as [string],
     },
   }
+}
+
+async function readReviewerProjectionAuthority(
+  request: WorkerDispatchRequest,
+  laneId: FoundationDocumentLaneId,
+) {
+  return readFoundationReviewProjectionAuthority({
+    workspacePath: request.workspacePath,
+    revision: request.revision,
+    laneId,
+    descriptor: request.contract.projection,
+  })
+}
+
+async function reviewerProjectionAuthorityPromptInstruction(
+  request: WorkerDispatchRequest,
+): Promise<string> {
+  const contract = reviewerAssignmentContract(request)
+  if (!contract || contract.role === 'synthesis') return ''
+  const authority = await readReviewerProjectionAuthority(
+    request,
+    contract.role,
+  )
+  const allowedEvidencePaths = [
+    ...new Set([
+      ...foundationDocumentLaneById(contract.role).ownedPaths,
+      ...authority.allowedEvidencePaths,
+    ]),
+  ].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)))
+  return [
+    `Allowed Evidence paths (exact): ${allowedEvidencePaths
+      .map(path => `\`${path}\``)
+      .join(', ')}.`,
+    `The projection artifact \`${authority.path}\` itself is forbidden as Evidence; cite the projected content by its canonical source path instead.`,
+  ].join(' ')
 }
 
 function taskTypeForWorker(
@@ -476,6 +515,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
               : request?.workerType === 'question-answerer'
                 ? 'Submit the answer through SubmitQuestionAnswerResult exactly once. Do not author workflow evidence or return terminal JSON.'
                 : ''
+      const reviewerProjectionInstruction = request
+        ? await reviewerProjectionAuthorityPromptInstruction(request)
+        : ''
       const assetManifestInstruction =
         request?.workerType === 'resource-planner'
           ? 'Use AssetManifest submit_resource_plan as the only mutation and stop after it is accepted.'
@@ -495,6 +537,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         implementationResultInstruction,
         validationResultInstruction,
         workflowResultInstruction,
+        reviewerProjectionInstruction,
         assetManifestInstruction,
       ]
         .filter(Boolean)
@@ -1102,12 +1145,10 @@ async function createDeterministicDocumentReviewTerminal(input: {
       candidateReferences,
     })
   } else {
-    const projection = await readFoundationReviewProjectionAuthority({
-      workspacePath: input.request.workspacePath,
-      revision: input.request.revision,
-      laneId: contract.role,
-      descriptor: input.request.contract.projection,
-    })
+    const projection = await readReviewerProjectionAuthority(
+      input.request,
+      contract.role,
+    )
     parseFoundationReviewLaneMarkdown(markdown, {
       revision: input.request.revision,
       lane: contract.role,
