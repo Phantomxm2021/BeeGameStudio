@@ -4172,7 +4172,13 @@ describe('delivery workflow recovery', () => {
       workerType: 'document-author',
       phase: 'DOCUMENT_DRAFTING',
       revision: initial.revision.document,
-      contract: { documentSet: 'foundation' },
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/GDD.md',
+        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+      },
     })
 
     await new Promise(resolve => setTimeout(resolve, 40))
