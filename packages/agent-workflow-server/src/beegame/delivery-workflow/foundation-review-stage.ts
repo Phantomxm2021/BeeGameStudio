@@ -1,21 +1,25 @@
-import { createHash } from 'node:crypto'
-import { readFile, rm } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises'
+import { dirname, relative, resolve } from 'node:path'
 import {
   FOUNDATION_DOCUMENT_LANES,
   foundationDocumentLaneById,
   type FoundationDocumentLaneId,
 } from './foundation-document-lanes'
+import { assembleFoundationReview } from './foundation-review-assembly'
 import {
-  acceptFoundationReviewLanePacket,
-  foundationReviewLanePacketPath,
-  foundationReviewLanePacketStagingPath,
-} from './foundation-review-lane-packet'
+  parseFoundationReviewLaneMarkdown,
+  parseFoundationReviewSelectionMarkdown,
+  type FoundationReviewLaneReceipt,
+  type FoundationReviewSelection,
+} from './foundation-review-markdown'
 import { writeFoundationReviewProjection } from './foundation-review-projection'
 import {
-  acceptFoundationReview,
-  foundationReviewPath,
-  foundationReviewStagingPath,
+  commitAssembledFoundationReview,
+  foundationReviewLaneReceiptPath,
+  foundationReviewLaneReceiptStagingPath,
+  foundationReviewSelectionPath,
+  foundationReviewSelectionStagingPath,
 } from './foundation-review'
 import {
   assertFoundationReviewState,
@@ -54,6 +58,198 @@ export type FoundationReviewDispatch = {
     confirmedBriefDigest: string
     packetDigests: Partial<Record<FoundationDocumentLaneId, string>>
     projection?: { path: string; digest: string; byteLength: number }
+    candidateReferences?: string[]
+  }
+}
+
+function sha256(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+function projectRelativePath(workspacePath: string, path: string): string {
+  return relative(resolve(workspacePath), path).split('\\').join('/')
+}
+
+async function isRegularFile(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isFile()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
+export async function atomicCommitReceipt(input: {
+  stagingPath: string
+  committedPath: string
+  bytes: Buffer
+}): Promise<void> {
+  if (await pathExists(input.committedPath))
+    throw new Error('foundation review Markdown receipt is already committed')
+  await mkdir(dirname(input.committedPath), { recursive: true })
+  const temporaryPath = `${input.committedPath}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    const receiptFile = await open(temporaryPath, 'wx')
+    try {
+      await receiptFile.writeFile(input.bytes)
+      await receiptFile.sync()
+    } finally {
+      await receiptFile.close()
+    }
+    if (await pathExists(input.committedPath))
+      throw new Error('foundation review Markdown receipt is already committed')
+    await rename(temporaryPath, input.committedPath)
+    const directory = await open(dirname(input.committedPath), 'r')
+    try {
+      await directory.sync()
+    } finally {
+      await directory.close()
+    }
+  } catch (error) {
+    await rm(temporaryPath, { force: true })
+    throw error
+  }
+  await rm(input.stagingPath, { force: true }).catch(() => undefined)
+}
+
+async function readLaneReceipt(input: {
+  state: FoundationReviewState
+  workspacePath: string
+  laneId: FoundationDocumentLaneId
+}): Promise<FoundationReviewLaneReceipt> {
+  const report = input.state.reports.find(
+    candidate => candidate.role === input.laneId,
+  )
+  if (report?.status !== 'completed' || !report.digest)
+    throw new Error('foundation synthesis requires completed lane receipts')
+  const projection = await writeFoundationReviewProjection({
+    workspacePath: input.workspacePath,
+    revision: input.state.revision,
+    laneId: input.laneId,
+  })
+  const path = foundationReviewLaneReceiptPath(
+    input.workspacePath,
+    input.state.revision,
+    input.laneId,
+  )
+  if (!(await isRegularFile(path)))
+    throw new Error('foundation review lane receipt is unavailable')
+  const bytes = await readFile(path)
+  if (sha256(bytes) !== report.digest)
+    throw new Error('foundation review lane receipt digest changed')
+  return parseFoundationReviewLaneMarkdown(bytes.toString('utf8'), {
+    revision: input.state.revision,
+    lane: input.laneId,
+    projectionDigest: projection.digest,
+  })
+}
+
+async function readLaneReceipts(input: {
+  state: FoundationReviewState
+  workspacePath: string
+}): Promise<FoundationReviewLaneReceipt[]> {
+  const receipts: FoundationReviewLaneReceipt[] = []
+  for (const lane of FOUNDATION_DOCUMENT_LANES)
+    receipts.push(
+      await readLaneReceipt({
+        ...input,
+        laneId: lane.id,
+      }),
+    )
+  return receipts
+}
+
+function candidateReferences(
+  receipts: readonly FoundationReviewLaneReceipt[],
+): string[] {
+  return receipts.flatMap(receipt =>
+    receipt.candidates.map(candidate => candidate.reference),
+  )
+}
+
+async function acceptLaneReceipt(input: {
+  workspacePath: string
+  revision: string
+  currentRevision: string
+  laneId: FoundationDocumentLaneId
+  projectionDigest: string
+}): Promise<{
+  receipt: FoundationReviewLaneReceipt
+  path: string
+  digest: string
+}> {
+  if (input.revision !== input.currentRevision)
+    throw new Error('canonical artifacts changed during foundation review')
+  const stagingPath = foundationReviewLaneReceiptStagingPath(
+    input.workspacePath,
+    input.revision,
+    input.laneId,
+  )
+  if (!(await isRegularFile(stagingPath)))
+    throw new Error('foundation review lane receipt is unavailable')
+  const bytes = await readFile(stagingPath)
+  const receipt = parseFoundationReviewLaneMarkdown(bytes.toString('utf8'), {
+    revision: input.revision,
+    lane: input.laneId,
+    projectionDigest: input.projectionDigest,
+  })
+  const committedPath = foundationReviewLaneReceiptPath(
+    input.workspacePath,
+    input.revision,
+    input.laneId,
+  )
+  await atomicCommitReceipt({ stagingPath, committedPath, bytes })
+  return {
+    receipt,
+    path: projectRelativePath(input.workspacePath, committedPath),
+    digest: sha256(bytes),
+  }
+}
+
+async function acceptSelectionReceipt(input: {
+  workspacePath: string
+  revision: string
+  dispatchId: string
+  candidateReferences: string[]
+}): Promise<{
+  selection: FoundationReviewSelection
+  path: string
+  digest: string
+}> {
+  const stagingPath = foundationReviewSelectionStagingPath(
+    input.workspacePath,
+    input.revision,
+    input.dispatchId,
+  )
+  if (!(await isRegularFile(stagingPath)))
+    throw new Error('foundation review selection receipt is unavailable')
+  const bytes = await readFile(stagingPath)
+  const selection = parseFoundationReviewSelectionMarkdown(
+    bytes.toString('utf8'),
+    {
+      revision: input.revision,
+      candidateReferences: input.candidateReferences,
+    },
+  )
+  const committedPath = foundationReviewSelectionPath(
+    input.workspacePath,
+    input.revision,
+  )
+  await atomicCommitReceipt({ stagingPath, committedPath, bytes })
+  return {
+    selection,
+    path: projectRelativePath(input.workspacePath, committedPath),
+    digest: sha256(bytes),
   }
 }
 
@@ -99,6 +295,10 @@ export async function buildFoundationReviewDispatches(input: {
     throw new Error('foundation review confirmed brief digest is invalid')
   const roles = pendingRoles(state)
   const packetDigests = completedPacketDigests(state)
+  const synthesisReceipts = roles.includes('synthesis')
+    ? await readLaneReceipts({ state, workspacePath: input.workspacePath })
+    : []
+  const synthesisCandidateReferences = candidateReferences(synthesisReceipts)
 
   return Promise.all(
     roles.map(async role => {
@@ -118,30 +318,33 @@ export async function buildFoundationReviewDispatches(input: {
           ...lane.ownedPaths.map(path => resolve(input.workspacePath, path)),
           resolve(input.workspacePath, projection.path),
         ]
-        stagingPath = foundationReviewLanePacketStagingPath(
+        stagingPath = foundationReviewLaneReceiptStagingPath(
           input.workspacePath,
           state.revision,
           role,
         )
-        committedPath = foundationReviewLanePacketPath(
+        committedPath = foundationReviewLaneReceiptPath(
           input.workspacePath,
           state.revision,
           role,
         )
       } else {
         sourcePaths = FOUNDATION_DOCUMENT_LANES.map(lane =>
-          foundationReviewLanePacketPath(
+          foundationReviewLaneReceiptPath(
             input.workspacePath,
             state.revision,
             lane.id,
           ),
         )
-        stagingPath = foundationReviewStagingPath(
+        stagingPath = foundationReviewSelectionStagingPath(
           input.workspacePath,
           state.revision,
           `foundation-initial-${state.attempt}-${role}`,
         )
-        committedPath = foundationReviewPath(input.workspacePath, state.revision)
+        committedPath = foundationReviewSelectionPath(
+          input.workspacePath,
+          state.revision,
+        )
       }
       const assignment: FoundationReviewAssignment = {
         scope: 'foundation',
@@ -164,6 +367,9 @@ export async function buildFoundationReviewDispatches(input: {
           confirmedBriefDigest: input.confirmedBriefDigest,
           packetDigests,
           ...(projection ? { projection } : {}),
+          ...(role === 'synthesis'
+            ? { candidateReferences: synthesisCandidateReferences }
+            : {}),
         },
       }
     }),
@@ -196,7 +402,7 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
       revision: state.revision,
       laneId: terminal.role,
     })
-    const accepted = await acceptFoundationReviewLanePacket({
+    const accepted = await acceptLaneReceipt({
       workspacePath: input.workspacePath,
       revision: state.revision,
       currentRevision: input.currentRevision,
@@ -221,20 +427,32 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     })
   }
 
-  if (terminal.role === 'synthesis') {
-    for (const lane of state.reports.slice(0, 3)) {
-      if (lane.status !== 'completed' || !lane.digest)
-        throw new Error('foundation synthesis requires completed lane packets')
-      const bytes = await readFile(resolve(input.workspacePath, lane.path))
-      if (createHash('sha256').update(bytes).digest('hex') !== lane.digest)
-        throw new Error('foundation review lane packet digest changed')
-    }
-  }
-  const accepted = await acceptFoundationReview({
+  const dispatchId = `foundation-initial-${state.attempt}-${terminal.role}`
+  const initialReceipts = await readLaneReceipts({
+    state,
+    workspacePath: input.workspacePath,
+  })
+  const acceptedSelection = await acceptSelectionReceipt({
+    workspacePath: input.workspacePath,
+    revision: state.revision,
+    dispatchId,
+    candidateReferences: candidateReferences(initialReceipts),
+  })
+  const laneReceipts = await readLaneReceipts({
+    state,
+    workspacePath: input.workspacePath,
+  })
+  const review = assembleFoundationReview({
+    revision: state.revision,
+    laneReceipts,
+    selection: acceptedSelection.selection,
+  })
+  const accepted = await commitAssembledFoundationReview({
     workspacePath: input.workspacePath,
     revision: state.revision,
     currentRevision: input.currentRevision,
-    dispatchId: `foundation-initial-${state.attempt}-${terminal.role}`,
+    dispatchId,
+    review,
   })
   return assertFoundationReviewState({
     ...state,
@@ -243,8 +461,8 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
       candidate.role === terminal.role
         ? {
             ...candidate,
-            path: accepted.path,
-            digest: accepted.digest,
+            path: acceptedSelection.path,
+            digest: acceptedSelection.digest,
             status: 'completed' as const,
             failureReason: undefined,
           }

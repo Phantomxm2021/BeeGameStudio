@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, open, readFile, rename } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { z } from 'zod'
+import {
+  foundationDocumentLaneById,
+  type FoundationDocumentLaneId,
+} from './foundation-document-lanes'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
@@ -146,6 +150,50 @@ export function foundationReviewPath(
   revision: string,
 ): string {
   return resolve(reviewDirectory(workspacePath, revision), 'review.json')
+}
+
+export function foundationReviewLaneReceiptPath(
+  workspacePath: string,
+  revision: string,
+  laneId: FoundationDocumentLaneId,
+): string {
+  foundationDocumentLaneById(laneId)
+  return resolve(reviewDirectory(workspacePath, revision), 'parts', `${laneId}.md`)
+}
+
+export function foundationReviewLaneReceiptStagingPath(
+  workspacePath: string,
+  revision: string,
+  laneId: FoundationDocumentLaneId,
+): string {
+  foundationDocumentLaneById(laneId)
+  return resolve(
+    reviewDirectory(workspacePath, revision),
+    '.staging',
+    'parts',
+    `${laneId}.md`,
+  )
+}
+
+export function foundationReviewSelectionPath(
+  workspacePath: string,
+  revision: string,
+): string {
+  return resolve(reviewDirectory(workspacePath, revision), 'selection.md')
+}
+
+export function foundationReviewSelectionStagingPath(
+  workspacePath: string,
+  revision: string,
+  dispatchId: string,
+): string {
+  assertSegment(dispatchId, 'foundation review dispatch ID')
+  return resolve(
+    reviewDirectory(workspacePath, revision),
+    '.staging',
+    dispatchId,
+    'selection.md',
+  )
 }
 
 export function foundationReviewStagingPath(
@@ -294,5 +342,64 @@ export async function acceptFoundationReview(input: {
       .join('/'),
     digest: createHash('sha256').update(accepted.bytes).digest('hex'),
     affectedPaths: foundationReviewAffectedPaths(accepted.review),
+  }
+}
+
+export async function commitAssembledFoundationReview(input: {
+  workspacePath: string
+  revision: string
+  currentRevision: string
+  dispatchId: string
+  review: FoundationReview
+}): Promise<{
+  review: FoundationReview
+  path: string
+  digest: string
+  affectedPaths: FoundationDocumentPath[]
+}> {
+  assertDigest(input.revision)
+  assertDigest(input.currentRevision)
+  if (input.revision !== input.currentRevision)
+    throw new Error('canonical artifacts changed during foundation review')
+  const review = foundationReviewSchema.parse(input.review)
+  if (review.revision !== input.revision)
+    throw new Error('foundation review revision does not match')
+  const bytes = Buffer.from(`${JSON.stringify(review, null, 2)}\n`, 'utf8')
+  const validated = foundationReviewSchema.parse(
+    JSON.parse(bytes.toString('utf8')),
+  )
+  const stagedPath = foundationReviewStagingPath(
+    input.workspacePath,
+    input.revision,
+    input.dispatchId,
+  )
+  const committedPath = foundationReviewPath(
+    input.workspacePath,
+    input.revision,
+  )
+  await mkdir(dirname(stagedPath), { recursive: true })
+  await writeFile(stagedPath, bytes)
+  const stagedFile = await open(stagedPath, 'r')
+  try {
+    await stagedFile.sync()
+  } finally {
+    await stagedFile.close()
+  }
+  await mkdir(dirname(committedPath), { recursive: true })
+  await rename(stagedPath, committedPath)
+  const directory = await open(dirname(committedPath), 'r')
+  try {
+    await directory.sync()
+  } finally {
+    await directory.close()
+  }
+
+  return {
+    review: validated,
+    path: relative(resolve(input.workspacePath), committedPath)
+      .split('\\')
+      .join('/'),
+    digest: createHash('sha256').update(bytes).digest('hex'),
+    affectedPaths: foundationReviewAffectedPaths(validated),
   }
 }

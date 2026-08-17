@@ -10,7 +10,7 @@ describe('foundation review worker terminal contract', () => {
         revision: 'a'.repeat(64),
         mode: 'initial',
         role: 'core-design',
-        reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/parts/core-design.json`,
+        reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/parts/core-design.md`,
       }).role,
     ).toBe('core-design')
     expect(
@@ -20,7 +20,7 @@ describe('foundation review worker terminal contract', () => {
         revision: 'a'.repeat(64),
         mode: 'initial',
         role: 'synthesis',
-        reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/review.json`,
+        reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/selection.md`,
       }).role,
     ).toBe('synthesis')
     expect(() =>
@@ -30,7 +30,17 @@ describe('foundation review worker terminal contract', () => {
         revision: 'a'.repeat(64),
         mode: 'verification',
         role: 'core-design',
-        reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/parts/core-design.json`,
+        reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/parts/core-design.md`,
+      }),
+    ).toThrow()
+    expect(() =>
+      foundationReviewWorkerTerminalSchema.parse({
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision: 'a'.repeat(64),
+        mode: 'initial',
+        role: 'synthesis',
+        reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/review.json`,
       }),
     ).toThrow()
   })

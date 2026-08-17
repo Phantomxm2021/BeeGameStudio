@@ -56,8 +56,8 @@ export const foundationReviewWorkerTerminalSchema = z
       value.role === 'core-design' ||
       value.role === 'technical-assets' ||
       value.role === 'presentation'
-        ? `${root}/parts/${value.role}.json`
-        : `${root}/review.json`
+        ? `${root}/parts/${value.role}.md`
+        : `${root}/selection.md`
     if (value.reportPath !== expected)
       context.addIssue({
         code: 'custom',

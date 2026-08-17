@@ -51,8 +51,12 @@ function reportPath(revision: string, role: FoundationReviewRole): string {
     role === 'technical-assets' ||
     role === 'presentation'
   )
-    return `${root}/parts/${role}.json`
-  return `${root}/review.json`
+    return `${root}/parts/${role}.md`
+  return `${root}/selection.md`
+}
+
+function finalReportPath(revision: string): string {
+  return `.beegame/reviews/foundation/${revision}/review.json`
 }
 
 export function assertFoundationReviewState(
@@ -95,6 +99,8 @@ export function assertFoundationReviewState(
       !state.verdict
     )
       throw new Error('completed foundation review requires final authority')
+    if (state.finalReportPath !== finalReportPath(state.revision))
+      throw new Error('completed foundation review final report path is invalid')
     digestSchema.parse(state.finalReportDigest)
   }
   return state
