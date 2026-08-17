@@ -81,34 +81,35 @@ function isParagraph(node: Content | undefined): node is Paragraph {
   return node?.type === 'paragraph' && !!node.children
 }
 
-function assertNoTables(nodes: readonly Content[]): void {
-  for (const node of nodes) {
-    if (node.type === 'table') fail('tables are forbidden')
-    if (node.children) assertNoTables(node.children)
-  }
-}
-
 function looksLikeMarkdownTable(node: Content): boolean {
   if (!isParagraph(node)) return false
   const lines = paragraphText(node)
     .split('\n')
     .map(line => line.trim())
-  if (lines.length < 2 || !lines[0]?.includes('|') || !lines[1]?.includes('|'))
-    return false
-  const divider = lines[1]
-  if (!divider) return false
-  let hasDash = false
-  for (const character of divider) {
-    if (character === '-') hasDash = true
-    else if (character !== '|' && character !== ':' && character !== ' ')
-      return false
+  for (let index = 1; index < lines.length; index += 1) {
+    const header = lines[index - 1]
+    const divider = lines[index]
+    if (!header?.includes('|') || !divider?.includes('|')) continue
+    let hasDash = false
+    let isDivider = true
+    for (const character of divider) {
+      if (character === '-') hasDash = true
+      else if (character !== '|' && character !== ':' && character !== ' ') {
+        isDivider = false
+        break
+      }
+    }
+    if (hasDash && isDivider) return true
   }
-  return hasDash
+  return false
 }
 
 function assertNoMarkdownTables(nodes: readonly Content[]): void {
-  assertNoTables(nodes)
-  if (nodes.some(looksLikeMarkdownTable)) fail('tables are forbidden')
+  for (const node of nodes) {
+    if (node.type === 'table' || looksLikeMarkdownTable(node))
+      fail('tables are forbidden')
+    if (node.children) assertNoMarkdownTables(node.children)
+  }
 }
 
 function identityValue(

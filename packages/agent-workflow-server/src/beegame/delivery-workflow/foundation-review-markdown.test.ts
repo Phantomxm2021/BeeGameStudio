@@ -27,8 +27,10 @@ function candidate(
   id: string,
   title: string,
   overrides: {
+    evidence?: string
     evidencePath?: string
     changes?: string
+    acceptance?: string
     headings?: string[]
   } = {},
 ) {
@@ -41,16 +43,18 @@ function candidate(
   ]
   const sections: Record<string, string> = {
     Problem: 'GDD 与关卡文档要求不同的唯一胜利状态。',
-    Evidence: [
-      `- Path: \`${overrides.evidencePath ?? 'docs/GDD.md'}\``,
-      '  Location: ## 胜利条件',
-      '  Observed: 必须同时满足 `A | B`，但关卡文档只要求 A。',
-    ].join('\n'),
+    Evidence:
+      overrides.evidence ??
+      [
+        `- Path: \`${overrides.evidencePath ?? 'docs/GDD.md'}\``,
+        '  Location: ## 胜利条件',
+        '  Observed: 必须同时满足 `A | B`，但关卡文档只要求 A。',
+      ].join('\n'),
     'Required outcome': '所有消费者使用同一个胜利状态。',
     Changes:
       overrides.changes ??
       '- Path: `docs/GDD.md`\n  Action: 保留唯一权威条件。',
-    Acceptance: '- GDD 与关卡文档枚举完全一致。',
+    Acceptance: overrides.acceptance ?? '- GDD 与关卡文档枚举完全一致。',
   }
   return [
     `## \`core-design:${id}\` — ${title}`,
@@ -151,6 +155,26 @@ describe('foundation review lane Markdown', () => {
     )
   })
 
+  test('rejects pipe tables nested inside evidence list items', () => {
+    expect(() =>
+      parseFoundationReviewLaneMarkdown(
+        markdown({
+          candidates: candidate('C1', '嵌套表格', {
+            evidence: [
+              '- Path: `docs/GDD.md`',
+              '  Location: ## 胜利条件',
+              '  Observed: 这里不应接受表格。',
+              '  | 列 | 值 |',
+              '  | --- | --- |',
+              '  | A | B |',
+            ].join('\n'),
+          }),
+        }),
+        expected,
+      ),
+    ).toThrow('foundation review lane Markdown tables are forbidden')
+  })
+
   test('rejects invalid candidate structure and authority', () => {
     expect(() =>
       parseFoundationReviewLaneMarkdown(
@@ -197,6 +221,18 @@ describe('foundation review lane Markdown', () => {
     ).toThrow(
       'foundation review lane Markdown Acceptance list must not be empty',
     )
+    expect(() =>
+      parseFoundationReviewLaneMarkdown(
+        markdown({ candidates: candidate('C1', '空证据', { evidence: '' }) }),
+        expected,
+      ),
+    ).toThrow('foundation review lane Markdown Evidence list must not be empty')
+    expect(() =>
+      parseFoundationReviewLaneMarkdown(
+        markdown({ candidates: candidate('C1', '空修改', { changes: '' }) }),
+        expected,
+      ),
+    ).toThrow('foundation review lane Markdown Changes list must not be empty')
     expect(() =>
       parseFoundationReviewLaneMarkdown(
         markdown({
