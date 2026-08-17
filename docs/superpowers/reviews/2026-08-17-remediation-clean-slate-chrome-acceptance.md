@@ -40,32 +40,71 @@ and `verificationSourcePaths`. The canonical version 2 initial report still
 requires `priorConflictStatus: []`, preserving its accepted initial shape while
 rejecting prior-run state.
 
-## Chrome Blocker
+## Authorized Chrome Run
 
-The local fixed-port launcher requires `AGENT_WORKFLOW_WORKSPACE_PATH` and the
-configured remote service/model credentials. The non-exported environment was
-first rejected before starting any service because the workspace path was not
-available to the launcher.
+The user explicitly authorized transmission of the existing accepted
+eight-document test project to the currently configured remote model endpoint
+for Reviewer-only acceptance. No later workflow stage was authorized.
 
-The corrected remote-enabled launch was then denied by the execution approval
-boundary because loading local credentials could transmit private project data
-to an unverified remote model endpoint without a separate explicit approval.
-The denial explicitly prohibited indirect execution or another workaround.
+The fixed-port stack ran on `62173`–`62177`. Chrome created and automatically
+started this fresh review copy through the Web/React Dashboard:
 
-Consequently:
+- project: `review-copy--405bace0-c997-48af-8c32-9660e32a5846`
+- workflow run: `54a7307a-aa89-46c7-ae4d-fc2620c71144`
+- document revision: `8f4fc1352df7c4fe07e2aab40f878c284f01a52c4cf86b8f7a1d7805024c3e3a`
 
-- no fixed-port service was started;
-- Chrome was not opened against the application;
-- no review copy or workflow run was created;
-- no Reviewer task, report, token, credit, tool-call, or wall-time evidence was
-  observed;
-- no pre/post source digest comparison was performed for this branch;
-- this document does not reuse the earlier branch's runtime evidence as proof
-  for the clean-slate tree.
+All three specialist Reviewer tasks completed and persisted eight candidates
+each:
+
+| Task | Result | Duration | Input | Cache input | Output |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Core design | completed | 219.611 s | 99,348 | 123,157 | 14,932 |
+| Presentation | completed | 302.813 s | 156,455 | 300,107 | 19,649 |
+| Technical and assets | completed | 333.966 s | 140,615 | 420,266 | 21,477 |
+
+The blocker synthesis Reviewer started, read its three projections, and began
+streaming its schema-backed `StructuredOutput`. Its last SSE record was an
+`input_json_delta` in the middle of a JSON field at
+`2026-08-17T13:50:00.619Z`. No further model output, completion event, or error
+arrived for more than nine minutes. At 15:38 Dashboard wall time the task was
+stopped through the UI, as required by the Reviewer-only acceptance boundary.
+The final raw record is `system/api_retry` with `error: "unknown"`; no retry was
+accepted or executed by the operator.
+
+Because the second synthesis turn never finalized its usage, its full token and
+credit values are unavailable. The observable lower bound, including its
+completed first turn, is 412,467 input tokens, 843,530 cache-input tokens, and
+56,721 output tokens. Billing debits also returned `Insufficient realtime usage
+credits`, so no trustworthy Credit total can be asserted for this run.
+
+Native tool evidence across all four Reviewer sessions is read-only:
+
+- 17 `Read` calls;
+- 4 `StructuredOutput` calls;
+- zero `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`, or `Agent` calls.
+
+Exactly four Reviewer dispatch log directories exist. No repair, verification,
+or other post-report dispatch exists.
+
+## Source Integrity
+
+The SHA-256 values below were identical before the Reviewer run and after it
+was stopped:
+
+| Source document | SHA-256 |
+| --- | --- |
+| `docs/ART_DIRECTION.md` | `b5af13c4f065db0e490abcb62173a26e5fe354a8c4be5dd51de084e2cf7c4c79` |
+| `docs/ASSET_PLAN.md` | `a2ffd5c58965a00b9a441a797cfa1533a65a0132243145f8ff03dbf930962547` |
+| `docs/AUDIO_DESIGN.md` | `d4315cc4b6f88dd9604ea8c385f063a9d8f2c9f78b50e545c9c14f6e5e7fc4a9` |
+| `docs/BALANCE_DESIGN.md` | `63d03c0c55c587e70c178b5429a0e1fc299182381f1cdf88d08a3fa7cf10cdb9` |
+| `docs/GDD.md` | `e80d64e803f144fa6b60c696159aab8f9523eb875c9ebbb219ddf46c23fee2e0` |
+| `docs/LEVEL_SCENE_DESIGN.md` | `c5c6579348483a08a5dbd08af1e607a712e5d5fa50cd47111f3fb32eab35a784` |
+| `docs/TECHNICAL_DESIGN.md` | `1782c8af62fb2e83412af3fe76e0a54e9847c2dc789b539b1ef4f1e38c956a44` |
+| `docs/UI_UX_SPEC.md` | `4d6d9e89942120083461d55f73f1cb21a0c8154b786a4d4d92f0188cae8903cd` |
 
 ## Required Evidence Still Outstanding
 
-Acceptance remains blocked until an authorized fixed-port run records:
+Acceptance remains incomplete until a fresh authorized run records:
 
 - project and workflow run IDs;
 - the four completed Reviewer task states;
@@ -81,6 +120,8 @@ Acceptance remains blocked until an authorized fixed-port run records:
 
 ## Conclusion
 
-Static and automated closure are green, but Chrome acceptance is not complete.
-This record must not be marked accepted until the missing live evidence is
-captured on this branch with authorized credentials and project-data handling.
+Static and automated closure are green. Chrome proved the clean-slate Reviewer
+is read-only and that no removed remediation path was dispatched, but the live
+acceptance is **not accepted** because the final Reviewer never completed and
+therefore produced no canonical report or terminal `needs_action` verdict. No
+later stage ran. This failure is recorded without retrying or patching it.
