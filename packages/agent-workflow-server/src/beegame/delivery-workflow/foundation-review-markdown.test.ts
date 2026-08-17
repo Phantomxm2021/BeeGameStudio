@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   foundationReviewLaneMarkdownInstruction,
   parseFoundationReviewLaneMarkdown,
+  parseFoundationReviewSelectionMarkdown,
 } from './foundation-review-markdown'
 
 const revision = 'a'.repeat(64)
@@ -68,6 +69,32 @@ function candidate(
   ]
     .join('\n')
     .trimEnd()
+}
+
+function selectionMarkdown(
+  overrides: {
+    revision?: string
+    keep?: string
+    duplicate?: string
+    reject?: string
+    extra?: string
+  } = {},
+) {
+  return [
+    '# Foundation Review Selection',
+    '',
+    `Revision: \`${overrides.revision ?? revision}\``,
+    '',
+    '## Keep',
+    overrides.keep ?? '- `core-design:C1`',
+    '',
+    '## Duplicate',
+    overrides.duplicate ?? '- `technical-assets:C1` -> `core-design:C1`',
+    '',
+    '## Reject',
+    overrides.reject ?? '- `presentation:C1`',
+    overrides.extra ?? '',
+  ].join('\n')
 }
 
 const expected = {
@@ -284,5 +311,95 @@ describe('foundation review lane Markdown', () => {
     expect(foundationReviewLaneMarkdownInstruction(expected)).toContain(
       'Markdown tables are forbidden',
     )
+  })
+
+  test('parses a compact, fully-accounted synthesis selection', () => {
+    expect(
+      parseFoundationReviewSelectionMarkdown(selectionMarkdown(), {
+        revision,
+        candidateReferences: [
+          'core-design:C1',
+          'technical-assets:C1',
+          'presentation:C1',
+        ],
+      }),
+    ).toEqual({
+      revision,
+      keep: ['core-design:C1'],
+      duplicate: [
+        { source: 'technical-assets:C1', target: 'core-design:C1' },
+      ],
+      reject: ['presentation:C1'],
+    })
+  })
+
+  test('rejects invalid synthesis selection grammar and accounting', () => {
+    const candidateReferences = [
+      'core-design:C1',
+      'technical-assets:C1',
+      'presentation:C1',
+    ]
+    const parse = (value: string, references = candidateReferences) =>
+      parseFoundationReviewSelectionMarkdown(value, { revision, candidateReferences: references })
+
+    expect(() =>
+      parse(
+        selectionMarkdown({
+          keep: '- `unknown:C1`',
+        }),
+      ),
+    ).toThrow('foundation review selection Markdown reference is unknown')
+    expect(() =>
+      parse(
+        selectionMarkdown({
+          keep: '- `core-design:C1`\n- `core-design:C1`',
+        }),
+      ),
+    ).toThrow('foundation review selection Markdown references must be accounted exactly once')
+    expect(() =>
+      parse(selectionMarkdown({ reject: '-' }), [
+        'core-design:C1',
+        'technical-assets:C1',
+        'presentation:C1',
+        'core-design:C2',
+      ]),
+    ).toThrow('foundation review selection Markdown references must be accounted exactly once')
+    expect(() =>
+      parse(
+        selectionMarkdown({
+          keep: '- `core-design:C1`',
+          duplicate: '- `technical-assets:C1` -> `presentation:C1`',
+          reject: '- `presentation:C1`',
+        }),
+      ),
+    ).toThrow('foundation review selection Markdown duplicate target is not retained')
+    expect(() =>
+      parse(
+        selectionMarkdown({
+          keep: '- `technical-assets:C1`',
+          duplicate: '- `core-design:C1` -> `core-design:C1`',
+          reject: '- `presentation:C1`',
+        }),
+      ),
+    ).toThrow('foundation review selection Markdown duplicate cannot target itself')
+    expect(() =>
+      parse(
+        selectionMarkdown({
+          keep: '- `core-design:C1`',
+          duplicate: '-',
+          reject: '- `core-design:C1`\n- `technical-assets:C1`\n- `presentation:C1`',
+        }),
+      ),
+    ).toThrow('foundation review selection Markdown references must be accounted exactly once')
+    expect(() =>
+      parse(
+        selectionMarkdown({ extra: '\nUnexpected prose.' }),
+      ),
+    ).toThrow('foundation review selection Markdown structure is invalid')
+    expect(() =>
+      parse(
+        '# Foundation Review Selection\n\n| column | value |\n| --- | --- |',
+      ),
+    ).toThrow('foundation review selection Markdown tables are forbidden')
   })
 })

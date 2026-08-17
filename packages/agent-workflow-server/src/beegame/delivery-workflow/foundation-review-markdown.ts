@@ -43,6 +43,13 @@ export type FoundationReviewLaneReceipt = {
   candidates: FoundationReviewCandidate[]
 }
 
+export type FoundationReviewSelection = {
+  revision: string
+  keep: string[]
+  duplicate: Array<{ source: string; target: string }>
+  reject: string[]
+}
+
 type ExpectedReceiptIdentity = {
   revision: string
   lane: FoundationDocumentLaneId
@@ -51,6 +58,10 @@ type ExpectedReceiptIdentity = {
 
 function fail(message: string): never {
   throw new Error(`foundation review lane Markdown ${message}`)
+}
+
+function selectionFail(message: string): never {
+  throw new Error(`foundation review selection Markdown ${message}`)
 }
 
 function phrasingText(node: { children: PhrasingContent[] }): string {
@@ -429,4 +440,138 @@ export function foundationReviewLaneMarkdownInstruction(
     '- `<mechanically-checkable condition>`',
     `Every evidence and change path must be one of: ${ownedPaths}. Report at most 8 candidates; candidate references must be unique.`,
   ].join('\n\n')
+}
+
+function assertNoSelectionMarkdownTables(nodes: readonly Content[]): void {
+  for (const node of nodes) {
+    if (node.type === 'table' || looksLikeMarkdownTable(node))
+      selectionFail('tables are forbidden')
+    if (node.children) assertNoSelectionMarkdownTables(node.children)
+  }
+}
+
+function selectionRevision(
+  node: Content | undefined,
+  expectedRevision: string,
+): void {
+  if (node?.type !== 'paragraph') selectionFail('revision paragraph is invalid')
+  const paragraph = node as Paragraph
+  const [prefix, value] = paragraph.children
+  if (
+    paragraph.children.length !== 2 ||
+    prefix?.type !== 'text' ||
+    prefix.value !== 'Revision: ' ||
+    value?.type !== 'inlineCode'
+  )
+    selectionFail('revision paragraph is invalid')
+  if (toString(value) !== expectedRevision)
+    selectionFail('revision does not match')
+}
+
+function selectionList(
+  node: Content | undefined,
+): ListItem[] {
+  if (node?.type !== 'list' || node.ordered) selectionFail('list is invalid')
+  const list = node as List
+  if (!list.children.length) selectionFail('list is invalid')
+  return list.children
+}
+
+function selectionItemChildren(item: ListItem): PhrasingContent[] {
+  if (item.children.length !== 1 || !isParagraph(item.children[0]))
+    selectionFail('list item is invalid')
+  return (item.children[0] as Paragraph).children
+}
+
+function isEmptySelectionList(items: ListItem[]): boolean {
+  return items.length === 1 && items[0]?.children.length === 0
+}
+
+function selectionReference(item: ListItem): string {
+  const children = selectionItemChildren(item)
+  if (children.length !== 1 || children[0]?.type !== 'inlineCode')
+    selectionFail('list item is invalid')
+  return toString(children[0])
+}
+
+function selectionReferences(items: ListItem[]): string[] {
+  if (isEmptySelectionList(items)) return []
+  return items.map(selectionReference)
+}
+
+function selectionDuplicates(
+  items: ListItem[],
+): Array<{ source: string; target: string }> {
+  if (isEmptySelectionList(items)) return []
+  return items.map(item => {
+    const children = selectionItemChildren(item)
+    const [source, connector, target] = children
+    if (
+      children.length !== 3 ||
+      source?.type !== 'inlineCode' ||
+      connector?.type !== 'text' ||
+      connector.value !== ' -> ' ||
+      target?.type !== 'inlineCode'
+    )
+      selectionFail('duplicate list item is invalid')
+    return { source: toString(source), target: toString(target) }
+  })
+}
+
+export function parseFoundationReviewSelectionMarkdown(
+  markdown: string,
+  expected: { revision: string; candidateReferences: string[] },
+): FoundationReviewSelection {
+  digestSchema.parse(expected.revision)
+  if (
+    new Set(expected.candidateReferences).size !==
+    expected.candidateReferences.length
+  )
+    selectionFail('expected candidate references must be unique')
+
+  const tree = fromMarkdown(markdown)
+  const nodes = tree.children as unknown as Content[]
+  assertNoSelectionMarkdownTables(nodes)
+  const headings = ['Keep', 'Duplicate', 'Reject']
+  if (nodes.length !== 8) selectionFail('structure is invalid')
+  const h1 = nodes[0]
+  if (
+    !isHeading(h1) ||
+    h1.depth !== 1 ||
+    headingText(h1) !== 'Foundation Review Selection'
+  )
+    selectionFail('requires exactly one H1 Foundation Review Selection')
+  if (
+    nodes.filter(node => node.type === 'heading' && node.depth === 1).length !==
+    1
+  )
+    selectionFail('requires exactly one H1 Foundation Review Selection')
+  selectionRevision(nodes[1], expected.revision)
+  for (const [index, heading] of headings.entries()) {
+    const node = nodes[index * 2 + 2]
+    if (!isHeading(node) || node.depth !== 2 || headingText(node) !== heading)
+      selectionFail('structure is invalid')
+  }
+
+  const keep = selectionReferences(selectionList(nodes[3]))
+  const duplicate = selectionDuplicates(selectionList(nodes[5]))
+  const reject = selectionReferences(selectionList(nodes[7]))
+  const expectedReferences = new Set(expected.candidateReferences)
+  const accounted = [...keep, ...duplicate.map(item => item.source), ...reject]
+  for (const reference of [...accounted, ...duplicate.map(item => item.target)])
+    if (!expectedReferences.has(reference)) selectionFail('reference is unknown')
+  if (
+    accounted.length !== expectedReferences.size ||
+    new Set(accounted).size !== accounted.length ||
+    accounted.some(reference => !expectedReferences.has(reference))
+  )
+    selectionFail('references must be accounted exactly once')
+  for (const reference of expectedReferences)
+    if (!accounted.includes(reference))
+      selectionFail('references must be accounted exactly once')
+  for (const { source, target } of duplicate) {
+    if (source === target) selectionFail('duplicate cannot target itself')
+    if (!keep.includes(target)) selectionFail('duplicate target is not retained')
+  }
+  return { revision: expected.revision, keep, duplicate, reject }
 }
