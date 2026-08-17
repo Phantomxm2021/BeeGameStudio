@@ -137,6 +137,7 @@ describe('native CLI process runner', () => {
       workflowWorkerType: 'document-author',
     })
 
+    expect(command).not.toContain('--tools')
     expect(command.some(argument => argument.startsWith('--tools='))).toBe(false)
     expect(
       command.some(argument => argument.startsWith('--allowedTools=')),
@@ -173,6 +174,10 @@ describe('native CLI process runner', () => {
 
     expect(command).toContain('--tools')
     expect(command[command.indexOf('--tools') + 1]).toBe('Read,Grep,Glob')
+    expect(command[command.indexOf('--tools') + 1]).not.toContain('Write')
+    expect(command[command.indexOf('--tools') + 1]).not.toContain('Edit')
+    expect(command[command.indexOf('--tools') + 1]).not.toContain('Bash')
+    expect(command[command.indexOf('--tools') + 1]).not.toContain('Agent')
     expect(command).toContain('--json-schema')
     expect(command[command.indexOf('--json-schema') + 1]).toBe(
       JSON.stringify(workflowJsonSchema),
