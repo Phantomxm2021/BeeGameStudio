@@ -383,6 +383,30 @@ describe('foundation review lane Markdown', () => {
     })
   })
 
+  test('ignores a paragraph-only synthesis preface without changing selection semantics', () => {
+    const bare = parseFoundationReviewSelectionMarkdown(selectionMarkdown(), {
+      revision,
+      candidateReferences: [
+        'core-design:C1',
+        'technical-assets:C1',
+        'presentation:C1',
+      ],
+    })
+    const prefaced = parseFoundationReviewSelectionMarkdown(
+      `这是一个普通的前言段落。\n\n${selectionMarkdown()}`,
+      {
+        revision,
+        candidateReferences: [
+          'core-design:C1',
+          'technical-assets:C1',
+          'presentation:C1',
+        ],
+      },
+    )
+
+    expect(prefaced).toEqual(bare)
+  })
+
   test('rejects invalid synthesis selection grammar and accounting', () => {
     const candidateReferences = [
       'core-design:C1',
@@ -458,6 +482,29 @@ describe('foundation review lane Markdown', () => {
     expect(() =>
       parse(selectionMarkdown({ extra: '\nUnexpected prose.' })),
     ).toThrow('foundation review selection Markdown structure is invalid')
+    for (const prefix of [
+      '## Prefix heading',
+      '- Prefix list item',
+      '> Prefix quote',
+      '```text\nprefix code\n```',
+      '<p>prefix HTML</p>',
+    ]) {
+      expect(() => parse(`${prefix}\n\n${selectionMarkdown()}`)).toThrow(
+        'foundation review selection Markdown structure is invalid',
+      )
+    }
+    expect(() =>
+      parse(`# Another H1\n\n${selectionMarkdown()}`),
+    ).toThrow(
+      'foundation review selection Markdown requires exactly one H1 Foundation Review Selection',
+    )
+    expect(() =>
+      parse(
+        selectionMarkdown().replace('# Foundation Review Selection', '# Wrong'),
+      ),
+    ).toThrow(
+      'foundation review selection Markdown requires exactly one H1 Foundation Review Selection',
+    )
     expect(() =>
       parse(
         '# Foundation Review Selection\n\n| column | value |\n| --- | --- |',

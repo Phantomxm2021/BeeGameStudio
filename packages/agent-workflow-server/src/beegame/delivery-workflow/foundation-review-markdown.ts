@@ -532,29 +532,30 @@ export function parseFoundationReviewSelectionMarkdown(
   const nodes = tree.children as unknown as Content[]
   assertNoSelectionMarkdownTables(nodes)
   const headings = ['Keep', 'Duplicate', 'Reject']
-  if (nodes.length !== 8) selectionFail('structure is invalid')
-  const h1 = nodes[0]
+  const h1s = nodes.filter(
+    node => node.type === 'heading' && node.depth === 1,
+  )
   if (
-    !isHeading(h1) ||
-    h1.depth !== 1 ||
-    headingText(h1) !== 'Foundation Review Selection'
+    h1s.length !== 1 ||
+    !isHeading(h1s[0]) ||
+    headingText(h1s[0]) !== 'Foundation Review Selection'
   )
     selectionFail('requires exactly one H1 Foundation Review Selection')
-  if (
-    nodes.filter(node => node.type === 'heading' && node.depth === 1).length !==
-    1
-  )
-    selectionFail('requires exactly one H1 Foundation Review Selection')
-  selectionRevision(nodes[1], expected.revision)
+  const receiptStart = nodes.indexOf(h1s[0])
+  if (nodes.slice(0, receiptStart).some(node => !isParagraph(node)))
+    selectionFail('structure is invalid')
+  const receipt = nodes.slice(receiptStart)
+  if (receipt.length !== 8) selectionFail('structure is invalid')
+  selectionRevision(receipt[1], expected.revision)
   for (const [index, heading] of headings.entries()) {
-    const node = nodes[index * 2 + 2]
+    const node = receipt[index * 2 + 2]
     if (!isHeading(node) || node.depth !== 2 || headingText(node) !== heading)
       selectionFail('structure is invalid')
   }
 
-  const keep = selectionReferences(selectionList(nodes[3]))
-  const duplicate = selectionDuplicates(selectionList(nodes[5]))
-  const reject = selectionReferences(selectionList(nodes[7]))
+  const keep = selectionReferences(selectionList(receipt[3]))
+  const duplicate = selectionDuplicates(selectionList(receipt[5]))
+  const reject = selectionReferences(selectionList(receipt[7]))
   const expectedReferences = new Set(expected.candidateReferences)
   const accounted = [...keep, ...duplicate.map(item => item.source), ...reject]
   for (const reference of [...accounted, ...duplicate.map(item => item.target)])

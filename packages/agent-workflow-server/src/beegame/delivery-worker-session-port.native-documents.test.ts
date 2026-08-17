@@ -332,6 +332,7 @@ describe('native initial document authoring', () => {
       'presentation:C1',
     ]
     const markdown = [
+      '普通前言段落会按原样持久化。',
       '# Foundation Review Selection',
       `Revision: \`${revision}\``,
       '## Keep',
