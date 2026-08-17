@@ -213,6 +213,37 @@ async function publishFoundationReviewArtifacts(input: {
         includeCandidate: input.needsRevision && lane.id === 'core-design',
       }),
     )
+    state = {
+      ...state,
+      reports: state.reports.map(report =>
+        report.role === dispatch.role
+          ? {
+              ...report,
+              dispatch: {
+                dispatchId: dispatch.idempotencyKey,
+                workerType: 'document-reviewer' as const,
+                phase: 'DOCUMENT_REVIEW' as const,
+                taskId: dispatch.taskId,
+                revision: input.revision,
+                status: 'running' as const,
+                request: {
+                  dispatchId: dispatch.idempotencyKey,
+                  runId: 'run',
+                  ownerId: 'owner',
+                  projectId: 'project',
+                  workspacePath: input.workspacePath,
+                  workerType: 'document-reviewer' as const,
+                  phase: 'DOCUMENT_REVIEW' as const,
+                  taskId: dispatch.taskId,
+                  revision: input.revision,
+                  contract: dispatch.contract,
+                },
+                startedAt: new Date().toISOString(),
+              },
+            }
+          : report,
+      ),
+    }
     state = await acceptFoundationReviewWorkerTerminal({
       state,
       workspacePath: input.workspacePath,
@@ -2423,6 +2454,11 @@ describe('delivery workflow recovery', () => {
         },
       },
     }
+    failedReview.reports[1] = {
+      ...failedReview.reports[1],
+      status: 'failed',
+      failureReason: 'technical-assets failed without a receipt',
+    }
     const failed = {
       ...initial,
       phase: 'DOCUMENT_REVIEW' as const,
@@ -2453,6 +2489,9 @@ describe('delivery workflow recovery', () => {
       ['synthesis', 'pending'],
     ])
     expect(retried.status).toBe('running')
+    expect(
+      retried.foundationReviewState?.reports[1].failureReason,
+    ).toBeUndefined()
     expect(
       retried.foundationReviewState?.reports[0].dispatch?.terminalResult,
     ).toBeDefined()
@@ -2526,6 +2565,63 @@ describe('delivery workflow recovery', () => {
     expect(recovered?.blockedReason).toContain(
       recovered?.foundationReviewState?.finalReportPath,
     )
+  })
+
+  test('startup preserves an ordinary failed review when no committed artifact is ahead', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-startup-failed-'))
+    const ownerId = 'owner-review-startup-failed'
+    const initial = createTestDeliveryRun({
+      runId: 'run-review-startup-failed',
+      projectId: 'project-review-startup-failed',
+      ownerId,
+    })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
+    const revision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
+    const review = createFoundationReviewState({ revision })
+    review.status = 'failed'
+    review.failureReason = 'technical-assets failed without a receipt'
+    review.reports[1] = {
+      ...review.reports[1],
+      status: 'failed',
+      failureReason: review.failureReason,
+    }
+    const failed = {
+      ...initial,
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'needs_action' as const,
+      revision: { ...initial.revision, document: revision },
+      foundationReviewState: review,
+      blockedReason: review.failureReason,
+    }
+    const store = createRunStore(workspace, ownerId)
+    await store.save(failed)
+
+    const recovered = await reconcileRunOnStartup({ store })
+
+    expect(recovered).toMatchObject({
+      status: 'needs_action',
+      blockedReason: review.failureReason,
+      foundationReviewState: {
+        status: 'failed',
+        failureReason: review.failureReason,
+        reports: [
+          { role: 'core-design', status: 'pending' },
+          {
+            role: 'technical-assets',
+            status: 'failed',
+            failureReason: review.failureReason,
+          },
+          { role: 'presentation', status: 'pending' },
+          { role: 'synthesis', status: 'pending' },
+        ],
+      },
+    })
   })
 
   test('explicit retry discards stale review artifacts after documents change', async () => {

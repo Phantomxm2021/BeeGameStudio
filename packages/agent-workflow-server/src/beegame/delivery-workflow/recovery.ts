@@ -36,7 +36,10 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import { reconcileFoundationReviewStateFromArtifacts } from './foundation-review-stage'
+import {
+  foundationReviewHasCommittedArtifactsAhead,
+  reconcileFoundationReviewStateFromArtifacts,
+} from './foundation-review-stage'
 
 export {
   inspectWorkflowSnapshot,
@@ -823,6 +826,13 @@ async function restoreAcceptedReviewAfterRoutingFailure(input: {
     input.run.documentStep !== 'FOUNDATION_REVIEW'
   )
     return undefined
+  if (
+    !(await foundationReviewHasCommittedArtifactsAhead({
+      state,
+      workspacePath: input.workspacePath,
+    }))
+  )
+    return undefined
   const currentRevision = await computeDocumentRevision(
     input.workspacePath,
     input.run.confirmedBriefDigest,
@@ -835,10 +845,9 @@ async function restoreAcceptedReviewAfterRoutingFailure(input: {
   const base = {
     ...input.run,
     foundationReviewState: reconciled,
-    blockedReason: undefined,
     updatedAt: new Date().toISOString(),
   }
-  if (reconciled.status !== 'completed') return { ...base, status: 'running' }
+  if (reconciled.status !== 'completed') return base
   return reconciled.verdict === 'READY'
     ? {
         ...base,
@@ -1056,24 +1065,28 @@ export async function retryRun(input: {
           run: acquired.run,
           workspacePath: input.workspacePath,
         })
-    const restoredAcceptedReview =
+    const reconciledReview =
       !restoredHandoff && !changedReview
         ? await restoreAcceptedReviewAfterRoutingFailure({
             run: acquired.run,
             workspacePath: input.workspacePath,
           })
         : undefined
+    const restoredAcceptedReview =
+      reconciledReview?.foundationReviewState?.status === 'completed'
+        ? reconciledReview
+        : undefined
     const resourceRefresh =
       !restoredHandoff &&
       !changedReview &&
-      !restoredAcceptedReview &&
+      !reconciledReview &&
       input.workspacePath &&
       shouldRefreshProvisionalResourceInventory(
         acquired.run,
         auditAssetContract(input.workspacePath),
       )
     const retryBaseRun =
-      restoredAcceptedReview ??
+      reconciledReview ??
       (resourceRefresh
         ? {
             ...acquired.run,

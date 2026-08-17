@@ -17,6 +17,7 @@ import {
   acceptFoundationReviewWorkerTerminal,
   atomicCommitReceipt,
   buildFoundationReviewDispatches,
+  foundationReviewHasCommittedArtifactsAhead,
   reconcileFoundationReviewStateFromArtifacts,
 } from './foundation-review-stage'
 import { getGameDocumentContract } from './game-document-contracts'
@@ -349,7 +350,188 @@ describe('foundation review lane dispatch barrier', () => {
     ])
     expect(recovered.reports[0].digest).toBe(accepted.state.reports[0].digest)
     expect(recovered.reports[1].digest).toBeUndefined()
-    expect(recovered.status).toBe('running')
+    expect(recovered.status).toBe('pending')
+  })
+
+  test('does not treat staging, terminal metadata, or reflected receipts as committed work ahead of state', async () => {
+    const root = await workspace()
+    const initial = createFoundationReviewState({ revision, attempt: 1 })
+    const [dispatch] = await buildFoundationReviewDispatches({
+      state: initial,
+      workspacePath: root,
+      confirmedBriefDigest: 'd'.repeat(64),
+    })
+    await mkdir(dirname(dispatch.assignment.stagingOutputPaths[0]), {
+      recursive: true,
+    })
+    await writeFile(dispatch.assignment.stagingOutputPaths[0], 'staging only\n')
+    const terminalOnly = {
+      ...initial,
+      status: 'failed' as const,
+      reports: initial.reports.map(report =>
+        report.role === 'core-design'
+          ? {
+              ...report,
+              status: 'failed' as const,
+              failureReason: 'terminal persisted without committed receipt',
+              dispatch: {
+                dispatchId: 'terminal-only',
+                workerType: 'document-reviewer' as const,
+                phase: 'DOCUMENT_REVIEW' as const,
+                revision,
+                status: 'completed' as const,
+                startedAt: '2026-08-18T00:00:00.000Z',
+                finishedAt: '2026-08-18T00:01:00.000Z',
+                terminalResult: {
+                  workerType: 'document-reviewer',
+                  status: 'completed',
+                  revision,
+                  mode: 'initial',
+                  role: 'core-design',
+                  reportPath: report.path,
+                },
+              },
+            }
+          : report,
+      ),
+    }
+    expect(
+      await foundationReviewHasCommittedArtifactsAhead({
+        state: terminalOnly,
+        workspacePath: root,
+      }),
+    ).toBe(false)
+
+    const accepted = await acceptLanes(root)
+    await rm(resolve(root, accepted.state.reports[1].path))
+    await rm(resolve(root, accepted.state.reports[2].path))
+    const reflectedWithFailure = {
+      ...initial,
+      status: 'failed' as const,
+      reports: initial.reports.map(report =>
+        report.role === 'core-design'
+          ? accepted.state.reports[0]
+          : report.role === 'technical-assets'
+            ? {
+                ...report,
+                status: 'failed' as const,
+                failureReason: 'unrelated failed lane',
+              }
+            : report,
+      ),
+    }
+    expect(
+      await foundationReviewHasCommittedArtifactsAhead({
+        state: reflectedWithFailure,
+        workspacePath: root,
+      }),
+    ).toBe(false)
+  })
+
+  test('detects only unreflected committed lane, selection, and final artifacts', async () => {
+    const root = await workspace()
+    const accepted = await acceptLanes(root, { includeCandidates: true })
+    expect(
+      await foundationReviewHasCommittedArtifactsAhead({
+        state: createFoundationReviewState({ revision, attempt: 1 }),
+        workspacePath: root,
+      }),
+    ).toBe(true)
+
+    const [synthesis] = await buildFoundationReviewDispatches({
+      state: accepted.state,
+      workspacePath: root,
+      confirmedBriefDigest: 'd'.repeat(64),
+    })
+    await mkdir(dirname(synthesis.assignment.stagingOutputPaths[0]), {
+      recursive: true,
+    })
+    await writeFile(
+      synthesis.assignment.stagingOutputPaths[0],
+      selectionMarkdown({
+        keep: ['core-design:C1'],
+        reject: ['technical-assets:C1', 'presentation:C1'],
+      }),
+    )
+    const completed = await acceptFoundationReviewWorkerTerminal({
+      state: accepted.state,
+      workspacePath: root,
+      currentRevision: revision,
+      terminal: {
+        workerType: 'document-reviewer',
+        status: 'completed',
+        revision,
+        mode: 'initial',
+        role: 'synthesis',
+        reportPath: accepted.state.reports[3].path,
+      },
+    })
+    await rm(resolve(root, completed.finalReportPath!))
+    expect(
+      await foundationReviewHasCommittedArtifactsAhead({
+        state: accepted.state,
+        workspacePath: root,
+      }),
+    ).toBe(true)
+
+    await rm(resolve(root, accepted.state.reports[3].path))
+    await writeFile(
+      resolve(root, completed.finalReportPath!),
+      `${JSON.stringify({
+        version: 3,
+        scope: 'foundation',
+        revision,
+        verdict: 'NEEDS_REVISION',
+        conflicts: [],
+      })}\n`,
+    )
+    expect(
+      await foundationReviewHasCommittedArtifactsAhead({
+        state: accepted.state,
+        workspacePath: root,
+      }),
+    ).toBe(true)
+  })
+
+  test('promotes committed lanes without clearing failures for absent artifacts', async () => {
+    const root = await workspace()
+    const accepted = await acceptLanes(root)
+    await rm(resolve(root, accepted.state.reports[1].path))
+    await rm(resolve(root, accepted.state.reports[2].path))
+    const initial = createFoundationReviewState({ revision, attempt: 1 })
+    const failed = {
+      ...initial,
+      status: 'failed' as const,
+      failureReason: 'technical-assets failed',
+      reports: initial.reports.map(report =>
+        report.role === 'technical-assets'
+          ? {
+              ...report,
+              status: 'failed' as const,
+              failureReason: 'technical-assets failed',
+            }
+          : report,
+      ),
+    }
+
+    const reconciled = await reconcileFoundationReviewStateFromArtifacts({
+      state: failed,
+      workspacePath: root,
+      currentRevision: revision,
+    })
+
+    expect(reconciled.status).toBe('failed')
+    expect(reconciled.failureReason).toBe('technical-assets failed')
+    expect(reconciled.reports).toEqual([
+      expect.objectContaining({ role: 'core-design', status: 'completed' }),
+      expect.objectContaining({
+        role: 'technical-assets',
+        status: 'failed',
+        failureReason: 'technical-assets failed',
+      }),
+      expect.objectContaining({ role: 'presentation', status: 'pending' }),
+      expect.objectContaining({ role: 'synthesis', status: 'pending' }),
+    ])
   })
 
   test.each([

@@ -304,6 +304,37 @@ function completedPacketDigests(
   ) as Partial<Record<FoundationDocumentLaneId, string>>
 }
 
+export async function foundationReviewHasCommittedArtifactsAhead(input: {
+  state: FoundationReviewState
+  workspacePath: string
+}): Promise<boolean> {
+  const state = assertFoundationReviewState(input.state)
+  for (const lane of FOUNDATION_DOCUMENT_LANES) {
+    const report = state.reports.find(candidate => candidate.role === lane.id)!
+    if (
+      (report.status !== 'completed' || !report.digest) &&
+      (await isRegularFile(
+        foundationReviewLaneReceiptPath(
+          input.workspacePath,
+          state.revision,
+          lane.id,
+        ),
+      ))
+    )
+      return true
+  }
+  if (state.status === 'completed') return false
+  if (
+    await isRegularFile(
+      foundationReviewSelectionPath(input.workspacePath, state.revision),
+    )
+  )
+    return true
+  return isRegularFile(
+    foundationReviewPath(input.workspacePath, state.revision),
+  )
+}
+
 export async function reconcileFoundationReviewStateFromArtifacts(input: {
   state: FoundationReviewState
   workspacePath: string
@@ -321,14 +352,7 @@ export async function reconcileFoundationReviewStateFromArtifacts(input: {
       state.revision,
       lane.id,
     )
-    if (!(await isRegularFile(committedPath))) {
-      reports[index] = {
-        role: lane.id,
-        path: state.reports[index].path,
-        status: 'pending',
-      }
-      continue
-    }
+    if (!(await isRegularFile(committedPath))) continue
     const projection = await writeFoundationReviewProjection({
       workspacePath: input.workspacePath,
       revision: state.revision,
@@ -366,19 +390,9 @@ export async function reconcileFoundationReviewStateFromArtifacts(input: {
     .slice(0, 3)
     .every(report => report.status === 'completed' && report.digest)
   if (!lanesCompleted) {
-    reports[synthesisIndex] = {
-      role: 'synthesis',
-      path: state.reports[synthesisIndex].path,
-      status: 'pending',
-    }
     return assertFoundationReviewState({
       ...state,
-      status: 'running',
       reports,
-      finalReportPath: undefined,
-      finalReportDigest: undefined,
-      verdict: undefined,
-      failureReason: undefined,
     })
   }
 
@@ -395,30 +409,15 @@ export async function reconcileFoundationReviewStateFromArtifacts(input: {
       throw new Error(
         'foundation review final report exists without its selection receipt',
       )
-    reports[synthesisIndex] = {
-      role: 'synthesis',
-      path: state.reports[synthesisIndex].path,
-      status: 'pending',
-    }
     return assertFoundationReviewState({
       ...state,
-      status: 'running',
       reports,
-      finalReportPath: undefined,
-      finalReportDigest: undefined,
-      verdict: undefined,
-      failureReason: undefined,
     })
   }
 
   const reconciledState = assertFoundationReviewState({
     ...state,
-    status: 'running',
     reports,
-    finalReportPath: undefined,
-    finalReportDigest: undefined,
-    verdict: undefined,
-    failureReason: undefined,
   })
   const laneReceipts = await readLaneReceipts({
     state: reconciledState,
