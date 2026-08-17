@@ -12,6 +12,7 @@ import {
   foundationReviewPath,
   foundationReviewSchema,
   foundationReviewStagingPath,
+  type FoundationReview,
 } from './foundation-review'
 
 const revision = 'a'.repeat(64)
@@ -107,6 +108,28 @@ describe('foundation review contract', () => {
       'docs/GDD.md',
       'docs/TECHNICAL_DESIGN.md',
       'docs/AUDIO_DESIGN.md',
+    ])
+  })
+
+  test('accepts distinct change actions targeting the same document', () => {
+    const changes: FoundationReview['conflicts'][number]['changes'] = [
+      {
+        path: 'docs/GDD.md',
+        action: 'Define the terminal-state authority.',
+      },
+      {
+        path: 'docs/GDD.md',
+        action: 'Remove the conflicting terminal-state condition.',
+      },
+    ]
+
+    const parsed = foundationReviewSchema.parse(
+      review({ conflicts: [{ ...conflict(), changes }] }),
+    )
+
+    expect(parsed.conflicts[0]?.changes).toEqual(changes)
+    expect(foundationReviewAffectedPaths(parsed)).toEqual([
+      'docs/GDD.md',
     ])
   })
 

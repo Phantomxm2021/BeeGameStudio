@@ -42,17 +42,6 @@ export const foundationReviewConflictContentSchema = z
     acceptance: z.array(z.string().trim().min(1).max(600)).min(1).max(24),
   })
   .strict()
-  .superRefine((value, context) => {
-    if (
-      new Set(value.changes.map(change => change.path)).size !==
-      value.changes.length
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['changes'],
-        message: 'foundation review conflict change paths must be unique',
-      })
-  })
 
 const conflictSchema = foundationReviewConflictContentSchema.safeExtend({
   id: conflictIdSchema,

@@ -122,7 +122,8 @@ model expansion. Its strict heading structure contains:
 - one or more evidence items, each with path, stable location, and bounded
   observation;
 - required outcome;
-- one or more changed paths with required action;
+- one or more changed path/action entries; distinct actions may target the
+  same document;
 - one or more mechanically checkable acceptance conditions.
 
 Receipts contain no verdict, replacement prose, correct-item summary,

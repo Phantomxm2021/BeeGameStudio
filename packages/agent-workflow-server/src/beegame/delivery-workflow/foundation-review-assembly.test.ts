@@ -3,6 +3,7 @@ import type {
   FoundationReviewCandidate,
   FoundationReviewLaneReceipt,
 } from './foundation-review-markdown'
+import { foundationReviewAffectedPaths } from './foundation-review'
 import { parseFoundationReviewSelectionMarkdown } from './foundation-review-markdown'
 import { assembleFoundationReview } from './foundation-review-assembly'
 
@@ -78,7 +79,10 @@ const candidateReferences = [
   'presentation:C1',
 ]
 
-function selectionMarkdown(keep = '- `core-design:C1`\n- `presentation:C1`') {
+function selectionMarkdown(
+  keep = '- `core-design:C1`\n- `presentation:C1`',
+  reject = '- `technical-assets:C1`',
+) {
   return [
     '# Foundation Review Selection',
     '',
@@ -91,7 +95,7 @@ function selectionMarkdown(keep = '- `core-design:C1`\n- `presentation:C1`') {
     '- `core-design:C2` -> `core-design:C1`',
     '',
     '## Reject',
-    '- `technical-assets:C1`',
+    reject,
     '',
   ].join('\n')
 }
@@ -117,6 +121,44 @@ describe('foundation review assembly', () => {
     expect(laneReceipts[0]!.candidates[0]!.evidence[0]!.observed).toBe(
       'Core blocker is inconsistent.',
     )
+  })
+
+  test('preserves distinct same-path actions while affected paths remain unique', () => {
+    const technicalCandidate = laneReceipts[1]!.candidates[0]!
+    const changes: FoundationReviewCandidate['changes'] = [
+      {
+        path: 'docs/TECHNICAL_DESIGN.md',
+        action: 'Define the asset authority.',
+      },
+      {
+        path: 'docs/TECHNICAL_DESIGN.md',
+        action: 'Remove the conflicting asset condition.',
+      },
+    ]
+    const receipt: FoundationReviewLaneReceipt = {
+      ...laneReceipts[1]!,
+      candidates: [{ ...technicalCandidate, changes }],
+    }
+    const review = assembleFoundationReview({
+      revision,
+      laneReceipts: [laneReceipts[0]!, receipt, laneReceipts[2]!],
+      selection: parseFoundationReviewSelectionMarkdown(
+        selectionMarkdown(
+          '- `core-design:C1`\n- `technical-assets:C1`',
+          '- `presentation:C1`',
+        ),
+        {
+          revision,
+          candidateReferences,
+        },
+      ),
+    })
+
+    expect(review.conflicts[1]?.changes).toEqual(changes)
+    expect(foundationReviewAffectedPaths(review)).toEqual([
+      'docs/GDD.md',
+      'docs/TECHNICAL_DESIGN.md',
+    ])
   })
 
   test('produces byte-identical JSON when lane and keep ordering are reversed', () => {

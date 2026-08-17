@@ -318,21 +318,23 @@ describe('foundation review lane Markdown', () => {
     ).toThrow(
       'foundation review lane Markdown evidence path is outside lane authority',
     )
-    expect(() =>
-      parseFoundationReviewLaneMarkdown(
-        markdown({
-          candidates: candidate('C1', '重复修改路径', {
-            changes: [
-              '- Path: `docs/GDD.md`',
-              '  Action: 保留唯一权威条件。',
-              '- Path: `docs/GDD.md`',
-              '  Action: 删除重复条件。',
-            ].join('\n'),
-          }),
+    const repeatedPathChanges = parseFoundationReviewLaneMarkdown(
+      markdown({
+        candidates: candidate('C1', '重复修改路径', {
+          changes: [
+            '- Path: `docs/GDD.md`',
+            '  Action: 保留唯一权威条件。',
+            '- Path: `docs/GDD.md`',
+            '  Action: 删除重复条件。',
+          ].join('\n'),
         }),
-        expected,
-      ),
-    ).toThrow('foundation review conflict change paths must be unique')
+      }),
+      expected,
+    )
+    expect(repeatedPathChanges.candidates[0]?.changes).toEqual([
+      { path: 'docs/GDD.md', action: '保留唯一权威条件。' },
+      { path: 'docs/GDD.md', action: '删除重复条件。' },
+    ])
   })
 
   test('rejects non-paragraph Evidence list item children and invalid labels', () => {

@@ -112,7 +112,9 @@ const conflictSchema = foundationReviewConflictContentSchema.safeExtend({
 })
 ```
 
-Preserve the existing unique change-path refinement on the exported content schema so both inputs enforce it.
+Permit multiple distinct change actions for the same canonical document path;
+preserve entries verbatim and in order while downstream affected-path
+projection remains deduplicated.
 
 - [ ] **Step 5: Implement AST-based strict parsing**
 
