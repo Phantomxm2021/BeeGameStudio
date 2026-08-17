@@ -24,6 +24,14 @@ function reviewerPriorDigest(
 }
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
+  if (
+    request.workerType === 'document-author' &&
+    request.contract.documentSet === 'foundation' &&
+    !['initial', 'parallel-draft', 'remediation'].includes(
+      String(request.contract.authoringMode),
+    )
+  )
+    throw new Error('Foundation document authoring mode is unsupported')
   const initialFoundationAuthor =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
@@ -295,7 +303,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             ? 'Return exactly one complete raw Markdown body as the visible response. Do not call tools, do not return JSON, do not use a code fence, and do not add text before or after the document.'
             : request.contract.authoringMode === 'remediation'
               ? `Author replacement bodies only for the byte-bound canonical units assigned in the accepted path-scoped conflict transaction for ${String(request.contract.foundationDocumentPath)}. Return exactly one contracted JSON object; Bee Game Studio validates and atomically persists the assembled document.`
-              : 'Use the accepted Foundation review JSON and current target bytes projected by the workflow service. Apply every conflict change across exactly contract.remediation.affectedPaths in one coordinated turn, preserve unrelated approved content, and leave every authorized Markdown document complete when the turn ends.',
+              : 'Author the assigned document through its canonical contract.',
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',

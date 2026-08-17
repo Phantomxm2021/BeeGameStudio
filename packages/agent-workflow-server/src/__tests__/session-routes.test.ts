@@ -1279,6 +1279,7 @@ describe('delivery workflow session continuation', () => {
             ownedPaths: ['docs/TECHNICAL_DESIGN.md'],
             affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
             status: 'failed',
+            sourceDigest: 'b'.repeat(64),
             failureReason: '技术修订写入失败',
             dispatch: {
               dispatchId: 'foundation-remediation-technical-design',

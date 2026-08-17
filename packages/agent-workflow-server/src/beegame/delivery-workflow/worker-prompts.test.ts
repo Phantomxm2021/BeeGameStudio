@@ -719,6 +719,26 @@ describe('resource-content worker prompts', () => {
     expect(ownerPrompt).not.toContain('CommitCanonicalDocument')
   })
 
+  test('rejects removed Foundation authoring protocols', () => {
+    expect(() =>
+      buildWorkerPrompt({
+        runId: 'run',
+        ownerId: 'owner',
+        projectId: 'project',
+        workspacePath: '/workspace',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision',
+        allowedPaths: ['docs/GDD.md'],
+        contract: {
+          documentSet: 'foundation',
+          authoringMode: 'legacy-remediation',
+          foundationDocumentPath: 'docs/GDD.md',
+        },
+      } as never),
+    ).toThrow('Foundation document authoring mode is unsupported')
+  })
+
   test('keeps the checklist minimal and scenario-level', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
