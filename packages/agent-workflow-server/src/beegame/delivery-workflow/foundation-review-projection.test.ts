@@ -8,6 +8,7 @@ import {
   type FoundationDocumentLaneId,
 } from './foundation-document-lanes'
 import {
+  readFoundationReviewProjectionAuthority,
   readFoundationReviewProjection,
   writeFoundationReviewProjection,
 } from './foundation-review-projection'
@@ -64,7 +65,9 @@ function expectedSelectors(laneId: FoundationDocumentLaneId): string[] {
 }
 
 afterEach(async () => {
-  await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true })))
+  await Promise.all(
+    workspaces.splice(0).map(path => rm(path, { recursive: true })),
+  )
 })
 
 describe('foundation review projections', () => {
@@ -139,5 +142,124 @@ describe('foundation review projections', () => {
         expectedDigest: accepted.digest,
       }),
     ).rejects.toThrow('foundation review projection is unavailable')
+  })
+
+  test('reads only the canonical projection descriptor and returns unique source paths', async () => {
+    const root = await workspace()
+    const revision = 'd'.repeat(64)
+    const descriptor = await writeFoundationReviewProjection({
+      workspacePath: root,
+      revision,
+      laneId: 'core-design',
+    })
+
+    const authority = await readFoundationReviewProjectionAuthority({
+      workspacePath: root,
+      revision,
+      laneId: 'core-design',
+      descriptor,
+    })
+
+    expect(authority.path).toBe(descriptor.path)
+    expect(authority.digest).toBe(descriptor.digest)
+    expect(authority.byteLength).toBe(descriptor.byteLength)
+    expect(authority.allowedEvidencePaths).toEqual([
+      ...new Set(authority.projection.sources.map(source => source.path)),
+    ])
+  })
+
+  test.each([
+    {
+      name: 'missing projection path',
+      change: (descriptor: {
+        path: string
+        digest: string
+        byteLength: number
+      }) => ({
+        ...descriptor,
+        path: descriptor.path.replace('core-design.json', 'missing.json'),
+      }),
+    },
+    {
+      name: 'wrong canonical path',
+      change: (descriptor: {
+        path: string
+        digest: string
+        byteLength: number
+      }) => ({
+        ...descriptor,
+        path: `docs/GDD.md`,
+      }),
+    },
+    {
+      name: 'wrong byte length',
+      change: (descriptor: {
+        path: string
+        digest: string
+        byteLength: number
+      }) => ({
+        ...descriptor,
+        byteLength: descriptor.byteLength + 1,
+      }),
+    },
+    {
+      name: 'wrong digest',
+      change: (descriptor: {
+        path: string
+        digest: string
+        byteLength: number
+      }) => ({
+        ...descriptor,
+        digest: 'e'.repeat(64),
+      }),
+    },
+  ])('rejects a $name descriptor', async ({ change }) => {
+    const root = await workspace()
+    const revision = 'd'.repeat(64)
+    const descriptor = await writeFoundationReviewProjection({
+      workspacePath: root,
+      revision,
+      laneId: 'core-design',
+    })
+
+    await expect(
+      readFoundationReviewProjectionAuthority({
+        workspacePath: root,
+        revision,
+        laneId: 'core-design',
+        descriptor: change(descriptor),
+      }),
+    ).rejects.toThrow()
+  })
+
+  test.each([
+    ['revision', 'revision', 'f'.repeat(64)],
+    ['lane', 'lane', 'presentation'],
+  ] as const)('rejects a projection with the wrong %s identity', async (_name, field, value) => {
+    const root = await workspace()
+    const revision = 'd'.repeat(64)
+    const descriptor = await writeFoundationReviewProjection({
+      workspacePath: root,
+      revision,
+      laneId: 'core-design',
+    })
+    const absolute = resolve(root, descriptor.path)
+    const projection = JSON.parse(await readFile(absolute, 'utf8'))
+    projection[field] = value
+    const bytes = `${JSON.stringify(projection, null, 2)}\n`
+    await writeFile(absolute, bytes, 'utf8')
+
+    await expect(
+      readFoundationReviewProjectionAuthority({
+        workspacePath: root,
+        revision,
+        laneId: 'core-design',
+        descriptor: {
+          path: descriptor.path,
+          digest: createHash('sha256').update(bytes).digest('hex'),
+          byteLength: Buffer.byteLength(bytes),
+        },
+      }),
+    ).rejects.toThrow('foundation review projection identity changed')
   })
 })

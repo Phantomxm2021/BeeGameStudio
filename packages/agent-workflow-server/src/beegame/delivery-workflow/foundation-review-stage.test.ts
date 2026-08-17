@@ -59,6 +59,8 @@ function laneMarkdown(input: {
   lane: (typeof FOUNDATION_DOCUMENT_LANES)[number]
   projectionDigest: string
   includeCandidate?: boolean
+  evidencePath?: string
+  changePath?: string
 }): string {
   const identity = [
     '# Foundation Review Packet',
@@ -70,7 +72,8 @@ function laneMarkdown(input: {
     `Projection: \`${input.projectionDigest}\``,
   ]
   if (!input.includeCandidate) return `${identity.join('\n')}\n`
-  const path = input.lane.ownedPaths[0]
+  const evidencePath = input.evidencePath ?? input.lane.ownedPaths[0]
+  const changePath = input.changePath ?? input.lane.ownedPaths[0]
   return [
     ...identity,
     '',
@@ -80,7 +83,7 @@ function laneMarkdown(input: {
     'The authority permits incompatible implementations.',
     '',
     '### Evidence',
-    `- Path: ${path}`,
+    `- Path: ${evidencePath}`,
     '',
     '  Location: Contract section',
     '',
@@ -90,7 +93,7 @@ function laneMarkdown(input: {
     'Define one implementable outcome.',
     '',
     '### Changes',
-    `- Path: ${path}`,
+    `- Path: ${changePath}`,
     '',
     '  Action: Define the unique outcome.',
     '',
@@ -147,6 +150,37 @@ async function acceptLanes(
       candidate => candidate.id === dispatch.role,
     )!
     const stagingPath = dispatch.assignment.stagingOutputPaths[0]
+    state = {
+      ...state,
+      reports: state.reports.map(report =>
+        report.role === dispatch.role
+          ? {
+              ...report,
+              dispatch: {
+                dispatchId: dispatch.idempotencyKey,
+                workerType: 'document-reviewer' as const,
+                phase: 'DOCUMENT_REVIEW' as const,
+                taskId: dispatch.taskId,
+                revision,
+                status: 'running' as const,
+                request: {
+                  dispatchId: dispatch.idempotencyKey,
+                  runId: 'run',
+                  ownerId: 'owner',
+                  projectId: 'project',
+                  workspacePath: root,
+                  workerType: 'document-reviewer' as const,
+                  phase: 'DOCUMENT_REVIEW' as const,
+                  taskId: dispatch.taskId,
+                  revision,
+                  contract: dispatch.contract,
+                },
+                startedAt: new Date().toISOString(),
+              },
+            }
+          : report,
+      ),
+    }
     await mkdir(dirname(stagingPath), { recursive: true })
     await writeFile(
       stagingPath,
@@ -300,6 +334,44 @@ describe('foundation review lane dispatch barrier', () => {
       'technical-assets:C1',
       'presentation:C1',
     ])
+  })
+
+  test('requires the committed projection descriptor persisted on the lane dispatch', async () => {
+    const root = await workspace()
+    const state = createFoundationReviewState({ revision, attempt: 1 })
+    const [dispatch] = await buildFoundationReviewDispatches({
+      state,
+      workspacePath: root,
+      confirmedBriefDigest: 'd'.repeat(64),
+    })
+    const lane = FOUNDATION_DOCUMENT_LANES[0]
+    await mkdir(dirname(dispatch.assignment.stagingOutputPaths[0]), {
+      recursive: true,
+    })
+    await writeFile(
+      dispatch.assignment.stagingOutputPaths[0],
+      laneMarkdown({
+        lane,
+        projectionDigest: dispatch.contract.projection!.digest,
+      }),
+      'utf8',
+    )
+
+    await expect(
+      acceptFoundationReviewWorkerTerminal({
+        state,
+        workspacePath: root,
+        currentRevision: revision,
+        terminal: {
+          workerType: 'document-reviewer',
+          status: 'completed',
+          revision,
+          mode: 'initial',
+          role: lane.id,
+          reportPath: `.beegame/reviews/foundation/${revision}/parts/${lane.id}.md`,
+        },
+      }),
+    ).rejects.toThrow('projection descriptor is missing')
   })
 
   test('resumes only a pending lane while preserving completed siblings', async () => {

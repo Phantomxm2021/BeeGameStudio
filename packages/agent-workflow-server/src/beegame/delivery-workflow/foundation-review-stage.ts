@@ -14,6 +14,7 @@ import {
   type FoundationReviewSelection,
 } from './foundation-review-markdown'
 import {
+  readFoundationReviewProjectionAuthority,
   readFoundationReviewProjection,
   writeFoundationReviewProjection,
 } from './foundation-review-projection'
@@ -162,6 +163,31 @@ async function readLaneReceipt(input: {
     allowedEvidencePaths: validatedProjection.projection.sources.map(
       source => source.path,
     ),
+  })
+}
+
+async function readDispatchedProjectionAuthority(input: {
+  state: FoundationReviewState
+  workspacePath: string
+  laneId: FoundationDocumentLaneId
+}) {
+  const report = input.state.reports.find(
+    candidate => candidate.role === input.laneId,
+  )
+  const request = report?.dispatch?.request
+  if (!request || request.workerType !== 'document-reviewer')
+    throw new Error('foundation review projection descriptor is missing')
+  if (
+    request.revision !== input.state.revision ||
+    request.contract.reviewMode !== 'initial' ||
+    request.contract.reviewRole !== input.laneId
+  )
+    throw new Error('foundation review projection dispatch identity changed')
+  return readFoundationReviewProjectionAuthority({
+    workspacePath: input.workspacePath,
+    revision: input.state.revision,
+    laneId: input.laneId,
+    descriptor: request.contract.projection,
   })
 }
 
@@ -577,16 +603,10 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
     throw new Error('foundation review report is already completed')
 
   if (isLaneRole(terminal.role)) {
-    const projection = await writeFoundationReviewProjection({
+    const projection = await readDispatchedProjectionAuthority({
+      state,
       workspacePath: input.workspacePath,
-      revision: state.revision,
       laneId: terminal.role,
-    })
-    const validatedProjection = await readFoundationReviewProjection({
-      workspacePath: input.workspacePath,
-      revision: state.revision,
-      laneId: terminal.role,
-      expectedDigest: projection.digest,
     })
     const accepted = await acceptLaneReceipt({
       workspacePath: input.workspacePath,
@@ -594,9 +614,7 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
       currentRevision: input.currentRevision,
       laneId: terminal.role,
       projectionDigest: projection.digest,
-      allowedEvidencePaths: validatedProjection.projection.sources.map(
-        source => source.path,
-      ),
+      allowedEvidencePaths: projection.allowedEvidencePaths,
     })
     return assertFoundationReviewState({
       ...state,

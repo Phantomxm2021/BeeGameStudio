@@ -36,6 +36,7 @@ import {
   parseFoundationReviewLaneMarkdown,
   parseFoundationReviewSelectionMarkdown,
 } from './delivery-workflow/foundation-review-markdown'
+import { readFoundationReviewProjectionAuthority } from './delivery-workflow/foundation-review-projection'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -62,11 +63,7 @@ const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 function reviewerAssignmentContract(request: WorkerDispatchRequest):
   | {
       mode: 'initial'
-      role:
-        | 'core-design'
-        | 'technical-assets'
-        | 'presentation'
-        | 'synthesis'
+      role: 'core-design' | 'technical-assets' | 'presentation' | 'synthesis'
       assignment: {
         sourcePaths: string[]
         stagingOutputPaths: [string]
@@ -354,9 +351,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           : {}),
         ...(reviewContract
           ? {
-              workflowReadOnlyPaths: [
-                ...reviewContract.assignment.sourcePaths,
-              ],
+              workflowReadOnlyPaths: [...reviewContract.assignment.sourcePaths],
             }
           : request.workerType === 'resource-content-author'
             ? {
@@ -1090,7 +1085,9 @@ async function createDeterministicDocumentReviewTerminal(input: {
     Buffer.byteLength(`${markdown}\n`, 'utf8') >
     FOUNDATION_MARKDOWN_STREAM_MAX_BYTES
   )
-    throw new Error('Foundation Reviewer Markdown receipt exceeds maximum bytes')
+    throw new Error(
+      'Foundation Reviewer Markdown receipt exceeds maximum bytes',
+    )
   if (contract.role === 'synthesis') {
     const candidateReferences = input.request.contract.candidateReferences
     if (
@@ -1105,18 +1102,17 @@ async function createDeterministicDocumentReviewTerminal(input: {
       candidateReferences,
     })
   } else {
-    const projection = input.request.contract.projection
-    const projectionDigest =
-      projection &&
-      typeof projection === 'object' &&
-      !Array.isArray(projection) &&
-      typeof (projection as Record<string, unknown>).digest === 'string'
-        ? ((projection as Record<string, unknown>).digest as string)
-        : ''
+    const projection = await readFoundationReviewProjectionAuthority({
+      workspacePath: input.request.workspacePath,
+      revision: input.request.revision,
+      laneId: contract.role,
+      descriptor: input.request.contract.projection,
+    })
     parseFoundationReviewLaneMarkdown(markdown, {
       revision: input.request.revision,
       lane: contract.role,
-      projectionDigest,
+      projectionDigest: projection.digest,
+      allowedEvidencePaths: projection.allowedEvidencePaths,
     })
   }
   const stagingPath = resolve(contract.assignment.stagingOutputPaths[0])

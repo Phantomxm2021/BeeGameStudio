@@ -355,6 +355,33 @@ describe('foundation review lane Markdown', () => {
     }
   })
 
+  test('permits projected Evidence but never projected Changes', () => {
+    const projectedPath = 'docs/ART_DIRECTION.md'
+    const receipt = parseFoundationReviewLaneMarkdown(
+      markdown({
+        candidates: candidate('C1', '投影证据', {
+          evidencePath: projectedPath,
+        }),
+      }),
+      { ...expected, allowedEvidencePaths: [projectedPath] },
+    )
+    expect(receipt.candidates[0]?.evidence[0]?.path).toBe(projectedPath)
+
+    expect(() =>
+      parseFoundationReviewLaneMarkdown(
+        markdown({
+          candidates: candidate('C1', '投影修改', {
+            evidencePath: projectedPath,
+            changes: `- Path: \`${projectedPath}\`\n  Action: 不得修改投影来源。`,
+          }),
+        }),
+        { ...expected, allowedEvidencePaths: [projectedPath] },
+      ),
+    ).toThrow(
+      'foundation review lane Markdown change path is outside lane authority',
+    )
+  })
+
   test('publishes the complete lane receipt grammar', () => {
     expect(foundationReviewLaneMarkdownInstruction(expected)).toContain(
       '# Foundation Review Packet',
@@ -495,9 +522,7 @@ describe('foundation review lane Markdown', () => {
         'foundation review selection Markdown structure is invalid',
       )
     }
-    expect(() =>
-      parse(`# Another H1\n\n${selectionMarkdown()}`),
-    ).toThrow(
+    expect(() => parse(`# Another H1\n\n${selectionMarkdown()}`)).toThrow(
       'foundation review selection Markdown requires exactly one H1 Foundation Review Selection',
     )
     expect(() =>

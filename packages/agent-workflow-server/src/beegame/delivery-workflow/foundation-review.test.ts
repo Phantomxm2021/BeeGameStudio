@@ -1,17 +1,10 @@
-import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'bun:test'
 import { z } from 'zod'
 import {
   FOUNDATION_REVIEW_VERSION,
-  acceptFoundationReview,
   foundationReviewAffectedPaths,
-  foundationReviewOutputContractInstruction,
-  foundationReviewPath,
   foundationReviewSchema,
-  foundationReviewStagingPath,
   type FoundationReview,
 } from './foundation-review'
 
@@ -58,6 +51,19 @@ function review(overrides: Record<string, unknown> = {}) {
 }
 
 describe('foundation review contract', () => {
+  test('has no provider-authored JSON staging acceptance surface', () => {
+    const source = readFileSync(
+      new URL('./foundation-review.ts', import.meta.url),
+      'utf8',
+    )
+    expect(source).not.toContain('acceptFoundationReview')
+    expect(source).not.toContain('foundationReviewStagingPath')
+    expect(source).not.toContain('foundationReviewOutputContractInstruction')
+    expect(source).not.toContain(
+      "'.staging',\n    dispatchId,\n    'review.json'",
+    )
+  })
+
   test('publishes one strict v3 schema without verification-era fields', () => {
     const jsonSchema = z.toJSONSchema(foundationReviewSchema, {
       target: 'draft-7',
@@ -77,11 +83,6 @@ describe('foundation review contract', () => {
     expect(schemaText).not.toContain('"not"')
   })
 
-  test('states one exact root shape with acceptance only inside conflicts', () => {
-    const instruction = foundationReviewOutputContractInstruction()
-    expect(instruction).toContain('The root object has exactly')
-    expect(instruction).toContain('There is no root-level acceptance field')
-  })
   test('derives a canonical unique affected path set from conflict changes', () => {
     const parsed = foundationReviewSchema.parse(
       review({
@@ -128,9 +129,7 @@ describe('foundation review contract', () => {
     )
 
     expect(parsed.conflicts[0]?.changes).toEqual(changes)
-    expect(foundationReviewAffectedPaths(parsed)).toEqual([
-      'docs/GDD.md',
-    ])
+    expect(foundationReviewAffectedPaths(parsed)).toEqual(['docs/GDD.md'])
   })
 
   test('rejects verdict, conflict, identity and actionability mismatches', () => {
@@ -197,45 +196,4 @@ describe('foundation review contract', () => {
       ),
     ).toThrow()
   })
-
-  test('atomically accepts one immutable review json bound to current bytes', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-review-'))
-    const dispatchId = 'dispatch-1'
-    const stagedPath = foundationReviewStagingPath(
-      workspacePath,
-      revision,
-      dispatchId,
-    )
-    await mkdir(dirname(stagedPath), { recursive: true })
-    await writeFile(stagedPath, JSON.stringify(review()), 'utf8')
-
-    const accepted = await acceptFoundationReview({
-      workspacePath,
-      revision,
-      currentRevision: revision,
-      dispatchId,
-    })
-
-    const committedPath = foundationReviewPath(workspacePath, revision)
-    const committedBytes = await readFile(committedPath)
-    expect(accepted.path).toBe(
-      `.beegame/reviews/foundation/${revision}/review.json`,
-    )
-    expect(accepted.digest).toBe(
-      createHash('sha256').update(committedBytes).digest('hex'),
-    )
-    expect(accepted.affectedPaths).toEqual([
-      'docs/GDD.md',
-      'docs/AUDIO_DESIGN.md',
-    ])
-    await expect(
-      acceptFoundationReview({
-        workspacePath,
-        revision,
-        currentRevision: revision,
-        dispatchId,
-      }),
-    ).rejects.toThrow('foundation review is already committed')
-  })
-
 })

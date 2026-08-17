@@ -2,18 +2,65 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   completeTestSubmission,
   renderTestCompleteGameDocument,
 } from '../__tests__/complete-game-document-fixture'
 import { createBeeGameDeliveryWorkerPort } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import {
+  readFoundationReviewProjectionAuthority,
+  writeFoundationReviewProjection,
+} from './delivery-workflow/foundation-review-projection'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from './delivery-workflow/types'
+import type { FoundationDocumentLaneId } from './delivery-workflow/foundation-document-lanes'
 import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
 import { commitAuthoredFoundationDocument } from './authored-document-receipt'
 
 function count(value: string, needle: string): number {
   return value.split(needle).length - 1
+}
+
+function projectionSourceDocument(path: FoundationDocumentPath): string {
+  const contract = getGameDocumentContract(path)
+  return [
+    `# ${contract.discipline}`,
+    '',
+    ...contract.sections.flatMap(section => [
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      `Exact ${path} content for ${section.sectionId}.`,
+      '',
+    ]),
+  ].join('\n')
+}
+
+async function prepareReviewProjection(
+  workspacePath: string,
+  revision: string,
+  laneId: FoundationDocumentLaneId,
+) {
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+    const absolute = join(workspacePath, path)
+    await mkdir(dirname(absolute), { recursive: true })
+    await writeFile(absolute, projectionSourceDocument(path), 'utf8')
+  }
+  const descriptor = await writeFoundationReviewProjection({
+    workspacePath,
+    revision,
+    laneId,
+  })
+  const authority = await readFoundationReviewProjectionAuthority({
+    workspacePath,
+    revision,
+    laneId,
+    descriptor,
+  })
+  return { descriptor, projectedPath: authority.allowedEvidencePaths[0]! }
 }
 
 function request(workspacePath: string, dispatchId: string) {
@@ -180,39 +227,42 @@ describe('native initial document authoring', () => {
   test('persists the native visible Reviewer lane Markdown without a schema or Write tool call', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-markdown-'))
     const revision = 'a'.repeat(64)
-    const projectionDigest = 'b'.repeat(64)
+    const { descriptor: projection, projectedPath } =
+      await prepareReviewProjection(workspacePath, revision, 'technical-assets')
+    const projectionDigest = projection.digest
     const stagingPath = join(
       workspacePath,
       '.beegame/reviews/foundation',
       revision,
-      '.staging/parts/core-design.md',
+      '.staging/parts/technical-assets.md',
     )
     const committedPath = join(
       workspacePath,
       '.beegame/reviews/foundation',
       revision,
-      'parts/core-design.md',
+      'parts/technical-assets.md',
     )
     const markdown = [
       '# Foundation Review Packet',
       `Revision: \`${revision}\``,
-      'Lane: `core-design`',
+      'Lane: `technical-assets`',
       `Projection: \`${projectionDigest}\``,
-      '## `core-design:C1` — Loose list receipt',
+      '## `technical-assets:C1` — Loose list receipt',
       '### Problem',
       'The authority permits incompatible implementations.',
       '### Evidence',
-      '- Path: `docs/GDD.md`',
+      `- Path: \`${projectedPath}\``,
       '  Location: Contract section',
       '  Observed: The required outcome is ambiguous.',
       '### Required outcome',
       'Define one implementable outcome.',
       '### Changes',
-      '- Path: `docs/GDD.md`',
+      '- Path: `docs/TECHNICAL_DESIGN.md`',
       '  Action: Define the unique outcome.',
       '### Acceptance',
       '- The outcome has one observable result.',
     ].join('\n\n')
+    let nextMarkdown = markdown
     const prompts: string[] = []
     const events: Array<Record<string, unknown>> = []
     let startInput: Record<string, unknown> | undefined
@@ -246,7 +296,7 @@ describe('native initial document authoring', () => {
           text: 'This visible text is not the Reviewer authority.',
           payload: {
             type: 'result',
-            result: `  ${markdown}\n\n`,
+            result: `  ${nextMarkdown}\n\n`,
             num_turns: 1,
             usage: {
               input_tokens: 0,
@@ -276,16 +326,14 @@ describe('native initial document authoring', () => {
       revision,
       contract: {
         reviewMode: 'initial',
-        reviewRole: 'core-design',
+        reviewRole: 'technical-assets',
         projection: {
-          path: '.beegame/reviews/foundation/projections/core-design.json',
-          digest: projectionDigest,
-          byteLength: 100,
+          ...projection,
         },
         assignment: {
           scope: 'foundation',
-          role: 'core-design',
-          sourcePaths: [join(workspacePath, 'docs/GDD.md')],
+          role: 'technical-assets',
+          sourcePaths: [join(workspacePath, 'docs/TECHNICAL_DESIGN.md')],
           stagingOutputPaths: [stagingPath],
           committedOutputPaths: [committedPath],
         },
@@ -308,6 +356,77 @@ describe('native initial document authoring', () => {
     )
     expect(startInput?.workflowJsonSchema).toBeUndefined()
     expect(await readFile(stagingPath, 'utf8')).toBe(`${markdown}\n`)
+
+    const missingProjectionStagingPath = join(
+      workspacePath,
+      '.beegame/reviews/foundation',
+      revision,
+      '.staging/parts/missing-projection.md',
+    )
+    const missingProjectionRequest = {
+      ...request,
+      dispatchId: 'review-missing-projection',
+      contract: {
+        ...request.contract,
+        projection: {
+          ...projection,
+          path: projection.path.replace(
+            'technical-assets.json',
+            'missing.json',
+          ),
+        },
+        assignment: {
+          ...request.contract.assignment,
+          stagingOutputPaths: [missingProjectionStagingPath],
+        },
+      },
+    } as const
+    await port.start(missingProjectionRequest as never)
+    await port.submit(
+      missingProjectionRequest.dispatchId,
+      'Review the assigned lane.',
+    )
+    await expect(
+      port.waitForTerminal?.(missingProjectionRequest.dispatchId),
+    ).rejects.toThrow('foundation review projection path is not canonical')
+    await expect(readFile(missingProjectionStagingPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+
+    const projectedChangeStagingPath = join(
+      workspacePath,
+      '.beegame/reviews/foundation',
+      revision,
+      '.staging/parts/projected-change.md',
+    )
+    nextMarkdown = markdown.replace(
+      '- Path: `docs/TECHNICAL_DESIGN.md`',
+      `- Path: \`${projectedPath}\``,
+    )
+    const projectedChangeRequest = {
+      ...request,
+      dispatchId: 'review-projected-change',
+      contract: {
+        ...request.contract,
+        assignment: {
+          ...request.contract.assignment,
+          stagingOutputPaths: [projectedChangeStagingPath],
+        },
+      },
+    } as const
+    await port.start(projectedChangeRequest as never)
+    await port.submit(
+      projectedChangeRequest.dispatchId,
+      'Review the assigned lane.',
+    )
+    await expect(
+      port.waitForTerminal?.(projectedChangeRequest.dispatchId),
+    ).rejects.toThrow(
+      'foundation review lane Markdown change path is outside lane authority',
+    )
+    await expect(readFile(projectedChangeStagingPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
     await rm(workspacePath, { recursive: true, force: true })
   })
 
@@ -422,6 +541,11 @@ describe('native initial document authoring', () => {
   ])('rejects %s native Reviewer result text before returning a completed terminal', async (_case, resultText, expectedError) => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-invalid-'))
     const revision = 'a'.repeat(64)
+    const { descriptor: projection } = await prepareReviewProjection(
+      workspacePath,
+      revision,
+      'core-design',
+    )
     const stagingPath = join(workspacePath, '.beegame/reviewer.md')
     const events: Array<Record<string, unknown>> = []
     const sessions = {
@@ -473,11 +597,7 @@ describe('native initial document authoring', () => {
       contract: {
         reviewMode: 'initial',
         reviewRole: 'core-design',
-        projection: {
-          path: '.beegame/projection.json',
-          digest: 'b'.repeat(64),
-          byteLength: 100,
-        },
+        projection,
         assignment: {
           scope: 'foundation',
           role: 'core-design',
