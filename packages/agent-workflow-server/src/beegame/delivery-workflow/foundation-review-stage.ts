@@ -37,7 +37,6 @@ export type FoundationReviewAssignment = {
   scope: 'foundation'
   role: FoundationReviewRole
   sourcePaths: string[]
-  verificationSourcePaths: string[]
   stagingOutputPaths: [string]
   committedOutputPaths: [string]
 }
@@ -106,7 +105,6 @@ export async function buildFoundationReviewDispatches(input: {
       const taskId = `review:foundation:${role}:${state.attempt}`
       let projection: FoundationReviewDispatch['contract']['projection']
       let sourcePaths: string[]
-      let verificationSourcePaths: string[]
       let stagingPath: string
       let committedPath: string
       if (isLaneRole(role)) {
@@ -116,8 +114,10 @@ export async function buildFoundationReviewDispatches(input: {
           revision: state.revision,
           laneId: role,
         })
-        sourcePaths = lane.ownedPaths.map(path => resolve(input.workspacePath, path))
-        verificationSourcePaths = [resolve(input.workspacePath, projection.path)]
+        sourcePaths = [
+          ...lane.ownedPaths.map(path => resolve(input.workspacePath, path)),
+          resolve(input.workspacePath, projection.path),
+        ]
         stagingPath = foundationReviewLanePacketStagingPath(
           input.workspacePath,
           state.revision,
@@ -136,7 +136,6 @@ export async function buildFoundationReviewDispatches(input: {
             lane.id,
           ),
         )
-        verificationSourcePaths = []
         stagingPath = foundationReviewStagingPath(
           input.workspacePath,
           state.revision,
@@ -148,7 +147,6 @@ export async function buildFoundationReviewDispatches(input: {
         scope: 'foundation',
         role,
         sourcePaths,
-        verificationSourcePaths,
         stagingOutputPaths: [stagingPath],
         committedOutputPaths: [committedPath],
       }
@@ -204,7 +202,6 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
       currentRevision: input.currentRevision,
       laneId: terminal.role,
       projectionDigest: projection.digest,
-      mode: 'initial',
     })
     return assertFoundationReviewState({
       ...state,

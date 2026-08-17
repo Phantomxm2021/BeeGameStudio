@@ -40,7 +40,7 @@ export const foundationReviewWorkerTerminalSchema = z
     workerType: z.literal('document-reviewer'),
     status: z.literal('completed'),
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
-    mode: z.enum(['initial', 'verification']),
+    mode: z.literal('initial'),
     role: z.enum([
       'core-design',
       'technical-assets',

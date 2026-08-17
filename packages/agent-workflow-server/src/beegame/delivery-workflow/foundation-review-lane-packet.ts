@@ -30,14 +30,6 @@ const candidateSchema = z
   })
   .strict()
 
-const priorConflictStatusSchema = z
-  .object({
-    id: z.string().regex(/^B[1-9][0-9]*$/u),
-    status: z.enum(['closed', 'open']),
-    note: z.string().trim().min(1).max(1_200),
-  })
-  .strict()
-
 const basePacketSchema = z.object({
     version: z.literal(1),
     scope: z.literal('foundation'),
@@ -46,16 +38,9 @@ const basePacketSchema = z.object({
     candidates: z.array(candidateSchema).max(8),
   })
 
-export const foundationReviewLanePacketSchema = z.discriminatedUnion('mode', [
-  basePacketSchema.extend({ mode: z.literal('initial') }).strict(),
-  basePacketSchema
-    .extend({
-      mode: z.literal('verification'),
-      priorReviewDigest: digestSchema,
-      priorConflictStatus: z.array(priorConflictStatusSchema).max(64),
-    })
-    .strict(),
-])
+export const foundationReviewLanePacketSchema = basePacketSchema
+  .extend({ mode: z.literal('initial') })
+  .strict()
 
 export type FoundationReviewLanePacket = z.infer<
   typeof foundationReviewLanePacketSchema
@@ -63,42 +48,25 @@ export type FoundationReviewLanePacket = z.infer<
 
 const LANE_FOCUS: Record<FoundationDocumentLaneId, string> = {
   'core-design':
-    'Review only game rules, progression, level structure and balance authority for blocking implementation or verification defects.',
+    'Review only game rules, progression, level structure and balance authority for blocking implementation or acceptance defects.',
   'technical-assets':
-    'Review only runtime architecture, production feasibility and asset responsibilities for blocking implementation or verification defects.',
+    'Review only runtime architecture, production feasibility and asset responsibilities for blocking implementation or acceptance defects.',
   presentation:
-    'Review only art, UI/UX and audio experience contracts for blocking implementation or verification defects.',
+    'Review only art, UI/UX and audio experience contracts for blocking implementation or acceptance defects.',
 }
 
 export function foundationReviewLanePacketContractInstruction(input: {
   revision: string
   laneId: FoundationDocumentLaneId
-  mode: 'initial' | 'verification'
-  priorReviewDigest?: string
-  priorConflictIds?: string[]
 }): string {
   digestSchema.parse(input.revision)
   laneSchema.parse(input.laneId)
-  if (input.mode === 'verification') {
-    digestSchema.parse(input.priorReviewDigest)
-    if (!input.priorConflictIds) throw new Error('verification packet requires prior conflicts')
-  }
   const shape = JSON.stringify({
     version: 1,
     scope: 'foundation',
     revision: input.revision,
     lane: input.laneId,
-    mode: input.mode,
-    ...(input.mode === 'verification'
-      ? {
-          priorReviewDigest: input.priorReviewDigest,
-          priorConflictStatus: (input.priorConflictIds ?? []).map(id => ({
-            id,
-            status: '<closed-or-open>',
-            note: '<specific verification observation>',
-          })),
-        }
-      : {}),
+    mode: 'initial',
     candidates: [
       {
         title: '<specific blocking defect>',
@@ -118,11 +86,6 @@ export function foundationReviewLanePacketContractInstruction(input: {
     LANE_FOCUS[input.laneId],
     `Return exactly one JSON object with this exact shape and fixed identity: ${shape}`,
     `The object may contain only the fields shown in the shape. Each candidate may contain only title, problem, evidence and blockingReason. Each evidence item may contain only path, location and observed. Every evidence path must be one of these exact project-relative canonical paths: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}. Never write an absolute path. Report only the 8 highest-priority proven blockers; candidates may be empty when no blocking defect is proven.`,
-    ...(input.mode === 'verification'
-      ? [
-          `Account for exactly these prior conflict IDs, in this order, and no others: ${(input.priorConflictIds ?? []).join(', ') || '<none>'}. A closed item is fixed in every assigned document; an open item remains a blocking candidate with evidence.`,
-        ]
-      : []),
     'Read the assigned full documents and the one assigned projection only. Do not inspect other canonical documents, .beegame workflow state or Bee Game Studio source code. Submit the object once through StructuredOutput. Do not emit prose, decide the final verdict, propose replacement text, modify source documents or launch another Agent or task.',
   ].join(' ')
 }
@@ -272,36 +235,13 @@ async function assertEvidenceAuthority(input: {
   }
 }
 
-function assertVerificationAuthority(input: {
-  packet: FoundationReviewLanePacket
-  mode: 'initial' | 'verification'
-  priorReviewDigest?: string
-  priorConflictIds?: string[]
-}): void {
-  if (input.packet.mode !== input.mode)
-    throw new Error('foundation review lane packet mode does not match')
-  if (input.mode === 'initial') return
-  if (input.packet.mode !== 'verification') throw new Error('verification packet is invalid')
-  if (input.packet.priorReviewDigest !== input.priorReviewDigest)
-    throw new Error('foundation review lane packet prior digest does not match')
-  const actual = input.packet.priorConflictStatus.map(item => item.id)
-  const expected = input.priorConflictIds ?? []
-  if (
-    actual.length !== expected.length ||
-    actual.some((id, index) => id !== expected[index])
-  )
-    throw new Error('foundation review lane packet prior conflict coverage does not match')
-}
-
 export async function acceptFoundationReviewLanePacket(input: {
   workspacePath: string
   revision: string
   currentRevision: string
   laneId: FoundationDocumentLaneId
   projectionDigest: string
-  mode: 'initial' | 'verification'
-  priorReviewDigest?: string
-  priorConflictIds?: string[]
+  mode?: 'initial'
 }): Promise<{
   path: string
   digest: string
@@ -331,12 +271,6 @@ export async function acceptFoundationReviewLanePacket(input: {
     throw new Error('foundation review lane packet revision does not match')
   if (accepted.packet.lane !== input.laneId)
     throw new Error('foundation review lane packet lane does not match')
-  assertVerificationAuthority({
-    packet: accepted.packet,
-    mode: input.mode,
-    priorReviewDigest: input.priorReviewDigest,
-    priorConflictIds: input.priorConflictIds,
-  })
   await assertEvidenceAuthority({
     workspacePath: input.workspacePath,
     revision: input.revision,

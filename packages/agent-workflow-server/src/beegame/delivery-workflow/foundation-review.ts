@@ -48,22 +48,13 @@ const conflictSchema = z
       })
   })
 
-const priorConflictStatusSchema = z
-  .object({
-    id: conflictIdSchema,
-    status: z.enum(['closed', 'open']),
-    note: z.string().trim().min(1).max(1_200).optional(),
-  })
-  .strict()
-
 export const foundationReviewSchema = z
   .object({
     version: z.literal(FOUNDATION_REVIEW_VERSION),
     scope: z.literal('foundation'),
     revision: digestSchema,
     verdict: z.enum(['READY', 'NEEDS_REVISION']),
-    priorReviewDigest: digestSchema.optional(),
-    priorConflictStatus: z.array(priorConflictStatusSchema).max(64),
+    priorConflictStatus: z.array(z.never()).max(0),
     conflicts: z.array(conflictSchema).max(64),
   })
   .strict()
@@ -76,34 +67,6 @@ export const foundationReviewSchema = z
         path: ['conflicts'],
         message: 'foundation review conflict IDs must be unique',
       })
-    const priorIds = value.priorConflictStatus.map(status => status.id)
-    if (new Set(priorIds).size !== priorIds.length)
-      context.addIssue({
-        code: 'custom',
-        path: ['priorConflictStatus'],
-        message: 'foundation review prior conflict IDs must be unique',
-      })
-    if (!value.priorReviewDigest && value.priorConflictStatus.length)
-      context.addIssue({
-        code: 'custom',
-        path: ['priorReviewDigest'],
-        message: 'foundation review prior status requires a prior digest',
-      })
-    for (const [index, prior] of value.priorConflictStatus.entries()) {
-      const present = conflictIdSet.has(prior.id)
-      if (prior.status === 'open' && !present)
-        context.addIssue({
-          code: 'custom',
-          path: ['priorConflictStatus', index],
-          message: 'open foundation conflict must remain in current conflicts',
-        })
-      if (prior.status === 'closed' && present)
-        context.addIssue({
-          code: 'custom',
-          path: ['priorConflictStatus', index],
-          message: 'closed foundation conflict cannot remain current',
-        })
-    }
     if (value.verdict === 'READY' && value.conflicts.length)
       context.addIssue({
         code: 'custom',
@@ -124,10 +87,7 @@ export function foundationReviewOutputContractInstruction(): string {
     scope: 'foundation',
     revision: '<assigned-64-hex-revision>',
     verdict: '<READY-or-NEEDS_REVISION>',
-    priorReviewDigest: '<verification-only-64-hex-digest>',
-    priorConflictStatus: [
-      { id: 'B1', status: '<closed-or-open>', note: '<optional-bounded-note>' },
-    ],
+    priorConflictStatus: [],
     conflicts: [
       {
         id: 'B1',
@@ -150,7 +110,7 @@ export function foundationReviewOutputContractInstruction(): string {
     `The root object has exactly this shape: ${rootShape}`,
     'There is no root-level acceptance field. acceptance exists only inside each conflicts item. Do not add summary, severity, impact, coverage, notes or any other root or conflict field.',
     `version must be the integer ${FOUNDATION_REVIEW_VERSION}; scope must be the string foundation; revision must exactly equal the assigned revision; verdict must be READY or NEEDS_REVISION.`,
-    'priorConflictStatus must always be present as an array; use [] on the initial review. Each priorConflictStatus object may contain only id, status and an optional bounded note explaining the verification evidence. Include priorReviewDigest only for a verification review.',
+    'priorConflictStatus must always be present and must equal []; the current architecture has no prior-review execution mode.',
     'Conflict IDs must be B1, B2, B3 and so on with no suffix or descriptive text.',
     'Each conflict evidence must be an array of objects containing only path, location and observed; never use a string. Each conflict changes must be an array of objects containing only path and action, with each path appearing at most once. acceptance must be an array of testable strings.',
   ].join(' ')
@@ -280,38 +240,11 @@ export async function readFoundationReviewArtifact(input: {
   }
 }
 
-function validatePriorReview(
-  current: FoundationReview,
-  prior:
-    | {
-        review: FoundationReview
-        digest: string
-      }
-    | undefined,
-): void {
-  if (!prior) {
-    if (current.priorReviewDigest || current.priorConflictStatus.length)
-      throw new Error('foundation review has unexpected prior review state')
-    return
-  }
-  assertDigest(prior.digest)
-  if (current.priorReviewDigest !== prior.digest)
-    throw new Error('foundation review prior digest does not match')
-  const expected = new Set(prior.review.conflicts.map(conflict => conflict.id))
-  const actual = new Set(current.priorConflictStatus.map(status => status.id))
-  if (
-    expected.size !== actual.size ||
-    [...expected].some(id => !actual.has(id))
-  )
-    throw new Error('foundation review does not account for every prior conflict')
-}
-
 export async function acceptFoundationReview(input: {
   workspacePath: string
   revision: string
   currentRevision: string
   dispatchId: string
-  priorReview?: { review: FoundationReview; digest: string }
 }): Promise<{
   review: FoundationReview
   path: string
@@ -336,8 +269,6 @@ export async function acceptFoundationReview(input: {
   const accepted = await readReview(stagedPath)
   if (accepted.review.revision !== input.revision)
     throw new Error('foundation review revision does not match')
-  validatePriorReview(accepted.review, input.priorReview)
-
   const stagedFile = await open(stagedPath, 'r')
   try {
     await stagedFile.sync()

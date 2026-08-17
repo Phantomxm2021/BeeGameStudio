@@ -61,7 +61,7 @@ describe('foundation review contract', () => {
     expect(instruction).toContain('The root object has exactly')
     expect(instruction).toContain('There is no root-level acceptance field')
   })
-  test('derives a canonical unique remediation path set from conflict changes', () => {
+  test('derives a canonical unique affected path set from conflict changes', () => {
     const parsed = foundationReviewSchema.parse(
       review({
         conflicts: [
@@ -130,23 +130,12 @@ describe('foundation review contract', () => {
     ).toThrow()
   })
 
-  test('accounts for every byte-bound prior conflict without silent loss', () => {
-    const priorDigest = 'b'.repeat(64)
+  test('keeps the canonical initial prior status empty and rejects prior-run state', () => {
+    expect(foundationReviewSchema.parse(review()).priorConflictStatus).toEqual([])
     expect(() =>
       foundationReviewSchema.parse(
         review({
-          priorReviewDigest: priorDigest,
-          priorConflictStatus: [{ id: 'B1', status: 'closed' }],
-          conflicts: [conflict('B1')],
-        }),
-      ),
-    ).toThrow()
-    expect(() =>
-      foundationReviewSchema.parse(
-        review({
-          priorReviewDigest: priorDigest,
-          priorConflictStatus: [{ id: 'B1', status: 'open' }],
-          conflicts: [conflict('B2')],
+          priorReviewDigest: 'b'.repeat(64),
         }),
       ),
     ).toThrow()
@@ -154,48 +143,9 @@ describe('foundation review contract', () => {
       foundationReviewSchema.parse(
         review({
           priorConflictStatus: [{ id: 'B1', status: 'open' }],
-          conflicts: [conflict('B1')],
         }),
       ),
     ).toThrow()
-
-    expect(
-      foundationReviewSchema.parse(
-        review({
-          priorReviewDigest: priorDigest,
-          priorConflictStatus: [
-            { id: 'B1', status: 'closed' },
-            { id: 'B3', status: 'open' },
-          ],
-          conflicts: [conflict('B2'), conflict('B3')],
-        }),
-      ).conflicts.map(item => item.id),
-    ).toEqual(['B2', 'B3'])
-  })
-
-  test('preserves bounded verification evidence for each prior conflict status', () => {
-    const parsed = foundationReviewSchema.parse(
-      review({
-        verdict: 'READY',
-        priorReviewDigest: 'b'.repeat(64),
-        priorConflictStatus: [
-          {
-            id: 'B1',
-            status: 'closed',
-            note: 'The cited authority and every named consumer now agree.',
-          },
-        ],
-        conflicts: [],
-      }),
-    )
-
-    expect(parsed.priorConflictStatus).toEqual([
-      {
-        id: 'B1',
-        status: 'closed',
-        note: 'The cited authority and every named consumer now agree.',
-      },
-    ])
   })
 
   test('atomically accepts one immutable review json bound to current bytes', async () => {
@@ -238,37 +188,4 @@ describe('foundation review contract', () => {
     ).rejects.toThrow('foundation review is already committed')
   })
 
-  test('rejects a verification review that does not account for every prior conflict', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-review-'))
-    const stagedPath = foundationReviewStagingPath(
-      workspacePath,
-      revision,
-      'dispatch-2',
-    )
-    const prior = foundationReviewSchema.parse(
-      review({ conflicts: [conflict('B1'), conflict('B2')] }),
-    )
-    await mkdir(dirname(stagedPath), { recursive: true })
-    await writeFile(
-      stagedPath,
-      JSON.stringify(
-        review({
-          priorReviewDigest: 'c'.repeat(64),
-          priorConflictStatus: [{ id: 'B1', status: 'closed' }],
-          conflicts: [conflict('B2')],
-        }),
-      ),
-      'utf8',
-    )
-
-    await expect(
-      acceptFoundationReview({
-        workspacePath,
-        revision,
-        currentRevision: revision,
-        dispatchId: 'dispatch-2',
-        priorReview: { review: prior, digest: 'c'.repeat(64) },
-      }),
-    ).rejects.toThrow('foundation review does not account for every prior conflict')
-  })
 })

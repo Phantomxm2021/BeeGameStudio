@@ -18,11 +18,12 @@ No replacement repair flow is in scope.
 
 ## Verified Non-Browser Closure
 
-The exact production static scan returned no matches for removed Foundation
-post-report state, task IDs, authoring mode, creation events, or Dashboard
-labels.
+The expanded production static scan returned no matches for removed Foundation
+post-report state, task IDs, authoring mode, creation events, Dashboard labels,
+verification-mode discriminants, prior-review routing fields, the second
+Reviewer source-path list, or the removed verification authority validator.
 
-The complete affected test command passed with 233 tests passing, 1 intentional
+The complete affected test command passed with 231 tests passing, 1 intentional
 skip, and 0 failures. TypeScript typecheck and `git diff --check` also passed.
 
 During that verification, the persisted-schema fingerprint test correctly
@@ -30,6 +31,14 @@ detected that removal had structurally changed the strict delivery-run schema
 without changing its version. The current schema version is now 26 with the new
 fingerprint registered. Version 25 remains unsupported; no migration or
 projection was added.
+
+Self-review after the first static pass found residual executable
+post-remediation verification contracts outside the original literal list.
+The correction removed verification-mode terminals and lane packets,
+prior-review digest/conflict routing, verification-only prompts and acceptors,
+and `verificationSourcePaths`. The canonical version 2 initial report still
+requires `priorConflictStatus: []`, preserving its accepted initial shape while
+rejecting prior-run state.
 
 ## Chrome Blocker
 

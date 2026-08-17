@@ -1195,7 +1195,6 @@ describe('delivery worker session credentials', () => {
               `.beegame/reviews/foundation/${revision}/parts/${lane}.json`,
             ),
         ),
-        verificationSourcePaths: [],
         stagingOutputPaths: [stagingPath],
         committedOutputPaths: [
           join(workspacePath, `.beegame/reviews/foundation/${revision}/review.json`),

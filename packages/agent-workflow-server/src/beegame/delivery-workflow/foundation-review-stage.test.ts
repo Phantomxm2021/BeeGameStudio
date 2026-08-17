@@ -81,20 +81,27 @@ describe('foundation review lane dispatch barrier', () => {
       'presentation',
     ])
     expect(
-      laneDispatches.flatMap(dispatch => dispatch.assignment.sourcePaths),
+      laneDispatches.flatMap(dispatch =>
+        dispatch.assignment.sourcePaths.filter(path => path.endsWith('.md')),
+      ),
     ).toEqual(
       FOUNDATION_DOCUMENT_LANES.flatMap(lane =>
         lane.ownedPaths.map(path => resolve(root, path)),
       ),
     )
     expect(
-      new Set(laneDispatches.flatMap(item => item.assignment.sourcePaths)).size,
+      new Set(
+        laneDispatches.flatMap(item =>
+          item.assignment.sourcePaths.filter(path => path.endsWith('.md')),
+        ),
+      ).size,
     ).toBe(8)
     expect(
       laneDispatches.every(
         item =>
-          item.assignment.sourcePaths.length < 8 &&
-          item.assignment.verificationSourcePaths.length === 1 &&
+          item.assignment.sourcePaths.filter(path => path.endsWith('.md')).length < 8 &&
+          item.assignment.sourcePaths.filter(path => path.endsWith('.json')).length === 1 &&
+          !Object.hasOwn(item.assignment, 'verificationSourcePaths') &&
           item.contract.reviewMode === 'initial' &&
           item.contract.projection?.digest.match(/^[a-f0-9]{64}$/u),
       ),
@@ -117,7 +124,7 @@ describe('foundation review lane dispatch barrier', () => {
         ),
       ),
     )
-    expect(synthesis[0].assignment.verificationSourcePaths).toEqual([])
+    expect(synthesis[0].assignment).not.toHaveProperty('verificationSourcePaths')
     expect(synthesis[0].contract.packetDigests).toEqual({
       'core-design': '1'.repeat(64),
       'technical-assets': '2'.repeat(64),

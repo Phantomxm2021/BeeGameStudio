@@ -1034,7 +1034,6 @@ export function createDeliveryWorkflowController(input: {
                 allowedPaths: item.assignment.stagingOutputPaths,
                 protectedPaths: [
                   ...item.assignment.sourcePaths,
-                  ...item.assignment.verificationSourcePaths,
                 ],
                 contract: item.contract,
               }),

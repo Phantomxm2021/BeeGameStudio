@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { foundationReviewWorkerTerminalSchema } from './worker-contracts'
 
 describe('foundation review worker terminal contract', () => {
-  test('binds initial and verification lanes plus synthesis to exact committed artifacts', () => {
+  test('binds only initial lanes plus synthesis to exact committed artifacts', () => {
     expect(
       foundationReviewWorkerTerminalSchema.parse({
         workerType: 'document-reviewer',
@@ -23,7 +23,7 @@ describe('foundation review worker terminal contract', () => {
         reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/review.json`,
       }).role,
     ).toBe('synthesis')
-    expect(
+    expect(() =>
       foundationReviewWorkerTerminalSchema.parse({
         workerType: 'document-reviewer',
         status: 'completed',
@@ -31,7 +31,7 @@ describe('foundation review worker terminal contract', () => {
         mode: 'verification',
         role: 'core-design',
         reportPath: `.beegame/reviews/foundation/${'a'.repeat(64)}/parts/core-design.json`,
-      }).role,
-    ).toBe('core-design')
+      }),
+    ).toThrow()
   })
 })

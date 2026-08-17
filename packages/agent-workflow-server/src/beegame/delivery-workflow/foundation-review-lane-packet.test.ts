@@ -113,6 +113,15 @@ describe('foundation review lane packets', () => {
         packet({ candidates: [candidate({ replacementText: 'Rewrite it.' })] }),
       ),
     ).toThrow()
+    expect(() =>
+      foundationReviewLanePacketSchema.parse(
+        packet({
+          mode: 'verification',
+          priorReviewDigest: 'b'.repeat(64),
+          priorConflictStatus: [],
+        }),
+      ),
+    ).toThrow()
   })
 
   test('canonicalizes workspace-confined absolute evidence paths before commit', async () => {
@@ -366,62 +375,4 @@ describe('foundation review lane packets', () => {
     )
   })
 
-  test('binds verification packets to the prior digest and exact lane conflict set', async () => {
-    const root = await workspace()
-    const projection = await writeFoundationReviewProjection({
-      workspacePath: root,
-      revision,
-      laneId: 'technical-assets',
-    })
-    await stagePacket(
-      root,
-      packet({
-        mode: 'verification',
-        priorReviewDigest: 'b'.repeat(64),
-        priorConflictStatus: [
-          { id: 'B2', status: 'closed', note: 'The runtime contract now agrees.' },
-        ],
-        candidates: [],
-      }),
-    )
-    const accepted = await acceptFoundationReviewLanePacket({
-      workspacePath: root,
-      revision,
-      currentRevision: revision,
-      laneId: 'technical-assets',
-      projectionDigest: projection.digest,
-      mode: 'verification',
-      priorReviewDigest: 'b'.repeat(64),
-      priorConflictIds: ['B2'],
-    })
-    expect(accepted.packet.mode).toBe('verification')
-
-    const mismatchRoot = await workspace()
-    const mismatchProjection = await writeFoundationReviewProjection({
-      workspacePath: mismatchRoot,
-      revision,
-      laneId: 'technical-assets',
-    })
-    await stagePacket(
-      mismatchRoot,
-      packet({
-        mode: 'verification',
-        priorReviewDigest: 'b'.repeat(64),
-        priorConflictStatus: [],
-        candidates: [],
-      }),
-    )
-    await expect(
-      acceptFoundationReviewLanePacket({
-        workspacePath: mismatchRoot,
-        revision,
-        currentRevision: revision,
-        laneId: 'technical-assets',
-        projectionDigest: mismatchProjection.digest,
-        mode: 'verification',
-        priorReviewDigest: 'b'.repeat(64),
-        priorConflictIds: ['B2'],
-      }),
-    ).rejects.toThrow('prior conflict coverage does not match')
-  })
 })

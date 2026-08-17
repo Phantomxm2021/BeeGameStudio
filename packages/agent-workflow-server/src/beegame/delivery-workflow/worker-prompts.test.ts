@@ -12,6 +12,31 @@ test('has no Foundation remediation prompt path', () => {
   expect(source).not.toContain('remediationReceipts')
 })
 
+test('has no executable post-report Foundation verification contract', () => {
+  const sources = [
+    './foundation-review.ts',
+    './foundation-review-lane-packet.ts',
+    './foundation-review-stage.ts',
+    './worker-contracts.ts',
+    './worker-prompts.ts',
+    '../delivery-worker-session-port.ts',
+    './controller.ts',
+  ].map(path => readFileSync(new URL(path, import.meta.url), 'utf8'))
+  const removedIdentifiers = [
+    'verificationSourcePaths',
+    'priorReviewDigest',
+    'priorConflictIds',
+    "reviewMode === 'verification'",
+    "mode === 'verification'",
+    "z.literal('verification')",
+    "z.enum(['initial', 'verification'])",
+    'assertVerificationAuthority',
+  ]
+  for (const source of sources)
+    for (const identifier of removedIdentifiers)
+      expect(source).not.toContain(identifier)
+})
+
 describe('resource-content worker prompts', () => {
   test('requires complete structured human-discipline documents', () => {
     const completeDocumentContract = getGameDocumentContract('docs/GDD.md')
@@ -338,12 +363,10 @@ describe('resource-content worker prompts', () => {
             '/workspace/.beegame/reviews/foundation/revision/parts/technical-assets.json',
             '/workspace/.beegame/reviews/foundation/revision/parts/presentation.json',
           ],
-          verificationSourcePaths: [],
           stagingOutputPaths: [
             '/workspace/.beegame/reviews/staging/review.json',
           ],
         },
-        allowedAffectedPaths: ['docs/GDD.md'],
       },
     })
     expect(finalReviewerPrompt).toContain('Read exactly the three accepted lane packets')
@@ -358,7 +381,7 @@ describe('resource-content worker prompts', () => {
       'priorConflictStatus must always be present',
     )
     expect(finalReviewerPrompt).toContain(
-      'may contain only id, status and an optional bounded note',
+      'must equal []',
     )
     expect(finalReviewerPrompt).toContain('IDs must be B1, B2, B3')
     expect(finalReviewerPrompt).toContain(
@@ -368,6 +391,7 @@ describe('resource-content worker prompts', () => {
       'path, location and observed',
     )
     expect(finalReviewerPrompt).toContain('priorConflictStatus')
+    expect(finalReviewerPrompt).not.toContain('priorReviewDigest')
     expect(finalReviewerPrompt).toContain('requiredOutcome')
     expect(finalReviewerPrompt).toContain('changes')
     expect(finalReviewerPrompt).toContain('acceptance')
@@ -398,8 +422,8 @@ describe('resource-content worker prompts', () => {
         reviewMode: 'initial',
         reviewRole: 'core-design',
         assignment: {
-          sourcePaths: ['/workspace/docs/GDD.md'],
-          verificationSourcePaths: [
+          sourcePaths: [
+            '/workspace/docs/GDD.md',
             '/workspace/.beegame/reviews/foundation/revision/projections/core-design.json',
           ],
           stagingOutputPaths: [
@@ -452,8 +476,8 @@ describe('resource-content worker prompts', () => {
         reviewMode: 'initial',
         reviewRole: 'technical-assets',
         assignment: {
-          sourcePaths: ['/workspace/docs/GDD.md'],
-          verificationSourcePaths: [
+          sourcePaths: [
+            '/workspace/docs/GDD.md',
             '/workspace/.beegame/reviews/foundation/revision/projections/technical-assets.json',
           ],
           stagingOutputPaths: [
@@ -469,83 +493,6 @@ describe('resource-content worker prompts', () => {
       '"lane":"technical-assets"',
     )
 
-    const verificationLanePrompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-reviewer',
-      phase: 'DOCUMENT_REVIEW',
-      revision: 'a'.repeat(64),
-      contract: {
-        reviewScope: 'foundation',
-        reviewMode: 'verification',
-        reviewRole: 'core-design',
-        priorReview: {
-          path: '.beegame/reviews/foundation/old/review.json',
-          digest: 'b'.repeat(64),
-        },
-        priorConflictIds: ['B1', 'B4'],
-        assignment: {
-          sourcePaths: ['/workspace/docs/GDD.md'],
-          verificationSourcePaths: [
-            '/workspace/.beegame/reviews/foundation/old/review.json',
-            '/workspace/.beegame/reviews/foundation/new/projections/core-design.json',
-          ],
-          stagingOutputPaths: [
-            '/workspace/.beegame/reviews/foundation/new/.staging/parts/core-design.json',
-          ],
-        },
-      },
-    })
-    expect(verificationLanePrompt).toContain(
-      `"priorReviewDigest":"${'b'.repeat(64)}"`,
-    )
-    expect(verificationLanePrompt).toContain('B1, B4')
-
-    const repeatReviewerPrompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-reviewer',
-      phase: 'DOCUMENT_REVIEW',
-      taskId: 'review:foundation:synthesis:5',
-      revision: 'a'.repeat(64),
-      contract: {
-        reviewScope: 'foundation',
-        reviewMode: 'verification',
-        reviewRole: 'synthesis',
-        priorReview: {
-          path: '.beegame/reviews/foundation/old/review.json',
-          digest: 'a'.repeat(64),
-        },
-        assignment: {
-          sourcePaths: [
-            '/workspace/.beegame/reviews/foundation/new/parts/core-design.json',
-            '/workspace/.beegame/reviews/foundation/new/parts/technical-assets.json',
-            '/workspace/.beegame/reviews/foundation/new/parts/presentation.json',
-          ],
-          verificationSourcePaths: [
-            '/workspace/.beegame/reviews/foundation/old/review.json',
-          ],
-          stagingOutputPaths: [
-            '/workspace/.beegame/reviews/staging/review.json',
-          ],
-        },
-        allowedAffectedPaths: ['docs/GDD.md'],
-      },
-    })
-    expect(repeatReviewerPrompt).toContain('accepted prior review')
-    expect(repeatReviewerPrompt).toContain('three accepted verification lane packets')
-    expect(repeatReviewerPrompt).toContain('priorConflictStatus')
-    expect(repeatReviewerPrompt).toContain(
-      `"priorReviewDigest":"${'a'.repeat(64)}"`,
-    )
-    expect(repeatReviewerPrompt).toContain(
-      'Every open prior conflict must retain the same ID',
-    )
-    expect(repeatReviewerPrompt).toContain('New conflicts use new IDs')
   })
 
   test('keeps resource remediation inside the same Curator task', () => {

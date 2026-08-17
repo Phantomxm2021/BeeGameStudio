@@ -84,18 +84,12 @@ test('current delivery schema rejects removed remediation state', () => {
   ).toThrow()
 })
 
-function foundationRecoveryReviewJson(input: {
-  revision: string
-  priorReviewDigest?: string
-}): string {
+function foundationRecoveryReviewJson(input: { revision: string }): string {
   return `${JSON.stringify({
     version: 2,
     scope: 'foundation',
     revision: input.revision,
     verdict: 'NEEDS_REVISION',
-    ...(input.priorReviewDigest
-      ? { priorReviewDigest: input.priorReviewDigest }
-      : {}),
     priorConflictStatus: [],
     conflicts: [
       {

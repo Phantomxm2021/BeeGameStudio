@@ -60,7 +60,7 @@ const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 
 function reviewerAssignmentContract(request: WorkerDispatchRequest):
   | {
-      mode: 'initial' | 'verification'
+      mode: 'initial'
       role:
         | 'core-design'
         | 'technical-assets'
@@ -68,7 +68,6 @@ function reviewerAssignmentContract(request: WorkerDispatchRequest):
         | 'synthesis'
       assignment: {
         sourcePaths: string[]
-        verificationSourcePaths: string[]
         stagingOutputPaths: [string]
         committedOutputPaths: [string]
       }
@@ -89,10 +88,9 @@ function reviewerAssignmentContract(request: WorkerDispatchRequest):
     'sourcePaths',
     'stagingOutputPaths',
     'committedOutputPaths',
-    'verificationSourcePaths',
   ] as const
   if (
-    (mode !== 'initial' && mode !== 'verification') ||
+    mode !== 'initial' ||
     (role !== 'core-design' &&
       role !== 'technical-assets' &&
       role !== 'presentation' &&
@@ -113,7 +111,6 @@ function reviewerAssignmentContract(request: WorkerDispatchRequest):
     role,
     assignment: {
       sourcePaths: record.sourcePaths as string[],
-      verificationSourcePaths: record.verificationSourcePaths as string[],
       stagingOutputPaths: record.stagingOutputPaths as [string],
       committedOutputPaths: record.committedOutputPaths as [string],
     },
@@ -368,7 +365,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? {
               workflowReadOnlyPaths: [
                 ...reviewContract.assignment.sourcePaths,
-                ...reviewContract.assignment.verificationSourcePaths,
               ],
             }
           : request.workerType === 'resource-content-author'

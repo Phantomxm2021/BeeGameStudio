@@ -268,7 +268,6 @@ describe('native initial document authoring', () => {
           scope: 'foundation',
           role: 'core-design',
           sourcePaths: [join(workspacePath, 'docs/GDD.md')],
-          verificationSourcePaths: [],
           stagingOutputPaths: [stagingPath],
           committedOutputPaths: [committedPath],
         },
