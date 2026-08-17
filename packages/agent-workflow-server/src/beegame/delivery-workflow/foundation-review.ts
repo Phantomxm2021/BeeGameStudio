@@ -28,9 +28,8 @@ const changeSchema = z
   })
   .strict()
 
-const conflictSchema = z
+export const foundationReviewConflictContentSchema = z
   .object({
-    id: conflictIdSchema,
     title: z.string().trim().min(1).max(160),
     problem: z.string().trim().min(1).max(2_000),
     evidence: z.array(evidenceSchema).min(1).max(32),
@@ -40,13 +39,20 @@ const conflictSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (new Set(value.changes.map(change => change.path)).size !== value.changes.length)
+    if (
+      new Set(value.changes.map(change => change.path)).size !==
+      value.changes.length
+    )
       context.addIssue({
         code: 'custom',
         path: ['changes'],
         message: 'foundation review conflict change paths must be unique',
       })
   })
+
+const conflictSchema = foundationReviewConflictContentSchema.safeExtend({
+  id: conflictIdSchema,
+})
 
 export const foundationReviewSchema = z
   .object({
