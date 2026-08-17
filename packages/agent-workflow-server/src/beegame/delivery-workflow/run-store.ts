@@ -89,117 +89,7 @@ function storageReadError(path: string, error: unknown): WorkflowStoreError {
   )
 }
 
-type SnapshotMigration = {
-  value: unknown
-  migrated: boolean
-}
-
-function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return { value, migrated: false }
-  const source = value as Record<string, unknown>
-  if (source.schemaVersion === 24)
-    return {
-      migrated: true,
-      value: { ...source, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION },
-    }
-  if (source.schemaVersion === 23) {
-    const review = source.foundationReviewState
-    const reviewRecord =
-      review && typeof review === 'object' && !Array.isArray(review)
-        ? (review as Record<string, unknown>)
-        : undefined
-    const reports = Array.isArray(reviewRecord?.reports)
-      ? reviewRecord.reports
-      : []
-    const hasSingleVerification =
-      reviewRecord?.mode === 'verification' &&
-      reports.length === 1 &&
-      (reports[0] as Record<string, unknown> | undefined)?.role === 'verification'
-    if (!hasSingleVerification)
-      return {
-        migrated: true,
-        value: { ...source, schemaVersion: DELIVERY_RUN_SCHEMA_VERSION },
-      }
-    const revision = String(reviewRecord!.revision)
-    const root = `.beegame/reviews/foundation/${revision}`
-    const {
-      mode: _mode,
-      priorReviewPath: _priorReviewPath,
-      priorReviewDigest: _priorReviewDigest,
-      finalReportPath: _finalReportPath,
-      finalReportDigest: _finalReportDigest,
-      verdict: _verdict,
-      failureReason: _failureReason,
-      ...reviewAuthority
-    } = reviewRecord!
-    return {
-      migrated: true,
-      value: {
-        ...source,
-        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-        status: 'running',
-        blockedReason: undefined,
-        foundationReviewState: {
-          ...reviewAuthority,
-          status: 'running',
-          reports: [
-            ['core-design', `${root}/parts/core-design.json`],
-            ['technical-assets', `${root}/parts/technical-assets.json`],
-            ['presentation', `${root}/parts/presentation.json`],
-            ['synthesis', `${root}/review.json`],
-          ].map(([role, path]) => ({ role, path, status: 'pending' })),
-        },
-      },
-    }
-  }
-  if (source.schemaVersion !== 22) return { value, migrated: false }
-  const {
-    foundationReviewState: _foundationReviewState,
-    ...preserved
-  } = source
-  if (source.phase === 'DELIVERY' && source.status === 'completed')
-    return {
-      migrated: true,
-      value: {
-        ...preserved,
-        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-      },
-    }
-  const reviewingFoundation =
-    source.documentStep === 'FOUNDATION_REVIEW' ||
-    _foundationReviewState !== undefined
-  if (!reviewingFoundation)
-    return {
-      migrated: true,
-      value: {
-        ...preserved,
-        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-      },
-    }
-  const {
-    activeDispatch: _activeDispatch,
-    pendingEvents: _pendingEvents,
-    completedAt: _completedAt,
-    blockedReason: _blockedReason,
-    currentItemId: _currentItemId,
-    ...reviewReset
-  } = preserved
-  return {
-    migrated: true,
-    value: {
-      ...reviewReset,
-      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
-      status: 'running',
-      currentMessage: 'Foundation review must be re-established',
-      thinking: 'idle',
-    },
-  }
-}
-
-/** Read and classify run.json without migrating, flushing markers or rewriting it. */
+/** Read and classify run.json without flushing markers or rewriting it. */
 export async function inspectWorkflowSnapshot(input: {
   snapshotPath: string
   ownerId?: string
@@ -224,8 +114,6 @@ export async function inspectWorkflowSnapshot(input: {
       ),
     }
   }
-  const migration = migrateWorkflowSnapshot(parsedValue)
-  parsedValue = migration.value
   const snapshotVersion =
     parsedValue &&
     typeof parsedValue === 'object' &&
@@ -723,8 +611,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       )
     }
     let run: DeliveryRun
-    const migration = migrateWorkflowSnapshot(value)
-    value = migration.value
     const snapshotVersion =
       value && typeof value === 'object' && !Array.isArray(value)
         ? (value as Record<string, unknown>).schemaVersion
@@ -758,11 +644,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     }
     if (run.ownerId !== ownerId)
       throw new WorkflowStoreError('workflow ownership mismatch', 'ownership')
-    if (migration.migrated)
-      await durableWrite(
-        filePaths.snapshot,
-        `${JSON.stringify(run, null, 2)}\n`,
-      )
     if (run.pendingEvents?.length) {
       // Journal replay failures are operational failures, not malformed
       // snapshots. Keep the marker so the next load can retry safely.

@@ -6018,51 +6018,9 @@ function projectFoundationReviewTaskState(
     ]
   })
   return {
-    mode: 'initial',
     attempt: Number(state.attempt),
     reports,
   }
-}
-
-function projectFoundationRemediationTaskState(
-  workflow: JsonObject,
-): Parameters<
-  typeof projectDocumentDisplayTasks
->[0]['foundationRemediationLanes'] {
-  const state = isObject(workflow.foundationRemediationState)
-    ? workflow.foundationRemediationState
-    : undefined
-  if (!state || !Array.isArray(state.lanes)) return undefined
-  return state.lanes.flatMap(lane => {
-    if (
-      !isObject(lane) ||
-      !['core-design', 'technical-assets', 'presentation'].includes(
-        String(lane.id),
-      ) ||
-      ![
-        'not_required',
-        'pending',
-        'running',
-        'completed',
-        'failed',
-      ].includes(String(lane.status))
-    )
-      return []
-    return [
-      {
-        id: lane.id as 'core-design' | 'technical-assets' | 'presentation',
-        status: lane.status as
-          | 'not_required'
-          | 'pending'
-          | 'running'
-          | 'completed'
-          | 'failed',
-        ...(typeof lane.failureReason === 'string'
-          ? { failureReason: lane.failureReason }
-          : {}),
-      },
-    ]
-  })
 }
 
 function workflowViewForDisplay(
@@ -6148,8 +6106,6 @@ function workflowViewForDisplay(
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
           foundationReview: projectFoundationReviewTaskState(workflow),
-          foundationRemediationLanes:
-            projectFoundationRemediationTaskState(workflow),
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({

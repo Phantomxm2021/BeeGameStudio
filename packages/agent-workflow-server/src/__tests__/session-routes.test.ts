@@ -1249,51 +1249,6 @@ describe('delivery workflow session continuation', () => {
             .update(reportJson)
             .digest('hex'),
       },
-      ...({ foundationRemediationState: {
-        reviewPath: reportPath,
-        reviewDigest: createHash('sha256').update(reportJson).digest('hex'),
-        sourceRevision: reviewRevision,
-        lanes: [
-          {
-            id: 'core-design',
-            ownedPaths: [
-              'docs/GDD.md',
-              'docs/LEVEL_SCENE_DESIGN.md',
-              'docs/BALANCE_DESIGN.md',
-            ],
-            affectedPaths: ['docs/GDD.md'],
-            status: 'pending',
-          },
-          {
-            id: 'technical-assets',
-            ownedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
-            affectedPaths: ['docs/TECHNICAL_DESIGN.md'],
-            status: 'failed',
-            failureReason: '技术修订写入失败',
-            dispatch: {
-              dispatchId: 'foundation-remediation-technical-assets',
-              taskId: 'foundation-remediation:technical-assets',
-              workerType: 'document-author',
-              phase: 'DOCUMENT_DRAFTING',
-              revision: reviewRevision,
-              status: 'failed',
-              startedAt: '2026-08-06T00:00:00.000Z',
-              finishedAt: '2026-08-06T00:00:12.000Z',
-              failureReason: '技术修订写入失败',
-            },
-          },
-          {
-            id: 'presentation',
-            ownedPaths: [
-              'docs/ART_DIRECTION.md',
-              'docs/UI_UX_SPEC.md',
-              'docs/AUDIO_DESIGN.md',
-            ],
-            affectedPaths: [],
-            status: 'not_required',
-          },
-        ],
-      } } as any),
       currentMessage: 'live stage status',
       blockedReason: 'current-only recovery detail',
       usage: {
@@ -1323,35 +1278,39 @@ describe('delivery workflow session continuation', () => {
     expect(workflow).not.toHaveProperty('documentReview')
     expect(workflow.tasks).toEqual([
       {
-        id: 'foundation-remediation:core-design',
-        title: '修订核心设计',
-        status: 'pending',
-        attempt: 1,
-        operation: 'write',
-      },
-      {
-        id: 'foundation-remediation:technical-assets',
-        title: '修订技术与资产',
-        status: 'failed',
-        attempt: 1,
-        operation: 'write',
-        failureReason: '技术修订写入失败',
-      },
-      {
-        id: 'foundation-remediation:presentation',
-        title: '修订表现体验',
+        id: 'review:foundation:core-design',
+        title: '核心设计',
         status: 'completed',
         attempt: 1,
-        operation: 'write',
+        operation: 'review',
       },
       {
-        id: 'review:foundation:verification',
-        title: '修订结果',
+        id: 'review:foundation:technical-assets',
+        title: '技术与资产',
+        status: 'completed',
+        attempt: 1,
+        operation: 'review',
+      },
+      {
+        id: 'review:foundation:presentation',
+        title: '表现体验',
+        status: 'pending',
+        attempt: 1,
+        operation: 'review',
+      },
+      {
+        id: 'review:foundation:synthesis',
+        title: '阻塞问题汇总',
         status: 'pending',
         attempt: 1,
         operation: 'review',
       },
     ])
+    expect(
+      (workflow.tasks as Array<{ id: string }>).some(task =>
+        task.id.startsWith('foundation-remediation:'),
+      ),
+    ).toBe(false)
     const cards = workflow.stageSnapshots as Array<Record<string, unknown>>
     expect(cards.map(card => card.phaseIndex)).toEqual([1, 2, 3])
     expect(cards[0]).toMatchObject({

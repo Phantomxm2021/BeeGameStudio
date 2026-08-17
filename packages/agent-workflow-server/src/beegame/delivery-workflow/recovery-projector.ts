@@ -1085,11 +1085,6 @@ function rawActiveUnitId(input: {
 }): string | undefined {
   const snapshot = input.snapshot
   if (!snapshot) return undefined
-  if (record(snapshot.foundationRemediationState))
-    recoveryError(
-      'recovery_checkpoint_missing',
-      'parallel Foundation remediation requires its intact persisted snapshot',
-    )
   const dispatch = record(snapshot.activeDispatch)
   const currentItemId = stringValue(snapshot.currentItemId)
   if (

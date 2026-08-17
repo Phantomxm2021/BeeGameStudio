@@ -23,24 +23,17 @@ describe('delivery progress projection', () => {
     })
   })
 
-  test('projects report-driven remediation without legacy closure stages', () => {
+  test('projects Foundation drafting without remediation state', () => {
     expect(
       projectDeliveryProgress({
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
-        foundationReviewState: {
-          mode: 'initial',
-          verdict: 'NEEDS_REVISION',
-          attempt: 2,
-        },
-        foundationRemediationState: { lanes: [] },
       }),
     ).toEqual({
       stageId: 'DOCUMENT_DRAFTING',
       phaseIndex: DELIVERY_PROGRESS_STAGES.indexOf('DOCUMENT_DRAFTING') + 1,
       phaseCount: DELIVERY_PROGRESS_STAGES.length,
-      substage: 'REPAIRING',
-      convergencePass: 2,
+      substage: 'INITIAL_DRAFTING',
     })
   })
 

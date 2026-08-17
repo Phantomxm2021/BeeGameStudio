@@ -66,7 +66,6 @@ describe('workflow display tasks', () => {
       workflowStatus: 'running',
       thinking: 'working',
       foundationReview: {
-        mode: 'initial',
         attempt: 1,
         reports: [
           { role: 'core-design', status: 'completed' },
@@ -76,47 +75,12 @@ describe('workflow display tasks', () => {
         ],
       },
     })
-    expect(tasks.map(task => [task.title, task.status])).toEqual([
-      ['核心设计', 'completed'],
-      ['技术与资产', 'running'],
-      ['表现体验', 'running'],
-      ['阻塞问题汇总', 'pending'],
+    expect(tasks.map(task => task.id)).toEqual([
+      'review:foundation:core-design',
+      'review:foundation:technical-assets',
+      'review:foundation:presentation',
+      'review:foundation:synthesis',
     ])
-  })
-
-  test('projects repair lanes and targeted verification as ordinary tasks', async () => {
-    const tasks = projectDocumentDisplayTasks({
-      workspacePath: await workspace(),
-      documentStep: 'FOUNDATION_REVIEW',
-      workflowStatus: 'running',
-      thinking: 'working',
-      foundationReview: {
-        mode: 'verification',
-        attempt: 2,
-        reports: [
-          { role: 'core-design', status: 'pending' },
-          { role: 'technical-assets', status: 'pending' },
-          { role: 'presentation', status: 'pending' },
-          { role: 'synthesis', status: 'pending' },
-        ],
-      },
-      foundationRemediationLanes: [
-        { id: 'core-design', status: 'completed' },
-        { id: 'technical-assets', status: 'not_required' },
-        {
-          id: 'presentation',
-          status: 'failed',
-          failureReason: '表现修订失败',
-        },
-      ],
-    })
-
-    expect(tasks.map(task => [task.title, task.status])).toEqual([
-      ['修订核心设计', 'completed'],
-      ['修订技术与资产', 'completed'],
-      ['修订表现体验', 'failed'],
-      ['修订结果', 'pending'],
-    ])
-    expect(tasks[2].failureReason).toBe('表现修订失败')
+    expect(tasks.some(task => task.id.startsWith('foundation-remediation:'))).toBe(false)
   })
 })
