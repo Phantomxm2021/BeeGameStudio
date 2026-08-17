@@ -16,15 +16,12 @@ import {
   acceptFoundationReview,
   foundationReviewPath,
   foundationReviewStagingPath,
-  readFoundationReviewArtifact,
 } from './foundation-review'
 import {
   assertFoundationReviewState,
   type FoundationReviewRole,
   type FoundationReviewState,
 } from './foundation-review-state'
-import { foundationRemediationReadyForVerification } from './foundation-remediation'
-import type { FoundationRemediationState } from './types'
 import { foundationReviewWorkerTerminalSchema } from './worker-contracts'
 
 const digestPattern = /^[a-f0-9]{64}$/u
@@ -52,18 +49,12 @@ export type FoundationReviewDispatch = {
   assignment: FoundationReviewAssignment
   contract: {
     reviewScope: 'foundation'
-    reviewMode: FoundationReviewState['mode']
+    reviewMode: 'initial'
     reviewRole: FoundationReviewRole
     assignment: FoundationReviewAssignment
     confirmedBriefDigest: string
     packetDigests: Partial<Record<FoundationDocumentLaneId, string>>
     projection?: { path: string; digest: string; byteLength: number }
-    priorReview?: { path: string; digest: string }
-    priorConflictIds?: string[]
-    remediationReceipts?: Array<{
-      laneId: string
-      receipt: NonNullable<FoundationRemediationState['lanes'][number]['receipt']>
-    }>
   }
 }
 
@@ -87,28 +78,6 @@ function pendingRoles(state: FoundationReviewState): FoundationReviewRole[] {
     .map(report => report.role)
 }
 
-async function priorConflictIdsByLane(input: {
-  state: FoundationReviewState
-  workspacePath: string
-}): Promise<Partial<Record<FoundationDocumentLaneId, string[]>>> {
-  if (input.state.mode !== 'verification') return {}
-  const prior = await readFoundationReviewArtifact({
-    workspacePath: input.workspacePath,
-    path: input.state.priorReviewPath!,
-    expectedDigest: input.state.priorReviewDigest!,
-  })
-  return Object.fromEntries(
-    FOUNDATION_DOCUMENT_LANES.map(lane => [
-      lane.id,
-      prior.review.conflicts
-        .filter(conflict =>
-          conflict.changes.some(change => lane.ownedPaths.includes(change.path)),
-        )
-        .map(conflict => conflict.id),
-    ]),
-  )
-}
-
 function completedPacketDigests(
   state: FoundationReviewState,
 ): Partial<Record<FoundationDocumentLaneId, string>> {
@@ -121,51 +90,16 @@ function completedPacketDigests(
   ) as Partial<Record<FoundationDocumentLaneId, string>>
 }
 
-function verificationReceipts(input: {
-  state: FoundationReviewState
-  remediationState?: FoundationRemediationState
-}): FoundationReviewDispatch['contract']['remediationReceipts'] {
-  if (input.state.mode !== 'verification') return undefined
-  const remediation = input.remediationState
-  if (
-    !remediation ||
-    remediation.reviewDigest !== input.state.priorReviewDigest ||
-    remediation.resultingRevision !== input.state.revision ||
-    !foundationRemediationReadyForVerification(remediation)
-  )
-    throw new Error(
-      'foundation verification requires the completed remediation receipt barrier',
-    )
-  return remediation.lanes.flatMap(lane =>
-    lane.status === 'not_required'
-      ? []
-      : lane.receipt
-        ? [{ laneId: lane.id, receipt: lane.receipt }]
-        : (() => {
-            throw new Error(`foundation verification receipt is missing: ${lane.id}`)
-          })(),
-  )
-}
-
 export async function buildFoundationReviewDispatches(input: {
   state: FoundationReviewState
   workspacePath: string
   confirmedBriefDigest: string
-  remediationState?: FoundationRemediationState
 }): Promise<FoundationReviewDispatch[]> {
   const state = assertFoundationReviewState(input.state)
   if (!digestPattern.test(input.confirmedBriefDigest))
     throw new Error('foundation review confirmed brief digest is invalid')
   const roles = pendingRoles(state)
   const packetDigests = completedPacketDigests(state)
-  const remediationReceipts = verificationReceipts({
-    state,
-    remediationState: input.remediationState,
-  })
-  const priorIdsByLane = await priorConflictIdsByLane({
-    state,
-    workspacePath: input.workspacePath,
-  })
 
   return Promise.all(
     roles.map(async role => {
@@ -183,12 +117,7 @@ export async function buildFoundationReviewDispatches(input: {
           laneId: role,
         })
         sourcePaths = lane.ownedPaths.map(path => resolve(input.workspacePath, path))
-        verificationSourcePaths = [
-          ...(state.mode === 'verification'
-            ? [resolve(input.workspacePath, state.priorReviewPath!)]
-            : []),
-          resolve(input.workspacePath, projection.path),
-        ]
+        verificationSourcePaths = [resolve(input.workspacePath, projection.path)]
         stagingPath = foundationReviewLanePacketStagingPath(
           input.workspacePath,
           state.revision,
@@ -207,14 +136,11 @@ export async function buildFoundationReviewDispatches(input: {
             lane.id,
           ),
         )
-        verificationSourcePaths =
-          state.mode === 'verification'
-            ? [resolve(input.workspacePath, state.priorReviewPath!)]
-            : []
+        verificationSourcePaths = []
         stagingPath = foundationReviewStagingPath(
           input.workspacePath,
           state.revision,
-          `foundation-${state.mode}-${state.attempt}-${role}`,
+          `foundation-initial-${state.attempt}-${role}`,
         )
         committedPath = foundationReviewPath(input.workspacePath, state.revision)
       }
@@ -234,24 +160,12 @@ export async function buildFoundationReviewDispatches(input: {
         assignment,
         contract: {
           reviewScope: 'foundation',
-          reviewMode: state.mode,
+          reviewMode: 'initial',
           reviewRole: role,
           assignment,
           confirmedBriefDigest: input.confirmedBriefDigest,
           packetDigests,
           ...(projection ? { projection } : {}),
-          ...(isLaneRole(role) && state.mode === 'verification'
-            ? { priorConflictIds: priorIdsByLane[role] ?? [] }
-            : {}),
-          ...(state.mode === 'verification'
-            ? {
-                priorReview: {
-                  path: state.priorReviewPath!,
-                  digest: state.priorReviewDigest!,
-                },
-                remediationReceipts,
-              }
-            : {}),
         },
       }
     }),
@@ -263,13 +177,12 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
   workspacePath: string
   currentRevision: string
   terminal: unknown
-  remediationState?: FoundationRemediationState
 }): Promise<FoundationReviewState> {
   const state = assertFoundationReviewState(input.state)
   const terminal = foundationReviewWorkerTerminalSchema.parse(input.terminal)
   if (
     terminal.revision !== state.revision ||
-    terminal.mode !== state.mode ||
+    terminal.mode !== 'initial' ||
     terminal.revision !== input.currentRevision
   )
     throw new Error('canonical artifacts changed during foundation review')
@@ -291,18 +204,7 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
       currentRevision: input.currentRevision,
       laneId: terminal.role,
       projectionDigest: projection.digest,
-      mode: state.mode,
-      ...(state.mode === 'verification'
-        ? {
-            priorReviewDigest: state.priorReviewDigest,
-            priorConflictIds: (
-              await priorConflictIdsByLane({
-                state,
-                workspacePath: input.workspacePath,
-              })
-            )[terminal.role],
-          }
-        : {}),
+      mode: 'initial',
     })
     return assertFoundationReviewState({
       ...state,
@@ -331,35 +233,11 @@ export async function acceptFoundationReviewWorkerTerminal(input: {
         throw new Error('foundation review lane packet digest changed')
     }
   }
-  const priorReview =
-    state.mode === 'verification'
-      ? await readFoundationReviewArtifact({
-          workspacePath: input.workspacePath,
-          path: state.priorReviewPath!,
-          expectedDigest: state.priorReviewDigest!,
-        })
-      : undefined
-  if (state.mode === 'verification') {
-    verificationReceipts({
-      state,
-      remediationState: input.remediationState,
-    })
-    for (const lane of input.remediationState!.lanes)
-      if (lane.status === 'completed')
-        await writeFoundationReviewProjection({
-          workspacePath: input.workspacePath,
-          revision: state.revision,
-          laneId: lane.id,
-        })
-  }
   const accepted = await acceptFoundationReview({
     workspacePath: input.workspacePath,
     revision: state.revision,
     currentRevision: input.currentRevision,
-    dispatchId: `foundation-${state.mode}-${state.attempt}-${terminal.role}`,
-    ...(priorReview
-      ? { priorReview: { review: priorReview.review, digest: priorReview.digest } }
-      : {}),
+    dispatchId: `foundation-initial-${state.attempt}-${terminal.role}`,
   })
   return assertFoundationReviewState({
     ...state,

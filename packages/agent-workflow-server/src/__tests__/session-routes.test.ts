@@ -1205,12 +1205,10 @@ describe('delivery workflow session continuation', () => {
       documentStep: 'FOUNDATION_REVIEW',
       foundationReviewState: {
           ...createFoundationReviewState({
-            mode: 'initial',
             revision: reviewRevision,
             attempt: 1,
           }),
           reports: createFoundationReviewState({
-            mode: 'initial',
             revision: reviewRevision,
             attempt: 1,
           }).reports.map((report, index) =>

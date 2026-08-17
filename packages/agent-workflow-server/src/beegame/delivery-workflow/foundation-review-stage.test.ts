@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
@@ -7,7 +6,6 @@ import { FOUNDATION_DOCUMENT_LANES } from './foundation-document-lanes'
 import { foundationReviewLanePacketStagingPath } from './foundation-review-lane-packet'
 import { foundationReviewStagingPath } from './foundation-review'
 import { createFoundationReviewState } from './foundation-review-state'
-import type { FoundationRemediationState } from './types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import {
   acceptFoundationReviewWorkerTerminal,
@@ -46,61 +44,8 @@ async function workspace(): Promise<string> {
   return root
 }
 
-function completedRemediationState(input: {
-  reviewPath: string
-  reviewDigest: string
-}): FoundationRemediationState {
-  const ownedPaths = [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-    'docs/BALANCE_DESIGN.md',
-  ] as const
-  return {
-    reviewPath: input.reviewPath,
-    reviewDigest: input.reviewDigest,
-    sourceRevision: 'f'.repeat(64),
-    resultingRevision: revision,
-    lanes: [
-      {
-        id: 'core-design',
-        ownedPaths: [...ownedPaths],
-        affectedPaths: ['docs/GDD.md'],
-        status: 'completed',
-        receipt: {
-          reviewDigest: input.reviewDigest,
-          sourceRevision: 'f'.repeat(64),
-          ownedPaths: [...ownedPaths],
-          beforeDigests: Object.fromEntries(
-            ownedPaths.map(path => [path, '1'.repeat(64)]),
-          ),
-          afterDigests: Object.fromEntries(
-            ownedPaths.map(path => [path, '2'.repeat(64)]),
-          ),
-          committedAt: '2026-08-17T00:00:00.000Z',
-        },
-      },
-      {
-        id: 'technical-assets',
-        ownedPaths: ['docs/TECHNICAL_DESIGN.md', 'docs/ASSET_PLAN.md'],
-        affectedPaths: [],
-        status: 'not_required',
-      },
-      {
-        id: 'presentation',
-        ownedPaths: [
-          'docs/ART_DIRECTION.md',
-          'docs/UI_UX_SPEC.md',
-          'docs/AUDIO_DESIGN.md',
-        ],
-        affectedPaths: [],
-        status: 'not_required',
-      },
-    ],
-  }
-}
-
 function completedLanes() {
-  const state = createFoundationReviewState({ mode: 'initial', revision })
+  const state = createFoundationReviewState({ revision, attempt: 1 })
   return {
     ...state,
     status: 'running' as const,
@@ -123,7 +68,7 @@ afterEach(async () => {
 describe('foundation review lane dispatch barrier', () => {
   test('dispatches three disjoint document lanes before packet-only synthesis', async () => {
     const root = await workspace()
-    const initial = createFoundationReviewState({ mode: 'initial', revision })
+    const initial = createFoundationReviewState({ revision, attempt: 1 })
     const laneDispatches = await buildFoundationReviewDispatches({
       state: initial,
       workspacePath: root,
@@ -150,9 +95,13 @@ describe('foundation review lane dispatch barrier', () => {
         item =>
           item.assignment.sourcePaths.length < 8 &&
           item.assignment.verificationSourcePaths.length === 1 &&
+          item.contract.reviewMode === 'initial' &&
           item.contract.projection?.digest.match(/^[a-f0-9]{64}$/u),
       ),
     ).toBe(true)
+    expect(laneDispatches[0].contract).not.toHaveProperty('priorReview')
+    expect(laneDispatches[0].contract).not.toHaveProperty('priorConflictIds')
+    expect(laneDispatches[0].contract).not.toHaveProperty('remediationReceipts')
 
     const synthesis = await buildFoundationReviewDispatches({
       state: completedLanes(),
@@ -178,7 +127,7 @@ describe('foundation review lane dispatch barrier', () => {
 
   test('resumes only a pending lane while preserving completed siblings', async () => {
     const root = await workspace()
-    const initial = createFoundationReviewState({ mode: 'initial', revision })
+    const initial = createFoundationReviewState({ revision, attempt: 1 })
     const resumed = {
       ...initial,
       status: 'running' as const,
@@ -213,7 +162,7 @@ describe('foundation review lane dispatch barrier', () => {
     await mkdir(dirname(stagingPath), { recursive: true })
     await writeFile(stagingPath, '{"stale":true}', 'utf8')
 
-    const initial = createFoundationReviewState({ mode: 'initial', revision })
+    const initial = createFoundationReviewState({ revision, attempt: 1 })
     const resumed = {
       ...initial,
       status: 'running' as const,
@@ -241,86 +190,9 @@ describe('foundation review lane dispatch barrier', () => {
     await expect(readFile(stagingPath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  test('dispatches verification as three bounded lanes behind remediation receipts', async () => {
-    const root = await workspace()
-    const priorRevision = 'c'.repeat(64)
-    const priorReviewPath = `.beegame/reviews/foundation/${priorRevision}/review.json`
-    const priorBytes = Buffer.from(
-      `${JSON.stringify({
-        version: 2,
-        scope: 'foundation',
-        revision: priorRevision,
-        verdict: 'NEEDS_REVISION',
-        priorConflictStatus: [],
-        conflicts: [
-          {
-            id: 'B1',
-            title: 'Core rule mismatch',
-            problem: 'The GDD cannot be implemented consistently.',
-            evidence: [
-              { path: 'docs/GDD.md', location: 'Rules', observed: 'Mismatch.' },
-            ],
-            requiredOutcome: 'Use one rule.',
-            changes: [{ path: 'docs/GDD.md', action: 'Align the rule.' }],
-            acceptance: ['The rule is unique.'],
-          },
-        ],
-      }, null, 2)}\n`,
-    )
-    await mkdir(dirname(resolve(root, priorReviewPath)), { recursive: true })
-    await writeFile(resolve(root, priorReviewPath), priorBytes)
-    const priorReviewDigest = createHash('sha256').update(priorBytes).digest('hex')
-    const state = createFoundationReviewState({
-      mode: 'verification',
-      revision,
-      attempt: 2,
-      priorReviewPath,
-      priorReviewDigest,
-    })
-    const dispatches = await buildFoundationReviewDispatches({
-      state,
-      workspacePath: root,
-      confirmedBriefDigest: 'd'.repeat(64),
-      remediationState: completedRemediationState({
-        reviewPath: priorReviewPath,
-        reviewDigest: priorReviewDigest,
-      }),
-    })
-    expect(dispatches.map(dispatch => dispatch.role)).toEqual([
-      'core-design',
-      'technical-assets',
-      'presentation',
-    ])
-    expect(dispatches[0].contract.priorReview).toEqual({
-      path: priorReviewPath,
-      digest: priorReviewDigest,
-    })
-    expect(dispatches[0].contract.remediationReceipts).toHaveLength(1)
-    expect(dispatches.map(dispatch => dispatch.contract.priorConflictIds)).toEqual([
-      ['B1'],
-      [],
-      [],
-    ])
-    expect(dispatches[0].assignment.sourcePaths).toEqual([
-      resolve(root, 'docs/GDD.md'),
-      resolve(root, 'docs/LEVEL_SCENE_DESIGN.md'),
-      resolve(root, 'docs/BALANCE_DESIGN.md'),
-    ])
-    expect(dispatches[0].assignment.verificationSourcePaths).toEqual([
-      resolve(root, priorReviewPath),
-      resolve(
-        root,
-        `.beegame/reviews/foundation/${revision}/projections/core-design.json`,
-      ),
-    ])
-    expect(dispatches[0].assignment.verificationSourcePaths).not.toContain(
-      resolve(root, 'docs/AUDIO_DESIGN.md'),
-    )
-  })
-
   test('accepts three lane packets and one synthesis only for the current revision', async () => {
     const root = await workspace()
-    let state = createFoundationReviewState({ mode: 'initial', revision })
+    let state = createFoundationReviewState({ revision, attempt: 1 })
     await buildFoundationReviewDispatches({
       state,
       workspacePath: root,
@@ -400,7 +272,7 @@ describe('foundation review lane dispatch barrier', () => {
 
     await expect(
       acceptFoundationReviewWorkerTerminal({
-        state: createFoundationReviewState({ mode: 'initial', revision }),
+        state: createFoundationReviewState({ revision, attempt: 1 }),
         workspacePath: root,
         currentRevision: 'f'.repeat(64),
         terminal: {

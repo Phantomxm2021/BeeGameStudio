@@ -124,6 +124,9 @@ function migrateWorkflowSnapshot(value: unknown): SnapshotMigration {
     const revision = String(reviewRecord!.revision)
     const root = `.beegame/reviews/foundation/${revision}`
     const {
+      mode: _mode,
+      priorReviewPath: _priorReviewPath,
+      priorReviewDigest: _priorReviewDigest,
       finalReportPath: _finalReportPath,
       finalReportDigest: _finalReportDigest,
       verdict: _verdict,

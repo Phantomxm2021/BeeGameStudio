@@ -1,7 +1,5 @@
 import { parseDeliveryRun } from './schema'
 import { retryFoundationFailures } from './foundation-authoring-batch'
-import { retryFoundationRemediationFailures } from './foundation-remediation'
-import { MAX_FOUNDATION_REVIEW_ATTEMPTS } from './foundation-review-state'
 import type {
   AtomicTask,
   DeliveryRun,
@@ -477,16 +475,6 @@ export function transitionDeliveryRun(
         )
       )
         fail('retry task must be a failed task')
-      if (
-        run.phase === 'DOCUMENT_REVIEW' &&
-        run.foundationReviewState?.mode === 'verification' &&
-        run.foundationReviewState.status === 'completed' &&
-        run.foundationReviewState.verdict === 'NEEDS_REVISION' &&
-        run.foundationReviewState.attempt >= MAX_FOUNDATION_REVIEW_ATTEMPTS
-      )
-        fail(
-          'Foundation review reached its bounded remediation limit; resolve the remaining conflicts manually before starting a new workflow run',
-        )
       next = {
         ...run,
         status: 'running',
@@ -496,15 +484,6 @@ export function transitionDeliveryRun(
               foundationDraftState: retryFoundationFailures(
                 run.foundationDraftState,
               ),
-            }
-          : {}),
-        ...(run.phase === 'DOCUMENT_DRAFTING' &&
-        run.foundationRemediationState
-          ? {
-              foundationRemediationState:
-                retryFoundationRemediationFailures(
-                  run.foundationRemediationState,
-                ),
             }
           : {}),
         ...(run.phase === 'DOCUMENT_REVIEW' &&

@@ -5981,7 +5981,6 @@ function projectFoundationReviewTaskState(
     : undefined
   if (
     !state ||
-    (state.mode !== 'initial' && state.mode !== 'verification') ||
     !Number.isInteger(state.attempt) ||
     !Array.isArray(state.reports)
   )
@@ -6019,7 +6018,7 @@ function projectFoundationReviewTaskState(
     ]
   })
   return {
-    mode: state.mode,
+    mode: 'initial',
     attempt: Number(state.attempt),
     reports,
   }

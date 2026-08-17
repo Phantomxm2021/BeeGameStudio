@@ -76,7 +76,6 @@ describe('createReviewProjectCopy', () => {
         completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       },
       foundationReviewState: {
-        mode: 'initial',
         attempt: 1,
         status: 'pending',
       },

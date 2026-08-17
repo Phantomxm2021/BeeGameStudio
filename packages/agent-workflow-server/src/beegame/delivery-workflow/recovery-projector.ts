@@ -1439,7 +1439,6 @@ function buildProjectionRun(input: {
     ...(reviewScope === 'foundation' && input.revision.document
       ? {
           foundationReviewState: createFoundationReviewState({
-            mode: 'initial',
             revision: input.revision.document,
             attempt: 1,
           }),

@@ -706,7 +706,6 @@ async function createWorkerRecoveryRun(input: {
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       foundationReviewState: createFoundationReviewState({
-        mode: 'initial',
         revision: documentRevision,
         attempt: 1,
       }),
@@ -1039,7 +1038,6 @@ async function createStaleReviewerRecoveryFixture() {
       contentReceipt: { contentDigest, acceptedAt: RECOVERY_ACCEPTED_AT },
     },
     foundationReviewState: createFoundationReviewState({
-      mode: 'initial',
       revision: documentRevision,
       attempt: 1,
     }),
@@ -2101,7 +2099,7 @@ describe('delivery workflow recovery', () => {
     ).toMatchObject({ schemaVersion: DELIVERY_RUN_SCHEMA_VERSION })
   })
 
-  test('migrates the schema 23 single verification worker into three lanes and synthesis', async () => {
+  test('migrates the schema 23 legacy Reviewer into three lanes and synthesis', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-storage-schema-23-review-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -2146,7 +2144,6 @@ describe('delivery workflow recovery', () => {
       schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
       status: 'running',
       foundationReviewState: {
-        mode: 'verification',
         status: 'running',
         reports: [
           { role: 'core-design', status: 'pending' },
@@ -2157,6 +2154,7 @@ describe('delivery workflow recovery', () => {
       },
     })
     expect(migrated?.blockedReason).toBeUndefined()
+    expect(migrated?.foundationReviewState).not.toHaveProperty('mode')
   })
 
   test('migrates schema 24 remediation state without inventing a mutation baseline', async () => {
@@ -2991,7 +2989,6 @@ describe('delivery workflow recovery', () => {
       status: 'stopped',
       blockedReason: 'user stopped workflow',
       foundationReviewState: createFoundationReviewState({
-        mode: 'initial',
         revision: reviewRevision,
       }),
       foundationRemediationState: remediation,
@@ -3586,7 +3583,6 @@ describe('delivery workflow recovery', () => {
       documentRevision: 'a'.repeat(64),
     })
     const reviewRun = createFoundationReviewState({
-      mode: 'initial',
       revision: initial.revision.document,
       attempt: 1,
     })
@@ -3620,73 +3616,92 @@ describe('delivery workflow recovery', () => {
     expect(persisted?.usage?.total_tokens).toBe(35)
   })
 
-  test('explicit retry cannot reopen a completed Foundation verification', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-limit-retry-'))
-    const ownerId = 'owner-review-limit-retry'
-    const store = createRunStore(workspace, ownerId)
+  test('accepted Foundation NEEDS_REVISION stops without dispatching repair', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-review-needs-revision-'))
+    const ownerId = 'owner-review-needs-revision'
     const initial = createTestDeliveryRun({
-      runId: 'run-review-limit-retry',
-      projectId: 'project-review-limit-retry',
+      runId: 'run-review-needs-revision',
+      projectId: 'project-review-needs-revision',
       ownerId,
     })
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+      await writeFile(join(workspace, path), matrixCompleteDocument(path))
     const documentRevision = await computeDocumentRevision(
       workspace,
       initial.confirmedBriefDigest,
     )
-    const priorReviewPath = `.beegame/reviews/foundation/${documentRevision}/prior-review.json`
     const review = createFoundationReviewState({
-      mode: 'verification',
       revision: documentRevision,
-      attempt: 3,
-      priorReviewPath,
-      priorReviewDigest: 'e'.repeat(64),
+      attempt: 1,
     })
     for (const report of review.reports.slice(0, 3)) {
       report.status = 'completed'
       report.digest = createHash('sha256').update(report.role).digest('hex')
     }
     const final = review.reports.find(report => report.role === 'synthesis')!
-    const priorReviewDigest = 'e'.repeat(64)
+    const finalReportPath = final.path
     const finalBytes = foundationRecoveryReviewJson({
       revision: documentRevision,
-      priorReviewDigest,
     })
-    const finalDigest = createHash('sha256').update(finalBytes).digest('hex')
+    const finalReportDigest = createHash('sha256')
+      .update(finalBytes)
+      .digest('hex')
     await mkdir(join(workspace, final.path, '..'), { recursive: true })
     await writeFile(join(workspace, final.path), finalBytes)
     final.status = 'completed'
-    final.digest = finalDigest
-    review.status = 'completed'
-    review.finalReportPath = final.path
-    review.finalReportDigest = finalDigest
-    review.verdict = 'NEEDS_REVISION'
-    await store.save({
+    final.digest = finalReportDigest
+    const completedNeedsRevisionRun = {
       ...initial,
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'running' as const,
+      revision: { ...initial.revision, document: documentRevision },
+      foundationReviewState: {
+        ...review,
+        status: 'completed' as const,
+        finalReportPath,
+        finalReportDigest,
+        verdict: 'NEEDS_REVISION' as const,
+      },
+    }
+    const dispatched: WorkerDispatchRequest[] = []
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId,
+      workerPort: {
+        async start(request) {
+          dispatched.push(request)
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await controller.store.save(completedNeedsRevisionRun)
+
+    await controller.resume(completedNeedsRevisionRun)
+
+    const persisted = await controller.store.load()
+    expect(persisted).toMatchObject({
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       status: 'needs_action',
-      revision: { ...initial.revision, document: documentRevision },
-      blockedReason: 'Foundation verification still requires revision',
-      foundationReviewState: review,
+      foundationReviewState: {
+        status: 'completed',
+        verdict: 'NEEDS_REVISION',
+        finalReportPath,
+        finalReportDigest,
+      },
     })
-
-    const retried = await retryRun({
-      store,
-      runId: initial.runId,
-      workspacePath: workspace,
-    })
-
-    expect(retried).toMatchObject({
-      phase: 'DOCUMENT_REVIEW',
-      status: 'needs_action',
-      blockedReason: 'Foundation verification still requires revision',
-    })
-    expect(retried.foundationReviewState).toMatchObject({
-      status: 'completed',
-      verdict: 'NEEDS_REVISION',
-      priorReviewDigest,
-      attempt: 3,
-    })
+    expect(dispatched).toEqual([])
+    expect('foundationRemediationState' in persisted!).toBe(false)
   })
 
   test('explicit retry resets only failed Foundation review work', () => {
@@ -3697,7 +3712,6 @@ describe('delivery workflow recovery', () => {
       documentRevision: 'a'.repeat(64),
     })
     const review = createFoundationReviewState({
-      mode: 'initial',
       revision: 'a'.repeat(64),
     })
     review.status = 'failed'

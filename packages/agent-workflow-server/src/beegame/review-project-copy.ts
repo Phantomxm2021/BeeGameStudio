@@ -132,7 +132,6 @@ export async function createReviewProjectCopy(input: {
         completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       },
       foundationReviewState: createFoundationReviewState({
-        mode: 'initial',
         revision: documentRevision,
         attempt: 1,
       }),

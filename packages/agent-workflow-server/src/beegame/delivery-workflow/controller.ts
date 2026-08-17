@@ -22,11 +22,7 @@ import {
   acceptFoundationReviewWorkerTerminal,
   buildFoundationReviewDispatches,
 } from './foundation-review-stage'
-import {
-  createFoundationReviewState,
-  foundationReviewMayStartRemediation,
-} from './foundation-review-state'
-import { readFoundationReviewArtifact } from './foundation-review'
+import { createFoundationReviewState } from './foundation-review-state'
 import {
   completeResourceTask,
   reconcileCurrentResourcePreparation,
@@ -45,11 +41,6 @@ import {
 import { createRunStore, type RunStore } from './run-store'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import { transitionDeliveryRun } from './transition'
-import {
-  createFoundationRemediationStateFromAuthority,
-  pendingFoundationRemediationLanes,
-  recordFoundationRemediationFailure,
-} from './foundation-remediation'
 import {
   enterImplementationAudit,
   reconcileAcceptance,
@@ -380,45 +371,25 @@ export function createDeliveryWorkflowController(input: {
             next.confirmedBriefDigest,
           ),
           terminal: result,
-          remediationState: next.foundationRemediationState,
         })
         next = { ...next, foundationReviewState: acceptedState }
         if (acceptedState.status === 'completed') {
-          if (acceptedState.verdict === 'READY') {
-            next = {
-              ...next,
-              phase: 'DOCUMENT_REVIEW',
-              documentStep: 'CHECKLIST_DRAFTING',
-              status: 'running',
-              blockedReason: undefined,
-            }
-          } else if (!foundationReviewMayStartRemediation(acceptedState)) {
-            next = {
-              ...next,
-              status: 'needs_action',
-              blockedReason: `Foundation review reached its bounded remediation limit and still requires revision; see ${acceptedState.finalReportPath}`,
-            }
-          } else {
-            const review = await readFoundationReviewArtifact({
-              workspacePath: input.workspacePath,
-              path: acceptedState.finalReportPath!,
-              expectedDigest: acceptedState.finalReportDigest!,
-            })
-            next = {
-              ...next,
-              phase: 'DOCUMENT_DRAFTING',
-              documentStep: undefined,
-              status: 'running',
-              foundationRemediationState:
-                createFoundationRemediationStateFromAuthority({
-                  reviewPath: review.path,
-                  reviewDigest: review.digest,
-                  sourceRevision: review.review.revision,
-                  affectedPaths: review.affectedPaths,
-                }),
-              blockedReason: undefined,
-            }
-          }
+          next =
+            acceptedState.verdict === 'READY'
+              ? {
+                  ...next,
+                  phase: 'DOCUMENT_REVIEW',
+                  documentStep: 'CHECKLIST_DRAFTING',
+                  status: 'running',
+                  blockedReason: undefined,
+                }
+              : {
+                  ...next,
+                  phase: 'DOCUMENT_REVIEW',
+                  documentStep: 'FOUNDATION_REVIEW',
+                  status: 'needs_action',
+                  blockedReason: `Foundation review requires revision; see ${acceptedState.finalReportPath}`,
+                }
         }
         next = await persist(next, 'foundation.review.report.accepted')
         if (next.status === 'running') await resumeUnlocked(next)
@@ -917,66 +888,6 @@ export function createDeliveryWorkflowController(input: {
     if (run.status !== 'running') return
     if (
       run.phase === 'DOCUMENT_DRAFTING' &&
-      run.foundationRemediationState
-    ) {
-      const replayable = run.foundationRemediationState.lanes.find(
-        lane => lane.status !== 'completed' && lane.dispatch?.terminalResult,
-      )?.dispatch
-      if (replayable) {
-        await dispatcher.replayTerminal(replayable, handleTerminalUnlocked)
-        return
-      }
-      const runningLanes = run.foundationRemediationState.lanes.filter(
-        lane => lane.dispatch?.status === 'running',
-      )
-      if (runningLanes.length) {
-        const unavailable = [] as typeof runningLanes
-        for (const lane of runningLanes) {
-          const isOpen = await dispatcher
-            .workerIsOpen(lane.dispatch!.dispatchId)
-            .catch(() => false)
-          if (!isOpen) unavailable.push(lane)
-        }
-        if (!unavailable.length) {
-          if (
-            pendingFoundationRemediationLanes(
-              run.foundationRemediationState,
-            ).length
-          )
-            await startDocumentStage({
-              run,
-              workspacePath: input.workspacePath,
-              dispatcher,
-            })
-          return
-        }
-        let foundationRemediationState = run.foundationRemediationState
-        for (const lane of unavailable)
-          foundationRemediationState = recordFoundationRemediationFailure(
-            foundationRemediationState,
-            lane.id,
-            'preserved native remediation session is unavailable',
-          )
-        const stillRunning = foundationRemediationState.lanes.some(
-          lane => lane.dispatch?.status === 'running',
-        )
-        const recovered = await persist(
-          {
-            ...run,
-            foundationRemediationState,
-            status: stillRunning ? 'running' : 'needs_action',
-            blockedReason: stillRunning
-              ? undefined
-              : 'one or more preserved native remediation sessions are unavailable',
-          },
-          'document.remediation.session_unavailable',
-        )
-        if (recovered.status === 'running') await resumeUnlocked(recovered)
-        return
-      }
-    }
-    if (
-      run.phase === 'DOCUMENT_DRAFTING' &&
       run.foundationDraftState.documents
     ) {
       const replayable = run.foundationDraftState.documents.find(
@@ -1085,66 +996,28 @@ export function createDeliveryWorkflowController(input: {
           let reviewRun = run
           if (
             reviewRun.foundationReviewState &&
-            foundationReviewMayStartRemediation(
-              reviewRun.foundationReviewState,
-            ) &&
-            reviewRun.foundationReviewState.finalReportPath &&
-            reviewRun.foundationReviewState.finalReportDigest &&
-            reviewRun.foundationRemediationState?.reviewDigest !==
-              reviewRun.foundationReviewState.finalReportDigest
+            reviewRun.foundationReviewState.status === 'completed'
           ) {
-            const review = await readFoundationReviewArtifact({
-              workspacePath: input.workspacePath,
-              path: reviewRun.foundationReviewState.finalReportPath,
-              expectedDigest:
-                reviewRun.foundationReviewState.finalReportDigest,
-            })
             reviewRun = await persist(
-              {
-                ...reviewRun,
-                phase: 'DOCUMENT_DRAFTING',
-                documentStep: undefined,
-                status: 'running',
-                foundationRemediationState:
-                  createFoundationRemediationStateFromAuthority({
-                    reviewPath: review.path,
-                    reviewDigest: review.digest,
-                    sourceRevision: review.review.revision,
-                    affectedPaths: review.affectedPaths,
-                  }),
-                blockedReason: undefined,
-              },
-              'foundation.review.remediation.created',
+              reviewRun.foundationReviewState.verdict === 'READY'
+                ? {
+                    ...reviewRun,
+                    phase: 'DOCUMENT_REVIEW',
+                    documentStep: 'CHECKLIST_DRAFTING',
+                    status: 'running',
+                    blockedReason: undefined,
+                  }
+                : {
+                    ...reviewRun,
+                    phase: 'DOCUMENT_REVIEW',
+                    documentStep: 'FOUNDATION_REVIEW',
+                    status: 'needs_action',
+                    blockedReason: `Foundation review requires revision; see ${reviewRun.foundationReviewState.finalReportPath}`,
+                  },
+              'foundation.review.verdict.resumed',
             )
-            await resumeUnlocked(reviewRun)
+            if (reviewRun.status === 'running') await resumeUnlocked(reviewRun)
             return
-          }
-          if (
-            reviewRun.foundationRemediationState?.resultingRevision ===
-              reviewRevision &&
-            reviewRun.foundationReviewState &&
-            reviewRun.foundationReviewState.status === 'completed' &&
-            reviewRun.foundationReviewState.verdict === 'NEEDS_REVISION' &&
-            reviewRun.foundationReviewState.finalReportPath &&
-            reviewRun.foundationReviewState.finalReportDigest &&
-            reviewRun.foundationRemediationState.reviewDigest ===
-              reviewRun.foundationReviewState.finalReportDigest
-          ) {
-            reviewRun = await persist(
-              {
-                ...reviewRun,
-                foundationReviewState: createFoundationReviewState({
-                  mode: 'verification',
-                  revision: reviewRevision,
-                  attempt: reviewRun.foundationReviewState.attempt + 1,
-                  priorReviewPath:
-                    reviewRun.foundationReviewState.finalReportPath,
-                  priorReviewDigest:
-                    reviewRun.foundationReviewState.finalReportDigest,
-                }),
-              },
-              'foundation.review.verification.created',
-            )
           }
           if (
             !reviewRun.foundationReviewState ||
@@ -1154,7 +1027,6 @@ export function createDeliveryWorkflowController(input: {
               {
                 ...reviewRun,
                 foundationReviewState: createFoundationReviewState({
-                  mode: 'initial',
                   revision: reviewRevision,
                   attempt:
                     (reviewRun.foundationReviewState?.attempt ?? 0) + 1,
@@ -1167,7 +1039,6 @@ export function createDeliveryWorkflowController(input: {
             state: reviewRun.foundationReviewState!,
             workspacePath: input.workspacePath,
             confirmedBriefDigest: reviewRun.confirmedBriefDigest,
-            remediationState: reviewRun.foundationRemediationState,
           })
           await Promise.all(
             pending.map(item =>

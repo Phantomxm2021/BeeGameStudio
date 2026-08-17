@@ -201,7 +201,6 @@ export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
 const foundationReviewStateSchema: z.ZodType<FoundationReviewState> = z
   .object({
     revision: z.string().regex(/^[a-f0-9]{64}$/u),
-    mode: z.enum(['initial', 'verification']),
     attempt: z.number().int().positive(),
     status: z.enum(['pending', 'running', 'completed', 'failed']),
     reports: z.array(
@@ -223,8 +222,6 @@ const foundationReviewStateSchema: z.ZodType<FoundationReviewState> = z
         })
         .strict(),
     ),
-    priorReviewPath: z.string().min(1).optional(),
-    priorReviewDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
     finalReportPath: z.string().min(1).optional(),
     finalReportDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
     verdict: z.enum(['READY', 'NEEDS_REVISION']).optional(),

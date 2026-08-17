@@ -36,7 +36,6 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import { MAX_FOUNDATION_REVIEW_ATTEMPTS } from './foundation-review-state'
 
 export {
   inspectWorkflowSnapshot,
@@ -808,16 +807,6 @@ async function restoreResourceContentCommit(
   }
 }
 
-function reviewRetryIsLocked(run: DeliveryRun): boolean {
-  return Boolean(
-    run.phase === 'DOCUMENT_REVIEW' &&
-      run.foundationReviewState?.mode === 'verification' &&
-      run.foundationReviewState.status === 'completed' &&
-      run.foundationReviewState.verdict === 'NEEDS_REVISION' &&
-      run.foundationReviewState.attempt >= MAX_FOUNDATION_REVIEW_ATTEMPTS,
-  )
-}
-
 async function restoreAcceptedReviewAfterRoutingFailure(input: {
   run: DeliveryRun
   workspacePath?: string
@@ -944,8 +933,6 @@ export async function resumeRun(input: {
           run: acquired.run,
           workspacePath: input.workspacePath,
         })
-    if (reviewRetryIsLocked(acquired.run) && !restoredHandoff && !changedReview)
-      return acquired.run
     const resumed =
       restoredHandoff ??
       changedReview ??
@@ -1018,13 +1005,6 @@ export async function retryRun(input: {
             workspacePath: input.workspacePath,
           })
         : undefined
-    if (
-      reviewRetryIsLocked(acquired.run) &&
-      !restoredHandoff &&
-      !changedReview &&
-      !acknowledgedReview
-    )
-      return acquired.run
     const restoredAcceptedReview =
       !restoredHandoff && !changedReview && !acknowledgedReview
         ? await restoreAcceptedReviewAfterRoutingFailure({

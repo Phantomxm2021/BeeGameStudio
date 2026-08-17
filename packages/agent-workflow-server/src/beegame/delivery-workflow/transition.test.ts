@@ -6,45 +6,12 @@ import { transitionDeliveryRun } from './transition'
 const revision = 'a'.repeat(64)
 
 describe('delivery workflow retry', () => {
-  test('allows the bounded second repair but locks the final verification', () => {
-    const base = createTestDeliveryRun({
-      projectId: 'bounded-review-retry',
-      ownerId: 'owner-bounded-review-retry',
-    })
-    const completedVerification = (attempt: number) => ({
-      ...base,
-      status: 'needs_action' as const,
-      phase: 'DOCUMENT_REVIEW' as const,
-      documentStep: 'FOUNDATION_REVIEW' as const,
-      foundationReviewState: {
-        ...createFoundationReviewState({
-          mode: 'verification' as const,
-          revision,
-          attempt,
-          priorReviewPath: '.beegame/reviews/foundation/prior/review.json',
-          priorReviewDigest: 'b'.repeat(64),
-        }),
-        status: 'completed' as const,
-        verdict: 'NEEDS_REVISION' as const,
-      },
-    })
-
-    const retried = transitionDeliveryRun(completedVerification(2), {
-      type: 'retry',
-    })
-    expect(retried.status).toBe('running')
-    expect(retried.foundationReviewState?.status).toBe('completed')
-    expect(() =>
-      transitionDeliveryRun(completedVerification(3), { type: 'retry' }),
-    ).toThrow('bounded remediation limit')
-  })
-
   test('preserves committed review lanes and resets every uncommitted lane', () => {
     const base = createTestDeliveryRun({
       projectId: 'review-retry',
       ownerId: 'owner-review-retry',
     })
-    const review = createFoundationReviewState({ mode: 'initial', revision })
+    const review = createFoundationReviewState({ revision })
     const run = {
       ...base,
       status: 'stopped' as const,
