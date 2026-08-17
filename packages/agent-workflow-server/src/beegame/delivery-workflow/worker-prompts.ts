@@ -3,11 +3,7 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
-import {
-  FOUNDATION_REVIEW_VERSION,
-  foundationReviewOutputContractInstruction,
-} from './foundation-review'
-import { foundationReviewLanePacketContractInstruction } from './foundation-review-lane-packet'
+import { foundationReviewLaneMarkdownInstruction } from './foundation-review-markdown'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
@@ -105,6 +101,7 @@ function formatContract(request: WorkerDispatchRequest): string {
       assignment: request.contract.assignment,
       packetDigests: request.contract.packetDigests,
       projection: request.contract.projection,
+      candidateReferences: request.contract.candidateReferences,
     })
   }
   const {
@@ -215,6 +212,66 @@ function reviewerContractPaths(request: WorkerDispatchRequest): string[] {
   )
 }
 
+type ReviewerLane = 'core-design' | 'technical-assets' | 'presentation'
+
+function reviewerProjectionDigest(request: WorkerDispatchRequest): string {
+  const projection = request.contract.projection
+  if (
+    !projection ||
+    typeof projection !== 'object' ||
+    Array.isArray(projection) ||
+    typeof (projection as Record<string, unknown>).digest !== 'string'
+  )
+    throw new Error('Foundation Reviewer projection digest is missing')
+  return (projection as Record<string, unknown>).digest as string
+}
+
+function reviewerLaneFocus(lane: ReviewerLane): string {
+  switch (lane) {
+    case 'core-design':
+      return 'Review only game rules, progression, level structure and balance authority for blocking implementation or acceptance defects.'
+    case 'technical-assets':
+      return 'Review only runtime architecture, production feasibility and asset responsibilities for blocking implementation or acceptance defects.'
+    case 'presentation':
+      return 'Review only art, UI/UX and audio experience contracts for blocking implementation or acceptance defects.'
+  }
+}
+
+function reviewerCandidateReferences(request: WorkerDispatchRequest): string[] {
+  const references = request.contract.candidateReferences
+  if (
+    !Array.isArray(references) ||
+    references.some(reference => typeof reference !== 'string') ||
+    new Set(references).size !== references.length
+  )
+    throw new Error('Foundation Reviewer candidate references are invalid')
+  return references
+}
+
+function foundationReviewSelectionMarkdownInstruction(
+  request: WorkerDispatchRequest,
+): string {
+  const references = reviewerCandidateReferences(request)
+  return [
+    'Return exactly one Foundation Review Selection Markdown receipt and nothing else.',
+    'Markdown tables and prose outside this grammar are forbidden. Each available candidate must be accounted exactly once as a kept record, a duplicate source, or a rejected record. Every duplicate target must occur in Keep.',
+    '# Foundation Review Selection',
+    `Revision: \`${request.revision}\``,
+    '## Keep',
+    '- `<candidate-reference>`',
+    '## Duplicate',
+    '- `<duplicate-source-reference>` -> `<kept-target-reference>`',
+    '## Reject',
+    '- `<candidate-reference>`',
+    'Use a single empty list marker `-` when a section has no entries.',
+    `Available candidate references: ${
+      references.length
+        ? references.map(reference => `\`${reference}\``).join(', ')
+        : '<none>'
+    }.`,
+  ].join('\n\n')
+}
+
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'document-author':
@@ -274,24 +331,23 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'document-reviewer':
       return [
         'Act only as the review unit named by contract.reviewRole. Read only contract.assignment.sourcePaths.',
-        'Submit exactly one report through the native StructuredOutput tool. Do not use Write or Edit and do not author a report file. Bee Game Studio validates and atomically persists the structured result to the sole contract.assignment.stagingOutputPaths entry. Do not modify source documents, workflow state, resources, implementation files, or any other path.',
+        'Return exactly one visible Markdown receipt. Do not author a report file or modify source documents, workflow state, resources, implementation files, or any other path.',
         request.contract.reviewRole === 'synthesis'
           ? [
-                `Read exactly the three accepted lane packets. Do not read any canonical full document. Deduplicate overlapping candidates, retain only blocking defects supported by packet evidence, and write the sole canonical version ${FOUNDATION_REVIEW_VERSION} review.json. Do not launch another Agent or task.`,
+                'Read exactly the three accepted lane Markdown receipts. Do not read any canonical full document. Deduplicate overlapping candidates by selecting one complete source record; never merge or rewrite candidate content. Classify every available reference as Keep, Duplicate, or Reject. Do not launch another Agent or task.',
                 'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
-                'Return exactly one JSON object. It must contain only version, scope, revision, verdict and conflicts. Each conflict must contain only id, title, problem, evidence, requiredOutcome, changes and acceptance. Do not return Markdown, a decision file, audit narrative, correct-item summary, non-blocking register, preservation list, introduction or conclusion.',
-                foundationReviewOutputContractInstruction(),
-                'Each conflict must state what is wrong, the exact evidence location, every canonical path whose bytes would need to change, the required action for each path, one shared requiredOutcome and mechanically checkable acceptance conditions. Do not draft replacement document prose or launch follow-up work.',
-                'READY requires conflicts: []; NEEDS_REVISION requires at least one conflict. Do not output affectedPaths; the server derives affected-path metadata from conflicts[].changes[].path. Read each assigned canonical document once unless exact evidence needs a targeted reread.',
+                foundationReviewSelectionMarkdownInstruction(request),
               ].join(' ')
           : request.contract.reviewRole === 'core-design' ||
                 request.contract.reviewRole === 'technical-assets' ||
                 request.contract.reviewRole === 'presentation'
             ? [
-                'Review only the assigned document lane and return one bounded Foundation review lane packet JSON object. Ground every observation only in the accepted source revision and identify its canonical path and stable location; observations may state a calculation or cross-section implication and need not copy source prose verbatim; do not decide the final verdict or propose replacement prose; do not modify canonical documents.',
-                foundationReviewLanePacketContractInstruction({
+                reviewerLaneFocus(request.contract.reviewRole),
+                'Review only the assigned document lane. Ground every observation only in the accepted source revision and identify its canonical path and stable location; observations may state a calculation or cross-section implication and need not copy source prose verbatim; do not decide the final verdict or propose replacement prose; do not modify canonical documents.',
+                foundationReviewLaneMarkdownInstruction({
                   revision: request.revision,
-                  laneId: request.contract.reviewRole,
+                  lane: request.contract.reviewRole,
+                  projectionDigest: reviewerProjectionDigest(request),
                 }),
               ].join(' ')
             : 'Unsupported Foundation review role.',
@@ -357,7 +413,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
     case 'document-reviewer':
-      return 'Submit the complete contracted object once through StructuredOutput. Bee Game Studio owns validation and atomic persistence; do not write report files yourself.'
+      return 'Return exactly one contracted Markdown receipt as the visible final response. Do not call StructuredOutput, Write, Edit, shell, or Agent.'
     case 'resource-planner':
       return 'Call AssetManifest submit_resource_plan exactly once. Do not continue after the accepted call.'
     case 'resource-curator':

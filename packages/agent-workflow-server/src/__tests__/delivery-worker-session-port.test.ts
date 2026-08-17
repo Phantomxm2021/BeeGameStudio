@@ -20,7 +20,6 @@ import {
 } from '../beegame/delivery-workflow/revision'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
-import { foundationReviewStagingPath } from '../beegame/delivery-workflow/foundation-review'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
 
 describe('delivery worker session credentials', () => {
@@ -1138,7 +1137,7 @@ describe('delivery worker session credentials', () => {
     ).rejects.toThrow('model turn ended after rejected calls')
   })
 
-  test('accepts one canonical foundation review JSON and derives its terminal', async () => {
+  test('accepts one visible foundation review selection and derives its terminal', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-foundation-review-terminal-'),
     )
@@ -1148,18 +1147,20 @@ describe('delivery worker session credentials', () => {
         workspacePath,
         confirmedBriefDigest,
       )
-      const stagingPath = foundationReviewStagingPath(
+      const stagingPath = join(
         workspacePath,
-        revision,
-        'foundation-initial-1-synthesis',
+        `.beegame/reviews/foundation/${revision}/.staging/selection.md`,
       )
-      const reviewText = `${JSON.stringify({
-          version: 3,
-          scope: 'foundation',
-          revision,
-          verdict: 'READY',
-          conflicts: [],
-        })}\n`
+      const selectionMarkdown = [
+        '# Foundation Review Selection',
+        `Revision: \`${revision}\``,
+        '## Keep',
+        '-',
+        '## Duplicate',
+        '-',
+        '## Reject',
+        '-',
+      ].join('\n\n')
       const events = [
         {
           id: 'foundation-review-result',
@@ -1167,7 +1168,7 @@ describe('delivery worker session credentials', () => {
           text: '',
           payload: {
             type: 'result' as const,
-            structured_output: JSON.parse(reviewText),
+            result: selectionMarkdown,
           },
           createdAt: new Date(),
         },
@@ -1219,14 +1220,11 @@ describe('delivery worker session credentials', () => {
           assignment,
           confirmedBriefDigest,
           packetDigests: {},
+          candidateReferences: [],
         },
       })
 
-      const schemaText = JSON.stringify(startInput?.workflowJsonSchema)
-      expect(schemaText).not.toContain('priorConflictStatus')
-      expect(schemaText).not.toContain('priorReviewDigest')
-      expect(schemaText).not.toContain('"not"')
-
+      expect(startInput?.workflowJsonSchema).toBeUndefined()
       expect(
         await port.waitForTerminal!('dispatch-foundation-review'),
       ).toEqual({
@@ -1237,6 +1235,9 @@ describe('delivery worker session credentials', () => {
         role: 'synthesis',
         reportPath: `.beegame/reviews/foundation/${revision}/review.json`,
       })
+      expect(await readFile(stagingPath, 'utf8')).toBe(
+        `${selectionMarkdown}\n`,
+      )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

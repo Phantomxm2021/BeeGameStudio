@@ -9,7 +9,6 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
-import { z } from 'zod/v4'
 import { auditAssetContract } from './asset-contract-audit'
 import { resolveWorkflowEvidencePath } from './delivery-workflow/evidence'
 import {
@@ -33,8 +32,10 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { foundationReviewSchema } from './delivery-workflow/foundation-review'
-import { foundationReviewLanePacketSchema } from './delivery-workflow/foundation-review-lane-packet'
+import {
+  parseFoundationReviewLaneMarkdown,
+  parseFoundationReviewSelectionMarkdown,
+} from './delivery-workflow/foundation-review-markdown'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -317,15 +318,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         throw new Error('document author session resume is not supported')
       const documentAuthorityBlock = ''
       const reviewContract = reviewerAssignmentContract(request)
-      const workflowJsonSchema =
-        request.workerType === 'document-reviewer'
-          ? z.toJSONSchema(
-              request.contract.reviewRole === 'synthesis'
-                ? foundationReviewSchema
-                : foundationReviewLanePacketSchema,
-              { target: 'draft-7' },
-            )
-          : undefined
       if (request.workerType === 'atomic-task-planner') {
         await mkdir(join(request.workspacePath, '.beegame/workflow/evidence'), {
           recursive: true,
@@ -352,7 +344,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
-        ...(workflowJsonSchema ? { workflowJsonSchema } : {}),
         workflowAllowedPaths:
           reviewContract?.assignment.stagingOutputPaths ??
           request.allowedPaths ??
@@ -484,7 +475,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request?.workerType === 'document-author'
           ? ''
           : request?.workerType === 'document-reviewer'
-            ? 'Submit the report through StructuredOutput exactly once. Use native read and search capabilities as needed. Do not use Write or Edit and do not author a report file. Bee Game Studio validates and atomically persists the structured result to the sole contracted staging path.'
+            ? 'Return exactly one contracted Markdown receipt as the visible final response. Use native read and search capabilities as needed. Do not call StructuredOutput, Write, Edit, shell, or Agent. Bee Game Studio validates and atomically persists the visible result to the sole contracted staging path.'
             : request?.workerType === 'change-impact-analyzer'
               ? 'Submit the analysis through SubmitChangeImpactResult exactly once. Do not author workflow evidence or return terminal JSON.'
               : request?.workerType === 'question-answerer'
@@ -1089,12 +1080,45 @@ async function createDeterministicDocumentReviewTerminal(input: {
     .reverse()
     .find(event => event.type === 'result')
   const payload = result?.payload
-  const report =
-    payload && typeof payload === 'object' && 'structured_output' in payload
-      ? payload.structured_output
-      : undefined
-  if (report === undefined)
-    throw new Error('Foundation Reviewer returned no structured output')
+  const markdown =
+    payload && typeof payload === 'object' && typeof payload.result === 'string'
+      ? payload.result.trim()
+      : ''
+  if (!markdown)
+    throw new Error('Foundation Reviewer returned no visible Markdown receipt')
+  if (
+    Buffer.byteLength(`${markdown}\n`, 'utf8') >
+    FOUNDATION_MARKDOWN_STREAM_MAX_BYTES
+  )
+    throw new Error('Foundation Reviewer Markdown receipt exceeds maximum bytes')
+  if (contract.role === 'synthesis') {
+    const candidateReferences = input.request.contract.candidateReferences
+    if (
+      !Array.isArray(candidateReferences) ||
+      candidateReferences.some(reference => typeof reference !== 'string')
+    )
+      throw new Error(
+        'Foundation Reviewer synthesis candidate references are invalid',
+      )
+    parseFoundationReviewSelectionMarkdown(markdown, {
+      revision: input.request.revision,
+      candidateReferences,
+    })
+  } else {
+    const projection = input.request.contract.projection
+    const projectionDigest =
+      projection &&
+      typeof projection === 'object' &&
+      !Array.isArray(projection) &&
+      typeof (projection as Record<string, unknown>).digest === 'string'
+        ? ((projection as Record<string, unknown>).digest as string)
+        : ''
+    parseFoundationReviewLaneMarkdown(markdown, {
+      revision: input.request.revision,
+      lane: contract.role,
+      projectionDigest,
+    })
+  }
   const stagingPath = resolve(contract.assignment.stagingOutputPaths[0])
   const relativeStagingPath = relative(input.request.workspacePath, stagingPath)
   if (
@@ -1104,10 +1128,7 @@ async function createDeterministicDocumentReviewTerminal(input: {
     relativeStagingPath.startsWith('..\\')
   )
     throw new Error('Foundation Reviewer staging path escapes the project')
-  await durableWriteProjection(
-    stagingPath,
-    `${JSON.stringify(report, null, 2)}\n`,
-  )
+  await durableWriteProjection(stagingPath, `${markdown}\n`)
   return foundationReviewWorkerTerminalSchema.parse({
     workerType: 'document-reviewer',
     status: 'completed',

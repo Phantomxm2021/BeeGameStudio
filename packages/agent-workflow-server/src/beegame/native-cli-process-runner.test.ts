@@ -165,19 +165,12 @@ describe('native CLI process runner', () => {
   })
 
   test('exposes only native read and search tools to a Reviewer', () => {
-    const workflowJsonSchema = {
-      type: 'object',
-      properties: { version: { const: 1 } },
-      required: ['version'],
-      additionalProperties: false,
-    }
     const command = nativeRuntimeCommand({
       sessionId: 'foundation-reviewer',
       cwd: process.cwd(),
       env: {},
       workflowWorker: true,
       workflowWorkerType: 'document-reviewer',
-      workflowJsonSchema,
     })
 
     expect(command).toContain('--tools')
@@ -186,10 +179,23 @@ describe('native CLI process runner', () => {
     expect(command[command.indexOf('--tools') + 1]).not.toContain('Edit')
     expect(command[command.indexOf('--tools') + 1]).not.toContain('Bash')
     expect(command[command.indexOf('--tools') + 1]).not.toContain('Agent')
-    expect(command).toContain('--json-schema')
-    expect(command[command.indexOf('--json-schema') + 1]).toBe(
-      JSON.stringify(workflowJsonSchema),
-    )
+    expect(command).not.toContain('--json-schema')
+  })
+
+  test('cannot select the generic JSON schema capability for a Reviewer', () => {
+    const command = nativeRuntimeCommand({
+      sessionId: 'foundation-reviewer',
+      cwd: process.cwd(),
+      env: {},
+      workflowWorker: true,
+      workflowWorkerType: 'document-reviewer',
+      workflowJsonSchema: {
+        type: 'object',
+        properties: { version: { const: 1 } },
+      },
+    })
+
+    expect(command).not.toContain('--json-schema')
   })
 
   test('disables native tools only for a foundation Markdown stream turn', () => {

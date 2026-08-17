@@ -345,6 +345,7 @@ describe('resource-content worker prompts', () => {
     expect(authorPrompt).not.toContain('"allowedUpstreamPaths"')
     expect(authorPrompt).not.toContain('"upstreamSections"')
 
+    const reviewRevision = 'a'.repeat(64)
     const finalReviewerPrompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -352,44 +353,49 @@ describe('resource-content worker prompts', () => {
       workspacePath: '/workspace',
       workerType: 'document-reviewer',
       phase: 'DOCUMENT_REVIEW',
-      revision: 'revision',
+      revision: reviewRevision,
       contract: {
         reviewScope: 'foundation',
         reviewMode: 'initial',
         reviewRole: 'synthesis',
         assignment: {
           sourcePaths: [
-            '/workspace/.beegame/reviews/foundation/revision/parts/core-design.json',
-            '/workspace/.beegame/reviews/foundation/revision/parts/technical-assets.json',
-            '/workspace/.beegame/reviews/foundation/revision/parts/presentation.json',
+            '/workspace/.beegame/reviews/foundation/revision/parts/core-design.md',
+            '/workspace/.beegame/reviews/foundation/revision/parts/technical-assets.md',
+            '/workspace/.beegame/reviews/foundation/revision/parts/presentation.md',
           ],
           stagingOutputPaths: [
-            '/workspace/.beegame/reviews/staging/review.json',
+            '/workspace/.beegame/reviews/staging/selection.md',
           ],
         },
+        candidateReferences: [
+          'core-design:C1',
+          'technical-assets:C2',
+          'presentation:C1',
+        ],
       },
     })
-    expect(finalReviewerPrompt).toContain('Read exactly the three accepted lane packets')
+    expect(finalReviewerPrompt).toContain(
+      'Read exactly the three accepted lane Markdown receipts',
+    )
     expect(finalReviewerPrompt).not.toContain('Review all eight canonical foundation documents directly')
     expect(finalReviewerPrompt).not.toContain('fixed coverage pass')
     expect(finalReviewerPrompt).toContain('cannot be implemented or verified')
     expect(finalReviewerPrompt).toContain('permits incompatible implementations')
     expect(finalReviewerPrompt).toContain('unambiguous duplicate wording is non-blocking')
-    expect(finalReviewerPrompt).toContain('one JSON object')
-    expect(finalReviewerPrompt).toContain('version must be the integer 3')
-    expect(finalReviewerPrompt).toContain('IDs must be B1, B2, B3')
-    expect(finalReviewerPrompt).toContain(
-      'evidence must be an array of objects',
-    )
-    expect(finalReviewerPrompt).toContain(
-      'path, location and observed',
-    )
+    expect(finalReviewerPrompt).not.toContain('one JSON object')
+    expect(finalReviewerPrompt).not.toContain('version must be the integer 3')
+    expect(finalReviewerPrompt).not.toContain('IDs must be B1, B2, B3')
     expect(finalReviewerPrompt).not.toContain('priorConflictStatus')
     expect(finalReviewerPrompt).not.toContain('priorReviewDigest')
-    expect(finalReviewerPrompt).toContain('requiredOutcome')
-    expect(finalReviewerPrompt).toContain('changes')
-    expect(finalReviewerPrompt).toContain('acceptance')
-    expect(finalReviewerPrompt).not.toContain('review.md')
+    expect(finalReviewerPrompt).toContain('# Foundation Review Selection')
+    expect(finalReviewerPrompt).toContain(`Revision: \`${reviewRevision}\``)
+    expect(finalReviewerPrompt).toContain('## Keep')
+    expect(finalReviewerPrompt).toContain('## Duplicate')
+    expect(finalReviewerPrompt).toContain('## Reject')
+    expect(finalReviewerPrompt).toContain('`core-design:C1`')
+    expect(finalReviewerPrompt).toContain('`technical-assets:C2`')
+    expect(finalReviewerPrompt).toContain('`presentation:C1`')
     expect(finalReviewerPrompt).not.toContain('decision.json')
     expect(finalReviewerPrompt).not.toContain('one non-blocking register')
     expect(finalReviewerPrompt).not.toContain('one preservation list')
@@ -399,9 +405,13 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).not.toContain('TaskOutput')
     expect(finalReviewerPrompt).not.toContain('launch both specialists')
     expect(finalReviewerPrompt).toContain('Deduplicate')
-    expect(finalReviewerPrompt).toContain('sole canonical version 3 review.json')
-    expect(finalReviewerPrompt).toContain('accepted lane packets')
+    expect(finalReviewerPrompt).not.toContain('sole canonical version 3 review.json')
+    expect(finalReviewerPrompt).toContain('accepted lane Markdown receipts')
     expect(finalReviewerPrompt).toContain('launch another Agent or task')
+    expect(finalReviewerPrompt).toContain(
+      'Return exactly one contracted Markdown receipt as the visible final response',
+    )
+    expect(finalReviewerPrompt).toContain('Do not call StructuredOutput')
 
     const specialistPrompt = buildWorkerPrompt({
       runId: 'run',
@@ -415,44 +425,49 @@ describe('resource-content worker prompts', () => {
         reviewScope: 'foundation',
         reviewMode: 'initial',
         reviewRole: 'core-design',
+        projection: {
+          path: '/workspace/.beegame/reviews/foundation/revision/projections/core-design.json',
+          digest: 'b'.repeat(64),
+          byteLength: 100,
+        },
         assignment: {
           sourcePaths: [
             '/workspace/docs/GDD.md',
             '/workspace/.beegame/reviews/foundation/revision/projections/core-design.json',
           ],
           stagingOutputPaths: [
-            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/core-design.json',
+            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/core-design.md',
           ],
         },
       },
     })
     expect(specialistPrompt).toContain(
-      'return one bounded Foundation review lane packet JSON object',
+      'Return exactly one Foundation Review Packet Markdown receipt and nothing else',
     )
     expect(specialistPrompt).toContain('do not decide the final verdict')
     expect(specialistPrompt).toContain('do not modify canonical documents')
     expect(specialistPrompt).toContain(
       'game rules, progression, level structure and balance',
     )
-    expect(specialistPrompt).toContain('"version":1')
-    expect(specialistPrompt).toContain('"scope":"foundation"')
-    expect(specialistPrompt).toContain('"lane":"core-design"')
+    expect(specialistPrompt).toContain('# Foundation Review Packet')
+    expect(specialistPrompt).toContain('Lane: `core-design`')
+    expect(specialistPrompt).toContain(`Projection: \`${'b'.repeat(64)}\``)
     expect(specialistPrompt).toContain(
-      'title, problem, evidence and blockingReason',
+      '## `<lane>:C1` — `<title>`',
     )
+    expect(specialistPrompt).toContain('### Required outcome')
+    expect(specialistPrompt).toContain('### Changes')
+    expect(specialistPrompt).toContain('### Acceptance')
+    expect(specialistPrompt).toContain('Report at most 8 candidates')
     expect(specialistPrompt).toContain(
-      'path, location and observed',
+      'Return exactly one contracted Markdown receipt as the visible final response',
     )
-    expect(specialistPrompt).toContain('8 highest-priority proven blockers')
-    expect(specialistPrompt).toContain('Never write an absolute path')
-    expect(specialistPrompt).toContain(
-      'Submit the complete contracted object once through StructuredOutput',
-    )
+    expect(specialistPrompt).toContain('Do not call StructuredOutput')
     expect(specialistPrompt).not.toContain(
       'Finish only after every assigned report file is fully written',
     )
     expect(specialistPrompt).toContain(
-      'Do not inspect other canonical documents, .beegame workflow state or Bee Game Studio source code',
+      'Read only contract.assignment.sourcePaths',
     )
     expect(specialistPrompt).not.toContain('Write one human-readable Markdown')
     expect(specialistPrompt).not.toContain('TaskOutput')
@@ -469,13 +484,18 @@ describe('resource-content worker prompts', () => {
         reviewScope: 'foundation',
         reviewMode: 'initial',
         reviewRole: 'technical-assets',
+        projection: {
+          path: '/workspace/.beegame/reviews/foundation/revision/projections/technical-assets.json',
+          digest: 'c'.repeat(64),
+          byteLength: 100,
+        },
         assignment: {
           sourcePaths: [
             '/workspace/docs/GDD.md',
             '/workspace/.beegame/reviews/foundation/revision/projections/technical-assets.json',
           ],
           stagingOutputPaths: [
-            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/technical-assets.json',
+            '/workspace/.beegame/reviews/foundation/revision/.staging/parts/technical-assets.md',
           ],
         },
       },
@@ -484,7 +504,7 @@ describe('resource-content worker prompts', () => {
       'runtime architecture, production feasibility and asset responsibilities',
     )
     expect(integrationSpecialistPrompt).toContain(
-      '"lane":"technical-assets"',
+      'Lane: `technical-assets`',
     )
 
   })

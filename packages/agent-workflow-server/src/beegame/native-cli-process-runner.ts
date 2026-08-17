@@ -64,7 +64,8 @@ export function nativeRuntimeCommand(
     ...(input.workflowWorkerType === 'document-reviewer'
       ? ['--tools', 'Read,Grep,Glob']
       : []),
-    ...(input.workflowJsonSchema
+    ...(input.workflowJsonSchema &&
+    input.workflowWorkerType !== 'document-reviewer'
       ? ['--json-schema', JSON.stringify(input.workflowJsonSchema)]
       : []),
     ...(input.workflowMarkdownStreamContract ? ['--tools', ''] : []),

@@ -177,14 +177,15 @@ describe('native initial document authoring', () => {
     expect(source).not.toContain("authoringMode === 'remediation'")
   })
 
-  test('persists a Reviewer structured output without requiring a Write tool call', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-raw-json-'))
+  test('persists the native visible Reviewer lane Markdown without a schema or Write tool call', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-markdown-'))
     const revision = 'a'.repeat(64)
+    const projectionDigest = 'b'.repeat(64)
     const stagingPath = join(
       workspacePath,
       '.beegame/reviews/foundation',
       revision,
-      '.staging/parts/core-design.json',
+      '.staging/parts/core-design.md',
     )
     const committedPath = join(
       workspacePath,
@@ -192,14 +193,12 @@ describe('native initial document authoring', () => {
       revision,
       'parts/core-design.json',
     )
-    const packet = {
-      version: 1,
-      scope: 'foundation',
-      revision,
-      lane: 'core-design',
-      mode: 'initial',
-      candidates: [],
-    }
+    const markdown = [
+      '# Foundation Review Packet',
+      `Revision: \`${revision}\``,
+      'Lane: `core-design`',
+      `Projection: \`${projectionDigest}\``,
+    ].join('\n\n')
     const prompts: string[] = []
     const events: Array<Record<string, unknown>> = []
     let startInput: Record<string, unknown> | undefined
@@ -233,7 +232,7 @@ describe('native initial document authoring', () => {
           text: 'This visible text is not the Reviewer authority.',
           payload: {
             type: 'result',
-            structured_output: packet,
+            result: `  ${markdown}\n\n`,
             num_turns: 1,
             usage: {
               input_tokens: 0,
@@ -264,6 +263,11 @@ describe('native initial document authoring', () => {
       contract: {
         reviewMode: 'initial',
         reviewRole: 'core-design',
+        projection: {
+          path: '.beegame/reviews/foundation/projections/core-design.json',
+          digest: projectionDigest,
+          byteLength: 100,
+        },
         assignment: {
           scope: 'foundation',
           role: 'core-design',
@@ -278,24 +282,210 @@ describe('native initial document authoring', () => {
     await port.submit(request.dispatchId, 'Review the assigned lane.')
     await port.waitForTerminal?.(request.dispatchId)
 
-    expect(prompts[0]).toContain('Submit the report through StructuredOutput')
+    expect(prompts[0]).toContain(
+      'Return exactly one contracted Markdown receipt as the visible final response',
+    )
     expect(prompts[0]).toContain(
       'Use native read and search capabilities as needed',
     )
-    expect(prompts[0]).toContain('Do not use Write or Edit')
+    expect(prompts[0]).toContain('Do not call StructuredOutput')
     expect(prompts[0]).not.toContain(
       'native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged',
     )
-    expect(startInput?.workflowJsonSchema).toBeDefined()
-    expect(
-      (startInput?.workflowJsonSchema as Record<string, unknown> | undefined)
-        ?.$schema,
-    ).toBe(
-      'http://json-schema.org/draft-07/schema#',
-    )
-    expect(JSON.parse(await readFile(stagingPath, 'utf8'))).toEqual(packet)
+    expect(startInput?.workflowJsonSchema).toBeUndefined()
+    expect(await readFile(stagingPath, 'utf8')).toBe(`${markdown}\n`)
     await rm(workspacePath, { recursive: true, force: true })
   })
+
+  test('persists the native visible synthesis selection Markdown', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-selection-'))
+    const revision = 'a'.repeat(64)
+    const stagingPath = join(
+      workspacePath,
+      '.beegame/reviews/foundation',
+      revision,
+      '.staging/selection.md',
+    )
+    const committedPath = join(
+      workspacePath,
+      '.beegame/reviews/foundation',
+      revision,
+      'review.json',
+    )
+    const candidateReferences = [
+      'core-design:C1',
+      'technical-assets:C1',
+      'presentation:C1',
+    ]
+    const markdown = [
+      '# Foundation Review Selection',
+      `Revision: \`${revision}\``,
+      '## Keep',
+      '- `core-design:C1`',
+      '## Duplicate',
+      '- `presentation:C1` -> `core-design:C1`',
+      '## Reject',
+      '- `technical-assets:C1`',
+    ].join('\n\n')
+    const events: Array<Record<string, unknown>> = []
+    const sessions = {
+      start: () => ({
+        id: 'review-session',
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: workspacePath,
+      }),
+      updateAuthToken: () => undefined,
+      get: () => ({
+        id: 'review-session',
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        cwd: workspacePath,
+      }),
+      events: () => events,
+      isWorkflowWorkerOpen: () => true,
+      sendWithDisplay: async () => {
+        events.push({
+          type: 'result',
+          text: markdown,
+          payload: { type: 'result', result: markdown },
+        })
+      },
+      stop: () => undefined,
+      disposeWorkflowWorker: async () => undefined,
+    }
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions: sessions as never,
+      userId: 'user',
+    })
+    const request = {
+      dispatchId: 'synthesis-dispatch',
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath,
+      workerType: 'document-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision,
+      contract: {
+        reviewMode: 'initial',
+        reviewRole: 'synthesis',
+        candidateReferences,
+        assignment: {
+          scope: 'foundation',
+          role: 'synthesis',
+          sourcePaths: candidateReferences.map(reference =>
+            join(workspacePath, `${reference.split(':')[0]}.md`),
+          ),
+          stagingOutputPaths: [stagingPath],
+          committedOutputPaths: [committedPath],
+        },
+      },
+    } as const
+
+    await port.start(request as never)
+    await port.submit(request.dispatchId, 'Select the accepted candidates.')
+    await port.waitForTerminal?.(request.dispatchId)
+
+    expect(await readFile(stagingPath, 'utf8')).toBe(`${markdown}\n`)
+    await rm(workspacePath, { recursive: true, force: true })
+  })
+
+  test.each([
+    ['missing', undefined, 'no visible Markdown receipt'],
+    ['empty', ' \n\t ', 'no visible Markdown receipt'],
+    ['malformed', '# Not a Foundation Review Packet', 'lane Markdown'],
+    [
+      'oversized',
+      `# Foundation Review Packet\n\n${'x'.repeat(2 * 1024 * 1024)}`,
+      'maximum',
+    ],
+  ])(
+    'rejects %s native Reviewer result text before returning a completed terminal',
+    async (_case, resultText, expectedError) => {
+      const workspacePath = await mkdtemp(join(tmpdir(), 'reviewer-invalid-'))
+      const revision = 'a'.repeat(64)
+      const stagingPath = join(workspacePath, '.beegame/reviewer.md')
+      const events: Array<Record<string, unknown>> = []
+      const sessions = {
+        start: () => ({
+          id: 'review-session',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          cwd: workspacePath,
+        }),
+        updateAuthToken: () => undefined,
+        get: () => ({
+          id: 'review-session',
+          status: 'running',
+          turnStatus: 'idle',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          cwd: workspacePath,
+        }),
+        events: () => events,
+        isWorkflowWorkerOpen: () => true,
+        sendWithDisplay: async () => {
+          events.push({
+            type: 'result',
+            text: typeof resultText === 'string' ? resultText : '',
+            payload: {
+              type: 'result',
+              ...(typeof resultText === 'string'
+                ? { result: resultText }
+                : {}),
+            },
+          })
+        },
+        stop: () => undefined,
+        disposeWorkflowWorker: async () => undefined,
+      }
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions: sessions as never,
+        userId: 'user',
+      })
+      const request = {
+        dispatchId: `invalid-${_case}`,
+        runId: 'run',
+        ownerId: 'owner',
+        projectId: 'project',
+        workspacePath,
+        workerType: 'document-reviewer',
+        phase: 'DOCUMENT_REVIEW',
+        revision,
+        contract: {
+          reviewMode: 'initial',
+          reviewRole: 'core-design',
+          projection: {
+            path: '.beegame/projection.json',
+            digest: 'b'.repeat(64),
+            byteLength: 100,
+          },
+          assignment: {
+            scope: 'foundation',
+            role: 'core-design',
+            sourcePaths: [join(workspacePath, 'docs/GDD.md')],
+            stagingOutputPaths: [stagingPath],
+            committedOutputPaths: [join(workspacePath, 'reviewer.md')],
+          },
+        },
+      } as const
+
+      await port.start(request as never)
+      await port.submit(request.dispatchId, 'Review the assigned lane.')
+      await expect(port.waitForTerminal?.(request.dispatchId)).rejects.toThrow(
+        expectedError,
+      )
+      await expect(readFile(stagingPath, 'utf8')).rejects.toThrow()
+      await rm(workspacePath, { recursive: true, force: true })
+    },
+  )
 
   test.skip('legacy calibration session resume is removed', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'native-document-resume-'))
