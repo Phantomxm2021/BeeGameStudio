@@ -7,7 +7,7 @@ import {
   type FoundationDocumentPath,
 } from './types'
 
-export const FOUNDATION_REVIEW_VERSION = 2
+export const FOUNDATION_REVIEW_VERSION = 3
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/u)
 const conflictIdSchema = z.string().regex(/^B[1-9][0-9]*$/u)
@@ -54,7 +54,6 @@ export const foundationReviewSchema = z
     scope: z.literal('foundation'),
     revision: digestSchema,
     verdict: z.enum(['READY', 'NEEDS_REVISION']),
-    priorConflictStatus: z.array(z.never()).max(0),
     conflicts: z.array(conflictSchema).max(64),
   })
   .strict()
@@ -87,7 +86,6 @@ export function foundationReviewOutputContractInstruction(): string {
     scope: 'foundation',
     revision: '<assigned-64-hex-revision>',
     verdict: '<READY-or-NEEDS_REVISION>',
-    priorConflictStatus: [],
     conflicts: [
       {
         id: 'B1',
@@ -110,7 +108,6 @@ export function foundationReviewOutputContractInstruction(): string {
     `The root object has exactly this shape: ${rootShape}`,
     'There is no root-level acceptance field. acceptance exists only inside each conflicts item. Do not add summary, severity, impact, coverage, notes or any other root or conflict field.',
     `version must be the integer ${FOUNDATION_REVIEW_VERSION}; scope must be the string foundation; revision must exactly equal the assigned revision; verdict must be READY or NEEDS_REVISION.`,
-    'priorConflictStatus must always be present and must equal []; the current architecture has no prior-review execution mode.',
     'Conflict IDs must be B1, B2, B3 and so on with no suffix or descriptive text.',
     'Each conflict evidence must be an array of objects containing only path, location and observed; never use a string. Each conflict changes must be an array of objects containing only path and action, with each path appearing at most once. acceptance must be an array of testable strings.',
   ].join(' ')

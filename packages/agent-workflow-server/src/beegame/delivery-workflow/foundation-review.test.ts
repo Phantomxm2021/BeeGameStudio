@@ -3,7 +3,9 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, test } from 'bun:test'
+import { z } from 'zod'
 import {
+  FOUNDATION_REVIEW_VERSION,
   acceptFoundationReview,
   foundationReviewAffectedPaths,
   foundationReviewOutputContractInstruction,
@@ -45,17 +47,35 @@ function conflict(id = 'B1') {
 
 function review(overrides: Record<string, unknown> = {}) {
   return {
-    version: 2,
+    version: 3,
     scope: 'foundation',
     revision,
     verdict: 'NEEDS_REVISION',
-    priorConflictStatus: [],
     conflicts: [conflict()],
     ...overrides,
   }
 }
 
 describe('foundation review contract', () => {
+  test('publishes one strict v3 schema without verification-era fields', () => {
+    const jsonSchema = z.toJSONSchema(foundationReviewSchema, {
+      target: 'draft-7',
+    }) as { properties?: Record<string, unknown> }
+    const schemaText = JSON.stringify(jsonSchema)
+
+    expect(FOUNDATION_REVIEW_VERSION).toBe(3)
+    expect(Object.keys(jsonSchema.properties ?? {})).toEqual([
+      'version',
+      'scope',
+      'revision',
+      'verdict',
+      'conflicts',
+    ])
+    expect(schemaText).not.toContain('priorConflictStatus')
+    expect(schemaText).not.toContain('priorReviewDigest')
+    expect(schemaText).not.toContain('"not"')
+  })
+
   test('states one exact root shape with acceptance only inside conflicts', () => {
     const instruction = foundationReviewOutputContractInstruction()
     expect(instruction).toContain('The root object has exactly')
@@ -130,8 +150,15 @@ describe('foundation review contract', () => {
     ).toThrow()
   })
 
-  test('keeps the canonical initial prior status empty and rejects prior-run state', () => {
-    expect(foundationReviewSchema.parse(review()).priorConflictStatus).toEqual([])
+  test('accepts v3 and rejects v2 or verification-era fields', () => {
+    expect(foundationReviewSchema.parse(review()).version).toBe(3)
+    expect(() =>
+      foundationReviewSchema.parse(
+        review({
+          version: 2,
+        }),
+      ),
+    ).toThrow()
     expect(() =>
       foundationReviewSchema.parse(
         review({
@@ -142,7 +169,7 @@ describe('foundation review contract', () => {
     expect(() =>
       foundationReviewSchema.parse(
         review({
-          priorConflictStatus: [{ id: 'B1', status: 'open' }],
+          priorConflictStatus: [],
         }),
       ),
     ).toThrow()
