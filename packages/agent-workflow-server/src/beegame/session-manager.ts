@@ -1888,6 +1888,35 @@ export class BeeGameSessionManager {
       })
       return Promise.resolve({ behavior: 'allow', scope: 'once' })
     }
+    const projectFileAccess = projectWorkspaceFileAccessAuthority(
+      record,
+      request,
+    )
+    if (projectFileAccess) {
+      this.append(
+        record,
+        'permission.resolved',
+        `${request.toolName}: ${projectFileAccess.behavior}`,
+        {
+          type: 'permission.resolved',
+          toolUseID: request.toolUseID,
+          toolName: request.toolName,
+          decision: projectFileAccess.behavior,
+          scope: 'once',
+          autoApproved: projectFileAccess.behavior === 'allow',
+          autoDenied: projectFileAccess.behavior === 'deny',
+          reason: projectFileAccess.reason,
+          input: request.input,
+        },
+      )
+      return Promise.resolve({
+        behavior: projectFileAccess.behavior,
+        scope: 'once',
+        ...(projectFileAccess.message
+          ? { message: projectFileAccess.message }
+          : {}),
+      })
+    }
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,
@@ -3655,6 +3684,54 @@ function authorizeProjectWorkspaceFileMutation(
   const targetPath = resolveProspectivePath(record.session.cwd, artifactPath)
   const rel = relative(workspaceRoot, targetPath)
   return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+type ProjectWorkspaceFileAccessAuthority = {
+  behavior: 'allow' | 'deny'
+  reason:
+    | 'project_workspace_file_access'
+    | 'project_workspace_boundary'
+    | 'project_workspace_target_invalid'
+  message?: string
+}
+
+function projectWorkspaceFileAccessAuthority(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): ProjectWorkspaceFileAccessAuthority | undefined {
+  if (!record.projectId) return undefined
+  const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'
+  if (!['Read', 'Grep', 'Glob'].includes(request.toolName)) return undefined
+  const inputPath = request.input[pathKey]
+  const defaultToWorkspace =
+    (request.toolName === 'Grep' || request.toolName === 'Glob') &&
+    inputPath === undefined
+  if (
+    !defaultToWorkspace &&
+    (typeof inputPath !== 'string' || inputPath.trim().length === 0)
+  ) {
+    return {
+      behavior: 'deny',
+      reason: 'project_workspace_target_invalid',
+      message: `${request.toolName} requires one project-local target path.`,
+    }
+  }
+  const workspaceRoot = resolveExistingPath(record.session.cwd)
+  const targetPath = defaultToWorkspace
+    ? workspaceRoot
+    : resolveProspectivePath(record.session.cwd, inputPath as string)
+  const rel = relative(workspaceRoot, targetPath)
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    return {
+      behavior: 'deny',
+      reason: 'project_workspace_boundary',
+      message: `${request.toolName} may not access files outside the project workspace.`,
+    }
+  }
+  return {
+    behavior: 'allow',
+    reason: 'project_workspace_file_access',
+  }
 }
 
 type WorkflowFileMutationAuthority = {
