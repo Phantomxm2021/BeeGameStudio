@@ -69,6 +69,42 @@ for await (const chunk of Bun.stdin.stream()) {
       )
       continue
     }
+    if (content === 'structured-success-without-result') {
+      const toolUseID = 'structured-output-1'
+      process.stdout.write(
+        `${JSON.stringify({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: toolUseID,
+                name: 'StructuredOutput',
+                input: { version: 3 },
+              },
+            ],
+            stop_reason: 'tool_use',
+          },
+        })}\n`,
+      )
+      process.stdout.write(
+        `${JSON.stringify({
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: toolUseID,
+                content: 'Structured output provided successfully',
+              },
+            ],
+          },
+        })}\n`,
+      )
+      continue
+    }
     process.stdout.write(
       `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } })}\n`,
     )

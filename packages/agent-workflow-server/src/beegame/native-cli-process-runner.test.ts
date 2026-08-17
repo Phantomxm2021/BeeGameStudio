@@ -10,7 +10,12 @@ const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
 )
 
-function startRuntime(options: { markdownStream?: boolean } = {}) {
+function startRuntime(
+  options: {
+    markdownStream?: boolean
+    workflowJsonSchema?: Record<string, unknown>
+  } = {},
+) {
   return createNativeCliProcessRunner({
     command: [process.execPath, fixturePath],
     observabilityFactory: () => ({
@@ -35,6 +40,9 @@ function startRuntime(options: { markdownStream?: boolean } = {}) {
             maxBytes: 512_000,
           },
         }
+      : {}),
+    ...(options.workflowJsonSchema
+      ? { workflowJsonSchema: options.workflowJsonSchema }
       : {}),
   })
 }
@@ -220,6 +228,42 @@ describe('native CLI process runner', () => {
       'result',
     ])
     expect(messages.at(-1)?.received_session_id).toBe('')
+    runtime.dispose?.()
+  })
+
+  test('completes a structured turn when the validated StructuredOutput tool succeeds', async () => {
+    const runtime = await startRuntime({
+      workflowJsonSchema: {
+        type: 'object',
+        properties: { version: { const: 3 } },
+        required: ['version'],
+        additionalProperties: false,
+      },
+    })
+    const messages: Record<string, unknown>[] = []
+
+    await expect(
+      Promise.race([
+        runtime.submit({
+          prompt: 'structured-success-without-result',
+          signal: new AbortController().signal,
+          onMessage: message => messages.push(message),
+          requestPermission: async () => ({ behavior: 'deny' }),
+        }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('structured turn did not terminate')),
+            500,
+          ),
+        ),
+      ]),
+    ).resolves.toBeUndefined()
+    expect(messages.at(-1)).toMatchObject({
+      type: 'result',
+      subtype: 'success',
+      structured_output: { version: 3 },
+    })
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
     runtime.dispose?.()
   })
 

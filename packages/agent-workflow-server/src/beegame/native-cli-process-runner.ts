@@ -83,6 +83,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private disposed = false
   private stderrTail = ''
   private nativeSessionId: string | undefined
+  private readonly structuredOutputCalls = new Map<string, unknown>()
 
   private constructor(
     private readonly child: RuntimeProcess,
@@ -135,6 +136,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     if (this.activeTurn)
       throw new Error('Bee Game Studio native runtime already has an active turn')
     if (input.signal.aborted) return
+    this.structuredOutputCalls.clear()
 
     await new Promise<void>((resolve, reject) => {
       const requestId = crypto.randomUUID()
@@ -232,6 +234,15 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     if (!turn) return
     this.observability.observeMessage(message)
     turn.input.onMessage(message as DashboardSDKMessage)
+    this.captureStructuredOutputCall(message)
+    const structuredOutput = this.successfulStructuredOutput(message)
+    if (
+      this.sessionInput.workflowJsonSchema &&
+      structuredOutput !== undefined
+    ) {
+      await this.completeStructuredTurn(turn, structuredOutput)
+      return
+    }
     if (
       message.type === 'system' &&
       (message.subtype === 'task_notification' ||
@@ -265,6 +276,70 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     this.observability.finishTurn({ outcome: 'success' })
     await this.observability.flush()
     turn.resolve()
+  }
+
+  private captureStructuredOutputCall(message: Record<string, unknown>): void {
+    if (message.type !== 'assistant') return
+    const assistant = objectField(message, 'message')
+    const content = assistant?.content
+    if (!Array.isArray(content)) return
+    for (const block of content) {
+      if (!block || typeof block !== 'object' || Array.isArray(block)) continue
+      const value = block as Record<string, unknown>
+      if (
+        value.type === 'tool_use' &&
+        value.name === 'StructuredOutput' &&
+        typeof value.id === 'string'
+      ) {
+        this.structuredOutputCalls.set(value.id, value.input)
+      }
+    }
+  }
+
+  private successfulStructuredOutput(
+    message: Record<string, unknown>,
+  ): unknown | undefined {
+    if (message.type !== 'user') return undefined
+    const user = objectField(message, 'message')
+    const content = user?.content
+    if (!Array.isArray(content)) return undefined
+    for (const block of content) {
+      if (!block || typeof block !== 'object' || Array.isArray(block)) continue
+      const value = block as Record<string, unknown>
+      const toolUseID = stringField(value, 'tool_use_id')
+      if (
+        value.type === 'tool_result' &&
+        value.is_error !== true &&
+        value.content === 'Structured output provided successfully' &&
+        this.structuredOutputCalls.has(toolUseID)
+      ) {
+        return this.structuredOutputCalls.get(toolUseID)
+      }
+    }
+    return undefined
+  }
+
+  private async completeStructuredTurn(
+    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
+    structuredOutput: unknown,
+  ): Promise<void> {
+    this.activeTurn = null
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'Structured output accepted',
+      session_id: this.nativeSessionId ?? '',
+      structured_output: structuredOutput,
+    }
+    this.observability.observeMessage(result)
+    turn.input.onMessage(result)
+    this.observability.finishTurn({ outcome: 'success' })
+    await this.observability.flush()
+    turn.resolve()
+    this.disposed = true
+    this.child.stdin.end()
+    if (this.child.exitCode === null) this.child.kill('SIGTERM')
   }
 
   private async resolvePermissionRequest(
