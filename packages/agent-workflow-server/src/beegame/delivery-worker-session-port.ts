@@ -62,9 +62,13 @@ import { readAuthoredDocumentReceipt } from './authored-document-receipt'
 import {
   buildFoundationRemediationTransactionRequest,
   foundationRemediationResultSchema,
+  type FoundationRemediationTransactionReceipt,
   type FoundationRemediationTransactionRequest,
 } from './delivery-workflow/foundation-remediation-transaction'
-import { commitFoundationRemediationTransaction } from './foundation-remediation-commit'
+import {
+  commitFoundationRemediationTransaction,
+  reconcileFoundationRemediationTransactionCommit,
+} from './foundation-remediation-commit'
 
 const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
 
@@ -274,6 +278,29 @@ type PreparedFoundationRemediation = {
   committedAt: string
 }
 
+function assertRemediationReceiptAuthority(
+  request: WorkerDispatchRequest,
+  receipt: FoundationRemediationTransactionReceipt,
+): void {
+  const remediation = request.contract.remediation
+  if (
+    request.workerType !== 'document-author' ||
+    request.contract.authoringMode !== 'remediation' ||
+    !remediation ||
+    typeof remediation !== 'object' ||
+    Array.isArray(remediation)
+  )
+    throw new Error('foundation remediation recovery authority is invalid')
+  const authority = remediation as Record<string, unknown>
+  if (
+    receipt.reviewDigest !== authority.reviewDigest ||
+    receipt.sourceRevision !== authority.sourceRevision ||
+    receipt.targetPath !== request.contract.foundationDocumentPath ||
+    receipt.sourceDigest !== authority.sourceDigest
+  )
+    throw new Error('foundation remediation durable receipt authority mismatch')
+}
+
 function remediationDocumentMetadata(markdown: string): {
   version: string
   updatedAt: string
@@ -431,6 +458,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
     string,
     PreparedFoundationRemediation
   >()
+  const recoveredFoundationRemediationReceipts = new Map<
+    string,
+    FoundationRemediationTransactionReceipt
+  >()
   const eventOffsets = new Map<string, number>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
@@ -448,6 +479,35 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
+      const recoveredRemediation =
+        request.workerType === 'document-author' &&
+        request.contract.authoringMode === 'remediation'
+          ? await reconcileFoundationRemediationTransactionCommit({
+              workspacePath: request.workspacePath,
+              dispatchId,
+            })
+          : undefined
+      if (recoveredRemediation) {
+        assertRemediationReceiptAuthority(request, recoveredRemediation)
+        const sessionId = `recovered-remediation:${dispatchId}`
+        sessions.set(dispatchId, sessionId)
+        requests.set(dispatchId, { ...request, dispatchId })
+        recoveredFoundationRemediationReceipts.set(
+          dispatchId,
+          recoveredRemediation,
+        )
+        eventOffsets.set(dispatchId, 0)
+        records.set(dispatchId, {
+          dispatchId,
+          workerType: request.workerType,
+          phase: request.phase,
+          ...(request.taskId ? { taskId: request.taskId } : {}),
+          revision: request.revision,
+          status: 'running',
+          startedAt: new Date().toISOString(),
+        })
+        return { sessionId, dispatchId }
+      }
       const preparedRemediation =
         request.workerType === 'document-author' &&
         request.contract.authoringMode === 'remediation'
@@ -585,6 +645,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       return { sessionId: session.id, dispatchId }
     },
     async submit(dispatchId, prompt) {
+      if (recoveredFoundationRemediationReceipts.has(dispatchId)) return
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) throw new Error('worker session is not registered')
       const authToken = await input.getAuthToken?.()
@@ -671,6 +732,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       })
     },
     async stop(dispatchId, reason) {
+      if (recoveredFoundationRemediationReceipts.has(dispatchId)) return
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) {
         await input.sessions.disposeWorkflowDispatch?.(dispatchId)
@@ -697,7 +759,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
         return
       }
       try {
-        if (!options?.preserveSession) {
+        if (
+          !recoveredFoundationRemediationReceipts.has(dispatchId) &&
+          !options?.preserveSession
+        ) {
           const session = input.sessions.get(sessionId)
           if (
             session?.status === 'running' &&
@@ -712,6 +777,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
         requests.delete(dispatchId)
         documentAuthorityBlocks.delete(dispatchId)
         documentAuthorityProjections.delete(dispatchId)
+        foundationRemediationTransactions.delete(dispatchId)
+        recoveredFoundationRemediationReceipts.delete(dispatchId)
         eventOffsets.delete(dispatchId)
       }
     },
@@ -737,11 +804,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
       }
     },
     async hasInFlightMutation(dispatchId) {
+      if (recoveredFoundationRemediationReceipts.has(dispatchId)) return false
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) return false
       return hasInFlightResourceMutation(input.sessions.events(sessionId))
     },
     async hasInFlightTerminalSubmission(dispatchId) {
+      if (recoveredFoundationRemediationReceipts.has(dispatchId)) return false
       const sessionId = sessions.get(dispatchId)
       const request = requests.get(dispatchId)
       if (!sessionId || !request) return false
@@ -761,6 +830,15 @@ export function createBeeGameDeliveryWorkerPort(input: {
       )
     },
     async waitForTerminal(dispatchId) {
+      const recovered = recoveredFoundationRemediationReceipts.get(dispatchId)
+      if (recovered)
+        return documentAuthorTerminalSchema.parse({
+          workerType: 'document-author',
+          status: 'completed',
+          writtenPaths: [recovered.targetPath],
+          resolvedFindingIds: [],
+          remediationReceipt: recovered,
+        })
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) throw new Error('worker session is not registered')
       let closedTurnDrained = false

@@ -6,7 +6,10 @@ import {
   completeTestSubmission,
   renderTestCompleteGameDocument,
 } from '../__tests__/complete-game-document-fixture'
-import { commitFoundationRemediationTransaction } from './foundation-remediation-commit'
+import {
+  commitFoundationRemediationTransaction,
+  reconcileFoundationRemediationTransactionCommit,
+} from './foundation-remediation-commit'
 import {
   buildFoundationRemediationTransactionRequest,
   type FoundationRemediationResult,
@@ -122,6 +125,60 @@ describe('foundation remediation commit', () => {
     expect(await readFile(join(workspacePath, PATH), 'utf8')).toBe(firstBytes)
     expect(firstBytes).toContain('version: 1.0.1')
     expect(firstBytes).toContain('Revised authority')
+    expect(
+      JSON.parse(
+        await readFile(
+          join(
+            workspacePath,
+            '.beegame/workflow/foundation-remediation-commits/dispatch-gdd.json',
+          ),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({
+      version: 1,
+      state: 'committed',
+      dispatchId: 'dispatch-gdd',
+      receipt: first,
+    })
+  })
+
+  test('recovers a target committed before its prepared receipt advanced', async () => {
+    workspacePath = await mkdtemp(join(tmpdir(), 'remediation-recover-'))
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    await writeFile(join(workspacePath, PATH), canonicalDocument())
+    const { request, result } = transaction()
+    const receipt = await commitFoundationRemediationTransaction({
+      workspacePath,
+      dispatchId: 'dispatch-recover',
+      request,
+      result,
+      previousMetadata: {
+        version: '1.0.0',
+        updatedAt: PREVIOUS_UPDATED_AT,
+      },
+      committedAt: COMMITTED_AT,
+    })
+    const receiptPath = join(
+      workspacePath,
+      '.beegame/workflow/foundation-remediation-commits/dispatch-recover.json',
+    )
+    const persisted = JSON.parse(await readFile(receiptPath, 'utf8'))
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify({ ...persisted, state: 'prepared' }, null, 2)}\n`,
+    )
+
+    const recovered = await reconcileFoundationRemediationTransactionCommit({
+      workspacePath,
+      dispatchId: 'dispatch-recover',
+    })
+
+    expect(recovered).toEqual(receipt)
+    expect(JSON.parse(await readFile(receiptPath, 'utf8'))).toMatchObject({
+      state: 'committed',
+      receipt,
+    })
   })
 
   test('leaves externally changed source bytes untouched', async () => {

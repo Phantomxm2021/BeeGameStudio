@@ -358,6 +358,41 @@ describe('native initial document authoring', () => {
     expect(
       await readFile(join(workspacePath, 'docs/TECHNICAL_DESIGN.md'), 'utf8'),
     ).toContain('The repaired runtime authority')
+
+    let recoveredNativeStarts = 0
+    let recoveredNativeSubmits = 0
+    const recoveryPort = createBeeGameDeliveryWorkerPort({
+      sessions: {
+        start: () => {
+          recoveredNativeStarts += 1
+          throw new Error('a committed remediation must not restart the model')
+        },
+        updateAuthToken: () => undefined,
+        get: () => undefined,
+        events: () => [],
+        isWorkflowWorkerOpen: () => false,
+        sendWithDisplay: async () => {
+          recoveredNativeSubmits += 1
+        },
+        stop: () => undefined,
+        disposeWorkflowWorker: async () => undefined,
+      } as never,
+      userId: 'user',
+    })
+    await recoveryPort.start(request as never)
+    await recoveryPort.submit(request.dispatchId, 'Do not run again.')
+    const recoveredTerminal = await recoveryPort.waitForTerminal?.(
+      request.dispatchId,
+    )
+
+    expect(recoveredTerminal).toMatchObject({
+      workerType: 'document-author',
+      writtenPaths: ['docs/TECHNICAL_DESIGN.md'],
+      remediationReceipt: (terminal as { remediationReceipt: unknown })
+        .remediationReceipt,
+    })
+    expect(recoveredNativeStarts).toBe(0)
+    expect(recoveredNativeSubmits).toBe(0)
     await rm(workspacePath, { recursive: true, force: true })
   })
 
