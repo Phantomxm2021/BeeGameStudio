@@ -387,10 +387,10 @@ Do not retain “deprecated”, “legacy”, or fallback implementation instruc
 Run:
 
 ```bash
-rg -n "foundationRemediationState|FoundationRemediation|foundation-remediation:|authoringMode === 'remediation'|authoringMode: 'remediation'|foundation\.review\.(remediation|verification)\.created|修订核心设计|修订技术与资产|修订表现体验|修订结果" packages/agent-workflow-server/src
+rg -n "foundationRemediationState|FoundationRemediation|foundation-remediation:|authoringMode === 'remediation'|authoringMode: 'remediation'|foundation\.review\.(remediation|verification)\.created|修订核心设计|修订技术与资产|修订表现体验|修订结果" packages/agent-workflow-server/src --glob '!**/*.test.ts' --glob '!**/__tests__/**'
 ```
 
-Expected: no production or test matches. If a match remains, classify it before editing; do not whitelist it unless it is the clean-slate design or acceptance evidence outside production code.
+Expected: no production matches. Behavioral tests may contain the removed literals only to prove that current schemas, prompts, task projections, and dispatch contracts reject them. If a production match remains, classify it before editing; do not whitelist it.
 
 - [ ] **Step 3: Run the complete affected suite and typecheck**
 
@@ -447,3 +447,4 @@ git commit -m "docs: accept remediation-free reviewer workflow"
 - **No compatibility track:** Old remediation snapshots are rejected rather than migrated or projected.
 - **No placeholders:** Every task names files, expected behavior, commands, and commit boundaries.
 - **Failure discipline:** Any unexpected failure is classified against the clean-slate direction before code changes; tests must not be weakened to preserve removed behavior.
+- **Preflight ruling:** Behavioral absence tests govern; static closure excludes test files so their removed-literal assertions cannot create false positives.
