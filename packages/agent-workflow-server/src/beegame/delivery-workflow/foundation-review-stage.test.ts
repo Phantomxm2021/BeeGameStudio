@@ -751,6 +751,14 @@ describe('foundation review lane dispatch barrier', () => {
       verdict: 'NEEDS_REVISION',
       conflicts: [{ id: 'B1', title: 'core-design blocker' }],
     })
+    await expect(
+      readdir(
+        resolve(
+          root,
+          `.beegame/reviews/foundation/${revision}/.staging`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
     expect(
       await foundationReviewNeedsRevisionMessage({
         workspacePath: root,

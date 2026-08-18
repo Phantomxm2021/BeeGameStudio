@@ -102,6 +102,23 @@ export function foundationReviewPath(
   return resolve(reviewDirectory(workspacePath, revision), 'review.json')
 }
 
+export async function removeFoundationReviewStagingDirectory(
+  workspacePath: string,
+  revision: string,
+): Promise<void> {
+  const directoryPath = reviewDirectory(workspacePath, revision)
+  await rm(resolve(directoryPath, '.staging'), {
+    recursive: true,
+    force: true,
+  })
+  const directory = await open(directoryPath, 'r')
+  try {
+    await directory.sync()
+  } finally {
+    await directory.close()
+  }
+}
+
 export function foundationReviewLaneReceiptPath(
   workspacePath: string,
   revision: string,

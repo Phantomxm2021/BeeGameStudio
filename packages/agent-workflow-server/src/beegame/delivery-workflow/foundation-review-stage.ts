@@ -26,6 +26,7 @@ import {
   foundationReviewSelectionPath,
   foundationReviewSelectionStagingPath,
   readFoundationReviewArtifact,
+  removeFoundationReviewStagingDirectory,
 } from './foundation-review'
 import {
   assertFoundationReviewState,
@@ -499,6 +500,10 @@ export async function reconcileFoundationReviewStateFromArtifacts(input: {
     dispatchId,
     review,
   })
+  await removeFoundationReviewStagingDirectory(
+    input.workspacePath,
+    state.revision,
+  )
   reports[synthesisIndex] = {
     ...state.reports[synthesisIndex],
     path: acceptedSelection.path,
