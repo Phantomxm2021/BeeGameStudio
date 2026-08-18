@@ -383,15 +383,17 @@ describe('foundation review lane Markdown', () => {
   })
 
   test('publishes the complete lane receipt grammar', () => {
-    expect(foundationReviewLaneMarkdownInstruction(expected)).toContain(
-      '# Foundation Review Packet',
+    const instruction = foundationReviewLaneMarkdownInstruction(expected)
+    expect(instruction).toContain('# Foundation Review Packet')
+    expect(instruction).toContain(`Revision: \`${revision}\``)
+    expect(instruction).toContain('Markdown tables are forbidden')
+    expect(instruction).toContain(
+      'Zero candidates is valid when no blocking defect is proven',
     )
-    expect(foundationReviewLaneMarkdownInstruction(expected)).toContain(
-      `Revision: \`${revision}\``,
+    expect(instruction).toContain(
+      'Eight candidates is a hard safety maximum, not a target',
     )
-    expect(foundationReviewLaneMarkdownInstruction(expected)).toContain(
-      'Markdown tables are forbidden',
-    )
+    expect(instruction).not.toContain('Report at most 8 candidates')
   })
 
   test('parses a compact, fully-accounted synthesis selection', () => {

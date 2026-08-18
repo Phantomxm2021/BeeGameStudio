@@ -448,7 +448,7 @@ export function foundationReviewLaneMarkdownInstruction(
     '  Action: `<required action>`',
     '### Acceptance',
     '- `<mechanically-checkable condition>`',
-    `Every change path must be one of: ${ownedPaths}. Evidence paths may additionally name a locally validated projection source path. Report at most 8 candidates; candidate references must be unique.`,
+    `Every change path must be one of: ${ownedPaths}. Evidence paths may additionally name a locally validated projection source path. Zero candidates is valid when no blocking defect is proven. Eight candidates is a hard safety maximum, not a target; never fill the allowance. Candidate references must be unique.`,
   ].join('\n\n')
 }
 

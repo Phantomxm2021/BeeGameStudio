@@ -336,6 +336,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           ? [
                 'Read exactly the three accepted lane Markdown receipts. Do not read any canonical full document. Deduplicate overlapping candidates by selecting one complete source record; never merge or rewrite candidate content. Classify every available reference as Keep, Duplicate, or Reject. Do not launch another Agent or task.',
                 'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
+                'Before Keep, establish all six admission conditions from the bounded candidate records: the evidence supports the stated problem; the problem identifies a blocked implementation or acceptance result; no stated precedence, deterministic mapping, or explicit stricter bound already resolves the observation; the required outcome is a neutral invariant rather than a selected design; the changes remain within the candidate declared authority; and the acceptance conditions are mechanically decidable. Failure of any admission condition requires Reject. Duplicate applies only when the underlying defect, required outcome, and change scope are the same. Never repair a deficient candidate or import omitted source context.',
                 foundationReviewSelectionMarkdownInstruction(request),
               ].join(' ')
           : request.contract.reviewRole === 'core-design' ||
@@ -344,6 +345,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             ? [
                 reviewerLaneFocus(request.contract.reviewRole),
                 'Review only the assigned document lane. Ground every observation only in the accepted source revision and identify its canonical path and stable location; observations may state a calculation or cross-section implication and need not copy source prose verbatim; do not decide the final verdict or propose replacement prose; do not modify canonical documents.',
+                'Report only a proven blocking defect: incompatible authoritative rules or values; a required mapping that is missing or incompatible; a required decision with no unique authority; an authorized requirement that cannot be mechanically accepted; or authorized production constraints that cannot be satisfied together. Different representation sizes are not inherently contradictory. If a total deterministic mapping exists, the observation is non-blocking; if a required mapping is absent, report the missing mapping and never require equal representation sizes. A subordinate or subsystem bound that explicitly takes the stricter value is already resolved. Missing detail is blocking only when an existing implementation or acceptance decision cannot be completed without it. Problem must identify the implementation or acceptance result it blocks. Required outcome must be a neutral invariant and must not select an unowned design, value, document winner, or replacement prose. Ignore prose style, harmless redundancy, optional clarification, editorial quality, non-blocking polish, and correct-content summaries.',
                 foundationReviewLaneMarkdownInstruction({
                   revision: request.revision,
                   lane: request.contract.reviewRole,
@@ -351,7 +353,6 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 }),
               ].join(' ')
             : 'Unsupported Foundation review role.',
-        'Review production usability, completeness, clarity, ownership, redundancy, feasibility and verification evidence within this role. Do not invent product requirements or silently repair source documents.',
       ].join(' ')
     case 'resource-planner':
       return [

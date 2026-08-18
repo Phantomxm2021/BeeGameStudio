@@ -391,6 +391,21 @@ describe('resource-content worker prompts', () => {
     expect(finalReviewerPrompt).toContain(
       'unambiguous duplicate wording is non-blocking',
     )
+    expect(finalReviewerPrompt).toContain(
+      'the evidence supports the stated problem',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'no stated precedence, deterministic mapping, or explicit stricter bound already resolves the observation',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'the required outcome is a neutral invariant rather than a selected design',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'the acceptance conditions are mechanically decidable',
+    )
+    expect(finalReviewerPrompt).toContain(
+      'Failure of any admission condition requires Reject',
+    )
     expect(finalReviewerPrompt).not.toContain('one JSON object')
     expect(finalReviewerPrompt).not.toContain('version must be the integer 3')
     expect(finalReviewerPrompt).not.toContain('IDs must be B1, B2, B3')
@@ -474,7 +489,27 @@ describe('resource-content worker prompts', () => {
       '- Path: `<lane-owned-canonical-path>`\n\n  Action: `<required action>`',
     )
     expect(specialistPrompt).toContain('### Acceptance')
-    expect(specialistPrompt).toContain('Report at most 8 candidates')
+    expect(specialistPrompt).toContain(
+      'Zero candidates is valid when no blocking defect is proven',
+    )
+    expect(specialistPrompt).toContain(
+      'Eight candidates is a hard safety maximum, not a target',
+    )
+    expect(specialistPrompt).toContain(
+      'Different representation sizes are not inherently contradictory',
+    )
+    expect(specialistPrompt).toContain(
+      'explicitly takes the stricter value is already resolved',
+    )
+    expect(specialistPrompt).toContain(
+      'Problem must identify the implementation or acceptance result it blocks',
+    )
+    expect(specialistPrompt).toContain(
+      'Required outcome must be a neutral invariant',
+    )
+    expect(specialistPrompt).not.toContain(
+      'Review production usability, completeness, clarity, ownership, redundancy',
+    )
     expect(specialistPrompt).toContain(
       'Return exactly one contracted Markdown receipt as the visible final response',
     )
