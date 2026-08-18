@@ -20,6 +20,7 @@ import {
 import {
   acceptFoundationReviewWorkerTerminal,
   buildFoundationReviewDispatches,
+  foundationReviewNeedsRevisionMessage,
 } from './foundation-review-stage'
 import { createFoundationReviewState } from './foundation-review-state'
 import {
@@ -369,7 +370,10 @@ export function createDeliveryWorkflowController(input: {
                   phase: 'DOCUMENT_REVIEW',
                   documentStep: 'FOUNDATION_REVIEW',
                   status: 'needs_action',
-                  blockedReason: `Foundation review requires revision; see ${acceptedState.finalReportPath}`,
+                  blockedReason: await foundationReviewNeedsRevisionMessage({
+                    workspacePath: input.workspacePath,
+                    state: acceptedState,
+                  }),
                 }
         }
         next = await persist(next, 'foundation.review.report.accepted')
@@ -992,7 +996,10 @@ export function createDeliveryWorkflowController(input: {
                     phase: 'DOCUMENT_REVIEW',
                     documentStep: 'FOUNDATION_REVIEW',
                     status: 'needs_action',
-                    blockedReason: `Foundation review requires revision; see ${reviewRun.foundationReviewState.finalReportPath}`,
+                    blockedReason: await foundationReviewNeedsRevisionMessage({
+                      workspacePath: input.workspacePath,
+                      state: reviewRun.foundationReviewState,
+                    }),
                   },
               'foundation.review.verdict.resumed',
             )

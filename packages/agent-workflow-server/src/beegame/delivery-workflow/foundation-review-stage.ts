@@ -25,6 +25,7 @@ import {
   foundationReviewPath,
   foundationReviewSelectionPath,
   foundationReviewSelectionStagingPath,
+  readFoundationReviewArtifact,
 } from './foundation-review'
 import {
   assertFoundationReviewState,
@@ -67,6 +68,36 @@ export type FoundationReviewDispatch = {
     projection?: { path: string; digest: string; byteLength: number }
     candidateReferences?: string[]
   }
+}
+
+export async function foundationReviewNeedsRevisionMessage(input: {
+  workspacePath: string
+  state: FoundationReviewState
+}): Promise<string> {
+  const state = assertFoundationReviewState(input.state)
+  if (
+    state.status !== 'completed' ||
+    state.verdict !== 'NEEDS_REVISION' ||
+    !state.finalReportPath ||
+    !state.finalReportDigest
+  )
+    throw new Error(
+      'foundation review needs-revision message requires accepted final authority',
+    )
+  const accepted = await readFoundationReviewArtifact({
+    workspacePath: input.workspacePath,
+    path: state.finalReportPath,
+    expectedDigest: state.finalReportDigest,
+  })
+  if (
+    accepted.review.revision !== state.revision ||
+    accepted.review.verdict !== 'NEEDS_REVISION'
+  )
+    throw new Error(
+      'foundation review needs-revision message authority does not match state',
+    )
+  const count = accepted.review.conflicts.length
+  return `Foundation review found ${count} blocking ${count === 1 ? 'issue' : 'issues'} requiring revision`
 }
 
 function sha256(bytes: Buffer): string {

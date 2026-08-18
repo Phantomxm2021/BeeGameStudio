@@ -38,6 +38,7 @@ import {
 } from '../native-resource-content-tool'
 import {
   foundationReviewHasCommittedArtifactsAhead,
+  foundationReviewNeedsRevisionMessage,
   reconcileFoundationReviewStateFromArtifacts,
 } from './foundation-review-stage'
 
@@ -860,7 +861,10 @@ async function restoreAcceptedReviewAfterRoutingFailure(input: {
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
         status: 'needs_action',
-        blockedReason: `Foundation review requires revision; see ${reconciled.finalReportPath}`,
+        blockedReason: await foundationReviewNeedsRevisionMessage({
+          workspacePath: input.workspacePath,
+          state: reconciled,
+        }),
       }
 }
 

@@ -18,6 +18,7 @@ import {
   atomicCommitReceipt,
   buildFoundationReviewDispatches,
   foundationReviewHasCommittedArtifactsAhead,
+  foundationReviewNeedsRevisionMessage,
   reconcileFoundationReviewStateFromArtifacts,
 } from './foundation-review-stage'
 import { getGameDocumentContract } from './game-document-contracts'
@@ -750,6 +751,12 @@ describe('foundation review lane dispatch barrier', () => {
       verdict: 'NEEDS_REVISION',
       conflicts: [{ id: 'B1', title: 'core-design blocker' }],
     })
+    expect(
+      await foundationReviewNeedsRevisionMessage({
+        workspacePath: root,
+        state: completed,
+      }),
+    ).toBe('Foundation review found 1 blocking issue requiring revision')
 
     await expect(
       acceptFoundationReviewWorkerTerminal({

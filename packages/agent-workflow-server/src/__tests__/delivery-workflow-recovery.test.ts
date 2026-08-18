@@ -2562,8 +2562,8 @@ describe('delivery workflow recovery', () => {
         verdict: 'NEEDS_REVISION',
       },
     })
-    expect(recovered?.blockedReason).toContain(
-      recovered?.foundationReviewState?.finalReportPath,
+    expect(recovered?.blockedReason).toBe(
+      'Foundation review found 1 blocking issue requiring revision',
     )
   })
 
@@ -3923,17 +3923,17 @@ describe('delivery workflow recovery', () => {
       report.digest = createHash('sha256').update(report.role).digest('hex')
     }
     const final = review.reports.find(report => report.role === 'synthesis')!
-    const finalReportPath = final.path
+    const finalReportPath = `.beegame/reviews/foundation/${documentRevision}/review.json`
     const finalBytes = foundationRecoveryReviewJson({
       revision: documentRevision,
     })
     const finalReportDigest = createHash('sha256')
       .update(finalBytes)
       .digest('hex')
-    await mkdir(join(workspace, final.path, '..'), { recursive: true })
-    await writeFile(join(workspace, final.path), finalBytes)
+    await mkdir(join(workspace, finalReportPath, '..'), { recursive: true })
+    await writeFile(join(workspace, finalReportPath), finalBytes)
     final.status = 'completed'
-    final.digest = finalReportDigest
+    final.digest = createHash('sha256').update('selection').digest('hex')
     const completedNeedsRevisionRun = {
       ...initial,
       phase: 'DOCUMENT_REVIEW' as const,
@@ -3985,6 +3985,9 @@ describe('delivery workflow recovery', () => {
     })
     expect(dispatched).toEqual([])
     expect('foundationRemediationState' in persisted!).toBe(false)
+    expect(persisted?.blockedReason).toBe(
+      'Foundation review found 1 blocking issue requiring revision',
+    )
   })
 
   test('explicit retry resets only failed Foundation review work', () => {
