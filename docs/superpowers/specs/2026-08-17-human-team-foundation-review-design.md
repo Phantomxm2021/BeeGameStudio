@@ -92,36 +92,53 @@ review input metadata, not document authority or a second document format.
 
 ## Review Scope
 
-A worker reports a candidate only when it proves at least one of these defects:
+A worker reports a candidate only when the available evidence proves at least
+one of these blocking defects:
 
-1. incompatible gameplay rules, states, transitions, outcomes, or recovery;
-2. conflicting enumeration, cardinality, value, formula, unit, bound, or budget;
-3. missing or duplicated authority ownership;
-4. owner-to-consumer or cross-discipline interface mismatch;
-5. production, runtime, asset, UI, art, audio, accessibility, or acceptance
-   requirements that make the authorized game impossible or ambiguous to ship;
-6. an unresolved dependency or assumption that blocks a unique implementation
-   or acceptance result.
+1. two authoritative rules, states, values, formulas, units, bounds, budgets,
+   outcomes, or recovery paths cannot both be true;
+2. an implementation-required mapping between authoritative enumerations,
+   states, tiers, events, or interfaces is missing or incompatible;
+3. an implementation-required decision has no unique authority owner, or two
+   authorities both claim final ownership without precedence;
+4. an authorized delivery requirement cannot be mechanically accepted because
+   its required evidence or pass/fail condition is missing;
+5. authorized production, runtime, asset, UI, art, audio, accessibility, or
+   acceptance constraints cannot be satisfied together.
+
+Different representation sizes are not inherently contradictory. If a total,
+deterministic mapping exists, the candidate is non-blocking; if such a mapping
+is required but absent, the defect is the missing mapping, never a requirement
+to make both representations the same size. A subordinate or subsystem bound
+that explicitly takes the stricter value is already resolved and is not a
+conflict. Missing detail is blocking only when an existing implementation or
+acceptance decision cannot be completed without it.
 
 Workers ignore prose style, harmless redundancy, optional clarification,
 editorial quality, non-blocking polish, correct-content summaries, and requests
-for additional detail that do not change implementation or acceptance.
+for additional detail that do not change implementation or acceptance. They
+also reject their own preferred design, an invented value, a forced document
+winner, or replacement prose as a finding. Zero candidates is a valid and
+expected result when no blocking defect is proven.
 
 ## Markdown Receipt Contract
 
 The three discipline tasks emit immutable Markdown lane receipts. Each receipt
-is bound to one lane, the accepted source revision, and its projection digest,
-and contains at most eight highest-priority candidates. Evidence paths must
-belong to the lane's full documents or contracted projection.
+is bound to one lane, the accepted source revision, and its projection digest.
+Eight candidates is a hard safety maximum, not a target. Workers must not fill
+the allowance, and an empty receipt is valid. Evidence paths must belong to the
+lane's full documents or contracted projection.
 
 Each candidate is complete enough to become a remediation task without later
 model expansion. Its strict heading structure contains:
 
 - stable lane-local candidate reference;
-- problem;
+- problem, which states both the proven incompatibility or omission and the
+  implementation or acceptance result it blocks;
 - one or more evidence items, each with path, stable location, and bounded
   observation;
-- required outcome;
+- required outcome, expressed as an invariant that must become true without
+  selecting an unowned design, value, document winner, or replacement prose;
 - one or more changed path/action entries; distinct actions may target the
   same document;
 - one or more mechanically checkable acceptance conditions.
@@ -201,6 +218,22 @@ it does not create a non-blocking issue register. The selection receipt is
 invalid unless it accounts for all candidates, so synthesis cannot silently
 omit a finding.
 
+Before retaining a candidate, synthesis must establish all of the following
+from the bounded candidate records it received:
+
+1. the evidence supports the stated problem;
+2. the problem identifies a blocked implementation or acceptance result;
+3. no stated precedence, deterministic mapping, or explicit stricter bound
+   already resolves the observation;
+4. the required outcome is a neutral invariant rather than a selected design;
+5. the changes remain within the candidate's declared authority;
+6. the acceptance conditions are mechanically decidable.
+
+Failure of any admission condition requires `Reject`. `Duplicate` applies only
+when two candidates have the same underlying defect, required outcome, and
+change scope. Synthesis never repairs a deficient candidate, imports omitted
+source context, or promotes a candidate because its subject is important.
+
 ## Canonical Report and Terminal Verdict
 
 The deterministic local assembler produces the strict canonical `review.json`.
@@ -262,7 +295,10 @@ Foundation review uses the existing standard `tasks` projection and Task icons:
 The Task list shows the three discipline review tasks and one conflict
 synthesis task. The main card does not show receipt names, raw Markdown, raw
 JSON, revision, digest, evidence prose, or a separate conflict panel. Existing
-global usage UI remains the sole token and credit display.
+global usage UI remains the sole token and credit display. At the terminal
+state it may show only the canonical retained-conflict count and the existing
+action for opening the accepted result; individual conflicts never become a
+second Workflow Card task list.
 
 ## Failure Semantics
 
@@ -301,6 +337,15 @@ Automated and Chrome acceptance must prove:
   receive `StructuredOutput` or `--json-schema`;
 - each lane receipt includes the complete fields needed for deterministic
   canonical assembly;
+- zero-candidate lane receipts and an all-empty review produce `READY`;
+- the eight-candidate parser limit remains a safety bound and is never framed
+  as a target;
+- explicit precedence, a total deterministic mapping, and an explicit
+  stricter subordinate bound do not become retained conflicts;
+- a required but absent mapping is reported as a missing mapping rather than a
+  demand to equalize representation sizes;
+- every retained problem names the implementation or acceptance result it
+  blocks, and every required outcome is a neutral invariant;
 - synthesis receives only three accepted Markdown receipts and emits only the
   compact selection grammar;
 - every candidate is accounted for exactly once and duplicate targets are kept;
