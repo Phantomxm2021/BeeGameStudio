@@ -19,6 +19,9 @@ import {
 import {
   rebuildFoundationImpactedFacts,
   validateFoundationPatch,
+  admitFoundationSemanticRecheckResult,
+  buildFoundationSemanticRecheckPacket,
+  digestFoundationSemanticRecheckResult,
   type FoundationPatchValidationInput,
 } from './foundation-patch-validation'
 import type { AuditIssue } from './foundation-issue-registry'
@@ -378,5 +381,119 @@ describe('targeted foundation patch validation', () => {
     const result = validateFoundationPatch(base)
     expect(result.patchValidations.map(item => item.issueId)).toEqual(['a', 'b'])
     expect(result.patchValidations[0]?.changedSectionIds).toEqual(['rules_systems', 'vision'])
+  })
+})
+
+describe('semantic patch targeted recheck authority', () => {
+  const text = (sectionId: string, body: string) => `## ${sectionId}\n${body}`
+  const snapshot = () => {
+    const sourceText = text('core_loop', 'loop body')
+    const targetText = text('vision', 'updated vision')
+    const source: SectionRef = {
+      documentPath: 'docs/GDD.md', sectionId: 'core_loop', heading: 'core_loop',
+      startLine: 1, endLine: 2, digest: createHash('sha256').update(sourceText).digest('hex'),
+    }
+    const target: SectionRef = {
+      documentPath: 'docs/GDD.md', sectionId: 'vision', heading: 'vision',
+      startLine: 3, endLine: 4, digest: createHash('sha256').update(targetText).digest('hex'),
+    }
+    const operation: PatchOperation = {
+      kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'vision', issueIds: ['semantic-1'],
+      beforeDigest: 'b'.repeat(64), afterDigest: target.digest,
+    }
+    const issue: AuditIssue = {
+      id: 'semantic-1', severity: 'HIGH', type: 'semantic', source,
+      target, expected: 'coherent', actual: 'contradictory',
+      fixDocument: 'docs/GDD.md', fixSectionId: 'vision',
+    }
+    const fact: FoundationFact = {
+      key: 'game.players.max', value: 4, source: target,
+      evidence: { documentPath: target.documentPath, sectionId: target.sectionId, startLine: 4, endLine: 4, digest: target.digest },
+    }
+    return {
+      sourceText, targetText, source, target, operation, issue, fact,
+      sectionIndex: [source, target],
+      documents: { 'docs/GDD.md': `${sourceText}\n${targetText}\n` },
+      impact: analyzeFoundationImpact([operation]),
+    }
+  }
+
+  const packetInput = (input: ReturnType<typeof snapshot>) => {
+    const { sourceText: _sourceText, targetText: _targetText, fact: _fact, source: _source, target: _target, operation, ...value } = input
+    return { ...value, patchOperation: operation }
+  }
+
+  test('builds one immutable packet from the exact deduplicated current slices and related facts', () => {
+    const input = snapshot()
+    const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
+    expect(packet.issueId).toBe('semantic-1')
+    expect(packet.sections.map(section => `${section.ref.documentPath}#${section.ref.sectionId}`)).toEqual([
+      'docs/GDD.md#core_loop', 'docs/GDD.md#vision',
+    ])
+    expect(packet.sections.find(section => section.ref.sectionId === 'vision')?.text).toBe(input.targetText)
+    expect(packet.patchOperation).toEqual({ kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'vision', beforeDigest: 'b'.repeat(64), afterDigest: input.target.digest })
+    expect(packet.facts.map(fact => fact.key)).toEqual(['game.players.max'])
+    expect(Object.isFrozen(packet)).toBe(true)
+    expect(Object.isFrozen(packet.sections)).toBe(true)
+    expect(packet.packetDigest).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  test('rebinds changed issue references to the new digest but rejects drift in unchanged references', () => {
+    const input = snapshot()
+    const oldTarget = { ...input.target, digest: 'c'.repeat(64) }
+    const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), issue: { ...input.issue, target: oldTarget }, factStore: [input.fact] })
+    expect(packet.sections.find(section => section.ref.sectionId === 'vision')?.ref.digest).toBe(input.target.digest)
+    expect(() => buildFoundationSemanticRecheckPacket({
+      ...packetInput(input),
+      issue: { ...input.issue, source: { ...input.source, digest: 'c'.repeat(64) } },
+      factStore: [input.fact],
+    })).toThrow(/unchanged|digest|section/i)
+  })
+
+  test('is stable under input ordering and excludes other issue IDs and full documents', () => {
+    const input = snapshot()
+    const first = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
+    const reversed = buildFoundationSemanticRecheckPacket({
+      ...packetInput(input),
+      sectionIndex: [...input.sectionIndex].reverse(),
+      factStore: [input.fact],
+    })
+    expect(reversed.packetDigest).toBe(first.packetDigest)
+    expect(JSON.stringify(first)).not.toContain('semantic-2')
+    expect(JSON.stringify(first)).not.toContain(`${input.sourceText}\n${input.targetText}\n`)
+    expect(first.sections.some(section => section.text === input.targetText)).toBe(true)
+  })
+
+  test('admits only exact PASS/FAIL results bound to the packet and produces a stable result digest', () => {
+    const input = snapshot()
+    const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
+    const pass = admitFoundationSemanticRecheckResult(packet, { issueId: packet.issueId, packetDigest: packet.packetDigest, status: 'PASS' })
+    expect(pass).toEqual({ issueId: 'semantic-1', packetDigest: packet.packetDigest, status: 'PASS' })
+    expect(digestFoundationSemanticRecheckResult(pass)).toBe(digestFoundationSemanticRecheckResult({ ...pass }))
+    expect(() => admitFoundationSemanticRecheckResult(packet, { ...pass, status: 'UNDECIDABLE' })).toThrow(/status|PASS|FAIL/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, { ...pass, issueId: 'other' })).toThrow(/identity|issue/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, { ...pass, extra: true })).toThrow(/extra|shape|key/i)
+  })
+
+  test('rejects oversized packets and facts or sections outside the impact/current index', () => {
+    const input = snapshot()
+    expect(() => buildFoundationSemanticRecheckPacket({
+      ...packetInput(input),
+      documents: { 'docs/GDD.md': `${input.sourceText}\n${text('vision', 'x'.repeat(17 * 1024))}\n` },
+      sectionIndex: [input.source, { ...input.target, digest: createHash('sha256').update(text('vision', 'x'.repeat(17 * 1024))).digest('hex') }],
+      patchOperation: { ...input.operation, afterDigest: createHash('sha256').update(text('vision', 'x'.repeat(17 * 1024))).digest('hex') },
+      factStore: [input.fact],
+    })).toThrow(/16.*KiB|bytes|size/i)
+    expect(() => buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [{ ...input.fact, key: 'game.mechanics' as const }] })).toThrow(/impact|fact|scope/i)
+    expect(() => buildFoundationSemanticRecheckPacket({
+      ...packetInput(input),
+      issue: { ...input.issue, source: { ...input.source, sectionId: 'unknown' } },
+      factStore: [input.fact],
+    })).toThrow(/unknown|section|index/i)
+    expect(() => buildFoundationSemanticRecheckPacket({
+      ...packetInput(input),
+      patchOperation: { ...input.operation, sectionId: 'core_loop', afterDigest: input.source.digest },
+      factStore: [input.fact],
+    })).toThrow(/bind|target|operation|impact/i)
   })
 })

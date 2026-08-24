@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   buildFoundationFactPackets,
   extractSelectedFoundationFacts,
@@ -41,6 +42,7 @@ const VALID_ISSUE_TYPES = new Set<AuditIssue['type']>([
   'contract',
   'semantic',
 ])
+const TARGETED_PACKET_MAX_BYTES = 16 * 1024
 
 /** One service-owned verdict for one original deterministic issue. */
 export type PatchValidation = {
@@ -75,6 +77,34 @@ type FoundationPatchValidationResult = {
   semanticRecheckIssueIds: string[]
   newImpactedIssues: AuditIssue[]
 }
+
+export type FoundationSemanticRecheckPacketSection = Readonly<{
+  ref: Readonly<SectionRef>
+  text: string
+}>
+
+export type FoundationSemanticRecheckPacket = Readonly<{
+  issueId: string
+  expected: string
+  actual: string
+  sections: readonly FoundationSemanticRecheckPacketSection[]
+  patchOperation: Readonly<{
+    kind: PatchOperation['kind']
+    documentPath: FoundationDocumentPath
+    sectionId: string
+    beforeDigest?: string
+    afterDigest?: string
+  }>
+  facts: readonly FoundationFact[]
+  packetDigest: string
+}>
+
+export type FoundationSemanticRecheckResult = Readonly<{
+  issueId: string
+  packetDigest: string
+  status: 'PASS' | 'FAIL'
+  reasonCode?: string
+}>
 
 export type FoundationImpactedFactRebuild = {
   factStore: FoundationFactStore
@@ -371,6 +401,184 @@ function issueTouchesImpact(
     )
   }
   return false
+}
+
+function targetedCanonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(targetedCanonical).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => compareStable(left, right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${targetedCanonical(item)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+function targetedDigest(value: unknown): string {
+  return createHash('sha256').update(targetedCanonical(value)).digest('hex')
+}
+
+function rawTargetedDigest(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function deepFreezeTargeted<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value)
+    for (const child of Object.values(value as Record<string, unknown>)) deepFreezeTargeted(child)
+  }
+  return value
+}
+
+function documentValue(input: DocumentInput, path: string): string | undefined {
+  return input instanceof Map ? input.get(path) : (input as Record<string, string>)[path]
+}
+
+function sectionText(input: DocumentInput, ref: SectionRef): string {
+  const document = documentValue(input, ref.documentPath)
+  if (typeof document !== 'string') throw new Error(`targeted semantic packet document is missing: ${ref.documentPath}`)
+  if (!Number.isInteger(ref.startLine) || !Number.isInteger(ref.endLine) || ref.startLine < 1 || ref.endLine < ref.startLine)
+    throw new Error(`targeted semantic packet section line bounds are invalid: ${sectionKey(ref)}`)
+  const lines = document.split('\n')
+  if (ref.endLine > lines.length + 1) throw new Error(`targeted semantic packet section line bounds are invalid: ${sectionKey(ref)}`)
+  return lines.slice(ref.startLine - 1, ref.endLine).join('\n')
+}
+
+function validateTargetedIssue(issue: AuditIssue): void {
+  if (!issue || typeof issue !== 'object' || Array.isArray(issue)) throw new Error('targeted semantic issue is invalid')
+  const expected = ['actual', 'expected', 'fixDocument', 'fixSectionId', 'id', 'reasonCode', 'severity', 'source', 'target', 'type']
+    .filter(key => key === 'target' ? issue.target !== undefined : key === 'reasonCode' ? issue.reasonCode !== undefined : true)
+    .sort(compareStable)
+  assertExactKeys(issue as unknown as Record<string, unknown>, expected, 'targeted semantic issue')
+  if (
+    issue.type !== 'semantic' || typeof issue.id !== 'string' || !issue.id.trim() ||
+    typeof issue.expected !== 'string' || !issue.expected.trim() ||
+    typeof issue.actual !== 'string' || !issue.actual.trim() ||
+    typeof issue.fixDocument !== 'string' || typeof issue.fixSectionId !== 'string' || !issue.fixSectionId.trim()
+  ) throw new Error('targeted semantic issue fields are invalid')
+  if (issue.reasonCode !== undefined && (typeof issue.reasonCode !== 'string' || !issue.reasonCode.trim()))
+    throw new Error('targeted semantic issue reasonCode is invalid')
+}
+
+function currentTargetedSection(
+  sectionIndex: readonly SectionRef[],
+  issueRef: SectionRef,
+  changedKey: string,
+  documents: DocumentInput,
+): FoundationSemanticRecheckPacketSection {
+  const current = sectionIndex.find(ref => sectionKey(ref) === sectionKey(issueRef))
+  if (!current) throw new Error(`targeted semantic packet section is unknown: ${sectionKey(issueRef)}`)
+  const text = sectionText(documents, current)
+  assertDigest(current.digest, `targeted semantic packet section digest: ${sectionKey(current)}`)
+  if (rawTargetedDigest(text) !== current.digest) throw new Error(`targeted semantic packet section bytes do not match digest: ${sectionKey(current)}`)
+  if (sectionKey(current) !== changedKey && current.digest !== issueRef.digest)
+    throw new Error(`targeted semantic packet unchanged section digest drift: ${sectionKey(current)}`)
+  return Object.freeze({ ref: { ...current }, text })
+}
+
+/** Builds the sole packet authority for one admitted semantic issue and its bound operation. */
+export function buildFoundationSemanticRecheckPacket(input: {
+  issue: AuditIssue
+  patchOperation: PatchOperation
+  sectionIndex: readonly SectionRef[]
+  documents: DocumentInput
+  impact: FoundationImpactAnalysis
+  factStore: readonly FoundationFact[]
+}): FoundationSemanticRecheckPacket {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('targeted semantic packet input is invalid')
+  assertExactKeys(input as unknown as Record<string, unknown>, ['documents', 'factStore', 'impact', 'issue', 'patchOperation', 'sectionIndex'], 'targeted semantic packet input')
+  validateTargetedIssue(input.issue)
+  const operationImpact = validateImpact(input.impact, [input.patchOperation])
+  if (!input.patchOperation.issueIds.includes(input.issue.id)) throw new Error('targeted semantic packet issue is not bound to PatchOperation')
+  if (input.patchOperation.documentPath !== input.issue.fixDocument || input.patchOperation.sectionId !== input.issue.fixSectionId)
+    throw new Error('targeted semantic packet PatchOperation does not bind the issue fix target')
+  if (!Array.isArray(input.sectionIndex) || input.sectionIndex.length === 0) throw new Error('targeted semantic packet requires a full SectionIndex')
+  const indexKeys = new Set<string>()
+  for (const ref of input.sectionIndex) {
+    if (!ref || typeof ref !== 'object' || typeof ref.documentPath !== 'string' || typeof ref.sectionId !== 'string' || typeof ref.heading !== 'string' || !Number.isInteger(ref.startLine) || !Number.isInteger(ref.endLine))
+      throw new Error('targeted semantic packet SectionIndex contains an invalid section')
+    const key = sectionKey(ref)
+    if (indexKeys.has(key)) throw new Error(`targeted semantic packet SectionIndex contains duplicate section: ${key}`)
+    indexKeys.add(key)
+  }
+  const changedKey = sectionKey(input.patchOperation)
+  const changed = input.sectionIndex.find(ref => sectionKey(ref) === changedKey)
+  if (!changed) throw new Error('targeted semantic packet changed section is not in the rebuilt SectionIndex')
+  if (input.patchOperation.kind !== 'DELETE' && input.patchOperation.afterDigest !== changed.digest)
+    throw new Error('targeted semantic packet PatchOperation afterDigest is stale')
+
+  const sectionRefs: SectionRef[] = [
+    input.issue.source,
+    ...(input.issue.target ? [input.issue.target] : []),
+  ]
+  const fixRef = input.sectionIndex.find(ref => ref.documentPath === input.issue.fixDocument && ref.sectionId === input.issue.fixSectionId)
+  if (!fixRef) throw new Error('targeted semantic packet fix section is not in the rebuilt SectionIndex')
+  sectionRefs.push(fixRef)
+  const uniqueRefs = new Map<string, SectionRef>()
+  for (const ref of sectionRefs) {
+    const key = sectionKey(ref)
+    if (!uniqueRefs.has(key)) uniqueRefs.set(key, ref)
+  }
+  const sections = [...uniqueRefs.values()]
+    .map(ref => currentTargetedSection(input.sectionIndex, ref, changedKey, input.documents))
+    .sort((left, right) => compareStable(sectionKey(left.ref), sectionKey(right.ref)))
+
+  const normalizedFacts = createFoundationFactStore(input.factStore)
+  const factKeys = new Set(operationImpact.factKeys)
+  const facts = normalizedFacts
+    .filter(fact => factKeys.has(fact.key as FoundationFactKey))
+    .map(fact => ({ ...fact, source: { ...fact.source }, evidence: { ...fact.evidence } }))
+    .sort((left, right) => compareStable(left.key, right.key))
+  const patchOperation = {
+    kind: input.patchOperation.kind,
+    documentPath: input.patchOperation.documentPath,
+    sectionId: input.patchOperation.sectionId,
+    ...(input.patchOperation.beforeDigest ? { beforeDigest: input.patchOperation.beforeDigest } : {}),
+    ...(input.patchOperation.afterDigest ? { afterDigest: input.patchOperation.afterDigest } : {}),
+  }
+  const body = {
+    issueId: input.issue.id,
+    expected: input.issue.expected,
+    actual: input.issue.actual,
+    sections,
+    patchOperation,
+    facts,
+  }
+  const packetDigest = targetedDigest(body)
+  const packet = { ...body, packetDigest }
+  const bytes = Buffer.byteLength(targetedCanonical(packet), 'utf8')
+  if (bytes > TARGETED_PACKET_MAX_BYTES) throw new Error(`targeted semantic packet exceeds ${TARGETED_PACKET_MAX_BYTES} bytes`)
+  return deepFreezeTargeted(packet)
+}
+
+/** Admits exactly one PASS/FAIL result for the packet; no issue compilation occurs here. */
+export function admitFoundationSemanticRecheckResult(
+  packet: FoundationSemanticRecheckPacket,
+  input: unknown,
+): FoundationSemanticRecheckResult {
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet)) throw new Error('targeted semantic packet is invalid')
+  const packetValue = packet as unknown as Record<string, unknown>
+  assertExactKeys(packetValue, ['actual', 'expected', 'facts', 'issueId', 'packetDigest', 'patchOperation', 'sections'], 'targeted semantic packet')
+  const { packetDigest: suppliedDigest, ...packetBody } = packetValue
+  if (suppliedDigest !== targetedDigest(packetBody)) throw new Error('targeted semantic packet digest is invalid')
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('targeted semantic result is invalid')
+  const value = input as Record<string, unknown>
+  const expected = ['issueId', 'packetDigest', 'reasonCode', 'status'].filter(key => key === 'reasonCode' ? value.reasonCode !== undefined : true)
+  assertExactKeys(value, expected, 'targeted semantic result')
+  if (value.issueId !== packet.issueId) throw new Error('targeted semantic result issue identity does not match packet')
+  if (value.packetDigest !== packet.packetDigest) throw new Error('targeted semantic result packet identity does not match packet')
+  if (value.status !== 'PASS' && value.status !== 'FAIL') throw new Error('targeted semantic result status must be PASS or FAIL')
+  if (value.reasonCode !== undefined && (typeof value.reasonCode !== 'string' || !value.reasonCode.trim())) throw new Error('targeted semantic result reasonCode is invalid')
+  return deepFreezeTargeted({
+    issueId: packet.issueId,
+    packetDigest: packet.packetDigest,
+    status: value.status,
+    ...(value.reasonCode !== undefined ? { reasonCode: value.reasonCode as string } : {}),
+  })
+}
+
+export function digestFoundationSemanticRecheckResult(value: FoundationSemanticRecheckResult): string {
+  return targetedDigest(value)
 }
 
 /**
