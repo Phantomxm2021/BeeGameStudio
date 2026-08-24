@@ -9,10 +9,10 @@ import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun, type DeliveryWorkerPo
 import { createBeeGameDeliveryWorkerPort } from '../delivery-worker-session-port'
 import { getGameDocumentContract } from './game-document-contracts'
 import { loadFoundationSemanticReview } from './foundation-audit-artifacts'
-import { foundationFactDefinition } from './foundation-fact-definitions'
+import { FOUNDATION_FACT_CATALOG, foundationFactDefinition } from './foundation-fact-definitions'
 import type { FactValue } from './foundation-fact-store'
 import type { AuditIssue } from './foundation-issue-registry'
-import { foundationRevisionStagePath, loadFoundationRevisionPacket, revisionTaskReceiptTerminalDigest } from './foundation-revision-stage'
+import { foundationRevisionPacketPath, foundationRevisionStagePath, loadFoundationRevisionPacket, revisionTaskReceiptTerminalDigest } from './foundation-revision-stage'
 
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
@@ -301,12 +301,12 @@ describe('foundation fact runtime controller integration', () => {
     }
   }
 
-  async function completeSemantic(controller: ReturnType<typeof createDeliveryWorkflowController>, taskId: string, outcome: 'PASS' | 'ISSUES' | 'UNDECIDABLE') {
+  async function completeSemantic(controller: ReturnType<typeof createDeliveryWorkflowController>, taskId: string, outcome: 'PASS' | 'ISSUES' | 'UNDECIDABLE', issueSectionKey?: string) {
     const snapshot = await controller.store.load()
     const task = snapshot!.foundationAuditState!.tasks.find(candidate => candidate.taskId === taskId)!
     const dispatchId = task.dispatch!.dispatchId
     const packet = task.dispatch!.request!.contract.packet as { sections: Array<{ sectionKey: string }> }
-    const sectionKey = packet.sections[0]!.sectionKey
+    const sectionKey = issueSectionKey ?? packet.sections[0]!.sectionKey
     await controller.store.addWorkflowUsage(snapshot!.runId, { input_tokens: 2, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 3, total_tokens: 5 }, dispatchId)
     await controller.dispatcher.completeDispatch(dispatchId, {
       workerType: 'foundation-semantic-reviewer', status: 'completed', runId: snapshot!.runId, dispatchId, taskId,
@@ -333,17 +333,73 @@ describe('foundation fact runtime controller integration', () => {
     return current!
   }
 
-  async function makeRevisionTerminal(workspacePath: string, run: DeliveryRun, task: FoundationRevisionDocumentTask) {
+  async function driveToFactOwnerRevisionIssue(controller: ReturnType<typeof createDeliveryWorkflowController>) {
+    await finishFacts(controller, consistentFactValue)
+    const targetFact = FOUNDATION_FACT_CATALOG.find(fact => fact.key === 'game.boss.count')!
+    const documentIdByPath: Record<string, string> = {
+      'docs/GDD.md': 'GDD',
+      'docs/LEVEL_SCENE_DESIGN.md': 'LEVEL',
+      'docs/BALANCE_DESIGN.md': 'BALANCE',
+      'docs/TECHNICAL_DESIGN.md': 'TECHNICAL',
+      'docs/ART_DIRECTION.md': 'ART',
+      'docs/UI_UX_SPEC.md': 'UI',
+      'docs/AUDIO_DESIGN.md': 'AUDIO',
+      'docs/ASSET_PLAN.md': 'ASSET',
+    }
+    let current = await controller.store.load()
+    let issued = false
+    while (current?.foundationAuditState?.status === 'semantic_review') {
+      const running = current.foundationAuditState.tasks.filter(task => task.kind === 'semantic' && task.status === 'running')
+      if (!running.length) { await controller.resume(current); current = await controller.store.load(); continue }
+      await Promise.all(running.map(async task => {
+        const packet = task.dispatch!.request!.contract.packet as { sections: Array<{ sectionKey: string }> }
+        const targetSection = packet.sections.find(section => {
+          return `${documentIdByPath[targetFact.owner.documentPath]}#${targetFact.owner.sectionId}` === section.sectionKey
+        })
+        const issue = !issued && targetSection !== undefined
+        if (issue) issued = true
+        await completeSemantic(controller, task.taskId, issue ? 'ISSUES' : 'PASS', targetSection?.sectionKey)
+      }))
+      current = await controller.store.load()
+    }
+    if (!issued) throw new Error('semantic packet did not contain the game.boss.count owner section')
+    return { run: current!, targetFact }
+  }
+
+  function ownerFactText(factKey: string, override?: FactValue): string {
+    const target = FOUNDATION_FACT_CATALOG.find(fact => fact.key === factKey)!
+    const ownerFacts = FOUNDATION_FACT_CATALOG.filter(fact => fact.owner.documentPath === target.owner.documentPath && fact.owner.sectionId === target.owner.sectionId)
+    if (!ownerFacts.length) throw new Error(`fact owner has no catalog keys: ${factKey}`)
+    return ownerFacts.map(fact => `${fact.key}: ${JSON.stringify(fact.key === factKey && override !== undefined ? override : consistentFactValue(fact.key))}`).join('\n')
+  }
+
+  async function makeRevisionTerminal(workspacePath: string, run: DeliveryRun, task: FoundationRevisionDocumentTask, replacement = 'revised prose') {
     const request = task.dispatch!.request!
     const packet = await loadFoundationRevisionPacket({ workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, documentPath: task.documentPath, packetDigest: task.packetDigest }) as { sections: Array<{ sectionId: string; startLine: number; endLine: number; text: string }> }
     const section = packet.sections.find(candidate => candidate.sectionId === task.sectionIds[0])!
     const stageAbsolute = join(workspacePath, task.stagedPath)
     const stagedLines = (await readFile(stageAbsolute, 'utf8')).split('\n')
-    stagedLines.splice(section.startLine - 1, section.endLine - section.startLine, ...section.text.replace('unresolved prose', 'revised prose').split('\n'))
+    stagedLines.splice(section.startLine - 1, section.endLine - section.startLine, ...section.text.replace('unresolved prose', replacement).split('\n'))
     await writeFile(stageAbsolute, stagedLines.join('\n'))
     const stagedBytes = await readFile(stageAbsolute)
     const receiptWithoutTerminal = { taskId: task.taskId, round: task.round, documentPath: task.documentPath, issueIds: [...task.issueIds], baseDocumentDigest: task.baseDocumentDigest, stagedDocumentDigest: createHash('sha256').update(stagedBytes).digest('hex'), changedSectionIds: [task.sectionIds[0]!], stagedPath: task.stagedPath }
     return { workerType: 'foundation-document-reviser' as const, status: 'completed' as const, runId: run!.runId, dispatchId: request.dispatchId!, taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, round: task.round, documentPath: task.documentPath, receipt: { ...receiptWithoutTerminal, terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal) } }
+  }
+
+  async function completeFactOwnerRevision(controller: ReturnType<typeof createDeliveryWorkflowController>, workspacePath: string, replacement = 'revised prose') {
+    const { run: current, targetFact } = await driveToFactOwnerRevisionIssue(controller)
+    const documentTask = current.foundationRevisionState!.tasks.find(task => task.kind === 'document-revision')! as FoundationRevisionDocumentTask
+    expect(documentTask.documentPath).toBe(targetFact.owner.documentPath)
+    expect(documentTask.sectionIds).toContain(targetFact.owner.sectionId)
+    const terminal = await makeRevisionTerminal(workspacePath, current, documentTask, replacement)
+    await controller.dispatcher.completeDispatch(documentTask.dispatch!.dispatchId, terminal)
+    return { targetFact, rebuilding: (await controller.store.load())! }
+  }
+
+  async function driveToRevisionFactPlanning(controller: ReturnType<typeof createDeliveryWorkflowController>, workspacePath: string, replacement = 'revised prose') {
+    const { targetFact, rebuilding } = await completeFactOwnerRevision(controller, workspacePath, replacement)
+    await controller.resume(rebuilding!)
+    return { targetFact, rebuilding, current: await controller.store.load() }
   }
 
   test('completes all ten semantic PASS checks into one atomic review and audit_ready', async () => {
@@ -539,6 +595,169 @@ describe('foundation fact runtime controller integration', () => {
       expect(completed.status).toBe('completed')
       expect(completed.receipt).toEqual(terminal.receipt)
       expect(completed.terminalDigest).toBe(terminal.receipt.terminalDigest)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('after document receipts, zero unresolved impacted facts advances through validating to publishing', async () => {
+    const { workspacePath, controller, requests } = await preparedController()
+    try {
+      const { current: currentValue } = await driveToRevisionFactPlanning(controller, workspacePath, ownerFactText('game.boss.count'))
+      const current = currentValue!
+      expect(current.foundationRevisionState?.phase).toBe('validating')
+      expect(current.foundationRevisionState?.tasks.some(task => task.kind === 'impacted-facts')).toBe(false)
+      expect(requests.filter(request => request.workerType === 'foundation-fact-extractor')).toHaveLength(8)
+      await controller.resume(current)
+      const validated = await controller.store.load()
+      expect(validated?.foundationRevisionState?.phase).toBe('publishing')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('plans one unresolved impacted fact packet, dispatches it, and persists its completed receipt', async () => {
+    const { workspacePath, controller, requests } = await preparedController()
+    const originalCommit = controller.store.commit.bind(controller.store)
+    let planningCrashObserved = false
+    let plannedAtCrash: { taskId: string; packetPath: string; packetDigest: string; bytes: string } | undefined
+    try {
+      const { rebuilding } = await completeFactOwnerRevision(controller, workspacePath)
+      const factWorkersBefore = requests.filter(request => request.workerType === 'foundation-fact-extractor').length
+      controller.store.commit = async (...args) => {
+        const next = args[0] as DeliveryRun
+        const event = args[1] as { type?: string }
+        const planned = next.foundationRevisionState?.tasks.find(task => task.kind === 'impacted-facts')
+        if (!planningCrashObserved && event.type === 'foundation.revision.impacted_facts.planned' && planned) {
+          plannedAtCrash = { taskId: planned.taskId, packetPath: planned.packetPath, packetDigest: planned.packetDigest, bytes: (await readFile(join(workspacePath, planned.packetPath))).toString() }
+          planningCrashObserved = true
+          throw new Error('simulated impacted planning crash')
+        }
+        return originalCommit(...args)
+      }
+      await controller.resume(rebuilding).catch(() => undefined)
+      expect(planningCrashObserved).toBe(true)
+      const crashed = await controller.store.load()
+      expect(crashed?.foundationRevisionState?.phase).toBe('rebuilding_facts')
+      expect(crashed?.foundationRevisionState?.tasks.some(task => task.kind === 'impacted-facts')).toBe(false)
+      controller.store.commit = originalCommit
+      await controller.resume(crashed!)
+      const replayedPlanning = await controller.store.load()
+      const impacted = replayedPlanning!.foundationRevisionState?.tasks.filter(task => task.kind === 'impacted-facts') ?? []
+      expect(impacted).toHaveLength(1)
+      const task = impacted[0]!
+      expect(plannedAtCrash).toBeDefined()
+      if (!plannedAtCrash) return
+      const stableTask = replayedPlanning!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === plannedAtCrash!.taskId && candidate.kind === 'impacted-facts')!
+      expect(stableTask.taskId).toBe(plannedAtCrash.taskId)
+      expect(stableTask.packetPath).toBe(plannedAtCrash.packetPath)
+      expect(stableTask.packetDigest).toBe(plannedAtCrash.packetDigest)
+      expect(stableTask.packetPath).toBe(foundationRevisionPacketPath(stableTask.revision, stableTask.round, stableTask.taskId))
+      expect(stableTask.dispatch?.status).toBe('running')
+      const packet = JSON.parse((await readFile(join(workspacePath, stableTask.packetPath))).toString()) as { revision: string; packetDigest: string; keys: string[] }
+      expect(packet.revision).toBe(stableTask.revision)
+      expect(packet.packetDigest).toBe(stableTask.packetDigest)
+      expect(stableTask.dispatch?.request?.contract).not.toHaveProperty('packet')
+      expect((await readFile(join(workspacePath, stableTask.packetPath))).toString()).toBe(plannedAtCrash.bytes)
+      expect(requests.filter(request => request.workerType === 'foundation-fact-extractor')).toHaveLength(factWorkersBefore + 1)
+      const snapshot = await controller.store.load()
+      await controller.dispatcher.completeDispatch(stableTask.dispatch!.dispatchId, {
+        workerType: 'foundation-fact-extractor',
+        status: 'completed',
+        runId: snapshot!.runId,
+        dispatchId: stableTask.dispatch!.dispatchId,
+        taskId: stableTask.taskId,
+        revision: stableTask.revision,
+        packetDigest: stableTask.packetDigest,
+        results: packet.keys.map(key => ({ key, status: 'absent' })),
+      })
+      const completed = await controller.store.load()
+      const admitted = completed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === stableTask.taskId)!
+      expect(admitted.status).toBe('completed')
+      expect(admitted.kind).toBe('impacted-facts')
+      expect('receiptPath' in admitted && admitted.receiptPath).toBeTruthy()
+      expect(requests.filter(request => request.workerType === 'foundation-fact-extractor')).toHaveLength(factWorkersBefore + 1)
+      expect(completed!.foundationRevisionState!.phase).toBe('validating')
+    } finally { controller.store.commit = originalCommit; await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('a persisted impacted-fact terminal replay does not start a second worker after handler failure', async () => {
+    const { workspacePath, controller, requests } = await preparedController()
+    const originalCommit = controller.store.commit.bind(controller.store)
+    let terminalPersisted = false
+    let failAdmission = true
+    controller.store.commit = async (...args) => {
+      const next = args[0] as DeliveryRun
+      const task = next.foundationRevisionState?.tasks.find(candidate => candidate.kind === 'impacted-facts')
+      if (task?.status === 'completed' && task.dispatch?.terminalResult && !task.receiptPath && !terminalPersisted) {
+        terminalPersisted = true
+        return originalCommit(...args)
+      }
+      if (failAdmission && terminalPersisted && task?.status === 'completed' && task.dispatch?.terminalResult && !task.receiptPath) {
+        failAdmission = false
+        throw new Error('simulated impacted fact receipt handler crash')
+      }
+      return originalCommit(...args)
+    }
+    try {
+      const { current: currentValue } = await driveToRevisionFactPlanning(controller, workspacePath)
+      const current = currentValue!
+      const task = current.foundationRevisionState?.tasks.find(candidate => candidate.kind === 'impacted-facts')!
+      expect(task).toBeDefined()
+      if (!task) return
+      const packet = JSON.parse((await readFile(join(workspacePath, task.packetPath))).toString()) as { keys: string[]; packetDigest: string }
+      expect(packet.packetDigest).toBe(task.packetDigest)
+      await expect(controller.dispatcher.completeDispatch(task!.dispatch!.dispatchId, {
+        workerType: 'foundation-fact-extractor', status: 'completed', runId: current.runId, dispatchId: task!.dispatch!.dispatchId, taskId: task!.taskId, revision: task!.revision, packetDigest: task!.packetDigest, results: packet.keys.map(key => ({ key, status: 'absent' })),
+      })).rejects.toThrow(/handler|crash/i)
+      const retryable = await controller.store.load()
+      const failed = retryable!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task!.taskId)!
+      expect(failed.status).not.toBe('completed')
+      expect(failed.dispatch?.terminalResult).toBeDefined()
+      expect('receiptPath' in failed && failed.receiptPath).toBeFalsy()
+      const before = requests.filter(request => request.workerType === 'foundation-fact-extractor').length
+      controller.store.commit = originalCommit
+      await controller.resume(retryable!)
+      const replayed = await controller.store.load()
+      expect(replayed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task!.taskId)!.status).toBe('completed')
+      expect(requests.filter(request => request.workerType === 'foundation-fact-extractor')).toHaveLength(before)
+    } finally { controller.store.commit = originalCommit; await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('stale staged bytes fail closed from validating and never cross the publishing boundary', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      const { run: current } = await driveToFactOwnerRevisionIssue(controller)
+      const task = current.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'document-revision')! as FoundationRevisionDocumentTask
+      const terminal = await makeRevisionTerminal(workspacePath, current, task)
+      await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, terminal)
+      const rebuilding = await controller.store.load()
+      const canonicalBefore = await readFile(join(workspacePath, task.documentPath), 'utf8')
+      const stagedAbsolute = join(workspacePath, task.stagedPath)
+      await writeFile(stagedAbsolute, `${await readFile(stagedAbsolute, 'utf8')}\nstale bytes\n`)
+      await controller.resume(rebuilding!)
+      const failed = await controller.store.load()
+      expect(await readFile(join(workspacePath, task.documentPath), 'utf8')).toBe(canonicalBefore)
+      expect(failed?.status).toBe('needs_action')
+      expect(failed?.foundationRevisionState?.phase).toBe('validating')
+      expect(failed?.foundationRevisionState?.phase).not.toBe('publishing')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('deterministic new impacted issues block publishing after a real validating transition', async () => {
+    const { workspacePath, controller, requests } = await preparedController()
+    try {
+      const canonicalBefore = await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(workspacePath, path), 'utf8')] as const))
+      const { rebuilding } = await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count', 2))
+      await controller.resume(rebuilding)
+      const validating = await controller.store.load()
+      expect(validating?.status).toBe('running')
+      expect(validating?.foundationRevisionState?.phase).toBe('validating')
+      const semanticWorkersBefore = requests.filter(request => request.workerType === 'foundation-semantic-reviewer').length
+      await controller.resume(validating!)
+      const failed = await controller.store.load()
+      expect(failed?.status).toBe('needs_action')
+      expect(failed?.foundationRevisionState?.phase).toBe('validating')
+      expect(failed?.foundationRevisionState?.publication).toBeUndefined()
+      expect(failed?.blockedReason).toMatch(/impact|validation|deterministic|issue/i)
+      expect(requests.filter(request => request.workerType === 'foundation-semantic-reviewer')).toHaveLength(semanticWorkersBefore)
+      for (const [path, contents] of canonicalBefore) expect(await readFile(join(workspacePath, path), 'utf8')).toBe(contents)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
