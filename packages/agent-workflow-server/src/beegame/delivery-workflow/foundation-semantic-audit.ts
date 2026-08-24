@@ -6,15 +6,18 @@ import {
   isFoundationFactKey,
   type FoundationFactKey,
 } from './foundation-fact-definitions'
-import type { FoundationFact } from './foundation-fact-store'
-import type { SectionRef } from './foundation-section-index'
+import {
+  createFoundationFactStore,
+  digestFactStore,
+  type FoundationFact,
+} from './foundation-fact-store'
+import { digestSectionIndex, type SectionRef } from './foundation-section-index'
 import type { AuditIssue, AuditIssueDraft } from './foundation-issue-registry'
 import type { FoundationDocumentPath } from './types'
 
 export const FOUNDATION_SEMANTIC_AUDIT_VERSION = 'foundation-semantic.v1' as const
 export const SEMANTIC_PACKET_MAX_BYTES = 16 * 1024
 export const SEMANTIC_OUTPUT_MAX_TOKENS = 768
-export const SEMANTIC_OUTPUT_MAX_BYTES = SEMANTIC_OUTPUT_MAX_TOKENS * 4
 
 export type FoundationSemanticDocumentId =
   | 'GDD'
@@ -167,6 +170,9 @@ function validateDeclaration(checkValue: FoundationSemanticCheck, index: number)
 export function validateFoundationSemanticManifest(input: unknown): FoundationSemanticManifest {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('semantic manifest must be an object')
   const value = input as Partial<FoundationSemanticManifest>
+  const manifestKeys = Object.keys(value).sort()
+  if (JSON.stringify(manifestKeys) !== JSON.stringify(['catalogVersion', 'checks', 'digest', 'version']))
+    throw new Error('semantic manifest has unknown or missing fields')
   if (value.version !== FOUNDATION_SEMANTIC_AUDIT_VERSION || value.catalogVersion !== FOUNDATION_FACT_CATALOG_VERSION)
     throw new Error('semantic manifest version/catalog is invalid')
   if (!Array.isArray(value.checks) || value.checks.length !== 10) throw new Error('semantic manifest must contain exactly ten checks')
@@ -179,9 +185,11 @@ export function validateFoundationSemanticManifest(input: unknown): FoundationSe
   if (ids.size !== expectedByCheck.size) throw new Error('semantic manifest contains an orphan check')
   const withoutDigest = { version: value.version, catalogVersion: value.catalogVersion, checks: value.checks }
   const computed = digestManifest(withoutDigest)
-  if (value.digest !== undefined && value.digest !== computed && value.checks === (FOUNDATION_SEMANTIC_CHECKS as unknown))
-    throw new Error('semantic manifest digest is invalid')
-  return Object.freeze({ ...withoutDigest, digest: computed }) as FoundationSemanticManifest
+  if (value.digest !== FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest || computed !== FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest)
+    throw new Error('semantic manifest declaration or digest is not the service authority')
+  if (canonical(value.checks) !== canonical(FOUNDATION_SEMANTIC_CHECKS))
+    throw new Error('semantic manifest declaration differs from service authority')
+  return Object.freeze({ ...withoutDigest, digest: value.digest }) as FoundationSemanticManifest
 }
 
 export type FoundationSemanticPacketInput = {
@@ -189,9 +197,9 @@ export type FoundationSemanticPacketInput = {
   checkId: string
   sectionIndex: readonly SectionRef[]
   sectionBytes: ReadonlyMap<string, string> | Record<string, string>
-  facts: readonly FoundationFact[]
-  receipts: readonly Readonly<Record<string, unknown>>[]
+  factStore: readonly FoundationFact[]
   deterministicIssuePrefix: readonly AuditIssue[]
+  deterministicReviewDigest: string
 }
 
 export type FoundationSemanticPacket = Readonly<{
@@ -199,11 +207,11 @@ export type FoundationSemanticPacket = Readonly<{
   revision: string
   manifestDigest: string
   checkId: string
-  sections: readonly Readonly<{ ref: SectionRef; bytes: string }>[]
+  sections: readonly Readonly<{ sectionKey: string; ref: SectionRef; bytes: string }>[]
   facts: readonly FoundationFact[]
-  receipts: readonly Readonly<Record<string, unknown>>[]
   deterministicIssuePrefix: readonly AuditIssue[]
-  factDigest: string
+  fullSectionIndexDigest: string
+  fullFactStoreDigest: string
   deterministicReviewDigest: string
   identity: string
   bytes: number
@@ -217,6 +225,12 @@ function mapValue(input: ReadonlyMap<string, string> | Record<string, string>, k
 
 function sectionRefIdentity(ref: SectionRef): string {
   return `${ref.documentPath}#${ref.sectionId}`
+}
+
+function modelSectionKey(ref: SectionRef): string {
+  const documentId = Object.entries(documentPathById).find(([, path]) => path === ref.documentPath)?.[0]
+  if (!documentId) throw new Error(`semantic section has no canonical model key: ${ref.documentPath}`)
+  return `${documentId}#${ref.sectionId}`
 }
 
 function exactSection(index: readonly SectionRef[], path: FoundationDocumentPath, sectionId: string): SectionRef {
@@ -233,6 +247,7 @@ function bodyValue(value: unknown, body: string): boolean {
 
 export function buildFoundationSemanticPacket(input: FoundationSemanticPacketInput): FoundationSemanticPacket {
   if (!input.revision.trim()) throw new Error('semantic packet revision is required')
+  if (!/^[a-f0-9]{64}$/.test(input.deterministicReviewDigest)) throw new Error('deterministic review digest is required')
   const manifest = validateFoundationSemanticManifest(FOUNDATION_SEMANTIC_AUDIT_MANIFEST)
   const declaration = expectedByCheck.get(input.checkId)
   if (!declaration) throw new Error(`unknown or caller-supplied semantic check: ${input.checkId}`)
@@ -242,27 +257,23 @@ export function buildFoundationSemanticPacket(input: FoundationSemanticPacketInp
     const bytes = mapValue(input.sectionBytes, sectionRefIdentity(ref))
     if (typeof bytes !== 'string') throw new Error(`semantic packet section bytes are missing: ${sectionRefIdentity(ref)}`)
     if (sha256(bytes) !== ref.digest) throw new Error(`semantic packet section bytes do not match committed digest: ${sectionRefIdentity(ref)}`)
-    return Object.freeze({ ref: { ...ref }, bytes })
+    return Object.freeze({ sectionKey: modelSectionKey(ref), ref: { ...ref }, bytes })
   })
+  const fullSectionIndexDigest = digestSectionIndex(input.sectionIndex)
+  const fullStore = createFoundationFactStore([...input.factStore])
+  const fullFactStoreDigest = digestFactStore(fullStore)
   const allowedFacts = new Set(declaration.factKeys)
-  const factKeys = new Set<string>()
-  for (const fact of input.facts) {
-    if (!allowedFacts.has(fact.key as FoundationFactKey) || factKeys.has(fact.key)) throw new Error(`semantic packet fact is unknown, orphaned, or duplicate: ${fact.key}`)
+  for (const fact of fullStore) {
+    if (!allowedFacts.has(fact.key as FoundationFactKey)) continue
     const definition = foundationFactDefinition(fact.key)
     if (!definition || fact.source.documentPath !== definition.owner.documentPath || fact.source.sectionId !== definition.owner.sectionId) throw new Error(`semantic packet fact is not catalog-owned: ${fact.key}`)
-    const sourceBytes = mapValue(input.sectionBytes, `${fact.source.documentPath}#${fact.source.sectionId}`)
-    if (sourceBytes && bodyValue(fact.value, sourceBytes)) throw new Error(`semantic packet rejects section-body fact: ${fact.key}`)
-    factKeys.add(fact.key)
+    for (const body of input.sectionBytes instanceof Map ? input.sectionBytes.values() : Object.values(input.sectionBytes))
+      if (bodyValue(fact.value, body)) throw new Error(`semantic packet rejects section-body fact: ${fact.key}`)
   }
-  for (const issue of input.deterministicIssuePrefix) {
-    if (!sectionSet.has(sectionRefIdentity(issue.source)) || (issue.target && !sectionSet.has(sectionRefIdentity(issue.target)))) throw new Error('semantic packet issue reference is out of scope')
-  }
-  const facts = [...input.facts].sort((a, b) => a.key.localeCompare(b.key)).map(fact => ({ ...fact, source: { ...fact.source }, evidence: { ...fact.evidence } }))
-  const receipts = [...input.receipts].map(item => ({ ...item }))
-  const factDigest = sha256(canonical({ facts, receipts }))
-  const deterministicReviewDigest = sha256(canonical(input.deterministicIssuePrefix))
-  const identity = sha256(canonical({ revision: input.revision, manifestDigest: manifest.digest, checkId: input.checkId, sectionDigests: sections.map(item => [sectionRefIdentity(item.ref), item.ref.digest]), factDigest, deterministicReviewDigest }))
-  const packetBody = { version: FOUNDATION_SEMANTIC_AUDIT_VERSION, revision: input.revision, manifestDigest: manifest.digest, checkId: input.checkId, sections, facts, receipts, deterministicIssuePrefix: input.deterministicIssuePrefix, factDigest, deterministicReviewDigest, identity, context: { fresh: true as const, resume: false as const, sessionId: null } }
+  const facts = fullStore.filter(fact => allowedFacts.has(fact.key as FoundationFactKey)).sort((a, b) => a.key.localeCompare(b.key)).map(fact => ({ ...fact, source: { ...fact.source }, evidence: { ...fact.evidence } }))
+  const deterministicIssuePrefix = input.deterministicIssuePrefix.filter(issue => sectionSet.has(sectionRefIdentity(issue.source)) && (!issue.target || sectionSet.has(sectionRefIdentity(issue.target))))
+  const identity = sha256(canonical({ revision: input.revision, manifestDigest: manifest.digest, fullSectionIndexDigest, fullFactStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, checkId: input.checkId, selectedSectionDigests: sections.map(item => [item.sectionKey, item.ref.digest]) }))
+  const packetBody = { version: FOUNDATION_SEMANTIC_AUDIT_VERSION, revision: input.revision, manifestDigest: manifest.digest, checkId: input.checkId, sections, facts, deterministicIssuePrefix, fullSectionIndexDigest, fullFactStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, identity, context: { fresh: true as const, resume: false as const, sessionId: null } }
   const bytes = Buffer.byteLength(canonical(packetBody), 'utf8')
   if (bytes > SEMANTIC_PACKET_MAX_BYTES) throw new Error(`semantic packet exceeds ${SEMANTIC_PACKET_MAX_BYTES} bytes`)
   return deepFreeze({ ...packetBody, bytes })
@@ -272,8 +283,8 @@ export type FoundationSemanticIssueDraft = Readonly<{
   problem: string
   expected: string
   actual: string
-  sourceSection: string
-  fixSection: string
+  sourceSectionKey: string
+  fixSectionKey: string
   reasonCode?: string
 }>
 
@@ -285,19 +296,15 @@ export type FoundationSemanticResult = Readonly<{
   reason?: string
 }>
 
-function resultBytes(value: unknown): number {
-  return Buffer.byteLength(canonical(value), 'utf8')
-}
-
 function strictIssue(value: unknown, packetSections: ReadonlySet<string>): FoundationSemanticIssueDraft {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('semantic issue draft is invalid')
   const candidate = value as Record<string, unknown>
-  const allowed = ['actual', 'expected', 'fixSection', 'problem', 'reasonCode', 'sourceSection']
+  const allowed = ['actual', 'expected', 'fixSectionKey', 'problem', 'reasonCode', 'sourceSectionKey']
   if (Object.keys(candidate).some(key => !allowed.includes(key)) || Object.keys(candidate).some(key => candidate[key] === undefined)) throw new Error('semantic issue draft contains an ID or redundant/unknown field')
-  for (const key of ['problem', 'expected', 'actual', 'fixSection', 'sourceSection']) if (typeof candidate[key] !== 'string' || !candidate[key].trim()) throw new Error(`semantic issue ${key} is required`)
-  if (!packetSections.has(candidate.sourceSection as string) || !packetSections.has(candidate.fixSection as string)) throw new Error('semantic issue section is outside assigned packet')
+  for (const key of ['problem', 'expected', 'actual', 'fixSectionKey', 'sourceSectionKey']) if (typeof candidate[key] !== 'string' || !candidate[key].trim()) throw new Error(`semantic issue ${key} is required`)
+  if (!packetSections.has(candidate.sourceSectionKey as string) || !packetSections.has(candidate.fixSectionKey as string)) throw new Error('semantic issue section is outside assigned packet')
   if (candidate.reasonCode !== undefined && (typeof candidate.reasonCode !== 'string' || !candidate.reasonCode.trim())) throw new Error('semantic issue reason is invalid')
-  return Object.freeze({ problem: candidate.problem as string, expected: candidate.expected as string, actual: candidate.actual as string, sourceSection: candidate.sourceSection as string, fixSection: candidate.fixSection as string, ...(candidate.reasonCode ? { reasonCode: candidate.reasonCode as string } : {}) })
+  return Object.freeze({ problem: candidate.problem as string, expected: candidate.expected as string, actual: candidate.actual as string, sourceSectionKey: candidate.sourceSectionKey as string, fixSectionKey: candidate.fixSectionKey as string, ...(candidate.reasonCode ? { reasonCode: candidate.reasonCode as string } : {}) })
 }
 
 export function admitFoundationSemanticResult(packet: FoundationSemanticPacket, input: unknown): FoundationSemanticResult {
@@ -308,13 +315,8 @@ export function admitFoundationSemanticResult(packet: FoundationSemanticPacket, 
   if (value.checkId !== packet.checkId) throw new Error('semantic result check identity does not match packet')
   if (value.packetIdentity !== packet.identity) throw new Error('semantic result packet identity does not match packet')
   if (!['PASS', 'ISSUES', 'UNDECIDABLE'].includes(String(value.outcome))) throw new Error('semantic result outcome is invalid')
-  if (resultBytes(value) > SEMANTIC_OUTPUT_MAX_BYTES || resultBytes(value) / 4 > SEMANTIC_OUTPUT_MAX_TOKENS) throw new Error(`semantic result exceeds ${SEMANTIC_OUTPUT_MAX_TOKENS}-token output budget`)
   const sections = new Set<string>()
-  for (const item of packet.sections) {
-    sections.add(sectionRefIdentity(item.ref))
-    const documentId = (Object.entries(documentPathById).find(([, path]) => path === item.ref.documentPath)?.[0])
-    if (documentId) sections.add(`${documentId}#${item.ref.sectionId}`)
-  }
+  for (const item of packet.sections) sections.add(item.sectionKey)
   const rawIssues = value.issues === undefined ? [] : value.issues
   if (!Array.isArray(rawIssues)) throw new Error('semantic result issues must be an array')
   const issues = rawIssues.map(item => strictIssue(item, sections))
@@ -344,11 +346,7 @@ export function createDeepConfirmationRequest(packet: FoundationSemanticPacket, 
 }
 
 function resolvePacketSection(packet: FoundationSemanticPacket, value: string): SectionRef {
-  const found = packet.sections.find(item => {
-    const pathIdentity = sectionRefIdentity(item.ref)
-    const documentId = Object.entries(documentPathById).find(([, path]) => path === item.ref.documentPath)?.[0]
-    return value === pathIdentity || value === `${documentId}#${item.ref.sectionId}`
-  })
+  const found = packet.sections.find(item => value === item.sectionKey)
   if (!found) throw new Error('semantic issue section is outside assigned packet')
   return found.ref
 }
@@ -362,8 +360,8 @@ export function semanticResultToFoundationIssueDrafts(
   if (result.outcome !== 'ISSUES') return []
   const declaration = expectedByCheck.get(packet.checkId)!
   return result.issues!.map(issue => {
-    const source = resolvePacketSection(packet, issue.sourceSection)
-    const fix = resolvePacketSection(packet, issue.fixSection)
+    const source = resolvePacketSection(packet, issue.sourceSectionKey)
+    const fix = resolvePacketSection(packet, issue.fixSectionKey)
     return {
       checkId: packet.checkId,
       severity: declaration.severity,
