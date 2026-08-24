@@ -311,6 +311,10 @@ export type FoundationSemanticResult = Readonly<{
   reason?: string
 }>
 
+export function digestFoundationSemanticResult(value: FoundationSemanticResult): string {
+  return sha256(canonical(value))
+}
+
 function strictIssue(value: unknown, packetSections: ReadonlySet<string>): FoundationSemanticIssueDraft {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('semantic issue draft is invalid')
   const candidate = value as Record<string, unknown>

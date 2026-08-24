@@ -714,6 +714,16 @@ function compileIssueRegistry(
   return issues.sort((left, right) => left.id.localeCompare(right.id))
 }
 
+/** The sole service-owned compiler for semantic drafts. IDs are never accepted from workers. */
+export function compileFoundationIssueRegistry(input: {
+  sectionIndex: readonly SectionRef[]
+  factStore: readonly FoundationFact[]
+  drafts: readonly AuditIssueDraft[]
+}): AuditIssue[] {
+  const context = contextFrom({ sectionIndex: input.sectionIndex, factStore: input.factStore })
+  return compileIssueRegistry(context, input.drafts)
+}
+
 export function runDeterministicFoundationAudit(
   input: DeterministicFoundationAuditInput,
 ): AuditIssue[] {

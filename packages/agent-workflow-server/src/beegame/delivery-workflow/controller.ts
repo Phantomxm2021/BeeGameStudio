@@ -69,15 +69,36 @@ import {
 import { recordFoundationFailure } from './foundation-authoring-batch'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, validateFoundationFactResults } from './foundation-fact-extraction'
 import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
-import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, loadCommittedFoundationDerivedArtifacts } from './foundation-audit-artifacts'
+import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, loadCommittedFoundationDerivedArtifacts, loadDeterministicFoundationReview, publishFoundationSemanticReview, loadFoundationSemanticReview } from './foundation-audit-artifacts'
 import { createFoundationFactStore, digestFactStore } from './foundation-fact-store'
 import type { FoundationAuditState } from './foundation-audit-state'
 import {
   FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
   runProductionDeterministicFoundationAudit,
 } from './foundation-audit-production-manifest'
+import {
+  FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
+  buildFoundationSemanticPacket,
+  admitFoundationSemanticResult,
+  digestFoundationSemanticResult,
+  semanticResultToFoundationIssueDrafts,
+  type FoundationSemanticPacket,
+  type FoundationSemanticResult,
+} from './foundation-semantic-audit'
+import {
+  FOUNDATION_SEMANTIC_MAX_RUNNING,
+  appendFoundationConfirmationTask,
+  admitFoundationSemanticTerminal,
+  claimFoundationSemanticTasks,
+  createFoundationSemanticTaskCollection,
+  foundationSemanticTasksComplete,
+  type FoundationSemanticTaskCollection,
+} from './foundation-semantic-runtime'
+import { compileFoundationIssueRegistry } from './foundation-audit-check-definitions'
+import { foundationSemanticReviewerStructuredOutputJsonSchema } from './worker-contracts'
 
 async function deriveFoundationAudit(
   run: DeliveryRun,
@@ -129,6 +150,32 @@ async function deriveFoundationAudit(
       thinking: 'idle',
     }
   }
+}
+
+function sectionBytes(documents: ReadonlyMap<string, string>, ref: { documentPath: string; startLine: number; endLine: number }): string {
+  const document = documents.get(ref.documentPath)
+  if (document === undefined) throw new Error(`semantic section document is missing: ${ref.documentPath}`)
+  return document.split('\n').slice(ref.startLine - 1, ref.endLine).join('\n')
+}
+
+async function buildSemanticPacketFor(input: {
+  workspacePath: string
+  revision: string
+  checkId: string
+  sectionIndex: readonly import('./foundation-section-index').SectionRef[]
+  factStore: readonly import('./foundation-fact-store').FoundationFact[]
+  deterministicReviewDigest: string
+  deterministicIssuePrefix: readonly import('./foundation-issue-registry').AuditIssue[]
+  documentDigests: readonly { path: string; digest: string }[]
+}): Promise<FoundationSemanticPacket> {
+  const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(input.workspacePath, path), 'utf8')] as const)))
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+    const expected = input.documentDigests.find(item => item.path === path)?.digest
+    const actual = createHash('sha256').update(documents.get(path)!).digest('hex')
+    if (!expected || expected !== actual) throw new Error(`semantic audit source changed after commit: ${path}`)
+  }
+  const bytes = Object.fromEntries(input.sectionIndex.map(ref => [`${ref.documentPath}#${ref.sectionId}`, sectionBytes(documents, ref)]))
+  return buildFoundationSemanticPacket({ revision: input.revision, checkId: input.checkId, sectionIndex: input.sectionIndex, sectionBytes: bytes, factStore: input.factStore, deterministicReviewDigest: input.deterministicReviewDigest, deterministicIssuePrefix: input.deterministicIssuePrefix })
 }
 
 export function createDeliveryWorkflowController(input: {
@@ -301,21 +348,61 @@ export function createDeliveryWorkflowController(input: {
       sectionIndexDigest: review.sectionIndexDigest,
       factStoreDigest: review.factStoreDigest,
     }
+    const deterministicPrefix = await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: state.revision, reviewDigest: review.reviewDigest })
+    if (!deterministicPrefix) throw new Error('deterministic review prefix failed closed')
+    const semanticPackets = await Promise.all(FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: state.revision, checkId: check.checkId, sectionIndex, factStore, deterministicReviewDigest: review.reviewDigest, deterministicIssuePrefix: deterministicPrefix.issues, documentDigests: committed.documentDigests })))
+    if (semanticPackets.length !== 10) throw new Error('semantic authority did not return exactly ten checks')
+    const phaseStartedAt = new Date().toISOString()
+    const semanticCollection = createFoundationSemanticTaskCollection({ revision: state.revision, phaseStartedAt, tasks: semanticPackets.map((packet, index) => ({ taskId: `${state.revision}:semantic:${index}:${packet.identity.slice(0, 12)}`, kind: 'semantic' as const, revision: state.revision, checkId: packet.checkId, packetDigest: packet.identity, modelTier: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks[index]!.modelTier, status: 'pending' as const, attempt: 0 })) })
     const lease = await store.mutationLock(run.runId)
+    let seededRun: DeliveryRun | undefined
     try {
       const locked = await store.load(lease)
-      if (!locked?.foundationAuditState || locked.foundationAuditState.status === 'deterministic_ready') return
+      if (!locked?.foundationAuditState || ['semantic_review', 'audit_ready'].includes(locked.foundationAuditState.status)) return
       if (locked.foundationAuditState.status !== 'derived_committed') throw new Error('foundation audit state changed during deterministic recovery')
-      await store.commit({
+      const { aggregateUsage: _factAggregateUsage, ...semanticBaseState } = locked.foundationAuditState
+      seededRun = await store.commit({
         ...locked,
-        foundationAuditState: { ...locked.foundationAuditState, status: 'deterministic_ready', deterministic },
-        status: 'needs_action',
-        blockedReason: 'deterministic audit complete; semantic Task 5 is not installed',
-        thinking: 'idle',
-      }, { runId: locked.runId, type: 'foundation.audit.deterministic_ready', phase: locked.phase, status: 'needs_action', revision: locked.revision, reviewDigest: review.reviewDigest }, undefined, lease)
+        foundationAuditState: { ...semanticBaseState, status: 'semantic_review', deterministic, tasks: semanticCollection.tasks, phaseStartedAt, semantic: { aggregateUsage: semanticCollection.aggregateUsage } },
+        status: 'running', blockedReason: undefined, thinking: 'working',
+      }, { runId: locked.runId, type: 'foundation.audit.semantic_review', phase: locked.phase, status: 'running', revision: locked.revision, reviewDigest: review.reviewDigest, semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest }, undefined, lease)
     } finally {
       await store.unlock(lease)
     }
+    if (seededRun) await resumeUnlocked(seededRun)
+  }
+
+  async function finalizeFoundationSemanticReview(run: DeliveryRun): Promise<void> {
+    const state = run.foundationAuditState
+    if (!state || state.status !== 'semantic_review') return
+    if (!state.deterministic || !state.derived) throw new Error('semantic finalization requires deterministic and derived bindings')
+    const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision })
+    const prefix = await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: state.revision, reviewDigest: state.deterministic.reviewDigest })
+    if (!committed || !prefix) throw new Error('semantic finalization immutable inputs are unavailable')
+    const sourceTasks = state.tasks.filter(task => task.kind === 'semantic') as Array<{ taskId: string; checkId: string; status: string; admittedResult?: FoundationSemanticResult }>
+    if (sourceTasks.length !== 10 || sourceTasks.some(task => !task.admittedResult || task.status !== 'completed')) throw new Error('semantic finalization requires every source result')
+    const resultLedger: { checkId: string; packetIdentity: string; admittedResultDigest: string; confirmationDigest?: string }[] = []
+    const semanticDrafts = []
+    for (const task of sourceTasks) {
+      const packet = await buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: state.revision, checkId: task.checkId, sectionIndex: committed.sectionIndex, factStore: committed.factStore, deterministicReviewDigest: prefix.reviewDigest, deterministicIssuePrefix: prefix.issues, documentDigests: committed.documentDigests })
+      const confirmation = state.tasks.find(candidate => candidate.kind === 'confirmation' && candidate.sourceTaskId === task.taskId) as { admittedResult?: FoundationSemanticResult } | undefined
+      const admitted = (confirmation?.admittedResult ?? task.admittedResult) as FoundationSemanticResult
+      if (admitted.outcome === 'UNDECIDABLE') throw new Error('semantic confirmation remained undecidable')
+      semanticDrafts.push(...semanticResultToFoundationIssueDrafts(packet, admitted))
+      resultLedger.push({ checkId: task.checkId, packetIdentity: packet.identity, admittedResultDigest: digestFoundationSemanticResult(task.admittedResult!), ...(confirmation?.admittedResult ? { confirmationDigest: digestFoundationSemanticResult(confirmation.admittedResult) } : {}) })
+    }
+    const semanticIssues = compileFoundationIssueRegistry({ sectionIndex: committed.sectionIndex, factStore: committed.factStore, drafts: semanticDrafts })
+    const issues = [...prefix.issues, ...semanticIssues]
+    const review = await publishFoundationSemanticReview({ workspacePath: input.workspacePath, revision: state.revision, documentDigests: committed.documentDigests, sectionIndexDigest: committed.digests.sectionIndex, factStoreDigest: committed.digests.factStore, deterministicReviewDigest: prefix.reviewDigest, semanticManifest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST, semanticResultDigests: resultLedger, issues })
+    const reviewRoot = `.beegame/audit/foundation/${state.revision}/review/${review.reviewDigest}`
+    const finalState = { ...state, status: 'audit_ready' as const, review: { reviewDigest: review.reviewDigest, issueRegistryPath: `${reviewRoot}/issue-registry.json`, issueRegistryDigest: review.digests.issueRegistry, manifestPath: `${reviewRoot}/manifest.json`, manifestDigest: review.digests.manifest, markerPath: `${reviewRoot}/COMMITTED.json`, markerDigest: review.digests.marker, sectionIndexDigest: review.sectionIndexDigest, factStoreDigest: review.factStoreDigest, semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest } }
+    const lease = await store.mutationLock(run.runId)
+    try {
+      const locked = await store.load(lease)
+      if (!locked?.foundationAuditState || locked.foundationAuditState.status === 'audit_ready') return
+      if (locked.foundationAuditState.status !== 'semantic_review') throw new Error('semantic review state changed during finalization')
+      await store.commit({ ...locked, foundationAuditState: finalState, status: 'running', blockedReason: undefined, thinking: 'idle' }, { runId: locked.runId, type: 'foundation.audit.audit_ready', phase: locked.phase, status: 'running', revision: locked.revision, reviewDigest: review.reviewDigest }, undefined, lease)
+    } finally { await store.unlock(lease) }
   }
 
   async function handleTerminalUnlocked(
@@ -330,13 +417,44 @@ export function createDeliveryWorkflowController(input: {
     const foundationFactTask = run?.foundationAuditState?.tasks.find(
       task => task.dispatch?.dispatchId === record.dispatchId,
     )
-    if (
-      !run ||
-      (run.activeDispatch?.dispatchId !== record.dispatchId &&
-        !foundationCheckpoint &&
-        !foundationFactTask)
+    const foundationSemanticTask = run?.foundationAuditState?.tasks.find(
+      task => task.dispatch?.dispatchId === record.dispatchId && (task.kind === 'semantic' || task.kind === 'confirmation'),
     )
+    if (!run || (run.activeDispatch?.dispatchId !== record.dispatchId && !foundationCheckpoint && !foundationFactTask && !foundationSemanticTask))
       return
+    if (foundationSemanticTask && result.workerType === 'foundation-semantic-reviewer') {
+      const lease = await store.mutationLock(run.runId)
+      let completedRun: DeliveryRun | undefined
+      try {
+        const locked = await store.load(lease)
+        const lockedTask = locked?.foundationAuditState?.tasks.find(task => task.taskId === foundationSemanticTask.taskId)
+        if (!locked || !lockedTask || (lockedTask.kind !== 'semantic' && lockedTask.kind !== 'confirmation') || lockedTask.dispatch?.dispatchId !== record.dispatchId) return
+        const lockedState = locked.foundationAuditState!
+        const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: lockedState.revision })
+        const prefix = lockedState.deterministic ? await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: lockedState.revision, reviewDigest: lockedState.deterministic.reviewDigest }) : undefined
+        if (!committed || !prefix) throw new Error('semantic audit immutable inputs are unavailable')
+        const packet = await buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: lockedState.revision, checkId: lockedTask.checkId, sectionIndex: committed.sectionIndex, factStore: committed.factStore, deterministicReviewDigest: prefix.reviewDigest, deterministicIssuePrefix: prefix.issues, documentDigests: committed.documentDigests })
+        if (packet.identity !== lockedTask.packetDigest) throw new Error('semantic packet digest changed during terminal admission')
+        if (!record.usage || !Number.isFinite(record.usage.total_tokens) || !Number.isFinite(record.usage.input_tokens) || !Number.isFinite(record.usage.completion_tokens) || record.usage.total_tokens < 0 || record.usage.input_tokens < 0 || record.usage.completion_tokens < 0 || !record.finishedAt || !Number.isFinite(Date.parse(record.startedAt)) || !Number.isFinite(Date.parse(record.finishedAt))) throw new Error('semantic terminal is missing measured usage or duration')
+        const admitted = admitFoundationSemanticResult(packet, { checkId: lockedTask.checkId, packetIdentity: packet.identity, outcome: result.outcome, ...(result.issues !== undefined ? { issues: result.issues } : {}), ...(result.reason !== undefined ? { reason: result.reason } : {}) })
+        const runtimeState: FoundationSemanticTaskCollection = { revision: lockedState.revision, phaseStartedAt: lockedState.phaseStartedAt!, status: 'semantic_review', tasks: lockedState.tasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticTaskCollection['tasks'], aggregateUsage: lockedState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, ...(lockedState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: lockedState.semantic.deepPhaseStartedAt } : {}), ...(lockedState.semantic?.deepAggregateUsage ? { deepAggregateUsage: lockedState.semantic.deepAggregateUsage } : {}) }
+        const admission = admitFoundationSemanticTerminal(runtimeState, { taskId: lockedTask.taskId, dispatchId: record.dispatchId, revision: result.revision, packetDigest: result.packetDigest, terminal: result as never, usage: record.usage, durationMs: Date.parse(record.finishedAt) - Date.parse(record.startedAt), now: new Date().toISOString() })
+        let tasks = admission.state.tasks.map(task => task.taskId === lockedTask.taskId ? { ...task, ...(admission.accepted ? { admittedResult: admitted } : {}) } : task)
+        let semanticState = { aggregateUsage: admission.state.aggregateUsage, ...(admission.state.deepPhaseStartedAt ? { deepPhaseStartedAt: admission.state.deepPhaseStartedAt } : {}), ...(admission.state.deepAggregateUsage ? { deepAggregateUsage: admission.state.deepAggregateUsage } : {}) }
+        if (admission.accepted && !admission.idempotent && lockedTask.kind === 'semantic' && (admitted.outcome === 'UNDECIDABLE' || FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.find(check => check.checkId === lockedTask.checkId)?.severity === 'BLOCKER')) {
+          const confirmation = appendFoundationConfirmationTask({ ...admission.state, tasks: tasks as FoundationSemanticTaskCollection['tasks'] }, { taskId: `${lockedTask.taskId}:confirmation`, sourceTaskId: lockedTask.taskId, admittedResult: admitted, now: new Date().toISOString() })
+          tasks = confirmation.tasks.map(task => task.taskId === lockedTask.taskId ? { ...task, admittedResult: admitted } : task)
+          semanticState = { aggregateUsage: confirmation.aggregateUsage, ...(confirmation.deepPhaseStartedAt ? { deepPhaseStartedAt: confirmation.deepPhaseStartedAt } : {}), ...(confirmation.deepAggregateUsage ? { deepAggregateUsage: confirmation.deepAggregateUsage } : {}) }
+        }
+        const finalTaskState = { ...lockedState, status: 'semantic_review' as const, tasks, semantic: semanticState }
+        const hasNeedsAction = tasks.some(task => task.status === 'needs_action') || (admitted.outcome === 'UNDECIDABLE' && lockedTask.kind === 'confirmation')
+        const runStatus: DeliveryRun['status'] = hasNeedsAction ? 'needs_action' : 'running'
+        completedRun = await store.commit({ ...locked, foundationAuditState: finalTaskState, status: runStatus, blockedReason: hasNeedsAction ? 'semantic audit needs action' : undefined, thinking: hasNeedsAction ? 'idle' : 'working' }, { runId: locked.runId, type: admission.idempotent ? 'foundation.semantic.terminal.replayed' : 'foundation.semantic.terminal.admitted', phase: locked.phase, status: runStatus, revision: locked.revision, dispatchId: record.dispatchId, taskId: lockedTask.taskId, terminalDigest: admission.terminalDigest }, undefined, lease)
+      } finally { await store.unlock(lease) }
+      if (completedRun && completedRun.status === 'running' && completedRun.foundationAuditState && foundationSemanticTasksComplete({ revision: completedRun.foundationAuditState.revision, phaseStartedAt: completedRun.foundationAuditState.phaseStartedAt!, status: 'semantic_review', tasks: completedRun.foundationAuditState.tasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticTaskCollection['tasks'], aggregateUsage: completedRun.foundationAuditState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, ...(completedRun.foundationAuditState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: completedRun.foundationAuditState.semantic.deepPhaseStartedAt } : {}), ...(completedRun.foundationAuditState.semantic?.deepAggregateUsage ? { deepAggregateUsage: completedRun.foundationAuditState.semantic.deepAggregateUsage } : {}) })) await finalizeFoundationSemanticReview(completedRun)
+      else if (completedRun?.status === 'running') await resumeUnlocked(completedRun)
+      return
+    }
     if (foundationFactTask && result.workerType === 'foundation-fact-extractor') {
       const lease = await store.mutationLock(run.runId)
       let factsStagedRun: DeliveryRun | undefined
@@ -364,7 +482,7 @@ export function createDeliveryWorkflowController(input: {
             : 'FoundationFactInvalidResultError'
           throw invalid
         }
-        const runtimeState: FoundationFactTaskCollection = { revision: lockedState.revision, phaseStartedAt: lockedState.phaseStartedAt!, status: lockedState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts', tasks: lockedState.tasks, aggregateUsage: lockedState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 } }
+        const runtimeState: FoundationFactTaskCollection = { revision: lockedState.revision, phaseStartedAt: lockedState.phaseStartedAt!, status: lockedState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts', tasks: lockedState.tasks.filter(task => task.kind === 'document-facts'), aggregateUsage: lockedState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 } }
         const admission = admitFoundationFactTerminal(runtimeState, { taskId: lockedTask.taskId, dispatchId: record.dispatchId, revision: result.revision, packetDigest: result.packetDigest, terminal: result, usage: record.usage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, durationMs: Math.max(0, Date.parse(record.finishedAt ?? new Date().toISOString()) - Date.parse(record.startedAt)), now: new Date().toISOString() })
         let auditState: FoundationAuditState = { ...lockedState, status: admission.state.status, tasks: admission.state.tasks, aggregateUsage: admission.state.aggregateUsage }
         const admittedTask = admission.state.tasks.find(task => task.taskId === lockedTask.taskId)!
@@ -372,7 +490,7 @@ export function createDeliveryWorkflowController(input: {
           const receipt = await writeFoundationFactReceipt({ workspacePath: input.workspacePath, revision: lockedTask.revision, receipt: { taskId: lockedTask.taskId, revision: lockedTask.revision, packetDigest: lockedTask.packetDigest, terminalDigest: admission.terminalDigest, normalizedFactDigest: validated.normalizedFactDigest, receipts: validated.receipts, facts: validated.facts, usage: admittedTask.usage, durationMs: admittedTask.durationMs ?? 0 } })
           auditState = { ...auditState, tasks: auditState.tasks.map(task => task.taskId === lockedTask.taskId ? { ...task, receiptPath: receipt.path, receiptDigest: receipt.digest } : task) }
         }
-        const collectionAfterReceipt: FoundationFactTaskCollection = { ...admission.state, tasks: auditState.tasks }
+        const collectionAfterReceipt: FoundationFactTaskCollection = { ...admission.state, tasks: auditState.tasks.filter(task => task.kind === 'document-facts') }
         if (foundationFactTasksComplete(collectionAfterReceipt)) {
           auditState = { ...auditState, status: 'facts_staged' }
           factsStagedRun = await store.commit({ ...locked, foundationAuditState: auditState, status: 'running', blockedReason: undefined, thinking: 'working' }, { runId: locked.runId, type: 'foundation.fact.facts_staged', phase: locked.phase, status: 'running', revision: locked.revision, dispatchId: record.dispatchId, taskId: lockedTask.taskId, terminalDigest: admission.terminalDigest }, undefined, lease)
@@ -1150,6 +1268,22 @@ export function createDeliveryWorkflowController(input: {
       }
       if (run.foundationAuditState?.status === 'facts_staged') {
         await finalizeFoundationFacts(run)
+        return
+      }
+      if (run.foundationAuditState?.status === 'semantic_review') {
+        const replayable = run.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status !== 'completed' && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId)).map(task => task.dispatch!)
+        if (replayable.length) { for (const dispatch of replayable) await dispatcher.replayTerminal(dispatch, handleTerminalUnlocked); return }
+        const available = run.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; checkId: string; revision: string; packetDigest: string; modelTier: 'fast' | 'balanced' | 'strong' }>
+        const running = run.foundationAuditState.tasks.filter(task => task.status === 'running').length
+        if (running >= FOUNDATION_SEMANTIC_MAX_RUNNING || !available.length) return
+        const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision })
+        const prefix = run.foundationAuditState.deterministic ? await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision, reviewDigest: run.foundationAuditState.deterministic.reviewDigest }) : undefined
+        if (!committed || !prefix) throw new Error('semantic audit immutable inputs are unavailable')
+        for (const task of available.slice(0, FOUNDATION_SEMANTIC_MAX_RUNNING - running)) {
+          const packet = await buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision, checkId: task.checkId, sectionIndex: committed.sectionIndex, factStore: committed.factStore, deterministicReviewDigest: prefix.reviewDigest, deterministicIssuePrefix: prefix.issues, documentDigests: committed.documentDigests })
+          if (packet.identity !== task.packetDigest) throw new Error('semantic retry packet differs from immutable task packet')
+          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-semantic-reviewer', checkId: task.checkId } })
+        }
         return
       }
       if (run.foundationAuditState?.status === 'extracting_facts') {

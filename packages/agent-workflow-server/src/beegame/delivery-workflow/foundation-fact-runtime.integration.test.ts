@@ -68,32 +68,23 @@ describe('foundation fact runtime controller integration', () => {
       current = await controller.store.load()
       expect(current?.foundationAuditState?.tasks.filter(task => task.status === 'running')).toHaveLength(4)
       expect(current?.foundationAuditState?.tasks.filter(task => task.status === 'completed')).toHaveLength(4)
+      const firstWaveFacts = current?.foundationAuditState?.tasks.filter(task => task.kind === 'document-facts' && task.status === 'completed') ?? []
+      expect(firstWaveFacts).toHaveLength(4)
+      expect(firstWaveFacts.every(task => task.usage?.total_tokens === 5)).toBe(true)
       const secondWave = current!.foundationAuditState!.tasks.filter(task => task.status === 'running').map(task => task.taskId)
       await Promise.all(secondWave.map(complete))
       current = await controller.store.load()
-      expect(started.size).toBe(8)
-      expect(current?.foundationAuditState?.status).toBe('deterministic_ready')
-      expect(current?.status).toBe('needs_action')
-      expect(current?.foundationAuditState?.aggregateUsage?.total_tokens).toBe(40)
-      expect(current?.foundationAuditState?.tasks.every(task => task.usage?.total_tokens === 5)).toBe(true)
+      expect(started.size).toBe(12)
+      expect(current?.foundationAuditState?.status).toBe('semantic_review')
+      expect(current?.status).toBe('running')
+      expect(current?.foundationAuditState?.semantic?.aggregateUsage?.total_tokens).toBe(0)
+      expect(current?.foundationAuditState?.tasks.some(task => task.kind === 'document-facts')).toBe(false)
       const deterministicBefore = current?.foundationAuditState?.deterministic
       expect(deterministicBefore?.reviewDigest).toMatch(/^[a-f0-9]{64}$/)
-      await controller.store.commit({
-        ...current!,
-        status: 'running',
-        blockedReason: undefined,
-        foundationAuditState: { ...current!.foundationAuditState!, status: 'derived_committed', deterministic: undefined },
-      }, { runId: current!.runId, type: 'test.interrupt.after.derived', phase: current!.phase, status: 'running', revision: current!.revision.document })
-      const startsBeforeRecovery = started.size
-      await controller.resume((await controller.store.load())!)
-      const recovered = await controller.store.load()
-      expect(started.size).toBe(startsBeforeRecovery)
-      expect(recovered?.foundationAuditState?.status).toBe('deterministic_ready')
-      expect(recovered?.foundationAuditState?.deterministic).toEqual(deterministicBefore)
       const events = await controller.store.readEvents()
       expect(events.some(event => event.type === 'foundation.fact.facts_staged')).toBe(true)
       expect(events.some(event => event.type === 'foundation.fact.derived_committed')).toBe(true)
-      expect(events.filter(event => event.type === 'foundation.audit.deterministic_ready')).toHaveLength(2)
+      expect(events.filter(event => event.type === 'foundation.audit.semantic_review')).toHaveLength(1)
       expect(events.some(event => event.type === 'foundation.audit.deterministic_ready.recovered')).toBe(false)
       const marker = JSON.parse(await readFile(join(workspacePath, '.beegame/audit/foundation/rev-1/derived/COMMITTED.json'), 'utf8')) as Record<string, unknown>
       expect(marker.status).toBe('committed')
@@ -243,6 +234,112 @@ describe('foundation fact runtime controller integration', () => {
       expect(started.size).toBe(before)
       expect(after!.foundationAuditState!.tasks.filter(task => task.status === 'pending' || task.status === 'retryable')).toHaveLength(0)
       expect(after!.foundationAuditState!.tasks.every(task => task.status === 'needs_action')).toBe(true)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  async function finishFacts(controller: ReturnType<typeof createDeliveryWorkflowController>) {
+    while (true) {
+      const current = await controller.store.load()
+      const running = current?.foundationAuditState?.tasks.filter(task => task.kind === 'document-facts' && task.status === 'running') ?? []
+      if (!running.length) return current!
+      await Promise.all(running.map(async task => {
+        const snapshot = await controller.store.load()
+        const packet = task.dispatch!.request!.contract.packet as { keys: string[] }
+        await controller.store.addWorkflowUsage(snapshot!.runId, { input_tokens: 2, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 3, total_tokens: 5 }, task.dispatch!.dispatchId)
+        await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {
+          workerType: 'foundation-fact-extractor', status: 'completed', runId: snapshot!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId,
+          revision: task.revision, packetDigest: task.packetDigest, results: packet.keys.map(key => ({ key, status: 'absent' })),
+        })
+      }))
+    }
+  }
+
+  async function completeSemantic(controller: ReturnType<typeof createDeliveryWorkflowController>, taskId: string, outcome: 'PASS' | 'UNDECIDABLE') {
+    const snapshot = await controller.store.load()
+    const task = snapshot!.foundationAuditState!.tasks.find(candidate => candidate.taskId === taskId)!
+    const dispatchId = task.dispatch!.dispatchId
+    await controller.store.addWorkflowUsage(snapshot!.runId, { input_tokens: 2, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 3, total_tokens: 5 }, dispatchId)
+    await controller.dispatcher.completeDispatch(dispatchId, {
+      workerType: 'foundation-semantic-reviewer', status: 'completed', runId: snapshot!.runId, dispatchId, taskId,
+      revision: task.revision, packetDigest: task.packetDigest, outcome, ...(outcome === 'UNDECIDABLE' ? { reason: 'insufficient evidence' } : {}),
+    })
+  }
+
+  test('completes all ten semantic PASS checks into one atomic review and audit_ready', async () => {
+    const { workspacePath, controller, started } = await preparedController()
+    try {
+      await finishFacts(controller)
+      let current = await controller.store.load()
+      expect(current?.foundationAuditState?.status).toBe('semantic_review')
+      while (current?.foundationAuditState?.status === 'semantic_review') {
+        const running = current.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status === 'running')
+        expect(running.length).toBeGreaterThan(0)
+        await Promise.all(running.map(task => completeSemantic(controller, task.taskId, 'PASS')))
+        current = await controller.store.load()
+      }
+      expect(current?.foundationAuditState?.status).toBe('audit_ready')
+      expect(current?.foundationAuditState?.tasks.filter(task => task.kind === 'semantic')).toHaveLength(10)
+      expect(current?.foundationAuditState?.tasks.filter(task => task.kind === 'semantic' && task.status === 'completed' && task.admittedResult?.outcome === 'PASS')).toHaveLength(10)
+      const review = current!.foundationAuditState!.review!
+      const marker = JSON.parse(await readFile(join(workspacePath, review.markerPath), 'utf8')) as Record<string, unknown>
+      expect(marker.status).toBe('committed')
+      expect(marker.reviewDigest).toBe(review.reviewDigest)
+      expect(await readFile(join(workspacePath, review.issueRegistryPath), 'utf8')).toContain('issues')
+      const dispatched = started.size
+      await controller.resume(current!)
+      expect(started.size).toBe(dispatched)
+      expect((await controller.store.load())!.foundationAuditState!.status).toBe('audit_ready')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('rebuilds the same semantic packet after interruption without duplicate resume dispatches', async () => {
+    const { workspacePath, controller, started } = await preparedController()
+    try {
+      await finishFacts(controller)
+      const before = started.size
+      const interrupted = await controller.store.reconcile(async () => false)
+      expect(interrupted!.foundationAuditState!.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status === 'retryable')).toHaveLength(4)
+      await controller.resume(interrupted!)
+      const after = started.size
+      expect(after - before).toBe(4)
+      await controller.resume(await controller.store.load() as never)
+      expect(started.size).toBe(after)
+      const resumed = await controller.store.load()
+      expect(resumed!.foundationAuditState!.tasks.filter(task => task.kind === 'semantic' && task.status === 'running')).toHaveLength(4)
+      expect(resumed!.foundationAuditState!.tasks.filter(task => task.kind === 'semantic' && task.status === 'running' && task.attempt === 2)).toHaveLength(4)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('requires same-packet strong confirmation and stops on a second UNDECIDABLE', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      await finishFacts(controller)
+      let current = await controller.store.load()
+      const source = current!.foundationAuditState!.tasks.find(task => task.kind === 'semantic' && task.status === 'running')!
+      if (source.kind !== 'semantic') throw new Error('semantic source task was not found')
+      await completeSemantic(controller, source.taskId, 'UNDECIDABLE')
+      current = await controller.store.load()
+      let confirmation = current!.foundationAuditState!.tasks.find(task => task.kind === 'confirmation' && task.sourceTaskId === source.taskId)
+      while (confirmation?.status !== 'running') {
+        const runningSources = current!.foundationAuditState!.tasks.filter(task => task.kind === 'semantic' && task.status === 'running')
+        if (runningSources.length) await Promise.all(runningSources.map(task => completeSemantic(controller, task.taskId, 'PASS')))
+        else await controller.resume(current!)
+        current = await controller.store.load()
+        confirmation = current!.foundationAuditState!.tasks.find(task => task.kind === 'confirmation' && task.sourceTaskId === source.taskId)
+      }
+      if (!confirmation || confirmation.kind !== 'confirmation') throw new Error('confirmation task was not dispatched')
+      expect(confirmation.packetDigest).toBe(source.packetDigest)
+      expect(confirmation.checkId).toBe(source.checkId)
+      expect(confirmation.modelTier).toBe('strong')
+      expect(confirmation.status).toBe('running')
+      await completeSemantic(controller, confirmation.taskId, 'UNDECIDABLE')
+      current = await controller.store.load()
+      expect(current!.status).toBe('needs_action')
+      expect(current!.foundationAuditState!.status).toBe('semantic_review')
+      const confirmedTask = current!.foundationAuditState!.tasks.find(task => task.taskId === confirmation.taskId)
+      if (!confirmedTask || confirmedTask.kind !== 'confirmation') throw new Error('confirmation result task was not retained')
+      expect(confirmedTask.admittedResult?.outcome).toBe('UNDECIDABLE')
+      expect(current!.foundationAuditState!.review).toBeUndefined()
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 

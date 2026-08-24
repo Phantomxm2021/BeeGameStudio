@@ -8,8 +8,8 @@ import type { FoundationFactTask } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
-    schemaVersion: 3 as const,
-    schemaFingerprint: 'foundation-audit-state-v3' as const,
+    schemaVersion: 4 as const,
+    schemaFingerprint: 'foundation-audit-state-v4' as const,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(
@@ -84,7 +84,7 @@ describe('foundationAuditState schema', () => {
       sectionIndexDigest: 'f'.repeat(64),
       factStoreDigest: 'e'.repeat(64),
     }
-    for (const status of ['derived_committed', 'deterministic_ready', 'semantic_review', 'audit_ready'] as const) {
+    for (const status of ['derived_committed', 'deterministic_ready'] as const) {
       expect(parseFoundationAuditState({ ...valid, status, phaseStartedAt: '2026-08-24T00:00:00.000Z', derived, ...(status === 'derived_committed' ? {} : { deterministic }) })).toMatchObject({ status, derived })
     }
   })

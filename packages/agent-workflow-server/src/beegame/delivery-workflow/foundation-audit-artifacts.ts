@@ -18,6 +18,7 @@ import type { AuditIssue } from './foundation-issue-registry'
 import {
   FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
 } from './foundation-audit-production-manifest'
+import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST, type FoundationSemanticManifest } from './foundation-semantic-audit'
 
 export type FoundationAuditManifest = {
   revision: string
@@ -75,6 +76,19 @@ export type FoundationDeterministicReview = {
   manifestDigest: string
   catalogVersion: string
   contractGraphDigest: string
+  issues: AuditIssue[]
+  paths: FoundationDeterministicReviewArtifactPaths
+  digests: { issueRegistry: string; manifest: string; marker: string }
+}
+
+export type FoundationFinalReview = {
+  revision: string
+  reviewDigest: string
+  documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>
+  sectionIndexDigest: string
+  factStoreDigest: string
+  deterministicReviewDigest: string
+  semanticManifestDigest: string
   issues: AuditIssue[]
   paths: FoundationDeterministicReviewArtifactPaths
   digests: { issueRegistry: string; manifest: string; marker: string }
@@ -604,7 +618,7 @@ function validateReviewSection(value: unknown, label: string): void {
     throw new Error(`deterministic review ${label} SectionRef is invalid`)
 }
 
-function validateReviewIssue(value: unknown, index: number): void {
+function validateReviewIssue(value: unknown, index: number, allowSemantic = false): void {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error(`deterministic review issue ${index} is invalid`)
   const issue = value as Record<string, unknown>
@@ -616,7 +630,7 @@ function validateReviewIssue(value: unknown, index: number): void {
     throw new Error(`deterministic review issue ${index} identity is invalid`)
   if (!['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(String(issue.severity)) || !['schema', 'rule', 'contract', 'semantic'].includes(String(issue.type)))
     throw new Error(`deterministic review issue ${index} classification is invalid`)
-  if (issue.type === 'semantic')
+  if (issue.type === 'semantic' && !allowSemantic)
     throw new Error('deterministic review prefix cannot contain semantic issues')
   if (typeof issue.expected !== 'string' || !issue.expected.trim() || typeof issue.actual !== 'string' || !issue.actual.trim())
     throw new Error(`deterministic review issue ${index} text is invalid`)
@@ -649,7 +663,7 @@ async function validateDeterministicReviewFiles(input: {
   if (issueObject.revision !== input.revision || issueObject.status !== 'deterministic_prefix' || issueObject.reviewDigest !== input.reviewDigest || !Array.isArray(issueObject.documentDigests) || !isDigest(issueObject.sectionIndexDigest) || !isDigest(issueObject.factStoreDigest) || issueObject.manifestDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest || issueObject.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion || issueObject.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest || !Array.isArray(issueObject.issues))
     throw new Error('deterministic review registry binding is invalid')
   canonicalDocumentDigests(issueObject.documentDigests as never)
-  ;(issueObject.issues as unknown[]).forEach(validateReviewIssue)
+  ;(issueObject.issues as unknown[]).forEach((value, index) => validateReviewIssue(value, index))
   validateIssueIdentity(issueObject.issues as AuditIssue[])
   if (!manifestValue || typeof manifestValue !== 'object' || Array.isArray(manifestValue) || !exactKeys(manifestValue, ['revision', 'status', 'reviewDigest', 'manifest']))
     throw new Error('deterministic review manifest shape is invalid')
@@ -762,6 +776,81 @@ export async function loadDeterministicFoundationReview(input: {
       marker: stableDigest(marker),
     },
   }
+}
+
+function foundationFinalReviewArtifactPaths(workspacePath: string, revision: string, reviewDigest: string): FoundationDeterministicReviewArtifactPaths {
+  if (!/^[a-f0-9]{64}$/.test(reviewDigest)) throw new Error('final review digest is invalid')
+  const root = join(resolve(workspacePath), '.beegame', 'audit', 'foundation', revision, 'review', reviewDigest)
+  return { root: join(resolve(workspacePath), '.beegame', 'audit', 'foundation', revision, 'review'), review: root, issueRegistry: join(root, 'issue-registry.json'), manifest: join(root, 'manifest.json'), marker: join(root, 'COMMITTED.json') }
+}
+
+function finalReviewDigest(input: { revision: string; documentDigests: readonly { path: FoundationDocumentPath; digest: string }[]; sectionIndexDigest: string; factStoreDigest: string; deterministicReviewDigest: string; semanticManifestDigest: string; semanticResultDigests: readonly { checkId: string; packetIdentity: string; admittedResultDigest: string; confirmationDigest?: string }[]; issues: readonly AuditIssue[] }): string {
+  return sha256(canonicalJson({ revision: input.revision, documentDigests: input.documentDigests, sectionIndexDigest: input.sectionIndexDigest, factStoreDigest: input.factStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, semanticManifestDigest: input.semanticManifestDigest, semanticResultDigests: input.semanticResultDigests, issues: input.issues }))
+}
+
+/** Publishes the one final review registry after all semantic results are admitted. */
+export async function publishFoundationSemanticReview(input: {
+  workspacePath: string
+  revision: string
+  documentDigests: readonly { path: FoundationDocumentPath; digest: string }[]
+  sectionIndexDigest: string
+  factStoreDigest: string
+  deterministicReviewDigest: string
+  semanticManifest: FoundationSemanticManifest
+  semanticResultDigests: readonly { checkId: string; packetIdentity: string; admittedResultDigest: string; confirmationDigest?: string }[]
+  issues: readonly AuditIssue[]
+}): Promise<FoundationFinalReview> {
+  if (input.semanticManifest.digest !== FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest) throw new Error('semantic manifest is not service authority')
+  if (!/^[a-f0-9]{64}$/.test(input.deterministicReviewDigest) || !/^[a-f0-9]{64}$/.test(input.sectionIndexDigest) || !/^[a-f0-9]{64}$/.test(input.factStoreDigest)) throw new Error('final review binding digest is invalid')
+  if (input.documentDigests.length !== 8 || new Set(input.documentDigests.map(item => item.path)).size !== 8) throw new Error('final review requires eight document digests')
+  const expectedSemanticChecks = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(item => item.checkId).sort()
+  const actualSemanticChecks = input.semanticResultDigests.map(item => item.checkId).sort()
+  if (input.semanticResultDigests.length !== 10 || JSON.stringify(expectedSemanticChecks) !== JSON.stringify(actualSemanticChecks) || input.semanticResultDigests.some(item => typeof item.checkId !== 'string' || !/^[a-f0-9]{64}$/.test(item.packetIdentity) || !/^[a-f0-9]{64}$/.test(item.admittedResultDigest) || (item.confirmationDigest !== undefined && !/^[a-f0-9]{64}$/.test(item.confirmationDigest)))) throw new Error('semantic result ledger is invalid')
+  const ids = new Set<string>()
+  for (const [index, issue] of input.issues.entries()) { validateReviewIssue(issue, index, true); if (ids.has(issue.id)) throw new Error('duplicate final review issue identity'); ids.add(issue.id) }
+  const semanticResultDigests = [...input.semanticResultDigests].sort((a, b) => a.checkId.localeCompare(b.checkId))
+  const documentDigests = canonicalDocumentDigests(input.documentDigests)
+  const issues = [...input.issues].sort((a, b) => a.id.localeCompare(b.id))
+  const reviewDigest = finalReviewDigest({ revision: input.revision, documentDigests, sectionIndexDigest: input.sectionIndexDigest, factStoreDigest: input.factStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, semanticManifestDigest: input.semanticManifest.digest, semanticResultDigests, issues })
+  const paths = foundationFinalReviewArtifactPaths(input.workspacePath, input.revision, reviewDigest)
+  const existing = await loadFoundationSemanticReview({ workspacePath: input.workspacePath, revision: input.revision, reviewDigest }).catch(error => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error })
+  if (existing) return existing
+  await mkdir(paths.root, { recursive: true })
+  const temporary = join(paths.root, `.${reviewDigest}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`)
+  await mkdir(temporary, { recursive: true })
+  const issueValue = { revision: input.revision, status: 'committed' as const, reviewDigest, documentDigests, sectionIndexDigest: input.sectionIndexDigest, factStoreDigest: input.factStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, semanticManifestDigest: input.semanticManifest.digest, semanticResultDigests, issues }
+  const manifestValue = { revision: input.revision, status: 'audit_ready' as const, reviewDigest, semanticManifest: input.semanticManifest }
+  const issueText = `${JSON.stringify(issueValue, null, 2)}\n`; const manifestText = `${JSON.stringify(manifestValue, null, 2)}\n`
+  const issueRegistryDigest = sha256(issueText); const manifestDigest = sha256(manifestText)
+  await writeFile(join(temporary, 'issue-registry.json'), issueText, 'utf8'); await writeFile(join(temporary, 'manifest.json'), manifestText, 'utf8')
+  const marker = { revision: input.revision, status: 'committed' as const, reviewDigest, issueRegistryDigest, manifestDigest, sectionIndexDigest: input.sectionIndexDigest, factStoreDigest: input.factStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, semanticManifestDigest: input.semanticManifest.digest, semanticResultDigests }
+  await writeFile(join(temporary, 'COMMITTED.json'), `${JSON.stringify(marker, null, 2)}\n`, 'utf8')
+  const markerText = await readFile(join(temporary, 'COMMITTED.json'), 'utf8')
+  const parsed = JSON.parse(markerText) as Record<string, unknown>
+  if (parsed.status !== 'committed' || parsed.reviewDigest !== reviewDigest || parsed.issueRegistryDigest !== issueRegistryDigest || parsed.manifestDigest !== manifestDigest) throw new Error('final review temporary marker validation failed')
+  try { await rename(temporary, paths.review) } catch (error) {
+    const replay = await loadFoundationSemanticReview({ workspacePath: input.workspacePath, revision: input.revision, reviewDigest }).catch(() => undefined)
+    if (!replay) throw error
+    return replay
+  }
+  const committed = await loadFoundationSemanticReview({ workspacePath: input.workspacePath, revision: input.revision, reviewDigest })
+  if (!committed) throw new Error('final review was not committed')
+  return committed
+}
+
+export async function loadFoundationSemanticReview(input: { workspacePath: string; revision: string; reviewDigest: string }): Promise<FoundationFinalReview | undefined> {
+  const paths = foundationFinalReviewArtifactPaths(input.workspacePath, input.revision, input.reviewDigest)
+  const [issueText, manifestText, markerText] = await Promise.all([readFile(paths.issueRegistry, 'utf8'), readFile(paths.manifest, 'utf8'), readFile(paths.marker, 'utf8')])
+  const issueValue = JSON.parse(issueText) as Record<string, unknown>; const manifestValue = JSON.parse(manifestText) as Record<string, unknown>; const marker = JSON.parse(markerText) as Record<string, unknown>
+  if (!exactKeys(marker, ['revision', 'status', 'reviewDigest', 'issueRegistryDigest', 'manifestDigest', 'sectionIndexDigest', 'factStoreDigest', 'deterministicReviewDigest', 'semanticManifestDigest', 'semanticResultDigests']) || !exactKeys(issueValue, ['revision', 'status', 'reviewDigest', 'documentDigests', 'sectionIndexDigest', 'factStoreDigest', 'deterministicReviewDigest', 'semanticManifestDigest', 'semanticResultDigests', 'issues']) || !exactKeys(manifestValue, ['revision', 'status', 'reviewDigest', 'semanticManifest']) || marker.revision !== input.revision || marker.status !== 'committed' || marker.reviewDigest !== input.reviewDigest || marker.sectionIndexDigest !== issueValue.sectionIndexDigest || marker.factStoreDigest !== issueValue.factStoreDigest || marker.deterministicReviewDigest !== issueValue.deterministicReviewDigest || marker.semanticManifestDigest !== issueValue.semanticManifestDigest || sha256(issueText) !== marker.issueRegistryDigest || sha256(manifestText) !== marker.manifestDigest || !Array.isArray(issueValue.issues) || issueValue.status !== 'committed' || issueValue.reviewDigest !== input.reviewDigest || !Array.isArray(issueValue.semanticResultDigests) || JSON.stringify(issueValue.semanticResultDigests) !== JSON.stringify(marker.semanticResultDigests) || issueValue.semanticResultDigests.length !== 10 || manifestValue.revision !== input.revision || manifestValue.reviewDigest !== input.reviewDigest || manifestValue.status !== 'audit_ready' || (manifestValue.semanticManifest as Record<string, unknown> | undefined)?.digest !== FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest) throw new Error('final review marker or binding is invalid')
+  const expectedSemanticChecks = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(item => item.checkId).sort(); const ledger = issueValue.semanticResultDigests as Array<{ checkId: string; packetIdentity: string; admittedResultDigest: string; confirmationDigest?: string }>; if (JSON.stringify(ledger.map(item => item.checkId).sort()) !== JSON.stringify(expectedSemanticChecks)) throw new Error('final review semantic result ledger is incomplete')
+  for (const entry of ledger) {
+    if (!exactKeys(entry as Record<string, unknown>, ['checkId', 'packetIdentity', 'admittedResultDigest', ...(Object.hasOwn(entry, 'confirmationDigest') ? ['confirmationDigest'] : [])]) || typeof entry.checkId !== 'string' || !isDigest(entry.packetIdentity) || !isDigest(entry.admittedResultDigest) || (entry.confirmationDigest !== undefined && !isDigest(entry.confirmationDigest))) throw new Error('final review semantic result ledger entry is invalid')
+  }
+  const issues = [...(issueValue.issues as AuditIssue[])].sort((a, b) => a.id.localeCompare(b.id)); const ids = new Set<string>(); issues.forEach((issue, index) => { validateReviewIssue(issue, index, true); if (ids.has(issue.id)) throw new Error('duplicate final review issue identity'); ids.add(issue.id) })
+  const documentDigests = canonicalDocumentDigests(issueValue.documentDigests as never)
+  if (finalReviewDigest({ revision: input.revision, documentDigests, sectionIndexDigest: String(issueValue.sectionIndexDigest), factStoreDigest: String(issueValue.factStoreDigest), deterministicReviewDigest: String(issueValue.deterministicReviewDigest), semanticManifestDigest: String(issueValue.semanticManifestDigest), semanticResultDigests: issueValue.semanticResultDigests as never[], issues }) !== input.reviewDigest) throw new Error('final review digest binding is invalid')
+  return { revision: input.revision, reviewDigest: input.reviewDigest, documentDigests, sectionIndexDigest: String(issueValue.sectionIndexDigest), factStoreDigest: String(issueValue.factStoreDigest), deterministicReviewDigest: String(issueValue.deterministicReviewDigest), semanticManifestDigest: String(issueValue.semanticManifestDigest), issues, paths, digests: { issueRegistry: String(marker.issueRegistryDigest), manifest: String(marker.manifestDigest), marker: stableDigest(marker) } }
 }
 export function assertExactlyEightCommittedFoundationDocuments(
   checkpoints: readonly Pick<FoundationDocumentCheckpoint, 'path' | 'status'>[],
@@ -984,6 +1073,13 @@ export async function validateFoundationAuditStateArtifacts(input: {
       const review = await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: input.state.revision, reviewDigest: input.state.deterministic.reviewDigest })
       if (!review || review.sectionIndexDigest !== input.state.deterministic.sectionIndexDigest || review.factStoreDigest !== input.state.deterministic.factStoreDigest || review.digests.issueRegistry !== input.state.deterministic.issueRegistryDigest || review.digests.manifest !== input.state.deterministic.manifestDigest || review.digests.marker !== input.state.deterministic.markerDigest || input.state.deterministic.issueRegistryPath !== relative(resolve(input.workspacePath), review.paths.issueRegistry).replaceAll('\\', '/') || input.state.deterministic.manifestPath !== relative(resolve(input.workspacePath), review.paths.manifest).replaceAll('\\', '/') || input.state.deterministic.markerPath !== relative(resolve(input.workspacePath), review.paths.marker).replaceAll('\\', '/'))
         throw new Error('foundation deterministic review does not match state bindings')
+      if (input.state.status === 'audit_ready') {
+        if (!input.state.review) throw new Error('foundation final review binding is missing')
+        const final = await loadFoundationSemanticReview({ workspacePath: input.workspacePath, revision: input.state.revision, reviewDigest: input.state.review.reviewDigest })
+        const finalRoot = `.beegame/audit/foundation/${input.state.revision}/review/${input.state.review.reviewDigest}`
+        if (!final || final.digests.issueRegistry !== input.state.review.issueRegistryDigest || final.digests.manifest !== input.state.review.manifestDigest || final.digests.marker !== input.state.review.markerDigest || input.state.review.issueRegistryPath !== `${finalRoot}/issue-registry.json` || input.state.review.manifestPath !== `${finalRoot}/manifest.json` || input.state.review.markerPath !== `${finalRoot}/COMMITTED.json` || final.sectionIndexDigest !== input.state.review.sectionIndexDigest || final.factStoreDigest !== input.state.review.factStoreDigest || final.semanticManifestDigest !== input.state.review.semanticManifestDigest)
+          throw new Error('foundation final review does not match state bindings')
+      }
     }
     return staged
   }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createFoundationFactStore, digestFactStore } from './foundation-fact-store'
@@ -10,9 +11,12 @@ import {
   assertExactlyEightCommittedFoundationDocuments,
   loadCommittedFoundationDerivedArtifacts,
   publishFoundationDerivedArtifacts,
+  publishFoundationSemanticReview,
+  loadFoundationSemanticReview,
 } from './foundation-audit-artifacts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import { getGameDocumentContract } from './game-document-contracts'
+import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST } from './foundation-semantic-audit'
 
 function validDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
@@ -32,6 +36,46 @@ function validDocument(
 }
 
 describe('foundation audit artifacts', () => {
+  test('fails closed when a final registry issue has invalid classification or target shape', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-final-review-corrupt-'))
+    try {
+      const digest = 'a'.repeat(64)
+      const ledger = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => ({ checkId: check.checkId, packetIdentity: digest, admittedResultDigest: digest }))
+      const issue = { id: 'AUD-AAAAAAAAAAAAAAAAAAAAAAAA', severity: 'HIGH' as const, type: 'semantic' as const, source: { documentPath: 'docs/GDD.md' as const, sectionId: 'vision', heading: 'Vision', startLine: 1, endLine: 1, digest }, expected: 'expected', actual: 'actual', fixDocument: 'docs/GDD.md' as const, fixSectionId: 'vision' }
+      const published = await publishFoundationSemanticReview({ workspacePath, revision: 'rev', documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), sectionIndexDigest: digest, factStoreDigest: digest, deterministicReviewDigest: digest, semanticManifest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST, semanticResultDigests: ledger, issues: [issue] })
+      const issuePath = join(workspacePath, '.beegame/audit/foundation/rev/review', published.reviewDigest, 'issue-registry.json')
+      const markerPath = join(workspacePath, '.beegame/audit/foundation/rev/review', published.reviewDigest, 'COMMITTED.json')
+      const corruptIssueText = `${JSON.stringify({ ...(JSON.parse(await readFile(issuePath, 'utf8')) as Record<string, unknown>), issues: [{ ...issue, severity: 'INVALID' }] }, null, 2)}\n`
+      await writeFile(issuePath, corruptIssueText)
+      const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
+      marker.issueRegistryDigest = createHash('sha256').update(corruptIssueText).digest('hex')
+      await writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`)
+      await expect(loadFoundationSemanticReview({ workspacePath, revision: 'rev', reviewDigest: published.reviewDigest })).rejects.toThrow(/classification|invalid|severity/i)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('atomically publishes and reloads one final semantic review with an exact result ledger', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-final-review-'))
+    try {
+      const digest = 'a'.repeat(64)
+      const ledger = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => ({ checkId: check.checkId, packetIdentity: digest, admittedResultDigest: digest }))
+      const published = await publishFoundationSemanticReview({ workspacePath, revision: 'rev', documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), sectionIndexDigest: digest, factStoreDigest: digest, deterministicReviewDigest: digest, semanticManifest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST, semanticResultDigests: ledger, issues: [] })
+      const loaded = await loadFoundationSemanticReview({ workspacePath, revision: 'rev', reviewDigest: published.reviewDigest })
+      expect(loaded?.reviewDigest).toBe(published.reviewDigest)
+      expect(loaded?.issues).toEqual([])
+      const markerPath = join(workspacePath, '.beegame/audit/foundation/rev/review', published.reviewDigest, 'COMMITTED.json')
+      const originalMarker = await readFile(markerPath, 'utf8')
+      const replayed = await publishFoundationSemanticReview({ workspacePath, revision: 'rev', documentDigests: [...CANONICAL_FOUNDATION_DOCUMENTS].reverse().map(path => ({ path, digest })), sectionIndexDigest: digest, factStoreDigest: digest, deterministicReviewDigest: digest, semanticManifest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST, semanticResultDigests: [...ledger].reverse(), issues: [] })
+      expect(replayed.reviewDigest).toBe(published.reviewDigest)
+      const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
+      marker.semanticResultDigests = [...(marker.semanticResultDigests as unknown[]).slice(1)]
+      await writeFile(markerPath, `${JSON.stringify(marker)}\n`)
+      await expect(loadFoundationSemanticReview({ workspacePath, revision: 'rev', reviewDigest: published.reviewDigest })).rejects.toThrow(/binding|ledger|invalid/i)
+      await writeFile(markerPath, originalMarker)
+      await rm(markerPath)
+      await expect(loadFoundationSemanticReview({ workspacePath, revision: 'rev', reviewDigest: published.reviewDigest })).rejects.toThrow()
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
   test('requires all eight canonical documents to have committed checkpoints', () => {
     const seven = CANONICAL_FOUNDATION_DOCUMENTS.slice(0, -1).map(path => ({
       path,
