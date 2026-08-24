@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -8,6 +8,7 @@ import { createInitialDeliveryRun } from './run-store'
 import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryWorkerPort } from './types'
 import { createBeeGameDeliveryWorkerPort } from '../delivery-worker-session-port'
 import { getGameDocumentContract } from './game-document-contracts'
+import { loadFoundationSemanticReview } from './foundation-audit-artifacts'
 
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
@@ -84,6 +85,7 @@ describe('foundation fact runtime controller integration', () => {
       const events = await controller.store.readEvents()
       expect(events.some(event => event.type === 'foundation.fact.facts_staged')).toBe(true)
       expect(events.some(event => event.type === 'foundation.fact.derived_committed')).toBe(true)
+      expect(events.filter(event => event.type === 'foundation.audit.deterministic_ready')).toHaveLength(1)
       expect(events.filter(event => event.type === 'foundation.audit.semantic_review')).toHaveLength(1)
       expect(events.some(event => event.type === 'foundation.audit.deterministic_ready.recovered')).toBe(false)
       const marker = JSON.parse(await readFile(join(workspacePath, '.beegame/audit/foundation/rev-1/derived/COMMITTED.json'), 'utf8')) as Record<string, unknown>
@@ -254,14 +256,18 @@ describe('foundation fact runtime controller integration', () => {
     }
   }
 
-  async function completeSemantic(controller: ReturnType<typeof createDeliveryWorkflowController>, taskId: string, outcome: 'PASS' | 'UNDECIDABLE') {
+  async function completeSemantic(controller: ReturnType<typeof createDeliveryWorkflowController>, taskId: string, outcome: 'PASS' | 'ISSUES' | 'UNDECIDABLE') {
     const snapshot = await controller.store.load()
     const task = snapshot!.foundationAuditState!.tasks.find(candidate => candidate.taskId === taskId)!
     const dispatchId = task.dispatch!.dispatchId
+    const packet = task.dispatch!.request!.contract.packet as { sections: Array<{ sectionKey: string }> }
+    const sectionKey = packet.sections[0]!.sectionKey
     await controller.store.addWorkflowUsage(snapshot!.runId, { input_tokens: 2, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 3, total_tokens: 5 }, dispatchId)
     await controller.dispatcher.completeDispatch(dispatchId, {
       workerType: 'foundation-semantic-reviewer', status: 'completed', runId: snapshot!.runId, dispatchId, taskId,
-      revision: task.revision, packetDigest: task.packetDigest, outcome, ...(outcome === 'UNDECIDABLE' ? { reason: 'insufficient evidence' } : {}),
+      revision: task.revision, packetDigest: task.packetDigest, outcome,
+      ...(outcome === 'UNDECIDABLE' ? { reason: 'insufficient evidence' } : {}),
+      ...(outcome === 'ISSUES' ? { issues: [{ problem: 'encounter has no readable counterplay', expected: 'counterplay is explicit', actual: 'counterplay is absent', sourceSectionKey: sectionKey, fixSectionKey: sectionKey }] } : {}),
     })
   }
 
@@ -274,7 +280,9 @@ describe('foundation fact runtime controller integration', () => {
       while (current?.foundationAuditState?.status === 'semantic_review') {
         const running = current.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status === 'running')
         expect(running.length).toBeGreaterThan(0)
-        await Promise.all(running.map(task => completeSemantic(controller, task.taskId, 'PASS')))
+        await Promise.all(running.map(task => completeSemantic(controller, task.taskId, 'PASS').catch(error => {
+          if (!(error instanceof Error) || !error.message.includes('simulated crash')) throw error
+        })))
         current = await controller.store.load()
       }
       expect(current?.foundationAuditState?.status).toBe('audit_ready')
@@ -307,6 +315,101 @@ describe('foundation fact runtime controller integration', () => {
       const resumed = await controller.store.load()
       expect(resumed!.foundationAuditState!.tasks.filter(task => task.kind === 'semantic' && task.status === 'running')).toHaveLength(4)
       expect(resumed!.foundationAuditState!.tasks.filter(task => task.kind === 'semantic' && task.status === 'running' && task.attempt === 2)).toHaveLength(4)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('resumes from completed semantic terminals and idempotently finalizes after publication crash', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      await finishFacts(controller)
+      const originalCommit = controller.store.commit.bind(controller.store)
+      let failFinalCommit = true
+      controller.store.commit = async (...args) => {
+        const event = args[1] as { type?: string }
+        if (failFinalCommit && event.type === 'foundation.audit.audit_ready') {
+          failFinalCommit = false
+          throw new Error('simulated crash after final review publication')
+        }
+        if (event.type === 'workflow.handler_failed') return args[0] as Awaited<ReturnType<typeof originalCommit>>
+        return originalCommit(...args)
+      }
+      let current = await controller.store.load()
+      let crashed = false
+      while (current?.foundationAuditState?.status === 'semantic_review') {
+        const running = current.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status === 'running')
+        if (!running.length) {
+          await controller.resume(current)
+          current = await controller.store.load()
+          continue
+        }
+        await Promise.all(running.map(task => completeSemantic(controller, task.taskId, 'PASS').catch(error => {
+          if (!(error instanceof Error) || !error.message.includes('simulated crash')) throw error
+          crashed = true
+        })))
+        current = await controller.store.load()
+        if (crashed) break
+      }
+      expect(current?.foundationAuditState?.status).toBe('semantic_review')
+      expect(current?.foundationAuditState?.review).toBeUndefined()
+      const completed = current!.foundationAuditState!.tasks.filter(task => task.kind === 'semantic' && task.status === 'completed')
+      expect(completed).toHaveLength(10)
+      expect((await readdir(join(workspacePath, '.beegame/audit/foundation/rev-1/review'))).length).toBe(1)
+      const reviewDirectories = await readFile(join(workspacePath, '.beegame/audit/foundation/rev-1/derived/COMMITTED.json'), 'utf8')
+      expect(reviewDirectories).toContain('committed')
+      await controller.resume(current!)
+      const resumed = await controller.store.load()
+      expect(resumed?.foundationAuditState?.status).toBe('audit_ready')
+      expect(resumed?.foundationAuditState?.review?.reviewDigest).toMatch(/^[a-f0-9]{64}$/)
+      await controller.resume(resumed!)
+      expect((await controller.store.load())?.foundationAuditState?.status).toBe('audit_ready')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('preserves semantic ISSUES in the single final Issue Registry', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      await finishFacts(controller)
+      let current = await controller.store.load()
+      let issued = false
+      while (current?.foundationAuditState?.status === 'semantic_review') {
+        const running = current.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status === 'running')
+        await Promise.all(running.map(task => {
+          const outcome = !issued && task.kind === 'semantic' ? 'ISSUES' : 'PASS'
+          issued ||= outcome === 'ISSUES'
+          return completeSemantic(controller, task.taskId, outcome)
+        }))
+        current = await controller.store.load()
+      }
+      expect(current?.foundationAuditState?.status).toBe('audit_ready')
+      const review = current!.foundationAuditState!.review!
+      const registry = JSON.parse(await readFile(join(workspacePath, review.issueRegistryPath), 'utf8')) as { issues: Array<{ type: string; actual?: string }> }
+      expect(registry.issues.filter(issue => issue.type === 'semantic')).toHaveLength(1)
+      expect(registry.issues.some(issue => issue.actual === 'counterplay is absent')).toBe(true)
+      expect(current!.foundationAuditState!.tasks.filter(task => task.kind === 'semantic')).toHaveLength(10)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('rejects a final review whose semantic manifest declaration is tampered despite its self-reported digest', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      await finishFacts(controller)
+      let current = await controller.store.load()
+      while (current?.foundationAuditState?.status === 'semantic_review') {
+        const running = current.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status === 'running')
+        await Promise.all(running.map(task => completeSemantic(controller, task.taskId, 'PASS')))
+        current = await controller.store.load()
+      }
+      const review = current!.foundationAuditState!.review!
+      const manifestPath = join(workspacePath, review.manifestPath)
+      const markerPath = join(workspacePath, review.markerPath)
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { semanticManifest: { checks: Array<{ objective: string }> } }
+      manifest.semanticManifest.checks[0]!.objective = 'tampered objective'
+      const manifestText = `${JSON.stringify(manifest, null, 2)}\n`
+      await writeFile(manifestPath, manifestText, 'utf8')
+      const marker = JSON.parse(await readFile(markerPath, 'utf8')) as { manifestDigest: string }
+      marker.manifestDigest = createHash('sha256').update(manifestText).digest('hex')
+      await writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`, 'utf8')
+      await expect(loadFoundationSemanticReview({ workspacePath, revision: 'rev-1', reviewDigest: review.reviewDigest })).rejects.toThrow(/manifest|authority|declaration/i)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
