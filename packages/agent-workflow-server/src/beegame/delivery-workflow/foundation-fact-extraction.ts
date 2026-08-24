@@ -517,7 +517,7 @@ function validatePacket(
 
 export function validateFoundationFactResults(input: {
   packet: FoundationFactPacket
-  expectedRevision?: string
+  expectedRevision: string
   documents: DocumentInput
   sectionIndex: readonly SectionRef[]
   results: readonly ResultInput[]
@@ -527,10 +527,9 @@ export function validateFoundationFactResults(input: {
   normalizedFactDigest: string
 } {
   const documents = mapDocuments(input.documents)
-  if (
-    input.expectedRevision !== undefined &&
-    input.packet.revision !== input.expectedRevision
-  )
+  if (!input.expectedRevision.trim())
+    throw new Error('expected foundation fact revision is required')
+  if (input.packet.revision !== input.expectedRevision)
     throw new Error('foundation fact packet revision is stale')
   validatePacket(input.packet, documents, input.sectionIndex)
   const assigned = new Set(input.packet.keys)

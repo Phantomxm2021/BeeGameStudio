@@ -151,6 +151,7 @@ describe('mechanical normalized foundation extraction', () => {
     expect(() =>
       validateFoundationFactResults({
         packet,
+        expectedRevision: 'revision-1',
         documents: docs,
         sectionIndex: index,
         results: [
@@ -173,6 +174,7 @@ describe('mechanical normalized foundation extraction', () => {
     expect(() =>
       validateFoundationFactResults({
         packet,
+        expectedRevision: 'revision-1',
         documents: docs,
         sectionIndex: index,
         results: [

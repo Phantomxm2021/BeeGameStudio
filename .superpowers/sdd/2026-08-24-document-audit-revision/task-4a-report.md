@@ -7,7 +7,7 @@ Implemented the normalized, versioned 24-key foundation fact catalog and mechani
 ## TDD evidence
 
 - Red: `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.test.ts` failed before implementation because the new catalog/extraction modules did not exist.
-- Green focused: the five Task 4A suites pass (`16 pass, 0 fail`; the extraction suite itself passes `4 pass, 0 fail`).
+- Green focused: the seven Task 4A/fix-round suites pass (`23 pass, 0 fail`; the extraction suite itself passes `4 pass, 0 fail`).
 - Delivery workflow after fix round: `84 pass, 0 fail`.
 - Package typecheck: `bun run --cwd packages/agent-workflow-server typecheck` passes.
 - `git diff --check` passes.
