@@ -250,7 +250,7 @@ export async function publishFoundationDerivedArtifacts(input: {
   factStore: FoundationFactStore
   normalizedFactDigest: string
   manifest: Record<string, unknown>
-}): Promise<{ paths: FoundationDerivedArtifactPaths; documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>; digests: { factStore: string; manifest: string; marker: string; sectionIndex: string } }> {
+}): Promise<LoadedCommittedFoundationDerivedArtifacts> {
   assertExactlyEightCommittedFoundationDocuments(CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, status: 'committed' as const })))
   if (input.documentDigests.length !== 8 || new Set(input.documentDigests.map(item => item.path)).size !== 8 || input.documentDigests.some(item => !CANONICAL_FOUNDATION_DOCUMENTS.includes(item.path)))
     throw new Error('derived foundation artifacts require exactly eight document digests')
@@ -300,7 +300,7 @@ export async function publishFoundationDerivedArtifacts(input: {
   return loaded
 }
 
-export async function loadCommittedFoundationDerivedArtifacts(input: { workspacePath: string; revision: string }): Promise<{ paths: FoundationDerivedArtifactPaths; documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>; digests: { factStore: string; manifest: string; marker: string; sectionIndex: string } } | undefined> {
+export async function loadCommittedFoundationDerivedArtifacts(input: { workspacePath: string; revision: string }): Promise<LoadedCommittedFoundationDerivedArtifacts | undefined> {
   const paths = foundationDerivedArtifactPaths(input.workspacePath, input.revision)
   return loadFoundationDerivedDirectory({ revision: input.revision, paths })
 }
@@ -316,7 +316,15 @@ function foundationDerivedArtifactPathsForDirectory(auditRoot: string, derived: 
   }
 }
 
-async function loadFoundationDerivedDirectory(input: { revision: string; paths: FoundationDerivedArtifactPaths }): Promise<{ paths: FoundationDerivedArtifactPaths; documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>; digests: { factStore: string; manifest: string; marker: string; sectionIndex: string } } | undefined> {
+type LoadedCommittedFoundationDerivedArtifacts = {
+  paths: FoundationDerivedArtifactPaths
+  documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>
+  sectionIndex: FoundationSectionIndex
+  factStore: FoundationFactStore
+  digests: { factStore: string; manifest: string; marker: string; sectionIndex: string }
+}
+
+async function loadFoundationDerivedDirectory(input: { revision: string; paths: FoundationDerivedArtifactPaths }): Promise<LoadedCommittedFoundationDerivedArtifacts | undefined> {
   const paths = input.paths
   let marker: Record<string, unknown>
   try { marker = JSON.parse(await readFile(paths.marker, 'utf8')) as Record<string, unknown> } catch (error) {
@@ -343,7 +351,13 @@ async function loadFoundationDerivedDirectory(input: { revision: string; paths: 
   if (digestSectionIndex(sectionRefs as never) !== section.digest) throw new Error('committed foundation section index digest is invalid')
   const closedFactStore = createFoundationFactStore(fact.facts as never[])
   if (digestFactStore(closedFactStore) !== fact.digest) throw new Error('committed foundation fact store digest is invalid')
-  return { paths, documentDigests: documentDigests as Array<{ path: FoundationDocumentPath; digest: string }>, digests: { sectionIndex: String(section.digest), factStore: String(fact.digest), manifest: String(marker.manifestDigest), marker: stableDigest(marker) } }
+  return {
+    paths,
+    documentDigests: documentDigests as Array<{ path: FoundationDocumentPath; digest: string }>,
+    sectionIndex: sectionRefs as FoundationSectionIndex,
+    factStore: closedFactStore,
+    digests: { sectionIndex: String(section.digest), factStore: String(fact.digest), manifest: String(marker.manifestDigest), marker: stableDigest(marker) },
+  }
 }
 
 export function foundationDeterministicReviewArtifactPaths(
@@ -632,7 +646,7 @@ async function validateDeterministicReviewFiles(input: {
   if (!issueValue || typeof issueValue !== 'object' || Array.isArray(issueValue) || !exactKeys(issueValue, ['revision', 'status', 'reviewDigest', 'documentDigests', 'sectionIndexDigest', 'factStoreDigest', 'manifestDigest', 'catalogVersion', 'contractGraphDigest', 'issues']))
     throw new Error('deterministic review registry shape is invalid')
   const issueObject = issueValue as Record<string, unknown>
-  if (issueObject.revision !== input.revision || issueObject.status !== 'deterministic_prefix' || issueObject.reviewDigest !== input.reviewDigest || !Array.isArray(issueObject.documentDigests) || !isDigest(issueObject.sectionIndexDigest) || !isDigest(issueObject.factStoreDigest) || !isDigest(issueObject.manifestDigest) || typeof issueObject.catalogVersion !== 'string' || !isDigest(issueObject.contractGraphDigest) || !Array.isArray(issueObject.issues))
+  if (issueObject.revision !== input.revision || issueObject.status !== 'deterministic_prefix' || issueObject.reviewDigest !== input.reviewDigest || !Array.isArray(issueObject.documentDigests) || !isDigest(issueObject.sectionIndexDigest) || !isDigest(issueObject.factStoreDigest) || issueObject.manifestDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest || issueObject.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion || issueObject.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest || !Array.isArray(issueObject.issues))
     throw new Error('deterministic review registry binding is invalid')
   canonicalDocumentDigests(issueObject.documentDigests as never)
   ;(issueObject.issues as unknown[]).forEach(validateReviewIssue)

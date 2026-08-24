@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto'
 import {
   FOUNDATION_FACT_CATALOG,
   FOUNDATION_FACT_CATALOG_VERSION,
+  foundationFactDefinition,
+  type FoundationFactValueType,
   type FoundationFactKey,
 } from './foundation-fact-definitions'
 import {
-  collectContractDrafts,
   type ContractBinding,
-  type ContractBindingRelation,
 } from './foundation-audit-contracts'
 import {
   runDeterministicFoundationAudit,
@@ -17,89 +17,23 @@ import {
 import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
 import type { AuditIssue } from './foundation-issue-registry'
-import { applyFoundationFixAuthority } from './foundation-audit-authority'
+import {
+  applyFoundationFixAuthority,
+  FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS,
+  type FoundationDeterministicContractDeclaration,
+} from './foundation-audit-authority'
 import { getGameDocumentContract } from './game-document-contracts'
 import type { FoundationDocumentPath } from './types'
-
-type ProductionContractDeclaration = {
-  id: string
-  sourceFactKey: FoundationFactKey
-  targetFactKey: FoundationFactKey
-  relation: ContractBindingRelation
-  source: { documentPath: FoundationDocumentPath; sectionId: string }
-  target: { documentPath: FoundationDocumentPath; sectionId: string }
-  severity: 'BLOCKER' | 'HIGH' | 'MEDIUM' | 'LOW'
-}
 
 export type FoundationAuditProductionManifest = {
   version: 'foundation-deterministic.v1'
   catalogVersion: typeof FOUNDATION_FACT_CATALOG_VERSION
   schemaKeys: readonly FoundationFactKey[]
-  contracts: readonly ProductionContractDeclaration[]
+  contracts: readonly FoundationDeterministicContractDeclaration[]
   deferredSemanticKeys: readonly FoundationFactKey[]
   digest: string
   contractGraphDigest: string
 }
-
-const contract = (
-  id: string,
-  sourceFactKey: FoundationFactKey,
-  targetFactKey: FoundationFactKey,
-  relation: ContractBindingRelation,
-  source: ProductionContractDeclaration['source'],
-  target: ProductionContractDeclaration['target'],
-): ProductionContractDeclaration => ({
-  id,
-  sourceFactKey,
-  targetFactKey,
-  relation,
-  source,
-  target,
-  severity: 'HIGH',
-})
-
-const PRODUCTION_CONTRACTS: readonly ProductionContractDeclaration[] = [
-  contract(
-    'technical-actions-authority',
-    'technical.supported_actions',
-    'game.mechanics',
-    'contains-all',
-    { documentPath: 'docs/TECHNICAL_DESIGN.md', sectionId: 'input_interaction' },
-    { documentPath: 'docs/GDD.md', sectionId: 'player_actions' },
-  ),
-  contract(
-    'asset-boss-count-authority',
-    'asset.boss.count',
-    'game.boss.count',
-    'numeric-equal',
-    { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' },
-    { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' },
-  ),
-  contract(
-    'ui-resources-authority',
-    'ui.displayed_resources',
-    'game.resources',
-    'contains-all',
-    { documentPath: 'docs/UI_UX_SPEC.md', sectionId: 'hud' },
-    { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' },
-  ),
-  contract(
-    'asset-inventory-authority',
-    'asset.inventory_ids',
-    'level.required_assets',
-    'contains-all',
-    { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' },
-    { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'content_matrix' },
-  ),
-  contract(
-    'asset-art-constraints-authority',
-    'asset.art_constraint_refs',
-    'art.style_constraints',
-    'contains-all',
-    { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'dependencies' },
-    { documentPath: 'docs/ART_DIRECTION.md', sectionId: 'visual_pillars' },
-  ),
-]
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -140,13 +74,13 @@ export const FOUNDATION_AUDIT_PRODUCTION_MANIFEST: FoundationAuditProductionMani
     schemaKeys: Object.freeze(
       FOUNDATION_FACT_CATALOG.map(item => item.key),
     ),
-    contracts: Object.freeze(PRODUCTION_CONTRACTS.map(item => Object.freeze({ ...item }))),
+    contracts: FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS,
     deferredSemanticKeys: Object.freeze(['technical.target_fps', 'level.complexity_budget'] as FoundationFactKey[]),
     digest: digest({
       version: 'foundation-deterministic.v1',
       catalogVersion: FOUNDATION_FACT_CATALOG_VERSION,
       schemaKeys: FOUNDATION_FACT_CATALOG.map(item => item.key),
-      contracts: PRODUCTION_CONTRACTS,
+      contracts: FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS,
       deferredSemanticKeys: ['technical.target_fps', 'level.complexity_budget'],
     }),
     contractGraphDigest: contractGraphDigest(),
@@ -176,11 +110,39 @@ function productionSchema(sectionIndex: readonly SectionRef[]): FoundationSchema
 }
 
 function productionContracts(sectionIndex: readonly SectionRef[]): ContractBinding[] {
-  return PRODUCTION_CONTRACTS.map(declaration => ({
+  return FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS.map(declaration => ({
     ...declaration,
     source: resolveSection(sectionIndex, declaration.source),
     target: resolveSection(sectionIndex, declaration.target),
   }))
+}
+
+function valueType(value: unknown): FoundationFactValueType | undefined {
+  if (typeof value === 'string') return 'string'
+  if (typeof value === 'number') return 'number'
+  if (typeof value === 'boolean') return 'boolean'
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  if (value.every(item => typeof item === 'string')) return 'string[]'
+  if (value.every(item => typeof item === 'number' && Number.isFinite(item))) return 'number[]'
+  return undefined
+}
+
+function validContractFacts(
+  bindings: readonly ContractBinding[],
+  factStore: readonly FoundationFact[],
+): ContractBinding[] {
+  const facts = new Map(factStore.map(fact => [fact.key, fact]))
+  return bindings.filter(binding => {
+    const source = facts.get(binding.sourceFactKey)
+    const target = facts.get(binding.targetFactKey)
+    const sourceDefinition = foundationFactDefinition(binding.sourceFactKey)
+    const targetDefinition = foundationFactDefinition(binding.targetFactKey)
+    return Boolean(
+      source && target && sourceDefinition && targetDefinition &&
+      valueType(source.value) === sourceDefinition.valueType &&
+      valueType(target.value) === targetDefinition.valueType,
+    )
+  })
 }
 
 export function runProductionDeterministicFoundationAudit(input: {
@@ -196,7 +158,13 @@ export function runProductionDeterministicFoundationAudit(input: {
     sectionIndex: input.sectionIndex,
     factStore: input.factStore,
     schema: productionSchema(input.sectionIndex),
-    contractBindings: productionContracts(input.sectionIndex),
+    // Catalog-backed schema checks own completeness and type validity. A
+    // contract only evaluates once both sides are admitted; otherwise its
+    // missing/invalid fact is represented by the single schema issue.
+    contractBindings: validContractFacts(
+      productionContracts(input.sectionIndex),
+      input.factStore,
+    ),
   }
   return applyFoundationFixAuthority(runDeterministicFoundationAudit(auditInput))
 }

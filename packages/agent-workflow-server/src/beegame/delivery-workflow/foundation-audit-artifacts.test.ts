@@ -177,7 +177,10 @@ describe('foundation audit artifacts', () => {
         normalizedFactDigest: digestFactStore(factStore),
         manifest: staged.manifest as unknown as Record<string, unknown>,
       })
-      expect(await loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })).toEqual(committed)
+      const loaded = await loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })
+      expect(loaded).toEqual(committed)
+      expect(loaded?.sectionIndex).toEqual(staged.sectionIndex)
+      expect(loaded?.factStore).toEqual(factStore)
       const markerPath = join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/COMMITTED.json')
       const manifest = JSON.parse(await readFile(join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/manifest.json'), 'utf8')) as Record<string, unknown>
       expect(manifest.needsAction).toBeUndefined()

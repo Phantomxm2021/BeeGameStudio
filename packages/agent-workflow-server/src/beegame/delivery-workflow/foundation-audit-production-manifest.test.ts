@@ -11,7 +11,7 @@ import {
   FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
   runProductionDeterministicFoundationAudit,
 } from './foundation-audit-production-manifest'
-import { SERVICE_OWNED_CATALOG_EDGES } from './foundation-audit-contracts'
+import { FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS } from './foundation-audit-authority'
 import {
   resolveFoundationFixTarget,
   TECHNICAL_IMPOSSIBILITY_REASON_CODE,
@@ -75,8 +75,18 @@ describe('service-owned deterministic production audit', () => {
     expect('rules' in FOUNDATION_AUDIT_PRODUCTION_MANIFEST).toBe(false)
     expect(new Set(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).size).toBe(24)
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts.map(item => item.id)).toContain('asset-boss-count-authority')
-    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts.map(item => `${item.sourceFactKey}->${item.targetFactKey}`).sort()).toEqual(SERVICE_OWNED_CATALOG_EDGES.map(item => `${item.sourceFactKey}->${item.targetFactKey}`).sort())
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts).toBe(FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS)
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts).toEqual(FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS)
     expect(Object.isFrozen(FOUNDATION_AUDIT_PRODUCTION_MANIFEST)).toBe(true)
+  })
+
+  test('production schema owns missing fact completeness without contract duplicates', () => {
+    const documents = fixtureDocuments()
+    const sectionIndex = buildFoundationSectionIndex({ documents })
+    const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: [] })
+    expect(issues).toHaveLength(24)
+    expect(issues.filter(issue => issue.type === 'schema')).toHaveLength(24)
+    expect(issues.filter(issue => issue.type === 'contract')).toHaveLength(0)
   })
 
   test('runs the real eight-document normalized-fact pipeline without caller rules or a worker', () => {

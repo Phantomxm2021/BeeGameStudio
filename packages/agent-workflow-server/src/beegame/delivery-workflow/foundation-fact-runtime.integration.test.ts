@@ -93,6 +93,8 @@ describe('foundation fact runtime controller integration', () => {
       const events = await controller.store.readEvents()
       expect(events.some(event => event.type === 'foundation.fact.facts_staged')).toBe(true)
       expect(events.some(event => event.type === 'foundation.fact.derived_committed')).toBe(true)
+      expect(events.filter(event => event.type === 'foundation.audit.deterministic_ready')).toHaveLength(2)
+      expect(events.some(event => event.type === 'foundation.audit.deterministic_ready.recovered')).toBe(false)
       const marker = JSON.parse(await readFile(join(workspacePath, '.beegame/audit/foundation/rev-1/derived/COMMITTED.json'), 'utf8')) as Record<string, unknown>
       expect(marker.status).toBe('committed')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }

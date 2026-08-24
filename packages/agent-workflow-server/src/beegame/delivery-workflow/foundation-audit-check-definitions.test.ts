@@ -123,7 +123,6 @@ describe('deterministic foundation audit compiler', () => {
       'collectRuleDrafts',
     ])
     expect(Object.keys(await import('./foundation-audit-contracts')).sort()).toEqual([
-      'SERVICE_OWNED_CATALOG_EDGES',
       'collectContractDrafts',
     ])
     expect(Object.keys(await import('./foundation-issue-registry'))).toEqual([])

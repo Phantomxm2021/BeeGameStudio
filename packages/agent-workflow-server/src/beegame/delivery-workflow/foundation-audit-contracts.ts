@@ -1,4 +1,5 @@
 import { getGameDocumentContract } from './game-document-contracts'
+import { FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS } from './foundation-audit-authority'
 import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
 import type {
@@ -74,7 +75,7 @@ function permittedEdge(binding: ContractBinding): boolean {
     )
   )
   if (direct) return true
-  return SERVICE_OWNED_CATALOG_EDGES.some(edge =>
+  return FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS.some(edge =>
     edge.sourceFactKey === binding.sourceFactKey &&
     edge.targetFactKey === binding.targetFactKey &&
     edge.source.documentPath === binding.source.documentPath &&
@@ -83,14 +84,6 @@ function permittedEdge(binding: ContractBinding): boolean {
     edge.target.sectionId === binding.target.sectionId,
   )
 }
-
-export const SERVICE_OWNED_CATALOG_EDGES = Object.freeze([
-  { sourceFactKey: 'technical.supported_actions', targetFactKey: 'game.mechanics', source: { documentPath: 'docs/TECHNICAL_DESIGN.md', sectionId: 'input_interaction' }, target: { documentPath: 'docs/GDD.md', sectionId: 'player_actions' } },
-  { sourceFactKey: 'asset.boss.count', targetFactKey: 'game.boss.count', source: { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }, target: { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' } },
-  { sourceFactKey: 'ui.displayed_resources', targetFactKey: 'game.resources', source: { documentPath: 'docs/UI_UX_SPEC.md', sectionId: 'hud' }, target: { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' } },
-  { sourceFactKey: 'asset.inventory_ids', targetFactKey: 'level.required_assets', source: { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }, target: { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'content_matrix' } },
-  { sourceFactKey: 'asset.art_constraint_refs', targetFactKey: 'art.style_constraints', source: { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'dependencies' }, target: { documentPath: 'docs/ART_DIRECTION.md', sectionId: 'visual_pillars' } },
-] as const)
 
 function bindingDrafts(
   context: FoundationAuditContext,

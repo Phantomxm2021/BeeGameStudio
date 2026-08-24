@@ -1,5 +1,42 @@
 import type { AuditIssue } from './foundation-issue-registry'
 import type { FoundationDocumentPath } from './types'
+import type { FoundationFactKey } from './foundation-fact-definitions'
+
+export type FoundationDeterministicContractDeclaration = {
+  id: string
+  sourceFactKey: FoundationFactKey
+  targetFactKey: FoundationFactKey
+  relation: 'exists' | 'equal' | 'numeric-equal' | 'contains-all'
+  source: { documentPath: FoundationDocumentPath; sectionId: string }
+  target: { documentPath: FoundationDocumentPath; sectionId: string }
+  severity: AuditIssue['severity']
+}
+
+const declaration = (
+  id: string,
+  sourceFactKey: FoundationFactKey,
+  targetFactKey: FoundationFactKey,
+  relation: FoundationDeterministicContractDeclaration['relation'],
+  source: FoundationDeterministicContractDeclaration['source'],
+  target: FoundationDeterministicContractDeclaration['target'],
+): FoundationDeterministicContractDeclaration => Object.freeze({
+  id,
+  sourceFactKey,
+  targetFactKey,
+  relation,
+  source: Object.freeze({ ...source }),
+  target: Object.freeze({ ...target }),
+  severity: 'HIGH',
+})
+
+/** The sole service-owned deterministic contract declaration source. */
+export const FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS = Object.freeze([
+  declaration('technical-actions-authority', 'technical.supported_actions', 'game.mechanics', 'contains-all', { documentPath: 'docs/TECHNICAL_DESIGN.md', sectionId: 'input_interaction' }, { documentPath: 'docs/GDD.md', sectionId: 'player_actions' }),
+  declaration('asset-boss-count-authority', 'asset.boss.count', 'game.boss.count', 'numeric-equal', { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }, { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' }),
+  declaration('ui-resources-authority', 'ui.displayed_resources', 'game.resources', 'contains-all', { documentPath: 'docs/UI_UX_SPEC.md', sectionId: 'hud' }, { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' }),
+  declaration('asset-inventory-authority', 'asset.inventory_ids', 'level.required_assets', 'contains-all', { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }, { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'content_matrix' }),
+  declaration('asset-art-constraints-authority', 'asset.art_constraint_refs', 'art.style_constraints', 'contains-all', { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'dependencies' }, { documentPath: 'docs/ART_DIRECTION.md', sectionId: 'visual_pillars' }),
+] as const)
 
 export const TECHNICAL_IMPOSSIBILITY_REASON_CODE =
   'technical-impossibility' as const

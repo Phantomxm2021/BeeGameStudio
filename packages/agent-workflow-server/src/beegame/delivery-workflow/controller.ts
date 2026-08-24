@@ -71,10 +71,13 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, validateFoundationFactResults } from './foundation-fact-extraction'
 import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
-import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, foundationDerivedArtifactPaths, loadCommittedFoundationDerivedArtifacts } from './foundation-audit-artifacts'
+import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, loadCommittedFoundationDerivedArtifacts } from './foundation-audit-artifacts'
 import { createFoundationFactStore, digestFactStore } from './foundation-fact-store'
 import type { FoundationAuditState } from './foundation-audit-state'
-import { runProductionDeterministicFoundationAudit } from './foundation-audit-production-manifest'
+import {
+  FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
+  runProductionDeterministicFoundationAudit,
+} from './foundation-audit-production-manifest'
 
 async function deriveFoundationAudit(
   run: DeliveryRun,
@@ -267,12 +270,8 @@ export function createDeliveryWorkflowController(input: {
     if (!state.derived) throw new Error('committed deterministic audit inputs are unavailable')
     const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision })
     if (!committed) throw new Error('committed derived authority is unavailable')
-    const paths = foundationDerivedArtifactPaths(input.workspacePath, state.revision)
-    const sectionValue = JSON.parse(await readFile(paths.sectionIndex, 'utf8')) as { sections?: unknown[] }
-    const factValue = JSON.parse(await readFile(paths.factStore, 'utf8')) as { facts?: unknown[] }
-    if (!Array.isArray(sectionValue.sections) || !Array.isArray(factValue.facts)) throw new Error('committed derived authority is malformed')
-    const sectionIndex = sectionValue.sections as never[]
-    const factStore = createFoundationFactStore(factValue.facts as never[])
+    const sectionIndex = committed.sectionIndex
+    const factStore = committed.factStore
     const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore })
     const review = await publishDeterministicFoundationReview({
       workspacePath: input.workspacePath,
@@ -282,6 +281,12 @@ export function createDeliveryWorkflowController(input: {
       factStore,
       issues,
     })
+    if (
+      review.manifestDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest ||
+      review.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion ||
+      review.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest
+    )
+      throw new Error('deterministic review is not bound to the controller production manifest')
     const reviewRoot = `.beegame/audit/foundation/${state.revision}/staging/review/${review.reviewDigest}`
     const deterministic = {
       reviewDigest: review.reviewDigest,
@@ -307,7 +312,7 @@ export function createDeliveryWorkflowController(input: {
         status: 'needs_action',
         blockedReason: 'deterministic audit complete; semantic Task 5 is not installed',
         thinking: 'idle',
-      }, { runId: locked.runId, type: 'foundation.audit.deterministic_ready.recovered', phase: locked.phase, status: 'needs_action', revision: locked.revision, reviewDigest: review.reviewDigest }, undefined, lease)
+      }, { runId: locked.runId, type: 'foundation.audit.deterministic_ready', phase: locked.phase, status: 'needs_action', revision: locked.revision, reviewDigest: review.reviewDigest }, undefined, lease)
     } finally {
       await store.unlock(lease)
     }
