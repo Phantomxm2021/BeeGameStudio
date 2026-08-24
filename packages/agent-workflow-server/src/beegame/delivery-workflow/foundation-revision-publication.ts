@@ -12,6 +12,7 @@ import {
 } from './foundation-revision-stage'
 import type { RevisionBatch } from './foundation-revision-batches'
 import type { FoundationSemanticRecheckResult, PatchValidation } from './foundation-patch-validation'
+import type { AuditIssue, AuditSeverity } from './foundation-issue-registry'
 import { CANONICAL_FOUNDATION_DOCUMENTS, type FoundationDocumentPath } from './types'
 import { computeDocumentRevision } from './revision'
 
@@ -19,6 +20,7 @@ const DIGEST = /^[a-f0-9]{64}$/
 const REVISION = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/
 const TASK = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/
 const DOCS = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
+const SEVERITIES = new Set<AuditSeverity>(['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'])
 
 export type FoundationRevisionPreparedDocument = {
   documentPath: FoundationDocumentPath
@@ -45,6 +47,8 @@ export type FoundationRevisionPrepared = {
   confirmedBriefDigest: string
   round: 1 | 2 | 3
   documents: FoundationRevisionPreparedDocument[]
+  resultingIssues: readonly AuditIssue[]
+  resultingIssueRegistryDigest: string
   authorityDigest: string
 }
 
@@ -54,6 +58,8 @@ export type FoundationRevisionPublicationResult = {
   resultingRevision: string
   confirmedBriefDigest: string
   authorityDigest: string
+  resultingIssues: readonly AuditIssue[]
+  resultingIssueRegistryDigest: string
   documentDigests: Record<string, string>
   preparedPath: string
   journalPath: string
@@ -83,6 +89,7 @@ type Committed = {
   round: 1 | 2 | 3
   authorityDigest: string
   resultingRevision: string
+  resultingIssueRegistryDigest: string
   documentDigests: Record<string, string>
 }
 
@@ -96,6 +103,7 @@ export type FoundationRevisionPublicationInput = {
   patchOperations: readonly PatchOperation[]
   patchValidations: readonly PatchValidation[]
   semanticRecheckResults: readonly FoundationSemanticRecheckResult[]
+  resultingIssues: readonly AuditIssue[]
   onPathPublished?: (documentPath: FoundationDocumentPath) => Promise<void> | void
 }
 
@@ -140,6 +148,42 @@ function assertExactKeys(value: Record<string, unknown>, expected: readonly stri
 function strings(value: unknown, label: string, allowEmpty = false): string[] {
   if (!Array.isArray(value) || (!allowEmpty && value.length === 0) || value.some(item => typeof item !== 'string' || item.length === 0) || new Set(value).size !== value.length) throw new Error(`${label} must contain unique non-empty strings`)
   return [...value]
+}
+
+function cloneJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneJsonValue)
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, cloneJsonValue(item)]))
+  return value
+}
+
+function freezeDeep<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value as Record<string, unknown>)) freezeDeep(child)
+    Object.freeze(value)
+  }
+  return value
+}
+
+function compareStableStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+function validateResultingIssues(value: unknown): AuditIssue[] {
+  if (!Array.isArray(value)) throw new Error('resultingIssues must be an array')
+  const ids = new Set<string>()
+  const issues = value.map(raw => {
+    assertObject(raw, 'resulting AuditIssue')
+    if (typeof raw.id !== 'string' || raw.id.length === 0) throw new Error('resulting AuditIssue ID must be non-empty')
+    if (ids.has(raw.id)) throw new Error(`duplicate resulting AuditIssue ID: ${raw.id}`)
+    ids.add(raw.id)
+    if (typeof raw.severity !== 'string' || !SEVERITIES.has(raw.severity as AuditSeverity)) throw new Error(`resulting AuditIssue severity is unsupported: ${String(raw.severity)}`)
+    return cloneJsonValue(raw) as AuditIssue
+  })
+  return issues.sort((left, right) => compareStableStrings(left.id, right.id))
+}
+
+function frozenResultingIssues(value: readonly AuditIssue[]): readonly AuditIssue[] {
+  return Object.freeze(value.map(issue => freezeDeep(cloneJsonValue(issue) as AuditIssue)))
 }
 
 function sameSet(left: readonly string[], right: readonly string[]): boolean {
@@ -321,6 +365,7 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
   const operations = input.patchOperations.map(validateOperation)
   const validations = input.patchValidations.map(validateValidation)
   const semanticResults = input.semanticRecheckResults.map(validateSemanticResult)
+  const resultingIssues = validateResultingIssues(input.resultingIssues)
   const batchByPath = new Map<FoundationDocumentPath, RevisionBatch>()
   for (const batch of batches) {
     if (batchByPath.has(batch.documentPath)) throw new Error('revision batches contain duplicate document paths')
@@ -337,6 +382,8 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
   if (receiptByPath.size !== batchByPath.size) throw new Error('revision batch coverage is incomplete')
   const allIssueIds = batches.flatMap(batch => batch.issueIds)
   if (new Set(allIssueIds).size !== allIssueIds.length) throw new Error('revision issue coverage contains duplicate IDs')
+  const resolvedIssueIds = new Set(allIssueIds)
+  if (resultingIssues.some(issue => resolvedIssueIds.has(issue.id))) throw new Error('resulting AuditIssue overlaps a resolved revision issue')
   const groupedOperations = new Map<FoundationDocumentPath, PatchOperation[]>()
   for (const operation of operations) groupedOperations.set(operation.documentPath, [...(groupedOperations.get(operation.documentPath) ?? []), operation])
   const groupedValidations = new Map<FoundationDocumentPath, PatchValidation[]>()
@@ -376,16 +423,20 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
   if (operations.some(operation => !receiptByPath.has(operation.documentPath))) throw new Error('revision has an unassigned document PatchOperation')
   documents.sort((a, b) => a.documentPath.localeCompare(b.documentPath))
   assertDigest(input.confirmedBriefDigest, 'confirmedBriefDigest')
-  const withoutDigest = { schema: 'beegame-foundation-revision-publish-v2' as const, status: 'prepared' as const, revision: input.revision, confirmedBriefDigest: input.confirmedBriefDigest, round: input.round, documents }
+  const resultingIssueRegistryDigest = digestList(resultingIssues)
+  const withoutDigest = { schema: 'beegame-foundation-revision-publish-v2' as const, status: 'prepared' as const, revision: input.revision, confirmedBriefDigest: input.confirmedBriefDigest, round: input.round, documents, resultingIssues, resultingIssueRegistryDigest }
   return { ...withoutDigest, authorityDigest: sha256(stable(withoutDigest)) }
 }
 
 function validatePrepared(value: unknown): FoundationRevisionPrepared {
   assertObject(value, 'foundation revision PREPARED authority')
-  assertExactKeys(value, ['authorityDigest', 'confirmedBriefDigest', 'documents', 'revision', 'round', 'schema', 'status'], 'PREPARED authority')
+  assertExactKeys(value, ['authorityDigest', 'confirmedBriefDigest', 'documents', 'revision', 'resultingIssueRegistryDigest', 'resultingIssues', 'round', 'schema', 'status'], 'PREPARED authority')
   if (value.schema !== 'beegame-foundation-revision-publish-v2' || value.status !== 'prepared' || typeof value.revision !== 'string' || !REVISION.test(value.revision) || (value.round !== 1 && value.round !== 2 && value.round !== 3) || !Array.isArray(value.documents) || value.documents.length === 0) throw new Error('foundation revision PREPARED authority is invalid')
   assertDigest(value.confirmedBriefDigest, 'PREPARED confirmedBriefDigest')
   assertDigest(value.authorityDigest, 'PREPARED authorityDigest')
+  const resultingIssues = validateResultingIssues(value.resultingIssues)
+  assertDigest(value.resultingIssueRegistryDigest, 'PREPARED resultingIssueRegistryDigest')
+  if (digestList(resultingIssues) !== value.resultingIssueRegistryDigest) throw new Error('PREPARED resulting issue registry digest mismatch')
   const documents = value.documents.map(raw => {
     assertObject(raw, 'PREPARED document')
     assertExactKeys(raw, ['baseDocumentDigest', 'changedSectionIds', 'documentPath', 'issueIds', 'operationDigest', 'patchOperations', 'receiptDigest', 'resultDigest', 'round', 'semanticResultDigest', 'stagedDocumentDigest', 'stagedPath', 'taskId', 'terminalDigest', 'validationDigest'], 'PREPARED document')
@@ -400,7 +451,7 @@ function validatePrepared(value: unknown): FoundationRevisionPrepared {
     return { documentPath: receipt.documentPath, round: receipt.round, taskId: receipt.taskId, issueIds: receipt.issueIds, changedSectionIds: receipt.changedSectionIds, baseDocumentDigest: receipt.baseDocumentDigest, stagedDocumentDigest: receipt.stagedDocumentDigest, stagedPath: receipt.stagedPath, terminalDigest: receipt.terminalDigest, receiptDigest: raw.receiptDigest as string, operationDigest: raw.operationDigest as string, validationDigest: raw.validationDigest as string, semanticResultDigest: raw.semanticResultDigest as string, resultDigest: raw.resultDigest as string, patchOperations }
   })
   if (new Set(documents.map(document => document.documentPath)).size !== documents.length) throw new Error('PREPARED authority contains duplicate document paths')
-  const withoutDigest = { schema: 'beegame-foundation-revision-publish-v2' as const, status: 'prepared' as const, revision: value.revision as string, confirmedBriefDigest: value.confirmedBriefDigest as string, round: value.round as 1 | 2 | 3, documents }
+  const withoutDigest = { schema: 'beegame-foundation-revision-publish-v2' as const, status: 'prepared' as const, revision: value.revision as string, confirmedBriefDigest: value.confirmedBriefDigest as string, round: value.round as 1 | 2 | 3, documents, resultingIssues, resultingIssueRegistryDigest: value.resultingIssueRegistryDigest as string }
   if (sha256(stable(withoutDigest)) !== value.authorityDigest) throw new Error('PREPARED authority digest mismatch')
   return { ...withoutDigest, authorityDigest: value.authorityDigest as string }
 }
@@ -427,6 +478,8 @@ function assertReplayMatches(input: FoundationRevisionPublicationInput, prepared
   if (stable(operations) !== stable(preparedOperations)) throw new Error('publication PatchOperations do not match PREPARED authority')
   const validations = input.patchValidations.map(validateValidation)
   const semanticResults = input.semanticRecheckResults.map(validateSemanticResult)
+  const resultingIssues = validateResultingIssues(input.resultingIssues)
+  if (digestList(resultingIssues) !== prepared.resultingIssueRegistryDigest || stable(resultingIssues) !== stable(prepared.resultingIssues)) throw new Error('publication resulting issue authority does not match PREPARED')
   for (const document of prepared.documents) {
     const documentValidations = validations.filter(validation => validation.documentPath === document.documentPath).sort((a, b) => a.issueId.localeCompare(b.issueId))
     if (digestList(documentValidations) !== document.validationDigest) throw new Error('publication PatchValidation authority does not match PREPARED')
@@ -476,9 +529,11 @@ async function recoverPrepared(input: FoundationRevisionRecoveryInput, prepared:
   try {
     const value = JSON.parse(await readFile(committedPath, 'utf8')) as unknown
     assertObject(value, 'COMMITTED marker')
-    assertExactKeys(value, ['authorityDigest', 'baseRevision', 'confirmedBriefDigest', 'documentDigests', 'resultingRevision', 'round', 'schema', 'status'], 'COMMITTED marker')
+    assertExactKeys(value, ['authorityDigest', 'baseRevision', 'confirmedBriefDigest', 'documentDigests', 'resultingIssueRegistryDigest', 'resultingRevision', 'round', 'schema', 'status'], 'COMMITTED marker')
     if (value.schema !== 'beegame-foundation-revision-commit-v2' || value.status !== 'committed' || value.baseRevision !== prepared.revision || value.confirmedBriefDigest !== prepared.confirmedBriefDigest || value.round !== prepared.round || value.authorityDigest !== prepared.authorityDigest) throw new Error('COMMITTED marker authority is invalid')
     assertDigest(value.resultingRevision, 'COMMITTED resultingRevision')
+    assertDigest(value.resultingIssueRegistryDigest, 'COMMITTED resultingIssueRegistryDigest')
+    if (value.resultingIssueRegistryDigest !== prepared.resultingIssueRegistryDigest) throw new Error('COMMITTED resulting issue registry authority is invalid')
     assertObject(value.documentDigests, 'COMMITTED documentDigests')
     priorCommitted = value as unknown as Committed
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
@@ -512,8 +567,8 @@ async function recoverPrepared(input: FoundationRevisionRecoveryInput, prepared:
   }
   const resultingRevision = await computeDocumentRevision(input.workspacePath, prepared.confirmedBriefDigest)
   if (priorCommitted && (priorCommitted.resultingRevision !== resultingRevision || stable(priorCommitted.documentDigests) !== stable(documentDigests))) throw new Error('COMMITTED marker contradicts canonical bytes')
-  if (!priorCommitted) await atomicJson(committedPath, { schema: 'beegame-foundation-revision-commit-v2', status: 'committed', baseRevision: prepared.revision, confirmedBriefDigest: prepared.confirmedBriefDigest, round: prepared.round, authorityDigest: prepared.authorityDigest, resultingRevision, documentDigests } satisfies Committed)
-  return { status: 'committed', baseRevision: prepared.revision, resultingRevision, confirmedBriefDigest: prepared.confirmedBriefDigest, authorityDigest: prepared.authorityDigest, documentDigests, preparedPath: foundationRevisionPreparedPath(prepared.revision), journalPath: foundationRevisionJournalPath(prepared.revision), committedPath: foundationRevisionCommittedPath(prepared.revision) }
+  if (!priorCommitted) await atomicJson(committedPath, { schema: 'beegame-foundation-revision-commit-v2', status: 'committed', baseRevision: prepared.revision, confirmedBriefDigest: prepared.confirmedBriefDigest, round: prepared.round, authorityDigest: prepared.authorityDigest, resultingRevision, resultingIssueRegistryDigest: prepared.resultingIssueRegistryDigest, documentDigests } satisfies Committed)
+  return { status: 'committed', baseRevision: prepared.revision, resultingRevision, confirmedBriefDigest: prepared.confirmedBriefDigest, authorityDigest: prepared.authorityDigest, resultingIssues: frozenResultingIssues(prepared.resultingIssues), resultingIssueRegistryDigest: prepared.resultingIssueRegistryDigest, documentDigests, preparedPath: foundationRevisionPreparedPath(prepared.revision), journalPath: foundationRevisionJournalPath(prepared.revision), committedPath: foundationRevisionCommittedPath(prepared.revision) }
 }
 
 /** Validates actual revision authority, durably writes PREPARED, and rolls forward staged Markdown. */

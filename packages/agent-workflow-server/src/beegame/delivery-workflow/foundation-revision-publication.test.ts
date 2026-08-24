@@ -15,6 +15,7 @@ import {
 } from './foundation-revision-stage'
 import type { FoundationSemanticRecheckResult, PatchValidation } from './foundation-patch-validation'
 import type { RevisionBatch } from './foundation-revision-batches'
+import type { AuditIssue } from './foundation-issue-registry'
 import type { FoundationDocumentPath } from './types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import {
@@ -98,7 +99,20 @@ function semanticResult(issueId: string, status: 'PASS' | 'FAIL' = 'PASS'): Foun
   return { issueId, packetDigest: sha256(`packet:${issueId}`), status }
 }
 
-function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options: { validations?: PatchValidation[]; semantic?: FoundationSemanticRecheckResult[] } = {}) {
+function resultingIssue(id: string, severity: AuditIssue['severity'] = 'HIGH'): AuditIssue {
+  return {
+    id,
+    severity,
+    type: 'rule',
+    source: { documentPath, sectionId: 'core_loop', heading: 'Core Loop', startLine: 1, endLine: 2, digest: sha256(`source:${id}`) },
+    expected: 'expected',
+    actual: 'actual',
+    fixDocument: documentPath,
+    fixSectionId: 'core_loop',
+  }
+}
+
+function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options: { validations?: PatchValidation[]; semantic?: FoundationSemanticRecheckResult[]; resultingIssues?: AuditIssue[] } = {}) {
   const validations = options.validations ?? fixtureValue.stages.map(stage => validation(stage.receipt.documentPath, stage.receipt, stage.operations, stage.receipt.issueIds[0]!))
   return {
     workspacePath: fixtureValue.workspace,
@@ -110,6 +124,7 @@ function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options
     patchOperations: fixtureValue.stages.flatMap(stage => stage.operations),
     patchValidations: validations,
     semanticRecheckResults: options.semantic ?? [],
+    resultingIssues: options.resultingIssues ?? [],
   }
 }
 
@@ -125,6 +140,35 @@ describe('foundation revision publication', () => {
     expect(await readFile(join(value.workspace, foundationRevisionCommittedPath(revision)), 'utf8')).toContain('"status": "committed"')
     const committed = JSON.parse(await readFile(join(value.workspace, foundationRevisionCommittedPath(revision)), 'utf8'))
     expect(Object.keys(committed.documentDigests).sort()).toEqual([...CANONICAL_FOUNDATION_DOCUMENTS].sort())
+  })
+
+  test('persists an empty resulting issue registry through publication and recovery', async () => {
+    const value = await fixture()
+    const result = await publishFoundationRevision(publishInput(value))
+    expect(result.resultingIssues).toEqual([])
+    expect(Object.isFrozen(result.resultingIssues)).toBe(true)
+    expect(result.resultingIssueRegistryDigest).toMatch(/^[a-f0-9]{64}$/)
+    const prepared = JSON.parse(await readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8'))
+    expect(prepared.resultingIssues).toEqual([])
+    expect(prepared.resultingIssueRegistryDigest).toBe(result.resultingIssueRegistryDigest)
+    const recovered = await recoverFoundationRevision({ workspacePath: value.workspace, revision })
+    expect(recovered.resultingIssues).toEqual([])
+    expect(recovered.resultingIssueRegistryDigest).toBe(result.resultingIssueRegistryDigest)
+  })
+
+  test('round-trips canonical resulting issues and reconstructs them from COMMITTED after recovery', async () => {
+    const value = await fixture()
+    const resultingIssues = [resultingIssue('NEXT-Z'), resultingIssue('NEXT-A', 'MEDIUM')]
+    const result = await publishFoundationRevision(publishInput(value, { resultingIssues }))
+    expect(result.resultingIssues.map(issue => issue.id)).toEqual(['NEXT-A', 'NEXT-Z'])
+    expect(Object.isFrozen(result.resultingIssues)).toBe(true)
+    expect(Object.isFrozen(result.resultingIssues[0])).toBe(true)
+    const committed = JSON.parse(await readFile(join(value.workspace, foundationRevisionCommittedPath(revision)), 'utf8'))
+    expect(committed.resultingIssueRegistryDigest).toBe(result.resultingIssueRegistryDigest)
+    const recovered = await recoverFoundationRevision({ workspacePath: value.workspace, revision })
+    expect(recovered.resultingIssues).toEqual(result.resultingIssues)
+    expect(recovered.resultingIssueRegistryDigest).toBe(result.resultingIssueRegistryDigest)
+    expect(Object.isFrozen(recovered.resultingIssues)).toBe(true)
   })
 
   test('binds the resulting revision to unchanged canonical documents as well', async () => {
@@ -185,6 +229,7 @@ describe('foundation revision publication', () => {
       patchOperations: [...first.stages[0]!.operations, ...secondOperations],
       patchValidations: [validation(documentPath, first.stages[0]!.receipt, first.stages[0]!.operations, 'AUD-1'), validation(secondPath, secondReceipt, secondOperations, secondIssue)],
       semanticRecheckResults: [],
+      resultingIssues: [],
     }
     let published = 0
     await expect(publishFoundationRevision({ ...input, onPathPublished: () => { published += 1; if (published === 1) throw new Error('simulated crash') } })).rejects.toThrow('simulated crash')
@@ -207,5 +252,26 @@ describe('foundation revision publication', () => {
     const altered = publishInput(fresh)
     altered.patchOperations[0] = { ...altered.patchOperations[0]!, issueIds: ['OTHER'] }
     await expect(publishFoundationRevision(altered)).rejects.toThrow(/authority|coverage|issue/i)
+  })
+
+  test('rejects resulting issue overlap, duplicates, and unsupported severity', async () => {
+    const overlap = await fixture()
+    await expect(publishFoundationRevision(publishInput(overlap, { resultingIssues: [resultingIssue('AUD-1')] }))).rejects.toThrow(/overlap|resolved|issue/i)
+
+    const duplicate = await fixture()
+    await expect(publishFoundationRevision(publishInput(duplicate, { resultingIssues: [resultingIssue('NEXT'), resultingIssue('NEXT')] }))).rejects.toThrow(/duplicate|issue/i)
+
+    const unsupported = await fixture()
+    await expect(publishFoundationRevision(publishInput(unsupported, { resultingIssues: [{ ...resultingIssue('NEXT'), severity: 'UNKNOWN' } as unknown as AuditIssue] }))).rejects.toThrow(/severity|issue/i)
+  })
+
+  test('rejects tampering with resulting issues in PREPARED authority', async () => {
+    const value = await fixture()
+    await publishFoundationRevision(publishInput(value, { resultingIssues: [resultingIssue('NEXT')] }))
+    const preparedPath = join(value.workspace, foundationRevisionPreparedPath(revision))
+    const prepared = JSON.parse(await readFile(preparedPath, 'utf8'))
+    prepared.resultingIssues[0].id = 'TAMPERED'
+    await writeFile(preparedPath, JSON.stringify(prepared))
+    await expect(recoverFoundationRevision({ workspacePath: value.workspace, revision })).rejects.toThrow(/authority|digest/i)
   })
 })
