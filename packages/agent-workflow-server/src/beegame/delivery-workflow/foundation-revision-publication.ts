@@ -375,7 +375,7 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
   for (const issueId of allIssueIds) if (!accounted.has(issueId)) throw new Error(`revision issue ${issueId} is missing validated result coverage`)
   if (operations.some(operation => !receiptByPath.has(operation.documentPath))) throw new Error('revision has an unassigned document PatchOperation')
   documents.sort((a, b) => a.documentPath.localeCompare(b.documentPath))
-  if (typeof input.confirmedBriefDigest !== 'string' || input.confirmedBriefDigest.length === 0) throw new Error('foundation revision publication requires confirmedBriefDigest')
+  assertDigest(input.confirmedBriefDigest, 'confirmedBriefDigest')
   const withoutDigest = { schema: 'beegame-foundation-revision-publish-v2' as const, status: 'prepared' as const, revision: input.revision, confirmedBriefDigest: input.confirmedBriefDigest, round: input.round, documents }
   return { ...withoutDigest, authorityDigest: sha256(stable(withoutDigest)) }
 }
@@ -383,7 +383,8 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
 function validatePrepared(value: unknown): FoundationRevisionPrepared {
   assertObject(value, 'foundation revision PREPARED authority')
   assertExactKeys(value, ['authorityDigest', 'confirmedBriefDigest', 'documents', 'revision', 'round', 'schema', 'status'], 'PREPARED authority')
-  if (value.schema !== 'beegame-foundation-revision-publish-v2' || value.status !== 'prepared' || typeof value.revision !== 'string' || !REVISION.test(value.revision) || typeof value.confirmedBriefDigest !== 'string' || value.confirmedBriefDigest.length === 0 || (value.round !== 1 && value.round !== 2 && value.round !== 3) || !Array.isArray(value.documents) || value.documents.length === 0) throw new Error('foundation revision PREPARED authority is invalid')
+  if (value.schema !== 'beegame-foundation-revision-publish-v2' || value.status !== 'prepared' || typeof value.revision !== 'string' || !REVISION.test(value.revision) || (value.round !== 1 && value.round !== 2 && value.round !== 3) || !Array.isArray(value.documents) || value.documents.length === 0) throw new Error('foundation revision PREPARED authority is invalid')
+  assertDigest(value.confirmedBriefDigest, 'PREPARED confirmedBriefDigest')
   assertDigest(value.authorityDigest, 'PREPARED authorityDigest')
   const documents = value.documents.map(raw => {
     assertObject(raw, 'PREPARED document')

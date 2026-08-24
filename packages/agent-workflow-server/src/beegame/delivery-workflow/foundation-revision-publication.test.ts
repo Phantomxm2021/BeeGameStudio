@@ -29,7 +29,7 @@ const workspaces: string[] = []
 afterEach(async () => Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))))
 
 const revision = 'publication-test'
-const confirmedBriefDigest = 'brief-digest-test'
+const confirmedBriefDigest = 'b'.repeat(64)
 const documentPath = 'docs/GDD.md' as const
 
 function sha256(value: string): string {
