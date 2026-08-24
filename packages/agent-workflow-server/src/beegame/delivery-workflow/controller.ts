@@ -18,11 +18,9 @@ import {
   startDocumentStage,
 } from './document-stage'
 import {
-  acceptFoundationReviewWorkerTerminal,
-  buildFoundationReviewDispatches,
-  foundationReviewNeedsRevisionMessage,
-} from './foundation-review-stage'
-import { createFoundationReviewState } from './foundation-review-state'
+  applyFoundationAuditBoundary,
+  canStartFoundationAudit,
+} from './foundation-audit-boundary'
 import {
   completeResourceTask,
   reconcileCurrentResourcePreparation,
@@ -176,14 +174,10 @@ export function createDeliveryWorkflowController(input: {
     const foundationCheckpoint = run?.foundationDraftState.documents?.find(
       document => document.dispatch?.dispatchId === record.dispatchId,
     )
-    const reviewCheckpoint = run?.foundationReviewState?.reports.find(
-      report => report.dispatch?.dispatchId === record.dispatchId,
-    )
     if (
       !run ||
       (run.activeDispatch?.dispatchId !== record.dispatchId &&
-        !foundationCheckpoint &&
-        !reviewCheckpoint)
+        !foundationCheckpoint)
     )
       return
     let next: DeliveryRun = foundationCheckpoint
@@ -259,10 +253,6 @@ export function createDeliveryWorkflowController(input: {
             : {
                 resourcePreparation: next.evidence.resourcePreparation,
               },
-        foundationReviewState:
-          result.classification === 'documents_required'
-            ? undefined
-            : next.foundationReviewState,
         foundationDraftState:
           result.classification === 'documents_required'
             ? { completedPaths: [] }
@@ -338,46 +328,6 @@ export function createDeliveryWorkflowController(input: {
           : 'document.draft.incomplete',
       )
       await resumeUnlocked(next)
-      return
-    }
-    if (result.workerType === 'document-reviewer') {
-      if (!('mode' in result))
-        throw new Error('Legacy document review terminals are not accepted')
-      if (!next.foundationReviewState)
-        throw new Error('Foundation review terminal has no active state')
-      const acceptedState = await acceptFoundationReviewWorkerTerminal({
-          state: next.foundationReviewState,
-          workspacePath: input.workspacePath,
-          currentRevision: await computeDocumentRevision(
-            input.workspacePath,
-            next.confirmedBriefDigest,
-          ),
-          terminal: result,
-        })
-        next = { ...next, foundationReviewState: acceptedState }
-        if (acceptedState.status === 'completed') {
-          next =
-            acceptedState.verdict === 'READY'
-              ? {
-                  ...next,
-                  phase: 'DOCUMENT_REVIEW',
-                  documentStep: 'CHECKLIST_DRAFTING',
-                  status: 'running',
-                  blockedReason: undefined,
-                }
-              : {
-                  ...next,
-                  phase: 'DOCUMENT_REVIEW',
-                  documentStep: 'FOUNDATION_REVIEW',
-                  status: 'needs_action',
-                  blockedReason: await foundationReviewNeedsRevisionMessage({
-                    workspacePath: input.workspacePath,
-                    state: acceptedState,
-                  }),
-                }
-        }
-        next = await persist(next, 'foundation.review.report.accepted')
-        if (next.status === 'running') await resumeUnlocked(next)
       return
     }
     if (
@@ -833,7 +783,6 @@ export function createDeliveryWorkflowController(input: {
       },
       tasks: [],
       evidence: {},
-      foundationReviewState: undefined,
       foundationDraftState: { completedPaths: [] },
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     }
@@ -918,13 +867,6 @@ export function createDeliveryWorkflowController(input: {
         return
       }
     }
-    const replayableReview = run.foundationReviewState?.reports.find(
-      report => report.status !== 'completed' && report.dispatch?.terminalResult,
-    )?.dispatch
-    if (replayableReview) {
-      await dispatcher.replayTerminal(replayableReview, handleTerminalUnlocked)
-      return
-    }
     if (run.activeDispatch?.terminalResult) {
       // resumeUnlocked already owns the controller serialization lane. Reuse
       // the canonical terminal handler directly instead of queueing behind
@@ -957,6 +899,14 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     if (run.phase === 'DOCUMENT_DRAFTING') {
+      if (canStartFoundationAudit(run)) {
+        const next = await applyFoundationAuditBoundary({
+          run,
+          dispatch: () => undefined as never,
+        })
+        await persist(next, 'foundation.audit.unavailable')
+        return
+      }
       await startDocumentStage({
         run,
         workspacePath: input.workspacePath,
@@ -971,91 +921,6 @@ export function createDeliveryWorkflowController(input: {
           workspacePath: input.workspacePath,
           dispatcher,
         })
-      } else {
-        if (run.documentStep === 'FOUNDATION_REVIEW') {
-          const reviewRevision = await computeDocumentRevision(
-            input.workspacePath,
-            run.confirmedBriefDigest,
-          )
-          let reviewRun = run
-          if (
-            reviewRun.foundationReviewState &&
-            reviewRun.foundationReviewState.status === 'completed'
-          ) {
-            reviewRun = await persist(
-              reviewRun.foundationReviewState.verdict === 'READY'
-                ? {
-                    ...reviewRun,
-                    phase: 'DOCUMENT_REVIEW',
-                    documentStep: 'CHECKLIST_DRAFTING',
-                    status: 'running',
-                    blockedReason: undefined,
-                  }
-                : {
-                    ...reviewRun,
-                    phase: 'DOCUMENT_REVIEW',
-                    documentStep: 'FOUNDATION_REVIEW',
-                    status: 'needs_action',
-                    blockedReason: await foundationReviewNeedsRevisionMessage({
-                      workspacePath: input.workspacePath,
-                      state: reviewRun.foundationReviewState,
-                    }),
-                  },
-              'foundation.review.verdict.resumed',
-            )
-            if (reviewRun.status === 'running') await resumeUnlocked(reviewRun)
-            return
-          }
-          if (
-            !reviewRun.foundationReviewState ||
-            reviewRun.foundationReviewState.revision !== reviewRevision
-          ) {
-            reviewRun = await persist(
-              {
-                ...reviewRun,
-                foundationReviewState: createFoundationReviewState({
-                  revision: reviewRevision,
-                  attempt:
-                    (reviewRun.foundationReviewState?.attempt ?? 0) + 1,
-                }),
-              },
-              'foundation.review.run.created',
-            )
-          }
-          const pending = await buildFoundationReviewDispatches({
-            state: reviewRun.foundationReviewState!,
-            workspacePath: input.workspacePath,
-            confirmedBriefDigest: reviewRun.confirmedBriefDigest,
-          })
-          await Promise.all(
-            pending.map(item =>
-              dispatcher.dispatch({
-                runId: reviewRun.runId,
-                ownerId: reviewRun.ownerId,
-                projectId: reviewRun.projectId,
-                workspacePath: input.workspacePath,
-                workerType: 'document-reviewer',
-                phase: 'DOCUMENT_REVIEW',
-                taskId: item.taskId,
-                revision: reviewRevision,
-                allowedPaths: item.assignment.stagingOutputPaths,
-                protectedPaths: [
-                  ...item.assignment.sourcePaths,
-                ],
-                contract: item.contract,
-              }),
-            ),
-          )
-          return
-        }
-        await persist(
-          {
-            ...run,
-            status: 'needs_action',
-            blockedReason: `Unsupported legacy document review step: ${String(run.documentStep)}`,
-          },
-          'document.review.legacy_step.rejected',
-        )
       }
       return
     }

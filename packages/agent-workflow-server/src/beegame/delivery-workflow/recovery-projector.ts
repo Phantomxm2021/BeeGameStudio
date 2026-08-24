@@ -7,7 +7,6 @@ import {
   readResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
 import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './foundation-document-topology'
-import { createFoundationReviewState } from './foundation-review-state'
 import {
   computeDocumentRevision,
   computeResourceContentDigest,
@@ -1173,7 +1172,7 @@ function rawActiveUnitId(input: {
       )
     return documentUnitId(currentItemId)
   }
-  if (snapshot.phase === 'DOCUMENT_REVIEW') return 'document-review:foundation'
+  if (snapshot.phase === 'DOCUMENT_REVIEW') return 'foundation-audit:unavailable'
   const activeTaskId = stringValue(snapshot.activeTaskId)
   if (activeTaskId) return `implementation:${activeTaskId}`
   const resourceTask = stringValue(
@@ -1286,16 +1285,10 @@ function buildProjectionRun(input: {
   let resourceTask: DeliveryRun['resourceProductionState']['currentTask'] =
     'RESOURCE_PLAN'
   const activeUnitId = input.activeUnitId
-  const reviewScope = activeUnitId?.startsWith('document-review:')
-    ? activeUnitId.slice('document-review:'.length)
-    : undefined
   if (activeUnitId?.startsWith('document:')) {
     phase = 'DOCUMENT_DRAFTING'
     documentStep = 'FOUNDATION_DRAFTING'
     currentItemId = activeUnitId.slice('document:'.length)
-  } else if (reviewScope === 'foundation') {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
   } else if (activeUnitId === RESOURCE_INVENTORY_UNIT_ID) {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'FOUNDATION_REVIEW'
@@ -1431,14 +1424,6 @@ function buildProjectionRun(input: {
           }
         : {}),
     },
-    ...(reviewScope === 'foundation' && input.revision.document
-      ? {
-          foundationReviewState: createFoundationReviewState({
-            revision: input.revision.document,
-            attempt: 1,
-          }),
-        }
-      : {}),
     foundationDraftState: { completedPaths: documents },
     resourceProductionState: {
       currentTask: resourceTask,
@@ -1606,7 +1591,7 @@ export async function projectExactResumeRun(input: {
   const activeUnitId =
     graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID &&
     !proofs.has(RESOURCE_INVENTORY_UNIT_ID)
-      ? 'document-review:foundation'
+      ? 'foundation-audit:unavailable'
       : graphActiveUnitId
   const rawProofInspection =
     input.receiptReconciliation?.sourceInspection ?? input.inspection

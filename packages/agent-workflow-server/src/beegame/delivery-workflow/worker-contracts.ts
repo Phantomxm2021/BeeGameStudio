@@ -35,37 +35,6 @@ export const documentAuthorTerminalSchema = z
   })
   .strict()
 
-export const foundationReviewWorkerTerminalSchema = z
-  .object({
-    workerType: z.literal('document-reviewer'),
-    status: z.literal('completed'),
-    revision: z.string().regex(/^[a-f0-9]{64}$/u),
-    mode: z.literal('initial'),
-    role: z.enum([
-      'core-design',
-      'technical-assets',
-      'presentation',
-      'synthesis',
-    ]),
-    reportPath: z.string().min(1),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    const root = `.beegame/reviews/foundation/${value.revision}`
-    const expected =
-      value.role === 'core-design' ||
-      value.role === 'technical-assets' ||
-      value.role === 'presentation'
-        ? `${root}/parts/${value.role}.md`
-        : `${root}/selection.md`
-    if (value.reportPath !== expected)
-      context.addIssue({
-        code: 'custom',
-        path: ['reportPath'],
-        message: 'Foundation Reviewer report path does not match its role',
-      })
-  })
-
 const resourceTaskMetricsSchema = z
   .object({
     catalogPayloadBytes: z.number().int().nonnegative(),
@@ -253,13 +222,10 @@ export const workerTerminalSchema = z.discriminatedUnion('workerType', [
 ])
 
 export type WorkerTerminalResult =
-  | z.infer<typeof workerTerminalSchema>
-  | z.infer<typeof foundationReviewWorkerTerminalSchema>
+  z.infer<typeof workerTerminalSchema>
 
 export function parseWorkerTerminalResult(
   value: unknown,
 ): WorkerTerminalResult {
-  const foundation = foundationReviewWorkerTerminalSchema.safeParse(value)
-  if (foundation.success) return foundation.data
   return workerTerminalSchema.parse(value)
 }

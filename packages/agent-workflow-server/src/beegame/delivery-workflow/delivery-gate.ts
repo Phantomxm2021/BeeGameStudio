@@ -1,7 +1,6 @@
 import { computeResourceRevision, computeWorkspaceRevision } from './revision'
 import { createRunStore } from './run-store'
 import { isWorkflowEvidenceFile } from './evidence'
-import { readFoundationReviewArtifact } from './foundation-review'
 
 export type WorkflowDeliveryGate = {
   allowed: boolean
@@ -32,17 +31,6 @@ export async function evaluateWorkflowDeliveryGate(input: {
       issues: ['Current workflow has no passed acceptance evidence.'],
     }
   }
-  if (
-    run.foundationReviewState?.status !== 'completed' ||
-    run.foundationReviewState.verdict !== 'READY' ||
-    !run.foundationReviewState.finalReportPath ||
-    !run.foundationReviewState.finalReportDigest
-  ) {
-    return {
-      allowed: false,
-      issues: ['Current workflow has no accepted Foundation review.'],
-    }
-  }
   if (run.evidence.resourcePreparation?.status !== 'passed') {
     return {
       allowed: false,
@@ -55,21 +43,7 @@ export async function evaluateWorkflowDeliveryGate(input: {
       issues: ['Current workflow has no passed implementation-audit evidence.'],
     }
   }
-  let reviewReportCurrent = false
-  try {
-    const accepted = await readFoundationReviewArtifact({
-      workspacePath: input.workspacePath,
-      path: run.foundationReviewState.finalReportPath,
-      expectedDigest: run.foundationReviewState.finalReportDigest,
-    })
-    reviewReportCurrent =
-      accepted.review.revision === run.foundationReviewState.revision &&
-      accepted.review.verdict === 'READY'
-  } catch {
-    reviewReportCurrent = false
-  }
   if (
-    !reviewReportCurrent ||
     !run.evidence.resourcePreparation.path ||
     !isWorkflowEvidenceFile(
       input.workspacePath,
@@ -84,7 +58,7 @@ export async function evaluateWorkflowDeliveryGate(input: {
     return {
       allowed: false,
       issues: [
-        'Current Foundation-review, resource-production or implementation-audit evidence file is missing or invalid.',
+        'Current resource-production or implementation-audit evidence file is missing or invalid.',
       ],
     }
   }

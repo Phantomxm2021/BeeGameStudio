@@ -3,7 +3,6 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
-import { foundationReviewLaneMarkdownInstruction } from './foundation-review-markdown'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
@@ -61,9 +60,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       : undefined
   const canonicalArtifacts =
     foundationAuthorArtifacts ??
-    (request.workerType === 'document-reviewer'
-      ? reviewerContractPaths(request)
-      : request.workerType === 'document-author' &&
+    (request.workerType === 'document-author' &&
           request.contract.documentSet === 'checklist'
         ? CANONICAL_PROJECT_DOCUMENTS
         : CANONICAL_PROJECT_ARTIFACTS)
@@ -94,16 +91,6 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
 function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType === 'resource-content-author')
     return JSON.stringify(formatResourceContentContract(request.contract))
-  if (request.workerType === 'document-reviewer') {
-    return JSON.stringify({
-      reviewScope: request.contract.reviewScope,
-      reviewRole: request.contract.reviewRole,
-      assignment: request.contract.assignment,
-      packetDigests: request.contract.packetDigests,
-      projection: request.contract.projection,
-      candidateReferences: request.contract.candidateReferences,
-    })
-  }
   const {
     confirmedBriefContext: _confirmedBriefContext,
     ...contractWithoutDuplicatedBrief
@@ -198,80 +185,6 @@ function formatResourceContentContract(
   return projection
 }
 
-function reviewerContractPaths(request: WorkerDispatchRequest): string[] {
-  const assignment = request.contract.assignment
-  if (
-    !assignment ||
-    typeof assignment !== 'object' ||
-    Array.isArray(assignment)
-  )
-    return []
-  const record = assignment as Record<string, unknown>
-  return (Array.isArray(record.sourcePaths) ? record.sourcePaths : []).filter(
-    (path): path is string => typeof path === 'string',
-  )
-}
-
-type ReviewerLane = 'core-design' | 'technical-assets' | 'presentation'
-
-function reviewerProjectionDigest(request: WorkerDispatchRequest): string {
-  const projection = request.contract.projection
-  if (
-    !projection ||
-    typeof projection !== 'object' ||
-    Array.isArray(projection) ||
-    typeof (projection as Record<string, unknown>).digest !== 'string'
-  )
-    throw new Error('Foundation Reviewer projection digest is missing')
-  return (projection as Record<string, unknown>).digest as string
-}
-
-function reviewerLaneFocus(lane: ReviewerLane): string {
-  switch (lane) {
-    case 'core-design':
-      return 'Review only game rules, progression, level structure and balance authority for blocking implementation or acceptance defects.'
-    case 'technical-assets':
-      return 'Review only runtime architecture, production feasibility and asset responsibilities for blocking implementation or acceptance defects.'
-    case 'presentation':
-      return 'Review only art, UI/UX and audio experience contracts for blocking implementation or acceptance defects.'
-  }
-}
-
-function reviewerCandidateReferences(request: WorkerDispatchRequest): string[] {
-  const references = request.contract.candidateReferences
-  if (
-    !Array.isArray(references) ||
-    references.some(reference => typeof reference !== 'string') ||
-    new Set(references).size !== references.length
-  )
-    throw new Error('Foundation Reviewer candidate references are invalid')
-  return references
-}
-
-function foundationReviewSelectionMarkdownInstruction(
-  request: WorkerDispatchRequest,
-): string {
-  const references = reviewerCandidateReferences(request)
-  return [
-    'Return exactly one Foundation Review Selection Markdown receipt and nothing else.',
-    'Markdown tables and prose outside this grammar are forbidden. Each available candidate must be accounted exactly once as a kept record, a duplicate source, or a rejected record. Every duplicate target must occur in Keep.',
-    '# Foundation Review Selection',
-    `Revision: \`${request.revision}\``,
-    '## Keep',
-    '- `<candidate-reference>`',
-    '## Duplicate',
-    '- `<duplicate-source-reference>` -> `<kept-target-reference>`',
-    '## Reject',
-    '- `<candidate-reference>`',
-    'Use a single empty list marker `-` when a section has no entries.',
-    `Available candidate references: ${
-      references.length
-        ? references.map(reference => `\`${reference}\``).join(', ')
-        : '<none>'
-    }.`,
-  ].join('\n\n')
-}
-
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'document-author':
@@ -327,32 +240,6 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   'Do not create the checklist, asset manifest, resources or implementation.',
                 ].join(' ')
               : 'Unsupported Foundation document authoring mode.',
-      ].join(' ')
-    case 'document-reviewer':
-      return [
-        'Act only as the review unit named by contract.reviewRole. Read only contract.assignment.sourcePaths.',
-        'Return exactly one visible Markdown receipt. Do not author a report file or modify source documents, workflow state, resources, implementation files, or any other path.',
-        request.contract.reviewRole === 'synthesis'
-          ? [
-                'Read exactly the three accepted lane Markdown receipts. Do not read any canonical full document. Deduplicate overlapping candidates by selecting one complete source record; never merge or rewrite candidate content. Classify every available reference as Keep, Duplicate, or Reject. Do not launch another Agent or task.',
-                'A finding is blocking only when the delivered contract cannot be implemented or verified, permits incompatible implementations, violates an authoritative state/formula/budget/ownership boundary, or omits evidence required to accept delivery. Cosmetic polish, optional clarification, or unambiguous duplicate wording is non-blocking. Do not promote a non-blocking issue merely because it occurs in an important section.',
-                'Before Keep, establish all six admission conditions from the bounded candidate records: the evidence supports the stated problem; the problem identifies a blocked implementation or acceptance result; no stated precedence, deterministic mapping, or explicit stricter bound already resolves the observation; the required outcome is a neutral invariant rather than a selected design; the changes remain within the candidate declared authority; and the acceptance conditions are mechanically decidable. Failure of any admission condition requires Reject. Duplicate applies only when the underlying defect, required outcome, and change scope are the same. Never repair a deficient candidate or import omitted source context.',
-                foundationReviewSelectionMarkdownInstruction(request),
-              ].join(' ')
-          : request.contract.reviewRole === 'core-design' ||
-                request.contract.reviewRole === 'technical-assets' ||
-                request.contract.reviewRole === 'presentation'
-            ? [
-                reviewerLaneFocus(request.contract.reviewRole),
-                'Review only the assigned document lane. Ground every observation only in the accepted source revision and identify its canonical path and stable location; observations may state a calculation or cross-section implication and need not copy source prose verbatim; do not decide the final verdict or propose replacement prose; do not modify canonical documents.',
-                'Report only a proven blocking defect: incompatible authoritative rules or values; a required mapping that is missing or incompatible; a required decision with no unique authority; an authorized requirement that cannot be mechanically accepted; or authorized production constraints that cannot be satisfied together. Different representation sizes are not inherently contradictory. If a total deterministic mapping exists, the observation is non-blocking; if a required mapping is absent, report the missing mapping and never require equal representation sizes. A subordinate or subsystem bound that explicitly takes the stricter value is already resolved. Missing detail is blocking only when an existing implementation or acceptance decision cannot be completed without it. Problem must identify the implementation or acceptance result it blocks. Required outcome must be a neutral invariant and must not select an unowned design, value, document winner, or replacement prose. Ignore prose style, harmless redundancy, optional clarification, editorial quality, non-blocking polish, and correct-content summaries.',
-                foundationReviewLaneMarkdownInstruction({
-                  revision: request.revision,
-                  lane: request.contract.reviewRole,
-                  projectionDigest: reviewerProjectionDigest(request),
-                }),
-              ].join(' ')
-            : 'Unsupported Foundation review role.',
       ].join(' ')
     case 'resource-planner':
       return [
@@ -413,8 +300,6 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
         : request.contract.authoringMode === 'initial'
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
-    case 'document-reviewer':
-      return 'Return exactly one contracted Markdown receipt as the visible final response. Do not call StructuredOutput, Write, Edit, shell, or Agent.'
     case 'resource-planner':
       return 'Call AssetManifest submit_resource_plan exactly once. Do not continue after the accepted call.'
     case 'resource-curator':

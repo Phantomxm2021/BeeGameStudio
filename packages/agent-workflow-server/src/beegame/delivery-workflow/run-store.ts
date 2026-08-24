@@ -268,17 +268,6 @@ function withDispatchUsage(
           }
         : {}),
     },
-    ...(run.foundationReviewState
-      ? {
-          foundationReviewState: {
-            ...run.foundationReviewState,
-            reports: run.foundationReviewState.reports.map(report => ({
-              ...report,
-              dispatch: update(report.dispatch),
-            })),
-          },
-        }
-      : {}),
   }
 }
 
@@ -1134,9 +1123,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           ? run.activeDispatch
           : run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === dispatchId,
-            )?.dispatch ??
-            run.foundationReviewState?.reports.find(
-              report => report.dispatch?.dispatchId === dispatchId,
             )?.dispatch
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'

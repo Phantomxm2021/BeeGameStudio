@@ -36,11 +36,7 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import {
-  foundationReviewHasCommittedArtifactsAhead,
-  foundationReviewNeedsRevisionMessage,
-  reconcileFoundationReviewStateFromArtifacts,
-} from './foundation-review-stage'
+import { FOUNDATION_AUDIT_UNAVAILABLE } from './foundation-audit-boundary'
 
 export {
   inspectWorkflowSnapshot,
@@ -330,15 +326,16 @@ async function reconcileActiveCanonicalReceipt(input: {
             currentItemId: nextPath,
           }
         : {
-            phase: 'DOCUMENT_REVIEW',
+          phase: 'DOCUMENT_REVIEW',
             documentStep: 'FOUNDATION_REVIEW',
-            foundationReviewState: undefined,
+            blockedReason: FOUNDATION_AUDIT_UNAVAILABLE,
+            status: 'needs_action',
           }),
       updatedAt: acceptedAt,
     }
     const activeUnitId = nextPath
       ? `document:${nextPath}`
-      : 'document-review:foundation'
+      : 'foundation-audit:unavailable'
     if (acceptedUnitAlreadyJournaled(input.events, unit.unitId))
       return {
         inspection: { ...input.inspection, parsedValue },
@@ -814,90 +811,6 @@ async function restoreResourceContentCommit(
   }
 }
 
-async function restoreAcceptedReviewAfterRoutingFailure(input: {
-  run: DeliveryRun
-  workspacePath?: string
-}): Promise<DeliveryRun | undefined> {
-  const state = input.run.foundationReviewState
-  if (
-    !state ||
-    state.status === 'completed' ||
-    !input.workspacePath ||
-    input.run.phase !== 'DOCUMENT_REVIEW' ||
-    input.run.documentStep !== 'FOUNDATION_REVIEW'
-  )
-    return undefined
-  if (
-    !(await foundationReviewHasCommittedArtifactsAhead({
-      state,
-      workspacePath: input.workspacePath,
-    }))
-  )
-    return undefined
-  const currentRevision = await computeDocumentRevision(
-    input.workspacePath,
-    input.run.confirmedBriefDigest,
-  )
-  const reconciled = await reconcileFoundationReviewStateFromArtifacts({
-    state,
-    workspacePath: input.workspacePath,
-    currentRevision,
-  })
-  const base = {
-    ...input.run,
-    foundationReviewState: reconciled,
-    updatedAt: new Date().toISOString(),
-  }
-  if (reconciled.status !== 'completed') return base
-  return reconciled.verdict === 'READY'
-    ? {
-        ...base,
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'CHECKLIST_DRAFTING',
-        status: 'running',
-      }
-    : {
-        ...base,
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
-        status: 'needs_action',
-        blockedReason: await foundationReviewNeedsRevisionMessage({
-          workspacePath: input.workspacePath,
-          state: reconciled,
-        }),
-      }
-}
-
-async function unlockReviewForChangedRevision(input: {
-  run: DeliveryRun
-  workspacePath?: string
-}): Promise<DeliveryRun | undefined> {
-  const review = input.run.foundationReviewState
-  if (!review || !input.workspacePath) return undefined
-  const documentRevision = await computeDocumentRevision(
-    input.workspacePath,
-    input.run.confirmedBriefDigest,
-  )
-  if (documentRevision === review.revision) return undefined
-  return {
-    ...input.run,
-    phase: 'DOCUMENT_REVIEW',
-    documentStep: 'FOUNDATION_REVIEW',
-    status: 'running',
-    blockedReason: undefined,
-    revision: {
-      ...input.run.revision,
-      document: documentRevision,
-      resource: undefined,
-      implementation: undefined,
-    },
-    tasks: [],
-    evidence: {},
-    foundationReviewState: undefined,
-    updatedAt: new Date().toISOString(),
-  }
-}
-
 export async function reconcileRunOnStartup(input: {
   store: RunStore
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
@@ -910,29 +823,7 @@ export async function reconcileRunOnStartup(input: {
     sessionIsOpen: input.sessionIsOpen,
   })
   try {
-    const changedReview = await unlockReviewForChangedRevision({
-      run: acquired.run,
-      workspacePath: input.store.workspacePath,
-    })
-    const reconciled =
-      changedReview ??
-      (await restoreAcceptedReviewAfterRoutingFailure({
-        run: acquired.run,
-        workspacePath: input.store.workspacePath,
-      }))
-    if (!reconciled) return acquired.run
-    return input.store.commit(
-      reconciled,
-      {
-        runId: reconciled.runId,
-        type: 'foundation.review.artifacts.reconciled',
-        phase: reconciled.phase,
-        status: reconciled.status,
-        revision: reconciled.revision,
-      },
-      undefined,
-      acquired.lease,
-    )
+    return acquired.run
   } finally {
     await acquired.unlock()
   }
@@ -992,21 +883,12 @@ export async function resumeRun(input: {
       input.store,
     )
     if (acquired.run.status === 'completed') return acquired.run
-    const restoredHandoff = undefined
     const retryable =
       acquired.run.status === 'needs_action' ||
       acquired.run.status === 'blocked' ||
       acquired.run.status === 'stopped' ||
       acquired.run.status === 'failed'
-    const changedReview = restoredHandoff
-      ? undefined
-      : await unlockReviewForChangedRevision({
-          run: acquired.run,
-          workspacePath: input.workspacePath,
-        })
     const resumed =
-      restoredHandoff ??
-      changedReview ??
       (retryable
         ? transitionDeliveryRun(
             {
@@ -1062,49 +944,23 @@ export async function retryRun(input: {
       !acquired.run.activeDispatch?.terminalResult
     )
       return acquired.run
-    const restoredHandoff = undefined
-    const changedReview = restoredHandoff
-      ? undefined
-      : await unlockReviewForChangedRevision({
-          run: acquired.run,
-          workspacePath: input.workspacePath,
-        })
-    const reconciledReview =
-      !restoredHandoff && !changedReview
-        ? await restoreAcceptedReviewAfterRoutingFailure({
-            run: acquired.run,
-            workspacePath: input.workspacePath,
-          })
-        : undefined
-    const restoredAcceptedReview =
-      reconciledReview?.foundationReviewState?.status === 'completed'
-        ? reconciledReview
-        : undefined
     const resourceRefresh =
-      !restoredHandoff &&
-      !changedReview &&
-      !reconciledReview &&
       input.workspacePath &&
       shouldRefreshProvisionalResourceInventory(
         acquired.run,
         auditAssetContract(input.workspacePath),
       )
-    const retryBaseRun =
-      reconciledReview ??
-      (resourceRefresh
+    const retryBaseRun = resourceRefresh
         ? {
             ...acquired.run,
             resourceProductionState: {
               currentTask: 'RESOURCE_INVENTORY' as const,
             },
           }
-        : acquired.run)
+        : acquired.run
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
     const resumed =
-      restoredHandoff ??
-      changedReview ??
-      restoredAcceptedReview ??
       transitionDeliveryRun(
         {
           ...retryBaseRun,

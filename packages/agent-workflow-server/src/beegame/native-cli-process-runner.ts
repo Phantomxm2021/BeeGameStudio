@@ -61,11 +61,7 @@ export function nativeRuntimeCommand(
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool=stdio',
-    ...(input.workflowWorkerType === 'document-reviewer'
-      ? ['--tools', 'Read,Grep,Glob']
-      : []),
-    ...(input.workflowJsonSchema &&
-    input.workflowWorkerType !== 'document-reviewer'
+    ...(input.workflowJsonSchema
       ? ['--json-schema', JSON.stringify(input.workflowJsonSchema)]
       : []),
     ...(input.workflowMarkdownStreamContract ? ['--tools', ''] : []),

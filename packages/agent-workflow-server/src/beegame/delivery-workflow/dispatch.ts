@@ -66,22 +66,6 @@ function foundationDispatch(
   )?.dispatch
 }
 
-function reviewerRoleFor(request: WorkerDispatchRequest): string | undefined {
-  const role = request.contract.reviewRole
-  return request.workerType === 'document-reviewer' && typeof role === 'string'
-    ? role
-    : undefined
-}
-
-function reviewerDispatch(
-  run: DeliveryRun,
-  role: string,
-): DispatchRecord | undefined {
-  return run.foundationReviewState?.reports.find(
-    report => report.role === role,
-  )?.dispatch
-}
-
 function dispatchLocation(
   run: DeliveryRun,
   dispatchId: string,
@@ -89,7 +73,6 @@ function dispatchLocation(
   | {
       record: DispatchRecord
       path?: FoundationDocumentPath
-      reviewRole?: string
     }
   | undefined {
   if (run.activeDispatch?.dispatchId === dispatchId)
@@ -97,16 +80,7 @@ function dispatchLocation(
   for (const document of run.foundationDraftState.documents ?? [])
     if (document.dispatch?.dispatchId === dispatchId)
       return { record: document.dispatch, path: document.path }
-  for (const report of run.foundationReviewState?.reports ?? [])
-    if (report.dispatch?.dispatchId === dispatchId)
-      return { record: report.dispatch, reviewRole: report.role }
   return undefined
-}
-
-function hasRunningReviewerDispatch(run: DeliveryRun): boolean {
-  return (run.foundationReviewState?.reports ?? []).some(
-    report => report.dispatch?.status === 'running',
-  )
 }
 
 function hasRunningFoundationDispatch(run: DeliveryRun): boolean {
@@ -137,72 +111,6 @@ function withFoundationDispatch(
   }
 }
 
-function withReviewerDispatch(
-  run: DeliveryRun,
-  role: string,
-  dispatch: DispatchRecord,
-  performance?: { durationMs: number; usage: WorkflowUsage },
-): DeliveryRun {
-  if (run.foundationReviewState?.reports.some(report => report.role === role))
-    return {
-      ...run,
-      foundationReviewState: {
-        ...run.foundationReviewState,
-        status: 'running',
-        reports: run.foundationReviewState.reports.map(report =>
-          report.role === role
-            ? {
-                ...report,
-                status: 'running',
-                dispatch,
-                failureReason: undefined,
-                ...(performance
-                  ? {
-                      durationMs: performance.durationMs,
-                      usage: performance.usage,
-                    }
-                  : {}),
-              }
-            : report,
-        ),
-      },
-    }
-  throw new DispatchError('blocked', `Foundation review role ${role} is missing`)
-}
-
-function withReviewerFailure(
-  run: DeliveryRun,
-  role: string,
-  dispatch: DispatchRecord,
-  reason: string,
-): DeliveryRun {
-  if (run.foundationReviewState?.reports.some(report => report.role === role)) {
-    const reports = run.foundationReviewState.reports.map(report =>
-      report.role === role
-        ? {
-            ...report,
-            status: 'failed' as const,
-            dispatch,
-            failureReason: reason,
-          }
-        : report,
-    )
-    const othersRunning = reports.some(report => report.status === 'running')
-    return {
-      ...run,
-      status: othersRunning ? 'running' : 'needs_action',
-      blockedReason: othersRunning ? undefined : reason,
-      foundationReviewState: {
-        ...run.foundationReviewState,
-        status: 'failed',
-        reports,
-        failureReason: reason,
-      },
-      thinking: othersRunning ? 'working' : 'idle',
-    }
-  }
-  return run
-}
 
 function isolatedFoundationFailureStatus(
   run: DeliveryRun,
@@ -227,9 +135,7 @@ function idempotencyKey(
   const lane =
     request.workerType === 'document-author'
       ? `document:${String(request.contract.documentSet ?? 'foundation')}`
-      : request.workerType === 'document-reviewer'
-        ? `review:${String(request.contract.reviewScope ?? 'complete')}:${String(request.contract.reviewRole ?? 'unknown')}`
-        : request.workerType
+      : request.workerType
   return `${request.runId}:${request.phase}:${request.workerType}:${lane}:${request.taskId ?? request.phase}:${request.revision}:${attempt}`
 }
 
@@ -268,40 +174,6 @@ function usageDelta(
       end.completion_tokens - start.completion_tokens,
     ),
     total_tokens: Math.max(0, end.total_tokens - start.total_tokens),
-  }
-}
-
-function reviewerPerformance(input: {
-  dispatch: DispatchRecord
-  request: WorkerDispatchRequest | undefined
-  result: WorkerTerminalResult
-  finishedAt: string
-}):
-  | {
-      scope: string
-      role: string
-      durationMs: number
-      usage: WorkflowUsage
-      reportPaths: string[]
-    }
-  | undefined {
-  if (
-    input.result.workerType !== 'document-reviewer' ||
-    input.request?.workerType !== 'document-reviewer'
-  )
-    return undefined
-  const contract = input.request.contract
-  const startedAt = Date.parse(input.dispatch.startedAt)
-  const finishedAt = Date.parse(input.finishedAt)
-  return {
-    scope: String(contract.reviewScope),
-    role: String(contract.reviewRole),
-    durationMs:
-      Number.isFinite(startedAt) && Number.isFinite(finishedAt)
-        ? Math.max(0, finishedAt - startedAt)
-        : 0,
-    usage: usageSnapshot(input.dispatch.usage),
-    reportPaths: [input.result.reportPath],
   }
 }
 
@@ -402,13 +274,8 @@ function terminalEvidencePath(
 function workerRequiresEvidence(
   workerType: WorkerDispatchRequest['workerType'],
 ): boolean {
-  // Document review evidence is intentionally persisted by the semantic
-  // reconciler only after the frozen check/finding contract is accepted.
-  // Requiring the file here would reject every valid reviewer terminal before
-  // that reconciler gets the opportunity to validate and persist it.
   return (
     workerType !== 'document-author' &&
-    workerType !== 'document-reviewer' &&
     workerType !== 'resource-planner' &&
     workerType !== 'resource-curator' &&
     workerType !== 'resource-content-author'
@@ -503,8 +370,6 @@ export function createDeliveryDispatcher(options: {
   }
 
   function dispatch(request: WorkerDispatchRequest): Promise<DispatchRecord> {
-    if (request.workerType === 'document-reviewer')
-      return dispatchUnlocked(request)
     const previous = dispatchTail
     const current = previous
       .catch(() => undefined)
@@ -526,12 +391,9 @@ export function createDeliveryDispatcher(options: {
     if (run.status !== 'running')
       throw new DispatchError('blocked', 'delivery run is not running')
     const foundationPath = foundationPathFor(request)
-    const reviewRole = reviewerRoleFor(request)
     const durableDispatch = foundationPath
       ? foundationDispatch(run, foundationPath)
-      : reviewRole
-        ? reviewerDispatch(run, reviewRole)
-        : run.activeDispatch
+      : run.activeDispatch
     if (
       durableDispatch?.status === 'completed' &&
       durableDispatch.phase === request.phase &&
@@ -564,13 +426,6 @@ export function createDeliveryDispatcher(options: {
         'duplicate',
         'foundation document authoring batch is active',
       )
-    if (reviewRole && run.activeDispatch?.status === 'running')
-      throw new DispatchError(
-        'duplicate',
-        'a regular delivery worker is already running',
-      )
-    if (!reviewRole && hasRunningReviewerDispatch(run))
-      throw new DispatchError('duplicate', 'document review batch is active')
     const attempt = request.taskId
       ? Math.max(
           1,
@@ -618,12 +473,9 @@ export function createDeliveryDispatcher(options: {
         if (current.status !== 'running')
           throw new DispatchError('blocked', 'delivery run is not running')
         const currentFoundationPath = foundationPathFor(request)
-        const currentReviewRole = reviewerRoleFor(request)
         const active = currentFoundationPath
           ? foundationDispatch(current, currentFoundationPath)
-          : currentReviewRole
-            ? reviewerDispatch(current, currentReviewRole)
-            : current.activeDispatch
+          : current.activeDispatch
         if (active) {
           if (
             active.phase === request.phase &&
@@ -655,16 +507,6 @@ export function createDeliveryDispatcher(options: {
             'duplicate',
             'foundation document authoring batch is active',
           )
-        if (currentReviewRole && current.activeDispatch?.status === 'running')
-          throw new DispatchError(
-            'duplicate',
-            'a regular delivery worker is already running',
-          )
-        if (!currentReviewRole && hasRunningReviewerDispatch(current))
-          throw new DispatchError(
-            'duplicate',
-            'document review batch is active',
-          )
         const next = currentFoundationPath
           ? {
               ...current,
@@ -675,9 +517,7 @@ export function createDeliveryDispatcher(options: {
                 record,
               ),
             }
-          : currentReviewRole
-            ? withReviewerDispatch(current, currentReviewRole, record)
-            : { ...current, activeDispatch: record }
+          : { ...current, activeDispatch: record }
         await options.store.commit(
           {
             ...next,
@@ -874,9 +714,7 @@ export function createDeliveryDispatcher(options: {
             ),
             thinking: 'idle' as const,
           }
-        : location.reviewRole
-          ? withReviewerFailure(run, location.reviewRole, invalid, reason)
-          : {
+        : {
               ...run,
               status: 'failed' as const,
               blockedReason: reason,
@@ -911,9 +749,7 @@ export function createDeliveryDispatcher(options: {
       )
     }
     const status =
-      result.workerType === 'document-reviewer'
-        ? 'completed'
-        : result.workerType === 'document-author' ||
+      result.workerType === 'document-author' ||
             result.workerType === 'atomic-task-planner' ||
             result.workerType === 'change-impact-analyzer' ||
             result.workerType === 'question-answerer'
@@ -933,27 +769,14 @@ export function createDeliveryDispatcher(options: {
       terminalResult: result as unknown as Record<string, unknown>,
       finishedAt,
     })
-    const performance = reviewerPerformance({
-      dispatch: location.record,
-      request,
-      result,
-      finishedAt,
-    })
     const updatedWithDispatch = location.path
       ? withFoundationDispatch(run, location.path, completed)
-      : location.reviewRole
-        ? withReviewerDispatch(
-            run,
-            location.reviewRole,
-            completed,
-            performance,
-          )
-        : { ...run, activeDispatch: completed }
+      : { ...run, activeDispatch: completed }
     const updated = {
       ...updatedWithDispatch,
       thinking:
         hasRunningFoundationDispatch(updatedWithDispatch) ||
-        hasRunningReviewerDispatch(updatedWithDispatch)
+        updatedWithDispatch.activeDispatch?.status === 'running'
           ? ('working' as const)
           : ('idle' as const),
     }
@@ -979,7 +802,6 @@ export function createDeliveryDispatcher(options: {
       revision: run.revision,
       dispatchId,
       workerType: result.workerType,
-      ...(performance ? { reviewerPerformance: performance } : {}),
       ...(resourcePerformance
         ? { resourceTaskPerformance: resourcePerformance }
         : {}),
@@ -1054,14 +876,7 @@ export function createDeliveryDispatcher(options: {
                   ),
               status: isolatedFoundationFailureStatus(current),
             }
-          : currentLocation.reviewRole
-            ? withReviewerFailure(
-                current,
-                currentLocation.reviewRole,
-                failed,
-                reason,
-              )
-            : { ...current, status, activeDispatch: failed }
+          : { ...current, status, activeDispatch: failed }
         await options.store.commit(
           {
             ...failedCurrent,
@@ -1146,9 +961,7 @@ export function createDeliveryDispatcher(options: {
                 failed,
               ),
             }
-          : location.reviewRole
-            ? withReviewerFailure(current, location.reviewRole, failed, reason)
-            : { ...current, activeDispatch: failed }
+          : { ...current, activeDispatch: failed }
         await options.store.commit(
           {
             ...failedRun,
@@ -1198,14 +1011,10 @@ export function createDeliveryDispatcher(options: {
             reason,
           ),
         }
-      : location.reviewRole
-        ? withReviewerFailure(run, location.reviewRole, failed, reason)
-        : { ...run, activeDispatch: failed }
+      : { ...run, activeDispatch: failed }
     const status: DeliveryRun['status'] = location.path
       ? isolatedFoundationFailureStatus(failedRun)
-      : location.reviewRole
-        ? failedRun.status
-        : 'failed'
+      : 'failed'
     await options.store.commit(
       {
         ...failedRun,
@@ -1213,7 +1022,7 @@ export function createDeliveryDispatcher(options: {
         ...(status === 'running' ? {} : { blockedReason: reason }),
         thinking:
           hasRunningFoundationDispatch(failedRun) ||
-          hasRunningReviewerDispatch(failedRun)
+          failedRun.activeDispatch?.status === 'running'
             ? 'working'
             : 'idle',
       },
@@ -1255,14 +1064,10 @@ export function createDeliveryDispatcher(options: {
             reason,
           ),
         }
-      : location.reviewRole
-        ? withReviewerFailure(run, location.reviewRole, interrupted, reason)
-        : { ...run, activeDispatch: interrupted }
+      : { ...run, activeDispatch: interrupted }
     const status: DeliveryRun['status'] = location.path
       ? isolatedFoundationFailureStatus(interruptedRun)
-      : location.reviewRole
-        ? interruptedRun.status
-        : 'needs_action'
+      : 'needs_action'
     await options.store.commit(
       {
         ...interruptedRun,
@@ -1270,7 +1075,7 @@ export function createDeliveryDispatcher(options: {
         ...(status === 'running' ? {} : { blockedReason: reason }),
         thinking:
           hasRunningFoundationDispatch(interruptedRun) ||
-          hasRunningReviewerDispatch(interruptedRun)
+          interruptedRun.activeDispatch?.status === 'running'
             ? 'working'
             : 'idle',
       },
@@ -1304,9 +1109,7 @@ export function createDeliveryDispatcher(options: {
     })
     const stoppedRun = location.path
       ? withFoundationDispatch(run, location.path, stopped)
-      : location.reviewRole
-        ? withReviewerFailure(run, location.reviewRole, stopped, reason)
-        : { ...run, activeDispatch: stopped }
+      : { ...run, activeDispatch: stopped }
     await options.store.commit(
       {
         ...stoppedRun,

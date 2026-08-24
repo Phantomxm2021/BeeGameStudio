@@ -214,7 +214,6 @@ export function transitionDeliveryRun(
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
         foundationDraftState: { completedPaths: [] },
-        foundationReviewState: undefined,
         updatedAt: timestamp(),
       }
       break
@@ -483,30 +482,6 @@ export function transitionDeliveryRun(
               foundationDraftState: retryFoundationFailures(
                 run.foundationDraftState,
               ),
-            }
-          : {}),
-        ...(run.phase === 'DOCUMENT_REVIEW' &&
-        run.foundationReviewState &&
-        run.foundationReviewState.status !== 'completed'
-          ? {
-              foundationReviewState: {
-                ...run.foundationReviewState,
-                status: 'running' as const,
-                failureReason: undefined,
-                reports: run.foundationReviewState.reports.map(report =>
-                  report.status !== 'completed'
-                    ? {
-                        ...report,
-                        status: 'pending' as const,
-                        dispatch: undefined,
-                        digest: undefined,
-                        durationMs: undefined,
-                        usage: undefined,
-                        failureReason: undefined,
-                      }
-                    : report,
-                ),
-              },
             }
           : {}),
         ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId

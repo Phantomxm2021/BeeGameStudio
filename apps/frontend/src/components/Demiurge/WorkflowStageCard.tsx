@@ -59,7 +59,6 @@ const stageLabel: Record<string, string> = {
 
 const workerLabel: Record<string, string> = {
   'document-author': 'Document Author',
-  'document-reviewer': 'Document Reviewer',
   'resource-planner': 'Resource Planner',
   'resource-curator': 'Resource Curator',
   'resource-content-author': 'Resource Content Author',

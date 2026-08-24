@@ -112,7 +112,6 @@ export type AtomicTaskStatus =
 
 export type DispatchWorkerType =
   | 'document-author'
-  | 'document-reviewer'
   | 'resource-planner'
   | 'resource-curator'
   | 'resource-content-author'
@@ -318,7 +317,8 @@ export type DeliveryRun = {
     implementationAudit?: EvidenceRef
     acceptance?: EvidenceRef
   }
-  foundationReviewState?: FoundationReviewState
+  /** Compile-only compatibility for the protected checklist contract. */
+  foundationReviewState?: { revision: string }
   /** Sole durable cursor for the initial eight-document authoring pass. */
   foundationDraftState: FoundationDraftState
   /** Sole task/checkpoint state for Resource Production. */
@@ -372,4 +372,3 @@ export type DeliveryWorkerPort = {
   hasInFlightTerminalSubmission?(dispatchId: string): Promise<boolean>
   waitForTerminal?(dispatchId: string): Promise<unknown>
 }
-import type { FoundationReviewState } from './foundation-review-state'

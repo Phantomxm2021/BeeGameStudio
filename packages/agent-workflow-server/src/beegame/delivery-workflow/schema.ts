@@ -14,7 +14,6 @@ import type {
   WorkflowUnitAcceptedEvent,
   WorkerDispatchRequest,
 } from './types'
-import type { FoundationReviewState } from './foundation-review-state'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
@@ -58,7 +57,6 @@ export const DISPATCH_STATUSES = [
 ] as const
 export const WORKER_TYPES = [
   'document-author',
-  'document-reviewer',
   'resource-planner',
   'resource-curator',
   'resource-content-author',
@@ -196,36 +194,6 @@ export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
   })
   .strict()
 
-const foundationReviewStateSchema: z.ZodType<FoundationReviewState> = z
-  .object({
-    revision: z.string().regex(/^[a-f0-9]{64}$/u),
-    attempt: z.number().int().positive(),
-    status: z.enum(['pending', 'running', 'completed', 'failed']),
-    reports: z.array(
-      z
-        .object({
-          role: z.enum([
-            'core-design',
-            'technical-assets',
-            'presentation',
-            'synthesis',
-          ]),
-          path: z.string().min(1),
-          status: z.enum(['pending', 'running', 'completed', 'failed']),
-          dispatch: dispatchRecordSchema.optional(),
-          digest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
-          durationMs: z.number().finite().nonnegative().optional(),
-          usage: workflowUsageSchema.optional(),
-          failureReason: z.string().min(1).optional(),
-        })
-        .strict(),
-    ),
-    finalReportPath: z.string().min(1).optional(),
-    finalReportDigest: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
-    verdict: z.enum(['READY', 'NEEDS_REVISION']).optional(),
-    failureReason: z.string().min(1).optional(),
-  })
-  .strict()
 const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
   .object({
     completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
@@ -511,7 +479,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         acceptance: evidenceRefSchema.optional(),
       })
       .strict(),
-    foundationReviewState: foundationReviewStateSchema.optional(),
     foundationDraftState: foundationDraftStateSchema,
     resourceProductionState: resourceProductionStateSchema,
     usage: workflowUsageSchema.optional(),

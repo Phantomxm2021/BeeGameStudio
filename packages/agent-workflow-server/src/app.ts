@@ -5973,56 +5973,6 @@ function workflowNextAction(
   return undefined
 }
 
-function projectFoundationReviewTaskState(
-  workflow: JsonObject,
-): Parameters<typeof projectDocumentDisplayTasks>[0]['foundationReview'] {
-  const state = isObject(workflow.foundationReviewState)
-    ? workflow.foundationReviewState
-    : undefined
-  if (
-    !state ||
-    !Number.isInteger(state.attempt) ||
-    !Array.isArray(state.reports)
-  )
-    return undefined
-  const reports = state.reports.flatMap(report => {
-    if (
-      !isObject(report) ||
-      ![
-        'core-design',
-        'technical-assets',
-        'presentation',
-        'synthesis',
-      ].includes(String(report.role)) ||
-      !['pending', 'running', 'completed', 'failed'].includes(
-        String(report.status),
-      )
-    )
-      return []
-    return [
-      {
-        role: report.role as
-          | 'core-design'
-          | 'technical-assets'
-          | 'presentation'
-          | 'synthesis',
-        status: report.status as
-          | 'pending'
-          | 'running'
-          | 'completed'
-          | 'failed',
-        ...(typeof report.failureReason === 'string'
-          ? { failureReason: report.failureReason }
-          : {}),
-      },
-    ]
-  })
-  return {
-    attempt: Number(state.attempt),
-    reports,
-  }
-}
-
 function workflowViewForDisplay(
   workflow: JsonObject,
   usage?: JsonObject,
@@ -6105,7 +6055,6 @@ function workflowViewForDisplay(
               : undefined,
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
-          foundationReview: projectFoundationReviewTaskState(workflow),
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({
