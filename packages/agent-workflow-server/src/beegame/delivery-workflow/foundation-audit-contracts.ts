@@ -23,6 +23,10 @@ function text(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
+function identityPart(value: string): string {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
 function sameSection(left: SectionRef, right: SectionRef): boolean {
   return (
     left.documentPath === right.documentPath &&
@@ -93,7 +97,7 @@ function bindingDrafts(
     if (!sourceFact || !targetFact) {
       const fix = !targetFact ? target : source
       drafts.push({
-        checkId: `contract.${binding.id}`,
+        checkId: `contract.${identityPart(binding.id)}`,
         severity: binding.severity ?? 'HIGH',
         type: 'contract',
         source,
@@ -115,7 +119,7 @@ function bindingDrafts(
       )
     ) {
       drafts.push({
-        checkId: `contract.${binding.id}`,
+        checkId: `contract.${identityPart(binding.id)}`,
         severity: binding.severity ?? 'HIGH',
         type: 'contract',
         source,

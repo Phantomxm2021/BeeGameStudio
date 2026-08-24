@@ -118,6 +118,91 @@ describe('deterministic foundation rules', () => {
     })
   })
 
+  test('suppresses numeric evaluation when the first declared fact has the wrong type', () => {
+    const first = ref('docs/custom-first.md', 'values')
+    const later = ref('docs/custom-later.md', 'values')
+    const issues = runDeterministicFoundationAudit({
+      sectionIndex: [first, later],
+      factStore: [
+        fact('values.first', 'one', first),
+        fact('values.later', 1, later),
+      ],
+      numericRules: [
+        {
+          id: 'values-equal',
+          facts: [
+            { key: 'values.first', source: first, expectedType: 'number' },
+            { key: 'values.later', source: later, expectedType: 'number' },
+          ],
+          relation: 'equal',
+        },
+      ],
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.type).toBe('schema')
+  })
+
+  test('suppresses entity evaluation when its declared source has the wrong type', () => {
+    const source = ref('docs/custom-level.md', 'encounters')
+    const issues = runDeterministicFoundationAudit({
+      sectionIndex: [source],
+      factStore: [fact('level.boss', 7, source)],
+      entityRules: [
+        {
+          id: 'level.boss-exists',
+          source: { key: 'level.boss', source, expectedType: 'string' },
+          targetFactPrefix: 'asset.boss.',
+        },
+      ],
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.type).toBe('schema')
+  })
+
+  test('evaluates valid declarations while suppressing invalid declarations', () => {
+    const validFirst = ref('docs/custom-valid-first.md', 'values')
+    const validLater = ref('docs/custom-valid-later.md', 'values')
+    const invalidFirst = ref('docs/custom-invalid-first.md', 'values')
+    const invalidLater = ref('docs/custom-invalid-later.md', 'values')
+    const issues = runDeterministicFoundationAudit({
+      sectionIndex: [validFirst, validLater, invalidFirst, invalidLater],
+      factStore: [
+        fact('valid.first', 1, validFirst),
+        fact('valid.later', 2, validLater),
+        fact('invalid.first', 'one', invalidFirst),
+        fact('invalid.later', 2, invalidLater),
+      ],
+      numericRules: [
+        {
+          id: 'valid-equal',
+          facts: [
+            { key: 'valid.first', source: validFirst, expectedType: 'number' },
+            { key: 'valid.later', source: validLater, expectedType: 'number' },
+          ],
+          relation: 'equal',
+        },
+        {
+          id: 'invalid-equal',
+          facts: [
+            {
+              key: 'invalid.first',
+              source: invalidFirst,
+              expectedType: 'number',
+            },
+            {
+              key: 'invalid.later',
+              source: invalidLater,
+              expectedType: 'number',
+            },
+          ],
+          relation: 'equal',
+        },
+      ],
+    })
+    expect(issues).toHaveLength(2)
+    expect(issues.map(issue => issue.type).sort()).toEqual(['rule', 'schema'])
+  })
+
   test('reports a missing entity source fact as a schema issue at its declaration', () => {
     const source = ref('docs/custom-level.md', 'encounters')
     const issues = runDeterministicFoundationAudit({

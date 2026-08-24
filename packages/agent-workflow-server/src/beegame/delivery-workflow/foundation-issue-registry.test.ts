@@ -70,6 +70,39 @@ describe('foundation issue registry admission', () => {
     expect(first).toEqual(second)
   })
 
+  test('normalizes surrounding check identity whitespace before hashing', () => {
+    const source = ref('docs/custom.md', 'settings')
+    const base = runDeterministicFoundationAudit({
+      sectionIndex: [source],
+      factStore: [fact('custom.a', 1, source), fact('custom.b', 2, source)],
+      numericRules: [
+        {
+          id: 'stable-check',
+          facts: [
+            { key: 'custom.a', source, expectedType: 'number' as const },
+            { key: 'custom.b', source, expectedType: 'number' as const },
+          ],
+          relation: 'equal',
+        },
+      ],
+    })
+    const padded = runDeterministicFoundationAudit({
+      sectionIndex: [source],
+      factStore: [fact('custom.a', 1, source), fact('custom.b', 2, source)],
+      numericRules: [
+        {
+          id: '  stable-check  ',
+          facts: [
+            { key: 'custom.a', source, expectedType: 'number' as const },
+            { key: 'custom.b', source, expectedType: 'number' as const },
+          ],
+          relation: 'equal',
+        },
+      ],
+    })
+    expect(base[0]?.id).toBe(padded[0]?.id)
+  })
+
   test('does not admit a caller-supplied issue ID surface', () => {
     const source = ref('docs/custom.md', 'settings')
     expect(() =>

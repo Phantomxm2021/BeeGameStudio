@@ -77,6 +77,10 @@ function display(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
+function identityPart(value: string): string {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
 function numericDrafts(
   context: FoundationAuditContext,
   rules: readonly NumericConsistencyRule[],
@@ -88,7 +92,7 @@ function numericDrafts(
     if (!first) continue
     if (!numeric(first.value)) {
       drafts.push({
-        checkId: `rule.numeric-consistency.${rule.id}`,
+        checkId: `rule.numeric-consistency.${identityPart(rule.id)}`,
         severity: rule.severity ?? 'HIGH',
         type: 'rule',
         source: first.source,
@@ -117,7 +121,7 @@ function numericDrafts(
       )
         continue
       drafts.push({
-        checkId: `rule.numeric-consistency.${rule.id}`,
+        checkId: `rule.numeric-consistency.${identityPart(rule.id)}`,
         severity: rule.severity ?? 'HIGH',
         type: 'rule',
         source: first.source,
@@ -155,7 +159,7 @@ function entityDrafts(
     )
     if (!missing.length) continue
     drafts.push({
-      checkId: `rule.referenced-entities.${rule.id}`,
+      checkId: `rule.referenced-entities.${identityPart(rule.id)}`,
       severity: rule.severity ?? 'HIGH',
       type: 'rule',
       source: source.source,

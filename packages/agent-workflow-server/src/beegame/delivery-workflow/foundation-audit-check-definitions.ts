@@ -394,6 +394,14 @@ function typeOf(value: FactValue): FoundationFactType {
   return value.every(item => typeof item === 'string') ? 'string[]' : 'number[]'
 }
 
+function validDeclaredFact(
+  context: FoundationAuditContext,
+  definition: RuleFactDefinition,
+): boolean {
+  const fact = context.fact(definition.key)
+  return fact !== undefined && typeOf(fact.value) === definition.expectedType
+}
+
 function schemaDrafts(
   context: FoundationAuditContext,
   schema: FoundationSchemaInput | undefined,
@@ -523,6 +531,10 @@ function normalizedJson(value: unknown): string {
   return JSON.stringify(normalize(value))
 }
 
+function canonicalIdentityString(value: string): string {
+  return value.trim().replace(/\s+/g, ' ')
+}
+
 function issueDigest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
@@ -568,8 +580,10 @@ function validateIssueDraft(
     throw new Error(
       'audit issue draft must not contain caller id or unknown fields',
     )
-  if (typeof candidate.checkId !== 'string' || !candidate.checkId.trim())
+  if (typeof candidate.checkId !== 'string')
     throw new Error('audit issue check identity is required')
+  const checkId = canonicalIdentityString(candidate.checkId)
+  if (!checkId) throw new Error('audit issue check identity is required')
   if (
     !['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(String(candidate.severity))
   )
@@ -603,7 +617,7 @@ function validateIssueDraft(
   const fix = context.section(candidate.fixDocument, candidate.fixSectionId)
   if (!fix) throw new Error('audit issue fix is not the validated SectionRef')
   return {
-    checkId: candidate.checkId,
+    checkId,
     severity: candidate.severity as AuditSeverity,
     type: candidate.type as AuditIssueType,
     source,
@@ -664,14 +678,21 @@ export function runDeterministicFoundationAudit(
   const context = contextFrom(input)
   validateSchema(context, input.schema)
   validateRules(context, input)
+  const schemaIssues = schemaDrafts(
+    context,
+    input.schema,
+    input.numericRules ?? [],
+    input.entityRules ?? [],
+  )
+  const numericRules = (input.numericRules ?? []).filter(rule =>
+    rule.facts.every(definition => validDeclaredFact(context, definition)),
+  )
+  const entityRules = (input.entityRules ?? []).filter(rule =>
+    validDeclaredFact(context, rule.source),
+  )
   const drafts = [
-    ...schemaDrafts(
-      context,
-      input.schema,
-      input.numericRules ?? [],
-      input.entityRules ?? [],
-    ),
-    ...collectRuleDrafts(context, input),
+    ...schemaIssues,
+    ...collectRuleDrafts(context, { numericRules, entityRules }),
     ...collectContractDrafts(context, input.contractBindings ?? []),
   ]
   return compileIssueRegistry(context, drafts)
