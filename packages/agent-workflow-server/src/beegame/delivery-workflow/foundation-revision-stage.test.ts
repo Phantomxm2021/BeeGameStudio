@@ -10,6 +10,7 @@ import {
   revisionTaskReceiptTerminalDigest,
   type RevisionTaskReceipt,
 } from './foundation-revision-stage'
+import type { AuditIssue } from './foundation-issue-registry'
 
 const workspaces: string[] = []
 afterEach(async () =>
@@ -101,6 +102,7 @@ test('derives INSERT, REPLACE and DELETE section operations without content fiel
   await writeFile(join(workspace, stage.stagedPath), staged)
   const stagedDocumentDigest = stageDigest(staged)
   const base = receiptFor({
+    issueIds: ['AUD-1', 'AUD-DELETE', 'AUD-INSERT'],
     baseDocumentDigest: stage.baseDocumentDigest,
     stagedDocumentDigest,
     stagedPath: stage.stagedPath,
@@ -113,8 +115,13 @@ test('derives INSERT, REPLACE and DELETE section operations without content fiel
     batch: {
       documentPath,
       sectionIds: ['vision', 'core_loop', 'progression'],
-      issueIds: ['AUD-1'],
+      issueIds: ['AUD-1', 'AUD-DELETE', 'AUD-INSERT'],
     },
+    issues: [
+      admittedIssue('AUD-1', 'vision'),
+      admittedIssue('AUD-DELETE', 'core_loop'),
+      admittedIssue('AUD-INSERT', 'progression'),
+    ],
     receipt: base,
   })
   expect(operations.map(operation => operation.kind)).toEqual([
@@ -123,7 +130,11 @@ test('derives INSERT, REPLACE and DELETE section operations without content fiel
     'INSERT',
   ])
   expect(operations.every(operation => !('content' in operation))).toBe(true)
-  expect(operations.flatMap(operation => operation.issueIds)).toEqual(['AUD-1'])
+  expect(operations.flatMap(operation => operation.issueIds)).toEqual([
+    'AUD-1',
+    'AUD-DELETE',
+    'AUD-INSERT',
+  ])
 })
 
 test('rejects stale base, traversal paths, user-directory staging and unauthorized sections', async () => {
@@ -146,6 +157,7 @@ test('rejects stale base, traversal paths, user-directory staging and unauthoriz
       workspacePath: workspace,
       revision,
       batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      issues: [admittedIssue('AUD-1', 'vision')],
       receipt: valid,
     }),
   ).rejects.toThrow(/stale|base|digest/i)
@@ -160,6 +172,7 @@ test('rejects stale base, traversal paths, user-directory staging and unauthoriz
         sectionIds: ['rules_systems'],
         issueIds: ['AUD-1'],
       },
+      issues: [admittedIssue('AUD-1', 'rules_systems')],
       receipt: valid,
     }),
   ).rejects.toThrow(/section|changed/i)
@@ -176,6 +189,7 @@ test('rejects stale base, traversal paths, user-directory staging and unauthoriz
       workspacePath: workspace,
       revision,
       batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      issues: [admittedIssue('AUD-1', 'vision')],
       receipt: traversal,
     }),
   ).rejects.toThrow(/path|staged/i)
@@ -202,6 +216,7 @@ test('rejects extra keys, duplicate IDs, marker destruction and whole-document d
         sectionIds: ['vision'],
         issueIds: ['AUD-1', 'AUD-1'],
       },
+      issues: [admittedIssue('AUD-1', 'vision')],
       receipt: valid,
     }),
   ).rejects.toThrow(/duplicate|issue/i)
@@ -210,6 +225,7 @@ test('rejects extra keys, duplicate IDs, marker destruction and whole-document d
       workspacePath: workspace,
       revision,
       batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      issues: [admittedIssue('AUD-1', 'vision')],
       receipt: { ...valid, extra: true } as never,
     }),
   ).rejects.toThrow(/shape|key|receipt/i)
@@ -232,9 +248,193 @@ test('rejects extra keys, duplicate IDs, marker destruction and whole-document d
       workspacePath: workspace,
       revision,
       batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      issues: [admittedIssue('AUD-1', 'vision')],
       receipt: broken,
     }),
   ).rejects.toThrow(/section|marker|contract/i)
+})
+
+function admittedIssue(id: string, fixSectionId: string): AuditIssue {
+  return {
+    id,
+    severity: 'HIGH',
+    type: 'rule',
+    source: {
+      documentPath,
+      sectionId: fixSectionId,
+      heading: fixSectionId,
+      startLine: 1,
+      endLine: 1,
+      digest: 'a'.repeat(64),
+    },
+    expected: 'expected',
+    actual: 'actual',
+    fixDocument: documentPath,
+    fixSectionId,
+  }
+}
+
+async function deriveWithIssues(input: Record<string, unknown>) {
+  return deriveFoundationPatchOperations(input as never)
+}
+
+test('binds distinct section operations to admitted fix targets regardless issue array order', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  const staged = (await readFile(join(workspace, stage.stagedPath), 'utf8'))
+    .replace('original vision', 'revised vision')
+    .replace('original core_loop', 'revised core loop')
+  await writeFile(join(workspace, stage.stagedPath), staged)
+  const receipt = receiptFor({
+    issueIds: ['AUD-CORE', 'AUD-VISION'],
+    changedSectionIds: ['vision', 'core_loop'],
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: stageDigest(staged),
+    stagedPath: stage.stagedPath,
+  })
+  const operations = await deriveWithIssues({
+    workspacePath: workspace,
+    revision,
+    batch: {
+      documentPath,
+      sectionIds: ['vision', 'core_loop'],
+      issueIds: ['AUD-CORE', 'AUD-VISION'],
+    },
+    issues: [
+      admittedIssue('AUD-VISION', 'vision'),
+      admittedIssue('AUD-CORE', 'core_loop'),
+    ],
+    receipt,
+  })
+  expect(operations).toEqual([
+    expect.objectContaining({ sectionId: 'vision', issueIds: ['AUD-VISION'] }),
+    expect.objectContaining({ sectionId: 'core_loop', issueIds: ['AUD-CORE'] }),
+  ])
+  const swapped = await deriveWithIssues({
+    workspacePath: workspace,
+    revision,
+    batch: {
+      documentPath,
+      sectionIds: ['vision', 'core_loop'],
+      issueIds: ['AUD-VISION', 'AUD-CORE'],
+    },
+    issues: [
+      admittedIssue('AUD-CORE', 'core_loop'),
+      admittedIssue('AUD-VISION', 'vision'),
+    ],
+    receipt: receiptFor({
+      issueIds: ['AUD-VISION', 'AUD-CORE'],
+      changedSectionIds: ['vision', 'core_loop'],
+      baseDocumentDigest: stage.baseDocumentDigest,
+      stagedDocumentDigest: stageDigest(staged),
+      stagedPath: stage.stagedPath,
+    }),
+  })
+  expect(
+    swapped.map(operation => ({
+      sectionId: operation.sectionId,
+      issueIds: operation.issueIds,
+    })),
+  ).toEqual(
+    operations.map(operation => ({
+      sectionId: operation.sectionId,
+      issueIds: operation.issueIds,
+    })),
+  )
+})
+
+test('keeps issues targeting one section together and rejects changed sections without authority', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  const staged = (
+    await readFile(join(workspace, stage.stagedPath), 'utf8')
+  ).replace('original vision', 'revised vision')
+  await writeFile(join(workspace, stage.stagedPath), staged)
+  const receipt = receiptFor({
+    issueIds: ['AUD-2', 'AUD-1'],
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: stageDigest(staged),
+    stagedPath: stage.stagedPath,
+  })
+  await expect(
+    deriveWithIssues({
+      workspacePath: workspace,
+      revision,
+      batch: {
+        documentPath,
+        sectionIds: ['vision'],
+        issueIds: ['AUD-2', 'AUD-1'],
+      },
+      issues: [
+        admittedIssue('AUD-2', 'vision'),
+        admittedIssue('AUD-1', 'vision'),
+      ],
+      receipt,
+    }),
+  ).resolves.toEqual([
+    expect.objectContaining({
+      sectionId: 'vision',
+      issueIds: ['AUD-1', 'AUD-2'],
+    }),
+  ])
+
+  const unrelatedReceipt = receiptFor({
+    issueIds: ['AUD-OTHER'],
+    changedSectionIds: ['vision'],
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: stageDigest(staged),
+    stagedPath: stage.stagedPath,
+  })
+  await expect(
+    deriveWithIssues({
+      workspacePath: workspace,
+      revision,
+      batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-OTHER'] },
+      issues: [admittedIssue('AUD-OTHER', 'core_loop')],
+      receipt: unrelatedReceipt,
+    }),
+  ).rejects.toThrow(/target|changed|issue/i)
+})
+
+test('rejects an authorized issue target that was not changed and any changed section with no issue', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  const staged = (
+    await readFile(join(workspace, stage.stagedPath), 'utf8')
+  ).replace('original vision', 'revised vision')
+  await writeFile(join(workspace, stage.stagedPath), staged)
+  const receipt = receiptFor({
+    issueIds: ['AUD-CORE'],
+    changedSectionIds: ['vision'],
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: stageDigest(staged),
+    stagedPath: stage.stagedPath,
+  })
+  await expect(
+    deriveWithIssues({
+      workspacePath: workspace,
+      revision,
+      batch: {
+        documentPath,
+        sectionIds: ['vision', 'core_loop'],
+        issueIds: ['AUD-CORE'],
+      },
+      issues: [admittedIssue('AUD-CORE', 'core_loop')],
+      receipt,
+    }),
+  ).rejects.toThrow(/target|changed|issue/i)
 })
 
 function stageDigest(value: string): string {

@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildFoundationSectionIndex } from './foundation-section-index'
+import type { AuditIssue } from './foundation-issue-registry'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
@@ -328,12 +329,59 @@ function assertBatch(batch: RevisionBatch): void {
     throw new Error('revision batch section is not canonical')
 }
 
+function issueAuthority(
+  batch: RevisionBatch,
+  issues: readonly AuditIssue[],
+): Map<string, string[]> {
+  if (!Array.isArray(issues) || issues.length !== batch.issueIds.length)
+    throw new Error('revision requires the exact admitted issue authority')
+  const batchIds = new Set(batch.issueIds)
+  const seen = new Set<string>()
+  const grouped = new Map<string, string[]>()
+  const contractSections = new Set(
+    getGameDocumentContract(batch.documentPath).sections.map(
+      section => section.sectionId,
+    ),
+  )
+  for (const issue of issues) {
+    if (
+      !issue ||
+      typeof issue.id !== 'string' ||
+      !issue.id ||
+      seen.has(issue.id)
+    )
+      throw new Error('revision admitted issue IDs must be unique')
+    if (!batchIds.has(issue.id))
+      throw new Error('revision admitted issue IDs disagree with the batch')
+    if (issue.fixDocument !== batch.documentPath)
+      throw new Error('revision issue fix document is outside the batch')
+    if (
+      !contractSections.has(issue.fixSectionId) ||
+      !batch.sectionIds.includes(issue.fixSectionId)
+    )
+      throw new Error('revision issue fix section is outside the batch')
+    seen.add(issue.id)
+    const sectionIssues = grouped.get(issue.fixSectionId) ?? []
+    sectionIssues.push(issue.id)
+    grouped.set(issue.fixSectionId, sectionIssues)
+  }
+  if (seen.size !== batchIds.size)
+    throw new Error('revision admitted issue coverage is incomplete')
+  for (const ids of grouped.values()) ids.sort(compareStable)
+  return grouped
+}
+
+function compareStable(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
 /** Derives bounded operations from bytes; it never accepts a worker-supplied patch body. */
 export async function deriveFoundationPatchOperations(input: {
   workspacePath: string
   revision: string
   taskId?: string
   batch: RevisionBatch
+  issues: readonly AuditIssue[]
   receipt: RevisionTaskReceipt
 }): Promise<PatchOperation[]> {
   assertRevision(input.revision)
@@ -346,6 +394,7 @@ export async function deriveFoundationPatchOperations(input: {
     sectionIds: input.batch.sectionIds,
     workspacePath: input.workspacePath,
   })
+  const issueIdsBySection = issueAuthority(input.batch, input.issues)
   const canonicalPath = resolveProjectPath(
     input.workspacePath,
     input.batch.documentPath,
@@ -428,8 +477,11 @@ export async function deriveFoundationPatchOperations(input: {
       (contractOrder.get(left.sectionId) ?? Number.MAX_SAFE_INTEGER) -
       (contractOrder.get(right.sectionId) ?? Number.MAX_SAFE_INTEGER),
   )
-  const operations = changed.map((before, index) => {
+  const operations = changed.map(before => {
     const after = stagedMap.get(before.sectionId)!
+    const issueIds = issueIdsBySection.get(before.sectionId)
+    if (!issueIds || issueIds.length === 0)
+      throw new Error('revision changed a section without an admitted issue')
     const kind: PatchOperation['kind'] =
       !before.body && after.body
         ? 'INSERT'
@@ -440,9 +492,7 @@ export async function deriveFoundationPatchOperations(input: {
       kind,
       documentPath: input.batch.documentPath,
       sectionId: before.sectionId,
-      issueIds: input.batch.issueIds.filter(
-        (_, issueIndex) => issueIndex % changed.length === index,
-      ),
+      issueIds,
       ...(kind === 'INSERT' || kind === 'REPLACE'
         ? { afterDigest: sha256(after.text) }
         : {}),
@@ -451,10 +501,15 @@ export async function deriveFoundationPatchOperations(input: {
         : {}),
     } satisfies PatchOperation
   })
+  for (const issue of input.issues)
+    if (!changedIds.includes(issue.fixSectionId))
+      throw new Error('revision admitted issue target was not changed')
   const boundIssueIds = operations.flatMap(operation => operation.issueIds)
+  const expectedIssueIds = [...input.batch.issueIds].sort(compareStable)
+  const actualIssueIds = [...boundIssueIds].sort(compareStable)
   if (
-    boundIssueIds.length !== input.batch.issueIds.length ||
-    boundIssueIds.some((id, index) => id !== input.batch.issueIds[index])
+    actualIssueIds.length !== expectedIssueIds.length ||
+    actualIssueIds.some((id, index) => id !== expectedIssueIds[index])
   )
     throw new Error('revision issue coverage is not exact')
   return operations
