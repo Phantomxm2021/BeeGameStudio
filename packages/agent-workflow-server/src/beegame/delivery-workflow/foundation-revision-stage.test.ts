@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { getGameDocumentContract } from './game-document-contracts'
+import * as revisionStage from './foundation-revision-stage'
 import {
   createFoundationRevisionStage,
   deriveFoundationPatchOperations,
@@ -51,6 +52,55 @@ test('does not overwrite a packet and keeps packet paths isolated by round', asy
   const roundTwo = { ...first, round: 2 as const }
   const roundTwoPath = await writeFoundationRevisionPacket({ workspacePath: workspace, revision, round: 2, taskId: identity.taskId, documentPath, packet: roundTwo, packetDigest: foundationRevisionPacketDigest(roundTwo) })
   expect(roundTwoPath).not.toBe(foundationRevisionPacketPath(revision, 1, identity.taskId))
+})
+
+test('persists semantic result artifacts immutably and binds issue, packet, result digest, and path', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const api = revisionStage as unknown as {
+    writeFoundationRevisionSemanticResult?: (input: {
+      workspacePath: string
+      revision: string
+      round: 1 | 2 | 3
+      taskId: string
+      issueId: string
+      packetDigest: string
+      result: Record<string, unknown>
+      resultDigest: string
+    }) => Promise<string>
+    loadFoundationRevisionSemanticResult?: (input: {
+      workspacePath: string
+      revision: string
+      round: 1 | 2 | 3
+      taskId: string
+      issueId: string
+      packetDigest: string
+      resultDigest: string
+      resultPath: string
+    }) => Promise<Record<string, unknown>>
+  }
+  expect(typeof api.writeFoundationRevisionSemanticResult).toBe('function')
+  expect(typeof api.loadFoundationRevisionSemanticResult).toBe('function')
+  if (!api.writeFoundationRevisionSemanticResult || !api.loadFoundationRevisionSemanticResult) return
+  const packetDigest = 'a'.repeat(64)
+  const result = { issueId: 'AUD-semantic-1', packetDigest, status: 'PASS' }
+  const resultDigest = createHash('sha256').update(JSON.stringify(result)).digest('hex')
+  const input = { workspacePath: workspace, revision, round: 1 as const, taskId: 'revision-recheck-1', issueId: result.issueId, packetDigest, result, resultDigest }
+  const resultPath = await api.writeFoundationRevisionSemanticResult(input)
+  expect(resultPath).toContain(`/round-${input.round}/tasks/${input.taskId}/`)
+  await expect(api.loadFoundationRevisionSemanticResult({ ...input, resultPath })).resolves.toEqual(result)
+  await expect(api.writeFoundationRevisionSemanticResult(input)).resolves.toBe(resultPath)
+  for (const mismatch of [
+    { issueId: 'AUD-other' },
+    { packetDigest: 'b'.repeat(64) },
+    { resultDigest: 'c'.repeat(64) },
+    { resultPath: resultPath.replace(input.taskId, 'other-task') },
+  ]) {
+    await expect(api.loadFoundationRevisionSemanticResult({ ...input, resultPath, ...mismatch })).rejects.toThrow(/identity|digest|path|stale/i)
+  }
+  const originalBytes = await readFile(join(workspace, resultPath))
+  await writeFile(join(workspace, resultPath), `${originalBytes}tampered`)
+  await expect(api.loadFoundationRevisionSemanticResult({ ...input, resultPath })).rejects.toThrow(/digest|stale|tamper/i)
+  await expect(api.writeFoundationRevisionSemanticResult({ ...input, result: { ...result, status: 'FAIL' }, resultDigest: 'b'.repeat(64) })).rejects.toThrow(/different|conflict|digest/i)
 })
 
 function canonicalDocument(): string {

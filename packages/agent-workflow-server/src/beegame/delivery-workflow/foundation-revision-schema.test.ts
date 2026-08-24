@@ -69,4 +69,21 @@ describe('foundation revision persisted authority', () => {
       expect(parsed.success).toBe(false)
     }
   })
+
+  test('does not treat a completed semantic recheck as complete without its result binding', () => {
+    const task = {
+      taskId: 'rev-1.recheck.1.0', kind: 'semantic-recheck' as const, revision: 'rev-1', round: 1 as const,
+      packetPath: foundationRevisionPacketPath('rev-1', 1, 'rev-1.recheck.1.0'), packetDigest: digest,
+      status: 'completed' as const, attempt: 1, modelTier: 'strong' as const, issueId: 'AUD-1',
+    }
+    const base = { authority: binding, roundBefore: { documentRevision: 'rev-1', issueRegistryDigest: digest }, revision: 'rev-1', round: 1 as const, phase: 'semantic_recheck' as const, status: 'running' as const, phaseStartedAt: new Date().toISOString(), roundDeadlineAt: new Date(Date.now() + 600_000).toISOString(), knownIssueIds: ['AUD-1'], tasks: [task] }
+    expect(foundationRevisionStateSchema.safeParse(base).success).toBe(false)
+    const complete = { ...task, resultPath: `${task.packetPath}.result.json`, resultDigest: digest, terminalDigest: digest }
+    expect(foundationRevisionStateSchema.safeParse({ ...base, tasks: [complete] }).success).toBe(true)
+    for (const incomplete of [
+      (() => { const { terminalDigest: _omit, ...value } = complete; return value })(),
+      (() => { const { resultPath: _omit, ...value } = complete; return value })(),
+      (() => { const { resultDigest: _omit, ...value } = complete; return value })(),
+    ]) expect(foundationRevisionStateSchema.safeParse({ ...base, tasks: [incomplete] }).success).toBe(false)
+  })
 })

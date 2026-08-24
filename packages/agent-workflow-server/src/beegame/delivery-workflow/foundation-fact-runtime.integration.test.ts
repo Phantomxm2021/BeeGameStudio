@@ -5,15 +5,19 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { createDeliveryWorkflowController } from './controller'
 import { createInitialDeliveryRun } from './run-store'
-import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun, type DeliveryWorkerPort, type FoundationRevisionDocumentTask, type WorkerDispatchRequest } from './types'
+import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun, type DeliveryWorkerPort, type FoundationRevisionDocumentTask, type FoundationRevisionSemanticRecheckTask, type WorkerDispatchRequest } from './types'
 import { createBeeGameDeliveryWorkerPort } from '../delivery-worker-session-port'
 import { getGameDocumentContract } from './game-document-contracts'
-import { loadFoundationSemanticReview } from './foundation-audit-artifacts'
+import { loadCommittedFoundationDerivedArtifacts, loadFoundationSemanticReview } from './foundation-audit-artifacts'
+import { buildFoundationSectionIndex, type SectionRef } from './foundation-section-index'
+import { analyzeFoundationImpact } from './foundation-impact-analysis'
 import { FOUNDATION_FACT_CATALOG, foundationFactDefinition } from './foundation-fact-definitions'
 import type { FactValue } from './foundation-fact-store'
 import type { AuditIssue } from './foundation-issue-registry'
-import { foundationRevisionPacketPath, foundationRevisionStagePath, loadFoundationRevisionPacket, revisionTaskReceiptTerminalDigest } from './foundation-revision-stage'
+import { buildFoundationSemanticRecheckPacket } from './foundation-patch-validation'
+import { foundationRevisionPacketPath, foundationRevisionStagePath, loadFoundationRevisionPacket, revisionTaskReceiptTerminalDigest, writeFoundationRevisionSemanticPacket, type PatchOperation } from './foundation-revision-stage'
 import { digestFoundationFactTerminal } from './foundation-fact-runtime'
+import { foundationSemanticReviewerStructuredOutputJsonSchema } from './worker-contracts'
 
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
@@ -73,7 +77,7 @@ async function presentFactResults(workspacePath: string, packet: { keys: string[
 }
 
 describe('foundation fact runtime controller integration', () => {
-  async function preparedController(workerPortFactory?: (started: Set<string>) => DeliveryWorkerPort, resumeImmediately = true) {
+  async function preparedController(workerPortFactory?: (started: Set<string>, requests: WorkerDispatchRequest[]) => DeliveryWorkerPort, resumeImmediately = true) {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-fact-runtime-'))
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) await writeFile(join(workspacePath, path), document(path))
@@ -82,7 +86,7 @@ describe('foundation fact runtime controller integration', () => {
     const ready = { ...run, phase: 'DOCUMENT_DRAFTING' as const, documentStep: 'FOUNDATION_DRAFTING' as const, foundationDraftState: { completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS] }, revision: { ...run.revision, document: 'rev-1' } }
     const started = new Set<string>()
     const requests: WorkerDispatchRequest[] = []
-    const controller = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: workerPortFactory ? workerPortFactory(started) : port(started, requests) })
+    const controller = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: workerPortFactory ? workerPortFactory(started, requests) : port(started, requests) })
     await controller.store.save(ready)
     if (resumeImmediately) await controller.resume(ready)
     return { workspacePath, controller, started, requests }
@@ -433,6 +437,61 @@ describe('foundation fact runtime controller integration', () => {
     return { task, run: await controller.store.load() }
   }
 
+  async function reachSemanticRecheck(controller: ReturnType<typeof createDeliveryWorkflowController>, workspacePath: string) {
+    await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+    let current = await controller.store.load()
+    for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
+      await controller.resume(current!)
+      current = await controller.store.load()
+    }
+    return current!
+  }
+
+  function revisionSemanticRequest(run: DeliveryRun, task: FoundationRevisionSemanticRecheckTask, workspacePath: string): WorkerDispatchRequest {
+    return { runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { workerType: 'foundation-semantic-reviewer', taskId: task.taskId, revision: task.revision, round: task.round, issueId: task.issueId, packetPath: task.packetPath, packetDigest: task.packetDigest, modelTier: task.modelTier } }
+  }
+
+  async function exerciseSemanticNegativeOutcome(outcome: 'ISSUES' | 'UNDECIDABLE') {
+    const { workspacePath, controller, requests } = await preparedController()
+    try {
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      let current = await controller.store.load()
+      for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
+        await controller.resume(current!)
+        current = await controller.store.load()
+      }
+      expect(current?.foundationRevisionState?.phase).toBe('semantic_recheck')
+      const beforeRegistry = current?.foundationAuditState
+      const task = current!.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')!
+      await controller.resume(current!)
+      const claimed = await controller.store.load()
+      const request = requests.find(candidate => candidate.taskId === task.taskId)
+      expect(request).toBeDefined()
+      if (!request) return
+      const runningTask = claimed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      const packet = JSON.parse((await readFile(join(workspacePath, runningTask.packetPath))).toString()) as { sections?: Array<{ sectionKey: string }> }
+      const sectionKey = packet.sections?.[0]?.sectionKey ?? 'GDD#core_loop'
+      const issue = { problem: 'counterplay remains unclear', expected: 'counterplay is explicit', actual: 'counterplay is absent', sourceSectionKey: sectionKey, fixSectionKey: sectionKey }
+      await controller.dispatcher.completeDispatch(request.dispatchId!, {
+        workerType: 'foundation-semantic-reviewer', status: 'completed', runId: claimed!.runId, dispatchId: request.dispatchId!, taskId: runningTask.taskId, revision: runningTask.revision, packetDigest: runningTask.packetDigest,
+        ...(outcome === 'UNDECIDABLE' ? { outcome, reason: 'insufficient evidence' } : { outcome, issues: [issue] }),
+      })
+      const after = await controller.store.load()
+      expect(after!.status).toBe('needs_action')
+      expect(after!.foundationRevisionState!.phase).toBe('semantic_recheck')
+      expect(after!.foundationRevisionState!.publication).toBeUndefined()
+      expect(after!.foundationAuditState).toEqual(beforeRegistry)
+      const admittedTask = after!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)
+      if (outcome === 'ISSUES') {
+        expect(admittedTask?.kind === 'semantic-recheck' && admittedTask.resultPath).toBeTruthy()
+        if (admittedTask?.kind === 'semantic-recheck' && admittedTask.resultPath) {
+          const resultArtifact = JSON.parse((await readFile(join(workspacePath, admittedTask.resultPath))).toString()) as { status?: string }
+          expect(resultArtifact.status).toBe('FAIL')
+        }
+      }
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  }
+
   test('completes all ten semantic PASS checks into one atomic review and audit_ready', async () => {
     const { workspacePath, controller, requests } = await preparedController()
     try {
@@ -563,6 +622,7 @@ describe('foundation fact runtime controller integration', () => {
   test('admits one real foundation revision terminal and persists its receipt', async () => {
     const { workspacePath, controller } = await preparedController()
     try {
+      const canonicalBefore = await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(workspacePath, path))] as const))
       await finishFacts(controller, consistentFactValue)
       let current = await controller.store.load()
       let issued = false
@@ -622,13 +682,10 @@ describe('foundation fact runtime controller integration', () => {
       }
       await controller.dispatcher.completeDispatch(request.dispatchId!, terminal)
       const completed = (await controller.store.load())!.foundationRevisionState!.tasks.find(task => task.kind === 'document-revision')!
-      await controller.resume(await controller.store.load() as DeliveryRun)
-      const afterRebuild = await controller.store.load() as DeliveryRun
-      if (afterRebuild.foundationRevisionState?.phase === 'rebuilding_facts') await controller.resume(afterRebuild)
-      expect((await controller.store.load())!.foundationRevisionState!.phase).toBe('semantic_recheck')
       expect(completed.status).toBe('completed')
       expect(completed.receipt).toEqual(terminal.receipt)
       expect(completed.terminalDigest).toBe(terminal.receipt.terminalDigest)
+      for (const [path, contents] of canonicalBefore) expect(await readFile(join(workspacePath, path))).toEqual(contents)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
@@ -1109,6 +1166,225 @@ describe('foundation fact runtime controller integration', () => {
       const documentTask = rechecked!.foundationRevisionState!.tasks.find(task => task.kind === 'document-revision')!
       expect(tasks[0]!.issueId).toBe(documentTask.kind === 'document-revision' ? documentTask.issueIds[0] ?? '' : '')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('claims revision semantic rechecks from FoundationRevisionState and injects only the artifact at prompt time', async () => {
+    const prompts: string[] = []
+    const { workspacePath, controller, requests } = await preparedController((started, capturedRequests) => {
+      const base = port(started, capturedRequests)
+      return { ...base, async submit(_dispatchId, prompt) { prompts.push(prompt) } }
+    })
+    try {
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      let current = await controller.store.load()
+      for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
+        await controller.resume(current!)
+        current = await controller.store.load()
+      }
+      expect(current?.foundationRevisionState?.phase).toBe('semantic_recheck')
+      const task = current!.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')!
+      const beforeAudit = current!.foundationAuditState
+      await controller.resume(current!)
+      const claimed = await controller.store.load()
+      const claimedTask = claimed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      const request = requests.find(candidate => candidate.taskId === task.taskId)
+      expect(request).toBeDefined()
+      expect(request?.workerType).toBe('foundation-semantic-reviewer')
+      expect(request?.allowedPaths).toEqual([])
+      expect(request?.projectReadScope).toBe('empty')
+      expect(request?.workflowJsonSchema).toBeDefined()
+      expect(request?.contract).not.toHaveProperty('packet')
+      expect(request?.contract).toMatchObject({ taskId: task.taskId, packetPath: task.packetPath, packetDigest: task.packetDigest, issueId: task.issueId, modelTier: 'strong' })
+      const packet = JSON.parse((await readFile(join(workspacePath, task.packetPath))).toString()) as { expected?: string; actual?: string; sections?: Array<{ text?: string }> }
+      expect(claimedTask.kind).toBe('semantic-recheck')
+      expect(claimedTask.status).toBe('running')
+      expect(claimedTask.attempt).toBe(1)
+      expect(claimed!.foundationRevisionState!.tasks.filter(candidate => candidate.status === 'running')).toHaveLength(1)
+      expect(claimed!.foundationAuditState).toEqual(beforeAudit)
+      expect(prompts.at(-1)).toContain(task.packetDigest)
+      expect(prompts.at(-1)).toContain(task.issueId)
+      expect(packet.expected).toBeTruthy()
+      expect(packet.actual).toBeTruthy()
+      expect(packet.sections?.[0]?.text).toBeTruthy()
+      expect(prompts.at(-1)).toContain(packet.expected!)
+      expect(prompts.at(-1)).toContain(packet.actual!)
+      expect(prompts.at(-1)).toContain(packet.sections![0]!.text!)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('admits a semantic PASS result artifact into the revision task and reaches publishing without rerunning the worker', async () => {
+    const { workspacePath, controller, requests } = await preparedController()
+    try {
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      let current = await controller.store.load()
+      for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
+        await controller.resume(current!)
+        current = await controller.store.load()
+      }
+      expect(current?.foundationRevisionState?.phase).toBe('semantic_recheck')
+      const task = current!.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')!
+      await controller.resume(current!)
+      const claimed = await controller.store.load()
+      const request = requests.find(candidate => candidate.taskId === task.taskId)
+      expect(request).toBeDefined()
+      if (!request) return
+      const runningTask = claimed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      const workerCount = requests.filter(candidate => candidate.taskId === task.taskId).length
+      await controller.dispatcher.completeDispatch(request.dispatchId!, { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: claimed!.runId, dispatchId: request.dispatchId!, taskId: runningTask.taskId, revision: runningTask.revision, packetDigest: runningTask.packetDigest, outcome: 'PASS' })
+      const after = await controller.store.load()
+      const completed = after!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      expect(completed.status).toBe('completed')
+      expect(completed.terminalDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(completed.kind === 'semantic-recheck' && completed.resultPath).toMatch(/result|semantic/i)
+      expect(completed.kind === 'semantic-recheck' && completed.resultDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(after!.foundationRevisionState!.phase).toBe('publishing')
+      expect(requests.filter(candidate => candidate.taskId === task.taskId)).toHaveLength(workerCount)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('semantic recheck ISSUES maps to targeted FAIL and stops publication', async () => {
+    await exerciseSemanticNegativeOutcome('ISSUES')
+  })
+
+  test('semantic recheck UNDECIDABLE stops publication without registry mutation', async () => {
+    await exerciseSemanticNegativeOutcome('UNDECIDABLE')
+  })
+
+  test('replays a persisted semantic terminal after admission commit failure without starting another worker', async () => {
+    const { workspacePath, controller, requests } = await preparedController()
+    const originalCommit = controller.store.commit.bind(controller.store)
+    let crash = true
+    try {
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      let current = await controller.store.load()
+      for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
+        await controller.resume(current!)
+        current = await controller.store.load()
+      }
+      const task = current!.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')!
+      await controller.resume(current!)
+      const claimed = await controller.store.load()
+      const request = requests.find(candidate => candidate.taskId === task.taskId)
+      expect(request).toBeDefined()
+      if (!request) return
+      const runningTask = claimed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      controller.store.commit = async (...args) => {
+        const next = args[0] as DeliveryRun
+        const committedTask = next.foundationRevisionState?.tasks.find(candidate => candidate.taskId === task.taskId)
+        if (crash && committedTask?.kind === 'semantic-recheck' && committedTask.status === 'completed' && committedTask.resultPath) {
+          crash = false
+          throw new Error('simulated semantic admission commit crash')
+        }
+        return originalCommit(...args)
+      }
+      const workerCount = requests.filter(candidate => candidate.taskId === task.taskId).length
+      await expect(controller.dispatcher.completeDispatch(request.dispatchId!, { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: claimed!.runId, dispatchId: request.dispatchId!, taskId: runningTask.taskId, revision: runningTask.revision, packetDigest: runningTask.packetDigest, outcome: 'PASS' })).rejects.toThrow(/crash|commit/i)
+      controller.store.commit = originalCommit
+      const crashed = await controller.store.load()
+      const crashedTask = crashed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      expect(crashedTask.dispatch?.status).toBe('completed')
+      expect(crashedTask.dispatch?.terminalResult).toBeDefined()
+      expect(crashedTask.kind === 'semantic-recheck' && crashedTask.resultPath).toBeUndefined()
+      const freshRequests: WorkerDispatchRequest[] = []
+      const freshStarted = new Set<string>()
+      const freshController = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: port(freshStarted, freshRequests) })
+      await freshController.resume(crashed!)
+      const replayed = await freshController.store.load()
+      expect(replayed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('completed')
+      expect(replayed!.foundationRevisionState!.phase).toBe('publishing')
+      expect(freshRequests.filter(candidate => candidate.taskId === task.taskId)).toHaveLength(0)
+      expect(requests.filter(candidate => candidate.taskId === task.taskId)).toHaveLength(workerCount)
+    } finally { controller.store.commit = originalCommit; await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('revision semantic claim fails closed when strong model readiness is unavailable', async () => {
+    const unavailable = await preparedController((started, capturedRequests) => {
+      const base = port(started, capturedRequests)
+      return { ...base, async assertFoundationSemanticModelReady(request: WorkerDispatchRequest) { if (request.contract.issueId) throw new Error('strong semantic model unavailable') } }
+    })
+    try {
+      const current = await reachSemanticRecheck(unavailable.controller, unavailable.workspacePath)
+      const task = current.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')! as FoundationRevisionSemanticRecheckTask
+      await expect(unavailable.controller.dispatcher.dispatch(revisionSemanticRequest(current, task, unavailable.workspacePath))).rejects.toThrow()
+      const after = await unavailable.controller.store.load()
+      expect(unavailable.requests.filter(request => request.taskId === task.taskId)).toHaveLength(0)
+      expect(after!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!.attempt).toBe(0)
+      expect(after!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('needs_action')
+    } finally { await rm(unavailable.workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('revision semantic claim refuses a third attempt', async () => {
+    const capped = await preparedController()
+    try {
+      const current = await reachSemanticRecheck(capped.controller, capped.workspacePath)
+      const task = current.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')! as FoundationRevisionSemanticRecheckTask
+      const retry = { ...current, foundationRevisionState: { ...current.foundationRevisionState!, tasks: current.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, status: 'retryable' as const, attempt: 2, dispatch: undefined } : candidate) } }
+      await capped.controller.store.commit(retry, { runId: retry.runId, type: 'test.semantic.attempt.cap', phase: retry.phase, status: retry.status, revision: retry.revision })
+      await expect(capped.controller.dispatcher.dispatch(revisionSemanticRequest(retry, { ...task, status: 'retryable', attempt: 2, dispatch: undefined }, capped.workspacePath))).rejects.toThrow()
+      const after = await capped.controller.store.load()
+      expect(capped.requests.filter(request => request.taskId === task.taskId)).toHaveLength(0)
+      expect(after!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('needs_action')
+    } finally { await rm(capped.workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('revision semantic claim rejects an expired durable deadline without starting', async () => {
+    const expired = await preparedController()
+    try {
+      const current = await reachSemanticRecheck(expired.controller, expired.workspacePath)
+      const task = current.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')! as FoundationRevisionSemanticRecheckTask
+      const stale = { ...current, foundationRevisionState: { ...current.foundationRevisionState!, roundDeadlineAt: new Date(0).toISOString(), tasks: current.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, status: 'pending' as const, attempt: 0, dispatch: undefined } : candidate) } }
+      await expired.controller.store.commit(stale, { runId: stale.runId, type: 'test.semantic.deadline', phase: stale.phase, status: stale.status, revision: stale.revision })
+      await expect(expired.controller.dispatcher.dispatch(revisionSemanticRequest(stale, { ...task, status: 'pending', attempt: 0, dispatch: undefined }, expired.workspacePath))).rejects.toThrow()
+      const after = await expired.controller.store.load()
+      expect(expired.requests.filter(request => request.taskId === task.taskId)).toHaveLength(0)
+      expect(after!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('needs_action')
+    } finally { await rm(expired.workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('revision semantic claim starts at most four of five distinct issue packets', async () => {
+    const concurrent = await preparedController()
+    try {
+      const current = await reachSemanticRecheck(concurrent.controller, concurrent.workspacePath)
+      const source = current.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')! as FoundationRevisionSemanticRecheckTask
+      const sourcePacket = JSON.parse((await readFile(join(concurrent.workspacePath, source.packetPath))).toString()) as {
+        expected: string
+        actual: string
+        sections: Array<{ ref: SectionRef; text: string }>
+        patchOperation: PatchOperation
+      }
+      const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: concurrent.workspacePath, revision: source.revision })
+      expect(committed).toBeDefined()
+      const documents = Object.fromEntries(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(concurrent.workspacePath, path), 'utf8')] as const))) as Record<string, string>
+      for (const task of current.foundationRevisionState!.tasks) {
+        if (task.kind !== 'document-revision' || task.status !== 'completed') continue
+        documents[task.documentPath] = (await readFile(join(concurrent.workspacePath, task.stagedPath))).toString()
+      }
+      const sectionIndex = buildFoundationSectionIndex({ documents })
+      const semanticTasks = await Promise.all(Array.from({ length: 5 }, async (_, index) => {
+        const issueId = `AUD-recheck-concurrency-${index}`
+        const taskId = `${source.revision}.semantic-recheck.${source.round}.concurrency-${index}`
+        const baseOperation: PatchOperation = { ...sourcePacket.patchOperation, issueIds: [issueId] }
+        const sourceRef = sectionIndex.find(ref => ref.documentPath === baseOperation.documentPath && ref.sectionId === baseOperation.sectionId)!
+        const operation: PatchOperation = baseOperation.kind === 'DELETE' ? baseOperation : { ...baseOperation, afterDigest: sourceRef.digest }
+        const issue: AuditIssue = { id: issueId, severity: 'HIGH', type: 'semantic', source: sourceRef, expected: sourcePacket.expected, actual: sourcePacket.actual, fixDocument: operation.documentPath, fixSectionId: operation.sectionId }
+        const packet = buildFoundationSemanticRecheckPacket({ issue, patchOperation: operation, sectionIndex, documents, impact: analyzeFoundationImpact([operation]), factStore: committed!.factStore })
+        const packetPath = await writeFoundationRevisionSemanticPacket({ workspacePath: concurrent.workspacePath, revision: source.revision, round: source.round, taskId, packet })
+        return { taskId, kind: 'semantic-recheck' as const, revision: source.revision, round: source.round, packetPath, packetDigest: packet.packetDigest, status: 'pending' as const, attempt: 0, issueId, modelTier: 'strong' as const }
+      }))
+      const taskIds = new Set(semanticTasks.map(task => task.taskId))
+      const baseline = concurrent.requests.filter(request => request.taskId && taskIds.has(request.taskId)).length
+      const widened = { ...current, foundationRevisionState: { ...current.foundationRevisionState!, tasks: [...current.foundationRevisionState!.tasks.filter(candidate => candidate.kind !== 'semantic-recheck'), ...semanticTasks] } }
+      await concurrent.controller.store.commit(widened, { runId: widened.runId, type: 'test.semantic.concurrency', phase: widened.phase, status: widened.status, revision: widened.revision })
+      const dispatchResults = await Promise.allSettled(semanticTasks.map(task => concurrent.controller.dispatcher.dispatch(revisionSemanticRequest(widened, task as FoundationRevisionSemanticRecheckTask, concurrent.workspacePath))))
+      expect(dispatchResults.filter(result => result.status === 'fulfilled')).toHaveLength(4)
+      const rejected = dispatchResults.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      expect(rejected).toHaveLength(1)
+      expect(String(rejected[0]!.reason)).toMatch(/concurrency|limit/i)
+      const after = await concurrent.controller.store.load()
+      expect(concurrent.requests.filter(request => request.taskId && taskIds.has(request.taskId))).toHaveLength(baseline + 4)
+      expect(after!.foundationRevisionState!.tasks.filter(candidate => candidate.kind === 'semantic-recheck' && candidate.status === 'running')).toHaveLength(4)
+      expect(after!.foundationRevisionState!.tasks.filter(candidate => candidate.kind === 'semantic-recheck' && candidate.status === 'pending')).toHaveLength(1)
+    } finally { await rm(concurrent.workspacePath, { recursive: true, force: true }) }
   })
 
   test('revision impacted fact dispatch enforces fast readiness, output cap, aggregate cap, and task kind', async () => {
