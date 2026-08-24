@@ -172,6 +172,28 @@ describe('native CLI process runner', () => {
     expect(command[command.indexOf('--tools') + 1]).toBe('')
   })
 
+  test('disables built-in tools for a StructuredOutput workflow turn while retaining its JSON schema', () => {
+    const schema = {
+      type: 'object',
+      properties: { taskId: { type: 'string' } },
+      required: ['taskId'],
+      additionalProperties: false,
+    }
+    const command = nativeRuntimeCommand({
+      sessionId: 'beegame_fact_extractor',
+      cwd: process.cwd(),
+      env: {},
+      workflowWorker: true,
+      workflowWorkerType: 'foundation-fact-extractor',
+      workflowJsonSchema: schema,
+    })
+
+    expect(command).toContain('--json-schema')
+    expect(command[command.indexOf('--json-schema') + 1]).toBe(JSON.stringify(schema))
+    expect(command).toContain('--tools')
+    expect(command[command.indexOf('--tools') + 1]).toBe('')
+  })
+
   test('forwards native messages and resolves only on result', async () => {
     const runtime = await startRuntime()
     const messages: Record<string, unknown>[] = []

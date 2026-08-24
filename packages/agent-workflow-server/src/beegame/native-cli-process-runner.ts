@@ -64,7 +64,12 @@ export function nativeRuntimeCommand(
     ...(input.workflowJsonSchema
       ? ['--json-schema', JSON.stringify(input.workflowJsonSchema)]
       : []),
-    ...(input.workflowMarkdownStreamContract ? ['--tools', ''] : []),
+    // StructuredOutput fact turns receive the packet as their sole input;
+    // disable the native built-in inventory while retaining --json-schema as
+    // the one terminal lane. Markdown streams keep their existing boundary.
+    ...(input.workflowJsonSchema || input.workflowMarkdownStreamContract
+      ? ['--tools', '']
+      : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }
