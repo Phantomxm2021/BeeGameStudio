@@ -58,6 +58,7 @@ export const DISPATCH_STATUSES = [
 ] as const
 export const WORKER_TYPES = [
   'document-author',
+  'foundation-fact-extractor',
   'resource-planner',
   'resource-curator',
   'resource-content-author',
@@ -99,6 +100,7 @@ const workerDispatchRequestSchema: z.ZodType<WorkerDispatchRequest> = z
     revision: z.string().min(1),
     allowedPaths: z.array(z.string().min(1)).optional(),
     protectedPaths: z.array(z.string().min(1)).optional(),
+    projectReadScope: z.literal('empty').optional(),
     contract: z.record(z.string(), z.unknown()),
   })
   .strict()

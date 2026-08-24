@@ -1676,6 +1676,20 @@ export async function projectExactResumeRun(input: {
   if (storedFoundationAuditState) {
     try {
       const state = parseFoundationAuditState(storedFoundationAuditState)
+      const runningFactTasks = state.tasks.filter(task => task.status === 'running')
+      if (runningFactTasks.length > 4)
+        recoveryError(
+          'recovery_checkpoint_conflict',
+          'foundation fact recovery contains more than four running tasks',
+        )
+      if (
+        (state.status === 'facts_staged' || state.status === 'derived_committed') &&
+        !state.tasks.every(task => task.status === 'completed' && task.receiptPath && task.receiptDigest)
+      )
+        recoveryError(
+          'recovery_checkpoint_missing',
+          'foundation fact recovery state is staged without every immutable receipt',
+        )
       await validateFoundationAuditStateArtifacts({
         workspacePath: input.workspacePath,
         state,

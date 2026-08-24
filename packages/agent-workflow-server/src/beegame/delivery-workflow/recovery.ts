@@ -840,10 +840,17 @@ async function acquireAndLoad(input: {
   const lease = await input.store.lock(input.runId, async () => {
     const current = (await input.store.inspectWorkflowSnapshot()).currentRun
     if (!current || current.runId !== input.runId) return false
-    if (current.activeDispatch?.status !== 'running') return false
-    return input.sessionIsOpen
-      ? input.sessionIsOpen(current.activeDispatch)
-      : true
+    const runningDispatches = [
+      ...(current.activeDispatch?.status === 'running'
+        ? [current.activeDispatch]
+        : []),
+      ...(current.foundationAuditState?.tasks
+        .filter(task => task.status === 'running' && task.dispatch)
+        .map(task => task.dispatch!) ?? []),
+    ]
+    if (!runningDispatches.length) return false
+    if (!input.sessionIsOpen) return true
+    return (await Promise.all(runningDispatches.map(dispatch => input.sessionIsOpen!(dispatch)))).some(Boolean)
   })
   try {
     const run = await input.store.reconcile(
@@ -867,9 +874,13 @@ export async function resumeRun(input: {
 }): Promise<DeliveryRun> {
   const acquired = await acquireAndLoad(input)
   try {
+    const foundationFactRunning = acquired.run.foundationAuditState?.tasks.some(
+      task => task.status === 'running' && task.dispatch?.status === 'running',
+    )
     if (
       acquired.run.status === 'completed' ||
-      acquired.run.activeDispatch?.status === 'running'
+      acquired.run.activeDispatch?.status === 'running' ||
+      foundationFactRunning
     )
       return acquired.run
     acquired.run = await restoreCanonicalDocumentCommit(

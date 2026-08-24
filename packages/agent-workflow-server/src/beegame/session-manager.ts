@@ -259,6 +259,7 @@ export type BeeGameSessionRunnerStartInput = {
   workflowWorkerType?: string
   workflowDispatchId?: string
   workflowAllowedPaths?: string[]
+  workflowProjectReadScope?: 'empty'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   /** Native structured-output authority for workers that must return JSON. */
@@ -391,6 +392,7 @@ type SessionRecord = {
   workflowWorkerType?: string
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
+  workflowProjectReadScope?: 'empty'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
@@ -549,6 +551,30 @@ function isResourceProductionWorker(workerType?: string): boolean {
   )
 }
 
+export function selectFoundationFactFastRuntime(
+  runtime: RuntimeModelConfig | undefined,
+  environment: Record<string, string>,
+): Record<string, string> {
+  const fastEnvKey = runtime?.modelType === 'openai'
+    ? 'OPENAI_DEFAULT_HAIKU_MODEL'
+    : runtime?.modelType === 'gemini'
+      ? 'GEMINI_DEFAULT_HAIKU_MODEL'
+      : runtime?.modelType === 'grok'
+        ? 'GROK_DEFAULT_HAIKU_MODEL'
+        : runtime?.modelType === 'anthropic'
+          ? 'ANTHROPIC_DEFAULT_HAIKU_MODEL'
+          : undefined
+  if (!fastEnvKey) throw new Error('foundation fact extractor fast model is not configured')
+  const fastModel = environment[fastEnvKey]
+  if (!fastModel) throw new Error('foundation fact extractor fast model is not configured')
+  const providerPrefix = fastEnvKey.replace('_DEFAULT_HAIKU_MODEL', '')
+  // The native runtime selects its primary turn model through the provider's
+  // sonnet/default alias. Route this worker's isolated process to the
+  // configured fast model using a recognized provider key; arbitrary MODEL
+  // environment variables are ignored by the runtime.
+  return { ...environment, [`${providerPrefix}_DEFAULT_SONNET_MODEL`]: fastModel }
+}
+
 export type StartBeeGameSessionInput = {
   workspacePath: string
   projectId?: string
@@ -567,6 +593,7 @@ export type StartBeeGameSessionInput = {
   workflowWorkerType?: string
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
+  workflowProjectReadScope?: 'empty'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
@@ -712,6 +739,9 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
+        : {}),
+      ...(input.workflowProjectReadScope
+        ? { workflowProjectReadScope: input.workflowProjectReadScope }
         : {}),
       ...(input.workflowProtectedPaths
         ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
@@ -1368,10 +1398,13 @@ export class BeeGameSessionManager {
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
-      const selectedEnvironment = mergeRuntimeEnv(
+      let selectedEnvironment = mergeRuntimeEnv(
         record.runtime,
         await this.loadAdditionalRuntimeEnv(record),
       )
+      if (record.workflowWorkerType === 'foundation-fact-extractor') {
+        selectedEnvironment = selectFoundationFactFastRuntime(record.runtime, selectedEnvironment)
+      }
       const env = buildRuntimeEnv(selectedEnvironment)
       if (record.workflowMarkdownStreamContract) {
         markdownStreamSink = await createFoundationMarkdownStreamSink(
@@ -1418,6 +1451,9 @@ export class BeeGameSessionManager {
             : {}),
           ...(record.workflowAllowedPaths
             ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
+            : {}),
+          ...(record.workflowProjectReadScope
+            ? { workflowProjectReadScope: record.workflowProjectReadScope }
             : {}),
           ...(record.workflowProtectedPaths
             ? { workflowProtectedPaths: [...record.workflowProtectedPaths] }
@@ -3690,6 +3726,7 @@ type ProjectWorkspaceFileAccessAuthority = {
   behavior: 'allow' | 'deny'
   reason:
     | 'project_workspace_file_access'
+    | 'project_workspace_read_scope_empty'
     | 'project_workspace_boundary'
     | 'project_workspace_target_invalid'
   message?: string
@@ -3700,6 +3737,15 @@ function projectWorkspaceFileAccessAuthority(
   request: DashboardPermissionRequest,
 ): ProjectWorkspaceFileAccessAuthority | undefined {
   if (!record.projectId) return undefined
+  if (
+    record.workflowProjectReadScope === 'empty' &&
+    ['Read', 'Grep', 'Glob'].includes(request.toolName)
+  )
+    return {
+      behavior: 'deny',
+      reason: 'project_workspace_read_scope_empty',
+      message: `${request.toolName} is disabled for this scoped fact worker; use the assigned packet only.`,
+    }
   const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'
   if (!['Read', 'Grep', 'Glob'].includes(request.toolName)) return undefined
   const inputPath = request.input[pathKey]

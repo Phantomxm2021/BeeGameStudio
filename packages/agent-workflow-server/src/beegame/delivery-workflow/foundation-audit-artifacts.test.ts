@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createFoundationFactStore, digestFactStore } from './foundation-fact-store'
 import {
   deriveFoundationAuditArtifacts,
   foundationAuditArtifactPaths,
   assertExactlyEightCommittedFoundationDocuments,
+  loadCommittedFoundationDerivedArtifacts,
+  publishFoundationDerivedArtifacts,
 } from './foundation-audit-artifacts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import { getGameDocumentContract } from './game-document-contracts'
@@ -153,5 +156,31 @@ describe('foundation audit artifacts', () => {
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
+  })
+
+  test('accepts only a fully bound committed derived directory', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-derived-atomic-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const documents = new Map(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, validDocument(path)] as const))
+      for (const [path, content] of documents) await writeFile(join(workspacePath, path), content)
+      const checkpoints = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, status: 'committed' as const }))
+      const staged = await deriveFoundationAuditArtifacts({ workspacePath, revision: 'revision-derived', checkpoints })
+      const factStore = createFoundationFactStore([])
+      const committed = await publishFoundationDerivedArtifacts({
+        workspacePath,
+        revision: 'revision-derived',
+        documentDigests: staged.documentDigests,
+        sectionIndex: staged.sectionIndex,
+        factStore,
+        normalizedFactDigest: digestFactStore(factStore),
+        manifest: staged.manifest as unknown as Record<string, unknown>,
+      })
+      expect(await loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })).toEqual(committed)
+      const markerPath = join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/COMMITTED.json')
+      const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
+      await writeFile(markerPath, `${JSON.stringify({ ...marker, factStoreDigest: 'f'.repeat(64) })}\n`)
+      await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })).rejects.toThrow('binding')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 })

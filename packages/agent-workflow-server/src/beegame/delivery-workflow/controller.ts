@@ -66,21 +66,19 @@ import {
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { extractNormalizedFoundationFacts, buildFoundationFactPackets, validateFoundationFactResults } from './foundation-fact-extraction'
+import { admitFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
+import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt } from './foundation-audit-artifacts'
+import { createFoundationFactStore, digestFactStore } from './foundation-fact-store'
+import type { FoundationAuditState } from './foundation-audit-state'
 
 async function deriveFoundationAudit(
   run: DeliveryRun,
   workspacePath: string,
 ): Promise<DeliveryRun> {
-  if (run.foundationAuditState)
-    return {
-      ...run,
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
-      status: 'needs_action',
-      activeDispatch: undefined,
-      blockedReason: run.foundationAuditState.needsAction,
-      thinking: 'idle',
-    }
+  if (run.foundationAuditState && run.foundationAuditState.status !== 'index_staged') return run
   const checkpoints = run.foundationDraftState.documents ??
     CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
       path,
@@ -94,18 +92,24 @@ async function deriveFoundationAudit(
       revision: run.revision.document,
       checkpoints,
     })
+    const documents = new Map(
+      await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(workspacePath, path), 'utf8')] as const)),
+    )
+    const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex: artifacts.sectionIndex })
+    const packets = buildFoundationFactPackets({ revision: artifacts.revision, documents, sectionIndex: artifacts.sectionIndex, unresolvedKeys: extraction.unresolvedKeys })
+    const phaseStartedAt = new Date().toISOString()
+    const baseState = createFoundationAuditState({ revision: artifacts.revision, documentDigests: artifacts.documentDigests, manifest: artifacts.manifest })
+    const tasks = packets.map((packet, index) => ({ taskId: `${artifacts.revision}:fact:${index}:${packet.packetDigest.slice(0, 12)}`, kind: 'document-facts' as const, revision: artifacts.revision, packetDigest: packet.packetDigest, modelTier: 'fast' as const, status: 'pending' as const, attempt: 0 }))
+    for (const [index, packet] of packets.entries()) await writeFoundationFactPacket({ workspacePath, revision: artifacts.revision, taskId: tasks[index]!.taskId, packet })
+    let nextState: FoundationAuditState = { ...baseState, status: packets.length ? ('extracting_facts' as const) : ('facts_staged' as const), tasks, phaseStartedAt }
     return {
       ...run,
-      foundationAuditState: createFoundationAuditState({
-        revision: artifacts.revision,
-        documentDigests: artifacts.documentDigests,
-        manifest: artifacts.manifest,
-      }),
+      foundationAuditState: nextState,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      status: 'needs_action',
+      status: 'running',
       activeDispatch: undefined,
-      blockedReason: artifacts.manifest.needsAction,
+      blockedReason: undefined,
       thinking: 'idle',
     }
   } catch (error) {
@@ -222,6 +226,30 @@ export function createDeliveryWorkflowController(input: {
     return serialize(() => handleTerminalUnlocked(record, result, request))
   }
 
+  async function finalizeFoundationFacts(run: DeliveryRun): Promise<void> {
+    const state = run.foundationAuditState
+    if (!state || state.status !== 'facts_staged') return
+    const artifacts = await loadFoundationAuditArtifacts({ workspacePath: input.workspacePath, revision: state.revision, expectedState: state })
+    if (!artifacts) throw new Error('foundation fact section index is unavailable during finalization')
+    const facts = []
+    for (const task of state.tasks) {
+      if (!task.receiptPath || !task.receiptDigest || !task.terminalDigest) throw new Error('foundation fact task receipt binding is incomplete')
+      const receipt = await loadFoundationFactReceipt({ workspacePath: input.workspacePath, revision: state.revision, taskId: task.taskId, expectedPacketDigest: task.packetDigest, expectedTerminalDigest: task.terminalDigest, expectedReceiptPath: task.receiptPath, expectedReceiptDigest: task.receiptDigest })
+      facts.push(...receipt.facts)
+    }
+    const factStore = createFoundationFactStore(facts)
+    const normalizedFactDigest = digestFactStore(factStore)
+    const published = await publishFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision, documentDigests: artifacts.documentDigests, sectionIndex: artifacts.sectionIndex, factStore, normalizedFactDigest, manifest: artifacts.manifest as unknown as Record<string, unknown> })
+    const lease = await store.mutationLock(run.runId)
+    try {
+      const locked = await store.load(lease)
+      if (!locked?.foundationAuditState || locked.foundationAuditState.status === 'derived_committed') return
+      if (locked.foundationAuditState.status !== 'facts_staged') throw new Error('foundation fact state changed before derived binding')
+      const derived = { manifestPath: `.beegame/audit/foundation/${state.revision}/derived/manifest.json`, manifestDigest: published.digests.manifest, markerPath: `.beegame/audit/foundation/${state.revision}/derived/COMMITTED.json`, markerDigest: published.digests.marker, factStorePath: `.beegame/audit/foundation/${state.revision}/derived/fact-store.json`, factStoreDigest: published.digests.factStore, sectionIndexPath: `.beegame/audit/foundation/${state.revision}/derived/section-index.json`, sectionIndexDigest: published.digests.sectionIndex }
+      await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'derived_committed', derived }, status: 'needs_action', blockedReason: 'foundation facts committed; deterministic audit is Task 4C', thinking: 'idle' }, { runId: locked.runId, type: 'foundation.fact.derived_committed', phase: locked.phase, status: 'needs_action', revision: locked.revision, artifactManifestDigest: published.digests.manifest }, undefined, lease)
+    } finally { await store.unlock(lease) }
+  }
+
   async function handleTerminalUnlocked(
     record: DispatchRecord,
     result: WorkerTerminalResult,
@@ -231,12 +259,58 @@ export function createDeliveryWorkflowController(input: {
     const foundationCheckpoint = run?.foundationDraftState.documents?.find(
       document => document.dispatch?.dispatchId === record.dispatchId,
     )
+    const foundationFactTask = run?.foundationAuditState?.tasks.find(
+      task => task.dispatch?.dispatchId === record.dispatchId,
+    )
     if (
       !run ||
       (run.activeDispatch?.dispatchId !== record.dispatchId &&
-        !foundationCheckpoint)
+        !foundationCheckpoint &&
+        !foundationFactTask)
     )
       return
+    if (foundationFactTask && result.workerType === 'foundation-fact-extractor') {
+      const lease = await store.mutationLock(run.runId)
+      let factsStagedRun: DeliveryRun | undefined
+      try {
+        const locked = await store.load(lease)
+        const lockedTask = locked?.foundationAuditState?.tasks.find(task => task.taskId === foundationFactTask.taskId)
+        if (!locked || !lockedTask || !lockedTask.dispatch || lockedTask.dispatch.dispatchId !== record.dispatchId) return
+        const lockedState = locked.foundationAuditState!
+        if (lockedTask.status === 'completed') {
+          if (lockedState.status === 'facts_staged') factsStagedRun = locked
+        } else {
+        const packet = request?.contract.packet
+        if (!packet || typeof packet !== 'object') throw new Error('foundation fact packet is missing from dispatch contract')
+        const artifacts = await loadFoundationAuditArtifacts({ workspacePath: input.workspacePath, revision: locked.revision.document, expectedState: locked.foundationAuditState })
+        if (!artifacts) throw new Error('foundation fact section index is unavailable')
+        const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(input.workspacePath, path), 'utf8')] as const)))
+        const validated = validateFoundationFactResults({ packet: packet as never, expectedRevision: lockedTask.revision, documents, sectionIndex: artifacts.sectionIndex, results: result.results as never })
+        const runtimeState: FoundationFactTaskCollection = { revision: lockedState.revision, phaseStartedAt: lockedState.phaseStartedAt!, status: lockedState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts', tasks: lockedState.tasks, aggregateUsage: lockedState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 } }
+        const admission = admitFoundationFactTerminal(runtimeState, { taskId: lockedTask.taskId, dispatchId: record.dispatchId, revision: result.revision, packetDigest: result.packetDigest, terminal: result, usage: record.usage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, durationMs: Math.max(0, Date.parse(record.finishedAt ?? new Date().toISOString()) - Date.parse(record.startedAt)), now: new Date().toISOString() })
+        let auditState: FoundationAuditState = { ...lockedState, status: admission.state.status, tasks: admission.state.tasks, aggregateUsage: admission.state.aggregateUsage }
+        const admittedTask = admission.state.tasks.find(task => task.taskId === lockedTask.taskId)!
+        if (admission.accepted && !admission.idempotent) {
+          const receipt = await writeFoundationFactReceipt({ workspacePath: input.workspacePath, revision: lockedTask.revision, receipt: { taskId: lockedTask.taskId, revision: lockedTask.revision, packetDigest: lockedTask.packetDigest, terminalDigest: admission.terminalDigest, normalizedFactDigest: validated.normalizedFactDigest, receipts: validated.receipts, facts: validated.facts, usage: admittedTask.usage, durationMs: admittedTask.durationMs ?? 0 } })
+          auditState = { ...auditState, tasks: auditState.tasks.map(task => task.taskId === lockedTask.taskId ? { ...task, receiptPath: receipt.path, receiptDigest: receipt.digest } : task) }
+        }
+        const collectionAfterReceipt: FoundationFactTaskCollection = { ...admission.state, tasks: auditState.tasks }
+        if (foundationFactTasksComplete(collectionAfterReceipt)) {
+          auditState = { ...auditState, status: 'facts_staged' }
+          factsStagedRun = await store.commit({ ...locked, foundationAuditState: auditState, status: 'running', blockedReason: undefined, thinking: 'working' }, { runId: locked.runId, type: 'foundation.fact.facts_staged', phase: locked.phase, status: 'running', revision: locked.revision, dispatchId: record.dispatchId, taskId: lockedTask.taskId, terminalDigest: admission.terminalDigest }, undefined, lease)
+        } else {
+          const status: DeliveryRun['status'] = auditState.tasks.some(task => task.status === 'needs_action') ? 'needs_action' : 'running'
+          await store.commit({ ...locked, foundationAuditState: auditState, status, blockedReason: status === 'needs_action' ? 'foundation fact extraction needs action' : undefined, thinking: status === 'running' ? 'working' : 'idle' }, { runId: locked.runId, type: admission.idempotent ? 'foundation.fact.terminal.replayed' : 'foundation.fact.terminal.admitted', phase: locked.phase, status, revision: locked.revision, dispatchId: record.dispatchId, taskId: lockedTask.taskId, terminalDigest: admission.terminalDigest }, undefined, lease)
+        }
+        }
+      } finally { await store.unlock(lease) }
+      if (factsStagedRun) await finalizeFoundationFacts(factsStagedRun)
+      else {
+        const current = await store.load()
+        if (current?.status === 'running') await resumeUnlocked(current)
+      }
+      return
+    }
     let next: DeliveryRun = foundationCheckpoint
       ? { ...run, activeDispatch: record }
       : { ...run, activeDispatch: undefined }
@@ -941,6 +1015,16 @@ export function createDeliveryWorkflowController(input: {
       )
       return
     }
+    if (run.foundationAuditState) {
+      const replayableFactDispatches = run.foundationAuditState.tasks
+        .filter(task => task.status !== 'completed' && task.dispatch?.terminalResult)
+        .map(task => task.dispatch!)
+      if (replayableFactDispatches.length) {
+        for (const dispatch of replayableFactDispatches)
+          await dispatcher.replayTerminal(dispatch, handleTerminalUnlocked)
+        return
+      }
+    }
     if (run.activeDispatch?.status === 'running') return
     if (run.changeRequest && !run.changeRoute && run.phase === 'DELIVERY') {
       await dispatcher.dispatch(
@@ -971,6 +1055,7 @@ export function createDeliveryWorkflowController(input: {
             ? 'foundation.audit.index_staged'
             : 'foundation.audit.derivation_failed',
         )
+        if (next.status === 'running') await resumeUnlocked(next)
         return
       }
       await startDocumentStage({
@@ -981,6 +1066,21 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     if (run.phase === 'DOCUMENT_REVIEW') {
+      if (run.foundationAuditState?.status === 'facts_staged') {
+        await finalizeFoundationFacts(run)
+        return
+      }
+      if (run.foundationAuditState?.status === 'extracting_facts') {
+        const available = run.foundationAuditState.tasks.filter(task => task.status === 'pending' || task.status === 'retryable')
+        const running = run.foundationAuditState.tasks.filter(task => task.status === 'running').length
+        if (running >= 4 || available.length === 0) return
+        for (const task of available.slice(0, 4 - running)) {
+          const packetPath = join(input.workspacePath, `.beegame/audit/foundation/${run.foundationAuditState.revision}/staging/packets/${task.taskId}.json`)
+          const packet = JSON.parse(await readFile(packetPath, 'utf8')) as Record<string, unknown>
+          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-fact-extractor' } })
+        }
+        return
+      }
       if (run.documentStep === 'CHECKLIST_DRAFTING') {
         await startChecklistDraftStage({
           run,

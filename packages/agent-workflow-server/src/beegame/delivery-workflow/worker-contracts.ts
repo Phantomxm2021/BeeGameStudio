@@ -4,6 +4,37 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
 
+const foundationFactEvidenceSchema = z
+  .object({
+    documentPath: z.string().min(1),
+    sectionId: z.string().min(1),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict()
+
+const foundationFactResultSchema = z
+  .object({
+    key: z.string().min(1),
+    status: z.enum(['present', 'absent', 'uncertain']),
+    value: z.unknown().optional(),
+    evidence: foundationFactEvidenceSchema.optional(),
+    reason: z.string().min(1).optional(),
+  })
+  .strict()
+
+export const foundationFactExtractorTerminalSchema = z
+  .object({
+    workerType: z.literal('foundation-fact-extractor'),
+    status: z.enum(['completed', 'failed', 'blocked']),
+    taskId: z.string().min(1),
+    revision: z.string().min(1),
+    packetDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    results: z.array(foundationFactResultSchema),
+  })
+  .strict()
+
 export const documentAuthorTerminalSchema = z
   .object({
     workerType: z.literal('document-author'),
@@ -210,6 +241,7 @@ export const questionAnswerSubmissionSchema = questionAnswerTerminalSchema.omit(
 
 export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   documentAuthorTerminalSchema,
+  foundationFactExtractorTerminalSchema,
   resourcePlannerTerminalSchema,
   resourceCuratorTerminalSchema,
   resourceContentAuthorTerminalSchema,

@@ -268,6 +268,16 @@ function withDispatchUsage(
           }
         : {}),
     },
+    foundationAuditState: run.foundationAuditState
+      ? {
+          ...run.foundationAuditState,
+          tasks: run.foundationAuditState.tasks.map(task =>
+            task.dispatch?.dispatchId === dispatchId
+              ? { ...task, dispatch: update(task.dispatch) }
+              : task,
+          ),
+        }
+      : run.foundationAuditState,
   }
 }
 
@@ -1083,8 +1093,59 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     const runId = lease?.runId ?? inspection.currentRun.runId
     return runMutation(runId, lease, async () => {
       const run = await loadUnlocked()
-      if (!run?.activeDispatch || run.activeDispatch.status !== 'running')
-        return run
+      if (!run) return run
+      if (run.foundationAuditState) {
+        const tasks = run.foundationAuditState.tasks
+        const unavailable: typeof tasks = []
+        for (const task of tasks) {
+          if (task.status !== 'running' || !task.dispatch) continue
+          if (!(await sessionIsOpen(task.dispatch))) unavailable.push(task)
+        }
+        if (unavailable.length) {
+          const nextState = {
+            ...run.foundationAuditState,
+            tasks: tasks.map(task => {
+              if (!unavailable.some(item => item.taskId === task.taskId)) return task
+              const hasPersistedTerminal = Boolean(task.dispatch?.terminalResult)
+              return {
+                ...task,
+                // A terminal envelope is durable evidence for controller
+                // replay. Keep the business task running until admission has
+                // written its immutable receipt under the controller lock.
+                status: hasPersistedTerminal
+                  ? ('running' as const)
+                  : task.attempt < 2
+                    ? ('retryable' as const)
+                    : ('needs_action' as const),
+                dispatch: task.dispatch
+                  ? {
+                      ...task.dispatch,
+                      status: hasPersistedTerminal
+                        ? ('completed' as const)
+                        : ('interrupted' as const),
+                      finishedAt: now(),
+                      ...(hasPersistedTerminal
+                        ? {}
+                        : {
+                            failureReason:
+                              'server stopped before the foundation fact terminal was admitted',
+                          }),
+                    }
+                  : undefined,
+                ...(hasPersistedTerminal
+                  ? {}
+                  : {
+                      failureReason:
+                        'server stopped before the foundation fact terminal was admitted',
+                    }),
+              }
+            }),
+          }
+          const nextStatus = nextState.tasks.some(task => task.status === 'needs_action') ? 'needs_action' as const : 'running' as const
+          return commitUnlocked({ ...run, foundationAuditState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? 'foundation fact extraction requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: 'foundation.fact.recovered', phase: run.phase, status: nextStatus, revision: run.revision })
+        }
+      }
+      if (!run.activeDispatch || run.activeDispatch.status !== 'running') return run
       if (await sessionIsOpen(run.activeDispatch)) return run
       const interrupted = {
         ...run,
@@ -1124,6 +1185,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           : run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === dispatchId,
             )?.dispatch
+          ?? run.foundationAuditState?.tasks.find(
+            task => task.dispatch?.dispatchId === dispatchId,
+          )?.dispatch
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'
       const acceptsStoppedTailUsage =
@@ -1176,14 +1240,24 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return runMutation(runId, undefined, async () => {
       const run = await loadUnlocked()
       if (!run || run.runId !== runId) return run
+      const progressDispatch = progress.dispatchId
+        ? run.activeDispatch?.dispatchId === progress.dispatchId
+          ? run.activeDispatch
+          : run.foundationDraftState.documents?.find(
+              document => document.dispatch?.dispatchId === progress.dispatchId,
+            )?.dispatch
+            ?? run.foundationAuditState?.tasks.find(
+              task => task.dispatch?.dispatchId === progress.dispatchId,
+            )?.dispatch
+        : undefined
       if (
         progress.dispatchId &&
-        (run.status !== 'running' || run.activeDispatch?.status !== 'running')
+        (run.status !== 'running' || progressDispatch?.status !== 'running')
       )
         return run
       if (
         progress.dispatchId &&
-        run.activeDispatch?.dispatchId !== progress.dispatchId
+        progressDispatch?.dispatchId !== progress.dispatchId
       )
         return run
       const message = progress.message

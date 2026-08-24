@@ -158,24 +158,22 @@ describe('foundation audit cutover', () => {
         workerPort: {
           start: async request => {
             dispatches.push(request)
-            throw new Error('foundation audit must not dispatch')
+            return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
           },
           submit: async () => undefined,
           stop: async () => undefined,
-          status: async () => {
-            throw new Error('no dispatch should exist')
-          },
+          status: async dispatchId => ({ dispatchId, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'unknown', revision: run.revision.document, status: 'running', startedAt: new Date().toISOString() }),
         },
       })
       await controller.resume(terminalRun)
       const saved = await store.load()
 
-      expect(dispatches).toEqual([])
+      expect(dispatches).toHaveLength(4)
       expect(saved).toMatchObject({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        status: 'needs_action',
-        foundationAuditState: { status: 'index_staged' },
+        status: 'running',
+        foundationAuditState: { status: 'extracting_facts' },
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

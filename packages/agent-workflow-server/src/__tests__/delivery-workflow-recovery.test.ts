@@ -115,6 +115,7 @@ type ExactResumeWorkerCheckpoint =
 function exactResumeCheckpointsForWorker(
   workerType: DispatchWorkerType,
 ): ExactResumeWorkerCheckpoint[] {
+  if (workerType === 'foundation-fact-extractor') return []
   return EXACT_RESUME_WORKER_CHECKPOINTS.filter(
     checkpoint =>
       checkpoint !== 'canonical-receipt' ||
@@ -1166,7 +1167,7 @@ describe('delivery workflow recovery', () => {
   })
 
   test('defines every exact-resume checkpoint for every persisted worker type', () => {
-    expect(WORKER_TYPES).toHaveLength(10)
+    expect(WORKER_TYPES).toHaveLength(11)
     expect(EXACT_RESUME_WORKER_CHECKPOINTS).toEqual([
       'before-dispatch',
       'open',

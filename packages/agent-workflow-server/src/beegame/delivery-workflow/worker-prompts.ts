@@ -187,6 +187,11 @@ function formatResourceContentContract(
 
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
+    case 'foundation-fact-extractor':
+      return [
+        'Extract only the declared fact keys from the exact packet sections. The packet is the sole input; do not read project files, call Read, Grep or Glob, write files, mutate the platform, or emit issues.',
+        'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed and cite exact evidence lines from the packet. Do not return section prose or values not declared by the packet.',
+      ].join(' ')
     case 'document-author':
       return [
         request.contract.documentSet === 'checklist'
@@ -292,6 +297,8 @@ function workerInstruction(request: WorkerDispatchRequest): string {
 
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
+    case 'foundation-fact-extractor':
+      return 'Call the scoped foundation fact result terminal exactly once with taskId, revision, packetDigest, and the complete bounded result set. Do not return terminal JSON or completion prose.'
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||

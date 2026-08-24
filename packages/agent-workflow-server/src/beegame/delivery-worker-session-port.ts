@@ -31,6 +31,7 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
+import { foundationFactExtractorTerminalSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -280,6 +281,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
         workflowAllowedPaths: request.allowedPaths ?? [],
+        ...(request.projectReadScope
+          ? { workflowProjectReadScope: request.projectReadScope }
+          : {}),
         ...(request.workerType !== 'resource-content-author' &&
         request.protectedPaths
           ? { workflowProtectedPaths: [...request.protectedPaths] }
@@ -840,6 +844,8 @@ function structuredSubmissionToolName(
   switch (request.workerType) {
     case 'document-author':
       return undefined
+    case 'foundation-fact-extractor':
+      return 'SubmitFoundationFactResult'
     case 'atomic-task-planner':
       return 'SubmitAtomicTaskPlan'
     case 'implementation-worker':
@@ -901,6 +907,8 @@ async function createDeterministicStructuredTerminal(input: {
       throw new Error(
         'canonical document completion must use its commit receipt',
       )
+    case 'foundation-fact-extractor':
+      return createDeterministicFoundationFactTerminal(input)
     case 'atomic-task-planner':
       return createDeterministicAtomicTaskPlannerTerminal(input)
     case 'implementation-worker':
@@ -923,6 +931,31 @@ async function createDeterministicStructuredTerminal(input: {
         'resource content terminal requires a committed durable content receipt',
       )
   }
+}
+
+function createDeterministicFoundationFactTerminal(input: {
+  request: WorkerDispatchRequest
+  events: ReturnType<BeeGameSessionManager['events']>
+}) {
+  const candidates = [...input.events].reverse().flatMap(event => {
+    if (event.type !== 'tool.completed' || event.payload?.toolName !== 'SubmitFoundationFactResult') return []
+    const value = event.payload.input
+    return value && typeof value === 'object' && !Array.isArray(value) ? [value as Record<string, unknown>] : []
+  })
+  for (const candidate of candidates) {
+    if (candidate.runId !== input.request.runId || candidate.dispatchId !== input.request.dispatchId)
+      throw new Error('foundation fact terminal run or dispatch identity does not match')
+    const { runId: _runId, dispatchId: _dispatchId, ...payload } = candidate
+    const parsed = foundationFactExtractorTerminalSchema.parse({
+      ...payload,
+      workerType: 'foundation-fact-extractor',
+      status: 'completed',
+    })
+    if (parsed.taskId !== input.request.taskId || parsed.revision !== input.request.revision || parsed.packetDigest !== input.request.contract.packetDigest)
+      throw new Error('foundation fact terminal identity does not match dispatch contract')
+    return parsed
+  }
+  throw new Error('worker terminal result is missing a valid SubmitFoundationFactResult call')
 }
 
 function completedToolInputs(

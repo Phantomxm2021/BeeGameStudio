@@ -4,9 +4,12 @@ import {
   parseFoundationAuditState,
 } from './foundation-audit-state'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import type { FoundationFactTask } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
+    schemaVersion: 2 as const,
+    schemaFingerprint: 'foundation-audit-state-v2' as const,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(
@@ -16,7 +19,7 @@ describe('foundationAuditState schema', () => {
     sectionIndexPath:
       '.beegame/audit/foundation/revision-1/staging/section-index.json',
     manifestPath: '.beegame/audit/foundation/revision-1/staging/manifest.json',
-    needsAction: 'foundation fact extraction is not part of Task 4A',
+    tasks: [] as FoundationFactTask[],
   } as const
 
   test('accepts only the index staged scaffold and binds its revision and digest', () => {
