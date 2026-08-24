@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildFoundationSectionIndex } from './foundation-section-index'
+import type { RevisionBatch } from './foundation-revision-batches'
 import type { AuditIssue } from './foundation-issue-registry'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -28,12 +29,6 @@ export type PatchOperation = {
   issueIds: string[]
   beforeDigest?: string
   afterDigest?: string
-}
-
-export type RevisionBatch = {
-  documentPath: FoundationDocumentPath
-  sectionIds: string[]
-  issueIds: string[]
 }
 
 export type FoundationRevisionStage = {
