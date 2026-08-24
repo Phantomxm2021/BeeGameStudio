@@ -5,7 +5,6 @@ import type { SectionRef } from './foundation-section-index'
 export type AuditSeverity = 'BLOCKER' | 'HIGH' | 'MEDIUM' | 'LOW'
 export type AuditIssueType = 'schema' | 'rule' | 'contract' | 'semantic'
 
-/** The only issue shape admitted to the foundation audit pipeline. */
 export type AuditIssue = {
   id: string
   severity: AuditSeverity
@@ -18,239 +17,131 @@ export type AuditIssue = {
   fixSectionId: string
 }
 
-export type AuditFactConflict = Readonly<Record<string, unknown>>
-
-export type AuditIssueDraft = Omit<AuditIssue, 'id'> & {
+export type AuditIssueDraft = {
   checkId: string
-  /** Keys and values are included in the deterministic issue identity. */
-  conflictingFacts?: AuditFactConflict
-  conflictingFactKeys?: readonly string[]
-  conflictingFactValues?: readonly unknown[]
+  severity: AuditSeverity
+  type: AuditIssueType
+  source: SectionRef
+  target?: SectionRef
+  expected: string
+  actual: string
+  fixDocument: FoundationDocumentPath
+  fixSectionId: string
+  conflictIdentity: Readonly<Record<string, unknown>>
 }
 
-const ISSUE_KEYS = [
+export type IssueRegistryContext = {
+  validated: true
+  section(documentPath: string, sectionId: string): SectionRef | undefined
+}
+
+const DRAFT_KEYS = [
   'actual',
+  'checkId',
+  'conflictIdentity',
   'expected',
   'fixDocument',
   'fixSectionId',
-  'id',
   'severity',
   'source',
   'target',
   'type',
-] as const
+]
 
-function normalizeString(value: string): string {
-  return value.trim().replace(/\s+/g, ' ')
-}
-
-function normalizeValue(value: unknown): unknown {
-  if (typeof value === 'string') return normalizeString(value)
-  if (Array.isArray(value)) return value.map(normalizeValue)
-  if (value && typeof value === 'object') {
+function normalize(value: unknown): unknown {
+  if (typeof value === 'string') return value.trim().replace(/\s+/g, ' ')
+  if (Array.isArray(value)) return value.map(normalize)
+  if (value && typeof value === 'object')
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, item]) => [key, normalizeValue(item)]),
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, normalize(item)]),
     )
-  }
   return value
 }
 
-function sectionIdentity(section: SectionRef | undefined): unknown {
-  if (!section) return null
-  return {
-    documentPath: section.documentPath,
-    sectionId: section.sectionId,
-  }
-}
-
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(normalizeValue(value))
+function json(value: unknown): string {
+  return JSON.stringify(normalize(value))
 }
 
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function conflictPayload(input: {
-  conflictingFacts?: AuditFactConflict
-  conflictingFactKeys?: readonly string[]
-  conflictingFactValues?: readonly unknown[]
-}): unknown {
-  if (input.conflictingFacts)
-    return Object.fromEntries(
-      Object.entries(input.conflictingFacts)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, value]) => [key, normalizeValue(value)]),
-    )
-  return {
-    keys: [...(input.conflictingFactKeys ?? [])].sort(),
-    values: (input.conflictingFactValues ?? []).map(normalizeValue),
-  }
+function identitySection(section: SectionRef | undefined): unknown {
+  return section
+    ? { documentPath: section.documentPath, sectionId: section.sectionId }
+    : null
 }
 
-function issueIdentityPayload(
-  issue: Omit<AuditIssue, 'id'> & { checkId?: string },
-): Record<string, unknown> {
-  return {
-    checkId: issue.checkId ?? `${issue.type}.${issue.severity}`,
-    source: sectionIdentity(issue.source),
-    target: sectionIdentity(issue.target),
-    severity: issue.severity,
-    type: issue.type,
-    expected: normalizeString(issue.expected),
-    actual: normalizeString(issue.actual),
-    fixDocument: issue.fixDocument,
-    fixSectionId: issue.fixSectionId,
-  }
-}
-
-/** Returns a stable identity that intentionally excludes the display ID. */
-export function issueIdentity(issue: AuditIssue): string {
-  return canonicalJson(issueIdentityPayload(issue))
-}
-
-/** Creates an issue ID from check identity, section identity and fact conflicts. */
-export function makeAuditIssue(input: AuditIssueDraft): AuditIssue {
-  if (!input.checkId.trim())
-    throw new Error('audit issue check identity is required')
-  const identity = {
-    ...issueIdentityPayload(input),
-    conflicts: conflictPayload(input),
-  }
-  const id = `AUD-${digest(canonicalJson(identity)).slice(0, 24).toUpperCase()}`
-  return {
-    id,
-    severity: input.severity,
-    type: input.type,
-    source: { ...input.source },
-    ...(input.target ? { target: { ...input.target } } : {}),
-    expected: input.expected,
-    actual: input.actual,
-    fixDocument: input.fixDocument,
-    fixSectionId: input.fixSectionId,
-  }
-}
-
-function sameSection(left: SectionRef, right: SectionRef): boolean {
-  return (
-    left.documentPath === right.documentPath &&
-    left.sectionId === right.sectionId &&
-    left.heading === right.heading &&
-    left.startLine === right.startLine &&
-    left.endLine === right.endLine &&
-    left.digest === right.digest
-  )
-}
-
-function validateIssueShape(issue: AuditIssue): void {
-  const actualKeys = Object.keys(issue).sort()
-  const expectedKeys = [...ISSUE_KEYS]
-    .filter(key => key !== 'target' || issue.target !== undefined)
-    .sort()
-  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys))
-    throw new Error(`audit issue has an invalid schema: ${issue.id}`)
+function exactSection(
+  context: IssueRegistryContext,
+  section: SectionRef,
+  label: string,
+): SectionRef {
+  const resolved = context.section(section.documentPath, section.sectionId)
   if (
-    typeof issue.id !== 'string' ||
-    typeof issue.expected !== 'string' ||
-    typeof issue.actual !== 'string'
+    !resolved ||
+    resolved.heading !== section.heading ||
+    resolved.startLine !== section.startLine ||
+    resolved.endLine !== section.endLine ||
+    resolved.digest !== section.digest
   )
-    throw new Error(`audit issue has missing required fields: ${issue.id}`)
-  if (!['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(issue.severity))
-    throw new Error(`audit issue severity is invalid: ${issue.id}`)
-  if (!['schema', 'rule', 'contract', 'semantic'].includes(issue.type))
-    throw new Error(`audit issue type is invalid: ${issue.id}`)
-  if (!issue.fixDocument || !issue.fixSectionId)
-    throw new Error(`audit issue fix location is required: ${issue.id}`)
+    throw new Error(`audit issue ${label} is not the validated SectionRef`)
+  return resolved
 }
 
-export type FoundationIssueRegistryInput = {
-  issues: readonly AuditIssue[]
-  sectionIndex?: readonly SectionRef[]
+function validateDraftShape(draft: AuditIssueDraft): void {
+  const actual = Object.keys(draft).sort()
+  const expected = [...DRAFT_KEYS]
+    .filter(key => key !== 'target' || draft.target !== undefined)
+    .sort()
+  if (JSON.stringify(actual) !== JSON.stringify(expected))
+    throw new Error(
+      'audit issue draft must not contain caller id or unknown fields',
+    )
+  if (!draft.checkId.trim())
+    throw new Error('audit issue check identity is required')
 }
 
-function registryInput(
-  input: readonly AuditIssue[] | FoundationIssueRegistryInput,
-): FoundationIssueRegistryInput {
-  if (Array.isArray(input)) return { issues: input }
-  return input as FoundationIssueRegistryInput
-}
-
-/** Compiles the sole deterministic issue registry and rejects collisions. */
-export function createFoundationIssueRegistry(
-  input: readonly AuditIssue[] | FoundationIssueRegistryInput,
+/** Sole compiler/admission point. Callers provide drafts, never IDs. */
+export function compileIssueRegistry(
+  context: IssueRegistryContext,
+  drafts: readonly AuditIssueDraft[],
 ): AuditIssue[] {
-  const { issues, sectionIndex } = registryInput(input)
-  const ids = new Set<string>()
+  if (context.validated !== true)
+    throw new Error('issue registry requires a validated audit context')
   const identities = new Set<string>()
-  for (const issue of issues) {
-    validateIssueShape(issue)
-    if (ids.has(issue.id))
-      throw new Error(`duplicate audit issue id: ${issue.id}`)
-    ids.add(issue.id)
-    const identity = issueIdentity(issue)
-    if (identities.has(identity))
-      throw new Error('conflicting duplicate audit issue identity')
-    identities.add(identity)
-    if (sectionIndex) {
-      const source = sectionIndex.find(candidate =>
-        sameSection(candidate, issue.source),
-      )
-      if (!source)
-        throw new Error(
-          `audit issue source is not a validated SectionRef: ${issue.id}`,
-        )
-      const target = issue.target
-        ? sectionIndex.find(candidate => sameSection(candidate, issue.target!))
-        : undefined
-      if (issue.target && !target)
-        throw new Error(
-          `audit issue target is not a validated SectionRef: ${issue.id}`,
-        )
-      const fix = sectionIndex.find(
-        candidate =>
-          candidate.documentPath === issue.fixDocument &&
-          candidate.sectionId === issue.fixSectionId,
-      )
-      if (!fix)
-        throw new Error(
-          `audit issue fix is not a validated SectionRef: ${issue.id}`,
-        )
-    }
-  }
-  const severityRank: Record<AuditSeverity, number> = {
-    BLOCKER: 0,
-    HIGH: 1,
-    MEDIUM: 2,
-    LOW: 3,
-  }
-  return [...issues]
-    .map(issue => ({
-      ...issue,
-      source: { ...issue.source },
-      ...(issue.target ? { target: { ...issue.target } } : {}),
-    }))
-    .sort((left, right) => {
-      const rank = severityRank[left.severity] - severityRank[right.severity]
-      if (rank) return rank
-      const leftKey = `${left.type}\0${left.source.documentPath}\0${left.source.sectionId}\0${left.target?.documentPath ?? ''}\0${left.target?.sectionId ?? ''}\0${left.id}`
-      const rightKey = `${right.type}\0${right.source.documentPath}\0${right.source.sectionId}\0${right.target?.documentPath ?? ''}\0${right.target?.sectionId ?? ''}\0${right.id}`
-      return leftKey.localeCompare(rightKey)
+  const issues: AuditIssue[] = []
+  for (const draft of drafts) {
+    validateDraftShape(draft)
+    const source = exactSection(context, draft.source, 'source')
+    const target = draft.target
+      ? exactSection(context, draft.target, 'target')
+      : undefined
+    const fix = context.section(draft.fixDocument, draft.fixSectionId)
+    if (!fix) throw new Error('audit issue fix is not the validated SectionRef')
+    const identity = json({
+      checkId: draft.checkId.trim(),
+      source: identitySection(source),
+      target: identitySection(target),
+      conflict: draft.conflictIdentity,
     })
-}
-
-export const compileFoundationIssueRegistry = createFoundationIssueRegistry
-export const createIssueRegistry = createFoundationIssueRegistry
-export const compileIssueRegistry = createFoundationIssueRegistry
-
-export function appendFoundationIssues(
-  registry: readonly AuditIssue[],
-  issues: readonly AuditIssue[],
-  sectionIndex?: readonly SectionRef[],
-): AuditIssue[] {
-  return createFoundationIssueRegistry({
-    issues: [...registry, ...issues],
-    sectionIndex,
-  })
+    if (identities.has(identity))
+      throw new Error('duplicate audit issue identity')
+    identities.add(identity)
+    const id = `AUD-${digest(identity).slice(0, 24).toUpperCase()}`
+    issues.push({
+      id,
+      severity: draft.severity,
+      type: draft.type,
+      source: { ...source },
+      ...(target ? { target: { ...target } } : {}),
+      expected: draft.expected,
+      actual: draft.actual,
+      fixDocument: fix.documentPath,
+      fixSectionId: fix.sectionId,
+    })
+  }
+  return issues.sort((left, right) => left.id.localeCompare(right.id))
 }

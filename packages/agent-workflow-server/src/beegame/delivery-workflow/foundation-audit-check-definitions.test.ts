@@ -1,90 +1,121 @@
 import { describe, expect, test } from 'bun:test'
-import type { FoundationFact } from './foundation-fact-store'
 import {
-  FOUNDATION_AUDIT_CHECK_DEFINITIONS,
-  runFoundationAuditChecks,
-  type FoundationAuditCheckInput,
+  runDeterministicFoundationAudit,
+  type DeterministicFoundationAuditInput,
 } from './foundation-audit-check-definitions'
+import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
 
 const ref = (
-  documentPath: SectionRef['documentPath'],
+  documentPath: string,
   sectionId: string,
+  line = 1,
 ): SectionRef => ({
-  documentPath,
+  documentPath: documentPath as SectionRef['documentPath'],
   sectionId,
   heading: sectionId,
-  startLine: 1,
-  endLine: 2,
+  startLine: line,
+  endLine: line + 1,
   digest: 'a'.repeat(64),
 })
 
 const fact = (
-  source: SectionRef,
   key: string,
   value: FoundationFact['value'],
-): FoundationFact => ({
-  key,
-  value,
-  source,
-})
+  source: SectionRef,
+): FoundationFact => ({ key, value, source })
 
-describe('foundation audit check definitions', () => {
-  test('exposes explicit stable check identities', () => {
-    expect(
-      FOUNDATION_AUDIT_CHECK_DEFINITIONS.map(definition => definition.id),
-    ).toEqual([
-      'schema.required-section-facts',
-      'schema.fact-types',
-      'rule.numeric-consistency',
-      'rule.referenced-entities',
-      'contract.upstream-sections',
-    ])
-  })
-
-  test('runs all deterministic checks without a worker or dispatch port', () => {
-    const source = ref(
-      'docs/custom.md' as SectionRef['documentPath'],
-      'settings',
-    )
-    const input: FoundationAuditCheckInput = {
+describe('deterministic foundation audit compiler', () => {
+  test('reports a missing required fact at its declared exact section', () => {
+    const source = ref('docs/custom.md', 'settings')
+    const issues = runDeterministicFoundationAudit({
       sectionIndex: [source],
-      factStore: [fact(source, 'custom.settings', 'ok')],
+      factStore: [],
       schema: {
         requiredFacts: [
-          { key: 'custom.missing', source, expectedType: 'string' },
+          { key: 'custom.settings', source, expectedType: 'string' },
         ],
       },
-    }
-
-    const issues = runFoundationAuditChecks(input)
+    })
     expect(issues).toHaveLength(1)
     expect(issues[0]).toMatchObject({
       type: 'schema',
-      severity: 'BLOCKER',
       fixDocument: source.documentPath,
       fixSectionId: source.sectionId,
     })
   })
 
-  test('reports a wrong fact type against an explicit schema definition', () => {
-    const source = ref(
-      'docs/custom.md' as SectionRef['documentPath'],
-      'settings',
-    )
-    const issues = runFoundationAuditChecks({
+  test('reports a wrong fact type and accepts no worker or dispatch port', () => {
+    const source = ref('docs/custom.md', 'settings')
+    const issues = runDeterministicFoundationAudit({
       sectionIndex: [source],
-      factStore: [fact(source, 'custom.settings', 42)],
+      factStore: [fact('custom.settings', 42, source)],
       schema: {
         factTypes: [{ key: 'custom.settings', source, expectedType: 'string' }],
       },
     })
-
     expect(issues).toHaveLength(1)
     expect(issues[0]).toMatchObject({
       type: 'schema',
-      severity: 'BLOCKER',
       actual: 'fact custom.settings has type number',
     })
+  })
+
+  test('returns zero issues for a validated passing input', () => {
+    const source = ref('docs/custom.md', 'settings')
+    expect(
+      runDeterministicFoundationAudit({
+        sectionIndex: [source],
+        factStore: [fact('custom.settings', 'ok', source)],
+      }),
+    ).toEqual([])
+  })
+
+  test('rejects missing section indexes and malformed nested input before checking', () => {
+    expect(() =>
+      runDeterministicFoundationAudit({
+        factStore: [],
+      } as unknown as DeterministicFoundationAuditInput),
+    ).toThrow('section index')
+    const malformed = { ...ref('docs/custom.md', 'settings'), startLine: 0 }
+    expect(() =>
+      runDeterministicFoundationAudit({
+        sectionIndex: [malformed],
+        factStore: [],
+      }),
+    ).toThrow('SectionRef')
+  })
+
+  test('rejects duplicate facts and a fact source that is not the indexed SectionRef', () => {
+    const source = ref('docs/custom.md', 'settings')
+    expect(() =>
+      runDeterministicFoundationAudit({
+        sectionIndex: [source],
+        factStore: [
+          fact('custom.settings', 'first', source),
+          fact('custom.settings', 'second', source),
+        ],
+      }),
+    ).toThrow('duplicate fact key')
+    expect(() =>
+      runDeterministicFoundationAudit({
+        sectionIndex: [source],
+        factStore: [
+          fact('custom.settings', 'wrong', { ...source, heading: 'Other' }),
+        ],
+      }),
+    ).toThrow('fact source')
+  })
+
+  test('does not expose helper check or registry bypass functions', async () => {
+    expect(Object.keys(await import('./foundation-audit-rules'))).toEqual([
+      'collectRuleDrafts',
+    ])
+    expect(Object.keys(await import('./foundation-audit-contracts'))).toEqual([
+      'collectContractDrafts',
+    ])
+    expect(Object.keys(await import('./foundation-issue-registry'))).toEqual([
+      'compileIssueRegistry',
+    ])
   })
 })

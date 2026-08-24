@@ -1,11 +1,11 @@
 import { getGameDocumentContract } from './game-document-contracts'
-import type { FoundationFact, FactValue } from './foundation-fact-store'
+import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
-import {
-  makeAuditIssue,
-  type AuditIssue,
-  type AuditSeverity,
+import type {
+  AuditIssueDraft,
+  AuditSeverity,
 } from './foundation-issue-registry'
+import type { FoundationAuditContext } from './foundation-audit-rules'
 
 export type ContractBindingRelation = 'exists' | 'equal' | 'numeric-equal'
 
@@ -14,53 +14,27 @@ export type ContractBinding = {
   sourceFactKey: string
   targetFactKey: string
   relation: ContractBindingRelation
-  sourceDocumentPath?: SectionRef['documentPath']
-  sourceSectionId?: string
-  targetDocumentPath?: SectionRef['documentPath']
-  targetSectionId?: string
+  source: SectionRef
+  target: SectionRef
   severity?: AuditSeverity
-}
-
-export type FoundationContractCheckInput = {
-  sectionIndex: readonly SectionRef[]
-  factStore: readonly FoundationFact[]
-  contractBindings?: readonly ContractBinding[]
-  /** Validate immutable game-document upstream projections when enabled. */
-  includeDocumentContracts?: boolean
-}
-
-function findSection(
-  input: FoundationContractCheckInput,
-  documentPath: SectionRef['documentPath'] | undefined,
-  sectionId: string | undefined,
-  fallback?: SectionRef,
-): SectionRef | undefined {
-  if (documentPath && sectionId) {
-    const exact = input.sectionIndex.find(
-      section =>
-        section.documentPath === documentPath &&
-        section.sectionId === sectionId,
-    )
-    if (exact) return exact
-  }
-  if (sectionId) {
-    const byId = input.sectionIndex.find(
-      section => section.sectionId === sectionId,
-    )
-    if (byId) return byId
-  }
-  return fallback ?? input.sectionIndex[0]
 }
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
-function equalValues(
-  left: FactValue,
-  right: FactValue,
-  numeric: boolean,
-): boolean {
+function sameSection(left: SectionRef, right: SectionRef): boolean {
+  return (
+    left.documentPath === right.documentPath &&
+    left.sectionId === right.sectionId &&
+    left.heading === right.heading &&
+    left.startLine === right.startLine &&
+    left.endLine === right.endLine &&
+    left.digest === right.digest
+  )
+}
+
+function equal(left: unknown, right: unknown, numeric: boolean): boolean {
   if (numeric)
     return (
       typeof left === 'number' && typeof right === 'number' && left === right
@@ -68,173 +42,137 @@ function equalValues(
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-function bindingIssue(input: {
-  checkId: string
-  severity: AuditSeverity
-  source: SectionRef
-  target?: SectionRef
-  expected: string
-  actual: string
-  fix: SectionRef
-  conflicts: Record<string, unknown>
-}): AuditIssue {
-  return makeAuditIssue({
-    checkId: input.checkId,
-    severity: input.severity,
-    type: 'contract',
-    source: input.source,
-    ...(input.target ? { target: input.target } : {}),
-    expected: input.expected,
-    actual: input.actual,
-    fixDocument: input.fix.documentPath,
-    fixSectionId: input.fix.sectionId,
-    conflictingFacts: input.conflicts,
-  })
+function permittedEdge(binding: ContractBinding): boolean {
+  const contract = getGameDocumentContract(binding.source.documentPath as never)
+  if (!contract) return false
+  return (
+    contract.allowedUpstreamPaths.includes(
+      binding.target.documentPath as never,
+    ) &&
+    contract.upstreamSections.some(
+      projection =>
+        projection.path === binding.target.documentPath &&
+        projection.sectionIds.includes(binding.target.sectionId),
+    )
+  )
 }
 
-function runBindingChecks(input: FoundationContractCheckInput): AuditIssue[] {
-  const facts = new Map(input.factStore.map(fact => [fact.key, fact]))
-  const issues: AuditIssue[] = []
-  for (const binding of input.contractBindings ?? []) {
-    const sourceFact = facts.get(binding.sourceFactKey)
-    const targetFact = facts.get(binding.targetFactKey)
-    const source = findSection(
-      input,
-      binding.sourceDocumentPath,
-      binding.sourceSectionId,
-      sourceFact?.source,
+function bindingDrafts(
+  context: FoundationAuditContext,
+  bindings: readonly ContractBinding[],
+): AuditIssueDraft[] {
+  const drafts: AuditIssueDraft[] = []
+  for (const binding of bindings) {
+    const source = context.section(
+      binding.source.documentPath,
+      binding.source.sectionId,
     )
-    const target = findSection(
-      input,
-      binding.targetDocumentPath,
-      binding.targetSectionId,
-      targetFact?.source,
+    const target = context.section(
+      binding.target.documentPath,
+      binding.target.sectionId,
     )
-    if (!source) continue
-    if (!sourceFact) {
-      issues.push(
-        bindingIssue({
-          checkId: `contract.${binding.id}`,
-          severity: binding.severity ?? 'HIGH',
-          source,
-          ...(target ? { target } : {}),
-          expected: `source fact ${binding.sourceFactKey} must exist`,
-          actual: `missing fact ${binding.sourceFactKey}`,
-          fix: source,
-          conflicts: {
-            sourceFactKey: binding.sourceFactKey,
-            targetFactKey: binding.targetFactKey,
-          },
-        }),
+    if (
+      !source ||
+      !target ||
+      !sameSection(source, binding.source) ||
+      !sameSection(target, binding.target)
+    )
+      throw new Error('contract binding must use exact indexed SectionRefs')
+    if (!permittedEdge(binding))
+      throw new Error(
+        'contract binding is outside the immutable contract graph',
       )
-      continue
+    const sourceFact = context.fact(binding.sourceFactKey)
+    const targetFact = context.fact(binding.targetFactKey)
+    const conflict = {
+      sourceFactKey: binding.sourceFactKey,
+      targetFactKey: binding.targetFactKey,
+      sourceValue: sourceFact?.value ?? null,
+      targetValue: targetFact?.value ?? null,
     }
-    if (!targetFact) {
-      issues.push(
-        bindingIssue({
-          checkId: `contract.${binding.id}`,
-          severity: binding.severity ?? 'HIGH',
-          source,
-          ...(target ? { target } : {}),
-          expected: `target fact ${binding.targetFactKey} must exist`,
-          actual: `missing fact ${binding.targetFactKey}`,
-          fix: target ?? source,
-          conflicts: {
-            sourceFactKey: binding.sourceFactKey,
-            targetFactKey: binding.targetFactKey,
-          },
-        }),
-      )
+    if (!sourceFact || !targetFact) {
+      const fix = !targetFact ? target : source
+      drafts.push({
+        checkId: `contract.${binding.id}`,
+        severity: binding.severity ?? 'HIGH',
+        type: 'contract',
+        source,
+        target,
+        expected: 'both contract facts must exist',
+        actual: `missing ${!sourceFact ? binding.sourceFactKey : binding.targetFactKey}`,
+        fixDocument: fix.documentPath,
+        fixSectionId: fix.sectionId,
+        conflictIdentity: conflict,
+      })
       continue
     }
     if (
       binding.relation !== 'exists' &&
-      !equalValues(
+      !equal(
         sourceFact.value,
         targetFact.value,
         binding.relation === 'numeric-equal',
       )
     ) {
-      issues.push(
-        bindingIssue({
-          checkId: `contract.${binding.id}`,
-          severity: binding.severity ?? 'HIGH',
-          source,
-          ...(target ? { target } : {}),
-          expected: `${binding.sourceFactKey} and ${binding.targetFactKey} must match`,
-          actual: `${text(sourceFact.value)} != ${text(targetFact.value)}`,
-          fix: target ?? source,
-          conflicts: {
-            sourceFactKey: binding.sourceFactKey,
-            targetFactKey: binding.targetFactKey,
-            sourceValue: sourceFact.value,
-            targetValue: targetFact.value,
-          },
-        }),
-      )
+      drafts.push({
+        checkId: `contract.${binding.id}`,
+        severity: binding.severity ?? 'HIGH',
+        type: 'contract',
+        source,
+        target,
+        expected: `${binding.sourceFactKey} and ${binding.targetFactKey} must match`,
+        actual: `${text(sourceFact.value)} != ${text(targetFact.value)}`,
+        fixDocument: target.documentPath,
+        fixSectionId: target.sectionId,
+        conflictIdentity: conflict,
+      })
     }
   }
-  return issues
+  return drafts
 }
 
-function runDocumentContractChecks(
-  input: FoundationContractCheckInput,
-): AuditIssue[] {
-  const issues: AuditIssue[] = []
-  const paths = new Set(input.sectionIndex.map(section => section.documentPath))
+function documentGraphDrafts(
+  context: FoundationAuditContext,
+): AuditIssueDraft[] {
+  const drafts: AuditIssueDraft[] = []
+  const paths = [
+    ...new Set(context.sectionIndex.map(section => section.documentPath)),
+  ].sort()
   for (const path of paths) {
-    let contract: ReturnType<typeof getGameDocumentContract>
-    try {
-      contract = getGameDocumentContract(path)
-    } catch {
-      continue
-    }
+    const contract = getGameDocumentContract(path as never)
     if (!contract) continue
-    const localSections = input.sectionIndex.filter(
-      section => section.documentPath === path,
-    )
-    const source = localSections[0]
-    if (!source) continue
+    const anchorContract = contract.sections[0]
+    const anchor = anchorContract
+      ? context.section(path, anchorContract.sectionId)
+      : undefined
+    if (!anchor) throw new Error(`contract source section is missing: ${path}`)
     for (const projection of contract.upstreamSections) {
-      const upstreamSections = input.sectionIndex.filter(
-        section => section.documentPath === projection.path,
-      )
       for (const sectionId of projection.sectionIds) {
-        const target = upstreamSections.find(
-          section => section.sectionId === sectionId,
-        )
-        if (target) continue
-        issues.push(
-          makeAuditIssue({
-            checkId: `contract.upstream-sections.${path}.${projection.path}.${sectionId}`,
-            severity: 'HIGH',
-            type: 'contract',
-            source,
-            expected: `${path} must reference ${projection.path}#${sectionId}`,
-            actual: `referenced section is absent: ${projection.path}#${sectionId}`,
-            fixDocument: source.documentPath,
-            fixSectionId: source.sectionId,
-            conflictingFacts: {
-              sourceDocumentPath: path,
-              targetDocumentPath: projection.path,
-              targetSectionId: sectionId,
-            },
-          }),
-        )
+        if (context.section(projection.path, sectionId)) continue
+        drafts.push({
+          checkId: `contract.upstream-sections.${path}.${projection.path}.${sectionId}`,
+          severity: 'HIGH',
+          type: 'contract',
+          source: anchor,
+          expected: `${path} must reference ${projection.path}#${sectionId}`,
+          actual: `referenced section is absent: ${projection.path}#${sectionId}`,
+          fixDocument: anchor.documentPath,
+          fixSectionId: anchor.sectionId,
+          conflictIdentity: {
+            sourceDocumentPath: path,
+            targetDocumentPath: projection.path,
+            targetSectionId: sectionId,
+          },
+        })
       }
     }
   }
-  return issues
+  return drafts
 }
 
-export function runFoundationContractChecks(
-  input: FoundationContractCheckInput,
-): AuditIssue[] {
-  return [
-    ...runBindingChecks(input),
-    ...(input.includeDocumentContracts ? runDocumentContractChecks(input) : []),
-  ]
+export function collectContractDrafts(
+  context: FoundationAuditContext,
+  bindings: readonly ContractBinding[] = [],
+): AuditIssueDraft[] {
+  return [...bindingDrafts(context, bindings), ...documentGraphDrafts(context)]
 }
-
-export const runContractChecks = runFoundationContractChecks
-export const runFoundationAuditContracts = runFoundationContractChecks
