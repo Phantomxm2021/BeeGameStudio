@@ -28,12 +28,39 @@ export const foundationFactExtractorTerminalSchema = z
   .object({
     workerType: z.literal('foundation-fact-extractor'),
     status: z.enum(['completed', 'failed', 'blocked']),
+    runId: z.string().min(1),
+    dispatchId: z.string().min(1),
     taskId: z.string().min(1),
     revision: z.string().min(1),
     packetDigest: z.string().regex(/^[a-f0-9]{64}$/),
     results: z.array(foundationFactResultSchema),
   })
   .strict()
+
+export const foundationFactStructuredOutputJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    workerType: { const: 'foundation-fact-extractor' },
+    status: { enum: ['completed', 'failed', 'blocked'] },
+    runId: { type: 'string', minLength: 1 },
+    dispatchId: { type: 'string', minLength: 1 },
+    taskId: { type: 'string', minLength: 1 },
+    revision: { type: 'string', minLength: 1 },
+    packetDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    results: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+      key: { type: 'string', minLength: 1 },
+      status: { enum: ['present', 'absent', 'uncertain'] },
+      value: {},
+      evidence: { type: 'object', additionalProperties: false, properties: {
+        documentPath: { type: 'string', minLength: 1 }, sectionId: { type: 'string', minLength: 1 },
+        startLine: { type: 'integer', minimum: 1 }, endLine: { type: 'integer', minimum: 1 }, digest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      }, required: ['documentPath', 'sectionId', 'startLine', 'endLine', 'digest'] },
+      reason: { type: 'string', minLength: 1 },
+    }, required: ['key', 'status'] } },
+  },
+  required: ['workerType', 'status', 'runId', 'dispatchId', 'taskId', 'revision', 'packetDigest', 'results'],
+} as const
 
 export const documentAuthorTerminalSchema = z
   .object({

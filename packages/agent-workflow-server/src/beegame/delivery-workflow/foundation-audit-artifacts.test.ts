@@ -6,6 +6,7 @@ import { createFoundationFactStore, digestFactStore } from './foundation-fact-st
 import {
   deriveFoundationAuditArtifacts,
   foundationAuditArtifactPaths,
+  foundationDerivedArtifactPaths,
   assertExactlyEightCommittedFoundationDocuments,
   loadCommittedFoundationDerivedArtifacts,
   publishFoundationDerivedArtifacts,
@@ -178,9 +179,33 @@ describe('foundation audit artifacts', () => {
       })
       expect(await loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })).toEqual(committed)
       const markerPath = join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/COMMITTED.json')
+      const manifest = JSON.parse(await readFile(join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/manifest.json'), 'utf8')) as Record<string, unknown>
+      expect(manifest.needsAction).toBeUndefined()
       const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
       await writeFile(markerPath, `${JSON.stringify({ ...marker, factStoreDigest: 'f'.repeat(64) })}\n`)
       await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })).rejects.toThrow('binding')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('does not rename an invalid temporary derived publication into authority', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-derived-invalid-temp-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const documents = new Map(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, validDocument(path)] as const))
+      for (const [path, content] of documents) await writeFile(join(workspacePath, path), content)
+      const checkpoints = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, status: 'committed' as const }))
+      const staged = await deriveFoundationAuditArtifacts({ workspacePath, revision: 'revision-invalid-temp', checkpoints })
+      const factStore = createFoundationFactStore([])
+      await expect(publishFoundationDerivedArtifacts({
+        workspacePath,
+        revision: 'revision-invalid-temp',
+        documentDigests: staged.documentDigests,
+        sectionIndex: staged.sectionIndex,
+        factStore,
+        normalizedFactDigest: 'f'.repeat(64),
+        manifest: staged.manifest as unknown as Record<string, unknown>,
+      })).rejects.toThrow()
+      await expect(stat(foundationDerivedArtifactPaths(workspacePath, 'revision-invalid-temp').derived)).rejects.toThrow()
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 })

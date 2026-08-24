@@ -23,6 +23,15 @@ export type FoundationAuditManifest = {
   needsAction: 'foundation fact extraction is not part of Task 4A'
 }
 
+type FoundationDerivedManifest = {
+  revision: string
+  status: 'derived_committed'
+  documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>
+  sectionIndexDigest: string
+  factStoreDigest: string
+  normalizedFactDigest: string
+}
+
 export type FoundationAuditArtifactPaths = {
   root: string
   sectionIndex: string
@@ -221,11 +230,12 @@ export async function publishFoundationDerivedArtifacts(input: {
     throw new Error('derived foundation artifacts require exactly eight document digests')
   if (input.documentDigests.some(item => !/^[a-f0-9]{64}$/.test(item.digest))) throw new Error('derived foundation document digest is invalid')
   if (!/^[a-f0-9]{64}$/.test(input.normalizedFactDigest)) throw new Error('normalized fact digest is invalid')
+  if (digestFactStore(input.factStore) !== input.normalizedFactDigest) throw new Error('normalized fact digest does not match the closed fact store')
   const paths = foundationDerivedArtifactPaths(input.workspacePath, input.revision)
   try {
     const existing = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: input.revision })
     if (existing) {
-      if (!sameJson(existing.documentDigests, input.documentDigests) || existing.digests.factStore !== input.normalizedFactDigest)
+      if (!sameJson(existing.documentDigests, input.documentDigests) || existing.digests.factStore !== input.normalizedFactDigest || existing.digests.sectionIndex !== digestSectionIndex(input.sectionIndex))
         throw new Error('conflicting committed foundation derived artifact replay')
       return existing
     }
@@ -237,7 +247,7 @@ export async function publishFoundationDerivedArtifacts(input: {
   await mkdir(temp, { recursive: true })
   const sectionValue = { revision: input.revision, documentDigests: input.documentDigests, sections: input.sectionIndex, digest: digestSectionIndex(input.sectionIndex) }
   const factValue = { revision: input.revision, facts: input.factStore, digest: input.normalizedFactDigest }
-  const manifestValue = { ...input.manifest, revision: input.revision, status: 'derived_committed', documentDigests: input.documentDigests, sectionIndexDigest: sectionValue.digest, factStoreDigest: input.normalizedFactDigest }
+  const manifestValue: FoundationDerivedManifest = { revision: input.revision, status: 'derived_committed', documentDigests: input.documentDigests.map(item => ({ ...item })), sectionIndexDigest: sectionValue.digest, factStoreDigest: input.normalizedFactDigest, normalizedFactDigest: input.normalizedFactDigest }
   const files = [
     ['section-index.json', sectionValue],
     ['fact-store.json', factValue],
@@ -246,10 +256,18 @@ export async function publishFoundationDerivedArtifacts(input: {
   for (const [name, value] of files) await writeFile(join(temp, name), `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8' })
   const markerWithoutDigest = { revision: input.revision, status: 'committed', manifestDigest: stableDigest(manifestValue), sectionIndexDigest: sectionValue.digest, factStoreDigest: input.normalizedFactDigest }
   await writeFile(join(temp, 'COMMITTED.json'), `${JSON.stringify(markerWithoutDigest, null, 2)}\n`, { encoding: 'utf8' })
+  // Validate the complete temporary tree before it can become the authority.
+  await loadFoundationDerivedDirectory({
+    revision: input.revision,
+    paths: foundationDerivedArtifactPathsForDirectory(paths.root, temp),
+  })
   try {
     await rename(temp, paths.derived)
   } catch (error) {
-    try { await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: input.revision }) } catch { throw error }
+    try {
+      const existing = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: input.revision })
+      if (!existing || !sameJson(existing.documentDigests, input.documentDigests) || existing.digests.factStore !== input.normalizedFactDigest || existing.digests.sectionIndex !== digestSectionIndex(input.sectionIndex)) throw error
+    } catch { throw error }
   }
   const loaded = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: input.revision })
   if (!loaded) throw new Error('derived foundation artifacts were not committed')
@@ -258,6 +276,22 @@ export async function publishFoundationDerivedArtifacts(input: {
 
 export async function loadCommittedFoundationDerivedArtifacts(input: { workspacePath: string; revision: string }): Promise<{ paths: FoundationDerivedArtifactPaths; documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>; digests: { factStore: string; manifest: string; marker: string; sectionIndex: string } } | undefined> {
   const paths = foundationDerivedArtifactPaths(input.workspacePath, input.revision)
+  return loadFoundationDerivedDirectory({ revision: input.revision, paths })
+}
+
+function foundationDerivedArtifactPathsForDirectory(auditRoot: string, derived: string): FoundationDerivedArtifactPaths {
+  return {
+    root: auditRoot,
+    derived,
+    sectionIndex: join(derived, 'section-index.json'),
+    factStore: join(derived, 'fact-store.json'),
+    manifest: join(derived, 'manifest.json'),
+    marker: join(derived, 'COMMITTED.json'),
+  }
+}
+
+async function loadFoundationDerivedDirectory(input: { revision: string; paths: FoundationDerivedArtifactPaths }): Promise<{ paths: FoundationDerivedArtifactPaths; documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>; digests: { factStore: string; manifest: string; marker: string; sectionIndex: string } } | undefined> {
+  const paths = input.paths
   let marker: Record<string, unknown>
   try { marker = JSON.parse(await readFile(paths.marker, 'utf8')) as Record<string, unknown> } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
@@ -279,7 +313,7 @@ export async function loadCommittedFoundationDerivedArtifacts(input: { workspace
     isDigest(item.digest),
   )
   const manifestDocumentDigests = Array.isArray(manifest.documentDigests) ? manifest.documentDigests as Array<Record<string, unknown>> : []
-  if (marker.revision !== input.revision || marker.status !== 'committed' || !exactKeys(marker, ['revision', 'status', 'manifestDigest', 'sectionIndexDigest', 'factStoreDigest']) || section.revision !== input.revision || !exactKeys(section, ['revision', 'documentDigests', 'sections', 'digest']) || fact.revision !== input.revision || !exactKeys(fact, ['revision', 'facts', 'digest']) || !exactKeys(manifest, ['revision', 'status', 'catalogVersion', 'sectionIndexDigest', 'needsAction', 'documentDigests', 'factStoreDigest']) || manifest.status !== 'derived_committed' || manifest.catalogVersion !== FOUNDATION_FACT_CATALOG_VERSION || manifest.needsAction !== 'foundation fact extraction is not part of Task 4A' || stableDigest(manifest) !== marker.manifestDigest || section.digest !== marker.sectionIndexDigest || fact.digest !== marker.factStoreDigest || documentDigests.length !== 8 || documentDigests.some(item => typeof item.path !== 'string' || !CANONICAL_FOUNDATION_DOCUMENTS.includes(item.path as FoundationDocumentPath) || typeof item.digest !== 'string' || !isDigest(item.digest)) || new Set(documentDigests.map(item => item.path)).size !== 8 || !Array.isArray(fact.facts) || !sectionRefsValid || !sectionRefs.length || !sameJson(manifestDocumentDigests, documentDigests) || !sameJson(manifest.sectionIndexDigest, section.digest) || !sameJson(manifest.factStoreDigest, fact.digest)) throw new Error('committed foundation derived artifact binding is invalid')
+  if (marker.revision !== input.revision || marker.status !== 'committed' || !exactKeys(marker, ['revision', 'status', 'manifestDigest', 'sectionIndexDigest', 'factStoreDigest']) || section.revision !== input.revision || !exactKeys(section, ['revision', 'documentDigests', 'sections', 'digest']) || fact.revision !== input.revision || !exactKeys(fact, ['revision', 'facts', 'digest']) || !exactKeys(manifest, ['revision', 'status', 'documentDigests', 'sectionIndexDigest', 'factStoreDigest', 'normalizedFactDigest']) || manifest.status !== 'derived_committed' || stableDigest(manifest) !== marker.manifestDigest || section.digest !== marker.sectionIndexDigest || fact.digest !== marker.factStoreDigest || documentDigests.length !== 8 || documentDigests.some(item => typeof item.path !== 'string' || !CANONICAL_FOUNDATION_DOCUMENTS.includes(item.path as FoundationDocumentPath) || typeof item.digest !== 'string' || !isDigest(item.digest)) || new Set(documentDigests.map(item => item.path)).size !== 8 || !Array.isArray(fact.facts) || !sectionRefsValid || !sectionRefs.length || !sameJson(manifestDocumentDigests, documentDigests) || !sameJson(manifest.sectionIndexDigest, section.digest) || !sameJson(manifest.factStoreDigest, fact.digest) || manifest.normalizedFactDigest !== manifest.factStoreDigest || !isDigest(manifest.normalizedFactDigest)) throw new Error('committed foundation derived artifact binding is invalid')
   if (digestSectionIndex(sectionRefs as never) !== section.digest) throw new Error('committed foundation section index digest is invalid')
   const closedFactStore = createFoundationFactStore(fact.facts as never[])
   if (digestFactStore(closedFactStore) !== fact.digest) throw new Error('committed foundation fact store digest is invalid')

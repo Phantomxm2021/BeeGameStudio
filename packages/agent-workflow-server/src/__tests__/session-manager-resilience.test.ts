@@ -27,6 +27,7 @@ import {
   renderTestCompleteGameDocument,
 } from './complete-game-document-fixture'
 import { readAuthoredDocumentReceipt } from '../beegame/authored-document-receipt'
+import { createModelConfig, resetModelConfigs } from '@bee-game-studio/agent-workflow'
 
 const waitForIdle = async (
   manager: BeeGameSessionManager,
@@ -78,6 +79,44 @@ describe('BeeGame session runtime resilience', () => {
 
   afterEach(async () => {
     if (root) await rm(root, { recursive: true, force: true })
+    resetModelConfigs()
+  })
+
+  test('routes the fact worker through the configured fast model in the real runner start environment', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-fact-fast-route-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    const config = createModelConfig('owner-1', {
+      name: 'Fact fast route',
+      provider: 'anthropic-compatible',
+      apiKey: 'test-key',
+      models: { fast: 'claude-fast', balanced: 'claude-balanced', strong: 'claude-strong' },
+    })
+    let started: BeeGameSessionRunnerStartInput | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async input => {
+        started = input
+        return {
+          submit: async ({ onMessage }) => onMessage({
+            type: 'result', subtype: 'success', is_error: false,
+            structured_output: {
+              workerType: 'foundation-fact-extractor', status: 'completed', runId: 'run-fast', dispatchId: 'dispatch-fast', taskId: 'task-fast', revision: 'rev-fast', packetDigest: 'a'.repeat(64), results: [],
+            },
+          } as DashboardSDKMessage),
+          stop: () => undefined,
+        }
+      },
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath, userId: 'user-1', modelConfigId: config.id,
+      workflowWorker: true, workflowRunId: 'run-fast', workflowDispatchId: 'dispatch-fast', workflowWorkerType: 'foundation-fact-extractor',
+      workflowJsonSchema: { type: 'object', additionalProperties: false },
+    })
+    await manager.send(session.id, 'extract the packet')
+    await waitForIdle(manager, session.id)
+    expect(started?.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('claude-fast')
+    expect(started?.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('claude-fast')
   })
 
   test('commits a foundation Markdown stream before completing the turn', async () => {

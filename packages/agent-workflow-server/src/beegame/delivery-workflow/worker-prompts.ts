@@ -298,7 +298,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'foundation-fact-extractor':
-      return 'Call the scoped foundation fact result terminal exactly once with taskId, revision, packetDigest, and the complete bounded result set. Do not return terminal JSON or completion prose.'
+      return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with taskId, revision, packetDigest, and the complete bounded result set. Do not call project tools, return terminal JSON as prose, or add completion text.'
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||

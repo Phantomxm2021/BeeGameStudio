@@ -31,12 +31,14 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { foundationFactExtractorTerminalSchema } from './delivery-workflow/worker-contracts'
+import { foundationFactExtractorTerminalSchema, foundationFactStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
   BeeGameSessionLanguage,
 } from './session-manager'
+import { selectFoundationFactFastRuntime } from './session-manager'
+import { mapModelConfigToRuntime } from '@bee-game-studio/agent-workflow'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import {
   createResourceContentTerminalFromReceipt,
@@ -248,6 +250,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
       input.sessions.stop(sessionId)
   }
   return {
+    async assertFoundationFactFastReady(request) {
+      if (request.workerType !== 'foundation-fact-extractor') return
+      const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
+      selectFoundationFactFastRuntime(runtime, runtime?.env ?? {})
+    },
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
       const requestedResumeSession = request.contract.resumeWorkerSessionId
@@ -281,6 +288,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
         workflowAllowedPaths: request.allowedPaths ?? [],
+        ...(request.workerType === 'foundation-fact-extractor'
+          ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown> }
+          : {}),
         ...(request.projectReadScope
           ? { workflowProjectReadScope: request.projectReadScope }
           : {}),
@@ -577,6 +587,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
         // The accepted structured submission is durable workflow evidence, but
         // Bee Game Studio still owns its normal turn completion. Drain the native
         // turn before the workflow controller is allowed to close the session.
+        if (request?.workerType === 'foundation-fact-extractor') {
+          const factTerminal = createDeterministicFoundationFactTerminal({ request, events })
+          if (factTerminal) return factTerminal
+        }
         if (request && hasCompletedStructuredSubmission(request, events)) {
           if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
             await input.sessions.waitForWorkflowWorkerIdle(sessionId)
@@ -844,8 +858,6 @@ function structuredSubmissionToolName(
   switch (request.workerType) {
     case 'document-author':
       return undefined
-    case 'foundation-fact-extractor':
-      return 'SubmitFoundationFactResult'
     case 'atomic-task-planner':
       return 'SubmitAtomicTaskPlan'
     case 'implementation-worker':
@@ -908,7 +920,9 @@ async function createDeterministicStructuredTerminal(input: {
         'canonical document completion must use its commit receipt',
       )
     case 'foundation-fact-extractor':
-      return createDeterministicFoundationFactTerminal(input)
+      return createDeterministicFoundationFactTerminal(input) ?? (() => {
+        throw new Error('worker terminal result is missing a valid StructuredOutput fact result')
+      })()
     case 'atomic-task-planner':
       return createDeterministicAtomicTaskPlannerTerminal(input)
     case 'implementation-worker':
@@ -936,26 +950,16 @@ async function createDeterministicStructuredTerminal(input: {
 function createDeterministicFoundationFactTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
-}) {
-  const candidates = [...input.events].reverse().flatMap(event => {
-    if (event.type !== 'tool.completed' || event.payload?.toolName !== 'SubmitFoundationFactResult') return []
-    const value = event.payload.input
-    return value && typeof value === 'object' && !Array.isArray(value) ? [value as Record<string, unknown>] : []
-  })
-  for (const candidate of candidates) {
-    if (candidate.runId !== input.request.runId || candidate.dispatchId !== input.request.dispatchId)
-      throw new Error('foundation fact terminal run or dispatch identity does not match')
-    const { runId: _runId, dispatchId: _dispatchId, ...payload } = candidate
-    const parsed = foundationFactExtractorTerminalSchema.parse({
-      ...payload,
-      workerType: 'foundation-fact-extractor',
-      status: 'completed',
-    })
-    if (parsed.taskId !== input.request.taskId || parsed.revision !== input.request.revision || parsed.packetDigest !== input.request.contract.packetDigest)
-      throw new Error('foundation fact terminal identity does not match dispatch contract')
-    return parsed
-  }
-  throw new Error('worker terminal result is missing a valid SubmitFoundationFactResult call')
+}): ReturnType<typeof foundationFactExtractorTerminalSchema.parse> | undefined {
+  const resultEvent = [...input.events].reverse().find(event => event.type === 'result')
+  const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
+    ? (resultEvent.payload as Record<string, unknown>).structured_output
+    : undefined
+  if (structured === undefined) return undefined
+  const parsed = foundationFactExtractorTerminalSchema.parse(structured)
+  if (parsed.runId !== input.request.runId || parsed.dispatchId !== input.request.dispatchId || parsed.taskId !== input.request.taskId || parsed.revision !== input.request.revision || parsed.packetDigest !== input.request.contract.packetDigest)
+    throw new Error('foundation fact terminal identity does not match dispatch contract')
+  return parsed
 }
 
 function completedToolInputs(

@@ -140,7 +140,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 31 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 32 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -357,10 +357,13 @@ export type WorkerDispatchRequest = {
   protectedPaths?: string[]
   /** Explicit project-read scope; fact workers use the empty scope. */
   projectReadScope?: 'empty'
+  workflowJsonSchema?: Record<string, unknown>
   contract: Record<string, unknown>
 }
 
 export type DeliveryWorkerPort = {
+  /** Front-door validation for the fact worker's persisted fast model route. */
+  assertFoundationFactFastReady?(request: WorkerDispatchRequest): Promise<void>
   start(
     request: WorkerDispatchRequest,
   ): Promise<{ sessionId: string; dispatchId: string }>

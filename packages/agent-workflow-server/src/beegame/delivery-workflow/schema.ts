@@ -101,6 +101,7 @@ const workerDispatchRequestSchema: z.ZodType<WorkerDispatchRequest> = z
     allowedPaths: z.array(z.string().min(1)).optional(),
     protectedPaths: z.array(z.string().min(1)).optional(),
     projectReadScope: z.literal('empty').optional(),
+    workflowJsonSchema: z.record(z.string(), z.unknown()).optional(),
     contract: z.record(z.string(), z.unknown()),
   })
   .strict()

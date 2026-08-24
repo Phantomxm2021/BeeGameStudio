@@ -23,6 +23,54 @@ import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
 
 describe('delivery worker session credentials', () => {
+  test('uses the native StructuredOutput result for fact extraction and passes its strict schema to the runner', async () => {
+    const starts: Array<Record<string, unknown>> = []
+    const structured = {
+      workerType: 'foundation-fact-extractor',
+      status: 'completed',
+      runId: 'run-facts',
+      dispatchId: 'dispatch-facts',
+      taskId: 'task-facts',
+      revision: 'revision-facts',
+      packetDigest: 'a'.repeat(64),
+      results: [],
+    }
+    const sessions = {
+      start(input: Record<string, unknown>) {
+        starts.push(input)
+        return { id: 'session-facts' }
+      },
+      events() {
+        return [{
+          id: 'fact-result',
+          type: 'result' as const,
+          text: 'Structured output accepted',
+          createdAt: new Date(),
+          payload: { type: 'result', subtype: 'success', structured_output: structured },
+        }]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    const request = {
+      dispatchId: 'dispatch-facts',
+      runId: 'run-facts',
+      ownerId: 'user-1',
+      workspacePath: '/tmp/fact-project',
+      workerType: 'foundation-fact-extractor' as const,
+      phase: 'DOCUMENT_REVIEW' as const,
+      taskId: 'task-facts',
+      revision: 'revision-facts',
+      allowedPaths: [],
+      projectReadScope: 'empty' as const,
+      workflowJsonSchema: { type: 'object', additionalProperties: false },
+      contract: { taskId: 'task-facts', packetDigest: 'a'.repeat(64), modelTier: 'fast', workerType: 'foundation-fact-extractor' },
+    } as unknown as WorkerDispatchRequest
+    await port.start(request)
+    const terminal = await port.waitForTerminal?.('dispatch-facts')
+    expect(terminal).toEqual(structured)
+    expect(starts[0]?.workflowJsonSchema).toEqual(request.workflowJsonSchema)
+  })
+
   test('accepts only the planner resource-plan terminal contract', async () => {
     const workspacePath = await createResourceWorkspace()
     try {

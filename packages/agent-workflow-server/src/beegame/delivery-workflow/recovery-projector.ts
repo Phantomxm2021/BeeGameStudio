@@ -1682,6 +1682,17 @@ export async function projectExactResumeRun(input: {
           'recovery_checkpoint_conflict',
           'foundation fact recovery contains more than four running tasks',
         )
+      for (const task of state.tasks) {
+        const dispatch = task.dispatch
+        if (!dispatch) continue
+        const request = dispatch.request
+        const contract = request?.contract
+        if (dispatch.taskId !== task.taskId || dispatch.revision !== task.revision || (typeof request?.taskId === 'string' && request.taskId !== task.taskId) || (typeof request?.revision === 'string' && request.revision !== task.revision) || (contract && typeof contract === 'object' && 'packetDigest' in contract && contract.packetDigest !== task.packetDigest))
+          recoveryError(
+            'recovery_checkpoint_conflict',
+            `foundation fact recovery dispatch identity is inconsistent for ${task.taskId}`,
+          )
+      }
       if (
         (state.status === 'facts_staged' || state.status === 'derived_committed') &&
         !state.tasks.every(task => task.status === 'completed' && task.receiptPath && task.receiptDigest)

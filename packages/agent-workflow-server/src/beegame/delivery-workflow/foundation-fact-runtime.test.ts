@@ -56,6 +56,8 @@ describe('foundation fact runtime', () => {
     const terminal = {
       workerType: 'foundation-fact-extractor' as const,
       status: 'completed' as const,
+      runId: 'run-1',
+      dispatchId: 'dispatch-a',
       revision: 'rev-1',
       taskId: 'task-a',
       packetDigest: 'a'.repeat(64),
@@ -99,7 +101,7 @@ describe('foundation fact runtime', () => {
 
   test('does not complete failed terminals and fails safely on measured caps/deadline', () => {
     const claimed = claimFoundationFactTasks(collection(), { dispatchIdFor: () => 'dispatch-a', now: '2026-08-24T00:00:01.000Z' })
-    const base = { taskId: 'task-a', dispatchId: 'dispatch-a', revision: 'rev-1', packetDigest: 'a'.repeat(64), terminal: { workerType: 'foundation-fact-extractor' as const, status: 'failed' as const, revision: 'rev-1', taskId: 'task-a', packetDigest: 'a'.repeat(64), results: [] }, durationMs: 1, now: '2026-08-24T00:00:02.000Z' }
+    const base = { taskId: 'task-a', dispatchId: 'dispatch-a', revision: 'rev-1', packetDigest: 'a'.repeat(64), terminal: { workerType: 'foundation-fact-extractor' as const, status: 'failed' as const, runId: 'run-1', dispatchId: 'dispatch-a', revision: 'rev-1', taskId: 'task-a', packetDigest: 'a'.repeat(64), results: [] }, durationMs: 1, now: '2026-08-24T00:00:02.000Z' }
     const failed = admitFoundationFactTerminal(claimed, { ...base, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 } })
     expect(failed.accepted).toBe(false)
     expect(failed.state.tasks[0]?.status).toBe('retryable')

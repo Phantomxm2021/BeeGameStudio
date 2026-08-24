@@ -13,8 +13,7 @@ function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string
   return `${[`# ${path}`, '', ...contract.sections.flatMap(section => [`<!-- beegame-section:${section.sectionId} -->`, `## ${section.title}`, '', 'unresolved prose', ''])].join('\n')}\n`
 }
 
-function port(): DeliveryWorkerPort {
-  const started = new Set<string>()
+function port(started = new Set<string>()): DeliveryWorkerPort {
   return {
     async start(request) { started.add(request.dispatchId!); return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! } },
     async submit() {},
@@ -32,10 +31,11 @@ describe('foundation fact runtime controller integration', () => {
     const context = '{"game":"bee"}'
     const run = createInitialDeliveryRun({ projectId: 'project', ownerId: 'owner', confirmedBriefContext: context, confirmedBriefDigest: createHash('sha256').update(context).digest('hex'), documentRevision: 'rev-1', workspaceRevision: 'workspace-1' })
     const ready = { ...run, phase: 'DOCUMENT_DRAFTING' as const, documentStep: 'FOUNDATION_DRAFTING' as const, foundationDraftState: { completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS] }, revision: { ...run.revision, document: 'rev-1' } }
-    const controller = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: port() })
+    const started = new Set<string>()
+    const controller = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: port(started) })
     await controller.store.save(ready)
     await controller.resume(ready)
-    return { workspacePath, controller }
+    return { workspacePath, controller, started }
   }
 
   test('runs eight tasks in two four-way waves and commits only after facts_staged', async () => {
@@ -58,7 +58,7 @@ describe('foundation fact runtime controller integration', () => {
         const task = snapshot!.foundationAuditState!.tasks.find(candidate => candidate.taskId === taskId)!
         const packet = task.dispatch!.request!.contract.packet as { keys: string[] }
         await controller.store.addWorkflowUsage(snapshot!.runId, { input_tokens: 2, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 3, total_tokens: 5 }, task.dispatch!.dispatchId)
-        await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', taskId, revision: task.revision, packetDigest: task.packetDigest, results: packet.keys.map(key => ({ key, status: 'absent' })) })
+        await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: snapshot!.runId, dispatchId: task.dispatch!.dispatchId, taskId, revision: task.revision, packetDigest: task.packetDigest, results: packet.keys.map(key => ({ key, status: 'absent' })) })
       }
       const firstWave = current!.foundationAuditState!.tasks.filter(task => task.status === 'running').map(task => task.taskId)
       await Promise.all(firstWave.map(complete))
@@ -86,7 +86,7 @@ describe('foundation fact runtime controller integration', () => {
       let current = await controller.store.load()
       const task = current!.foundationAuditState!.tasks.find(candidate => candidate.status === 'running')!
       await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {
-        workerType: 'foundation-fact-extractor', status: 'completed', taskId: task.taskId,
+        workerType: 'foundation-fact-extractor', status: 'completed', runId: current!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId,
         revision: task.revision, packetDigest: task.packetDigest,
         results: [{ key: 'not-in-packet', status: 'absent' }],
       })).rejects.toThrow()
@@ -99,7 +99,7 @@ describe('foundation fact runtime controller integration', () => {
       const retried = current!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!
       const packet = retried.dispatch!.request!.contract.packet as { keys: string[] }
       await controller.dispatcher.completeDispatch(retried.dispatch!.dispatchId, {
-        workerType: 'foundation-fact-extractor', status: 'completed', taskId: retried.taskId,
+        workerType: 'foundation-fact-extractor', status: 'completed', runId: current!.runId, dispatchId: retried.dispatch!.dispatchId, taskId: retried.taskId,
         revision: retried.revision, packetDigest: retried.packetDigest,
         results: packet.keys.map(key => ({ key, status: 'absent' })),
       })
@@ -107,7 +107,15 @@ describe('foundation fact runtime controller integration', () => {
       const completed = admitted!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!
       expect(completed.status).toBe('completed')
       const receiptDigest = completed.receiptDigest
-      await controller.dispatcher.replayTerminal(completed.dispatch!)
+      const tampered = { ...completed.dispatch!, terminalResult: { ...completed.dispatch!.terminalResult, results: [] } }
+      await controller.store.commit({
+        ...admitted!,
+        foundationAuditState: {
+          ...admitted!.foundationAuditState!,
+          tasks: admitted!.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, dispatch: tampered } : candidate),
+        },
+      }, { runId: admitted!.runId, type: 'test.tampered.replay', phase: admitted!.phase, status: admitted!.status, revision: admitted!.revision })
+      await expect(controller.dispatcher.replayTerminal(tampered)).rejects.toThrow(/digest|replay|terminal/i)
       const replayed = await controller.store.load()
       expect(replayed!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!.receiptDigest).toBe(receiptDigest)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
@@ -126,6 +134,74 @@ describe('foundation fact runtime controller integration', () => {
       expect(recovered!.activeDispatch?.dispatchId).toBe('ordinary-dispatch')
       expect(recovered!.foundationAuditState!.tasks.filter(task => task.status === 'retryable')).toHaveLength(4)
       expect(recovered!.foundationAuditState!.tasks.filter(task => task.status === 'running')).toHaveLength(0)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('retains two terminals that enter from the same stale snapshot', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      const originalLoad = controller.store.load.bind(controller.store)
+      let barrierCount = 0
+      let releaseBarrier!: () => void
+      const barrier = new Promise<void>(resolve => { releaseBarrier = resolve })
+      controller.store.load = async (...args) => {
+        const snapshot = await originalLoad(...args)
+        if (barrierCount < 2) {
+          barrierCount += 1
+          if (barrierCount === 2) releaseBarrier()
+          await barrier
+        }
+        return snapshot
+      }
+      const current = await originalLoad()
+      const tasks = current!.foundationAuditState!.tasks.filter(task => task.status === 'running').slice(0, 2)
+      const complete = async (task: (typeof tasks)[number]) => {
+        const packet = task.dispatch!.request!.contract.packet as { keys: string[] }
+        await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {
+          workerType: 'foundation-fact-extractor', status: 'completed', runId: current!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId,
+          revision: task.revision, packetDigest: task.packetDigest,
+          results: packet.keys.map(key => ({ key, status: 'absent' })),
+        })
+      }
+      await Promise.all([complete(tasks[0]!), complete(tasks[1]!)])
+      const after = await originalLoad()
+      expect(after!.foundationAuditState!.tasks.filter(task => task.status === 'completed')).toHaveLength(2)
+      expect(after!.foundationAuditState!.tasks.filter(task => task.receiptPath && task.receiptDigest)).toHaveLength(2)
+      expect(after!.foundationAuditState!.tasks.filter(task => task.usage)).toHaveLength(2)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('does not dispatch a new wave after the extraction phase deadline', async () => {
+    const { workspacePath, controller, started } = await preparedController()
+    try {
+      const current = await controller.store.load()
+      await controller.store.reconcile(async () => false)
+      const recovered = await controller.store.load()
+      await controller.store.commit({
+        ...recovered!,
+        foundationAuditState: { ...recovered!.foundationAuditState!, phaseStartedAt: '2026-08-23T00:00:00.000Z' },
+      }, { runId: current!.runId, type: 'test.phase.expired', phase: recovered!.phase, status: recovered!.status, revision: recovered!.revision })
+      const before = started.size
+      await expect(controller.resume(await controller.store.load() as never)).rejects.toThrow(/deadline|claim/i)
+      expect(started.size).toBe(before)
+      expect((await controller.store.load())!.foundationAuditState!.tasks.every(task => task.status === 'needs_action')).toBe(true)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('does not retry a task whose measured output exceeds the cap', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      const current = await controller.store.load()
+      const task = current!.foundationAuditState!.tasks.find(candidate => candidate.status === 'running')!
+      await controller.store.addWorkflowUsage(current!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 513, total_tokens: 514 }, task.dispatch!.dispatchId)
+      const packet = task.dispatch!.request!.contract.packet as { keys: string[] }
+      await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {
+        workerType: 'foundation-fact-extractor', status: 'completed', runId: current!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId,
+        revision: task.revision, packetDigest: task.packetDigest,
+        results: packet.keys.map(key => ({ key, status: 'absent' })),
+      })
+      const after = await controller.store.load()
+      expect(after!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('needs_action')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 })

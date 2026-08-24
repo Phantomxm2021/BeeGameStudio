@@ -49,6 +49,8 @@ export type FoundationFactTaskCollection = {
 export type FoundationFactTerminal = {
   workerType: 'foundation-fact-extractor'
   status: 'completed' | 'failed' | 'blocked'
+  runId: string
+  dispatchId: string
   revision: string
   taskId: string
   packetDigest: string
@@ -81,6 +83,10 @@ function digest(value: unknown): string {
       ? `{${Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`).join(',')}}`
       : JSON.stringify(item)
   return createHash('sha256').update(canonical(value)).digest('hex')
+}
+
+export function digestFoundationFactTerminal(value: FoundationFactTerminal): string {
+  return digest(value)
 }
 
 function usage(value: WorkflowUsage): WorkflowUsage {
@@ -135,21 +141,24 @@ export function createFoundationFactTaskCollection(input: {
 
 export function claimFoundationFactTasks(
   state: FoundationFactTaskCollection,
-  input: { dispatchIdFor: (task: FoundationFactTask) => string; now: string },
+  input: { dispatchIdFor: (task: FoundationFactTask) => string; now: string; onlyTaskId?: string; modelReady?: boolean },
 ): FoundationFactTaskCollection {
-  if (Date.parse(input.now) - Date.parse(state.phaseStartedAt) > FOUNDATION_FACT_PHASE_DEADLINE_MS)
+  const phaseExpired = Date.parse(input.now) - Date.parse(state.phaseStartedAt) > FOUNDATION_FACT_PHASE_DEADLINE_MS
+  const aggregateCapped = state.aggregateUsage.total_tokens >= FOUNDATION_FACT_MAX_MODEL_TOKENS
+  const modelUnavailable = input.modelReady === false
+  if (phaseExpired || aggregateCapped || modelUnavailable)
     return {
       ...state,
       tasks: state.tasks.map(task =>
         task.status === 'pending' || task.status === 'retryable'
-          ? { ...task, status: 'needs_action', failureReason: 'foundation fact extraction phase deadline exceeded' }
+          ? { ...task, status: 'needs_action', failureReason: phaseExpired ? 'foundation fact extraction phase deadline exceeded' : aggregateCapped ? 'foundation fact aggregate model token cap exceeded' : 'foundation fact fast model is not configured' }
           : task,
       ),
     }
   const running = state.tasks.filter(task => task.status === 'running').length
   let slots = Math.max(0, FOUNDATION_FACT_MAX_RUNNING - running)
   const tasks = state.tasks.map(task => {
-    if (slots <= 0 || (task.status !== 'pending' && task.status !== 'retryable')) return task
+    if (slots <= 0 || (task.status !== 'pending' && task.status !== 'retryable') || (input.onlyTaskId && task.taskId !== input.onlyTaskId)) return task
     if (task.attempt >= 2)
       return { ...task, status: 'needs_action' as const, failureReason: 'foundation fact task attempt cap exceeded' }
     const dispatchId = input.dispatchIdFor(task)
@@ -204,7 +213,7 @@ export function admitFoundationFactTerminal(
   const completed = !failureReason
   const nextTask: FoundationFactTask = {
     ...task,
-    status: completed ? 'completed' : task.attempt < 2 ? 'retryable' : 'needs_action',
+    status: completed ? 'completed' : capReason ? 'needs_action' : task.attempt < 2 ? 'retryable' : 'needs_action',
     terminalDigest,
     usage: measuredUsage,
     durationMs: Math.max(0, input.durationMs),

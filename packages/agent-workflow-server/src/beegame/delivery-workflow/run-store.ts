@@ -1096,6 +1096,17 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       if (!run) return run
       if (run.foundationAuditState) {
         const tasks = run.foundationAuditState.tasks
+        const runningFactTasks = tasks.filter(task => task.status === 'running')
+        if (runningFactTasks.length > 4)
+          throw new WorkflowStoreError('foundation fact recovery exceeds the four-worker limit', 'conflict')
+        for (const task of tasks) {
+          const dispatch = task.dispatch
+          if (!dispatch) continue
+          const request = dispatch.request
+          const contract = request?.contract
+          if (dispatch.taskId !== task.taskId || dispatch.revision !== task.revision || (typeof request?.taskId === 'string' && request.taskId !== task.taskId) || (typeof request?.revision === 'string' && request.revision !== task.revision) || (contract && typeof contract === 'object' && 'packetDigest' in contract && contract.packetDigest !== task.packetDigest))
+            throw new WorkflowStoreError('foundation fact recovery dispatch identity is inconsistent', 'conflict')
+        }
         const unavailable: typeof tasks = []
         for (const task of tasks) {
           if (task.status !== 'running' || !task.dispatch) continue

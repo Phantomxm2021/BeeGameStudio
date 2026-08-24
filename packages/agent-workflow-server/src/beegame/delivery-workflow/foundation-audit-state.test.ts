@@ -8,8 +8,8 @@ import type { FoundationFactTask } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
-    schemaVersion: 2 as const,
-    schemaFingerprint: 'foundation-audit-state-v2' as const,
+    schemaVersion: 3 as const,
+    schemaFingerprint: 'foundation-audit-state-v3' as const,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(
@@ -40,5 +40,23 @@ describe('foundationAuditState schema', () => {
     expect(() =>
       parseFoundationAuditState({ ...valid, unknown: true }),
     ).toThrow()
+  })
+
+  test('rejects staged states that still contain pending or running tasks', () => {
+    const task = {
+      taskId: 'revision-1:fact:0',
+      kind: 'document-facts' as const,
+      revision: 'revision-1',
+      packetDigest: 'c'.repeat(64),
+      modelTier: 'fast' as const,
+      status: 'pending' as const,
+      attempt: 0,
+    }
+    expect(() => parseFoundationAuditState({
+      ...valid,
+      status: 'facts_staged',
+      phaseStartedAt: '2026-08-24T00:00:00.000Z',
+      tasks: [task],
+    })).toThrow(/pending|receipt|completed/i)
   })
 })

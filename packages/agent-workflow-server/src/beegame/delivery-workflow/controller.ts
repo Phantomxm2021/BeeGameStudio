@@ -63,13 +63,14 @@ import type {
 } from './types'
 import {
   parseWorkerTerminalResult,
+  foundationFactStructuredOutputJsonSchema,
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, validateFoundationFactResults } from './foundation-fact-extraction'
-import { admitFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
+import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt } from './foundation-audit-artifacts'
 import { createFoundationFactStore, digestFactStore } from './foundation-fact-store'
 import type { FoundationAuditState } from './foundation-audit-state'
@@ -135,6 +136,10 @@ export function createDeliveryWorkflowController(input: {
   const store = createRunStore(input.workspacePath, input.ownerId)
   let dispatcher: ReturnType<typeof createDeliveryDispatcher>
   let controllerTail: Promise<void> = Promise.resolve()
+  // A completed fact envelope may be durable before its serialized admission
+  // callback starts. Recovery must not race that callback by replaying the
+  // same envelope through the unlocked handler.
+  const terminalAdmissionInFlight = new Set<string>()
   const handoffRecoveryGraceMs = input.handoffRecoveryGraceMs ?? 1_000
 
   function serialize<T>(operation: () => Promise<T>): Promise<T> {
@@ -223,7 +228,10 @@ export function createDeliveryWorkflowController(input: {
     result: WorkerTerminalResult,
     request?: WorkerDispatchRequest,
   ): Promise<void> {
-    return serialize(() => handleTerminalUnlocked(record, result, request))
+    terminalAdmissionInFlight.add(record.dispatchId)
+    return serialize(() => handleTerminalUnlocked(record, result, request)).finally(() => {
+      terminalAdmissionInFlight.delete(record.dispatchId)
+    })
   }
 
   async function finalizeFoundationFacts(run: DeliveryRun): Promise<void> {
@@ -278,6 +286,7 @@ export function createDeliveryWorkflowController(input: {
         if (!locked || !lockedTask || !lockedTask.dispatch || lockedTask.dispatch.dispatchId !== record.dispatchId) return
         const lockedState = locked.foundationAuditState!
         if (lockedTask.status === 'completed') {
+          if (lockedTask.terminalDigest !== digestFoundationFactTerminal(result as never)) throw new Error('conflicting foundation fact terminal replay')
           if (lockedState.status === 'facts_staged') factsStagedRun = locked
         } else {
         const packet = request?.contract.packet
@@ -285,7 +294,16 @@ export function createDeliveryWorkflowController(input: {
         const artifacts = await loadFoundationAuditArtifacts({ workspacePath: input.workspacePath, revision: locked.revision.document, expectedState: locked.foundationAuditState })
         if (!artifacts) throw new Error('foundation fact section index is unavailable')
         const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(input.workspacePath, path), 'utf8')] as const)))
-        const validated = validateFoundationFactResults({ packet: packet as never, expectedRevision: lockedTask.revision, documents, sectionIndex: artifacts.sectionIndex, results: result.results as never })
+        let validated: ReturnType<typeof validateFoundationFactResults>
+        try {
+          validated = validateFoundationFactResults({ packet: packet as never, expectedRevision: lockedTask.revision, documents, sectionIndex: artifacts.sectionIndex, results: result.results as never })
+        } catch (error) {
+          const invalid = new Error(error instanceof Error ? error.message : 'foundation fact result is invalid')
+          invalid.name = (record.usage?.completion_tokens ?? 0) > 512
+            ? 'FoundationFactOutputCapError'
+            : 'FoundationFactInvalidResultError'
+          throw invalid
+        }
         const runtimeState: FoundationFactTaskCollection = { revision: lockedState.revision, phaseStartedAt: lockedState.phaseStartedAt!, status: lockedState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts', tasks: lockedState.tasks, aggregateUsage: lockedState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 } }
         const admission = admitFoundationFactTerminal(runtimeState, { taskId: lockedTask.taskId, dispatchId: record.dispatchId, revision: result.revision, packetDigest: result.packetDigest, terminal: result, usage: record.usage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, durationMs: Math.max(0, Date.parse(record.finishedAt ?? new Date().toISOString()) - Date.parse(record.startedAt)), now: new Date().toISOString() })
         let auditState: FoundationAuditState = { ...lockedState, status: admission.state.status, tasks: admission.state.tasks, aggregateUsage: admission.state.aggregateUsage }
@@ -1017,7 +1035,7 @@ export function createDeliveryWorkflowController(input: {
     }
     if (run.foundationAuditState) {
       const replayableFactDispatches = run.foundationAuditState.tasks
-        .filter(task => task.status !== 'completed' && task.dispatch?.terminalResult)
+        .filter(task => task.status !== 'completed' && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId))
         .map(task => task.dispatch!)
       if (replayableFactDispatches.length) {
         for (const dispatch of replayableFactDispatches)
@@ -1077,7 +1095,7 @@ export function createDeliveryWorkflowController(input: {
         for (const task of available.slice(0, 4 - running)) {
           const packetPath = join(input.workspacePath, `.beegame/audit/foundation/${run.foundationAuditState.revision}/staging/packets/${task.taskId}.json`)
           const packet = JSON.parse(await readFile(packetPath, 'utf8')) as Record<string, unknown>
-          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-fact-extractor' } })
+          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-fact-extractor' } })
         }
         return
       }

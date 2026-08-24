@@ -20,6 +20,7 @@ import type {
   WorkerDispatchRequest,
 } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
+import { claimFoundationFactTasks, digestFoundationFactTerminal, type FoundationFactTask, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
 import {
   recordFoundationDispatch,
@@ -96,53 +97,6 @@ function auditFactDispatch(
   taskId: string,
 ): DispatchRecord | undefined {
   return run.foundationAuditState?.tasks.find(task => task.taskId === taskId)?.dispatch
-}
-
-function withFoundationFactDispatch(
-  run: DeliveryRun,
-  taskId: string,
-  dispatch: DispatchRecord,
-): DeliveryRun {
-  if (!run.foundationAuditState) throw new DispatchError('blocked', 'foundation fact state is missing')
-  return {
-    ...run,
-    foundationAuditState: {
-      ...run.foundationAuditState,
-      status: 'extracting_facts',
-      tasks: run.foundationAuditState.tasks.map(task => task.taskId === taskId ? { ...task, status: 'running', attempt: task.attempt + 1, dispatch } : task),
-    },
-  }
-}
-
-function withFoundationFactTerminal(
-  run: DeliveryRun,
-  taskId: string,
-  dispatch: DispatchRecord,
-): DeliveryRun {
-  if (!run.foundationAuditState) throw new DispatchError('blocked', 'foundation fact state is missing')
-  return {
-    ...run,
-    foundationAuditState: {
-      ...run.foundationAuditState,
-      tasks: run.foundationAuditState.tasks.map(task => task.taskId === taskId ? { ...task, dispatch } : task),
-    },
-  }
-}
-
-function withFoundationFactInvalid(
-  run: DeliveryRun,
-  taskId: string,
-  dispatch: DispatchRecord,
-  reason: string,
-): DeliveryRun {
-  if (!run.foundationAuditState) throw new DispatchError('blocked', 'foundation fact state is missing')
-  return {
-    ...run,
-    foundationAuditState: {
-      ...run.foundationAuditState,
-      tasks: run.foundationAuditState.tasks.map(task => task.taskId === taskId ? { ...task, status: task.attempt < 2 ? 'retryable' as const : 'needs_action' as const, dispatch, failureReason: reason } : task),
-    },
-  }
 }
 
 function hasRunningFoundationDispatch(run: DeliveryRun): boolean {
@@ -432,6 +386,52 @@ export function createDeliveryDispatcher(options: {
     })
   }
 
+  async function mutateFoundationFactTask(
+    dispatchId: string,
+    eventType: string,
+    mutate: (input: { task: FoundationFactTask; record: DispatchRecord }) => {
+      task: FoundationFactTask
+      record: DispatchRecord
+      runStatus?: DeliveryRun['status']
+      blockedReason?: string
+    },
+  ): Promise<DispatchRecord> {
+    const initial = await options.store.load()
+    const initialLocation = initial ? dispatchLocation(initial, dispatchId) : undefined
+    if (!initial || !initialLocation?.auditTaskId)
+      throw new DispatchError('not_found', 'foundation fact dispatch is not active')
+    const lease = await acquireDispatchLease(initial.runId)
+    try {
+      const locked = await options.store.load(lease)
+      const location = locked ? dispatchLocation(locked, dispatchId) : undefined
+      const task = location?.auditTaskId
+        ? locked?.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.auditTaskId)
+        : undefined
+      if (!locked || !location?.auditTaskId || !task || task.dispatch?.dispatchId !== dispatchId)
+        throw new DispatchError('not_found', 'foundation fact dispatch lost durable authority')
+      const changed = mutate({ task, record: task.dispatch! })
+      const next = {
+        ...locked,
+        ...(changed.runStatus ? { status: changed.runStatus } : {}),
+        ...(changed.blockedReason !== undefined ? { blockedReason: changed.blockedReason } : {}),
+        foundationAuditState: {
+          ...locked.foundationAuditState!,
+          tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? changed.task : candidate),
+        },
+      }
+      await options.store.commit(next, {
+        runId: locked.runId,
+        type: eventType,
+        phase: locked.phase,
+        status: next.status,
+        revision: locked.revision,
+        dispatchId,
+        taskId: task.taskId,
+      }, undefined, lease)
+      return changed.record
+    } finally { await options.store.unlock(lease) }
+  }
+
   function dispatch(request: WorkerDispatchRequest): Promise<DispatchRecord> {
     const previous = dispatchTail
     const current = previous
@@ -553,6 +553,36 @@ export function createDeliveryDispatcher(options: {
           if (currentFactTask.attempt >= 2)
             throw new DispatchError('blocked', 'foundation fact task attempt cap exceeded')
         }
+        let fastModelError: string | undefined
+        if (factRequest && options.workerPort.assertFoundationFactFastReady) {
+          try {
+            await options.workerPort.assertFoundationFactFastReady(request)
+          } catch (error) {
+            fastModelError = error instanceof Error ? error.message : 'foundation fact extractor fast model is not configured'
+          }
+        }
+        let claimedFoundationState: FoundationFactTaskCollection | undefined
+        if (factRequest && current.foundationAuditState && request.taskId) {
+          const claimed = claimFoundationFactTasks({
+            revision: current.foundationAuditState.revision,
+            phaseStartedAt: current.foundationAuditState.phaseStartedAt!,
+            status: current.foundationAuditState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts',
+            tasks: current.foundationAuditState.tasks,
+            aggregateUsage: current.foundationAuditState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          }, {
+            onlyTaskId: fastModelError ? undefined : request.taskId,
+            dispatchIdFor: () => record.dispatchId,
+            now: record.startedAt,
+            modelReady: !fastModelError && Boolean(request.workflowJsonSchema),
+          })
+          claimedFoundationState = claimed
+          const claimedTask = claimed.tasks.find(task => task.taskId === request.taskId)
+          if (!claimedTask || claimedTask.status !== 'running') {
+            const blocked = claimedTask?.failureReason ?? fastModelError ?? 'foundation fact task is not claimable'
+            await options.store.commit({ ...current, foundationAuditState: { ...current.foundationAuditState, tasks: claimed.tasks }, status: 'needs_action', blockedReason: blocked, thinking: 'idle' }, { runId: current.runId, type: 'foundation.fact.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, dispatchId: record.dispatchId, taskId: request.taskId, reason: blocked }, undefined, lease)
+            throw new DispatchError('blocked', blocked)
+          }
+        }
         const active = currentFactTask
           ? currentFactTask.dispatch?.status === 'running'
             ? currentFactTask.dispatch
@@ -592,8 +622,8 @@ export function createDeliveryDispatcher(options: {
             'duplicate',
             'foundation document authoring batch is active',
           )
-        const next = factRequest && request.taskId
-          ? withFoundationFactDispatch(current, request.taskId, record)
+        const next = factRequest && request.taskId && claimedFoundationState
+          ? { ...current, foundationAuditState: { ...current.foundationAuditState!, status: 'extracting_facts' as const, tasks: claimedFoundationState.tasks.map(task => task.taskId === request.taskId ? { ...task, dispatch: record } : task) } }
           : currentFoundationPath
             ? {
               ...current,
@@ -724,6 +754,73 @@ export function createDeliveryDispatcher(options: {
     return error instanceof Error && error.name === 'WorkerNeedsActionError'
   }
 
+  function isTerminalFoundationFactFailure(reason: string): boolean {
+    return /(?:fast model|model config|phase deadline|extraction phase|aggregate model|output cap|packet cap|attempt cap|not configured)/i.test(reason)
+  }
+
+  async function completeFoundationFactDispatch(
+    dispatchId: string,
+    terminalValue: unknown,
+  ): Promise<{ record: DispatchRecord; result?: WorkerTerminalResult }> {
+    const run = await options.store.load()
+    const location = run ? dispatchLocation(run, dispatchId) : undefined
+    if (!run || !location?.auditTaskId)
+      throw new DispatchError('not_found', 'foundation fact dispatch is not active')
+    const request = requests.get(dispatchId) ?? location.record.request
+    let result: WorkerTerminalResult
+    try {
+      result = parseWorkerTerminalResult(terminalValue)
+      const factResult = result.workerType === 'foundation-fact-extractor' ? result : undefined
+      if (!factResult || !request || factResult.runId !== request.runId || factResult.dispatchId !== dispatchId || factResult.taskId !== request.taskId || factResult.revision !== request.revision || factResult.packetDigest !== request.contract.packetDigest)
+        throw new Error('foundation fact terminal identity does not match dispatch contract')
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'invalid foundation fact terminal'
+      const invalid = parseDispatchRecord({ ...location.record, status: 'invalid' as const, finishedAt: now(), failureReason: reason })
+      await mutateFoundationFactTask(dispatchId, 'dispatch.invalid', ({ task, record }) => ({
+        task: { ...task, status: task.attempt < 2 ? 'retryable' : 'needs_action', failureReason: reason, dispatch: invalid },
+        record: invalid,
+        runStatus: task.attempt < 2 ? 'running' : 'needs_action',
+        blockedReason: task.attempt < 2 ? undefined : reason,
+      }))
+      releaseDispatch(dispatchId)
+      throw new DispatchError('invalid_terminal', 'invalid foundation fact terminal')
+    }
+    const factResult = result as Extract<WorkerTerminalResult, { workerType: 'foundation-fact-extractor' }>
+    const status = factResult.status === 'completed' ? 'completed' : factResult.status === 'blocked' ? 'blocked' : 'failed'
+    const durable = await mutateFoundationFactTask(dispatchId, `dispatch.${status}`, ({ task, record }) => {
+      const completed = parseDispatchRecord({ ...record, status, terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() })
+      return { task: { ...task, dispatch: completed }, record: completed }
+    })
+    try {
+      const key = request ? idempotencyKey(request, Math.max(1, run.tasks.find(task => task.id === request.taskId)?.attempt ?? 1)) : dispatchId
+      await options.credits?.settle?.(key, result)
+      await options.onTerminal?.(durable, result, request)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'workflow terminal handler failed'
+      const terminalIsInvalid = error instanceof Error && (error.name === 'FoundationFactInvalidResultError' || error.name === 'FoundationFactOutputCapError')
+      const terminalNeedsAction = error instanceof Error && error.name === 'FoundationFactOutputCapError'
+      await mutateFoundationFactTask(dispatchId, 'workflow.handler_failed', ({ task, record }) => {
+        const failed = parseDispatchRecord({
+          ...record,
+          status: 'failed',
+          failureReason: reason,
+          ...(terminalIsInvalid ? { terminalResult: undefined } : { terminalResult: record.terminalResult }),
+        })
+        const needsAction = terminalNeedsAction || task.attempt >= 2
+        return {
+          task: { ...task, status: needsAction ? 'needs_action' : 'retryable', failureReason: reason, dispatch: failed },
+          record: failed,
+          runStatus: needsAction ? 'needs_action' : 'running',
+          blockedReason: needsAction ? reason : undefined,
+        }
+      }).catch(() => undefined)
+      releaseDispatch(dispatchId)
+      throw error
+    }
+    releaseDispatch(dispatchId)
+    return { record: durable, result }
+  }
+
   async function completeDispatch(
     dispatchId: string,
     terminalValue: unknown,
@@ -736,6 +833,8 @@ export function createDeliveryDispatcher(options: {
       throw new DispatchError('blocked', 'delivery run is no longer running')
     if (location.record.status !== 'running')
       throw new DispatchError('not_found', 'dispatch is not active')
+    if (location.auditTaskId)
+      return completeFoundationFactDispatch(dispatchId, terminalValue)
     const request = requests.get(dispatchId) ?? location.record.request
     let result: WorkerTerminalResult
     try {
@@ -794,9 +893,7 @@ export function createDeliveryDispatcher(options: {
         finishedAt: now(),
         failureReason: reason,
       })
-      const failedRun = location.auditTaskId
-        ? withFoundationFactInvalid(run, location.auditTaskId, invalid, reason)
-        : location.path
+      const failedRun = location.path
         ? {
             ...run,
             foundationDraftState: recordFoundationFailure(
@@ -813,9 +910,7 @@ export function createDeliveryDispatcher(options: {
               activeDispatch: invalid,
               thinking: 'idle' as const,
             }
-      const isolatedStatus = location.auditTaskId
-        ? (failedRun.foundationAuditState?.tasks.some(task => task.status === 'needs_action') ? 'needs_action' as const : run.status)
-        : location.path
+      const isolatedStatus = location.path
         ? isolatedFoundationFailureStatus(failedRun)
         : failedRun.status
       await options.store.commit(
@@ -837,7 +932,6 @@ export function createDeliveryDispatcher(options: {
         },
       )
       releaseDispatch(dispatchId)
-      if (location.auditTaskId) return { record: invalid }
       throw new DispatchError(
         'invalid_terminal',
         'invalid worker terminal result',
@@ -864,9 +958,7 @@ export function createDeliveryDispatcher(options: {
       terminalResult: result as unknown as Record<string, unknown>,
       finishedAt,
     })
-    const updatedWithDispatch = location.auditTaskId
-      ? withFoundationFactTerminal(run, location.auditTaskId, completed)
-      : location.path
+    const updatedWithDispatch = location.path
       ? withFoundationDispatch(run, location.path, completed)
       : { ...run, activeDispatch: completed }
     const updated = {
@@ -953,14 +1045,10 @@ export function createDeliveryDispatcher(options: {
         : undefined
       if (current && current.runId === run.runId && currentLocation) {
         const handlerFailure = terminalHandlerStarted
-        const status: DeliveryRun['status'] = currentLocation.auditTaskId
-          ? (current.foundationAuditState?.tasks.some(task => task.status === 'needs_action') ? 'needs_action' : 'running')
-          : handlerFailure
+        const status: DeliveryRun['status'] = handlerFailure
             ? 'needs_action'
             : 'failed'
-        const failedCurrent = currentLocation.auditTaskId
-          ? withFoundationFactInvalid(current, currentLocation.auditTaskId, failed, reason)
-          : currentLocation.path
+        const failedCurrent = currentLocation.path
           ? {
               ...current,
               foundationDraftState: handlerFailure
@@ -1022,9 +1110,16 @@ export function createDeliveryDispatcher(options: {
         'blocked',
         'dispatch has no replayable terminal result',
       )
-    const result = parseWorkerTerminalResult(record.terminalResult)
+    let result: WorkerTerminalResult
     try {
+      result = parseWorkerTerminalResult(record.terminalResult)
       const run = await options.store.load()
+      const location = run ? dispatchLocation(run, record.dispatchId) : undefined
+      const task = location?.auditTaskId
+        ? run?.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.auditTaskId)
+        : undefined
+      if (record.workerType === 'foundation-fact-extractor' && (!task?.terminalDigest || digestFoundationFactTerminal(result as never) !== task.terminalDigest))
+        throw new Error('foundation fact terminal replay digest conflicts with durable dispatch')
       const request = record.request
       const attempt = request?.taskId
         ? Math.max(
@@ -1045,6 +1140,26 @@ export function createDeliveryDispatcher(options: {
         ? dispatchLocation(current, record.dispatchId)
         : undefined
       if (current && location) {
+        if (location.auditTaskId) {
+          const failed = await mutateFoundationFactTask(record.dispatchId, 'workflow.replay_failed', ({ task, record: lockedRecord }) => {
+            const terminal = parseDispatchRecord({
+              ...lockedRecord,
+              status: 'failed',
+              failureReason: reason,
+              terminalResult: undefined,
+              finishedAt: lockedRecord.finishedAt ?? now(),
+            })
+            return {
+              task: { ...task, status: 'needs_action', failureReason: reason, dispatch: terminal },
+              record: terminal,
+              runStatus: 'needs_action',
+              blockedReason: reason,
+            }
+          })
+          void failed
+          forgetDispatch(record.dispatchId)
+          throw error
+        }
         const failed = parseDispatchRecord({
           ...location.record,
           status: 'failed',
@@ -1052,9 +1167,7 @@ export function createDeliveryDispatcher(options: {
           terminalResult: undefined,
           finishedAt: location.record.finishedAt ?? now(),
         })
-        const failedRun = location.auditTaskId
-          ? withFoundationFactInvalid(current, location.auditTaskId, failed, reason)
-          : location.path
+        const failedRun = location.path
           ? {
               ...current,
               foundationDraftState: recordFoundationHandlerFailure(
@@ -1068,7 +1181,7 @@ export function createDeliveryDispatcher(options: {
         await options.store.commit(
           {
             ...failedRun,
-            status: location.auditTaskId && failedRun.foundationAuditState?.tasks.every(task => task.status !== 'needs_action') ? 'running' : 'needs_action',
+            status: 'needs_action',
             blockedReason: reason,
             thinking: 'idle',
           },
@@ -1099,15 +1212,27 @@ export function createDeliveryDispatcher(options: {
     if (!run || !location)
       throw new DispatchError('not_found', 'dispatch is not active')
     if (location.record.status !== 'running') return location.record
+    if (location.auditTaskId) {
+      const failed = await mutateFoundationFactTask(dispatchId, 'dispatch.failed', ({ task, record }) => {
+        const terminal = parseDispatchRecord({ ...record, status: 'failed', finishedAt: now(), failureReason: reason })
+        const needsAction = isTerminalFoundationFactFailure(reason) || task.attempt >= 2
+        return {
+          task: { ...task, status: needsAction ? 'needs_action' : 'retryable', failureReason: reason, dispatch: terminal },
+          record: terminal,
+          runStatus: needsAction ? 'needs_action' : 'running',
+          blockedReason: needsAction ? reason : undefined,
+        }
+      })
+      releaseDispatch(dispatchId, { stopReason: reason })
+      return failed
+    }
     const failed = parseDispatchRecord({
       ...location.record,
       status: 'failed',
       finishedAt: now(),
       failureReason: reason,
     })
-    const failedRun = location.auditTaskId
-      ? withFoundationFactInvalid(run, location.auditTaskId, failed, reason)
-      : location.path
+    const failedRun = location.path
       ? {
           ...run,
           foundationDraftState: recordFoundationFailure(
@@ -1117,9 +1242,7 @@ export function createDeliveryDispatcher(options: {
           ),
         }
       : { ...run, activeDispatch: failed }
-    const status: DeliveryRun['status'] = location.auditTaskId
-      ? (failedRun.foundationAuditState?.tasks.some(task => task.status === 'needs_action') ? 'needs_action' : 'running')
-      : location.path
+    const status: DeliveryRun['status'] = location.path
       ? isolatedFoundationFailureStatus(failedRun)
       : 'failed'
     await options.store.commit(
@@ -1156,15 +1279,26 @@ export function createDeliveryDispatcher(options: {
     if (!run || !location)
       throw new DispatchError('not_found', 'dispatch is not active')
     if (location.record.status !== 'running') return location.record
+    if (location.auditTaskId) {
+      const interrupted = await mutateFoundationFactTask(dispatchId, 'dispatch.needs_action', ({ task, record }) => {
+        const terminal = parseDispatchRecord({ ...record, status: 'interrupted', finishedAt: now(), failureReason: reason })
+        return {
+          task: { ...task, status: 'needs_action', failureReason: reason, dispatch: terminal },
+          record: terminal,
+          runStatus: 'needs_action',
+          blockedReason: reason,
+        }
+      })
+      releaseDispatch(dispatchId, { stopReason: reason })
+      return interrupted
+    }
     const interrupted = parseDispatchRecord({
       ...location.record,
       status: 'interrupted',
       finishedAt: now(),
       failureReason: reason,
     })
-    const interruptedRun = location.auditTaskId
-      ? withFoundationFactInvalid(run, location.auditTaskId, interrupted, reason)
-      : location.path
+    const interruptedRun = location.path
       ? {
           ...run,
           foundationDraftState: recordFoundationFailure(
@@ -1174,9 +1308,7 @@ export function createDeliveryDispatcher(options: {
           ),
         }
       : { ...run, activeDispatch: interrupted }
-    const status: DeliveryRun['status'] = location.auditTaskId
-      ? (interruptedRun.foundationAuditState?.tasks.some(task => task.status === 'needs_action') ? 'needs_action' : 'running')
-      : location.path
+    const status: DeliveryRun['status'] = location.path
       ? isolatedFoundationFailureStatus(interruptedRun)
       : 'needs_action'
     await options.store.commit(
@@ -1213,14 +1345,26 @@ export function createDeliveryDispatcher(options: {
     if (!run || !location)
       throw new DispatchError('not_found', 'dispatch is not active')
     if (location.record.status !== 'running') return location.record
+    if (location.auditTaskId) {
+      const stopped = await mutateFoundationFactTask(dispatchId, 'dispatch.interrupted', ({ task, record }) => {
+        const terminal = parseDispatchRecord({ ...record, status: 'interrupted', finishedAt: now(), failureReason: reason })
+        const needsAction = task.attempt >= 2
+        return {
+          task: { ...task, status: needsAction ? 'needs_action' : 'retryable', failureReason: reason, dispatch: terminal },
+          record: terminal,
+          runStatus: 'stopped',
+          blockedReason: reason,
+        }
+      })
+      releaseDispatch(dispatchId, { stopReason: reason })
+      return stopped
+    }
     const stopped = parseDispatchRecord({
       ...location.record,
       status: 'interrupted',
       finishedAt: now(),
     })
-    const stoppedRun = location.auditTaskId
-      ? withFoundationFactInvalid(run, location.auditTaskId, stopped, reason)
-      : location.path
+    const stoppedRun = location.path
       ? withFoundationDispatch(run, location.path, stopped)
       : { ...run, activeDispatch: stopped }
     await options.store.commit(
