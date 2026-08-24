@@ -40,8 +40,57 @@ const snapshot = (
 })
 
 describe('foundation revision round policy', () => {
+  test('plans the initial round without caller-side severity filtering', () => {
+    const result = evaluateFoundationRevisionRoundPolicy({
+      phase: 'plan',
+      round: 1,
+      issues: [
+        issue('AUD-L', 'LOW'),
+        issue('AUD-M', 'MEDIUM'),
+        issue('AUD-B', 'BLOCKER'),
+      ],
+    })
+
+    expect(result).toEqual({
+      status: 'repair',
+      round: 1,
+      repairIssueIds: ['AUD-B', 'AUD-M'],
+      knownIssueIds: ['AUD-L'],
+    })
+  })
+
+  test('proceeds from a plan with only medium or low issues', () => {
+    expect(
+      evaluateFoundationRevisionRoundPolicy({
+        phase: 'plan',
+        round: 1,
+        issues: [issue('AUD-L', 'LOW')],
+      }),
+    ).toEqual({
+      status: 'proceed',
+      repairIssueIds: [],
+      knownIssueIds: ['AUD-L'],
+    })
+  })
+
+  test('stops a round-three plan with an unrepairable high issue', () => {
+    expect(
+      evaluateFoundationRevisionRoundPolicy({
+        phase: 'plan',
+        round: 3,
+        issues: [issue('AUD-H', 'HIGH')],
+      }),
+    ).toEqual({
+      status: 'needs_action',
+      repairIssueIds: [],
+      knownIssueIds: [],
+      reason: 'round_limit',
+    })
+  })
+
   test('round 1 repairs blocker, high and medium in deterministic order', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
+      phase: 'evaluate',
       round: 1,
       before: snapshot(
         [
@@ -73,6 +122,7 @@ describe('foundation revision round policy', () => {
 
   test('round 2 repairs current and new blocker/high issues, but not medium', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
+      phase: 'evaluate',
       round: 2,
       before: snapshot([issue('AUD-H', 'HIGH')], digest('a'), 'doc-1'),
       after: snapshot(
@@ -96,6 +146,7 @@ describe('foundation revision round policy', () => {
 
   test('round 3 repairs only blockers and never starts round 4', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
+      phase: 'evaluate',
       round: 3,
       before: snapshot([issue('AUD-B', 'BLOCKER')], digest('a'), 'doc-1'),
       after: snapshot(
@@ -116,6 +167,7 @@ describe('foundation revision round policy', () => {
 
   test('proceeds with medium and low issues as known issues when no blocker or high remains', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
+      phase: 'evaluate',
       round: 3,
       before: snapshot([issue('AUD-B', 'BLOCKER')], digest('a'), 'doc-1'),
       after: snapshot(
@@ -135,6 +187,7 @@ describe('foundation revision round policy', () => {
   test('stops on explicit no-progress with unchanged authoritative identities and document revision', () => {
     const issues = [issue('AUD-B', 'BLOCKER'), issue('AUD-H', 'HIGH')]
     const result = evaluateFoundationRevisionRoundPolicy({
+      phase: 'evaluate',
       round: 2,
       before: snapshot(issues, digest('a'), 'doc-1'),
       after: snapshot(
@@ -156,6 +209,7 @@ describe('foundation revision round policy', () => {
     const duplicate = issue('AUD-DUP', 'HIGH')
     expect(() =>
       evaluateFoundationRevisionRoundPolicy({
+        phase: 'evaluate',
         round: 1,
         before: snapshot([duplicate, { ...duplicate }], digest('a'), 'doc-1'),
         after: snapshot([], digest('b'), 'doc-2'),
@@ -164,6 +218,7 @@ describe('foundation revision round policy', () => {
 
     expect(() =>
       evaluateFoundationRevisionRoundPolicy({
+        phase: 'evaluate',
         round: 4 as never,
         before: snapshot([issue('AUD-B', 'BLOCKER')], digest('a'), 'doc-1'),
         after: snapshot([], digest('b'), 'doc-2'),
@@ -172,6 +227,7 @@ describe('foundation revision round policy', () => {
 
     expect(() =>
       evaluateFoundationRevisionRoundPolicy({
+        phase: 'evaluate',
         round: 1,
         before: snapshot([issue('AUD-B', 'BLOCKER')], digest('a'), 'doc-1'),
         after: snapshot(
