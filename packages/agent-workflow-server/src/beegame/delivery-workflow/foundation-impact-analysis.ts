@@ -156,7 +156,7 @@ function validateServiceAuthority(): Readonly<{
         consumer => typeof consumer !== 'string' || consumer.trim().length === 0,
       ) || new Set(definition.consumers).size !== definition.consumers.length
     )
-      throw new Error(`foundation impact catalog has an orphan or invalid check reference: ${definition.key}`)
+      throw new Error(`foundation impact catalog has invalid consumer IDs: ${definition.key}`)
     factsByKey.set(definition.key, definition)
     const ownerKey = `${definition.owner.documentPath}\0${definition.owner.sectionId}`
     const owned = factByOwner.get(ownerKey) ?? []
@@ -252,9 +252,3 @@ export function analyzeFoundationImpact(
     issueIds: Object.freeze([...issueTargets.keys()].sort(compareStable)),
   })
 }
-
-// Descriptive aliases keep the pure operation easy to discover without
-// introducing another implementation or authority source.
-export const calculateFoundationImpact = analyzeFoundationImpact
-export const deriveFoundationImpact = analyzeFoundationImpact
-export const buildFoundationImpactAnalysis = analyzeFoundationImpact
