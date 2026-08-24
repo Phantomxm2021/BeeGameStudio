@@ -238,6 +238,23 @@ export function revisionTaskReceiptTerminalDigest(
   return sha256(stableJson(receipt))
 }
 
+function comparePatchOperations(left: PatchOperation, right: PatchOperation): number {
+  const document = left.documentPath.localeCompare(right.documentPath)
+  if (document !== 0) return document
+  const section = left.sectionId.localeCompare(right.sectionId)
+  if (section !== 0) return section
+  return stableJson(left).localeCompare(stableJson(right))
+}
+
+/** The mechanical, order-independent digest of validated patch operations. */
+export function foundationPatchOperationsDigest(
+  operations: readonly PatchOperation[],
+): string {
+  if (!Array.isArray(operations))
+    throw new Error('foundation patch operations must be an array')
+  return sha256(stableJson([...operations].sort(comparePatchOperations)))
+}
+
 function validateReceipt(
   receipt: unknown,
   input: {
