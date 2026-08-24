@@ -274,9 +274,7 @@ export async function startChecklistDraftStage(input: {
     contract: {
       confirmedBriefDigest: input.run.confirmedBriefDigest,
       documentSet: 'checklist',
-      approvedDocumentRevision:
-        input.run.foundationReviewState?.revision ??
-        input.run.revision.document,
+      approvedDocumentRevision: input.run.revision.document,
     },
   })
 }

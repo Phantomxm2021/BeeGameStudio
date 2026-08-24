@@ -36,7 +36,5 @@ describe('worker prompts', () => {
     expect(prompt).toContain(
       'Canonical artifacts: docs/GDD.md, docs/LEVEL_SCENE_DESIGN.md, docs/BALANCE_DESIGN.md, docs/TECHNICAL_DESIGN.md',
     )
-    expect(prompt).not.toContain('document-reviewer')
-    expect(prompt).not.toContain('candidateReferences')
   })
 })

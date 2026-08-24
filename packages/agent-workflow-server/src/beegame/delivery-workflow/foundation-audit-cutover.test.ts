@@ -18,7 +18,7 @@ function runWithEightCommittedDocs(): DeliveryRun {
     'docs/ASSET_PLAN.md',
   ] as const
   return {
-    schemaVersion: 27,
+    schemaVersion: 28,
     runId: 'run-cutover',
     projectId: 'project-cutover',
     ownerId: 'owner-cutover',

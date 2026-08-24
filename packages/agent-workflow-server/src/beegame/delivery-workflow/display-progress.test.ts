@@ -5,15 +5,11 @@ import {
 } from './display-progress'
 
 describe('delivery progress projection', () => {
-  test('projects report review directly from the workflow phase', () => {
+  test('projects the document audit boundary directly from the workflow phase', () => {
     expect(
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        foundationReviewState: {
-          mode: 'initial',
-          attempt: 1,
-        },
       }),
     ).toEqual({
       stageId: 'DOCUMENT_REVIEW',

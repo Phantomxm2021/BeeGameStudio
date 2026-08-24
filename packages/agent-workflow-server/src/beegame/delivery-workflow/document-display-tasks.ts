@@ -38,49 +38,6 @@ export type DocumentDisplayTaskInput = {
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
-  foundationReview?: {
-    attempt: number
-    reports: Array<{
-      role:
-        | 'core-design'
-        | 'technical-assets'
-        | 'presentation'
-        | 'synthesis'
-      status: 'pending' | 'running' | 'completed' | 'failed'
-      failureReason?: string
-    }>
-  }
-}
-
-const reviewTaskTitle = {
-  'core-design': '核心设计',
-  'technical-assets': '技术与资产',
-  presentation: '表现体验',
-  synthesis: '阻塞问题汇总',
-} as const
-
-function visibleReviewStatus(
-  status: 'pending' | 'running' | 'completed' | 'failed',
-  workflowStatus?: string,
-): DocumentDisplayTask['status'] {
-  return status === 'running' && workflowStopped(workflowStatus)
-    ? 'stopped'
-    : status
-}
-
-function projectFoundationReviewTasks(
-  input: DocumentDisplayTaskInput,
-): DocumentDisplayTask[] {
-  const review = input.foundationReview
-  if (!review) return []
-  return review.reports.map(report => ({
-    id: `review:foundation:${report.role}`,
-    title: reviewTaskTitle[report.role],
-    status: visibleReviewStatus(report.status, input.workflowStatus),
-    attempt: review.attempt,
-    operation: 'review',
-    ...(report.failureReason ? { failureReason: report.failureReason } : {}),
-  }))
 }
 
 /**
@@ -92,8 +49,6 @@ function projectFoundationReviewTasks(
 export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
-  if (input.documentStep === 'FOUNDATION_REVIEW')
-    return projectFoundationReviewTasks(input)
   const workspace = resolve(input.workspacePath)
   const canonicalReviewArtifacts = [
     ...CANONICAL_PROJECT_DOCUMENTS,

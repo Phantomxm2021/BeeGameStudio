@@ -71,13 +71,10 @@ describe('createReviewProjectCopy', () => {
       ownerId: 'owner-1',
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      status: 'running',
+      status: 'needs_action',
+      blockedReason: 'foundation audit implementation unavailable',
       foundationDraftState: {
         completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
-      },
-      foundationReviewState: {
-        attempt: 1,
-        status: 'pending',
       },
     })
     expect(await digests(destination)).toEqual(before)

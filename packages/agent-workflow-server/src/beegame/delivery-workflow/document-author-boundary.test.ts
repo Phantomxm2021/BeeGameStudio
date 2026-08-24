@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { canStartFoundationAudit } from './foundation-audit-boundary'
+import { startChecklistDraftStage } from './document-stage'
 import type { DeliveryRun, FoundationDocumentCheckpoint } from './types'
 
 const paths = [
@@ -17,7 +18,7 @@ function runWithStatuses(
   statuses: readonly FoundationDocumentCheckpoint['status'][],
 ): DeliveryRun {
   return {
-    schemaVersion: 27,
+    schemaVersion: 28,
     runId: 'run-boundary',
     projectId: 'project-boundary',
     ownerId: 'owner-boundary',
@@ -79,5 +80,33 @@ describe('Document Author boundary', () => {
         ]),
       ),
     ).toBe(true)
+  })
+
+  test('passes the current document revision to checklist authoring', async () => {
+    let captured: Record<string, unknown> | undefined
+    const run = {
+      ...runWithStatuses([
+        'committed',
+        'committed',
+        'committed',
+        'committed',
+        'committed',
+        'committed',
+        'committed',
+        'committed',
+      ]),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_DRAFTING' as const,
+    }
+    await startChecklistDraftStage({
+      run,
+      workspacePath: '/workspace',
+      dispatcher: {
+        dispatch: async request => {
+          captured = request.contract
+        },
+      },
+    })
+    expect(captured?.approvedDocumentRevision).toBe(run.revision.document)
   })
 })

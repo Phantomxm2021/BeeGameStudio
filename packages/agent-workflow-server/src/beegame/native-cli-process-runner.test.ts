@@ -152,52 +152,6 @@ describe('native CLI process runner', () => {
     ).toBe(false)
   })
 
-  test('does not inject workflow agent definitions into a Reviewer launch', () => {
-    const command = nativeRuntimeCommand({
-      sessionId: 'foundation-reviewer',
-      cwd: process.cwd(),
-      env: {},
-      workflowWorker: true,
-      workflowWorkerType: 'document-reviewer',
-    })
-
-    expect(command.some(value => value.startsWith('--agents='))).toBe(false)
-  })
-
-  test('exposes only native read and search tools to a Reviewer', () => {
-    const command = nativeRuntimeCommand({
-      sessionId: 'foundation-reviewer',
-      cwd: process.cwd(),
-      env: {},
-      workflowWorker: true,
-      workflowWorkerType: 'document-reviewer',
-    })
-
-    expect(command).toContain('--tools')
-    expect(command[command.indexOf('--tools') + 1]).toBe('Read,Grep,Glob')
-    expect(command[command.indexOf('--tools') + 1]).not.toContain('Write')
-    expect(command[command.indexOf('--tools') + 1]).not.toContain('Edit')
-    expect(command[command.indexOf('--tools') + 1]).not.toContain('Bash')
-    expect(command[command.indexOf('--tools') + 1]).not.toContain('Agent')
-    expect(command).not.toContain('--json-schema')
-  })
-
-  test('cannot select the generic JSON schema capability for a Reviewer', () => {
-    const command = nativeRuntimeCommand({
-      sessionId: 'foundation-reviewer',
-      cwd: process.cwd(),
-      env: {},
-      workflowWorker: true,
-      workflowWorkerType: 'document-reviewer',
-      workflowJsonSchema: {
-        type: 'object',
-        properties: { version: { const: 1 } },
-      },
-    })
-
-    expect(command).not.toContain('--json-schema')
-  })
-
   test('disables native tools only for a foundation Markdown stream turn', () => {
     const command = nativeRuntimeCommand({
       sessionId: 'beegame_stream_author',

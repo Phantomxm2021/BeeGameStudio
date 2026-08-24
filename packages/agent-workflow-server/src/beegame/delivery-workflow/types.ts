@@ -137,7 +137,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 27 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 28 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -317,8 +317,6 @@ export type DeliveryRun = {
     implementationAudit?: EvidenceRef
     acceptance?: EvidenceRef
   }
-  /** Compile-only compatibility for the protected checklist contract. */
-  foundationReviewState?: { revision: string }
   /** Sole durable cursor for the initial eight-document authoring pass. */
   foundationDraftState: FoundationDraftState
   /** Sole task/checkpoint state for Resource Production. */

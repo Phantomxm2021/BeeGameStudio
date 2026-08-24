@@ -725,7 +725,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-reviewer',
+      workflowWorkerType: 'document-author',
     })
 
     await manager.send(session.id, 'review the project documents')
@@ -807,7 +807,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-reviewer',
+      workflowWorkerType: 'document-author',
     })
 
     await manager.send(session.id, 'review project documents')
@@ -874,7 +874,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-reviewer',
+      workflowWorkerType: 'document-author',
     })
 
     await manager.send(session.id, 'inspect the project')
@@ -933,7 +933,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-reviewer',
+      workflowWorkerType: 'document-author',
     })
 
     await manager.send(session.id, 'verify the repaired documents')
@@ -1288,7 +1288,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-reviewer',
+      workflowWorkerType: 'document-author',
     })
 
     await manager.send(session.id, 'review documents')
@@ -1348,7 +1348,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-reviewer',
+      workflowWorkerType: 'document-author',
     })
 
     await manager.send(session.id, 'review the assigned document')
@@ -1643,7 +1643,7 @@ describe('BeeGame session runtime resilience', () => {
       workflowWorker: true,
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-reviewer',
+      workflowWorkerType: 'document-author',
     })
 
     await manager.send(session.id, 'review the assigned document')

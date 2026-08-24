@@ -59,28 +59,4 @@ describe('workflow display tasks', () => {
     ])
   })
 
-  test('projects Foundation review lanes and synthesis as ordinary tasks', async () => {
-    const tasks = projectDocumentDisplayTasks({
-      workspacePath: await workspace(),
-      documentStep: 'FOUNDATION_REVIEW',
-      workflowStatus: 'running',
-      thinking: 'working',
-      foundationReview: {
-        attempt: 1,
-        reports: [
-          { role: 'core-design', status: 'completed' },
-          { role: 'technical-assets', status: 'running' },
-          { role: 'presentation', status: 'running' },
-          { role: 'synthesis', status: 'pending' },
-        ],
-      },
-    })
-    expect(tasks.map(task => task.id)).toEqual([
-      'review:foundation:core-design',
-      'review:foundation:technical-assets',
-      'review:foundation:presentation',
-      'review:foundation:synthesis',
-    ])
-    expect(tasks.some(task => task.id.startsWith('foundation-remediation:'))).toBe(false)
-  })
 })

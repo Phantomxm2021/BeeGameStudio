@@ -17,66 +17,6 @@ describe('WorkflowCard', () => {
     vi.clearAllMocks();
   });
 
-  it('renders Foundation review through the standard task list', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'review-tasks',
-          status: 'running',
-          currentPhase: 'DOCUMENT_REVIEW',
-          tasks: [
-            { id: 'review:core-design', title: '核心设计', status: 'completed', operation: 'review' },
-            { id: 'review:technical-assets', title: '技术与资产', status: 'running', operation: 'review' },
-            { id: 'review:presentation', title: '表现体验', status: 'pending', operation: 'review' },
-            { id: 'review:synthesis', title: '阻塞问题汇总', status: 'pending', operation: 'review' },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.getByTestId('workflow-card-task-region')).toBeInTheDocument();
-    expect(screen.getByText('审计：核心设计')).toHaveClass('line-through');
-    expect(screen.getByText('审计：技术与资产')).toBeInTheDocument();
-    expect(screen.getByText('审计：表现体验')).toBeInTheDocument();
-    expect(screen.getByText('审计：阻塞问题汇总')).toBeInTheDocument();
-    expect(document.querySelector('[data-task-icon="review-completed"]')).toBeTruthy();
-    expect(document.querySelector('[data-task-icon="review-running"]')).toBeTruthy();
-    expect(screen.queryByTestId('workflow-review-report')).not.toBeInTheDocument();
-  });
-
-  it('shows reviewer failures as ordinary failed tasks', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'review-failures',
-          status: 'blocked',
-          currentPhase: 'DOCUMENT_REVIEW',
-          tasks: [
-            {
-              id: 'review:core-design',
-              title: '核心设计',
-              status: 'failed',
-              operation: 'review',
-              failureReason: '核心设计审计失败',
-            },
-            {
-              id: 'review:technical-assets',
-              title: '技术与资产',
-              status: 'failed',
-              operation: 'review',
-              failureReason: '技术与资产审计失败',
-            },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('核心设计审计失败')).toBeInTheDocument();
-    expect(screen.getByText('技术与资产审计失败')).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-task-icon="review-failed"]')).toHaveLength(2);
-    expect(screen.queryByTestId('workflow-review-report')).not.toBeInTheDocument();
-  });
-
   it('renders a stage deck with navigation and only exposes the latest action', async () => {
     const onAction = vi.fn().mockResolvedValue(undefined);
     render(
@@ -169,7 +109,7 @@ describe('WorkflowCard', () => {
           phaseCount: 9,
           substage: 'INITIAL_REVIEW',
           documentStep: 'FOUNDATION_REVIEW',
-          worker: 'document-reviewer',
+          worker: 'document-author',
           thinking: '正在检查当前文档版本。',
           executionStatus: 'working',
           currentItemId: 'docs/UI_UX_SPEC.md',
@@ -188,7 +128,7 @@ describe('WorkflowCard', () => {
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-icon', 'grip');
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-animation', 'loop');
     expect(screen.getByText('正在检查当前文档版本。')).toBeInTheDocument();
-    expect(screen.getByText(/Document Reviewer · 正在执行 · UI \/ UX 规格/)).toBeInTheDocument();
+    expect(screen.getByText(/Document Author · 正在执行 · UI \/ UX 规格/)).toBeInTheDocument();
     expect(screen.getByText('3 / 9')).toBeInTheDocument();
     expect(screen.getByText('任务 1 / 3')).toBeInTheDocument();
     expect(screen.getByText('审计：游戏设计文档 GDD')).toBeInTheDocument();
