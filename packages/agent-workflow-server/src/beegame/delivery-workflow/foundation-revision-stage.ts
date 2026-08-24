@@ -5,6 +5,7 @@ import { getGameDocumentContract } from './game-document-contracts'
 import { buildFoundationSectionIndex } from './foundation-section-index'
 import type { RevisionBatch } from './foundation-revision-batches'
 import type { AuditIssue } from './foundation-issue-registry'
+import { foundationFactPacketDigest, type FoundationFactPacket } from './foundation-fact-extraction'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationRevisionRound,
@@ -214,6 +215,96 @@ export async function loadFoundationRevisionPacket(input: {
   if (value.revision !== input.revision || value.round !== input.round || value.taskId !== input.taskId || value.documentPath !== input.documentPath)
     throw new Error('foundation revision packet artifact identity is stale')
   return value
+}
+
+/** Persist a fact packet as its own immutable artifact.  The packet's native
+ * packetDigest is the only identity; revision tasks merely point at it. */
+export async function writeFoundationRevisionFactPacket(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  packet: FoundationFactPacket
+}): Promise<string> {
+  if (input.packet.revision !== input.revision)
+    throw new Error('foundation fact packet revision is stale')
+  const identity = { revision: input.packet.revision, keys: [...input.packet.keys].sort(), sections: input.packet.sections }
+  if (foundationFactPacketDigest(identity) !== input.packet.packetDigest)
+    throw new Error('foundation fact packet digest is invalid')
+  const packetPath = foundationRevisionPacketPath(input.revision, input.round, input.taskId)
+  const absolute = resolveProjectPath(input.workspacePath, packetPath)
+  await mkdir(resolve(absolute, '..'), { recursive: true })
+  const content = `${JSON.stringify(input.packet)}\n`
+  try {
+    if ((await readFile(absolute, 'utf8')) !== content)
+      throw new Error('foundation fact packet artifact already exists with a different digest')
+    return packetPath
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' })
+  try {
+    await link(temporary, absolute)
+    await unlink(temporary)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    await unlink(temporary).catch(() => undefined)
+    if ((await readFile(absolute, 'utf8')) !== content)
+      throw new Error('foundation fact packet artifact already exists with a different digest')
+  }
+  return packetPath
+}
+
+export async function loadFoundationRevisionFactPacket(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  packetDigest: string
+}): Promise<FoundationFactPacket> {
+  const packetPath = foundationRevisionPacketPath(input.revision, input.round, input.taskId)
+  const value = JSON.parse(await readFile(resolveProjectPath(input.workspacePath, packetPath), 'utf8')) as FoundationFactPacket
+  if (!value || value.revision !== input.revision || value.packetDigest !== input.packetDigest)
+    throw new Error('foundation fact packet artifact identity is stale')
+  const identity = { revision: value.revision, keys: [...value.keys].sort(), sections: value.sections }
+  if (foundationFactPacketDigest(identity) !== input.packetDigest)
+    throw new Error('foundation fact packet artifact digest is stale')
+  return value
+}
+
+/** Persist a targeted semantic packet using its native packetDigest as the
+ * sole artifact identity.  The revision task owns only the derived path. */
+export async function writeFoundationRevisionSemanticPacket(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  packet: { packetDigest: string }
+}): Promise<string> {
+  const packetPath = foundationRevisionPacketPath(input.revision, input.round, input.taskId)
+  const absolute = resolveProjectPath(input.workspacePath, packetPath)
+  await mkdir(resolve(absolute, '..'), { recursive: true })
+  const content = `${JSON.stringify(input.packet)}\n`
+  try {
+    if ((await readFile(absolute, 'utf8')) !== content)
+      throw new Error('foundation semantic packet artifact already exists with a different digest')
+    return packetPath
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' })
+  try {
+    await link(temporary, absolute)
+    await unlink(temporary)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    await unlink(temporary).catch(() => undefined)
+    if ((await readFile(absolute, 'utf8')) !== content)
+      throw new Error('foundation semantic packet artifact already exists with a different digest')
+  }
+  return packetPath
 }
 
 function resolveProjectPath(

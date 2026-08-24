@@ -188,15 +188,19 @@ function validationInput(
 
 describe('incremental foundation fact rebuilding', () => {
   test('replaces only impacted facts and preserves unrelated fact objects', () => {
-    const unrelated = fact('game.mechanics', ['old'], actions, 'mechanics: [old]')
+    const rules: SectionRef = { ...vision, sectionId: 'rules_systems', heading: 'Rules', startLine: 4, endLine: 6 }
+    const unrelated: FoundationFact = {
+      key: 'game.boss.count', value: 1, source: rules,
+      evidence: { documentPath: rules.documentPath, sectionId: rules.sectionId, startLine: 6, endLine: 6, digest: createHash('sha256').update('boss.count: 1').digest('hex') },
+    }
     const committed = createFoundationFactStore([
       fact('game.players.max', 2, vision, 'players.max: 2'),
       unrelated,
     ])
     const result = rebuildFoundationImpactedFacts({
       committedFactStore: committed,
-      documents: { 'docs/GDD.md': visionText },
-      sectionIndex: [vision],
+      documents: { 'docs/GDD.md': `${visionText}# Rules\n## Rules\nboss.count: 1\n` },
+      sectionIndex: [vision, rules],
       impact: impact(['game.players.max']),
       revision: 'revision-2',
       phase: 'admit' as const,
@@ -205,7 +209,7 @@ describe('incremental foundation fact rebuilding', () => {
 
     expect(result.packets).toEqual([])
     expect(result.factStore.find(item => item.key === 'game.players.max')?.value).toBe(4)
-    expect(result.factStore.find(item => item.key === 'game.mechanics')).toEqual(unrelated)
+    expect(result.factStore.find(item => item.key === unrelated.key)).toEqual(unrelated)
   })
 
   test('builds unresolved packets and merges only validator-admitted results', () => {
@@ -260,8 +264,8 @@ describe('incremental foundation fact rebuilding', () => {
     ])
     const result = rebuildFoundationImpactedFacts({
       committedFactStore: committed,
-      documents: {},
-      sectionIndex: [],
+      documents: { 'docs/GDD.md': '# Vision\n## Vision\nplayers.max: 2\n' },
+      sectionIndex: [vision],
       impact: { ...impact([]), changedSections: [], factKeys: [] },
       revision: 'revision-2',
       phase: 'admit' as const,
@@ -271,6 +275,39 @@ describe('incremental foundation fact rebuilding', () => {
     expect(result.packets).toEqual([])
     expect(result.factStore).toEqual(committed)
     expect(result.extraction.normalizedFactDigest).toBe(digestFactStore([]))
+  })
+
+  test('mechanically rebases untouched facts after an upstream line insertion', () => {
+    const committed = createFoundationFactStore([fact('game.players.max', 2, vision, 'players.max: 2')])
+    const shifted: SectionRef = { ...vision, startLine: 2, endLine: 4 }
+    const documents = { 'docs/GDD.md': 'intro\n# Vision\n## Vision\nplayers.max: 2\n' }
+    const result = rebuildFoundationImpactedFacts({
+      committedFactStore: committed,
+      documents,
+      sectionIndex: [shifted],
+      impact: { ...impact([]), changedSections: [], factKeys: [] },
+      revision: 'revision-2',
+      phase: 'admit' as const,
+      results: [],
+    })
+    expect(result.factStore[0]!.source).toEqual(shifted)
+    expect(result.factStore[0]!.evidence.startLine).toBe(4)
+    expect(result.factStore[0]!.evidence.digest).toBe(committed[0]!.evidence.digest)
+    expect(createFoundationFactStore(result.factStore)).toEqual(result.factStore)
+  })
+
+  test('rejects untouched fact evidence bytes drift during mechanical rebase', () => {
+    const committed = createFoundationFactStore([fact('game.players.max', 2, vision, 'players.max: 2')])
+    const shifted: SectionRef = { ...vision, startLine: 2, endLine: 4 }
+    expect(() => rebuildFoundationImpactedFacts({
+      committedFactStore: committed,
+      documents: { 'docs/GDD.md': 'intro\n# Vision\n## Vision\nplayers.max: drift\n' },
+      sectionIndex: [shifted],
+      impact: { ...impact([]), changedSections: [], factKeys: [] },
+      revision: 'revision-2',
+      phase: 'admit' as const,
+      results: [],
+    })).toThrow(/evidence bytes drift|digest/i)
   })
 
   test('rejects missing, extra, duplicate, and mis-scoped results', () => {

@@ -162,6 +162,34 @@ function validateResultScope(
   }
 }
 
+function rebaseUntouchedFact(
+  fact: FoundationFact,
+  sectionIndex: readonly SectionRef[],
+  documents: DocumentInput,
+): FoundationFact {
+  const document = documents instanceof Map
+    ? documents.get(fact.source.documentPath)
+    : (documents as Record<string, string>)[fact.source.documentPath]
+  const next = sectionIndex.find(section =>
+    section.documentPath === fact.source.documentPath && section.sectionId === fact.source.sectionId)
+  if (!document || !next) throw new Error(`foundation fact source is not indexed: ${fact.key}`)
+  const startDelta = next.startLine - fact.source.startLine
+  const endDelta = next.endLine - fact.source.endLine
+  if (fact.source.digest !== next.digest || fact.source.heading !== next.heading || startDelta !== endDelta)
+    throw new Error(`foundation untouched fact section drift: ${fact.key}`)
+  const evidence = {
+    ...fact.evidence,
+    startLine: fact.evidence.startLine + startDelta,
+    endLine: fact.evidence.endLine + startDelta,
+  }
+  if (evidence.startLine < next.startLine || evidence.endLine > next.endLine || evidence.endLine < evidence.startLine)
+    throw new Error(`foundation untouched fact evidence bounds drift: ${fact.key}`)
+  const bytes = Buffer.from(document.split('\n').slice(evidence.startLine - 1, evidence.endLine).join('\n'), 'utf8')
+  if (createHash('sha256').update(bytes).digest('hex') !== fact.evidence.digest)
+    throw new Error(`foundation untouched fact evidence bytes drift: ${fact.key}`)
+  return { ...fact, source: next, evidence }
+}
+
 /**
  * Rebuilds exactly the facts named by a validated impact. Mechanical facts are
  * extracted from staged owner sections first; unresolved keys are admitted
@@ -178,8 +206,11 @@ export function rebuildFoundationImpactedFacts(
     throw new Error('foundation fact planning does not accept results')
   if (request.phase === 'admit' && request.results === undefined)
     throw new Error('foundation fact admission requires results')
-  const committed = createFoundationFactStore(input.committedFactStore)
   const impactedKeys = assertImpactKeys(input.impact.factKeys)
+  const committed = createFoundationFactStore(input.committedFactStore)
+  const impactedSet = new Set(impactedKeys)
+  const rebasedCommitted = createFoundationFactStore(committed.map(fact =>
+    impactedSet.has(fact.key as FoundationFactKey) ? fact : rebaseUntouchedFact(fact, input.sectionIndex, input.documents)))
   const results = request.phase === 'admit' ? request.results : []
   if (request.phase === 'admit')
     validateResultScope(results, impactedKeys, new Set())
@@ -194,7 +225,7 @@ export function rebuildFoundationImpactedFacts(
       normalizedFactDigest: digestFactStore([]),
     }
     return {
-      factStore: committed,
+      factStore: rebasedCommitted,
       packets: [],
       extraction,
       receipts: [],
@@ -219,7 +250,7 @@ export function rebuildFoundationImpactedFacts(
   })
   if (request.phase === 'plan')
     return {
-      factStore: committed,
+      factStore: rebasedCommitted,
       packets,
       extraction,
       receipts: [...extraction.receipts],
@@ -240,7 +271,7 @@ export function rebuildFoundationImpactedFacts(
   }
 
   const rebuiltKeys = new Set(impactedKeys)
-  const untouched = committed.filter(fact => !rebuiltKeys.has(fact.key as FoundationFactKey))
+  const untouched = rebasedCommitted.filter(fact => !rebuiltKeys.has(fact.key as FoundationFactKey))
   const factStore = createFoundationFactStore([
     ...untouched,
     ...extraction.facts,

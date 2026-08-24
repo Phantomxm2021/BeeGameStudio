@@ -37,6 +37,7 @@ import {
 import {
   deriveFoundationPatchOperations,
   loadFoundationRevisionPacket,
+  loadFoundationRevisionFactPacket,
   resetFoundationRevisionStage,
   type RevisionTaskReceipt,
 } from './foundation-revision-stage'
@@ -529,10 +530,12 @@ export function createDeliveryDispatcher(options: {
     const factRequest = isFoundationFactRequest(request)
     const semanticRequest = isFoundationSemanticRequest(request)
     const revisionRequest = isFoundationRevisionRequest(request)
-    const auditRequest = factRequest || semanticRequest
+    const revisionFactRequest = factRequest && Boolean(request.taskId && run.foundationRevisionState?.tasks.some(task => task.taskId === request.taskId && task.kind === 'impacted-facts'))
+    const revisionTaskRequest = revisionRequest || revisionFactRequest
+    const auditRequest = semanticRequest || (factRequest && !revisionFactRequest)
     const durableDispatch = auditRequest && request.taskId
       ? auditFactDispatch(run, request.taskId)
-      : revisionRequest && request.taskId
+      : revisionTaskRequest && request.taskId
         ? revisionDispatch(run, request.taskId)
       : foundationPath
         ? foundationDispatch(run, foundationPath)
@@ -572,7 +575,7 @@ export function createDeliveryDispatcher(options: {
         'foundation document authoring batch is active',
       )
     const durableTask = request.taskId
-      ? revisionRequest
+      ? revisionTaskRequest
         ? run.foundationRevisionState?.tasks.find(task => task.taskId === request.taskId)
         : auditRequest
           ? run.foundationAuditState?.tasks.find(task => task.taskId === request.taskId)
@@ -625,7 +628,7 @@ export function createDeliveryDispatcher(options: {
         const currentFactTask = auditRequest && request.taskId
           ? current.foundationAuditState?.tasks.find(task => task.taskId === request.taskId)
           : undefined
-        const currentRevisionTask = revisionRequest && request.taskId
+        const currentRevisionTask = revisionTaskRequest && request.taskId
           ? current.foundationRevisionState?.tasks.find(task => task.taskId === request.taskId)
           : undefined
         if (auditRequest) {
@@ -638,8 +641,11 @@ export function createDeliveryDispatcher(options: {
           if (currentFactTask.attempt >= 2)
             throw new DispatchError('blocked', 'foundation fact task attempt cap exceeded')
         }
-        if (revisionRequest) {
-          if (!currentRevisionTask || currentRevisionTask.kind !== 'document-revision' || !['pending', 'retryable'].includes(currentRevisionTask.status))
+        if (revisionTaskRequest) {
+          const expectedKind = revisionFactRequest ? 'impacted-facts' : 'document-revision'
+          if (!currentRevisionTask || currentRevisionTask.kind !== expectedKind)
+            throw new DispatchError('blocked', `foundation revision task kind mismatch: expected ${expectedKind}`)
+          if (!['pending', 'retryable'].includes(currentRevisionTask.status))
             throw new DispatchError('duplicate', 'foundation revision task is not claimable')
           if (currentRevisionTask.revision !== request.revision || currentRevisionTask.packetDigest !== request.contract.packetDigest || currentRevisionTask.packetPath !== request.contract.packetPath || currentRevisionTask.round !== request.contract.round)
             throw new DispatchError('blocked', 'foundation revision task is stale')
@@ -658,12 +664,48 @@ export function createDeliveryDispatcher(options: {
             fastModelError = error instanceof Error ? error.message : 'foundation fact extractor fast model is not configured'
           }
         }
+        if (revisionFactRequest && fastModelError) {
+          await options.store.commit({
+            ...current,
+            status: 'needs_action',
+            blockedReason: fastModelError,
+            foundationRevisionState: {
+              ...current.foundationRevisionState!,
+              status: 'needs_action',
+              tasks: current.foundationRevisionState!.tasks.map(task => task.taskId === request.taskId
+                ? { ...task, status: 'needs_action' as const, failureReason: fastModelError }
+                : task),
+            },
+          }, { runId: current.runId, type: 'foundation.revision.impacted_facts.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, taskId: request.taskId, reason: fastModelError }, undefined, lease)
+          throw new DispatchError('blocked', fastModelError)
+        }
+        if (revisionFactRequest && current.foundationRevisionState) {
+          const totalTokens = current.foundationRevisionState.tasks
+            .filter(task => task.kind === 'impacted-facts')
+            .reduce((total, task) => total + (task.usage?.total_tokens ?? 0), 0)
+          if (totalTokens >= 32_000) {
+            const reason = 'foundation impacted fact round usage cap exceeded'
+            await options.store.commit({
+              ...current,
+              status: 'needs_action',
+              blockedReason: reason,
+              foundationRevisionState: {
+                ...current.foundationRevisionState,
+                status: 'needs_action',
+                tasks: current.foundationRevisionState.tasks.map(task => task.taskId === request.taskId
+                  ? { ...task, status: 'needs_action' as const, failureReason: reason }
+                  : task),
+              },
+            }, { runId: current.runId, type: 'foundation.revision.impacted_facts.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, taskId: request.taskId, reason }, undefined, lease)
+            throw new DispatchError('blocked', reason)
+          }
+        }
         if (semanticRequest && options.workerPort.assertFoundationSemanticModelReady) {
           try { await options.workerPort.assertFoundationSemanticModelReady(request) }
           catch (error) { fastModelError = error instanceof Error ? error.message : 'foundation semantic model is not configured' }
         }
         let claimedFoundationState: FoundationFactTaskCollection | undefined
-        if (factRequest && current.foundationAuditState && request.taskId) {
+        if (factRequest && !revisionFactRequest && current.foundationAuditState && request.taskId) {
           const claimed = claimFoundationFactTasks({
             revision: current.foundationAuditState.revision,
             phaseStartedAt: current.foundationAuditState.phaseStartedAt!,
@@ -739,7 +781,7 @@ export function createDeliveryDispatcher(options: {
             'duplicate',
             'foundation document authoring batch is active',
           )
-        const next = revisionRequest && request.taskId && currentRevisionTask
+        const next = revisionTaskRequest && request.taskId && currentRevisionTask
           ? { ...current, foundationRevisionState: { ...current.foundationRevisionState!, tasks: current.foundationRevisionState!.tasks.map(task => task.taskId === request.taskId ? { ...task, status: 'running' as const, attempt: task.attempt + 1, dispatch: record } : task) } }
           : factRequest && request.taskId && claimedFoundationState
           ? { ...current, foundationAuditState: { ...current.foundationAuditState!, status: 'extracting_facts' as const, tasks: claimedFoundationState.tasks.map(task => task.taskId === request.taskId ? { ...task, dispatch: record } : task) } }
@@ -787,7 +829,7 @@ export function createDeliveryDispatcher(options: {
         const claimedRun = await options.store.load()
         const claimedTask = claimedRun?.foundationRevisionState?.tasks.find(task => task.taskId === request.taskId)
         if (!claimedTask || claimedTask.kind !== 'document-revision' || claimedTask.status !== 'running' || claimedTask.dispatch?.dispatchId !== record.dispatchId)
-          throw new DispatchError('blocked', 'foundation revision claim is no longer durable')
+          throw new DispatchError('blocked', 'foundation revision task kind mismatch: expected document-revision')
         await resetFoundationRevisionStage({
           workspacePath: request.workspacePath,
           revision: claimedTask.revision,
@@ -856,19 +898,25 @@ export function createDeliveryDispatcher(options: {
             }),
         )
       }
-      const promptRequest = isFoundationRevisionRequest(request)
+      const promptRequest = revisionRequest || revisionFactRequest
         ? {
             ...request,
             contract: {
               ...request.contract,
-              packet: await loadFoundationRevisionPacket({
+              packet: await (revisionRequest ? loadFoundationRevisionPacket({
                 workspacePath: request.workspacePath,
               revision: request.revision,
               round: Number(request.contract.round) as 1 | 2 | 3,
               taskId: request.taskId!,
               documentPath: request.contract.documentPath as FoundationDocumentPath,
                 packetDigest: String(request.contract.packetDigest),
-              }),
+              }) : loadFoundationRevisionFactPacket({
+                workspacePath: request.workspacePath,
+                revision: request.revision,
+                round: Number(request.contract.round) as 1 | 2 | 3,
+                taskId: request.taskId!,
+                packetDigest: String(request.contract.packetDigest),
+              })),
             },
           }
         : request
@@ -1079,6 +1127,57 @@ export function createDeliveryDispatcher(options: {
     return { record: durable, result }
   }
 
+  async function completeFoundationImpactedFactsDispatch(dispatchId: string, terminalValue: unknown): Promise<{ record: DispatchRecord; result?: WorkerTerminalResult }> {
+    const run = await options.store.load()
+    const location = run ? dispatchLocation(run, dispatchId) : undefined
+    if (!run || !location?.revisionTaskId) throw new DispatchError('not_found', 'foundation impacted fact dispatch is not active')
+    const task = run.foundationRevisionState?.tasks.find(candidate => candidate.taskId === location.revisionTaskId)
+    const request = requests.get(dispatchId) ?? location.record.request
+    if (!task || task.kind !== 'impacted-facts' || !request) throw new DispatchError('not_found', 'foundation impacted fact task authority is missing')
+    let result: WorkerTerminalResult
+    try {
+      result = parseWorkerTerminalResult(terminalValue)
+      if (result.workerType !== 'foundation-fact-extractor' || result.runId !== request.runId || result.dispatchId !== dispatchId || result.taskId !== request.taskId || result.revision !== request.revision || result.packetDigest !== request.contract.packetDigest)
+        throw new Error('foundation impacted fact terminal identity does not match dispatch contract')
+      if ((location.record.usage?.completion_tokens ?? 0) > 512)
+        throw new Error('foundation impacted fact completion token cap exceeded')
+      if (Date.now() >= new Date(run.foundationRevisionState!.roundDeadlineAt).getTime()) throw new Error('foundation revision round deadline exceeded')
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'invalid foundation impacted fact terminal'
+      const invalid = parseDispatchRecord({ ...location.record, status: 'invalid' as const, finishedAt: now(), failureReason: reason })
+      const terminalCap = reason.includes('completion token cap')
+      await mutateFoundationRevisionTask(dispatchId, 'dispatch.invalid', ({ task: current }) => ({ task: { ...current, status: terminalCap || current.attempt >= 2 ? 'needs_action' : 'retryable', failureReason: reason, dispatch: invalid }, record: invalid, runStatus: terminalCap || current.attempt >= 2 ? 'needs_action' : 'running', blockedReason: terminalCap || current.attempt >= 2 ? reason : undefined }))
+      releaseDispatch(dispatchId)
+      throw new DispatchError('invalid_terminal', 'invalid foundation impacted fact terminal')
+    }
+    const status = result.status === 'completed' ? 'completed' : result.status === 'blocked' ? 'blocked' : 'failed'
+    const measuredUsage = location.record.usage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+    const durationMs = Math.max(0, Date.parse(now()) - Date.parse(location.record.startedAt))
+    const durable = await mutateFoundationRevisionTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => {
+      const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() })
+      // Keep the terminal checkpoint replayable until the controller has
+      // validated the receipt and committed it atomically.
+      const nextStatus = status === 'completed' ? 'running' : current.attempt < 2 ? 'retryable' : 'needs_action'
+      return { task: { ...current, status: nextStatus, ...(status === 'completed' ? { terminalDigest: digestFoundationFactTerminal(result as never) } : {}), usage: measuredUsage, durationMs, dispatch: completed }, record: completed, ...(nextStatus === 'needs_action' ? { runStatus: 'needs_action' as const, blockedReason: 'foundation impacted fact worker failed' } : {}) }
+    })
+    try {
+      await options.credits?.settle?.(idempotencyKey(request, task.attempt), result)
+      await options.onTerminal?.(durable, result, request)
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'foundation impacted fact terminal handler failed'
+      // The terminal is the durable replay source. Do not convert it into a
+      // fresh worker attempt when controller admission failed after persist.
+      await mutateFoundationRevisionTask(dispatchId, 'workflow.handler_failed', ({ task: current, record }) => ({
+        task: { ...current, status: 'running', failureReason: reason, dispatch: parseDispatchRecord({ ...record, status: 'completed', failureReason: reason }) },
+        record: parseDispatchRecord({ ...record, status: 'completed', failureReason: reason }),
+      })).catch(() => undefined)
+      releaseDispatch(dispatchId)
+      throw error
+    }
+    releaseDispatch(dispatchId)
+    return { record: durable, result }
+  }
+
   async function completeDispatch(
     dispatchId: string,
     terminalValue: unknown,
@@ -1096,8 +1195,11 @@ export function createDeliveryDispatcher(options: {
       if (task?.kind === 'semantic' || task?.kind === 'confirmation') return completeFoundationSemanticDispatch(dispatchId, terminalValue)
       return completeFoundationFactDispatch(dispatchId, terminalValue)
     }
-    if (location.revisionTaskId)
+    if (location.revisionTaskId) {
+      const revisionTask = run.foundationRevisionState?.tasks.find(task => task.taskId === location.revisionTaskId)
+      if (revisionTask?.kind === 'impacted-facts') return completeFoundationImpactedFactsDispatch(dispatchId, terminalValue)
       return completeFoundationRevisionDispatch(dispatchId, terminalValue)
+    }
     const request = requests.get(dispatchId) ?? location.record.request
     let result: WorkerTerminalResult
     try {
@@ -1384,8 +1486,10 @@ export function createDeliveryDispatcher(options: {
       const revisionTask = location?.revisionTaskId
         ? run?.foundationRevisionState?.tasks.find(candidate => candidate.taskId === location.revisionTaskId)
         : undefined
-      if (record.workerType === 'foundation-fact-extractor' && (!task?.terminalDigest || digestFoundationFactTerminal(result as never) !== task.terminalDigest))
+      const factTask = task ?? (revisionTask?.kind === 'impacted-facts' ? revisionTask : undefined)
+      if (record.workerType === 'foundation-fact-extractor' && (!factTask?.terminalDigest || digestFoundationFactTerminal(result as never) !== factTask.terminalDigest)) {
         throw new Error('foundation fact terminal replay digest conflicts with durable dispatch')
+      }
       if (record.workerType === 'foundation-document-reviser') {
         const receipt = result.workerType === 'foundation-document-reviser' ? result.receipt : undefined
         if (!revisionTask || revisionTask.kind !== 'document-revision' || !receipt || result.workerType !== 'foundation-document-reviser' || result.taskId !== revisionTask.taskId || result.revision !== revisionTask.revision || result.packetDigest !== revisionTask.packetDigest || result.round !== revisionTask.round || result.documentPath !== revisionTask.documentPath || receipt.taskId !== revisionTask.taskId || receipt.round !== revisionTask.round || receipt.documentPath !== revisionTask.documentPath || receipt.stagedPath !== revisionTask.stagedPath || receipt.baseDocumentDigest !== revisionTask.baseDocumentDigest)

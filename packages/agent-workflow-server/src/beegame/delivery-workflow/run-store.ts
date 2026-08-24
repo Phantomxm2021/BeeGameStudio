@@ -278,6 +278,16 @@ function withDispatchUsage(
           ),
         }
       : run.foundationAuditState,
+    foundationRevisionState: run.foundationRevisionState
+      ? {
+          ...run.foundationRevisionState,
+          tasks: run.foundationRevisionState.tasks.map(task =>
+            task.dispatch?.dispatchId === dispatchId
+              ? { ...task, dispatch: update(task.dispatch) }
+              : task,
+          ),
+        }
+      : run.foundationRevisionState,
   }
 }
 
@@ -1255,6 +1265,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
               document => document.dispatch?.dispatchId === dispatchId,
             )?.dispatch
           ?? run.foundationAuditState?.tasks.find(
+            task => task.dispatch?.dispatchId === dispatchId,
+          )?.dispatch
+          ?? run.foundationRevisionState?.tasks.find(
             task => task.dispatch?.dispatchId === dispatchId,
           )?.dispatch
       const acceptsRunningUsage =
