@@ -111,6 +111,25 @@ Fact Store 不是普通摘要，而是可比较、可校验的标准化事实集
 能通过 Fact 直接判定的冲突不调用 LLM；只有语义层面的冲突才进入 Semantic
 Audit。
 
+## 6.1 定向语义检查清单
+
+Semantic Audit 不做全文自由扫描，也不按“8 份文档各读一次”运行。首版只运行下列 10 个无法由 Schema / Rule / Contract 直接判定的高风险游戏核心检查；数量来自十个互不重复的风险域，不使用无来源的固定边数。
+
+| Check ID | 精确 Section 输入 | 相关 Facts | 判断目标 | 等级 / 模型 |
+|---|---|---|---|---|
+| `SEM.gameplay_level_viability` | `GDD#core_loop,rules_systems` + `LEVEL#encounters,pacing_beats` | `game.mechanics`, `level.required_entities` | 核心循环、遭遇、节奏与反制是否可玩且不互相否定 | HIGH / balanced |
+| `SEM.progression_balance_coherence` | `GDD#progression` + `BALANCE#economy,progression_curves` | `game.resources`, `balance.variable_ids` | 进度、资源流与成长曲线是否形成可闭合体验 | HIGH / balanced |
+| `SEM.state_runtime_recovery` | `GDD#states_flow` + `TECHNICAL#runtime_state,save_load` | `game.states` | 状态、失败恢复与持久化语义是否可实现且一致 | HIGH / balanced |
+| `SEM.platform_performance_feasibility` | `GDD#vision` + `LEVEL#production_acceptance` + `TECHNICAL#performance,risks` | `game.platform`, `technical.target_fps`, `level.complexity_budget` | 目标平台、关卡复杂度与性能预算是否现实 | HIGH / balanced |
+| `SEM.interaction_ui_coherence` | `GDD#player_actions` + `UI#input,feedback_errors` | `game.mechanics`, `ui.supported_actions` | 玩家动作、输入、反馈与错误恢复是否连贯 | HIGH / balanced |
+| `SEM.camera_visual_readability` | `LEVEL#camera_readability` + `ART#composition_readability,camera_presentation` | `art.style_constraints` | 镜头、构图、对比与玩法可读性是否一致 | MEDIUM / fast |
+| `SEM.content_asset_feasibility` | `LEVEL#content_matrix` + `ART#asset_specifications` + `ASSET#inventory,formats_budgets` | `level.required_assets`, `asset.inventory_ids`, `asset.art_constraint_refs`, `asset.formats` | 内容需求、资产质量与交付预算是否可执行 | HIGH / balanced |
+| `SEM.audio_state_feedback` | `GDD#states_flow` + `AUDIO#event_taxonomy,music` | `game.states`, `audio.event_ids` | 关键状态、事件与音频反馈是否覆盖且不冲突 | MEDIUM / fast |
+| `SEM.multimodal_accessibility` | `GDD#accessibility_localization` + `UI#accessibility` + `ART#color_lighting` + `AUDIO#ui_feedback` | 无额外 Fact；只使用列出的 Section | 视觉、输入与非视觉替代是否共同满足可访问性 | HIGH / balanced |
+| `SEM.completion_recovery_coherence` | `GDD#states_flow,challenge_recovery` + `LEVEL#objectives_routes,spawn_checkpoint` | `game.states`, `game.win_conditions`, `game.loss_conditions` | 胜负、目标、失败、检查点与重试是否形成闭环 | HIGH / balanced |
+
+每个 Check 独立形成一个不超过 16 KiB 的 packet，只携带表中 Section、相关 normalized Facts 与 deterministic issue 引用；不携带其他文档。每个 worker 使用全新、不可累积的上下文，返回 `PASS | ISSUES | UNDECIDABLE`，不生成说明文档。`UNDECIDABLE` 或 BLOCKER 才允许以同一 packet 发起一次 strong confirmation；禁止通过重读全文或扩大上下文解决。
+
 # 7. Issue Registry
 
 > {  
