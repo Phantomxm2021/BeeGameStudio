@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 import { createDeliveryWorkflowController } from './controller'
 import { createInitialDeliveryRun } from './run-store'
 import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryWorkerPort } from './types'
+import { createBeeGameDeliveryWorkerPort } from '../delivery-worker-session-port'
 import { getGameDocumentContract } from './game-document-contracts'
 
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
@@ -24,7 +25,7 @@ function port(started = new Set<string>()): DeliveryWorkerPort {
 }
 
 describe('foundation fact runtime controller integration', () => {
-  async function preparedController() {
+  async function preparedController(workerPortFactory?: (started: Set<string>) => DeliveryWorkerPort, resumeImmediately = true) {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-fact-runtime-'))
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) await writeFile(join(workspacePath, path), document(path))
@@ -32,9 +33,9 @@ describe('foundation fact runtime controller integration', () => {
     const run = createInitialDeliveryRun({ projectId: 'project', ownerId: 'owner', confirmedBriefContext: context, confirmedBriefDigest: createHash('sha256').update(context).digest('hex'), documentRevision: 'rev-1', workspaceRevision: 'workspace-1' })
     const ready = { ...run, phase: 'DOCUMENT_DRAFTING' as const, documentStep: 'FOUNDATION_DRAFTING' as const, foundationDraftState: { completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS] }, revision: { ...run.revision, document: 'rev-1' } }
     const started = new Set<string>()
-    const controller = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: port(started) })
+    const controller = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: workerPortFactory ? workerPortFactory(started) : port(started) })
     await controller.store.save(ready)
-    await controller.resume(ready)
+    if (resumeImmediately) await controller.resume(ready)
     return { workspacePath, controller, started }
   }
 
@@ -202,6 +203,44 @@ describe('foundation fact runtime controller integration', () => {
       })
       const after = await controller.store.load()
       expect(after!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('needs_action')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('does not dispatch after the aggregate model cap is reached', async () => {
+    const { workspacePath, controller, started } = await preparedController()
+    try {
+      const current = await controller.store.load()
+      await controller.store.commit({
+        ...current!,
+        foundationAuditState: {
+          ...current!.foundationAuditState!,
+          aggregateUsage: { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 32000, total_tokens: 32000 },
+          tasks: current!.foundationAuditState!.tasks.map(task => ({ ...task, status: task.status === 'running' ? 'retryable' as const : task.status, dispatch: undefined })),
+        },
+      }, { runId: current!.runId, type: 'test.aggregate.cap', phase: current!.phase, status: current!.status, revision: current!.revision })
+      const before = started.size
+      await expect(controller.resume(await controller.store.load() as never)).rejects.toThrow(/aggregate|cap|claim/i)
+      const after = await controller.store.load()
+      expect(started.size).toBe(before)
+      expect(after!.foundationAuditState!.tasks.filter(task => task.status === 'pending' || task.status === 'retryable')).toHaveLength(0)
+      expect(after!.foundationAuditState!.tasks.every(task => task.status === 'needs_action')).toBe(true)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('fails closed once when the production port has no fast model and never starts or retries a worker', async () => {
+    let startCalls = 0
+    const { workspacePath, controller, started } = await preparedController(() => createBeeGameDeliveryWorkerPort({
+      sessions: {
+        start() { startCalls += 1; throw new Error('worker start must not be reached') },
+      } as never,
+      userId: 'owner',
+    }), false)
+    try {
+      await expect(controller.resume(await controller.store.load() as never)).rejects.toThrow(/fast model|configured/i)
+      const after = await controller.store.load()
+      expect(startCalls).toBe(0)
+      expect(started.size).toBe(0)
+      expect(after!.foundationAuditState!.tasks.every(task => task.status === 'needs_action' && task.attempt === 0)).toBe(true)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 })

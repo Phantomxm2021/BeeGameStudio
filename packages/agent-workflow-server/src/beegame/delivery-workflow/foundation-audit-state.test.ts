@@ -59,4 +59,20 @@ describe('foundationAuditState schema', () => {
       tasks: [task],
     })).toThrow(/pending|receipt|completed/i)
   })
+
+  test('preserves the exact derived binding through forward audit states', () => {
+    const derived = {
+      manifestPath: '.beegame/audit/foundation/revision-1/derived/manifest.json',
+      manifestDigest: 'c'.repeat(64),
+      markerPath: '.beegame/audit/foundation/revision-1/derived/COMMITTED.json',
+      markerDigest: 'd'.repeat(64),
+      factStorePath: '.beegame/audit/foundation/revision-1/derived/fact-store.json',
+      factStoreDigest: 'e'.repeat(64),
+      sectionIndexPath: '.beegame/audit/foundation/revision-1/derived/section-index.json',
+      sectionIndexDigest: 'f'.repeat(64),
+    }
+    for (const status of ['derived_committed', 'deterministic_ready', 'semantic_review', 'audit_ready'] as const) {
+      expect(parseFoundationAuditState({ ...valid, status, phaseStartedAt: '2026-08-24T00:00:00.000Z', derived })).toMatchObject({ status, derived })
+    }
+  })
 })
