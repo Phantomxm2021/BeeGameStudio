@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT,
-  FOUNDATION_AUDIT_STATE_SCHEMA_VERSION,
-  type FoundationAuditTask,
   foundationAuditStateSchema,
   parseFoundationAuditState,
 } from './foundation-audit-state'
@@ -10,8 +7,6 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
 describe('foundationAuditState schema', () => {
   const valid = {
-    schemaVersion: FOUNDATION_AUDIT_STATE_SCHEMA_VERSION,
-    schemaFingerprint: FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(
@@ -21,11 +16,7 @@ describe('foundationAuditState schema', () => {
     sectionIndexPath:
       '.beegame/audit/foundation/revision-1/staging/section-index.json',
     manifestPath: '.beegame/audit/foundation/revision-1/staging/manifest.json',
-    factStorePath: '.beegame/audit/foundation/revision-1/staging/fact-store.json',
-    derivedManifestPath: '.beegame/audit/foundation/revision-1/derived/derived-manifest.json',
-    commitMarkerPath: '.beegame/audit/foundation/revision-1/derived/COMMITTED.json',
-    tasks: [] as FoundationAuditTask[],
-    needsAction: 'foundation fact extraction has no unresolved catalog tasks',
+    needsAction: 'foundation fact extraction is not part of Task 4A',
   } as const
 
   test('accepts only the index staged scaffold and binds its revision and digest', () => {

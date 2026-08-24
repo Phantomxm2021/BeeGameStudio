@@ -1174,32 +1174,6 @@ function rawActiveUnitId(input: {
       )
     return documentUnitId(currentItemId)
   }
-  const auditState = record(snapshot.foundationAuditState)
-  const auditTasks = Array.isArray(auditState?.tasks) ? auditState.tasks : []
-  const runningAuditTask = auditTasks.find(task => {
-    const candidate = record(task)
-    return candidate?.status === 'running' && record(candidate.dispatch)?.status === 'running'
-  })
-  if (runningAuditTask) {
-    const task = record(runningAuditTask)
-    const auditDispatch = record(task?.dispatch)
-    const request = record(auditDispatch?.request)
-    const taskId = stringValue(task?.taskId)
-    const dispatchId = stringValue(auditDispatch?.dispatchId)
-    const revision = stringValue(task?.revision)
-    const packetDigest = stringValue(task?.packetDigest)
-    if (
-      !taskId || !dispatchId || !revision || !packetDigest ||
-      auditDispatch?.workerType !== 'foundation-fact-extractor' ||
-      auditDispatch?.taskId !== taskId || auditDispatch?.revision !== revision ||
-      request?.dispatchId !== dispatchId || request?.taskId !== taskId ||
-      request?.workerType !== 'foundation-fact-extractor' || request?.revision !== revision ||
-      record(request.contract)?.packetDigest !== packetDigest ||
-      record(snapshot.revision)?.document !== revision
-    )
-      recoveryError('recovery_checkpoint_conflict', 'foundation fact task contradicts its active dispatch proof')
-    return `foundation-fact:${taskId}`
-  }
   if (
     snapshot.phase === 'DOCUMENT_REVIEW' &&
     !record(snapshot?.foundationAuditState)

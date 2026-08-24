@@ -3692,7 +3692,6 @@ type ProjectWorkspaceFileAccessAuthority = {
     | 'project_workspace_file_access'
     | 'project_workspace_boundary'
     | 'project_workspace_target_invalid'
-    | 'workflow_fact_worker_read_scope'
   message?: string
 }
 
@@ -3703,16 +3702,6 @@ function projectWorkspaceFileAccessAuthority(
   if (!record.projectId) return undefined
   const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'
   if (!['Read', 'Grep', 'Glob'].includes(request.toolName)) return undefined
-  if (
-    record.workflowWorker === true &&
-    (record.workflowWorkerType === 'foundation-fact-extractor' ||
-      record.workflowWorkerType === 'foundation-semantic-auditor')
-  )
-    return {
-      behavior: 'deny',
-      reason: 'workflow_fact_worker_read_scope',
-      message: 'Fact and semantic workers receive packet-scoped input and may not read project files.',
-    }
   const inputPath = request.input[pathKey]
   const defaultToWorkspace =
     (request.toolName === 'Grep' || request.toolName === 'Glob') &&

@@ -27,7 +27,6 @@ import {
   changeImpactTerminalSchema,
   documentAuthorTerminalSchema,
   implementationAuditorTerminalSchema,
-  foundationFactExtractorTerminalSchema,
   questionAnswerTerminalSchema,
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
@@ -839,8 +838,6 @@ function structuredSubmissionToolName(
   request: WorkerDispatchRequest,
 ): string | undefined {
   switch (request.workerType) {
-    case 'foundation-fact-extractor':
-      return 'SubmitFoundationFactExtraction'
     case 'document-author':
       return undefined
     case 'atomic-task-planner':
@@ -900,8 +897,6 @@ async function createDeterministicStructuredTerminal(input: {
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   switch (input.request.workerType) {
-    case 'foundation-fact-extractor':
-      return createDeterministicFoundationFactExtractorTerminal(input)
     case 'document-author':
       throw new Error(
         'canonical document completion must use its commit receipt',
@@ -928,28 +923,6 @@ async function createDeterministicStructuredTerminal(input: {
         'resource content terminal requires a committed durable content receipt',
       )
   }
-}
-
-function createDeterministicFoundationFactExtractorTerminal(input: {
-  request: WorkerDispatchRequest
-  events: ReturnType<BeeGameSessionManager['events']>
-}) {
-  const candidate = completedToolInputs(
-    input.events,
-    'SubmitFoundationFactExtraction',
-  )[0]
-  if (!candidate)
-    throw new Error(
-      'worker terminal result is missing a valid SubmitFoundationFactExtraction call',
-    )
-  return foundationFactExtractorTerminalSchema.parse({
-    workerType: 'foundation-fact-extractor',
-    status: 'completed',
-    taskId: input.request.taskId,
-    revision: input.request.revision,
-    packetDigest: input.request.contract.packetDigest,
-    ...candidate,
-  })
 }
 
 function completedToolInputs(

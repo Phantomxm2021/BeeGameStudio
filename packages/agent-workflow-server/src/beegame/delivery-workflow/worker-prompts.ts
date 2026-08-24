@@ -39,7 +39,6 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     : request.allowedPaths?.length
       ? request.allowedPaths.join(', ')
       : 'read-only'
-  const foundationFactExtractor = request.workerType === 'foundation-fact-extractor'
   const foundationAuthorArtifacts =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
@@ -73,9 +72,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     initialFoundationAuthor
       ? undefined
       : `Workspace root: ${request.workspacePath}`,
-    foundationFactExtractor
-      ? 'Project read scope: empty (the packet below is the only input)'
-      : `${pathScopeLabel}: ${pathScope}`,
+    `${pathScopeLabel}: ${pathScope}`,
     `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
     'The durable confirmed brief context and its digest are the product authority for this run.',
     'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
@@ -190,8 +187,6 @@ function formatResourceContentContract(
 
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
-    case 'foundation-fact-extractor':
-      return 'Extract only the assigned catalog keys from the supplied packet. Do not read project files, write files, emit issues, or use any tool except SubmitFoundationFactExtraction exactly once.'
     case 'document-author':
       return [
         request.contract.documentSet === 'checklist'
@@ -297,8 +292,6 @@ function workerInstruction(request: WorkerDispatchRequest): string {
 
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
-    case 'foundation-fact-extractor':
-      return 'Call SubmitFoundationFactExtraction exactly once. The packet is the only input and no project file access is permitted.'
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||
