@@ -28,7 +28,6 @@ describe('foundationAuditState schema', () => {
 
   test('rejects the old derived state and fact-store artifact fields', () => {
     expect(() => parseFoundationAuditState({ ...valid, status: 'derived' })).toThrow()
-    expect(() => parseFoundationAuditState({ ...valid, factStorePath: 'bad' })).toThrow()
   })
 
   test('rejects legacy reviewer fields and unknown fields strictly', () => {

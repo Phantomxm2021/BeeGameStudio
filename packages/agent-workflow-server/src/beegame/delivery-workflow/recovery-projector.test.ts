@@ -23,7 +23,7 @@ import { deriveFoundationAuditArtifacts } from './foundation-audit-artifacts'
 import { createFoundationAuditState } from './foundation-audit-state'
 
 describe('recovery projector foundation audit boundary', () => {
-  test('reconstructs and preserves the sole derived audit state after recovery', async () => {
+  test('reconstructs and preserves the sole index-staged audit state after recovery', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'foundation-recovery-cutover-'),
     )

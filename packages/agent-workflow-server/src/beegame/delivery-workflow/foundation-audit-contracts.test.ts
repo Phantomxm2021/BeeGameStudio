@@ -17,7 +17,18 @@ const fact = (
   key: string,
   value: FoundationFact['value'],
   source: SectionRef,
-): FoundationFact => ({ key, value, source })
+): FoundationFact => ({
+  key,
+  value,
+  source,
+  evidence: {
+    documentPath: source.documentPath,
+    sectionId: source.sectionId,
+    startLine: source.startLine,
+    endLine: source.endLine,
+    digest: 'd'.repeat(64),
+  },
+})
 
 function completeFoundationFixture(overrides: readonly FoundationFact[] = []) {
   const sectionIndex = CANONICAL_FOUNDATION_DOCUMENTS.flatMap(path =>

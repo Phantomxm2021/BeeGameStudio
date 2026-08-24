@@ -968,7 +968,7 @@ export function createDeliveryWorkflowController(input: {
         await persist(
           next,
           next.foundationAuditState
-            ? 'foundation.audit.derived'
+            ? 'foundation.audit.index_staged'
             : 'foundation.audit.derivation_failed',
         )
         return

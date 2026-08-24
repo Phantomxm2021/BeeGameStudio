@@ -7,6 +7,7 @@ import { createRunStore } from './run-store'
 import { commitAuthoredFoundationDocument } from '../authored-document-receipt'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  DELIVERY_RUN_SCHEMA_VERSION,
   type DeliveryRun,
   type DispatchRecord,
 } from './types'
@@ -28,7 +29,7 @@ function runWithEightCommittedDocs(): DeliveryRun {
     'docs/ASSET_PLAN.md',
   ] as const
   return {
-    schemaVersion: 29,
+    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
     runId: 'run-cutover',
     projectId: 'project-cutover',
     ownerId: 'owner-cutover',

@@ -3,9 +3,7 @@ import {
   foundationFactDefinition,
   isFoundationFactKey,
 } from './foundation-fact-definitions'
-import type {
-  SectionRef,
-} from './foundation-section-index'
+import type { SectionRef } from './foundation-section-index'
 import type { FoundationFactEvidence } from './foundation-fact-extraction'
 
 export type FactValue = string | number | boolean | string[] | number[]
@@ -14,7 +12,7 @@ export type FoundationFact = {
   key: string
   value: FactValue
   source: SectionRef
-  evidence?: FoundationFactEvidence
+  evidence: FoundationFactEvidence
 }
 
 export type FoundationFactStore = FoundationFact[]
@@ -32,7 +30,9 @@ function isFactValue(value: unknown): value is FactValue {
     return true
   if (!Array.isArray(value) || value.length === 0) return false
   return value.every(
-    item => typeof item === 'string' || (typeof item === 'number' && Number.isFinite(item)),
+    item =>
+      typeof item === 'string' ||
+      (typeof item === 'number' && Number.isFinite(item)),
   )
 }
 
@@ -73,19 +73,47 @@ export function createFoundationFactStore(
       fact.evidence.endLine < fact.evidence.startLine ||
       fact.evidence.endLine > fact.source.endLine
     )
-      throw new Error(`foundation fact source is not the catalog owner: ${fact.key}`)
-    if (definition.valueType === 'number' &&
-      (!Number.isInteger(fact.value) || (fact.value as number) < (definition.valueSpec.min ?? -Infinity) || (fact.value as number) > (definition.valueSpec.max ?? Infinity)))
+      throw new Error(
+        `foundation fact source is not the catalog owner: ${fact.key}`,
+      )
+    if (
+      definition.valueType === 'number' &&
+      (!Number.isInteger(fact.value) ||
+        (fact.value as number) < (definition.valueSpec.min ?? -Infinity) ||
+        (fact.value as number) > (definition.valueSpec.max ?? Infinity))
+    )
       throw new Error(`foundation fact value is out of range: ${fact.key}`)
-    if (definition.valueType === 'string' && definition.valueSpec.enum &&
-      (!definition.valueSpec.enum.includes(fact.value as string)))
+    if (
+      definition.valueType === 'string' &&
+      definition.valueSpec.enum &&
+      !definition.valueSpec.enum.includes(fact.value as string)
+    )
       throw new Error(`foundation fact enum value is invalid: ${fact.key}`)
-    if ((definition.valueType === 'string[]' || definition.valueType === 'number[]') &&
-      ((fact.value as unknown[]).length < (definition.valueSpec.minItems ?? 0) || (fact.value as unknown[]).length > (definition.valueSpec.maxItems ?? Infinity)))
+    if (
+      (definition.valueType === 'string[]' ||
+        definition.valueType === 'number[]') &&
+      ((fact.value as unknown[]).length <
+        (definition.valueSpec.minItems ?? 0) ||
+        (fact.value as unknown[]).length >
+          (definition.valueSpec.maxItems ?? Infinity))
+    )
       throw new Error(`foundation fact list length is invalid: ${fact.key}`)
-    if (definition.valueType === 'number[]' && !(fact.value as unknown[]).every(item => typeof item === 'number' && Number.isFinite(item)))
+    if (
+      definition.valueType === 'number[]' &&
+      !(fact.value as unknown[]).every(
+        item => typeof item === 'number' && Number.isFinite(item),
+      )
+    )
       throw new Error(`foundation fact number list is invalid: ${fact.key}`)
-    if (definition.valueType === 'string[]' && !(fact.value as unknown[]).every(item => typeof item === 'string' && (!definition.valueSpec.itemPattern || new RegExp(definition.valueSpec.itemPattern).test(item))))
+    if (
+      definition.valueType === 'string[]' &&
+      !(fact.value as unknown[]).every(
+        item =>
+          typeof item === 'string' &&
+          (!definition.valueSpec.itemPattern ||
+            new RegExp(definition.valueSpec.itemPattern).test(item)),
+      )
+    )
       throw new Error(`foundation fact string list is invalid: ${fact.key}`)
     seen.add(fact.key)
     return {

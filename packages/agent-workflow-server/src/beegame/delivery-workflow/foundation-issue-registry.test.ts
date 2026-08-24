@@ -15,7 +15,18 @@ const fact = (
   key: string,
   value: FoundationFact['value'],
   source: SectionRef,
-): FoundationFact => ({ key, value, source })
+): FoundationFact => ({
+  key,
+  value,
+  source,
+  evidence: {
+    documentPath: source.documentPath,
+    sectionId: source.sectionId,
+    startLine: source.startLine,
+    endLine: source.endLine,
+    digest: 'd'.repeat(64),
+  },
+})
 
 describe('foundation issue registry admission', () => {
   test('derives IDs without caller IDs and keeps them stable across display/severity/fix changes', () => {

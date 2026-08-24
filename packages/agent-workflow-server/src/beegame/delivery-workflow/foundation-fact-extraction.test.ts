@@ -7,7 +7,7 @@ import {
   extractNormalizedFoundationFacts,
   validateFoundationFactResults,
 } from './foundation-fact-extraction'
-import { FOUNDATION_FACT_CATALOG } from './foundation-fact-definitions'
+import { FOUNDATION_FACT_CATALOG, foundationFactDefinition } from './foundation-fact-definitions'
 import { completeTestSubmission, renderTestCompleteGameDocument } from '../../__tests__/complete-game-document-fixture'
 import { withTestDocumentMetadata } from '../../__tests__/delivery-workflow-test-helpers'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
@@ -32,7 +32,7 @@ function sectionIndex(): SectionRef[] {
       if (!marker) continue
       const heading = lines[index + 1]!.replace(/^##\s+/, '')
       const next = lines.findIndex((line, offset) => offset > index && /^<!-- beegame-section:/.test(line.trim()))
-      const endLine = next < 0 ? lines.length : next + 1
+      const endLine = next < 0 ? lines.length : next
       output.push({
         documentPath: documentPath as SectionRef['documentPath'],
         sectionId: marker[1]!,
@@ -56,7 +56,39 @@ describe('mechanical normalized foundation extraction', () => {
     const result = extractNormalizedFoundationFacts({ documents: canonicalDocuments, sectionIndex: index })
     expect(result.receipts).toHaveLength(FOUNDATION_FACT_CATALOG.length)
     expect(result.unresolvedKeys).toHaveLength(FOUNDATION_FACT_CATALOG.length)
-    expect(buildFoundationFactPackets({ revision: 'canonical-revision', documents: canonicalDocuments, sectionIndex: index, unresolvedKeys: result.unresolvedKeys }).every(packet => packet.keys.every(key => FOUNDATION_FACT_CATALOG.find(item => item.key === key)?.resolution === 'model_if_unresolved'))).toBe(true)
+    const packets = buildFoundationFactPackets({ revision: 'canonical-revision', documents: canonicalDocuments, sectionIndex: index, unresolvedKeys: result.unresolvedKeys })
+    expect(packets).toHaveLength(8)
+    expect(new Set(packets.flatMap(packet => packet.keys)).size).toBe(FOUNDATION_FACT_CATALOG.length)
+    const admitted = packets.flatMap(packet => {
+      const results = packet.keys.map(key => {
+        const definition = foundationFactDefinition(key)!
+        const section = packet.sections.find(candidate => candidate.documentPath === definition.owner.documentPath && candidate.sectionId === definition.owner.sectionId)!
+        const value = definition.valueType === 'number'
+          ? definition.valueSpec.min ?? 1
+          : definition.valueType === 'string'
+            ? definition.valueSpec.enum?.[0] ?? 'fixture'
+            : definition.valueType === 'boolean'
+              ? true
+              : definition.valueType === 'number[]'
+                ? [1]
+                : ['fixture']
+        return {
+          key,
+          status: 'present' as const,
+          value,
+          evidence: {
+            documentPath: section.documentPath,
+            sectionId: section.sectionId,
+            startLine: section.startLine,
+            endLine: section.endLine,
+            digest: createHash('sha256').update(section.text).digest('hex'),
+          },
+        }
+      })
+      return validateFoundationFactResults({ packet, expectedRevision: 'canonical-revision', documents: canonicalDocuments, sectionIndex: index, results }).facts
+    })
+    expect(admitted).toHaveLength(FOUNDATION_FACT_CATALOG.length)
+    expect(admitted.every(fact => fact.evidence)).toBe(true)
   })
 
   test('rejects prose-body facts and emits typed facts with exact indexed provenance', () => {
@@ -107,6 +139,15 @@ describe('mechanical normalized foundation extraction', () => {
       sectionIndex: index,
       unresolvedKeys: ['game.mechanics'],
     })[0]!
+    expect(() =>
+      validateFoundationFactResults({
+        packet,
+        expectedRevision: 'stale-revision',
+        documents: docs,
+        sectionIndex: index,
+        results: [],
+      }),
+    ).toThrow(/stale|revision/i)
     expect(() =>
       validateFoundationFactResults({
         packet,

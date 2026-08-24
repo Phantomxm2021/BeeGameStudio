@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { canStartFoundationAudit } from './foundation-audit-boundary'
 import { startChecklistDraftStage } from './document-stage'
-import type { DeliveryRun, FoundationDocumentCheckpoint } from './types'
+import { DELIVERY_RUN_SCHEMA_VERSION, type DeliveryRun, type FoundationDocumentCheckpoint } from './types'
 
 const paths = [
   'docs/GDD.md',
@@ -18,7 +18,7 @@ function runWithStatuses(
   statuses: readonly FoundationDocumentCheckpoint['status'][],
 ): DeliveryRun {
   return {
-    schemaVersion: 29,
+    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
     runId: 'run-boundary',
     projectId: 'project-boundary',
     ownerId: 'owner-boundary',

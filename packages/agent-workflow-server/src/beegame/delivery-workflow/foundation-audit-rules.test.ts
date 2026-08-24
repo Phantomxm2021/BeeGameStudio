@@ -18,7 +18,18 @@ const fact = (
   key: string,
   value: FoundationFact['value'],
   source: SectionRef,
-): FoundationFact => ({ key, value, source })
+): FoundationFact => ({
+  key,
+  value,
+  source,
+  evidence: {
+    documentPath: source.documentPath,
+    sectionId: source.sectionId,
+    startLine: source.startLine,
+    endLine: source.endLine,
+    digest: 'd'.repeat(64),
+  },
+})
 
 describe('deterministic foundation rules', () => {
   test('targets each later conflicting numeric fact in a 3-way comparison', () => {

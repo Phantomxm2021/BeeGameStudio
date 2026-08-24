@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { FoundationFact, FactValue } from './foundation-fact-store'
+import { foundationFactDefinition } from './foundation-fact-definitions'
 import type { SectionRef } from './foundation-section-index'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -59,7 +60,14 @@ const SECTION_KEYS = [
   'sectionId',
   'startLine',
 ]
-const FACT_KEYS = ['key', 'source', 'value']
+const FACT_KEYS = ['evidence', 'key', 'source', 'value']
+const EVIDENCE_KEYS = [
+  'digest',
+  'documentPath',
+  'endLine',
+  'sectionId',
+  'startLine',
+]
 const SCHEMA_KEYS = ['factTypes', 'requiredFacts']
 const REQUIRED_KEYS = ['expectedType', 'key', 'severity', 'source']
 const NUMERIC_KEYS = ['facts', 'id', 'relation', 'severity']
@@ -146,6 +154,27 @@ function sameSection(left: SectionRef, right: SectionRef): boolean {
   )
 }
 
+function validateEvidence(
+  value: unknown,
+  source: SectionRef,
+  label: string,
+): FoundationFact['evidence'] {
+  exactKeys(value, EVIDENCE_KEYS, label)
+  const evidence = value as FoundationFact['evidence']
+  if (
+    evidence.documentPath !== source.documentPath ||
+    evidence.sectionId !== source.sectionId ||
+    !Number.isInteger(evidence.startLine) ||
+    !Number.isInteger(evidence.endLine) ||
+    evidence.startLine < source.startLine ||
+    evidence.endLine < evidence.startLine ||
+    evidence.endLine > source.endLine ||
+    !/^[a-f0-9]{64}$/.test(evidence.digest)
+  )
+    throw new Error(`${label} must match its source SectionRef and line bounds`)
+  return { ...evidence }
+}
+
 function contextFrom(
   input: DeterministicFoundationAuditInput,
 ): FoundationAuditContext {
@@ -211,6 +240,20 @@ function contextFrom(
         fact.source,
         `FoundationFact[${index}].source`,
       )
+      const catalogDefinition = foundationFactDefinition(fact.key)
+      if (
+        catalogDefinition &&
+        (catalogDefinition.owner.documentPath !== source.documentPath ||
+          catalogDefinition.owner.sectionId !== source.sectionId)
+      )
+        throw new Error(
+          `FoundationFact[${index}] source is not the catalog owner section`,
+        )
+      const evidence = validateEvidence(
+        fact.evidence,
+        source,
+        `FoundationFact[${index}].evidence`,
+      )
       const indexed = sectionMap.get(
         `${source.documentPath}\0${source.sectionId}`,
       )
@@ -218,7 +261,7 @@ function contextFrom(
         throw new Error(
           `FoundationFact[${index}] fact source is not the indexed SectionRef`,
         )
-      return { key: fact.key, value: fact.value, source: indexed }
+      return { key: fact.key, value: fact.value, source: indexed, evidence }
     })
     .sort((a, b) => a.key.localeCompare(b.key))
   const factMap = new Map<string, FoundationFact>()
