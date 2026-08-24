@@ -418,7 +418,12 @@ function validateRules(
       !binding.sourceFactKey.trim() ||
       typeof binding.targetFactKey !== 'string' ||
       !binding.targetFactKey.trim() ||
-      !['exists', 'equal', 'numeric-equal'].includes(binding.relation)
+      ![
+        'exists',
+        'equal',
+        'numeric-equal',
+        'numeric-less-than-or-equal',
+      ].includes(binding.relation)
     )
       throw new Error('contract binding is invalid')
     if (
@@ -534,6 +539,7 @@ const DRAFT_KEYS = [
   'expected',
   'fixDocument',
   'fixSectionId',
+  'reasonCode',
   'severity',
   'source',
   'target',
@@ -599,7 +605,9 @@ function validateIssueDraft(
   const candidate = draft as Record<string, unknown>
   const actualKeys = Object.keys(candidate).sort()
   const expectedKeys = DRAFT_KEYS.filter(
-    key => key !== 'target' || candidate.target !== undefined,
+    key =>
+      (key !== 'target' || candidate.target !== undefined) &&
+      (key !== 'reasonCode' || candidate.reasonCode !== undefined),
   ).sort()
   if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys))
     throw new Error(
@@ -621,6 +629,11 @@ function validateIssueDraft(
     throw new Error('audit issue expected text is required')
   if (typeof candidate.actual !== 'string' || !candidate.actual.trim())
     throw new Error('audit issue actual text is required')
+  if (
+    candidate.reasonCode !== undefined &&
+    (typeof candidate.reasonCode !== 'string' || !candidate.reasonCode.trim())
+  )
+    throw new Error('audit issue reason code is invalid')
   if (
     !candidate.conflictIdentity ||
     typeof candidate.conflictIdentity !== 'object' ||
@@ -651,6 +664,9 @@ function validateIssueDraft(
     actual: candidate.actual,
     fixDocument: fix.documentPath as FoundationDocumentPath,
     fixSectionId: fix.sectionId,
+    ...(candidate.reasonCode !== undefined
+      ? { reasonCode: candidate.reasonCode }
+      : {}),
     conflictIdentity: candidate.conflictIdentity as Readonly<
       Record<string, unknown>
     >,
@@ -692,6 +708,7 @@ function compileIssueRegistry(
       actual: draft.actual,
       fixDocument: draft.fixDocument,
       fixSectionId: draft.fixSectionId,
+      ...(draft.reasonCode ? { reasonCode: draft.reasonCode } : {}),
     })
   }
   return issues.sort((left, right) => left.id.localeCompare(right.id))

@@ -71,8 +71,21 @@ describe('foundationAuditState schema', () => {
       sectionIndexPath: '.beegame/audit/foundation/revision-1/derived/section-index.json',
       sectionIndexDigest: 'f'.repeat(64),
     }
+    const deterministic = {
+      reviewDigest: '1'.repeat(64),
+      issueRegistryPath: '.beegame/audit/foundation/revision-1/staging/review/1/issue-registry.json',
+      issueRegistryDigest: '2'.repeat(64),
+      manifestPath: '.beegame/audit/foundation/revision-1/staging/review/1/manifest.json',
+      manifestDigest: '3'.repeat(64),
+      markerPath: '.beegame/audit/foundation/revision-1/staging/review/1/COMMITTED.json',
+      markerDigest: '4'.repeat(64),
+      catalogVersion: 'foundation-facts.v1',
+      contractGraphDigest: '5'.repeat(64),
+      sectionIndexDigest: 'f'.repeat(64),
+      factStoreDigest: 'e'.repeat(64),
+    }
     for (const status of ['derived_committed', 'deterministic_ready', 'semantic_review', 'audit_ready'] as const) {
-      expect(parseFoundationAuditState({ ...valid, status, phaseStartedAt: '2026-08-24T00:00:00.000Z', derived })).toMatchObject({ status, derived })
+      expect(parseFoundationAuditState({ ...valid, status, phaseStartedAt: '2026-08-24T00:00:00.000Z', derived, ...(status === 'derived_committed' ? {} : { deterministic }) })).toMatchObject({ status, derived })
     }
   })
 })

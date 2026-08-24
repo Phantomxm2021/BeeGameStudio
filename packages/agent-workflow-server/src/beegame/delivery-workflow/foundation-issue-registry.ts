@@ -14,6 +14,7 @@ export type AuditIssue = {
   actual: string
   fixDocument: FoundationDocumentPath
   fixSectionId: string
+  reasonCode?: string
 }
 
 export type AuditIssueDraft = {
@@ -26,6 +27,7 @@ export type AuditIssueDraft = {
   actual: string
   fixDocument: FoundationDocumentPath
   fixSectionId: string
+  reasonCode?: string
   conflictIdentity: Readonly<Record<string, unknown>>
 }
 

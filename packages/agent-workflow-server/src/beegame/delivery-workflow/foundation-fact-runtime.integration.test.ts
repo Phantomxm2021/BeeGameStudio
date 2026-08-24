@@ -69,7 +69,7 @@ describe('foundation fact runtime controller integration', () => {
       const secondWave = current!.foundationAuditState!.tasks.filter(task => task.status === 'running').map(task => task.taskId)
       await Promise.all(secondWave.map(complete))
       current = await controller.store.load()
-      expect(current?.foundationAuditState?.status).toBe('derived_committed')
+      expect(current?.foundationAuditState?.status).toBe('deterministic_ready')
       expect(current?.status).toBe('needs_action')
       expect(current?.foundationAuditState?.aggregateUsage?.total_tokens).toBe(40)
       expect(current?.foundationAuditState?.tasks.every(task => task.usage?.total_tokens === 5)).toBe(true)

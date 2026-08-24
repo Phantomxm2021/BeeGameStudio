@@ -1,4 +1,5 @@
 import { getGameDocumentContract } from './game-document-contracts'
+import { foundationFactDefinition } from './foundation-fact-definitions'
 import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
 import type {
@@ -7,7 +8,11 @@ import type {
 } from './foundation-issue-registry'
 import type { FoundationAuditContext } from './foundation-audit-rules'
 
-export type ContractBindingRelation = 'exists' | 'equal' | 'numeric-equal'
+export type ContractBindingRelation =
+  | 'exists'
+  | 'equal'
+  | 'numeric-equal'
+  | 'numeric-less-than-or-equal'
 
 export type ContractBinding = {
   id: string
@@ -46,10 +51,20 @@ function equal(left: unknown, right: unknown, numeric: boolean): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
+function satisfiesRelation(
+  left: unknown,
+  right: unknown,
+  relation: ContractBindingRelation,
+): boolean {
+  if (relation === 'numeric-less-than-or-equal')
+    return typeof left === 'number' && typeof right === 'number' && left <= right
+  return equal(left, right, relation === 'numeric-equal')
+}
+
 function permittedEdge(binding: ContractBinding): boolean {
   const contract = getGameDocumentContract(binding.source.documentPath as never)
   if (!contract) return false
-  return (
+  const direct = (
     contract.allowedUpstreamPaths.includes(
       binding.target.documentPath as never,
     ) &&
@@ -58,6 +73,25 @@ function permittedEdge(binding: ContractBinding): boolean {
         projection.path === binding.target.documentPath &&
         projection.sectionIds.includes(binding.target.sectionId),
     )
+  )
+  if (direct) return true
+  // A closed catalog owner edge may be checked even when the compact
+  // projection omits that section (for example AssetPlan inventory ↔ GDD
+  // rules). This remains closed to the 24 service-owned keys and preserves
+  // the downstream-only direction; arbitrary caller edges are not admitted.
+  const sourceDefinition = foundationFactDefinition(binding.sourceFactKey)
+  const targetDefinition = foundationFactDefinition(binding.targetFactKey)
+  if (!sourceDefinition || !targetDefinition) return false
+  if (
+    binding.source.documentPath === 'docs/GDD.md' ||
+    binding.target.documentPath === 'docs/ASSET_PLAN.md'
+  )
+    return false
+  return (
+    sourceDefinition.owner.documentPath === binding.source.documentPath &&
+    sourceDefinition.owner.sectionId === binding.source.sectionId &&
+    targetDefinition.owner.documentPath === binding.target.documentPath &&
+    targetDefinition.owner.sectionId === binding.target.sectionId
   )
 }
 
@@ -112,11 +146,7 @@ function bindingDrafts(
     }
     if (
       binding.relation !== 'exists' &&
-      !equal(
-        sourceFact.value,
-        targetFact.value,
-        binding.relation === 'numeric-equal',
-      )
+      !satisfiesRelation(sourceFact.value, targetFact.value, binding.relation)
     ) {
       drafts.push({
         checkId: `contract.${identityPart(binding.id)}`,
