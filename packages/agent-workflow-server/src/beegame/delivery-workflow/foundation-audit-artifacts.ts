@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import {
   buildFoundationSectionIndex,
@@ -26,12 +26,32 @@ export type FoundationAuditArtifactPaths = {
   root: string
   sectionIndex: string
   manifest: string
+  factStore: string
+  derivedManifest: string
+  commitMarker: string
+  derived: string
 }
 export type DerivedFoundationAuditArtifacts = {
   revision: string
   documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>
   sectionIndex: FoundationSectionIndex
   manifest: FoundationAuditManifest
+  paths: FoundationAuditArtifactPaths
+}
+
+export type FoundationDerivedManifest = {
+  revision: string
+  sectionIndexDigest: string
+  factStoreDigest: string
+  normalizedFactDigest: string
+  documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>
+}
+
+export type CommittedDerivedFoundationAuditArtifacts = {
+  revision: string
+  sectionIndex: FoundationSectionIndex
+  factStore: unknown
+  manifest: FoundationDerivedManifest
   paths: FoundationAuditArtifactPaths
 }
 
@@ -72,21 +92,30 @@ export function foundationAuditArtifactPaths(
   const workspace = resolve(workspacePath)
   const base = join(workspace, '.beegame', 'audit', 'foundation')
   const root = join(base, revision, 'staging')
+  const derived = join(base, revision, 'derived')
   assertDescendant(base, root)
   return {
     root,
     sectionIndex: join(root, 'section-index.json'),
     manifest: join(root, 'manifest.json'),
+    factStore: join(root, 'fact-store.json'),
+    derivedManifest: join(derived, 'derived-manifest.json'),
+    commitMarker: join(derived, 'COMMITTED.json'),
+    derived,
   }
 }
 export function relativeFoundationAuditArtifactPaths(
   revision: string,
-): Omit<FoundationAuditArtifactPaths, 'root'> {
+): Omit<FoundationAuditArtifactPaths, 'root' | 'derived'> & { derived: string } {
   assertRevision(revision)
   const root = `.beegame/audit/foundation/${revision}/staging`
   return {
     sectionIndex: `${root}/section-index.json`,
     manifest: `${root}/manifest.json`,
+    factStore: `${root}/fact-store.json`,
+    derived: `.beegame/audit/foundation/${revision}/derived`,
+    derivedManifest: `.beegame/audit/foundation/${revision}/derived/derived-manifest.json`,
+    commitMarker: `.beegame/audit/foundation/${revision}/derived/COMMITTED.json`,
   }
 }
 export function assertExactlyEightCommittedFoundationDocuments(
@@ -254,7 +283,9 @@ async function loadExistingFoundationAuditArtifacts(input: {
         expectedDocuments.map(item => [item.path, item.digest]),
       ),
     ) ||
-      input.expectedState.status !== 'index_staged' ||
+      (input.expectedState.status !== 'index_staged' &&
+        input.expectedState.status !== 'extracting_facts' &&
+        input.expectedState.status !== 'facts_staged') ||
       input.expectedState.sectionIndexDigest !== sectionDigest ||
       input.expectedState.sectionIndexPath !==
         relativeFoundationAuditArtifactPaths(input.revision).sectionIndex ||
@@ -295,6 +326,13 @@ export async function validateFoundationAuditStateArtifacts(input: {
   workspacePath: string
   state: FoundationAuditState
 }): Promise<DerivedFoundationAuditArtifacts> {
+  if (input.state.status === 'derived_committed') {
+    const committed = await loadCommittedDerivedFoundationAuditArtifacts({
+      workspacePath: input.workspacePath,
+      revision: input.state.revision,
+    })
+    return committed as unknown as DerivedFoundationAuditArtifacts
+  }
   const loaded = await loadFoundationAuditArtifacts({
     workspacePath: input.workspacePath,
     revision: input.state.revision,
@@ -360,10 +398,111 @@ export async function deriveFoundationAuditArtifacts(input: {
 export function artifactPathsRelativeToWorkspace(
   workspacePath: string,
   paths: FoundationAuditArtifactPaths,
-): Omit<FoundationAuditArtifactPaths, 'root'> {
+): Pick<FoundationAuditArtifactPaths, 'sectionIndex' | 'manifest'> {
   const root = resolve(workspacePath)
   return {
     sectionIndex: relative(root, paths.sectionIndex).replaceAll('\\', '/'),
     manifest: relative(root, paths.manifest).replaceAll('\\', '/'),
   }
+}
+
+function canonicalDigest(value: unknown): string {
+  return sha256(JSON.stringify(value))
+}
+
+export async function publishDerivedFoundationAuditArtifacts(input: {
+  workspacePath: string
+  revision: string
+  documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>
+  sectionIndex: FoundationSectionIndex & { digest?: string }
+  factStore: unknown
+  normalizedFactDigest: string
+}): Promise<CommittedDerivedFoundationAuditArtifacts> {
+  assertRevision(input.revision)
+  if (!isDigest(input.normalizedFactDigest))
+    throw new Error('normalized foundation fact digest is invalid')
+  const paths = foundationAuditArtifactPaths(input.workspacePath, input.revision)
+  const sectionIndexDigest = input.sectionIndex.digest ?? digestSectionIndex(input.sectionIndex)
+  const factStoreDigest = canonicalDigest(input.factStore)
+  const manifest: FoundationDerivedManifest = {
+    revision: input.revision,
+    sectionIndexDigest,
+    factStoreDigest,
+    normalizedFactDigest: input.normalizedFactDigest,
+    documentDigests: input.documentDigests,
+  }
+  const marker = {
+    status: 'committed' as const,
+    revision: input.revision,
+    sectionIndexDigest,
+    factStoreDigest,
+    derivedManifestDigest: canonicalDigest(manifest),
+  }
+  try {
+    return await loadCommittedDerivedFoundationAuditArtifacts({
+      workspacePath: input.workspacePath,
+      revision: input.revision,
+    })
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('derived directory is missing')) throw error
+  }
+  const parent = dirname(paths.derived)
+  const temporary = join(parent, `.derived-${randomUUID()}.tmp`)
+  await mkdir(temporary, { recursive: true })
+  try {
+    await writeFile(join(temporary, 'section-index.json'), `${JSON.stringify(input.sectionIndex, null, 2)}\n`, 'utf8')
+    await writeFile(join(temporary, 'fact-store.json'), `${JSON.stringify(input.factStore, null, 2)}\n`, 'utf8')
+    await writeFile(join(temporary, 'derived-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+    await writeFile(join(temporary, 'COMMITTED.json'), `${JSON.stringify(marker, null, 2)}\n`, 'utf8')
+    await rename(temporary, paths.derived)
+  } catch (error) {
+    await rm(temporary, { recursive: true, force: true }).catch(() => undefined)
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+      return loadCommittedDerivedFoundationAuditArtifacts({
+        workspacePath: input.workspacePath,
+        revision: input.revision,
+      })
+    throw error
+  }
+  return loadCommittedDerivedFoundationAuditArtifacts({
+    workspacePath: input.workspacePath,
+    revision: input.revision,
+  })
+}
+
+export async function loadCommittedDerivedFoundationAuditArtifacts(input: {
+  workspacePath: string
+  revision: string
+}): Promise<CommittedDerivedFoundationAuditArtifacts> {
+  assertRevision(input.revision)
+  const paths = foundationAuditArtifactPaths(input.workspacePath, input.revision)
+  let directory: Awaited<ReturnType<typeof stat>>
+  try {
+    directory = await stat(paths.derived)
+  } catch {
+    throw new Error('derived directory is missing')
+  }
+  if (!directory.isDirectory()) throw new Error('derived directory is invalid')
+  const [sectionRaw, factsRaw, manifestRaw, markerRaw] = await Promise.all(
+    ['section-index.json', 'fact-store.json', 'derived-manifest.json', 'COMMITTED.json'].map(async name => {
+      try { return JSON.parse(await readFile(join(paths.derived, name), 'utf8')) as unknown }
+      catch { throw new Error(`derived commit marker or artifact is missing: ${name}`) }
+    }),
+  )
+  if (!markerRaw || typeof markerRaw !== 'object' || (markerRaw as Record<string, unknown>).status !== 'committed')
+    throw new Error('derived commit marker is invalid')
+  if (!manifestRaw || typeof manifestRaw !== 'object' || (manifestRaw as Record<string, unknown>).revision !== input.revision)
+    throw new Error('derived manifest is invalid')
+  const manifest = manifestRaw as FoundationDerivedManifest
+  if (
+    (markerRaw as Record<string, unknown>).revision !== input.revision ||
+    (markerRaw as Record<string, unknown>).sectionIndexDigest !== manifest.sectionIndexDigest ||
+    (markerRaw as Record<string, unknown>).factStoreDigest !== manifest.factStoreDigest ||
+    (markerRaw as Record<string, unknown>).derivedManifestDigest !== canonicalDigest(manifest) ||
+    canonicalDigest(factsRaw) !== manifest.factStoreDigest
+  ) throw new Error('derived commit marker digest is invalid')
+  const sectionIndex = sectionRaw as FoundationSectionIndex
+  if (digestSectionIndex(sectionIndex) !== manifest.sectionIndexDigest)
+    throw new Error('derived section index digest is invalid')
+  return { revision: input.revision, sectionIndex, factStore: factsRaw, manifest, paths }
 }

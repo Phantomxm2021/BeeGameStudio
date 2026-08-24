@@ -158,7 +158,7 @@ describe('foundation audit cutover', () => {
         workerPort: {
           start: async request => {
             dispatches.push(request)
-            throw new Error('foundation audit must not dispatch')
+            return { sessionId: `session-${request.taskId}`, dispatchId: request.dispatchId! }
           },
           submit: async () => undefined,
           stop: async () => undefined,
@@ -170,12 +170,13 @@ describe('foundation audit cutover', () => {
       await controller.resume(terminalRun)
       const saved = await store.load()
 
-      expect(dispatches).toEqual([])
+      expect(dispatches.length).toBeGreaterThan(0)
+      expect(dispatches.every(request => (request as { workerType: string }).workerType === 'foundation-fact-extractor')).toBe(true)
       expect(saved).toMatchObject({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        status: 'needs_action',
-        foundationAuditState: { status: 'index_staged' },
+        status: 'running',
+        foundationAuditState: { status: 'extracting_facts' },
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

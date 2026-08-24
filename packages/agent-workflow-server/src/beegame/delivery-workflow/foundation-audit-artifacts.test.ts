@@ -77,7 +77,7 @@ describe('foundation audit artifacts', () => {
       expect(paths.sectionIndex.startsWith(workspacePath)).toBe(true)
       expect(await stat(paths.sectionIndex)).toBeTruthy()
       expect(paths.sectionIndex).toContain(`${join('foundation', 'revision-1', 'staging')}`)
-      expect(Object.hasOwn(paths, 'factStore')).toBe(false)
+      expect(Object.hasOwn(paths, 'factStore')).toBe(true)
       expect(JSON.parse(await readFile(paths.manifest, 'utf8'))).toEqual(
         result.manifest,
       )

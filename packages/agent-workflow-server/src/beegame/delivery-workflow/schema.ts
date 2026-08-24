@@ -67,6 +67,7 @@ export const WORKER_TYPES = [
   'acceptance-validator',
   'change-impact-analyzer',
   'question-answerer',
+  'foundation-fact-extractor',
 ] as const
 
 const revisionSchema: z.ZodType<Revision> = z

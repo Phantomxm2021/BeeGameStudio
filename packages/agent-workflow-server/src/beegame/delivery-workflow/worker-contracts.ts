@@ -201,6 +201,19 @@ export const questionAnswerTerminalSchema = z
   })
   .strict()
 
+export const foundationFactExtractorTerminalSchema = z
+  .object({
+    workerType: z.literal('foundation-fact-extractor'),
+    status: z.literal('completed'),
+    taskId: z.string().min(1),
+    revision: z.string().min(1),
+    packetDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    terminalDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    results: z.array(z.record(z.string(), z.unknown())),
+    outputTokens: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+
 export const questionAnswerSubmissionSchema = questionAnswerTerminalSchema.omit(
   {
     workerType: true,
@@ -219,6 +232,7 @@ export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   questionAnswerTerminalSchema,
+  foundationFactExtractorTerminalSchema,
 ])
 
 export type WorkerTerminalResult =

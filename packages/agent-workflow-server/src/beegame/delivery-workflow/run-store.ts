@@ -268,6 +268,15 @@ function withDispatchUsage(
           }
         : {}),
     },
+    foundationAuditState: run.foundationAuditState
+      ? {
+          ...run.foundationAuditState,
+          tasks: run.foundationAuditState.tasks.map(task => ({
+            ...task,
+            dispatch: update(task.dispatch),
+          })),
+        }
+      : undefined,
   }
 }
 
@@ -1083,8 +1092,46 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     const runId = lease?.runId ?? inspection.currentRun.runId
     return runMutation(runId, lease, async () => {
       const run = await loadUnlocked()
-      if (!run?.activeDispatch || run.activeDispatch.status !== 'running')
-        return run
+      const auditTask = run?.foundationAuditState?.tasks.find(
+        task => task.status === 'running' && task.dispatch?.status === 'running',
+      )
+      if (!run?.activeDispatch || run.activeDispatch.status !== 'running') {
+        if (!run || !auditTask?.dispatch) return run
+        if (await sessionIsOpen(auditTask.dispatch)) return run
+        const dispatch = {
+          ...auditTask.dispatch,
+          status: 'interrupted' as const,
+          finishedAt: now(),
+          failureReason: 'server stopped before the active fact task produced a terminal result',
+        }
+        const tasks = run.foundationAuditState!.tasks.map(task =>
+          task.taskId === auditTask.taskId
+            ? {
+                ...task,
+                status: task.attempt < 2 ? ('retryable' as const) : ('needs_action' as const),
+                dispatch,
+                failureReason: dispatch.failureReason,
+              }
+            : task,
+        )
+        const status = tasks.some(task => task.status === 'needs_action') ? 'needs_action' as const : 'running' as const
+        return commitUnlocked({
+          ...run,
+          foundationAuditState: { ...run.foundationAuditState!, tasks },
+          status,
+          thinking: 'idle',
+          ...(status === 'needs_action' ? { blockedReason: dispatch.failureReason } : {}),
+        }, {
+          runId: run.runId,
+          type: 'foundation.fact_task.interrupted',
+          phase: run.phase,
+          status,
+          revision: run.revision,
+          dispatchId: dispatch.dispatchId,
+          reason: dispatch.failureReason,
+        })
+      }
+      if (!run.activeDispatch) return run
       if (await sessionIsOpen(run.activeDispatch)) return run
       const interrupted = {
         ...run,
@@ -1124,6 +1171,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           : run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === dispatchId,
             )?.dispatch
+          ?? run.foundationAuditState?.tasks.find(
+            task => task.dispatch?.dispatchId === dispatchId,
+          )?.dispatch
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'
       const acceptsStoppedTailUsage =

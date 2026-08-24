@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -26,6 +26,15 @@ import {
   recordFoundationFailure,
   recordFoundationHandlerFailure,
 } from './foundation-authoring-batch'
+import {
+  acceptFoundationAuditTerminal,
+  claimFoundationAuditTask,
+  FOUNDATION_AUDIT_OUTPUT_MAX_TOKENS,
+  FOUNDATION_AUDIT_PACKET_MAX_BYTES,
+  FOUNDATION_AUDIT_TOTAL_MODEL_TOKENS,
+  FOUNDATION_AUDIT_PHASE_DEADLINE_MS,
+  type FoundationAuditTask,
+} from './foundation-audit-state'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
@@ -66,6 +75,15 @@ function foundationDispatch(
   )?.dispatch
 }
 
+function foundationAuditTaskFor(
+  run: DeliveryRun,
+  request: WorkerDispatchRequest,
+): FoundationAuditTask | undefined {
+  if (request.workerType !== 'foundation-fact-extractor' || !request.taskId)
+    return undefined
+  return run.foundationAuditState?.tasks.find(task => task.taskId === request.taskId)
+}
+
 function dispatchLocation(
   run: DeliveryRun,
   dispatchId: string,
@@ -73,10 +91,14 @@ function dispatchLocation(
   | {
       record: DispatchRecord
       path?: FoundationDocumentPath
+      auditTask?: FoundationAuditTask
     }
   | undefined {
   if (run.activeDispatch?.dispatchId === dispatchId)
     return { record: run.activeDispatch }
+  for (const task of run.foundationAuditState?.tasks ?? [])
+    if (task.dispatch?.dispatchId === dispatchId && task.dispatch)
+      return { record: task.dispatch, auditTask: task }
   for (const document of run.foundationDraftState.documents ?? [])
     if (document.dispatch?.dispatchId === dispatchId)
       return { record: document.dispatch, path: document.path }
@@ -87,6 +109,52 @@ function hasRunningFoundationDispatch(run: DeliveryRun): boolean {
   return (run.foundationDraftState.documents ?? []).some(
     document => document.dispatch?.status === 'running',
   )
+}
+
+function hasRunningFoundationAuditTask(run: DeliveryRun): boolean {
+  return (run.foundationAuditState?.tasks ?? []).some(
+    task => task.status === 'running' && task.dispatch?.status === 'running',
+  )
+}
+
+function withFoundationAuditDispatch(
+  run: DeliveryRun,
+  taskId: string,
+  dispatch: DispatchRecord,
+): DeliveryRun {
+  if (!run.foundationAuditState)
+    throw new DispatchError('blocked', 'foundation audit task state is missing')
+  return {
+    ...run,
+    foundationAuditState: {
+      ...run.foundationAuditState,
+      tasks: run.foundationAuditState.tasks.map(task =>
+        task.taskId === taskId ? { ...task, dispatch } : task,
+      ),
+    },
+  }
+}
+
+function failFoundationAuditTask(
+  run: DeliveryRun,
+  task: FoundationAuditTask,
+  dispatch: DispatchRecord,
+  reason: string,
+): DeliveryRun {
+  const withDispatch = withFoundationAuditDispatch(run, task.taskId, dispatch)
+  return {
+    ...withDispatch,
+    foundationAuditState: acceptFoundationAuditTerminal(withDispatch.foundationAuditState!, {
+    taskId: task.taskId,
+    dispatchId: dispatch.dispatchId,
+    revision: task.revision,
+    packetDigest: task.packetDigest,
+    terminalDigest: createHash('sha256').update(`${dispatch.dispatchId}:${reason}`).digest('hex'),
+    status: 'failed',
+    failureReason: reason,
+    durationMs: Math.max(0, Date.parse(dispatch.finishedAt ?? now()) - Date.parse(dispatch.startedAt)),
+    }),
+  }
 }
 
 function withFoundationDispatch(
@@ -275,6 +343,7 @@ function workerRequiresEvidence(
   workerType: WorkerDispatchRequest['workerType'],
 ): boolean {
   return (
+    workerType !== 'foundation-fact-extractor' &&
     workerType !== 'document-author' &&
     workerType !== 'resource-planner' &&
     workerType !== 'resource-curator' &&
@@ -391,7 +460,25 @@ export function createDeliveryDispatcher(options: {
     if (run.status !== 'running')
       throw new DispatchError('blocked', 'delivery run is not running')
     const foundationPath = foundationPathFor(request)
-    const durableDispatch = foundationPath
+    const auditTask = foundationAuditTaskFor(run, request)
+    if (request.workerType === 'foundation-fact-extractor' && !auditTask)
+      throw new DispatchError('not_found', 'foundation audit task does not exist')
+    if (auditTask) {
+      const packetBytes = Buffer.byteLength(JSON.stringify(request.contract.packet ?? {}), 'utf8')
+      if (packetBytes > FOUNDATION_AUDIT_PACKET_MAX_BYTES)
+        throw new DispatchError('blocked', 'foundation fact packet exceeds 16 KiB')
+      if (request.contract.modelTier !== 'fast')
+        throw new DispatchError('blocked', 'foundation fact extractor requires fast model tier')
+      const aggregateTokens = (run.foundationAuditState?.tasks ?? []).reduce(
+        (total, task) => total + (task.usage?.total_tokens ?? 0),
+        0,
+      )
+      if (aggregateTokens >= FOUNDATION_AUDIT_TOTAL_MODEL_TOKENS)
+        throw new DispatchError('blocked', 'foundation fact extraction token cap exceeded')
+    }
+    const durableDispatch = auditTask
+      ? auditTask.dispatch
+      : foundationPath
       ? foundationDispatch(run, foundationPath)
       : run.activeDispatch
     if (
@@ -421,7 +508,7 @@ export function createDeliveryDispatcher(options: {
         'duplicate',
         'a regular delivery worker is already running',
       )
-    if (!foundationPath && hasRunningFoundationDispatch(run))
+    if (!foundationPath && !auditTask && hasRunningFoundationDispatch(run))
       throw new DispatchError(
         'duplicate',
         'foundation document authoring batch is active',
@@ -473,7 +560,10 @@ export function createDeliveryDispatcher(options: {
         if (current.status !== 'running')
           throw new DispatchError('blocked', 'delivery run is not running')
         const currentFoundationPath = foundationPathFor(request)
-        const active = currentFoundationPath
+        const currentAuditTask = foundationAuditTaskFor(current, request)
+        const active = currentAuditTask
+          ? currentAuditTask.dispatch
+          : currentFoundationPath
           ? foundationDispatch(current, currentFoundationPath)
           : current.activeDispatch
         if (active) {
@@ -501,13 +591,24 @@ export function createDeliveryDispatcher(options: {
           )
         if (
           !currentFoundationPath &&
+          !currentAuditTask &&
           hasRunningFoundationDispatch(current)
         )
           throw new DispatchError(
             'duplicate',
             'foundation document authoring batch is active',
           )
-        const next = currentFoundationPath
+        const next = currentAuditTask
+          ? {
+              ...current,
+              foundationAuditState: claimFoundationAuditTask(current.foundationAuditState!, {
+              taskId: request.taskId!,
+              revision: request.revision,
+              packetDigest: String(request.contract.packetDigest ?? ''),
+              dispatch: record,
+              }),
+            }
+          : currentFoundationPath
           ? {
               ...current,
               foundationDraftState: recordFoundationDispatch(
@@ -673,6 +774,12 @@ export function createDeliveryDispatcher(options: {
         throw new Error(
           'worker terminal result does not match dispatch contract',
         )
+      if (
+        result.workerType === 'foundation-fact-extractor' &&
+        ((result.outputTokens ?? 0) > FOUNDATION_AUDIT_OUTPUT_MAX_TOKENS ||
+          Date.now() - Date.parse(location.record.startedAt) > FOUNDATION_AUDIT_PHASE_DEADLINE_MS)
+      )
+        throw new Error('foundation fact extraction cap exceeded')
       if (request && result.workerType === 'implementation-worker')
         await persistImplementationEvidence({
           workspacePath: request.workspacePath,
@@ -769,13 +876,34 @@ export function createDeliveryDispatcher(options: {
       terminalResult: result as unknown as Record<string, unknown>,
       finishedAt,
     })
-    const updatedWithDispatch = location.path
+    let updatedWithDispatch = location.path
       ? withFoundationDispatch(run, location.path, completed)
-      : { ...run, activeDispatch: completed }
+      : location.auditTask
+        ? withFoundationAuditDispatch(run, location.auditTask.taskId, completed)
+        : { ...run, activeDispatch: completed }
+    if (
+      location.auditTask &&
+      result.workerType === 'foundation-fact-extractor'
+    ) {
+      updatedWithDispatch = {
+        ...updatedWithDispatch,
+        foundationAuditState: acceptFoundationAuditTerminal(updatedWithDispatch.foundationAuditState!, {
+        taskId: location.auditTask.taskId,
+        dispatchId,
+        revision: request?.revision ?? location.record.revision,
+        packetDigest: result.packetDigest,
+        terminalDigest: result.terminalDigest,
+        status: 'completed',
+        usage: usageDelta(run.usage, location.record.startingUsage),
+        durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(location.record.startedAt)),
+        }),
+      }
+    }
     const updated = {
       ...updatedWithDispatch,
       thinking:
         hasRunningFoundationDispatch(updatedWithDispatch) ||
+        hasRunningFoundationAuditTask(updatedWithDispatch) ||
         updatedWithDispatch.activeDispatch?.status === 'running'
           ? ('working' as const)
           : ('idle' as const),
@@ -876,7 +1004,9 @@ export function createDeliveryDispatcher(options: {
                   ),
               status: isolatedFoundationFailureStatus(current),
             }
-          : { ...current, status, activeDispatch: failed }
+          : currentLocation.auditTask
+            ? withFoundationAuditDispatch(current, currentLocation.auditTask.taskId, failed)
+            : { ...current, status, activeDispatch: failed }
         await options.store.commit(
           {
             ...failedCurrent,
@@ -961,7 +1091,9 @@ export function createDeliveryDispatcher(options: {
                 failed,
               ),
             }
-          : { ...current, activeDispatch: failed }
+          : location.auditTask
+            ? withFoundationAuditDispatch(current, location.auditTask.taskId, failed)
+            : { ...current, activeDispatch: failed }
         await options.store.commit(
           {
             ...failedRun,
@@ -1002,7 +1134,7 @@ export function createDeliveryDispatcher(options: {
       finishedAt: now(),
       failureReason: reason,
     })
-    const failedRun = location.path
+    let failedRun = location.path
       ? {
           ...run,
           foundationDraftState: recordFoundationFailure(
@@ -1011,17 +1143,24 @@ export function createDeliveryDispatcher(options: {
             reason,
           ),
         }
-      : { ...run, activeDispatch: failed }
+      : location.auditTask
+        ? withFoundationAuditDispatch(run, location.auditTask.taskId, failed)
+        : { ...run, activeDispatch: failed }
+    if (location.auditTask) failedRun = failFoundationAuditTask(failedRun, location.auditTask, failed, reason)
     const status: DeliveryRun['status'] = location.path
       ? isolatedFoundationFailureStatus(failedRun)
-      : 'failed'
+      : location.auditTask
+        ? failedRun.foundationAuditState?.tasks.find(task => task.taskId === location.auditTask!.taskId)?.status === 'needs_action'
+          ? 'needs_action'
+          : 'running'
+        : 'failed'
     await options.store.commit(
       {
         ...failedRun,
         status,
         ...(status === 'running' ? {} : { blockedReason: reason }),
         thinking:
-          hasRunningFoundationDispatch(failedRun) ||
+          (hasRunningFoundationDispatch(failedRun) || hasRunningFoundationAuditTask(failedRun)) ||
           failedRun.activeDispatch?.status === 'running'
             ? 'working'
             : 'idle',
@@ -1055,7 +1194,7 @@ export function createDeliveryDispatcher(options: {
       finishedAt: now(),
       failureReason: reason,
     })
-    const interruptedRun = location.path
+    let interruptedRun = location.path
       ? {
           ...run,
           foundationDraftState: recordFoundationFailure(
@@ -1064,17 +1203,24 @@ export function createDeliveryDispatcher(options: {
             reason,
           ),
         }
-      : { ...run, activeDispatch: interrupted }
+      : location.auditTask
+        ? withFoundationAuditDispatch(run, location.auditTask.taskId, interrupted)
+        : { ...run, activeDispatch: interrupted }
+    if (location.auditTask) interruptedRun = failFoundationAuditTask(interruptedRun, location.auditTask, interrupted, reason)
     const status: DeliveryRun['status'] = location.path
       ? isolatedFoundationFailureStatus(interruptedRun)
-      : 'needs_action'
+      : location.auditTask
+        ? interruptedRun.foundationAuditState?.tasks.find(task => task.taskId === location.auditTask!.taskId)?.status === 'retryable'
+          ? 'running'
+          : 'needs_action'
+        : 'needs_action'
     await options.store.commit(
       {
         ...interruptedRun,
         status,
         ...(status === 'running' ? {} : { blockedReason: reason }),
         thinking:
-          hasRunningFoundationDispatch(interruptedRun) ||
+          (hasRunningFoundationDispatch(interruptedRun) || hasRunningFoundationAuditTask(interruptedRun)) ||
           interruptedRun.activeDispatch?.status === 'running'
             ? 'working'
             : 'idle',
@@ -1109,7 +1255,9 @@ export function createDeliveryDispatcher(options: {
     })
     const stoppedRun = location.path
       ? withFoundationDispatch(run, location.path, stopped)
-      : { ...run, activeDispatch: stopped }
+      : location.auditTask
+        ? withFoundationAuditDispatch(run, location.auditTask.taskId, stopped)
+        : { ...run, activeDispatch: stopped }
     await options.store.commit(
       {
         ...stoppedRun,
