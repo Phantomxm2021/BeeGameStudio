@@ -99,6 +99,31 @@ export const foundationSemanticReviewerStructuredOutputJsonSchema = {
   }, required: ['workerType', 'status', 'runId', 'dispatchId', 'taskId', 'revision', 'packetDigest', 'outcome'],
 } as const
 
+const foundationRevisionReceiptSchema = z.object({
+  taskId: z.string().min(1),
+  round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+  issueIds: z.array(z.string().min(1)).min(1),
+  baseDocumentDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  stagedDocumentDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  changedSectionIds: z.array(z.string().min(1)).min(1),
+  stagedPath: z.string().min(1),
+  terminalDigest: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict()
+
+export const foundationDocumentReviserTerminalSchema = z.object({
+  workerType: z.literal('foundation-document-reviser'),
+  status: z.enum(['completed', 'failed', 'blocked']),
+  runId: z.string().min(1),
+  dispatchId: z.string().min(1),
+  taskId: z.string().min(1),
+  revision: z.string().min(1),
+  packetDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+  receipt: foundationRevisionReceiptSchema,
+}).strict()
+
 export const documentAuthorTerminalSchema = z
   .object({
     workerType: z.literal('document-author'),
@@ -307,6 +332,7 @@ export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   documentAuthorTerminalSchema,
   foundationFactExtractorTerminalSchema,
   foundationSemanticReviewerTerminalSchema,
+  foundationDocumentReviserTerminalSchema,
   resourcePlannerTerminalSchema,
   resourceCuratorTerminalSchema,
   resourceContentAuthorTerminalSchema,

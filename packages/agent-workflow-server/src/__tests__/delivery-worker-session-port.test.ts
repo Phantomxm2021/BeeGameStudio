@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -21,8 +22,44 @@ import {
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
+import { createFoundationRevisionStage, foundationRevisionPacketPath, revisionTaskReceiptTerminalDigest } from '../beegame/delivery-workflow/foundation-revision-stage'
 
 describe('delivery worker session credentials', () => {
+  test('exposes the foundation revision terminal and derives a terminal from its successful tool event', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'revision-session-port-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const contract = getGameDocumentContract('docs/GDD.md')
+      const canonical = `# GDD\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`).join('\n')}`
+      await writeFile(join(workspacePath, 'docs/GDD.md'), canonical)
+      const stage = await createFoundationRevisionStage({ workspacePath, revision: 'rev-1', documentPath: 'docs/GDD.md' })
+      const staged = canonical.replace('original vision', 'revised vision')
+      await writeFile(join(workspacePath, stage.stagedPath), staged)
+      const receiptWithoutTerminal = {
+        taskId: 'revision-task-1', round: 1 as const, documentPath: 'docs/GDD.md' as const, issueIds: ['AUD-1'],
+        baseDocumentDigest: stage.baseDocumentDigest,
+        stagedDocumentDigest: createHash('sha256').update(staged).digest('hex'),
+        changedSectionIds: ['vision'], stagedPath: stage.stagedPath,
+      }
+      const receipt = { ...receiptWithoutTerminal, terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal) }
+      const starts: Array<Record<string, unknown>> = []
+      const sessions = {
+        start(input: Record<string, unknown>) { starts.push(input); return { id: 'session-revision' } },
+        events() { return [{ id: 'revision-terminal', type: 'tool.completed' as const, text: 'SubmitFoundationRevisionResult completed', createdAt: new Date(), payload: { type: 'tool.completed', toolName: 'SubmitFoundationRevisionResult', output: JSON.stringify({ data: { accepted: true, receipt } }) } }] },
+      } as unknown as BeeGameSessionManager
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+      await port.start({
+        dispatchId: 'dispatch-revision', runId: 'run-revision', ownerId: 'user-1', projectId: 'project-revision', workspacePath,
+        workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', taskId: 'revision-task-1', revision: 'rev-1',
+        allowedPaths: [stage.stagedPath], protectedPaths: ['docs/GDD.md'], projectReadScope: 'allowed',
+        contract: { workerType: 'foundation-document-reviser', taskId: 'revision-task-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['AUD-1'], sectionIds: ['vision'], stagedPath: stage.stagedPath, baseDocumentDigest: stage.baseDocumentDigest, packetPath: foundationRevisionPacketPath('rev-1', 1, 'revision-task-1'), packetDigest: 'a'.repeat(64) },
+      })
+      await expect(port.waitForTerminal?.('dispatch-revision')).resolves.toMatchObject({ workerType: 'foundation-document-reviser', status: 'completed', receipt })
+      expect(starts[0]).toMatchObject({ workflowAllowedPaths: [stage.stagedPath], workflowProjectReadScope: 'allowed', workflowProtectedPaths: ['docs/GDD.md'], workflowRevisionContract: expect.objectContaining({ taskId: 'revision-task-1', stagedPath: stage.stagedPath }) })
+      expect(starts[0]?.workflowRevisionContract).not.toHaveProperty('packet')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
   test('uses the native StructuredOutput result for fact extraction and passes its strict schema to the runner', async () => {
     const starts: Array<Record<string, unknown>> = []
     const structured = {

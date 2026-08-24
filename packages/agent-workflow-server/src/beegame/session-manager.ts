@@ -260,13 +260,14 @@ export type BeeGameSessionRunnerStartInput = {
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowDispatchId?: string
   workflowAllowedPaths?: string[]
-  workflowProjectReadScope?: 'empty'
+  workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   /** Native structured-output authority for workers that must return JSON. */
   workflowJsonSchema?: Record<string, unknown>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
+  workflowRevisionContract?: Record<string, unknown>
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
@@ -285,6 +286,8 @@ export type RuntimeLaunchContract = {
 }
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
+  'BEEGAME_WORKFLOW_WORKER_TYPE',
+  'BEEGAME_REVISION_CONTRACT',
   'BEEGAME_CONFIG_DIR',
   'BEEGAME_MODEL_TYPE',
   'ANTHROPIC_BASE_URL',
@@ -394,12 +397,13 @@ type SessionRecord = {
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
-  workflowProjectReadScope?: 'empty'
+  workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
+  workflowRevisionContract?: Record<string, unknown>
   atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
@@ -612,12 +616,13 @@ export type StartBeeGameSessionInput = {
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
-  workflowProjectReadScope?: 'empty'
+  workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
   workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
+  workflowRevisionContract?: Record<string, unknown>
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -780,6 +785,9 @@ export class BeeGameSessionManager {
             workflowResourceContentCommitContract:
               input.workflowResourceContentCommitContract,
           }
+        : {}),
+      ...(input.workflowRevisionContract
+        ? { workflowRevisionContract: structuredClone(input.workflowRevisionContract) }
         : {}),
       runtime,
       userId: input.userId,
@@ -1428,7 +1436,24 @@ export class BeeGameSessionManager {
         if (!record.workflowModelTier) throw new Error('foundation semantic model tier is missing')
         selectedEnvironment = selectFoundationSemanticRuntime(record.runtime, selectedEnvironment, record.workflowModelTier)
       }
-      const env = buildRuntimeEnv(selectedEnvironment)
+      const env = buildRuntimeEnv({
+        ...selectedEnvironment,
+        ...(record.workflowWorkerType === 'foundation-document-reviser' && record.workflowRevisionContract
+          ? {
+              BEEGAME_WORKFLOW_WORKER_TYPE: record.workflowWorkerType,
+              BEEGAME_REVISION_CONTRACT: JSON.stringify({
+                taskId: record.workflowRevisionContract.taskId,
+                revision: record.workflowRevisionContract.revision,
+                round: record.workflowRevisionContract.round,
+                documentPath: record.workflowRevisionContract.documentPath,
+                issueIds: record.workflowRevisionContract.issueIds,
+                sectionIds: record.workflowRevisionContract.sectionIds,
+                stagedPath: record.workflowRevisionContract.stagedPath,
+                baseDocumentDigest: record.workflowRevisionContract.baseDocumentDigest,
+              }),
+            }
+          : {}),
+      })
       if (record.workflowMarkdownStreamContract) {
         markdownStreamSink = await createFoundationMarkdownStreamSink(
           record.workflowMarkdownStreamContract,
@@ -2109,6 +2134,9 @@ export class BeeGameSessionManager {
             ...(record.workflowWorkerType
               ? { workerType: record.workflowWorkerType }
               : {}),
+          ...(record.workflowRevisionContract
+            ? { workflowRevisionContract: structuredClone(record.workflowRevisionContract) }
+            : {}),
             ...(record.workflowDispatchId
               ? { dispatchId: record.workflowDispatchId }
               : {}),
@@ -3769,6 +3797,45 @@ function projectWorkspaceFileAccessAuthority(
       reason: 'project_workspace_read_scope_empty',
       message: `${request.toolName} is disabled for this scoped audit worker; use the assigned packet only.`,
     }
+  if (
+    record.workflowWorker === true &&
+    record.workflowProjectReadScope === 'allowed' &&
+    ['Read', 'Grep', 'Glob'].includes(request.toolName)
+  ) {
+    if (request.toolName !== 'Read')
+      return {
+        behavior: 'deny',
+        reason: 'project_workspace_read_scope_empty',
+        message: 'Scoped revision workers may use Read only on the assigned staged path.',
+      }
+    const inputPath = request.input.file_path
+    if (typeof inputPath !== 'string' || !inputPath.trim())
+      return {
+        behavior: 'deny',
+        reason: 'project_workspace_target_invalid',
+        message: 'Read requires one assigned staged path.',
+      }
+    const workspaceRoot = resolveExistingPath(record.session.cwd)
+    const targetPath = resolveProspectivePath(record.session.cwd, inputPath)
+    const rel = relative(workspaceRoot, targetPath)
+    if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
+      return {
+        behavior: 'deny',
+        reason: 'project_workspace_boundary',
+        message: 'Read may not access files outside the project workspace.',
+      }
+    const allowed = (record.workflowAllowedPaths ?? []).some(entry => {
+      const configured = entry.trim()
+      return configured && targetPath === resolveProspectivePath(record.session.cwd, configured)
+    })
+    return allowed
+      ? { behavior: 'allow', reason: 'project_workspace_file_access' }
+      : {
+          behavior: 'deny',
+          reason: 'project_workspace_read_scope_empty',
+          message: 'Scoped revision workers may read only their assigned staged path.',
+        }
+  }
   const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'
   if (!['Read', 'Grep', 'Glob'].includes(request.toolName)) return undefined
   const inputPath = request.input[pathKey]

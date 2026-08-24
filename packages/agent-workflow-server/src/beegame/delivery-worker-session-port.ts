@@ -31,7 +31,7 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { foundationFactExtractorTerminalSchema, foundationFactStructuredOutputJsonSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
+import { foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactStructuredOutputJsonSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -296,7 +296,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
         ...(request.contract.modelTier === 'fast' || request.contract.modelTier === 'balanced' || request.contract.modelTier === 'strong' ? { workflowModelTier: request.contract.modelTier } : {}),
-        workflowAllowedPaths: packetWorker ? [] : request.allowedPaths ?? [],
+        ...(request.workerType === 'foundation-document-reviser' ? { workflowRevisionContract: request.contract } : {}),
+        workflowAllowedPaths: request.allowedPaths ?? [],
         ...(request.workerType === 'foundation-fact-extractor'
           ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown> }
           : request.workerType === 'foundation-semantic-reviewer'
@@ -428,6 +429,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
               : request?.workerType === 'question-answerer'
                 ? 'Submit the answer through SubmitQuestionAnswerResult exactly once. Do not author workflow evidence or return terminal JSON.'
                 : ''
+      const revisionResultInstruction =
+        request?.workerType === 'foundation-document-reviser'
+          ? 'After editing only the assigned stage, call SubmitFoundationRevisionResult exactly once with changedSectionIds only; do not return terminal JSON.'
+          : ''
       const assetManifestInstruction =
         request?.workerType === 'resource-planner'
           ? 'Use AssetManifest submit_resource_plan as the only mutation and stop after it is accepted.'
@@ -445,6 +450,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         implementationResultInstruction,
         validationResultInstruction,
         workflowResultInstruction,
+        revisionResultInstruction,
         assetManifestInstruction,
       ]
         .filter(Boolean)
@@ -875,6 +881,8 @@ function structuredSubmissionToolName(
       return 'SubmitAtomicTaskPlan'
     case 'implementation-worker':
       return 'SubmitImplementationResult'
+    case 'foundation-document-reviser':
+      return 'SubmitFoundationRevisionResult'
     case 'implementation-auditor':
     case 'acceptance-validator':
       return 'SubmitValidationResult'
@@ -940,6 +948,8 @@ async function createDeterministicStructuredTerminal(input: {
       return createDeterministicFoundationSemanticTerminal(input) ?? (() => {
         throw new Error('worker terminal result is missing a valid StructuredOutput semantic result')
       })()
+    case 'foundation-document-reviser':
+      return createDeterministicFoundationRevisionTerminal(input)
     case 'atomic-task-planner':
       return createDeterministicAtomicTaskPlannerTerminal(input)
     case 'implementation-worker':
@@ -991,6 +1001,31 @@ function createDeterministicFoundationSemanticTerminal(input: {
   if (parsed.runId !== input.request.runId || parsed.dispatchId !== input.request.dispatchId || parsed.taskId !== input.request.taskId || parsed.revision !== input.request.revision || parsed.packetDigest !== input.request.contract.packetDigest)
     throw new Error('foundation semantic terminal identity does not match dispatch contract')
   return parsed
+}
+
+function createDeterministicFoundationRevisionTerminal(input: {
+  request: WorkerDispatchRequest
+  events: ReturnType<BeeGameSessionManager['events']>
+}) {
+  const event = [...input.events].reverse().find(candidate => candidate.type === 'tool.completed' && candidate.payload?.toolName === 'SubmitFoundationRevisionResult')
+  const output = event?.payload?.output
+  if (typeof output !== 'string') throw new Error('foundation revision terminal output is missing')
+  let value: unknown
+  try { value = JSON.parse(output) } catch { throw new Error('foundation revision terminal output is malformed') }
+  const data = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).data : undefined
+  const receipt = data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).receipt : undefined
+  return foundationDocumentReviserTerminalSchema.parse({
+    workerType: 'foundation-document-reviser',
+    status: 'completed',
+    runId: input.request.runId,
+    dispatchId: input.request.dispatchId,
+    taskId: input.request.taskId,
+    revision: input.request.revision,
+    packetDigest: input.request.contract.packetDigest,
+    round: input.request.contract.round,
+    documentPath: input.request.contract.documentPath,
+    receipt,
+  })
 }
 
 function completedToolInputs(

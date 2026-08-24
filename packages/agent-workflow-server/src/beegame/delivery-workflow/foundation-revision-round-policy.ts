@@ -1,6 +1,6 @@
 import type { AuditIssue, AuditSeverity } from './foundation-issue-registry'
 
-export type FoundationRevisionRound = 1 | 2 | 3
+import type { FoundationRevisionRound } from './types'
 
 export type FoundationRevisionRoundPolicySnapshot = {
   /** Issues have already been admitted by the committed Issue Registry. */

@@ -7,7 +7,11 @@ import { getGameDocumentContract } from './game-document-contracts'
 import {
   createFoundationRevisionStage,
   deriveFoundationPatchOperations,
+  foundationRevisionPacketDigest,
+  foundationRevisionPacketPath,
+  loadFoundationRevisionPacket,
   revisionTaskReceiptTerminalDigest,
+  writeFoundationRevisionPacket,
   type RevisionTaskReceipt,
 } from './foundation-revision-stage'
 import type { AuditIssue } from './foundation-issue-registry'
@@ -23,6 +27,31 @@ afterEach(async () =>
 
 const documentPath = 'docs/GDD.md' as const
 const revision = 'revision-test'
+
+test('atomically persists and digest-validates the sole packet artifact', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const packet = { schema: 'beegame-foundation-revision-packet-v1', revision, round: 1, taskId: 'revision-task-1', documentPath, issueIds: ['AUD-1'] }
+  const packetPath = foundationRevisionPacketPath(revision, 1, 'revision-task-1')
+  const packetDigest = foundationRevisionPacketDigest(packet)
+  await writeFoundationRevisionPacket({ workspacePath: workspace, revision, round: 1, taskId: 'revision-task-1', documentPath, packet, packetDigest })
+  await expect(loadFoundationRevisionPacket({ workspacePath: workspace, revision, round: 1, taskId: 'revision-task-1', documentPath, packetDigest })).resolves.toEqual(packet)
+  await writeFile(join(workspace, packetPath), JSON.stringify({ ...packet, issueIds: ['AUD-2'] }))
+  await expect(loadFoundationRevisionPacket({ workspacePath: workspace, revision, round: 1, taskId: 'revision-task-1', documentPath, packetDigest })).rejects.toThrow(/digest|stale/i)
+})
+
+test('does not overwrite a packet and keeps packet paths isolated by round', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const identity = { revision, round: 1 as const, taskId: 'revision-task-1', documentPath }
+  const first = { schema: 'packet', ...identity, issueIds: ['AUD-1'] }
+  const firstDigest = foundationRevisionPacketDigest(first)
+  await expect(writeFoundationRevisionPacket({ workspacePath: workspace, ...identity, packet: first, packetDigest: firstDigest })).resolves.toContain('/round-1/')
+  await expect(writeFoundationRevisionPacket({ workspacePath: workspace, ...identity, packet: first, packetDigest: firstDigest })).resolves.toBe(foundationRevisionPacketPath(revision, 1, identity.taskId))
+  const different = { ...first, issueIds: ['AUD-2'] }
+  await expect(writeFoundationRevisionPacket({ workspacePath: workspace, ...identity, packet: different, packetDigest: foundationRevisionPacketDigest(different) })).rejects.toThrow(/different digest|already exists/i)
+  const roundTwo = { ...first, round: 2 as const }
+  const roundTwoPath = await writeFoundationRevisionPacket({ workspacePath: workspace, revision, round: 2, taskId: identity.taskId, documentPath, packet: roundTwo, packetDigest: foundationRevisionPacketDigest(roundTwo) })
+  expect(roundTwoPath).not.toBe(foundationRevisionPacketPath(revision, 1, identity.taskId))
+})
 
 function canonicalDocument(): string {
   const contract = getGameDocumentContract(documentPath)
@@ -83,6 +112,13 @@ test('creates an isolated project-local staged copy and leaves canonical bytes u
   expect(await readFile(join(workspace, documentPath), 'utf8')).toBe(canonical)
   expect(stage.baseDocumentDigest).toMatch(/^[a-f0-9]{64}$/)
   expect(stage.stagedDocumentDigest).toBe(stage.baseDocumentDigest)
+})
+
+test('rejects a stale existing stage instead of reusing an orphaned copy', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const stage = await createFoundationRevisionStage({ workspacePath: workspace, revision, documentPath })
+  await writeFile(join(workspace, stage.stagedPath), `${await readFile(join(workspace, stage.stagedPath), 'utf8')}\nstale`)
+  await expect(createFoundationRevisionStage({ workspacePath: workspace, revision, documentPath, expectedBaseDocumentDigest: stage.baseDocumentDigest })).rejects.toThrow(/base|match|stale/i)
 })
 
 test('derives INSERT, REPLACE and DELETE section operations without content fields', async () => {

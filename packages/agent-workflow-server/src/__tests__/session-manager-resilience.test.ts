@@ -119,6 +119,33 @@ describe('BeeGame session runtime resilience', () => {
     expect(started?.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('claude-fast')
   })
 
+  test('limits allowed revision reads to the staged path and denies canonical/search reads', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-revision-read-scope-'))
+    const workspacePath = join(root, 'workspace')
+    const stagedPath = '.beegame/audit/foundation/rev-1/revision/docs/GDD.md'
+    await mkdir(join(workspacePath, '.beegame/audit/foundation/rev-1/revision/docs'), { recursive: true })
+    await writeFile(join(workspacePath, stagedPath), 'staged')
+    const decisions: DashboardPermissionDecision[] = []
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async ({ requestPermission, onMessage }) => {
+          const common = { message: 'revision read', toolUseID: 'scope-test' }
+          decisions.push(await requestPermission({ ...common, toolName: 'Read', input: { file_path: stagedPath } }))
+          decisions.push(await requestPermission({ ...common, toolUseID: 'scope-canonical', toolName: 'Read', input: { file_path: 'docs/GDD.md' } }))
+          decisions.push(await requestPermission({ ...common, toolUseID: 'scope-other', toolName: 'Read', input: { file_path: 'README.md' } }))
+          decisions.push(await requestPermission({ ...common, toolUseID: 'scope-grep', toolName: 'Grep', input: { path: stagedPath } }))
+          onMessage({ type: 'result', subtype: 'success', is_error: false } as DashboardSDKMessage)
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({ workspacePath, projectId: 'project-revision', userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision', workflowWorkerType: 'foundation-document-reviser', workflowAllowedPaths: [stagedPath], workflowProjectReadScope: 'allowed' })
+    await manager.send(session.id, 'read stage')
+    await waitForIdle(manager, session.id)
+    expect(decisions.map(decision => decision.behavior)).toEqual(['allow', 'deny', 'deny', 'deny'])
+  })
+
   test('commits a foundation Markdown stream before completing the turn', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-markdown-stream-turn-'))
     const workspacePath = join(root, 'workspace')

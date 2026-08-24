@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildFoundationSectionIndex } from './foundation-section-index'
@@ -7,6 +7,8 @@ import type { RevisionBatch } from './foundation-revision-batches'
 import type { AuditIssue } from './foundation-issue-registry'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationRevisionRound,
+  type FoundationRevisionDocumentTask,
   type FoundationDocumentPath,
 } from './types'
 
@@ -37,6 +39,40 @@ export type FoundationRevisionStage = {
   baseDocumentDigest: string
   stagedDocumentDigest: string
   stagedPath: string
+}
+
+export type FoundationRevisionSectionSlice = {
+  documentPath: FoundationDocumentPath
+  sectionId: string
+  heading: string
+  startLine: number
+  endLine: number
+  digest: string
+  text: string
+}
+
+export type FoundationRevisionAuthority = {
+  baseDocumentDigest: string
+  stagedPath: string
+  packetPath: string
+  packet: Record<string, unknown>
+  packetDigest: string
+}
+
+export function foundationRevisionDocumentReceiptMatches(task: FoundationRevisionDocumentTask): boolean {
+  const receipt = task.receipt
+  return task.status === 'completed' && !!receipt && !!task.terminalDigest &&
+    receipt.taskId === task.taskId &&
+    receipt.round === task.round &&
+    receipt.documentPath === task.documentPath &&
+    JSON.stringify(receipt.issueIds) === JSON.stringify(task.issueIds) &&
+    receipt.baseDocumentDigest === task.baseDocumentDigest &&
+    receipt.stagedPath === task.stagedPath &&
+    receipt.terminalDigest === task.terminalDigest
+}
+
+export function foundationRevisionTasksComplete(tasks: readonly import('./types').FoundationRevisionTask[]): boolean {
+  return tasks.length > 0 && tasks.every(task => task.kind === 'document-revision' && foundationRevisionDocumentReceiptMatches(task))
 }
 
 type RevisionTaskReceiptCore = {
@@ -74,6 +110,11 @@ function assertRevision(revision: string): void {
     )
 }
 
+function assertTaskId(taskId: string): void {
+  if (!/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(taskId))
+    throw new Error('foundation revision task is not a safe project-local identifier')
+}
+
 function assertCanonicalDocument(
   documentPath: string,
 ): asserts documentPath is FoundationDocumentPath {
@@ -103,6 +144,78 @@ export function foundationRevisionStagePath(
   return stageRelativePath(revision, documentPath)
 }
 
+export function foundationRevisionPacketDigest(packet: Record<string, unknown>): string {
+  return sha256(stableJson(packet))
+}
+
+export function foundationRevisionPacketPath(
+  revision: string,
+  round: FoundationRevisionRound,
+  taskId: string,
+): string {
+  assertRevision(revision)
+  assertTaskId(taskId)
+  return `.beegame/audit/foundation/${revision}/round-${round}/tasks/${taskId}/packet.json`
+}
+
+export async function writeFoundationRevisionPacket(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  documentPath: FoundationDocumentPath
+  packet: Record<string, unknown>
+  packetDigest: string
+}): Promise<string> {
+  if (foundationRevisionPacketDigest(input.packet) !== input.packetDigest)
+    throw new Error('foundation revision packet digest does not match body')
+  const packetPath = foundationRevisionPacketPath(input.revision, input.round, input.taskId)
+  const absolute = resolveProjectPath(input.workspacePath, packetPath)
+  await mkdir(resolve(absolute, '..'), { recursive: true })
+  try {
+    const existing = JSON.parse(await readFile(absolute, 'utf8')) as Record<string, unknown>
+    if (foundationRevisionPacketDigest(existing) !== input.packetDigest)
+      throw new Error('foundation revision packet artifact already exists with a different digest')
+    return packetPath
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(temporary, JSON.stringify(input.packet), { encoding: 'utf8', flag: 'wx' })
+  try {
+    await link(temporary, absolute)
+    await unlink(temporary)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    await unlink(temporary).catch(() => undefined)
+    const existing = JSON.parse(await readFile(absolute, 'utf8')) as Record<string, unknown>
+    if (foundationRevisionPacketDigest(existing) !== input.packetDigest)
+      throw new Error('foundation revision packet artifact already exists with a different digest')
+  }
+  return packetPath
+}
+
+export async function loadFoundationRevisionPacket(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  documentPath: FoundationDocumentPath
+  packetDigest: string
+}): Promise<Record<string, unknown>> {
+  const packetPath = foundationRevisionPacketPath(input.revision, input.round, input.taskId)
+  const absolute = resolveProjectPath(input.workspacePath, packetPath)
+  const packet = JSON.parse(await readFile(absolute, 'utf8')) as unknown
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+    throw new Error('foundation revision packet artifact is malformed')
+  const value = packet as Record<string, unknown>
+  if (foundationRevisionPacketDigest(value) !== input.packetDigest)
+    throw new Error('foundation revision packet artifact digest is stale')
+  if (value.revision !== input.revision || value.round !== input.round || value.taskId !== input.taskId || value.documentPath !== input.documentPath)
+    throw new Error('foundation revision packet artifact identity is stale')
+  return value
+}
+
 function resolveProjectPath(
   workspacePath: string,
   projectPath: string,
@@ -125,6 +238,7 @@ export async function createFoundationRevisionStage(input: {
   workspacePath: string
   revision: string
   documentPath: FoundationDocumentPath
+  expectedBaseDocumentDigest?: string
 }): Promise<FoundationRevisionStage> {
   assertRevision(input.revision)
   assertCanonicalDocument(input.documentPath)
@@ -139,12 +253,14 @@ export async function createFoundationRevisionStage(input: {
   const stagedAbsolute = resolveProjectPath(input.workspacePath, stagedPath)
   const baseBytes = await readFile(canonicalPath)
   const baseDocumentDigest = sha256(baseBytes)
+  if (input.expectedBaseDocumentDigest && input.expectedBaseDocumentDigest !== baseDocumentDigest)
+    throw new Error('foundation revision canonical document has a stale base digest')
   await mkdir(resolve(stagedAbsolute, '..'), { recursive: true })
   try {
     const existing = await readFile(stagedAbsolute)
-    if (existing.length === 0 && baseBytes.length > 0)
+    if (sha256(existing) !== baseDocumentDigest)
       throw new Error(
-        'existing foundation revision stage is not a valid Markdown copy',
+        'existing foundation revision stage does not match its canonical base',
       )
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -157,6 +273,142 @@ export async function createFoundationRevisionStage(input: {
     baseDocumentDigest,
     stagedDocumentDigest: sha256(stagedBytes),
     stagedPath,
+  }
+}
+
+/** Reset a retryable task's isolated stage to the current canonical base. */
+export async function resetFoundationRevisionStage(input: {
+  workspacePath: string
+  revision: string
+  documentPath: FoundationDocumentPath
+  expectedBaseDocumentDigest: string
+}): Promise<FoundationRevisionStage> {
+  assertRevision(input.revision)
+  assertCanonicalDocument(input.documentPath)
+  const canonicalPath = resolveProjectPath(input.workspacePath, input.documentPath)
+  const stagedPath = foundationRevisionStagePath(input.revision, input.documentPath)
+  const stagedAbsolute = resolveProjectPath(input.workspacePath, stagedPath)
+  const baseBytes = await readFile(canonicalPath)
+  const baseDocumentDigest = sha256(baseBytes)
+  if (baseDocumentDigest !== input.expectedBaseDocumentDigest)
+    throw new Error('foundation revision canonical document has a stale base digest')
+  await mkdir(resolve(stagedAbsolute, '..'), { recursive: true })
+  const temporary = `${stagedAbsolute}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(temporary, baseBytes, { encoding: 'utf8', flag: 'wx' })
+  await rename(temporary, stagedAbsolute).catch(error => {
+    void unlink(temporary).catch(() => undefined)
+    throw error
+  })
+  return {
+    revision: input.revision,
+    documentPath: input.documentPath,
+    baseDocumentDigest,
+    stagedDocumentDigest: baseDocumentDigest,
+    stagedPath,
+  }
+}
+
+function sectionSlices(
+  documentPath: FoundationDocumentPath,
+  markdown: string,
+): FoundationRevisionSectionSlice[] {
+  const index = buildFoundationSectionIndex({ documents: { [documentPath]: markdown } })
+  const lines = markdown.split('\n')
+  return index.map(section => ({
+    ...section,
+    text: lines.slice(section.startLine - 1, section.endLine).join('\n'),
+  }))
+}
+
+function issueEvidenceRefs(
+  issue: AuditIssue,
+  selectedSections: readonly FoundationRevisionSectionSlice[],
+): Array<Record<string, unknown>> {
+  const selectedDigests = new Map(
+    selectedSections.map(section => [
+      `${section.documentPath}\0${section.sectionId}`,
+      section.digest,
+    ]),
+  )
+  return [issue.source, ...(issue.target ? [issue.target] : []), { documentPath: issue.fixDocument, sectionId: issue.fixSectionId }]
+    .map(ref => ({
+      documentPath: ref.documentPath,
+      sectionId: ref.sectionId,
+      digest: (ref as { digest?: string }).digest ?? selectedDigests.get(`${ref.documentPath}\0${ref.sectionId}`) ?? null,
+    }))
+}
+
+export async function buildFoundationRevisionAuthority(input: {
+  workspacePath: string
+  revision: string
+  taskId: string
+  round: FoundationRevisionRound
+  batch: RevisionBatch
+  issues: readonly AuditIssue[]
+  sourceAuthorityDigest: string
+  sourceIssueRegistryDigest: string
+  sourceDerivedDigests: { sectionIndex: string; factStore: string; manifest: string }
+  sourceDocumentDigests: readonly { path: FoundationDocumentPath; digest: string }[]
+  normalizedFacts: readonly unknown[]
+}): Promise<FoundationRevisionAuthority> {
+  assertRevision(input.revision)
+  assertBatch(input.batch)
+  const canonicalPath = resolveProjectPath(input.workspacePath, input.batch.documentPath)
+  const markdown = (await readFile(canonicalPath)).toString('utf8')
+  const baseDocumentDigest = sha256(markdown)
+  const slices = sectionSlices(input.batch.documentPath, markdown)
+  const requiredSectionIds = new Set<string>(input.batch.sectionIds)
+  const issueRefs = new Set(
+    input.issues.flatMap(issue => [
+      `${issue.source.documentPath}\0${issue.source.sectionId}`,
+      ...(issue.target ? [`${issue.target.documentPath}\0${issue.target.sectionId}`] : []),
+      `${issue.fixDocument}\0${issue.fixSectionId}`,
+    ]),
+  )
+  const selectedSections = slices.filter(section =>
+    requiredSectionIds.has(section.sectionId) ||
+    issueRefs.has(`${section.documentPath}\0${section.sectionId}`),
+  )
+  const selectedFacts = input.normalizedFacts.filter(fact => {
+    if (!fact || typeof fact !== 'object' || Array.isArray(fact)) return false
+    const source = (fact as { source?: { documentPath?: string; sectionId?: string } }).source
+    return source && issueRefs.has(`${source.documentPath}\0${source.sectionId}`)
+  })
+  const issues = input.issues.map(issue => ({
+    ...issue,
+    // The persisted registry intentionally omits the worker's prose problem;
+    // retain the bounded, admitted actual as the packet's problem statement.
+    problem: issue.actual,
+    evidenceRefs: issueEvidenceRefs(issue, selectedSections),
+  }))
+  const packet: Record<string, unknown> = {
+    schema: 'beegame-foundation-revision-packet-v1',
+    revision: input.revision,
+    round: input.round,
+    taskId: input.taskId,
+    documentPath: input.batch.documentPath,
+    issueIds: [...input.batch.issueIds],
+    sectionIds: [...input.batch.sectionIds],
+    issues,
+    sections: selectedSections,
+    normalizedFacts: selectedFacts,
+    immutableDigests: {
+      sourceAuthorityDigest: input.sourceAuthorityDigest,
+      sourceIssueRegistryDigest: input.sourceIssueRegistryDigest,
+      sourceDerivedDigests: input.sourceDerivedDigests,
+      sourceDocumentDigests: input.sourceDocumentDigests,
+      baseDocumentDigest,
+    },
+  }
+  const packetBytes = Buffer.byteLength(JSON.stringify(packet), 'utf8')
+  if (packetBytes > 24 * 1024)
+    throw new Error('foundation revision packet exceeds 24KiB')
+  return {
+    baseDocumentDigest,
+    stagedPath: foundationRevisionStagePath(input.revision, input.batch.documentPath),
+    packetPath: foundationRevisionPacketPath(input.revision, input.round, input.taskId),
+    packet,
+    packetDigest: foundationRevisionPacketDigest(packet),
   }
 }
 

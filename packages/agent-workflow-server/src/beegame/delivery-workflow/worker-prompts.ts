@@ -197,6 +197,11 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Review only the exact semantic packet sections, normalized facts, and deterministic references. Do not read project files, call Read, Grep or Glob, write files, mutate the platform, or expand context.',
         'Return only PASS, ISSUES, or UNDECIDABLE in the supplied StructuredOutput schema. Issue drafts must use only assigned section keys and contain no IDs. Do not return Markdown, prose explanations, or additional fields.',
       ].join(' ')
+    case 'foundation-document-reviser':
+      return [
+        'Revise only the assigned staged canonical Markdown document and exact target sections for the supplied Issue Registry issue IDs. Read and write only the staged path; never modify the canonical document or unrelated paths.',
+        'Preserve all section markers and document structure. After the bounded revision is complete, call SubmitFoundationRevisionResult exactly once with only changedSectionIds; the service owns task identity, round, document and issue authority.',
+      ].join(' ')
     case 'document-author':
       return [
         request.contract.documentSet === 'checklist'
@@ -306,6 +311,8 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
       return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with taskId, revision, packetDigest, and the complete bounded result set. Do not call project tools, return terminal JSON as prose, or add completion text.'
     case 'foundation-semantic-reviewer':
       return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use only PASS, ISSUES, or UNDECIDABLE; do not return Markdown or explanatory text.'
+    case 'foundation-document-reviser':
+      return 'Complete the assigned staged Markdown revision, call SubmitFoundationRevisionResult exactly once, and end the turn normally.'
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||

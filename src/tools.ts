@@ -117,6 +117,8 @@ export {
   COORDINATOR_MODE_ALLOWED_TOOLS,
 } from './constants/tools.js'
 import { feature } from 'bun:bundle'
+import { createNativeFoundationRevisionResultTool } from '@bee-game-studio/agent-workflow-server/beegame/native-foundation-revision-result-tool.js'
+import type { FoundationDocumentPath } from '@bee-game-studio/agent-workflow-server/beegame/delivery-workflow/types.js'
 // Dead code elimination: conditional import for OVERFLOW_TEST_TOOL
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const OverflowTestTool = feature('OVERFLOW_TEST_TOOL')
@@ -216,6 +218,9 @@ export function getToolsForDefaultPreset(): string[] {
  * NOTE: This MUST stay in sync with https://console.statsig.com/4aF3Ewatb6xPVpCwxb5nA3/dynamic_configs/claude_code_global_system_caching, in order to cache the system prompt across users.
  */
 export function getAllBaseTools(): Tools {
+  const foundationRevisionResultTool = createFoundationRevisionResultToolForWorker()
+  if (process.env.BEEGAME_WORKFLOW_WORKER_TYPE === 'foundation-document-reviser')
+    return [FileReadTool, FileEditTool, ...(foundationRevisionResultTool ? [foundationRevisionResultTool] : [])]
   return [
     AgentTool,
     TaskOutputTool,
@@ -280,7 +285,37 @@ export function getAllBaseTools(): Tools {
     // ExecuteExtraTool (ExecuteTool) is a first-class tool — always available, not deferred.
     // Models use it to invoke deferred tools discovered via SearchExtraTools.
     ExecuteTool,
+    ...(foundationRevisionResultTool ? [foundationRevisionResultTool] : []),
   ]
+}
+
+function createFoundationRevisionResultToolForWorker(): Tool | undefined {
+  if (process.env.BEEGAME_WORKFLOW_WORKER_TYPE !== 'foundation-document-reviser') return undefined
+  let contract: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(process.env.BEEGAME_REVISION_CONTRACT ?? '')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    contract = parsed as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  const stringValue = (key: string) => typeof contract[key] === 'string' ? contract[key] as string : undefined
+  const issueIds = Array.isArray(contract.issueIds) ? contract.issueIds.filter((value): value is string => typeof value === 'string') : []
+  const sectionIds = Array.isArray(contract.sectionIds) ? contract.sectionIds.filter((value): value is string => typeof value === 'string') : []
+  const round = contract.round === 1 || contract.round === 2 || contract.round === 3 ? contract.round : undefined
+  if (!stringValue('taskId') || !stringValue('revision') || !stringValue('documentPath') || !stringValue('baseDocumentDigest') || !stringValue('stagedPath') || !round || !issueIds.length || !sectionIds.length) return undefined
+  return createNativeFoundationRevisionResultTool({
+    buildTool: definition => definition as Tool,
+    workspacePath: process.cwd(),
+    expectedTaskId: stringValue('taskId')!,
+    expectedRevision: stringValue('revision')!,
+    expectedRound: round,
+    expectedDocumentPath: stringValue('documentPath')! as FoundationDocumentPath,
+    expectedIssueIds: issueIds,
+    expectedSectionIds: sectionIds,
+    expectedBaseDocumentDigest: stringValue('baseDocumentDigest')!,
+    expectedStagedPath: stringValue('stagedPath'),
+  }) as Tool
 }
 
 /**

@@ -1094,6 +1094,64 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return runMutation(runId, lease, async () => {
       const run = await loadUnlocked()
       if (!run) return run
+      if (run.foundationRevisionState) {
+        const revisionState = run.foundationRevisionState
+        const tasks = revisionState.tasks
+        const runningRevisionTasks = tasks.filter(task => task.status === 'running')
+        if (runningRevisionTasks.length > 4)
+          throw new WorkflowStoreError('foundation revision recovery exceeds the four-worker limit', 'conflict')
+        for (const task of tasks) {
+          const dispatch = task.dispatch
+          if (!dispatch) continue
+          const request = dispatch.request
+          const contract = request?.contract
+          if (
+            dispatch.taskId !== task.taskId ||
+            dispatch.revision !== task.revision ||
+            (typeof request?.taskId === 'string' && request.taskId !== task.taskId) ||
+            (typeof request?.revision === 'string' && request.revision !== task.revision) ||
+            (contract && typeof contract === 'object' && (
+              contract.packetDigest !== task.packetDigest ||
+              contract.packetPath !== task.packetPath ||
+              contract.round !== task.round
+            ))
+          )
+            throw new WorkflowStoreError('foundation revision recovery dispatch identity is inconsistent', 'conflict')
+        }
+        const unavailable: typeof tasks = []
+        for (const task of runningRevisionTasks) {
+          if (!task.dispatch) continue
+          if (!(await sessionIsOpen(task.dispatch))) unavailable.push(task)
+        }
+        if (unavailable.length) {
+          const nextState = {
+            ...revisionState,
+            tasks: tasks.map(task => {
+              if (!unavailable.some(item => item.taskId === task.taskId)) return task
+              const hasPersistedTerminal = Boolean(task.dispatch?.terminalResult)
+              return {
+                ...task,
+                // Durable terminal envelopes are replayed by the controller;
+                // do not turn them into a retry while admission is pending.
+                status: hasPersistedTerminal
+                  ? ('running' as const)
+                  : task.attempt < 2
+                    ? ('retryable' as const)
+                    : ('needs_action' as const),
+                dispatch: task.dispatch ? {
+                  ...task.dispatch,
+                  status: hasPersistedTerminal ? ('completed' as const) : ('interrupted' as const),
+                  finishedAt: now(),
+                  ...(hasPersistedTerminal ? {} : { failureReason: 'server stopped before the foundation revision terminal was admitted' }),
+                } : undefined,
+                ...(hasPersistedTerminal ? {} : { failureReason: 'server stopped before the foundation revision terminal was admitted' }),
+              }
+            }),
+          }
+          const nextStatus = nextState.tasks.some(task => task.status === 'needs_action') ? 'needs_action' as const : 'running' as const
+          return commitUnlocked({ ...run, foundationRevisionState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? 'foundation revision requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: 'foundation.revision.recovered', phase: run.phase, status: nextStatus, revision: run.revision })
+        }
+      }
       if (run.foundationAuditState) {
         const tasks = run.foundationAuditState.tasks
         const runningFactTasks = tasks.filter(task => task.status === 'running')

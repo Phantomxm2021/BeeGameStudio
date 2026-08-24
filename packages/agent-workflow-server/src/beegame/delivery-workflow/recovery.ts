@@ -847,6 +847,9 @@ async function acquireAndLoad(input: {
       ...(current.foundationAuditState?.tasks
         .filter(task => task.status === 'running' && task.dispatch)
         .map(task => task.dispatch!) ?? []),
+      ...(current.foundationRevisionState?.tasks
+        .filter(task => task.status === 'running' && task.dispatch)
+        .map(task => task.dispatch!) ?? []),
     ]
     if (!runningDispatches.length) return false
     if (!input.sessionIsOpen) return true
@@ -877,10 +880,13 @@ export async function resumeRun(input: {
     const foundationFactRunning = acquired.run.foundationAuditState?.tasks.some(
       task => task.status === 'running' && task.dispatch?.status === 'running',
     )
+    const foundationRevisionRunning = acquired.run.foundationRevisionState?.tasks.some(
+      task => task.status === 'running' && task.dispatch?.status === 'running',
+    )
     if (
       acquired.run.status === 'completed' ||
       acquired.run.activeDispatch?.status === 'running' ||
-      foundationFactRunning
+      foundationFactRunning || foundationRevisionRunning
     )
       return acquired.run
     acquired.run = await restoreCanonicalDocumentCommit(

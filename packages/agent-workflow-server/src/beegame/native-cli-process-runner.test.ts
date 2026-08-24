@@ -172,6 +172,14 @@ describe('native CLI process runner', () => {
     expect(command[command.indexOf('--tools') + 1]).toBe('')
   })
 
+  test('exposes only Read, Edit and the native terminal tool to a revision worker', () => {
+    const command = nativeRuntimeCommand({
+      sessionId: 'beegame_revision_worker', cwd: process.cwd(), env: {},
+      workflowWorker: true, workflowWorkerType: 'foundation-document-reviser',
+    })
+    expect(command.slice(command.indexOf('--tools') + 1)).toEqual(['Read', 'Edit', 'SubmitFoundationRevisionResult'])
+  })
+
   test('disables built-in tools for a StructuredOutput workflow turn while retaining its JSON schema', () => {
     const schema = {
       type: 'object',

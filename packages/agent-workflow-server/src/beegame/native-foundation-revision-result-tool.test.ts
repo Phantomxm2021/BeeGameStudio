@@ -10,6 +10,7 @@ import {
   type RevisionTaskReceipt,
 } from './delivery-workflow/foundation-revision-stage'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { createFileStateCacheWithSizeLimit } from '../../../../src/utils/fileStateCache.js'
 
 type Tool = {
   call(input: unknown): Promise<{ data: Record<string, unknown> }>
@@ -68,10 +69,6 @@ function createTool(workspacePath: string, onReceipt?: (receipt: RevisionTaskRec
 }
 
 const declaration = {
-  taskId,
-  round: 1,
-  documentPath,
-  issueIds: [...issueIds],
   changedSectionIds: [...changedSectionIds],
 } as const
 
@@ -83,19 +80,15 @@ test('accepts only the bounded declaration and derives the full receipt from loc
   })
 
   expect(tool.inputSchema.safeParse(declaration).success).toBe(true)
-  await expect(tool.call(declaration)).resolves.toEqual({
-    data: {
-      accepted: true,
-      changedSectionCount: 1,
-      issueCount: 1,
-    },
+  await expect(tool.call(declaration)).resolves.toMatchObject({
+    data: { accepted: true, changedSectionCount: 1, issueCount: 1, receipt: expect.any(Object) },
   })
   const canonical = await readFile(join(workspace, documentPath))
   const expectedWithoutTerminal = {
-    taskId: declaration.taskId,
-    round: declaration.round,
-    documentPath: declaration.documentPath,
-    issueIds: [...declaration.issueIds],
+    taskId,
+    round: 1 as const,
+    documentPath,
+    issueIds: [...issueIds],
     baseDocumentDigest: createHash('sha256').update(canonical).digest('hex'),
     stagedDocumentDigest: createHash('sha256').update(staged).digest('hex'),
     changedSectionIds: [...declaration.changedSectionIds],
@@ -108,19 +101,35 @@ test('accepts only the bounded declaration and derives the full receipt from loc
   await expect(tool.prompt()).resolves.toEqual(expect.stringContaining('local'))
 })
 
+test('chains real Read and Edit on the isolated stage before native submission', async () => {
+  const { workspace, stage } = await workspaceWithStage()
+  const filePath = join(workspace, stage.stagedPath)
+  const toolContext = {
+    abortController: new AbortController(),
+    readFileState: createFileStateCacheWithSizeLimit(8),
+    fileReadingLimits: undefined,
+    dynamicSkillDirTriggers: new Set<string>(),
+    nestedMemoryAttachmentTriggers: new Set<string>(),
+  } as any
+  const parentMessage = { uuid: 'revision-real-read-edit', message: { id: 'revision-real-read-edit' } } as any
+  const rootTools = await import(new URL('../../../../src/tools.ts', import.meta.url).href)
+  const tools = rootTools.getAllBaseTools()
+  const fileRead = (tools as any[]).find((tool: any) => tool.name === 'Read')!
+  const fileEdit = (tools as any[]).find((tool: any) => tool.name === 'Edit')!
+  await fileRead.call({ file_path: filePath }, toolContext, undefined, parentMessage)
+  await fileEdit.call({ file_path: filePath, old_string: 'changed vision', new_string: 'revised vision' }, toolContext, undefined, parentMessage)
+  expect(await readFile(filePath, 'utf8')).toContain('revised vision')
+  const tool = createTool(workspace)
+  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { accepted: true, changedSectionCount: 1 } })
+})
+
 test('rejects caller-supplied path and digest evidence before it can enter the receipt', async () => {
   const { workspace } = await workspaceWithStage()
   let received = false
   const tool = createTool(workspace, () => {
     received = true
   })
-  const fabricated = {
-    ...declaration,
-    stagedPath: '../outside.md',
-    baseDocumentDigest: 'a'.repeat(64),
-    stagedDocumentDigest: 'b'.repeat(64),
-    terminalDigest: 'c'.repeat(64),
-  }
+  const fabricated = { ...declaration, stagedPath: '../outside.md', baseDocumentDigest: 'a'.repeat(64), stagedDocumentDigest: 'b'.repeat(64), terminalDigest: 'c'.repeat(64) }
 
   expect(tool.inputSchema.safeParse(fabricated).success).toBe(false)
   await expect(tool.call(fabricated)).rejects.toThrow()
@@ -130,10 +139,6 @@ test('rejects caller-supplied path and digest evidence before it can enter the r
 test('rejects stale identity, missing stage, and empty stage bytes', async () => {
   const { workspace, stage } = await workspaceWithStage()
   const tool = createTool(workspace)
-  await expect(tool.call({ ...declaration, taskId: 'other-task' })).rejects.toThrow(/task/i)
-  await expect(tool.call({ ...declaration, round: 2 })).rejects.toThrow(/round/i)
-  await expect(tool.call({ ...declaration, documentPath: 'docs/LEVEL_SCENE_DESIGN.md' })).rejects.toThrow(/document/i)
-  await expect(tool.call({ ...declaration, issueIds: ['AUD-2'] })).rejects.toThrow(/issue/i)
   await expect(tool.call({ ...declaration, changedSectionIds: ['rules_systems'] })).rejects.toThrow(/section/i)
 
   await rm(join(workspace, stage.stagedPath))

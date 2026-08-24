@@ -7,27 +7,14 @@ import {
   revisionTaskReceiptTerminalDigest,
   type RevisionTaskReceipt,
 } from './delivery-workflow/foundation-revision-stage'
-import {
-  CANONICAL_FOUNDATION_DOCUMENTS,
-  type FoundationDocumentPath,
-} from './delivery-workflow/types'
+import type { FoundationDocumentPath } from './delivery-workflow/types'
 
 const declarationSchema = z
   .object({
-    taskId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/),
-    round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-    documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
-    issueIds: z.array(z.string().min(1)).min(1),
     changedSectionIds: z.array(z.string().min(1)).min(1),
   })
   .strict()
   .superRefine((value, context) => {
-    if (new Set(value.issueIds).size !== value.issueIds.length)
-      context.addIssue({
-        code: 'custom',
-        path: ['issueIds'],
-        message: 'issueIds must be unique',
-      })
     if (
       new Set(value.changedSectionIds).size !== value.changedSectionIds.length
     )
@@ -76,6 +63,8 @@ export function createNativeFoundationRevisionResultTool(options: {
   expectedDocumentPath: FoundationDocumentPath
   expectedIssueIds: readonly string[]
   expectedSectionIds: readonly string[]
+  expectedBaseDocumentDigest?: string
+  expectedStagedPath?: string
   onReceipt?: (receipt: RevisionTaskReceipt) => Promise<void> | void
 }): unknown {
   return options.buildTool({
@@ -88,33 +77,24 @@ export function createNativeFoundationRevisionResultTool(options: {
       return 'Submit the bounded declaration for an isolated foundation document revision; the service derives the receipt from project-local bytes.'
     },
     async prompt() {
-      return 'After completing the assigned document revision, call SubmitFoundationRevisionResult exactly once with only taskId, round, documentPath, exact issueIds, and exact changedSectionIds. The service derives all evidence from project-local files; no additional fields are accepted.'
+      return 'After completing the assigned document revision, call SubmitFoundationRevisionResult exactly once with only changedSectionIds. The service injects task identity and derives all evidence from project-local files.'
     },
     async checkPermissions(input: Declaration) {
       return { behavior: 'allow', updatedInput: input }
     },
     async call(input: Declaration) {
       const parsed = declarationSchema.parse(input)
-      if (parsed.taskId !== options.expectedTaskId)
-        throw new Error('foundation revision receipt taskId mismatch')
-      if (parsed.round !== options.expectedRound)
-        throw new Error('foundation revision receipt round mismatch')
-      if (parsed.documentPath !== options.expectedDocumentPath)
-        throw new Error('foundation revision receipt document path mismatch')
-      if (!sameArray(parsed.issueIds, options.expectedIssueIds))
-        throw new Error('foundation revision receipt issueIds mismatch')
       if (!sameArray(parsed.changedSectionIds, options.expectedSectionIds))
         throw new Error(
           'foundation revision receipt changedSectionIds mismatch',
         )
 
-      const stagedPath = foundationRevisionStagePath(
-        options.expectedRevision,
-        parsed.documentPath,
-      )
+      const stagedPath = foundationRevisionStagePath(options.expectedRevision, options.expectedDocumentPath)
+      if (options.expectedStagedPath && options.expectedStagedPath !== stagedPath)
+        throw new Error('foundation revision staged path authority mismatch')
       const canonicalAbsolute = resolveProjectPath(
         options.workspacePath,
-        parsed.documentPath,
+        options.expectedDocumentPath,
       )
       const stagedAbsolute = resolveProjectPath(
         options.workspacePath,
@@ -132,14 +112,16 @@ export function createNativeFoundationRevisionResultTool(options: {
         )
       }
       const [baseBytes, stagedBytes] = bytes
+      if (options.expectedBaseDocumentDigest && sha256(baseBytes) !== options.expectedBaseDocumentDigest)
+        throw new Error('foundation revision canonical document has a stale base digest')
       if (stagedBytes.length === 0)
         throw new Error('foundation revision staged document is empty')
 
       const receiptWithoutTerminal = {
-        taskId: parsed.taskId,
-        round: parsed.round,
-        documentPath: parsed.documentPath,
-        issueIds: [...parsed.issueIds],
+        taskId: options.expectedTaskId,
+        round: options.expectedRound,
+        documentPath: options.expectedDocumentPath,
+        issueIds: [...options.expectedIssueIds],
         baseDocumentDigest: sha256(baseBytes),
         stagedDocumentDigest: sha256(stagedBytes),
         changedSectionIds: [...parsed.changedSectionIds],
@@ -156,6 +138,7 @@ export function createNativeFoundationRevisionResultTool(options: {
           accepted: true,
           changedSectionCount: receipt.changedSectionIds.length,
           issueCount: receipt.issueIds.length,
+          receipt,
         },
       }
     },
