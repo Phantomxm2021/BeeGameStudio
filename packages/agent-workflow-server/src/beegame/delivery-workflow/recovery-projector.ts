@@ -38,7 +38,6 @@ import {
   type WorkflowUnitAcceptedEvent,
   type WorkflowUsage,
 } from './types'
-import { FOUNDATION_AUDIT_UNAVAILABLE } from './foundation-audit-boundary'
 
 export { inspectWorkflowSnapshot }
 export type { WorkflowSnapshotInspection }
@@ -1173,7 +1172,11 @@ function rawActiveUnitId(input: {
       )
     return documentUnitId(currentItemId)
   }
-  if (snapshot.phase === 'DOCUMENT_REVIEW') return 'foundation-audit:unavailable'
+  if (
+    snapshot.phase === 'DOCUMENT_REVIEW' &&
+    !record(snapshot?.foundationAuditState)
+  )
+    return 'foundation-audit:derive'
   const activeTaskId = stringValue(snapshot.activeTaskId)
   if (activeTaskId) return `implementation:${activeTaskId}`
   const resourceTask = stringValue(
@@ -1286,9 +1289,9 @@ function buildProjectionRun(input: {
   let resourceTask: DeliveryRun['resourceProductionState']['currentTask'] =
     'RESOURCE_PLAN'
   const activeUnitId = input.activeUnitId
-  if (activeUnitId === 'foundation-audit:unavailable') {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
+  if (activeUnitId === 'foundation-audit:derive') {
+    phase = 'DOCUMENT_DRAFTING'
+    documentStep = 'FOUNDATION_DRAFTING'
   } else if (activeUnitId?.startsWith('document:')) {
     phase = 'DOCUMENT_DRAFTING'
     documentStep = 'FOUNDATION_DRAFTING'
@@ -1368,14 +1371,9 @@ function buildProjectionRun(input: {
     ...base,
     phase,
     ...(documentStep ? { documentStep } : {}),
-    status:
-      activeUnitId === 'foundation-audit:unavailable'
-        ? 'needs_action'
-        : activeUnitId
-          ? 'running'
-          : 'completed',
-    ...(activeUnitId === 'foundation-audit:unavailable'
-      ? { blockedReason: FOUNDATION_AUDIT_UNAVAILABLE }
+    status: activeUnitId ? 'running' : 'completed',
+    ...(activeUnitId === 'foundation-audit:derive'
+      ? { blockedReason: undefined }
       : {}),
     revision: {
       ...input.revision,
@@ -1602,8 +1600,9 @@ export async function projectExactResumeRun(input: {
   const graphActiveUnitId = graph[replayedUnitIds.length]
   const activeUnitId =
     graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID &&
-    !proofs.has(RESOURCE_INVENTORY_UNIT_ID)
-      ? 'foundation-audit:unavailable'
+    !proofs.has(RESOURCE_INVENTORY_UNIT_ID) &&
+    !record(snapshot?.foundationAuditState)
+      ? 'foundation-audit:derive'
       : graphActiveUnitId
   const rawProofInspection =
     input.receiptReconciliation?.sourceInspection ?? input.inspection

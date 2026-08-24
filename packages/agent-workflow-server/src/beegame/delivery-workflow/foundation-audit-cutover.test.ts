@@ -28,7 +28,7 @@ function runWithEightCommittedDocs(): DeliveryRun {
     'docs/ASSET_PLAN.md',
   ] as const
   return {
-    schemaVersion: 28,
+    schemaVersion: 29,
     runId: 'run-cutover',
     projectId: 'project-cutover',
     ownerId: 'owner-cutover',
@@ -79,7 +79,7 @@ describe('foundation audit cutover', () => {
       expect(saved).toMatchObject({
         phase: 'DOCUMENT_REVIEW',
         status: 'needs_action',
-        blockedReason: 'foundation audit implementation unavailable',
+        blockedReason: 'foundation audit derivation failed: committed foundation document is missing: docs/GDD.md',
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
@@ -173,8 +173,8 @@ describe('foundation audit cutover', () => {
       expect(saved).toMatchObject({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        status: 'needs_action',
-        blockedReason: 'foundation audit implementation unavailable',
+        status: 'running',
+        foundationAuditState: { status: 'derived' },
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

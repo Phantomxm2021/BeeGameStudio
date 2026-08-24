@@ -1,8 +1,5 @@
 import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun } from './types'
 
-export const FOUNDATION_AUDIT_UNAVAILABLE =
-  'foundation audit implementation unavailable'
-
 export function canStartFoundationAudit(run: DeliveryRun): boolean {
   const documents = run.foundationDraftState.documents
   if (documents)
@@ -18,21 +15,4 @@ export function canStartFoundationAudit(run: DeliveryRun): boolean {
       run.foundationDraftState.completedPaths.includes(path),
     )
   )
-}
-
-export function applyFoundationAuditBoundary(input: {
-  run: DeliveryRun
-}): DeliveryRun {
-  if (!canStartFoundationAudit(input.run)) return input.run
-  // The clean cutover deliberately stops here. Task 2 owns the replacement
-  // audit implementation and its dispatch contract.
-  return {
-    ...input.run,
-    phase: 'DOCUMENT_REVIEW',
-    documentStep: 'FOUNDATION_REVIEW',
-    status: 'needs_action',
-    activeDispatch: undefined,
-    blockedReason: FOUNDATION_AUDIT_UNAVAILABLE,
-    thinking: 'idle',
-  }
 }

@@ -17,10 +17,9 @@ import {
   startChecklistDraftStage,
   startDocumentStage,
 } from './document-stage'
-import {
-  applyFoundationAuditBoundary,
-  canStartFoundationAudit,
-} from './foundation-audit-boundary'
+import { canStartFoundationAudit } from './foundation-audit-boundary'
+import { createFoundationAuditState } from './foundation-audit-state'
+import { deriveFoundationAuditArtifacts } from './foundation-audit-artifacts'
 import {
   completeResourceTask,
   reconcileCurrentResourcePreparation,
@@ -47,7 +46,10 @@ import {
   startImplementationAudit,
 } from './validation-stage'
 import { readAcceptanceChecklistIds } from '../document-readiness-audit'
-import { CANONICAL_DOCUMENT_ARTIFACTS } from './types'
+import {
+  CANONICAL_DOCUMENT_ARTIFACTS,
+  CANONICAL_FOUNDATION_DOCUMENTS,
+} from './types'
 import {
   auditResourceDeliveryReadiness,
   confirmedResourceLibraryUsage,
@@ -64,6 +66,61 @@ import {
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
+
+async function deriveFoundationAudit(
+  run: DeliveryRun,
+  workspacePath: string,
+): Promise<DeliveryRun> {
+  if (run.foundationAuditState)
+    return {
+      ...run,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'running',
+      activeDispatch: undefined,
+      blockedReason: undefined,
+      thinking: 'idle',
+    }
+  const checkpoints = run.foundationDraftState.documents ??
+    CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+      path,
+      status: run.foundationDraftState.completedPaths.includes(path)
+        ? ('committed' as const)
+        : ('pending' as const),
+    }))
+  try {
+    const artifacts = await deriveFoundationAuditArtifacts({
+      workspacePath,
+      revision: run.revision.document,
+      checkpoints,
+    })
+    return {
+      ...run,
+      foundationAuditState: createFoundationAuditState({
+        revision: artifacts.revision,
+        documentDigests: artifacts.documentDigests,
+        manifest: artifacts.manifest,
+      }),
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'running',
+      activeDispatch: undefined,
+      blockedReason: undefined,
+      thinking: 'idle',
+    }
+  } catch (error) {
+    return {
+      ...run,
+      foundationAuditState: undefined,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      status: 'needs_action',
+      activeDispatch: undefined,
+      blockedReason: `foundation audit derivation failed: ${error instanceof Error ? error.message : String(error)}`,
+      thinking: 'idle',
+    }
+  }
+}
 
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
@@ -257,6 +314,10 @@ export function createDeliveryWorkflowController(input: {
           result.classification === 'documents_required'
             ? { completedPaths: [] }
             : next.foundationDraftState,
+        foundationAuditState:
+          result.classification === 'documents_required'
+            ? undefined
+            : next.foundationAuditState,
         resourceProductionState:
           result.classification === 'documents_required'
             ? { currentTask: 'RESOURCE_PLAN' }
@@ -315,7 +376,7 @@ export function createDeliveryWorkflowController(input: {
             documentSet,
       })
       if (documentSet === 'foundation' && canStartFoundationAudit(next))
-        next = applyFoundationAuditBoundary({ run: next })
+        next = await deriveFoundationAudit(next, input.workspacePath)
       if (next.blockedReason && next.status === 'running') {
         next = {
           ...next,
@@ -786,6 +847,7 @@ export function createDeliveryWorkflowController(input: {
       tasks: [],
       evidence: {},
       foundationDraftState: { completedPaths: [] },
+      foundationAuditState: undefined,
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     }
     await persist(invalidated, 'document.revision.invalidated')
@@ -902,10 +964,13 @@ export function createDeliveryWorkflowController(input: {
     }
     if (run.phase === 'DOCUMENT_DRAFTING') {
       if (canStartFoundationAudit(run)) {
-        const next = await applyFoundationAuditBoundary({
-          run,
-        })
-        await persist(next, 'foundation.audit.unavailable')
+        const next = await deriveFoundationAudit(run, input.workspacePath)
+        await persist(
+          next,
+          next.foundationAuditState
+            ? 'foundation.audit.derived'
+            : 'foundation.audit.derivation_failed',
+        )
         return
       }
       await startDocumentStage({

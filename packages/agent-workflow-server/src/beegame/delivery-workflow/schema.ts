@@ -14,6 +14,7 @@ import type {
   WorkflowUnitAcceptedEvent,
   WorkerDispatchRequest,
 } from './types'
+import { foundationAuditStateSchema } from './foundation-audit-state'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
@@ -480,6 +481,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       })
       .strict(),
     foundationDraftState: foundationDraftStateSchema,
+    foundationAuditState: foundationAuditStateSchema.optional(),
     resourceProductionState: resourceProductionStateSchema,
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),

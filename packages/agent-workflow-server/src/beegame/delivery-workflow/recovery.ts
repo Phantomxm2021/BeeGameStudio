@@ -36,7 +36,6 @@ import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import { FOUNDATION_AUDIT_UNAVAILABLE } from './foundation-audit-boundary'
 
 export {
   inspectWorkflowSnapshot,
@@ -326,16 +325,16 @@ async function reconcileActiveCanonicalReceipt(input: {
             currentItemId: nextPath,
           }
         : {
-          phase: 'DOCUMENT_REVIEW',
-            documentStep: 'FOUNDATION_REVIEW',
-            blockedReason: FOUNDATION_AUDIT_UNAVAILABLE,
-            status: 'needs_action',
+            phase: 'DOCUMENT_DRAFTING',
+            documentStep: 'FOUNDATION_DRAFTING',
+            status: 'running',
+            foundationAuditState: undefined,
           }),
       updatedAt: acceptedAt,
     }
     const activeUnitId = nextPath
       ? `document:${nextPath}`
-      : 'foundation-audit:unavailable'
+      : 'foundation-audit:derive'
     if (acceptedUnitAlreadyJournaled(input.events, unit.unitId))
       return {
         inspection: { ...input.inspection, parsedValue },

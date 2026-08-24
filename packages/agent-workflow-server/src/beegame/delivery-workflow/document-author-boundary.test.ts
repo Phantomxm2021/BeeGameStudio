@@ -18,7 +18,7 @@ function runWithStatuses(
   statuses: readonly FoundationDocumentCheckpoint['status'][],
 ): DeliveryRun {
   return {
-    schemaVersion: 28,
+    schemaVersion: 29,
     runId: 'run-boundary',
     projectId: 'project-boundary',
     ownerId: 'owner-boundary',

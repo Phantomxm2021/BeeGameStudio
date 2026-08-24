@@ -129,8 +129,7 @@ describe('recovery projector foundation audit boundary', () => {
         ...initial,
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        status: 'needs_action',
-        blockedReason: 'foundation audit implementation unavailable',
+        status: 'running',
         foundationDraftState: {
           completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
         },
@@ -155,12 +154,11 @@ describe('recovery projector foundation audit boundary', () => {
         confirmedBriefContext,
       })
 
-      expect(projected.activeUnitId).toBe('foundation-audit:unavailable')
+      expect(projected.activeUnitId).toBe('foundation-audit:derive')
       expect(projected.run).toMatchObject({
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
-        status: 'needs_action',
-        blockedReason: 'foundation audit implementation unavailable',
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        status: 'running',
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

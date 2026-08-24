@@ -1,3 +1,5 @@
+import type { FoundationAuditState } from './foundation-audit-state'
+
 export const CANONICAL_PROJECT_DOCUMENTS = [
   'docs/GDD.md',
   'docs/LEVEL_SCENE_DESIGN.md',
@@ -137,7 +139,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 28 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 29 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -319,6 +321,8 @@ export type DeliveryRun = {
   }
   /** Sole durable cursor for the initial eight-document authoring pass. */
   foundationDraftState: FoundationDraftState
+  /** Deterministic post-authoring Section Index + Fact Store binding. */
+  foundationAuditState?: FoundationAuditState
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
   usage?: WorkflowUsage

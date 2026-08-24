@@ -71,8 +71,8 @@ describe('createReviewProjectCopy', () => {
       ownerId: 'owner-1',
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      status: 'needs_action',
-      blockedReason: 'foundation audit implementation unavailable',
+      status: 'running',
+      foundationAuditState: { status: 'derived' },
       foundationDraftState: {
         completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       },

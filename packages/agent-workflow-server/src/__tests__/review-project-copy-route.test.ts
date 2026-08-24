@@ -141,8 +141,8 @@ describe('POST /api/projects/:projectId/review-copy', () => {
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       confirmedBriefContext: 'The durable confirmed source brief.',
-      status: 'needs_action',
-      blockedReason: 'foundation audit implementation unavailable',
+      status: 'running',
+      foundationAuditState: { status: 'derived' },
     })
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       expect(await readFile(join(payload.project.root_path, path))).toEqual(
