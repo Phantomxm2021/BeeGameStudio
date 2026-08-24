@@ -71,11 +71,13 @@ describe('foundation audit artifacts', () => {
           'audit',
           'foundation',
           'revision-1',
-          'derived',
+          'staging',
         ),
       )
       expect(paths.sectionIndex.startsWith(workspacePath)).toBe(true)
       expect(await stat(paths.sectionIndex)).toBeTruthy()
+      expect(paths.sectionIndex).toContain(`${join('foundation', 'revision-1', 'staging')}`)
+      expect(paths.factStore).toBeUndefined()
       expect(JSON.parse(await readFile(paths.manifest, 'utf8'))).toEqual(
         result.manifest,
       )
@@ -95,7 +97,7 @@ describe('foundation audit artifacts', () => {
           revision: 'revision-1',
           checkpoints,
         }),
-      ).rejects.toThrow('document digest binding')
+      ).rejects.toThrow('revision or digest')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -127,7 +129,7 @@ describe('foundation audit artifacts', () => {
       })
       await rm(
         foundationAuditArtifactPaths(workspacePath, 'revision-immutable')
-          .factStore,
+          .sectionIndex,
       )
       await expect(
         deriveFoundationAuditArtifacts({
@@ -140,7 +142,6 @@ describe('foundation audit artifacts', () => {
         workspacePath,
         'revision-immutable',
       )
-      await rm(paths.sectionIndex)
       await rm(paths.manifest)
       await expect(
         deriveFoundationAuditArtifacts({

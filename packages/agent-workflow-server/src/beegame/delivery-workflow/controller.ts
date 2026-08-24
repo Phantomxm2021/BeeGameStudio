@@ -76,9 +76,9 @@ async function deriveFoundationAudit(
       ...run,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      status: 'running',
+      status: 'needs_action',
       activeDispatch: undefined,
-      blockedReason: undefined,
+      blockedReason: run.foundationAuditState.needsAction,
       thinking: 'idle',
     }
   const checkpoints = run.foundationDraftState.documents ??
@@ -103,9 +103,9 @@ async function deriveFoundationAudit(
       }),
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      status: 'running',
+      status: 'needs_action',
       activeDispatch: undefined,
-      blockedReason: undefined,
+      blockedReason: artifacts.manifest.needsAction,
       thinking: 'idle',
     }
   } catch (error) {

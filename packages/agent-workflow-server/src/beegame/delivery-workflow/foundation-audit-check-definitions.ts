@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { getGameDocumentContract } from './game-document-contracts'
 import type { FoundationFact, FactValue } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
 import {
@@ -428,23 +427,6 @@ function schemaDrafts(
       continue
     }
     required.push(definition)
-  }
-  for (const section of context.sectionIndex) {
-    const contract = getGameDocumentContract(section.documentPath as never)
-    if (
-      !contract ||
-      !contract.sections.some(
-        candidate => candidate.sectionId === section.sectionId,
-      )
-    )
-      continue
-    const documentId = section.documentPath.slice(
-      section.documentPath.lastIndexOf('/') + 1,
-      -3,
-    )
-    const key = `${documentId}.${section.sectionId}`
-    if (!required.some(definition => definition.key === key))
-      required.push({ key, source: section, expectedType: 'string' })
   }
   const drafts: AuditIssueDraft[] = []
   for (const definition of required) {

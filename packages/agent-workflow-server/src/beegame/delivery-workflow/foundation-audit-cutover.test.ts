@@ -173,8 +173,8 @@ describe('foundation audit cutover', () => {
       expect(saved).toMatchObject({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        status: 'running',
-        foundationAuditState: { status: 'derived' },
+        status: 'needs_action',
+        foundationAuditState: { status: 'index_staged' },
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
