@@ -6,6 +6,8 @@ import {
   computeResourceContentRootDigest,
   readResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
+import { validateFoundationAuditStateArtifacts } from './foundation-audit-artifacts'
+import { parseFoundationAuditState } from './foundation-audit-state'
 import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './foundation-document-topology'
 import {
   computeDocumentRevision,
@@ -1669,8 +1671,28 @@ export async function projectExactResumeRun(input: {
     projectId: input.projectId,
     confirmedBriefContext: input.confirmedBriefContext,
   })
+  let foundationAuditState = run.foundationAuditState
+  const storedFoundationAuditState = record(snapshot?.foundationAuditState)
+  if (storedFoundationAuditState) {
+    try {
+      const state = parseFoundationAuditState(storedFoundationAuditState)
+      await validateFoundationAuditStateArtifacts({
+        workspacePath: input.workspacePath,
+        state,
+      })
+      foundationAuditState = state
+    } catch (error) {
+      recoveryError(
+        'recovery_artifact_digest_mismatch',
+        `stored foundation audit state failed byte validation: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+  const projectedRun = foundationAuditState
+    ? { ...run, foundationAuditState }
+    : run
   return {
-    run,
+    run: projectedRun,
     ...(activeUnitId ? { activeUnitId } : {}),
     replayedUnitIds,
     sourceSnapshotDigest: input.inspection.digest,

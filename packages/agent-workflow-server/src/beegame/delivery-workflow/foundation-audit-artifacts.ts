@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import {
   buildFoundationSectionIndex,
   digestSectionIndex,
@@ -17,6 +17,7 @@ import {
   type FoundationDocumentCheckpoint,
   type FoundationDocumentPath,
 } from './types'
+import type { FoundationAuditState } from './foundation-audit-state'
 
 export type FoundationAuditManifest = {
   revision: string
@@ -45,9 +46,30 @@ function sha256(value: string | Uint8Array): string {
 }
 
 function assertRevision(revision: string): void {
-  if (!/^[A-Za-z0-9._-]+$/.test(revision))
+  if (
+    !revision ||
+    revision === '.' ||
+    revision === '..' ||
+    !/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(revision) ||
+    revision.includes('/') ||
+    revision.includes('\\')
+  )
     throw new Error(
       'foundation audit revision must be a safe project-local identifier',
+    )
+}
+
+function assertDescendant(base: string, candidate: string): void {
+  const relativePath = relative(resolve(base), resolve(candidate))
+  if (
+    !relativePath ||
+    relativePath === '..' ||
+    relativePath.startsWith(`..${sep}`) ||
+    relativePath.startsWith('/') ||
+    relativePath.startsWith('\\')
+  )
+    throw new Error(
+      'foundation audit artifact path escaped its project-local root',
     )
 }
 
@@ -56,14 +78,10 @@ export function foundationAuditArtifactPaths(
   revision: string,
 ): FoundationAuditArtifactPaths {
   assertRevision(revision)
-  const root = join(
-    resolve(workspacePath),
-    '.beegame',
-    'audit',
-    'foundation',
-    revision,
-    'derived',
-  )
+  const workspace = resolve(workspacePath)
+  const base = join(workspace, '.beegame', 'audit', 'foundation')
+  const root = join(base, revision, 'derived')
+  assertDescendant(base, root)
   return {
     root,
     sectionIndex: join(root, 'section-index.json'),
@@ -103,20 +121,254 @@ export function assertExactlyEightCommittedFoundationDocuments(
 
 function checkpointList(input: {
   checkpoints?: readonly Pick<FoundationDocumentCheckpoint, 'path' | 'status'>[]
-}): readonly Pick<FoundationDocumentCheckpoint, 'path' | 'status'>[] {
+}): void {
   if (!input.checkpoints)
     throw new Error(
       'durable committed foundation checkpoints are required before audit derivation',
     )
   assertExactlyEightCommittedFoundationDocuments(input.checkpoints)
-  return input.checkpoints
+}
+
+async function readDocuments(input: {
+  workspace: string
+  documents?:
+    | ReadonlyMap<FoundationDocumentPath, string>
+    | Record<string, string>
+}): Promise<Map<FoundationDocumentPath, string>> {
+  const documents = new Map<FoundationDocumentPath, string>()
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+    let supplied: string | undefined
+    if (input.documents instanceof Map) supplied = input.documents.get(path)
+    else if (input.documents)
+      supplied = (input.documents as Record<string, string>)[path]
+    const content =
+      supplied ??
+      (await readFile(join(input.workspace, path), 'utf8').catch(() => {
+        throw new Error(`committed foundation document is missing: ${path}`)
+      }))
+    if (typeof content !== 'string')
+      throw new Error(
+        `committed foundation document content is invalid: ${path}`,
+      )
+    documents.set(path, content)
+  }
+  return documents
+}
+
+function documentDigests(
+  documents: ReadonlyMap<FoundationDocumentPath, string>,
+): Array<{ path: FoundationDocumentPath; digest: string }> {
+  return CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+    path,
+    digest: sha256(documents.get(path)! as string),
+  }))
+}
+
+function exactKeys(value: object, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort()
+  return JSON.stringify(actual) === JSON.stringify([...keys].sort())
+}
+
+function isDigest(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+async function readArtifact(path: string): Promise<unknown | undefined> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as unknown
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw new Error(`foundation audit artifact is malformed: ${path}`)
+  }
+}
+
+function validateDocumentDigestList(
+  value: unknown,
+  expected: readonly { path: FoundationDocumentPath; digest: string }[],
+): void {
+  if (!Array.isArray(value) || !sameJson(value, expected))
+    throw new Error(
+      'foundation audit artifact document digest binding is invalid',
+    )
+}
+
+async function loadExistingFoundationAuditArtifacts(input: {
+  workspace: string
+  revision: string
+  documents: ReadonlyMap<FoundationDocumentPath, string>
+  expectedState?: FoundationAuditState
+}): Promise<DerivedFoundationAuditArtifacts | undefined> {
+  const paths = foundationAuditArtifactPaths(input.workspace, input.revision)
+  let rootExists = false
+  try {
+    rootExists = (await stat(paths.root)).isDirectory()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      throw new Error('foundation audit artifact directory is unreadable')
+  }
+  const [sectionIndexRaw, factStoreRaw, manifestRaw] = await Promise.all([
+    readArtifact(paths.sectionIndex),
+    readArtifact(paths.factStore),
+    readArtifact(paths.manifest),
+  ])
+  const present = [sectionIndexRaw, factStoreRaw, manifestRaw].filter(
+    value => value !== undefined,
+  ).length
+  if (present === 0) {
+    if (rootExists || input.expectedState)
+      throw new Error('foundation audit artifact set is missing and immutable')
+    return undefined
+  }
+  if (present !== 3)
+    throw new Error('foundation audit artifact set is partial and immutable')
+
+  const expectedDocuments = documentDigests(input.documents)
+  if (
+    !sectionIndexRaw ||
+    !factStoreRaw ||
+    !manifestRaw ||
+    typeof sectionIndexRaw !== 'object' ||
+    typeof factStoreRaw !== 'object' ||
+    typeof manifestRaw !== 'object' ||
+    !exactKeys(sectionIndexRaw, [
+      'revision',
+      'documentDigests',
+      'sections',
+      'digest',
+    ]) ||
+    !exactKeys(factStoreRaw, [
+      'revision',
+      'documentDigests',
+      'facts',
+      'digest',
+    ]) ||
+    !exactKeys(manifestRaw, [
+      'revision',
+      'sectionIndexDigest',
+      'factStoreDigest',
+    ])
+  )
+    throw new Error('foundation audit artifact set is malformed and immutable')
+  const sectionObject = sectionIndexRaw as Record<string, unknown>
+  const factObject = factStoreRaw as Record<string, unknown>
+  const manifest = manifestRaw as Record<string, unknown>
+  if (
+    sectionObject.revision !== input.revision ||
+    factObject.revision !== input.revision ||
+    manifest.revision !== input.revision ||
+    !isDigest(sectionObject.digest) ||
+    !isDigest(factObject.digest) ||
+    !isDigest(manifest.sectionIndexDigest) ||
+    !isDigest(manifest.factStoreDigest)
+  )
+    throw new Error('foundation audit artifact revision or digest is invalid')
+  validateDocumentDigestList(sectionObject.documentDigests, expectedDocuments)
+  validateDocumentDigestList(factObject.documentDigests, expectedDocuments)
+  if (
+    !Array.isArray(sectionObject.sections) ||
+    !Array.isArray(factObject.facts)
+  )
+    throw new Error('foundation audit artifact payload is invalid')
+  const sectionIndex = buildFoundationSectionIndex({
+    documents: input.documents,
+  })
+  const factStore = createFoundationFactStore(
+    extractFoundationFacts({ documents: input.documents, sectionIndex }),
+  )
+  const sectionDigest = digestSectionIndex(sectionIndex)
+  const factDigest = digestFactStore(factStore)
+  if (
+    sectionObject.digest !== sectionDigest ||
+    factObject.digest !== factDigest ||
+    manifest.sectionIndexDigest !== sectionDigest ||
+    manifest.factStoreDigest !== factDigest ||
+    !sameJson(sectionObject.sections, sectionIndex) ||
+    !sameJson(factObject.facts, factStore)
+  )
+    throw new Error(
+      'foundation audit artifact bytes do not match current documents',
+    )
+  const typedManifest: FoundationAuditManifest = {
+    revision: input.revision,
+    sectionIndexDigest: sectionDigest,
+    factStoreDigest: factDigest,
+  }
+  if (
+    input.expectedState &&
+    (!sameJson(
+      input.expectedState.documentDigests,
+      Object.fromEntries(
+        expectedDocuments.map(item => [item.path, item.digest]),
+      ),
+    ) ||
+      !sameJson(input.expectedState.manifest, typedManifest) ||
+      input.expectedState.sectionIndexPath !==
+        relativeFoundationAuditArtifactPaths(input.revision).sectionIndex ||
+      input.expectedState.factStorePath !==
+        relativeFoundationAuditArtifactPaths(input.revision).factStore ||
+      input.expectedState.manifestPath !==
+        relativeFoundationAuditArtifactPaths(input.revision).manifest)
+  )
+    throw new Error(
+      'foundation audit state does not match committed artifact bytes',
+    )
+  return {
+    revision: input.revision,
+    documentDigests: expectedDocuments,
+    sectionIndex,
+    factStore,
+    manifest: typedManifest,
+    paths,
+  }
+}
+
+/** Shared fail-closed loader used by derivation and recovery. */
+export async function loadFoundationAuditArtifacts(input: {
+  workspacePath: string
+  revision: string
+  documents?:
+    | ReadonlyMap<FoundationDocumentPath, string>
+    | Record<string, string>
+  expectedState?: FoundationAuditState
+}): Promise<DerivedFoundationAuditArtifacts | undefined> {
+  assertRevision(input.revision)
+  const workspace = resolve(input.workspacePath)
+  const documents = await readDocuments({
+    workspace,
+    documents: input.documents,
+  })
+  return loadExistingFoundationAuditArtifacts({
+    workspace,
+    revision: input.revision,
+    documents,
+    expectedState: input.expectedState,
+  })
+}
+
+export async function validateFoundationAuditStateArtifacts(input: {
+  workspacePath: string
+  state: FoundationAuditState
+}): Promise<DerivedFoundationAuditArtifacts> {
+  const loaded = await loadFoundationAuditArtifacts({
+    workspacePath: input.workspacePath,
+    revision: input.state.revision,
+    expectedState: input.state,
+  })
+  if (!loaded)
+    throw new Error('foundation audit state refers to missing artifacts')
+  return loaded
 }
 
 async function durableJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
-  const temporary = `${path}.${process.pid}.tmp`
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
-  await rename(temporary, path)
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, {
+    encoding: 'utf8',
+    flag: 'wx',
+  })
 }
 
 export async function deriveFoundationAuditArtifacts(input: {
@@ -130,42 +382,18 @@ export async function deriveFoundationAuditArtifacts(input: {
   checkpointList(input)
   assertRevision(input.revision)
   const workspace = resolve(input.workspacePath)
-  const documents = new Map<FoundationDocumentPath, string>()
-  for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
-    let supplied: string | undefined
-    if (input.documents instanceof Map) supplied = input.documents.get(path)
-    else if (input.documents)
-      supplied = (input.documents as Record<string, string>)[path]
-    const content =
-      supplied ??
-      (await readFile(join(workspace, path), 'utf8').catch(() => {
-        throw new Error(`committed foundation document is missing: ${path}`)
-      }))
-    documents.set(path, content)
-  }
-  const documentDigests = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
-    path,
-    digest: sha256(documents.get(path)!),
-  }))
+  const documents = await readDocuments({
+    workspace,
+    documents: input.documents,
+  })
+  const existing = await loadExistingFoundationAuditArtifacts({
+    workspace,
+    revision: input.revision,
+    documents,
+  })
+  if (existing) return existing
+  const documentDigestsValue = documentDigests(documents)
   const paths = foundationAuditArtifactPaths(workspace, input.revision)
-  try {
-    const prior = JSON.parse(await readFile(paths.sectionIndex, 'utf8')) as {
-      revision?: unknown
-      documentDigests?: unknown
-    }
-    if (
-      prior.revision === input.revision &&
-      JSON.stringify(prior.documentDigests) !== JSON.stringify(documentDigests)
-    )
-      throw new Error(
-        'foundation audit revision is already bound to different document digests',
-      )
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('already bound'))
-      throw error
-    // A missing artifact is the normal first-derivation path. Malformed old
-    // artifacts have no trusted binding and are replaced by this derivation.
-  }
   const sectionIndex = buildFoundationSectionIndex({ documents })
   const factStore = createFoundationFactStore(
     extractFoundationFacts({ documents, sectionIndex }),
@@ -177,25 +405,24 @@ export async function deriveFoundationAuditArtifacts(input: {
   }
   await durableJson(paths.sectionIndex, {
     revision: input.revision,
-    documentDigests,
+    documentDigests: documentDigestsValue,
     sections: sectionIndex,
     digest: manifest.sectionIndexDigest,
   })
   await durableJson(paths.factStore, {
     revision: input.revision,
-    documentDigests,
+    documentDigests: documentDigestsValue,
     facts: factStore,
     digest: manifest.factStoreDigest,
   })
   await durableJson(paths.manifest, manifest)
-  return {
+  const loaded = await loadExistingFoundationAuditArtifacts({
+    workspace,
     revision: input.revision,
-    documentDigests,
-    sectionIndex,
-    factStore,
-    manifest,
-    paths,
-  }
+    documents,
+  })
+  if (!loaded) throw new Error('foundation audit artifacts were not committed')
+  return loaded
 }
 
 export function artifactPathsRelativeToWorkspace(

@@ -34,12 +34,7 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-/**
- * Indexes the authored Markdown only. Protocol section markers are used when
- * present because they are the existing immutable document contract; ordinary
- * Markdown headings remain indexable for small standalone inputs and tests.
- * Line numbers are one-based and endLine is inclusive.
- */
+/** Indexes authored Markdown using the immutable contract when the path is canonical. */
 export function buildFoundationSectionIndex(input: {
   documents: DocumentInput
 }): FoundationSectionIndex {
@@ -61,11 +56,7 @@ export function buildFoundationSectionIndex(input: {
       )
       return match ? [{ index, sectionId: match[1]! }] : []
     })
-    const contractIds = new Set(
-      getContractIfCanonical(path)?.sections.map(
-        section => section.sectionId,
-      ) ?? [],
-    )
+    const contract = getContractIfCanonical(path)
     const seenIds = new Set<string>()
     const sectionHeadings = markers.length
       ? headings.filter(heading =>
@@ -75,6 +66,46 @@ export function buildFoundationSectionIndex(input: {
           ),
         )
       : headings.filter(heading => heading.level > 1)
+    if (contract) {
+      const required = contract.sections
+      const requiredIds = new Set(required.map(section => section.sectionId))
+      const sectionMarkers = markers.filter(marker =>
+        requiredIds.has(marker.sectionId),
+      )
+      if (
+        markers.some(marker => !requiredIds.has(marker.sectionId)) ||
+        sectionMarkers.length !== required.length ||
+        new Set(sectionMarkers.map(marker => marker.sectionId)).size !==
+          required.length ||
+        !sectionMarkers.every(
+          (marker, index) => marker.sectionId === required[index]?.sectionId,
+        )
+      )
+        throw new Error(
+          `foundation document does not satisfy its immutable section contract: ${rawPath}`,
+        )
+      for (const section of required) {
+        const marker = sectionMarkers.find(
+          candidate => candidate.sectionId === section.sectionId,
+        )
+        const heading = marker
+          ? headings.find(
+              candidate =>
+                candidate.index > marker.index &&
+                candidate.index - marker.index <= 2,
+            )
+          : undefined
+        if (
+          !marker ||
+          !heading ||
+          heading.level !== 2 ||
+          heading.heading !== section.title
+        )
+          throw new Error(
+            `foundation document section marker or heading does not satisfy its immutable contract: ${rawPath}#${section.sectionId}`,
+          )
+      }
+    }
     for (const heading of sectionHeadings) {
       const marker = markers.find(
         candidate =>
@@ -109,8 +140,7 @@ export function buildFoundationSectionIndex(input: {
       })
     }
     // A marker without its required heading is a malformed committed document,
-    // not an inferred section. Contract IDs are retained only as a validation
-    // aid here; complete-game-document validation owns the full contract gate.
+    // not an inferred section.
     for (const marker of markers)
       if (
         !headings.some(
@@ -121,7 +151,6 @@ export function buildFoundationSectionIndex(input: {
         throw new Error(
           `foundation section marker has no heading: ${rawPath}#${marker.sectionId}`,
         )
-    void contractIds
   }
   return output
 }

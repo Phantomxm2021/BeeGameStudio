@@ -19,10 +19,14 @@ import {
 import { withTestDocumentMetadata } from '../../__tests__/delivery-workflow-test-helpers'
 import { computeDocumentRevision, computeWorkspaceRevision } from './revision'
 import { createHash } from 'node:crypto'
+import { deriveFoundationAuditArtifacts } from './foundation-audit-artifacts'
+import { createFoundationAuditState } from './foundation-audit-state'
 
 describe('recovery projector foundation audit boundary', () => {
-  test('reconstructs the durable needs-action cutover from its unavailable sentinel', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-recovery-cutover-'))
+  test('reconstructs and preserves the sole derived audit state after recovery', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'foundation-recovery-cutover-'),
+    )
     try {
       const ownerId = 'recovery-cutover-owner'
       const projectId = 'recovery-cutover-project'
@@ -71,6 +75,20 @@ describe('recovery projector foundation audit boundary', () => {
         ),
         workspace: await computeWorkspaceRevision(workspacePath),
       }
+      const artifacts = await deriveFoundationAuditArtifacts({
+        workspacePath,
+        revision: revision.document,
+        checkpoints: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          status: 'committed' as const,
+        })),
+      })
+      const foundationAuditState = createFoundationAuditState({
+        revision: artifacts.revision,
+        documentDigests: artifacts.documentDigests,
+        manifest: artifacts.manifest,
+      })
+      revision.workspace = await computeWorkspaceRevision(workspacePath)
       const acceptedEvents: WorkflowEvent[] = [
         {
           eventId: 'recovery-cutover-created',
@@ -97,8 +115,7 @@ describe('recovery projector foundation audit boundary', () => {
             total_tokens: 0,
           },
         },
-        ...units.map(
-        (unit, index) => ({
+        ...units.map((unit, index) => ({
           eventId: `recovery-cutover-event-${index}`,
           runId,
           type: 'workflow.unit.accepted',
@@ -111,10 +128,12 @@ describe('recovery projector foundation audit boundary', () => {
           unit: {
             ...unit,
             inputRevision: revision.document,
-            payload: { path: unit.payload && (unit.payload as { path: string }).path, revision: revision.document },
+            payload: {
+              path: unit.payload && (unit.payload as { path: string }).path,
+              revision: revision.document,
+            },
           },
-        }),
-        ),
+        })),
       ]
       const initial = createInitialDeliveryRun({
         runId,
@@ -127,12 +146,13 @@ describe('recovery projector foundation audit boundary', () => {
       })
       const run: DeliveryRun = {
         ...initial,
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
+        phase: 'RESOURCE_PREPARATION',
         status: 'running',
         foundationDraftState: {
           completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
         },
+        foundationAuditState,
+        resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
         createdAt: '2026-08-24T00:00:00.000Z',
         updatedAt: '2026-08-24T00:02:00.000Z',
       }
@@ -154,11 +174,12 @@ describe('recovery projector foundation audit boundary', () => {
         confirmedBriefContext,
       })
 
-      expect(projected.activeUnitId).toBe('foundation-audit:derive')
+      expect(projected.activeUnitId).toBe('resource:inventory')
       expect(projected.run).toMatchObject({
-        phase: 'DOCUMENT_DRAFTING',
-        documentStep: 'FOUNDATION_DRAFTING',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
         status: 'running',
+        foundationAuditState,
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

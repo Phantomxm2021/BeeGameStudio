@@ -9,8 +9,6 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { computeDocumentRevision } from './delivery-workflow/revision'
-import { createFoundationAuditState } from './delivery-workflow/foundation-audit-state'
-import { deriveFoundationAuditArtifacts } from './delivery-workflow/foundation-audit-artifacts'
 import {
   createInitialDeliveryRun,
   createRunStore,
@@ -125,24 +123,12 @@ export async function createReviewProjectCopy(input: {
       documentRevision,
       workspaceRevision: 'uncomputed',
     })
-    const artifacts = await deriveFoundationAuditArtifacts({
-      workspacePath: temporaryWorkspacePath,
-      revision: documentRevision,
-      checkpoints: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
-        path,
-        status: 'committed' as const,
-      })),
-    })
     const run = parseDeliveryRun({
       ...initial,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      status: 'running',
-      foundationAuditState: createFoundationAuditState({
-        revision: artifacts.revision,
-        documentDigests: artifacts.documentDigests,
-        manifest: artifacts.manifest,
-      }),
+      status: 'needs_action',
+      blockedReason: 'foundation audit implementation unavailable',
       foundationDraftState: {
         completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       },

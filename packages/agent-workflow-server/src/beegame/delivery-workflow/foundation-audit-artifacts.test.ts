@@ -8,6 +8,24 @@ import {
   assertExactlyEightCommittedFoundationDocuments,
 } from './foundation-audit-artifacts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import { getGameDocumentContract } from './game-document-contracts'
+
+function validDocument(
+  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): string {
+  const contract = getGameDocumentContract(path)
+  return `${[
+    `# ${path}`,
+    '',
+    ...contract.sections.flatMap(section => [
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      '',
+      'body',
+      '',
+    ]),
+  ].join('\n')}\n`
+}
 
 describe('foundation audit artifacts', () => {
   test('requires all eight canonical documents to have committed checkpoints', () => {
@@ -28,8 +46,7 @@ describe('foundation audit artifacts', () => {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       const documents = new Map(
         CANONICAL_FOUNDATION_DOCUMENTS.map(
-          path =>
-            [path, `# ${path}\n\n## Section\n\n- max_players: 4\n`] as const,
+          path => [path, validDocument(path)] as const,
         ),
       )
       for (const [path, content] of documents)
@@ -62,6 +79,15 @@ describe('foundation audit artifacts', () => {
       expect(JSON.parse(await readFile(paths.manifest, 'utf8'))).toEqual(
         result.manifest,
       )
+      await writeFile(paths.manifest, '{}')
+      await expect(
+        deriveFoundationAuditArtifacts({
+          workspacePath,
+          revision: 'revision-1',
+          checkpoints,
+        }),
+      ).rejects.toThrow('malformed')
+      await writeFile(paths.manifest, `${JSON.stringify(result.manifest)}\n`)
       await writeFile(join(workspacePath, 'docs/GDD.md'), '# changed\n')
       await expect(
         deriveFoundationAuditArtifacts({
@@ -69,7 +95,60 @@ describe('foundation audit artifacts', () => {
           revision: 'revision-1',
           checkpoints,
         }),
-      ).rejects.toThrow('already bound to different document digests')
+      ).rejects.toThrow('document digest binding')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects traversal revisions before constructing artifact paths', () => {
+    for (const revision of ['', '.', '..', 'a/b', 'a\\b', '../escape'])
+      expect(() =>
+        foundationAuditArtifactPaths('/tmp/project', revision),
+      ).toThrow()
+  })
+
+  test('fails closed when a revision has a partial or corrupt artifact set', async () => {
+    const workspacePath = await mkdtemp(
+      join(tmpdir(), 'foundation-audit-immutable-'),
+    )
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+        await writeFile(join(workspacePath, path), validDocument(path))
+      const checkpoints = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+        path,
+        status: 'committed' as const,
+      }))
+      await deriveFoundationAuditArtifacts({
+        workspacePath,
+        revision: 'revision-immutable',
+        checkpoints,
+      })
+      await rm(
+        foundationAuditArtifactPaths(workspacePath, 'revision-immutable')
+          .factStore,
+      )
+      await expect(
+        deriveFoundationAuditArtifacts({
+          workspacePath,
+          revision: 'revision-immutable',
+          checkpoints,
+        }),
+      ).rejects.toThrow('partial')
+      const paths = foundationAuditArtifactPaths(
+        workspacePath,
+        'revision-immutable',
+      )
+      await rm(paths.sectionIndex)
+      await rm(paths.manifest)
+      await expect(
+        deriveFoundationAuditArtifacts({
+          workspacePath,
+          revision: 'revision-immutable',
+          checkpoints,
+        }),
+      ).rejects.toThrow('missing')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
