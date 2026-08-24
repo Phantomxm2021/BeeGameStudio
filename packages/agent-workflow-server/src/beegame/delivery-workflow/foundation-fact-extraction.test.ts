@@ -5,6 +5,7 @@ import type { SectionRef } from './foundation-section-index'
 import {
   buildFoundationFactPackets,
   extractNormalizedFoundationFacts,
+  extractSelectedFoundationFacts,
   validateFoundationFactResults,
 } from './foundation-fact-extraction'
 import { FOUNDATION_FACT_CATALOG, foundationFactDefinition } from './foundation-fact-definitions'
@@ -47,6 +48,43 @@ function sectionIndex(): SectionRef[] {
 }
 
 describe('mechanical normalized foundation extraction', () => {
+  test('extracts only selected keys and their owner sections', () => {
+    const index = sectionIndex()
+    const result = extractSelectedFoundationFacts({
+      keys: ['game.players.max', 'game.mechanics'],
+      documents: { 'docs/GDD.md': docs['docs/GDD.md'] },
+      sectionIndex: index,
+    })
+
+    expect(result.facts.map(fact => fact.key)).toEqual([
+      'game.mechanics',
+      'game.players.max',
+    ])
+    expect(result.receipts.map(receipt => receipt.key)).toEqual([
+      'game.mechanics',
+      'game.players.max',
+    ])
+    expect(result.unresolvedKeys).toEqual([])
+  })
+
+  test('rejects duplicate and unknown selected keys', () => {
+    const index = sectionIndex()
+    expect(() =>
+      extractSelectedFoundationFacts({
+        keys: ['game.players.max', 'game.players.max'],
+        documents: docs,
+        sectionIndex: index,
+      }),
+    ).toThrow(/duplicate/i)
+    expect(() =>
+      extractSelectedFoundationFacts({
+        keys: ['not-a-foundation-key' as never],
+        documents: docs,
+        sectionIndex: index,
+      }),
+    ).toThrow(/unknown/i)
+  })
+
   test('indexes the complete canonical document fixture without requiring author output changes', () => {
     const canonicalDocuments = Object.fromEntries(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [
       path,

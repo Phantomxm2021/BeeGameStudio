@@ -263,15 +263,16 @@ function sectionFor(
   return section
 }
 
-export function extractNormalizedFoundationFacts(input: {
+function extractFactsForDefinitions(input: {
   documents: DocumentInput
   sectionIndex: readonly SectionRef[]
+  definitions: readonly FoundationFactDefinition[]
 }): NormalizedFoundationExtraction {
   const documents = mapDocuments(input.documents)
   const facts: FoundationFact[] = []
   const receipts: FoundationFactReceipt[] = []
   const unresolvedKeys: FoundationFactKey[] = []
-  for (const definition of FOUNDATION_FACT_CATALOG) {
+  for (const definition of input.definitions) {
     const section = sectionFor(input.sectionIndex, definition)
     const markdown = documents.get(section.documentPath)
     if (markdown === undefined)
@@ -319,6 +320,45 @@ export function extractNormalizedFoundationFacts(input: {
     unresolvedKeys,
     normalizedFactDigest: digestFactStore(store),
   }
+}
+
+export function extractNormalizedFoundationFacts(input: {
+  documents: DocumentInput
+  sectionIndex: readonly SectionRef[]
+}): NormalizedFoundationExtraction {
+  return extractFactsForDefinitions({
+    ...input,
+    definitions: FOUNDATION_FACT_CATALOG,
+  })
+}
+
+/**
+ * Rebuilds only the service-selected catalog keys from their immutable owner
+ * sections. The selected key list is the complete read scope; unrelated
+ * document bodies are never looked up.
+ */
+export function extractSelectedFoundationFacts(input: {
+  keys: readonly FoundationFactKey[]
+  documents: DocumentInput
+  sectionIndex: readonly SectionRef[]
+}): NormalizedFoundationExtraction {
+  if (!Array.isArray(input.keys))
+    throw new Error('selected foundation fact keys must be an array')
+  if (new Set(input.keys).size !== input.keys.length)
+    throw new Error('duplicate selected foundation fact key')
+  const keys = input.keys.map(key => {
+    if (!isFoundationFactKey(key))
+      throw new Error(`unknown selected foundation fact key: ${String(key)}`)
+    return key
+  })
+  const definitions = keys
+    .map(key => foundationFactDefinition(key)!)
+    .sort((left, right) => left.key.localeCompare(right.key))
+  return extractFactsForDefinitions({
+    documents: input.documents,
+    sectionIndex: input.sectionIndex,
+    definitions,
+  })
 }
 
 function canonicalPacketIdentity(
