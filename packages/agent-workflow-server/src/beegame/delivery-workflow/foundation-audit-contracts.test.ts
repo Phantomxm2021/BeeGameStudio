@@ -117,13 +117,8 @@ describe('mandatory immutable foundation contracts', () => {
     const factStore = fixture.factStore.filter(
       factValue => factValue.key !== 'GDD.core_loop',
     )
-    const issues = runDeterministicFoundationAudit({ sectionIndex, factStore })
-    expect(
-      issues.some(
-        issue =>
-          issue.type === 'contract' &&
-          issue.actual.includes('GDD.md#core_loop'),
-      ),
-    ).toBe(true)
+    expect(() =>
+      runDeterministicFoundationAudit({ sectionIndex, factStore }),
+    ).toThrow('does not provide exact local source section')
   })
 })

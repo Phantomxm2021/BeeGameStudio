@@ -2,10 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import { runDeterministicFoundationAudit } from './foundation-audit-check-definitions'
 import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
-import {
-  compileIssueRegistry,
-  type AuditIssueDraft,
-} from './foundation-issue-registry'
 
 const ref = (documentPath: string, sectionId: string): SectionRef => ({
   documentPath: documentPath as SectionRef['documentPath'],
@@ -49,42 +45,6 @@ describe('foundation issue registry admission', () => {
     })[0]!
     expect(first.id).toBe(second.id)
     expect(first.id).toMatch(/^AUD-[A-F0-9]{24}$/)
-
-    const alternate = ref('docs/custom.md', 'alternate')
-    const context = {
-      validated: true as const,
-      section: (documentPath: string, sectionId: string) =>
-        [source, alternate].find(
-          section =>
-            section.documentPath === documentPath &&
-            section.sectionId === sectionId,
-        ),
-    }
-    const draft: AuditIssueDraft = {
-      checkId: 'rule.same-conflict',
-      severity: 'HIGH',
-      type: 'rule',
-      source,
-      expected: 'old display',
-      actual: 'old actual',
-      fixDocument: source.documentPath,
-      fixSectionId: source.sectionId,
-      conflictIdentity: { key: 'x', value: 1 },
-    }
-    const changed: AuditIssueDraft = {
-      ...draft,
-      severity: 'LOW',
-      expected: 'new display',
-      actual: 'new actual',
-      fixDocument: alternate.documentPath,
-      fixSectionId: alternate.sectionId,
-    }
-    expect(compileIssueRegistry(context, [draft])[0]?.id).toBe(
-      compileIssueRegistry(context, [changed])[0]?.id,
-    )
-    expect(() => compileIssueRegistry(context, [draft, draft])).toThrow(
-      'duplicate audit issue identity',
-    )
   })
 
   test('keeps distinct conflicts distinct and exact repeated runs deterministic', () => {
@@ -95,7 +55,10 @@ describe('foundation issue registry admission', () => {
       numericRules: [
         {
           id: 'a-vs-b',
-          factKeys: ['custom.a', 'custom.b'] as [string, string],
+          facts: [
+            { key: 'custom.a', source, expectedType: 'number' as const },
+            { key: 'custom.b', source, expectedType: 'number' as const },
+          ],
           relation: 'equal' as const,
         },
       ],
@@ -125,22 +88,17 @@ describe('foundation issue registry admission', () => {
         },
       }),
     ).toThrow('id')
-    const draft = {
-      checkId: 'schema.test',
-      severity: 'HIGH',
-      type: 'schema',
-      source,
-      expected: 'expected',
-      actual: 'actual',
-      fixDocument: source.documentPath,
-      fixSectionId: source.sectionId,
-      conflictIdentity: { key: 'x', value: 1 },
-      id: 'caller-id',
-    }
     expect(() =>
-      compileIssueRegistry({ validated: true, section: () => source }, [
-        draft as never,
-      ]),
-    ).toThrow('caller id')
+      runDeterministicFoundationAudit({
+        sectionIndex: [source],
+        factStore: [],
+        schema: {
+          requiredFacts: [
+            { key: 'custom.duplicate', source, expectedType: 'string' },
+            { key: 'custom.duplicate', source, expectedType: 'string' },
+          ],
+        },
+      }),
+    ).toThrow('duplicate audit issue identity')
   })
 })

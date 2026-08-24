@@ -114,8 +114,6 @@ describe('deterministic foundation audit compiler', () => {
     expect(Object.keys(await import('./foundation-audit-contracts'))).toEqual([
       'collectContractDrafts',
     ])
-    expect(Object.keys(await import('./foundation-issue-registry'))).toEqual([
-      'compileIssueRegistry',
-    ])
+    expect(Object.keys(await import('./foundation-issue-registry'))).toEqual([])
   })
 })

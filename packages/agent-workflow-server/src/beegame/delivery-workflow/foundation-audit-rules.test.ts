@@ -35,10 +35,18 @@ describe('deterministic foundation rules', () => {
       numericRules: [
         {
           id: 'players.max-consistency',
-          factKeys: [
-            'players.max.balance',
-            'players.max.technical',
-            'players.max.level',
+          facts: [
+            {
+              key: 'players.max.balance',
+              source: balance,
+              expectedType: 'number',
+            },
+            {
+              key: 'players.max.technical',
+              source: technical,
+              expectedType: 'number',
+            },
+            { key: 'players.max.level', source: level, expectedType: 'number' },
           ],
           relation: 'equal',
         },
@@ -55,6 +63,83 @@ describe('deterministic foundation rules', () => {
     ).toBe(true)
   })
 
+  test('reports a missing later numeric fact as a schema issue at its declaration', () => {
+    const first = ref('docs/custom-first.md', 'values')
+    const later = ref('docs/custom-later.md', 'values')
+    const issues = runDeterministicFoundationAudit({
+      sectionIndex: [first, later],
+      factStore: [fact('values.first', 1, first)],
+      numericRules: [
+        {
+          id: 'values-equal',
+          facts: [
+            { key: 'values.first', source: first, expectedType: 'number' },
+            { key: 'values.later', source: later, expectedType: 'number' },
+          ],
+          relation: 'equal',
+        },
+      ],
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toMatchObject({
+      type: 'schema',
+      source: later,
+      fixDocument: later.documentPath,
+      fixSectionId: later.sectionId,
+    })
+  })
+
+  test('reports a nonnumeric later numeric fact as a schema issue at its declaration', () => {
+    const first = ref('docs/custom-first.md', 'values')
+    const later = ref('docs/custom-later.md', 'values')
+    const issues = runDeterministicFoundationAudit({
+      sectionIndex: [first, later],
+      factStore: [
+        fact('values.first', 1, first),
+        fact('values.later', 'one', later),
+      ],
+      numericRules: [
+        {
+          id: 'values-equal',
+          facts: [
+            { key: 'values.first', source: first, expectedType: 'number' },
+            { key: 'values.later', source: later, expectedType: 'number' },
+          ],
+          relation: 'equal',
+        },
+      ],
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toMatchObject({
+      type: 'schema',
+      source: later,
+      fixDocument: later.documentPath,
+      fixSectionId: later.sectionId,
+    })
+  })
+
+  test('reports a missing entity source fact as a schema issue at its declaration', () => {
+    const source = ref('docs/custom-level.md', 'encounters')
+    const issues = runDeterministicFoundationAudit({
+      sectionIndex: [source],
+      factStore: [],
+      entityRules: [
+        {
+          id: 'level.boss-exists',
+          source: { key: 'level.boss', source, expectedType: 'string' },
+          targetFactPrefix: 'asset.boss.',
+        },
+      ],
+    })
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toMatchObject({
+      type: 'schema',
+      source,
+      fixDocument: source.documentPath,
+      fixSectionId: source.sectionId,
+    })
+  })
+
   test('reports missing referenced entities at the source fact section', () => {
     const level = ref('docs/custom-level.md', 'encounters')
     const assets = ref('docs/custom-assets.md', 'inventory')
@@ -64,7 +149,7 @@ describe('deterministic foundation rules', () => {
       entityRules: [
         {
           id: 'level.boss-exists',
-          sourceFactKey: 'level.boss',
+          source: { key: 'level.boss', source: level, expectedType: 'string' },
           targetFactPrefix: 'asset.boss.',
         },
       ],

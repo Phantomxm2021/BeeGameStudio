@@ -1,7 +1,11 @@
+import { createHash } from 'node:crypto'
 import { getGameDocumentContract } from './game-document-contracts'
 import type { FoundationFact, FactValue } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from './types'
 import {
   collectContractDrafts,
   type ContractBinding,
@@ -11,12 +15,13 @@ import {
   type EntityReferenceRule,
   type FoundationAuditContext,
   type NumericConsistencyRule,
+  type RuleFactDefinition,
 } from './foundation-audit-rules'
 import {
-  compileIssueRegistry,
   type AuditIssue,
   type AuditIssueDraft,
   type AuditSeverity,
+  type AuditIssueType,
 } from './foundation-issue-registry'
 
 export type FoundationFactType =
@@ -58,8 +63,8 @@ const SECTION_KEYS = [
 const FACT_KEYS = ['key', 'source', 'value']
 const SCHEMA_KEYS = ['factTypes', 'requiredFacts']
 const REQUIRED_KEYS = ['expectedType', 'key', 'severity', 'source']
-const NUMERIC_KEYS = ['factKeys', 'id', 'relation', 'severity']
-const ENTITY_KEYS = ['id', 'severity', 'sourceFactKey', 'targetFactPrefix']
+const NUMERIC_KEYS = ['facts', 'id', 'relation', 'severity']
+const ENTITY_KEYS = ['id', 'severity', 'source', 'targetFactPrefix']
 const BINDING_KEYS = [
   'id',
   'relation',
@@ -244,6 +249,7 @@ function validateSchema(
       exactKeys(definition, REQUIRED_KEYS, `schema fact[${index}]`, [
         'severity',
       ])
+      validateSection(definition.source, `schema fact[${index}].source`)
       if (
         typeof definition.key !== 'string' ||
         !definition.key.trim() ||
@@ -277,7 +283,34 @@ function validateSchema(
   }
 }
 
-function validateRules(input: DeterministicFoundationAuditInput): void {
+function validateRuleFact(
+  context: FoundationAuditContext,
+  definition: unknown,
+  label: string,
+): asserts definition is RuleFactDefinition {
+  exactKeys(definition, ['expectedType', 'key', 'source'], label)
+  const candidate = definition as RuleFactDefinition
+  if (
+    typeof candidate.key !== 'string' ||
+    !candidate.key.trim() ||
+    !['string', 'number', 'boolean', 'string[]', 'number[]'].includes(
+      candidate.expectedType,
+    )
+  )
+    throw new Error(`${label} is invalid`)
+  validateSection(candidate.source, `${label}.source`)
+  const indexed = context.section(
+    candidate.source.documentPath,
+    candidate.source.sectionId,
+  )
+  if (!indexed || !sameSection(indexed, candidate.source))
+    throw new Error(`${label} source must be the exact indexed SectionRef`)
+}
+
+function validateRules(
+  context: FoundationAuditContext,
+  input: DeterministicFoundationAuditInput,
+): void {
   for (const [name, value] of [
     ['numericRules', input.numericRules],
     ['entityRules', input.entityRules],
@@ -290,9 +323,8 @@ function validateRules(input: DeterministicFoundationAuditInput): void {
     if (
       typeof rule.id !== 'string' ||
       !rule.id.trim() ||
-      !Array.isArray(rule.factKeys) ||
-      rule.factKeys.length < 2 ||
-      rule.factKeys.some(key => typeof key !== 'string' || !key.trim()) ||
+      !Array.isArray(rule.facts) ||
+      rule.facts.length < 2 ||
       ![
         'equal',
         'less-than-or-equal',
@@ -302,18 +334,36 @@ function validateRules(input: DeterministicFoundationAuditInput): void {
       ].includes(rule.relation)
     )
       throw new Error('numeric rule is invalid')
+    rule.facts.forEach((definition, factIndex) => {
+      validateRuleFact(
+        context,
+        definition,
+        `numeric rule[${index}].facts[${factIndex}]`,
+      )
+      if (definition.expectedType !== 'number')
+        throw new Error('numeric rule facts must declare expectedType number')
+    })
+    if (
+      rule.severity !== undefined &&
+      !['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(rule.severity)
+    )
+      throw new Error('numeric rule severity is invalid')
   }
   for (const [index, rule] of (input.entityRules ?? []).entries()) {
     exactKeys(rule, ENTITY_KEYS, `entity rule[${index}]`, ['severity'])
     if (
       typeof rule.id !== 'string' ||
       !rule.id.trim() ||
-      typeof rule.sourceFactKey !== 'string' ||
-      !rule.sourceFactKey.trim() ||
       typeof rule.targetFactPrefix !== 'string' ||
       !rule.targetFactPrefix
     )
       throw new Error('entity rule is invalid')
+    validateRuleFact(context, rule.source, `entity rule[${index}].source`)
+    if (
+      rule.severity !== undefined &&
+      !['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(rule.severity)
+    )
+      throw new Error('entity rule severity is invalid')
   }
   for (const [index, binding] of (input.contractBindings ?? []).entries()) {
     exactKeys(binding, BINDING_KEYS, `contract binding[${index}]`, ['severity'])
@@ -329,6 +379,11 @@ function validateRules(input: DeterministicFoundationAuditInput): void {
       !['exists', 'equal', 'numeric-equal'].includes(binding.relation)
     )
       throw new Error('contract binding is invalid')
+    if (
+      binding.severity !== undefined &&
+      !['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(binding.severity)
+    )
+      throw new Error('contract binding severity is invalid')
   }
 }
 
@@ -342,8 +397,30 @@ function typeOf(value: FactValue): FoundationFactType {
 function schemaDrafts(
   context: FoundationAuditContext,
   schema: FoundationSchemaInput | undefined,
+  numericRules: readonly NumericConsistencyRule[],
+  entityRules: readonly EntityReferenceRule[],
 ): AuditIssueDraft[] {
   const required = [...(schema?.requiredFacts ?? [])]
+  const declaredRuleFacts = [
+    ...numericRules.flatMap(rule => rule.facts),
+    ...entityRules.map(rule => rule.source),
+  ]
+  for (const definition of declaredRuleFacts) {
+    const existing = required.find(
+      candidate => candidate.key === definition.key,
+    )
+    if (existing) {
+      if (
+        existing.expectedType !== definition.expectedType ||
+        !sameSection(existing.source, definition.source)
+      )
+        throw new Error(
+          `conflicting schema declaration for fact ${definition.key}`,
+        )
+      continue
+    }
+    required.push(definition)
+  }
   for (const section of context.sectionIndex) {
     const contract = getGameDocumentContract(section.documentPath as never)
     if (
@@ -393,15 +470,19 @@ function schemaDrafts(
     if (!fact) continue
     const actualType = typeOf(fact.value)
     if (actualType === definition.expectedType) continue
+    const declaredSource = context.section(
+      definition.source.documentPath,
+      definition.source.sectionId,
+    )!
     drafts.push({
       checkId: `schema.fact-types.${definition.key}`,
       severity: definition.severity ?? 'BLOCKER',
       type: 'schema',
-      source: fact.source,
+      source: declaredSource,
       expected: `fact ${definition.key} must have type ${definition.expectedType}`,
       actual: `fact ${definition.key} has type ${actualType}`,
-      fixDocument: fact.source.documentPath,
-      fixSectionId: fact.source.sectionId,
+      fixDocument: declaredSource.documentPath,
+      fixSectionId: declaredSource.sectionId,
       conflictIdentity: {
         key: definition.key,
         expectedType: definition.expectedType,
@@ -413,14 +494,183 @@ function schemaDrafts(
   return drafts
 }
 
+const DRAFT_KEYS = [
+  'actual',
+  'checkId',
+  'conflictIdentity',
+  'expected',
+  'fixDocument',
+  'fixSectionId',
+  'severity',
+  'source',
+  'target',
+  'type',
+]
+
+function normalize(value: unknown): unknown {
+  if (typeof value === 'string') return value.trim().replace(/\s+/g, ' ')
+  if (Array.isArray(value)) return value.map(normalize)
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, normalize(item)]),
+    )
+  return value
+}
+
+function normalizedJson(value: unknown): string {
+  return JSON.stringify(normalize(value))
+}
+
+function issueDigest(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function identitySection(section: SectionRef | undefined): unknown {
+  return section
+    ? { documentPath: section.documentPath, sectionId: section.sectionId }
+    : null
+}
+
+function exactIssueSection(
+  context: FoundationAuditContext,
+  section: unknown,
+  label: string,
+): SectionRef {
+  if (!section || typeof section !== 'object' || Array.isArray(section))
+    throw new Error(`audit issue ${label} is invalid`)
+  const candidate = section as SectionRef
+  const resolved = context.section(candidate.documentPath, candidate.sectionId)
+  if (
+    !resolved ||
+    resolved.heading !== candidate.heading ||
+    resolved.startLine !== candidate.startLine ||
+    resolved.endLine !== candidate.endLine ||
+    resolved.digest !== candidate.digest
+  )
+    throw new Error(`audit issue ${label} is not the validated SectionRef`)
+  return resolved
+}
+
+function validateIssueDraft(
+  draft: unknown,
+  context: FoundationAuditContext,
+): AuditIssueDraft {
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft))
+    throw new Error('audit issue draft must be an object')
+  const candidate = draft as Record<string, unknown>
+  const actualKeys = Object.keys(candidate).sort()
+  const expectedKeys = DRAFT_KEYS.filter(
+    key => key !== 'target' || candidate.target !== undefined,
+  ).sort()
+  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys))
+    throw new Error(
+      'audit issue draft must not contain caller id or unknown fields',
+    )
+  if (typeof candidate.checkId !== 'string' || !candidate.checkId.trim())
+    throw new Error('audit issue check identity is required')
+  if (
+    !['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(String(candidate.severity))
+  )
+    throw new Error('audit issue severity is invalid')
+  if (
+    !['schema', 'rule', 'contract', 'semantic'].includes(String(candidate.type))
+  )
+    throw new Error('audit issue type is invalid')
+  if (typeof candidate.expected !== 'string' || !candidate.expected.trim())
+    throw new Error('audit issue expected text is required')
+  if (typeof candidate.actual !== 'string' || !candidate.actual.trim())
+    throw new Error('audit issue actual text is required')
+  if (
+    !candidate.conflictIdentity ||
+    typeof candidate.conflictIdentity !== 'object' ||
+    Array.isArray(candidate.conflictIdentity) ||
+    Object.keys(candidate.conflictIdentity).length === 0 ||
+    Object.keys(candidate.conflictIdentity).some(key => !key.trim())
+  )
+    throw new Error('audit issue conflict identity is required')
+  const source = exactIssueSection(context, candidate.source, 'source')
+  const target =
+    candidate.target === undefined
+      ? undefined
+      : exactIssueSection(context, candidate.target, 'target')
+  if (
+    typeof candidate.fixDocument !== 'string' ||
+    typeof candidate.fixSectionId !== 'string'
+  )
+    throw new Error('audit issue fix identity is invalid')
+  const fix = context.section(candidate.fixDocument, candidate.fixSectionId)
+  if (!fix) throw new Error('audit issue fix is not the validated SectionRef')
+  return {
+    checkId: candidate.checkId,
+    severity: candidate.severity as AuditSeverity,
+    type: candidate.type as AuditIssueType,
+    source,
+    ...(target ? { target } : {}),
+    expected: candidate.expected,
+    actual: candidate.actual,
+    fixDocument: fix.documentPath as FoundationDocumentPath,
+    fixSectionId: fix.sectionId,
+    conflictIdentity: candidate.conflictIdentity as Readonly<
+      Record<string, unknown>
+    >,
+  }
+}
+
+function compileIssueRegistry(
+  context: FoundationAuditContext,
+  drafts: readonly AuditIssueDraft[],
+): AuditIssue[] {
+  if (context.validated !== true)
+    throw new Error('issue registry requires a validated audit context')
+  if (!Array.isArray(drafts))
+    throw new Error('issue registry drafts must be an array')
+  const identities = new Set<string>()
+  const ids = new Set<string>()
+  const issues: AuditIssue[] = []
+  for (const rawDraft of drafts) {
+    const draft = validateIssueDraft(rawDraft, context)
+    const identity = normalizedJson({
+      checkId: draft.checkId,
+      source: identitySection(draft.source),
+      target: identitySection(draft.target),
+      conflict: draft.conflictIdentity,
+    })
+    if (identities.has(identity))
+      throw new Error('duplicate audit issue identity')
+    identities.add(identity)
+    const id = `AUD-${issueDigest(identity).slice(0, 24).toUpperCase()}`
+    if (ids.has(id)) throw new Error('duplicate audit issue id')
+    ids.add(id)
+    issues.push({
+      id,
+      severity: draft.severity,
+      type: draft.type,
+      source: { ...draft.source },
+      ...(draft.target ? { target: { ...draft.target } } : {}),
+      expected: draft.expected,
+      actual: draft.actual,
+      fixDocument: draft.fixDocument,
+      fixSectionId: draft.fixSectionId,
+    })
+  }
+  return issues.sort((left, right) => left.id.localeCompare(right.id))
+}
+
 export function runDeterministicFoundationAudit(
   input: DeterministicFoundationAuditInput,
 ): AuditIssue[] {
   const context = contextFrom(input)
   validateSchema(context, input.schema)
-  validateRules(input)
+  validateRules(context, input)
   const drafts = [
-    ...schemaDrafts(context, input.schema),
+    ...schemaDrafts(
+      context,
+      input.schema,
+      input.numericRules ?? [],
+      input.entityRules ?? [],
+    ),
     ...collectRuleDrafts(context, input),
     ...collectContractDrafts(context, input.contractBindings ?? []),
   ]

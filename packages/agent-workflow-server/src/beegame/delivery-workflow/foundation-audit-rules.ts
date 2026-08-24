@@ -22,14 +22,20 @@ export type NumericRuleRelation =
 
 export type NumericConsistencyRule = {
   id: string
-  factKeys: readonly [string, string, ...string[]]
+  facts: readonly RuleFactDefinition[]
   relation: NumericRuleRelation
   severity?: AuditSeverity
 }
 
+export type RuleFactDefinition = {
+  key: string
+  source: SectionRef
+  expectedType: 'string' | 'number' | 'boolean' | 'string[]' | 'number[]'
+}
+
 export type EntityReferenceRule = {
   id: string
-  sourceFactKey: string
+  source: RuleFactDefinition
   targetFactPrefix: string
   severity?: AuditSeverity
 }
@@ -77,7 +83,7 @@ function numericDrafts(
 ): AuditIssueDraft[] {
   const drafts: AuditIssueDraft[] = []
   for (const rule of rules) {
-    const entries = rule.factKeys.map(key => context.fact(key))
+    const entries = rule.facts.map(definition => context.fact(definition.key))
     const first = entries[0]
     if (!first) continue
     if (!numeric(first.value)) {
@@ -87,14 +93,14 @@ function numericDrafts(
         type: 'rule',
         source: first.source,
         expected: `all facts must be numeric and satisfy ${symbol(rule.relation)}`,
-        actual: `non-numeric fact ${rule.factKeys[0]}`,
+        actual: `non-numeric fact ${rule.facts[0].key}`,
         fixDocument: first.source.documentPath,
         fixSectionId: first.source.sectionId,
         conflictIdentity: {
           relation: rule.relation,
           facts: Object.fromEntries(
-            rule.factKeys.map((key, index) => [
-              key,
+            rule.facts.map((definition, index) => [
+              definition.key,
               entries[index]?.value ?? null,
             ]),
           ),
@@ -116,15 +122,15 @@ function numericDrafts(
         type: 'rule',
         source: first.source,
         target: entry.source,
-        expected: `${rule.factKeys[0]} ${symbol(rule.relation)} ${rule.factKeys[index]}`,
+        expected: `${rule.facts[0].key} ${symbol(rule.relation)} ${rule.facts[index].key}`,
         actual: `${display(first.value)} ${symbol(rule.relation)} ${display(entry.value)}`,
         fixDocument: entry.source.documentPath,
         fixSectionId: entry.source.sectionId,
         conflictIdentity: {
           relation: rule.relation,
           facts: Object.fromEntries(
-            rule.factKeys.map((key, candidate) => [
-              key,
+            rule.facts.map((definition, candidate) => [
+              definition.key,
               entries[candidate]?.value ?? null,
             ]),
           ),
@@ -141,7 +147,7 @@ function entityDrafts(
 ): AuditIssueDraft[] {
   const drafts: AuditIssueDraft[] = []
   for (const rule of rules) {
-    const source = context.fact(rule.sourceFactKey)
+    const source = context.fact(rule.source.key)
     if (!source) continue
     const values = Array.isArray(source.value) ? source.value : [source.value]
     const missing = values.filter(
@@ -158,7 +164,7 @@ function entityDrafts(
       fixDocument: source.source.documentPath,
       fixSectionId: source.source.sectionId,
       conflictIdentity: {
-        sourceFactKey: rule.sourceFactKey,
+        sourceFactKey: rule.source.key,
         sourceValue: source.value,
         targetFactPrefix: rule.targetFactPrefix,
         missing,

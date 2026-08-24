@@ -141,29 +141,12 @@ function documentGraphDrafts(
   for (const path of paths) {
     const contract = getGameDocumentContract(path as never)
     if (!contract) continue
-    const anchorContract = contract.sections[0]
-    const anchor = anchorContract
-      ? context.section(path, anchorContract.sectionId)
-      : undefined
-    if (!anchor) throw new Error(`contract source section is missing: ${path}`)
     for (const projection of contract.upstreamSections) {
       for (const sectionId of projection.sectionIds) {
         if (context.section(projection.path, sectionId)) continue
-        drafts.push({
-          checkId: `contract.upstream-sections.${path}.${projection.path}.${sectionId}`,
-          severity: 'HIGH',
-          type: 'contract',
-          source: anchor,
-          expected: `${path} must reference ${projection.path}#${sectionId}`,
-          actual: `referenced section is absent: ${projection.path}#${sectionId}`,
-          fixDocument: anchor.documentPath,
-          fixSectionId: anchor.sectionId,
-          conflictIdentity: {
-            sourceDocumentPath: path,
-            targetDocumentPath: projection.path,
-            targetSectionId: sectionId,
-          },
-        })
+        throw new Error(
+          `immutable contract graph does not provide exact local source section for ${path} -> ${projection.path}#${sectionId}`,
+        )
       }
     }
   }
