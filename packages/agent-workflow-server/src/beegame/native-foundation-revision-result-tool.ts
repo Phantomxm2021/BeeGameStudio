@@ -1,23 +1,24 @@
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { relative, resolve, sep } from 'node:path'
 import { z } from 'zod/v4'
 import {
   foundationRevisionStagePath,
   revisionTaskReceiptTerminalDigest,
   type RevisionTaskReceipt,
 } from './delivery-workflow/foundation-revision-stage'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from './delivery-workflow/types'
 
-const digest = z.string().regex(/^[a-f0-9]{64}$/)
-const receiptSchema = z
+const declarationSchema = z
   .object({
     taskId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/),
     round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
     issueIds: z.array(z.string().min(1)).min(1),
-    baseDocumentDigest: digest,
-    stagedDocumentDigest: digest,
     changedSectionIds: z.array(z.string().min(1)).min(1),
-    stagedPath: z.string().min(1),
-    terminalDigest: digest,
   })
   .strict()
   .superRefine((value, context) => {
@@ -38,100 +39,123 @@ const receiptSchema = z
   })
 
 type BuildTool = (definition: Record<string, unknown>) => unknown
-type Receipt = z.infer<typeof receiptSchema>
+type Declaration = z.infer<typeof declarationSchema>
+
+function sha256(value: Uint8Array): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function resolveProjectPath(workspacePath: string, projectPath: string): string {
+  const root = resolve(workspacePath)
+  const candidate = resolve(root, projectPath)
+  const escaped = relative(root, candidate)
+  if (
+    !escaped ||
+    escaped === '..' ||
+    escaped.startsWith(`..${sep}`) ||
+    escaped.startsWith('/') ||
+    escaped.startsWith('\\')
+  )
+    throw new Error('foundation revision path escaped the project workspace')
+  return candidate
+}
+
+function sameArray(left: readonly string[], right: readonly string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  )
+}
 
 export function createNativeFoundationRevisionResultTool(options: {
   buildTool: BuildTool
-  workspacePath?: string
-  expectedTaskId?: string
-  expectedRevision?: string
-  expectedDocumentPath?: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
-  expectedIssueIds?: readonly string[]
-  expectedSectionIds?: readonly string[]
+  workspacePath: string
+  expectedTaskId: string
+  expectedRevision: string
+  expectedRound: 1 | 2 | 3
+  expectedDocumentPath: FoundationDocumentPath
+  expectedIssueIds: readonly string[]
+  expectedSectionIds: readonly string[]
   onReceipt?: (receipt: RevisionTaskReceipt) => Promise<void> | void
 }): unknown {
   return options.buildTool({
     name: 'SubmitFoundationRevisionResult',
     alwaysLoad: true,
-    inputSchema: receiptSchema,
+    inputSchema: declarationSchema,
     isConcurrencySafe: () => false,
     isReadOnly: () => true,
     async description() {
-      return 'Submit the bounded receipt for an isolated foundation document revision.'
+      return 'Submit the bounded declaration for an isolated foundation document revision; the service derives the receipt from project-local bytes.'
     },
     async prompt() {
-      return 'Edit only the assigned staged Markdown file, then call SubmitFoundationRevisionResult exactly once with the strict bounded receipt. Submit no Markdown body, content field, JSON patch, or explanation. The service derives operations from canonical and staged bytes.'
+      return 'After completing the assigned document revision, call SubmitFoundationRevisionResult exactly once with only taskId, round, documentPath, exact issueIds, and exact changedSectionIds. The service derives all evidence from project-local files; no additional fields are accepted.'
     },
-    async checkPermissions(input: Receipt) {
+    async checkPermissions(input: Declaration) {
       return { behavior: 'allow', updatedInput: input }
     },
-    async call(input: Receipt) {
-      const parsed = receiptSchema.parse(input)
-      if (
-        !/^\.beegame\/audit\/foundation\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\/revision\/docs\/[A-Z_]+\.md$/.test(
-          parsed.stagedPath,
-        )
-      )
-        throw new Error(
-          'foundation revision receipt staged path is not project-local',
-        )
-      if (
-        options.expectedTaskId !== undefined &&
-        parsed.taskId !== options.expectedTaskId
-      )
+    async call(input: Declaration) {
+      const parsed = declarationSchema.parse(input)
+      if (parsed.taskId !== options.expectedTaskId)
         throw new Error('foundation revision receipt taskId mismatch')
-      if (
-        options.expectedRevision !== undefined &&
-        parsed.stagedPath !==
-          foundationRevisionStagePath(
-            options.expectedRevision,
-            parsed.documentPath,
-          )
-      )
-        throw new Error('foundation revision receipt staged path mismatch')
-      if (
-        options.expectedDocumentPath !== undefined &&
-        parsed.documentPath !== options.expectedDocumentPath
-      )
+      if (parsed.round !== options.expectedRound)
+        throw new Error('foundation revision receipt round mismatch')
+      if (parsed.documentPath !== options.expectedDocumentPath)
         throw new Error('foundation revision receipt document path mismatch')
-      if (
-        options.expectedIssueIds &&
-        !sameArray(parsed.issueIds, options.expectedIssueIds)
-      )
+      if (!sameArray(parsed.issueIds, options.expectedIssueIds))
         throw new Error('foundation revision receipt issueIds mismatch')
-      if (
-        options.expectedSectionIds &&
-        !sameArray(parsed.changedSectionIds, options.expectedSectionIds)
-      )
+      if (!sameArray(parsed.changedSectionIds, options.expectedSectionIds))
         throw new Error(
           'foundation revision receipt changedSectionIds mismatch',
         )
-      const { terminalDigest: _terminalDigest, ...withoutTerminal } = parsed
-      if (
-        revisionTaskReceiptTerminalDigest(
-          withoutTerminal as Omit<RevisionTaskReceipt, 'terminalDigest'>,
-        ) !== parsed.terminalDigest
+
+      const stagedPath = foundationRevisionStagePath(
+        options.expectedRevision,
+        parsed.documentPath,
       )
-        throw new Error('foundation revision receipt terminal digest mismatch')
-      if (options.workspacePath) {
-        if (
-          parsed.stagedPath.startsWith('/') ||
-          parsed.stagedPath.includes('..') ||
-          !parsed.stagedPath.startsWith('.beegame/audit/foundation/')
+      const canonicalAbsolute = resolveProjectPath(
+        options.workspacePath,
+        parsed.documentPath,
+      )
+      const stagedAbsolute = resolveProjectPath(
+        options.workspacePath,
+        stagedPath,
+      )
+      let bytes: [Uint8Array, Uint8Array]
+      try {
+        bytes = await Promise.all([
+          readFile(canonicalAbsolute),
+          readFile(stagedAbsolute),
+        ])
+      } catch {
+        throw new Error(
+          'foundation revision canonical or staged document could not be read',
         )
-          throw new Error(
-            'foundation revision receipt staged path escaped project staging',
-          )
-        // The native tool never writes the path; the service-owned staging writer
-        // is the only code allowed to resolve it against the project workspace.
       }
-      await options.onReceipt?.(parsed as RevisionTaskReceipt)
+      const [baseBytes, stagedBytes] = bytes
+      if (stagedBytes.length === 0)
+        throw new Error('foundation revision staged document is empty')
+
+      const receiptWithoutTerminal = {
+        taskId: parsed.taskId,
+        round: parsed.round,
+        documentPath: parsed.documentPath,
+        issueIds: [...parsed.issueIds],
+        baseDocumentDigest: sha256(baseBytes),
+        stagedDocumentDigest: sha256(stagedBytes),
+        changedSectionIds: [...parsed.changedSectionIds],
+        stagedPath,
+      } satisfies Omit<RevisionTaskReceipt, 'terminalDigest'>
+      const receipt: RevisionTaskReceipt = {
+        ...receiptWithoutTerminal,
+        terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal),
+      }
+
+      await options.onReceipt?.(receipt)
       return {
         data: {
           accepted: true,
-          taskId: parsed.taskId,
-          changedSectionCount: parsed.changedSectionIds.length,
-          issueCount: parsed.issueIds.length,
+          changedSectionCount: receipt.changedSectionIds.length,
+          issueCount: receipt.issueIds.length,
         },
       }
     },
@@ -148,11 +172,4 @@ export function createNativeFoundationRevisionResultTool(options: {
   })
 }
 
-function sameArray(left: readonly string[], right: readonly string[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  )
-}
-
-export { receiptSchema as foundationRevisionReceiptSchema }
+export { declarationSchema as foundationRevisionDeclarationSchema }
