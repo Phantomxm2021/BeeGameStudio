@@ -192,6 +192,11 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Extract only the declared fact keys from the exact packet sections. The packet is the sole input; do not read project files, call Read, Grep or Glob, write files, mutate the platform, or emit issues.',
         'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed and cite exact evidence lines from the packet. Do not return section prose or values not declared by the packet.',
       ].join(' ')
+    case 'foundation-semantic-reviewer':
+      return [
+        'Review only the exact semantic packet sections, normalized facts, and deterministic references. Do not read project files, call Read, Grep or Glob, write files, mutate the platform, or expand context.',
+        'Return only PASS, ISSUES, or UNDECIDABLE in the supplied StructuredOutput schema. Issue drafts must use only assigned section keys and contain no IDs. Do not return Markdown, prose explanations, or additional fields.',
+      ].join(' ')
     case 'document-author':
       return [
         request.contract.documentSet === 'checklist'
@@ -299,6 +304,8 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'foundation-fact-extractor':
       return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with taskId, revision, packetDigest, and the complete bounded result set. Do not call project tools, return terminal JSON as prose, or add completion text.'
+    case 'foundation-semantic-reviewer':
+      return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use only PASS, ISSUES, or UNDECIDABLE; do not return Markdown or explanatory text.'
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||

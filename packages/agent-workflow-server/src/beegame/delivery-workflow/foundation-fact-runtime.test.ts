@@ -5,7 +5,7 @@ import {
   createFoundationFactTaskCollection,
   type FoundationFactTaskCollection,
 } from './foundation-fact-runtime'
-import { selectFoundationFactFastRuntime } from '../session-manager'
+import { selectFoundationFactFastRuntime, selectFoundationSemanticRuntime } from '../session-manager'
 
 const packet = (taskId: string, packetDigest: string) => ({
   taskId,
@@ -121,5 +121,13 @@ describe('foundation fact runtime', () => {
   test('fast tier routes to the configured provider model and fails closed when absent', () => {
     expect(selectFoundationFactFastRuntime({ modelType: 'anthropic', env: {} }, { ANTHROPIC_DEFAULT_HAIKU_MODEL: 'fast-model', ANTHROPIC_DEFAULT_SONNET_MODEL: 'balanced-model' })).toMatchObject({ ANTHROPIC_DEFAULT_HAIKU_MODEL: 'fast-model', ANTHROPIC_DEFAULT_SONNET_MODEL: 'fast-model' })
     expect(() => selectFoundationFactFastRuntime(undefined, {})).toThrow(/fast model is not configured/)
+  })
+
+  test('semantic fast, balanced and strong tiers route to explicit provider models and fail closed', () => {
+    const env = { ANTHROPIC_DEFAULT_HAIKU_MODEL: 'fast-model', ANTHROPIC_DEFAULT_SONNET_MODEL: 'balanced-model', ANTHROPIC_DEFAULT_OPUS_MODEL: 'strong-model' }
+    expect(selectFoundationSemanticRuntime({ modelType: 'anthropic', env: {} }, env, 'fast').ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('fast-model')
+    expect(selectFoundationSemanticRuntime({ modelType: 'anthropic', env: {} }, env, 'balanced').ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('balanced-model')
+    expect(selectFoundationSemanticRuntime({ modelType: 'anthropic', env: {} }, env, 'strong').ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('strong-model')
+    expect(() => selectFoundationSemanticRuntime({ modelType: 'anthropic', env: {} }, {}, 'balanced')).toThrow(/balanced.*configured/i)
   })
 })

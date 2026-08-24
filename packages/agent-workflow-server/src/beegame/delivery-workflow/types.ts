@@ -115,6 +115,7 @@ export type AtomicTaskStatus =
 export type DispatchWorkerType =
   | 'document-author'
   | 'foundation-fact-extractor'
+  | 'foundation-semantic-reviewer'
   | 'resource-planner'
   | 'resource-curator'
   | 'resource-content-author'
@@ -140,7 +141,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 34 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 35 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -364,6 +365,8 @@ export type WorkerDispatchRequest = {
 export type DeliveryWorkerPort = {
   /** Front-door validation for the fact worker's persisted fast model route. */
   assertFoundationFactFastReady?(request: WorkerDispatchRequest): Promise<void>
+  /** Front-door validation for persisted semantic model tier routing. */
+  assertFoundationSemanticModelReady?(request: WorkerDispatchRequest): Promise<void>
   start(
     request: WorkerDispatchRequest,
   ): Promise<{ sessionId: string; dispatchId: string }>

@@ -59,6 +59,7 @@ export const DISPATCH_STATUSES = [
 export const WORKER_TYPES = [
   'document-author',
   'foundation-fact-extractor',
+  'foundation-semantic-reviewer',
   'resource-planner',
   'resource-curator',
   'resource-content-author',

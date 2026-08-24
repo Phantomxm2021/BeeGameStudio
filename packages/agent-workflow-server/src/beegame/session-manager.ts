@@ -257,6 +257,7 @@ export type BeeGameSessionRunnerStartInput = {
   /** Workflow identity is propagated into the native permission boundary. */
   workflowWorker?: boolean
   workflowWorkerType?: string
+  workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowDispatchId?: string
   workflowAllowedPaths?: string[]
   workflowProjectReadScope?: 'empty'
@@ -390,6 +391,7 @@ type SessionRecord = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
+  workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowProjectReadScope?: 'empty'
@@ -575,6 +577,22 @@ export function selectFoundationFactFastRuntime(
   return { ...environment, [`${providerPrefix}_DEFAULT_SONNET_MODEL`]: fastModel }
 }
 
+export function selectFoundationSemanticRuntime(
+  runtime: RuntimeModelConfig | undefined,
+  environment: Record<string, string>,
+  tier: 'fast' | 'balanced' | 'strong',
+): Record<string, string> {
+  const suffix = tier === 'fast' ? 'HAIKU' : tier === 'balanced' ? 'SONNET' : 'OPUS'
+  const provider = runtime?.modelType
+  const key = provider === 'openai' ? `OPENAI_DEFAULT_${suffix}_MODEL`
+    : provider === 'gemini' ? `GEMINI_DEFAULT_${suffix}_MODEL`
+      : provider === 'grok' ? `GROK_DEFAULT_${suffix}_MODEL`
+        : provider === 'anthropic' ? `ANTHROPIC_DEFAULT_${suffix}_MODEL` : undefined
+  if (!key || !environment[key]) throw new Error(`foundation semantic ${tier} model is not configured`)
+  const prefix = key.replace(`_DEFAULT_${suffix}_MODEL`, '')
+  return { ...environment, [`${prefix}_DEFAULT_SONNET_MODEL`]: environment[key] }
+}
+
 export type StartBeeGameSessionInput = {
   workspacePath: string
   projectId?: string
@@ -591,6 +609,7 @@ export type StartBeeGameSessionInput = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
+  workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowProjectReadScope?: 'empty'
@@ -731,6 +750,7 @@ export class BeeGameSessionManager {
       ...(input.workflowWorkerType
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
+      ...(input.workflowModelTier ? { workflowModelTier: input.workflowModelTier } : {}),
       ...(input.workflowMarkdownStreamContract
         ? {
             workflowMarkdownStreamContract:
@@ -1404,6 +1424,9 @@ export class BeeGameSessionManager {
       )
       if (record.workflowWorkerType === 'foundation-fact-extractor') {
         selectedEnvironment = selectFoundationFactFastRuntime(record.runtime, selectedEnvironment)
+      } else if (record.workflowWorkerType === 'foundation-semantic-reviewer') {
+        if (!record.workflowModelTier) throw new Error('foundation semantic model tier is missing')
+        selectedEnvironment = selectFoundationSemanticRuntime(record.runtime, selectedEnvironment, record.workflowModelTier)
       }
       const env = buildRuntimeEnv(selectedEnvironment)
       if (record.workflowMarkdownStreamContract) {
@@ -3744,7 +3767,7 @@ function projectWorkspaceFileAccessAuthority(
     return {
       behavior: 'deny',
       reason: 'project_workspace_read_scope_empty',
-      message: `${request.toolName} is disabled for this scoped fact worker; use the assigned packet only.`,
+      message: `${request.toolName} is disabled for this scoped audit worker; use the assigned packet only.`,
     }
   const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'
   if (!['Read', 'Grep', 'Glob'].includes(request.toolName)) return undefined

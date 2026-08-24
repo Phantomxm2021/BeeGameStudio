@@ -31,13 +31,13 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { foundationFactExtractorTerminalSchema, foundationFactStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
+import { foundationFactExtractorTerminalSchema, foundationFactStructuredOutputJsonSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
   BeeGameSessionLanguage,
 } from './session-manager'
-import { selectFoundationFactFastRuntime } from './session-manager'
+import { selectFoundationFactFastRuntime, selectFoundationSemanticRuntime } from './session-manager'
 import { mapModelConfigToRuntime } from '@bee-game-studio/agent-workflow'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import {
@@ -255,8 +255,16 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
       selectFoundationFactFastRuntime(runtime, runtime?.env ?? {})
     },
+    async assertFoundationSemanticModelReady(request) {
+      if (request.workerType !== 'foundation-semantic-reviewer') return
+      const tier = request.contract.modelTier
+      if (tier !== 'fast' && tier !== 'balanced' && tier !== 'strong') throw new Error('foundation semantic model tier is missing')
+      const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
+      selectFoundationSemanticRuntime(runtime, runtime?.env ?? {}, tier)
+    },
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
+      const packetWorker = request.workerType === 'foundation-fact-extractor' || request.workerType === 'foundation-semantic-reviewer'
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
@@ -287,11 +295,16 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
-        workflowAllowedPaths: request.allowedPaths ?? [],
+        ...(request.contract.modelTier === 'fast' || request.contract.modelTier === 'balanced' || request.contract.modelTier === 'strong' ? { workflowModelTier: request.contract.modelTier } : {}),
+        workflowAllowedPaths: packetWorker ? [] : request.allowedPaths ?? [],
         ...(request.workerType === 'foundation-fact-extractor'
           ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown> }
+          : request.workerType === 'foundation-semantic-reviewer'
+            ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown> }
           : {}),
-        ...(request.projectReadScope
+        ...(packetWorker
+          ? { workflowProjectReadScope: 'empty' as const }
+          : request.projectReadScope
           ? { workflowProjectReadScope: request.projectReadScope }
           : {}),
         ...(request.workerType !== 'resource-content-author' &&
@@ -923,6 +936,10 @@ async function createDeterministicStructuredTerminal(input: {
       return createDeterministicFoundationFactTerminal(input) ?? (() => {
         throw new Error('worker terminal result is missing a valid StructuredOutput fact result')
       })()
+    case 'foundation-semantic-reviewer':
+      return createDeterministicFoundationSemanticTerminal(input) ?? (() => {
+        throw new Error('worker terminal result is missing a valid StructuredOutput semantic result')
+      })()
     case 'atomic-task-planner':
       return createDeterministicAtomicTaskPlannerTerminal(input)
     case 'implementation-worker':
@@ -959,6 +976,20 @@ function createDeterministicFoundationFactTerminal(input: {
   const parsed = foundationFactExtractorTerminalSchema.parse(structured)
   if (parsed.runId !== input.request.runId || parsed.dispatchId !== input.request.dispatchId || parsed.taskId !== input.request.taskId || parsed.revision !== input.request.revision || parsed.packetDigest !== input.request.contract.packetDigest)
     throw new Error('foundation fact terminal identity does not match dispatch contract')
+  return parsed
+}
+
+function createDeterministicFoundationSemanticTerminal(input: {
+  request: WorkerDispatchRequest
+  events: ReturnType<BeeGameSessionManager['events']>
+}): ReturnType<typeof foundationSemanticReviewerTerminalSchema.parse> | undefined {
+  const resultEvent = [...input.events].reverse().find(event => event.type === 'result')
+  const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
+    ? (resultEvent.payload as Record<string, unknown>).structured_output : undefined
+  if (structured === undefined) return undefined
+  const parsed = foundationSemanticReviewerTerminalSchema.parse(structured)
+  if (parsed.runId !== input.request.runId || parsed.dispatchId !== input.request.dispatchId || parsed.taskId !== input.request.taskId || parsed.revision !== input.request.revision || parsed.packetDigest !== input.request.contract.packetDigest)
+    throw new Error('foundation semantic terminal identity does not match dispatch contract')
   return parsed
 }
 
