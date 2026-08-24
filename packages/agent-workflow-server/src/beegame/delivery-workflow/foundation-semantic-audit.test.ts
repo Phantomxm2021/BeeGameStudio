@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { digestFactStore, type FoundationFact } from './foundation-fact-store'
 import { digestSectionIndex, type SectionRef } from './foundation-section-index'
+import type { AuditIssue } from './foundation-issue-registry'
 import {
   FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
   FOUNDATION_SEMANTIC_CHECKS,
@@ -31,6 +32,10 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 
 function ref(documentPath: SectionRef['documentPath'], sectionId: string, bytes = `${sectionId} bytes`): SectionRef {
   return { documentPath, sectionId, heading: sectionId, startLine: 1, endLine: 2, digest: hash(bytes) }
+}
+
+function deterministicIssue(id: string, source: SectionRef, actual = 'mismatch', type: AuditIssue['type'] = 'rule'): AuditIssue {
+  return { id, severity: 'HIGH', type, source, expected: 'expected', actual, fixDocument: source.documentPath, fixSectionId: source.sectionId }
 }
 
 function fullSnapshot() {
@@ -85,6 +90,22 @@ describe('foundation semantic audit authority', () => {
     expect(packet.fullFactStoreDigest).toBe(digestFactStore(input.factStore))
     expect(packet.deterministicReviewDigest).toBe(input.deterministicReviewDigest)
     expect(packet.identity).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  test('binds identity to the selected deterministic prefix while excluding unrelated entries and semantic/duplicate IDs', () => {
+    const input = fullSnapshot()
+    const inScope = deterministicIssue('AUD-IN', input.sectionIndex.find(item => item.sectionId === 'core_loop')!)
+    const outOfScope = deterministicIssue('AUD-OUT', input.sectionIndex.find(item => item.sectionId === 'inventory')!)
+    const first = buildFoundationSemanticPacket({ ...input, deterministicIssuePrefix: [inScope, outOfScope] })
+    const changedSelected = buildFoundationSemanticPacket({ ...input, deterministicIssuePrefix: [deterministicIssue('AUD-IN', inScope.source, 'changed'), outOfScope] })
+    const changedUnrelated = buildFoundationSemanticPacket({ ...input, deterministicIssuePrefix: [inScope, deterministicIssue('AUD-OUT', outOfScope.source, 'unrelated')] })
+    expect(first.deterministicIssuePrefix.map(issue => issue.id)).toEqual(['AUD-IN'])
+    expect(changedSelected.selectedDeterministicPrefixDigest).not.toBe(first.selectedDeterministicPrefixDigest)
+    expect(changedSelected.identity).not.toBe(first.identity)
+    expect(changedUnrelated.selectedDeterministicPrefixDigest).toBe(first.selectedDeterministicPrefixDigest)
+    expect(changedUnrelated.identity).toBe(first.identity)
+    expect(() => buildFoundationSemanticPacket({ ...input, deterministicIssuePrefix: [inScope, inScope] })).toThrow(/duplicate/i)
+    expect(() => buildFoundationSemanticPacket({ ...input, deterministicIssuePrefix: [deterministicIssue('AUD-SEM', inScope.source, 'bad', 'semantic')] })).toThrow(/semantic|deterministic/i)
   })
 
   test('allows absent declared facts for deterministic Schema issues but rejects invalid or duplicate full Fact Store entries', () => {

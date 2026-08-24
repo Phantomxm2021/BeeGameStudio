@@ -210,6 +210,7 @@ export type FoundationSemanticPacket = Readonly<{
   sections: readonly Readonly<{ sectionKey: string; ref: SectionRef; bytes: string }>[]
   facts: readonly FoundationFact[]
   deterministicIssuePrefix: readonly AuditIssue[]
+  selectedDeterministicPrefixDigest: string
   fullSectionIndexDigest: string
   fullFactStoreDigest: string
   deterministicReviewDigest: string
@@ -245,6 +246,18 @@ function bodyValue(value: unknown, body: string): boolean {
   return Array.isArray(value) && value.length === 1 && typeof value[0] === 'string' && value[0].trim() === normalized
 }
 
+function validateDeterministicIssuePrefix(issues: readonly AuditIssue[]): void {
+  const ids = new Set<string>()
+  for (const issue of issues) {
+    if (!issue || typeof issue.id !== 'string' || !issue.id.trim())
+      throw new Error('deterministic issue prefix requires stable issue IDs')
+    if (ids.has(issue.id)) throw new Error('deterministic issue prefix contains duplicate IDs')
+    ids.add(issue.id)
+    if (!['schema', 'rule', 'contract'].includes(issue.type))
+      throw new Error('semantic issues cannot enter the deterministic prefix')
+  }
+}
+
 export function buildFoundationSemanticPacket(input: FoundationSemanticPacketInput): FoundationSemanticPacket {
   if (!input.revision.trim()) throw new Error('semantic packet revision is required')
   if (!/^[a-f0-9]{64}$/.test(input.deterministicReviewDigest)) throw new Error('deterministic review digest is required')
@@ -262,6 +275,7 @@ export function buildFoundationSemanticPacket(input: FoundationSemanticPacketInp
   const fullSectionIndexDigest = digestSectionIndex(input.sectionIndex)
   const fullStore = createFoundationFactStore([...input.factStore])
   const fullFactStoreDigest = digestFactStore(fullStore)
+  validateDeterministicIssuePrefix(input.deterministicIssuePrefix)
   const allowedFacts = new Set(declaration.factKeys)
   for (const fact of fullStore) {
     if (!allowedFacts.has(fact.key as FoundationFactKey)) continue
@@ -272,8 +286,9 @@ export function buildFoundationSemanticPacket(input: FoundationSemanticPacketInp
   }
   const facts = fullStore.filter(fact => allowedFacts.has(fact.key as FoundationFactKey)).sort((a, b) => a.key.localeCompare(b.key)).map(fact => ({ ...fact, source: { ...fact.source }, evidence: { ...fact.evidence } }))
   const deterministicIssuePrefix = input.deterministicIssuePrefix.filter(issue => sectionSet.has(sectionRefIdentity(issue.source)) && (!issue.target || sectionSet.has(sectionRefIdentity(issue.target))))
-  const identity = sha256(canonical({ revision: input.revision, manifestDigest: manifest.digest, fullSectionIndexDigest, fullFactStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, checkId: input.checkId, selectedSectionDigests: sections.map(item => [item.sectionKey, item.ref.digest]) }))
-  const packetBody = { version: FOUNDATION_SEMANTIC_AUDIT_VERSION, revision: input.revision, manifestDigest: manifest.digest, checkId: input.checkId, sections, facts, deterministicIssuePrefix, fullSectionIndexDigest, fullFactStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, identity, context: { fresh: true as const, resume: false as const, sessionId: null } }
+  const selectedDeterministicPrefixDigest = sha256(canonical(deterministicIssuePrefix))
+  const identity = sha256(canonical({ revision: input.revision, manifestDigest: manifest.digest, fullSectionIndexDigest, fullFactStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, selectedDeterministicPrefixDigest, checkId: input.checkId, selectedSectionDigests: sections.map(item => [item.sectionKey, item.ref.digest]) }))
+  const packetBody = { version: FOUNDATION_SEMANTIC_AUDIT_VERSION, revision: input.revision, manifestDigest: manifest.digest, checkId: input.checkId, sections, facts, deterministicIssuePrefix, selectedDeterministicPrefixDigest, fullSectionIndexDigest, fullFactStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, identity, context: { fresh: true as const, resume: false as const, sessionId: null } }
   const bytes = Buffer.byteLength(canonical(packetBody), 'utf8')
   if (bytes > SEMANTIC_PACKET_MAX_BYTES) throw new Error(`semantic packet exceeds ${SEMANTIC_PACKET_MAX_BYTES} bytes`)
   return deepFreeze({ ...packetBody, bytes })
@@ -381,10 +396,6 @@ export function semanticResultToFoundationIssueDrafts(
     }
   })
 }
-
-// Compatibility-free descriptive aliases for the service-owned surface.
-export const FOUNDATION_SEMANTIC_MANIFEST = FOUNDATION_SEMANTIC_AUDIT_MANIFEST
-export const SEMANTIC_CHECK_MANIFEST = FOUNDATION_SEMANTIC_AUDIT_MANIFEST
 
 // Fail closed during module initialization if a future edit breaks the graph,
 // catalog, exact ten-check set, or service-owned tier/severity mapping.
