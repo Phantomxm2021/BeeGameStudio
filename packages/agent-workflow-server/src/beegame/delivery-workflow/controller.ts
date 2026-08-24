@@ -71,10 +71,10 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, validateFoundationFactResults } from './foundation-fact-extraction'
 import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
-import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, foundationDerivedArtifactPaths } from './foundation-audit-artifacts'
+import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, foundationDerivedArtifactPaths, loadCommittedFoundationDerivedArtifacts } from './foundation-audit-artifacts'
 import { createFoundationFactStore, digestFactStore } from './foundation-fact-store'
 import type { FoundationAuditState } from './foundation-audit-state'
-import { FOUNDATION_AUDIT_PRODUCTION_MANIFEST, runProductionDeterministicFoundationAudit } from './foundation-audit-production-manifest'
+import { runProductionDeterministicFoundationAudit } from './foundation-audit-production-manifest'
 
 async function deriveFoundationAudit(
   run: DeliveryRun,
@@ -258,96 +258,29 @@ export function createDeliveryWorkflowController(input: {
       const derived = { manifestPath: `.beegame/audit/foundation/${state.revision}/derived/manifest.json`, manifestDigest: published.digests.manifest, markerPath: `.beegame/audit/foundation/${state.revision}/derived/COMMITTED.json`, markerDigest: published.digests.marker, factStorePath: `.beegame/audit/foundation/${state.revision}/derived/fact-store.json`, factStoreDigest: published.digests.factStore, sectionIndexPath: `.beegame/audit/foundation/${state.revision}/derived/section-index.json`, sectionIndexDigest: published.digests.sectionIndex }
       derivedCommittedRun = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'derived_committed', derived }, status: 'running', blockedReason: undefined, thinking: 'working' }, { runId: locked.runId, type: 'foundation.fact.derived_committed', phase: locked.phase, status: 'running', revision: locked.revision, artifactManifestDigest: published.digests.manifest }, undefined, lease)
     } finally { await store.unlock(lease) }
-    if (!derivedCommittedRun) return
-    // Deterministic checks are service-owned and run in-process immediately
-    // after the immutable derived commit. This path has no worker port and no
-    // model task creation; semantic review remains a later task boundary.
-    const deterministicIssues = runProductionDeterministicFoundationAudit({
-      sectionIndex: artifacts.sectionIndex,
-      factStore,
-    })
-    const review = await publishDeterministicFoundationReview({
-      workspacePath: input.workspacePath,
-      revision: state.revision,
-      documentDigests: artifacts.documentDigests,
-      sectionIndex: artifacts.sectionIndex,
-      factStore,
-      issues: deterministicIssues,
-      manifest: FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
-    })
-    const reviewRoot = `.beegame/audit/foundation/${state.revision}/staging/review/${review.reviewDigest}`
-    const deterministic = {
-      reviewDigest: review.reviewDigest,
-      issueRegistryPath: `${reviewRoot}/issue-registry.json`,
-      issueRegistryDigest: review.digests.issueRegistry,
-      manifestPath: `${reviewRoot}/manifest.json`,
-      manifestDigest: review.digests.manifest,
-      markerPath: `${reviewRoot}/COMMITTED.json`,
-      markerDigest: review.digests.marker,
-      catalogVersion: review.catalogVersion,
-      contractGraphDigest: review.contractGraphDigest,
-      sectionIndexDigest: review.sectionIndexDigest,
-      factStoreDigest: review.factStoreDigest,
-    }
-    const deterministicLease = await store.mutationLock(run.runId)
-    try {
-      const locked = await store.load(deterministicLease)
-      if (!locked?.foundationAuditState) return
-      if (locked.foundationAuditState.status === 'deterministic_ready') return
-      if (locked.foundationAuditState.status !== 'derived_committed')
-        throw new Error('foundation audit state changed before deterministic binding')
-      await store.commit(
-        {
-          ...locked,
-          foundationAuditState: {
-            ...locked.foundationAuditState,
-            status: 'deterministic_ready',
-            deterministic,
-          },
-          status: 'needs_action',
-          blockedReason: 'deterministic audit complete; semantic Task 5 is not installed',
-          thinking: 'idle',
-        },
-        {
-          runId: locked.runId,
-          type: 'foundation.audit.deterministic_ready',
-          phase: locked.phase,
-          status: 'needs_action',
-          revision: locked.revision,
-          artifactManifestDigest: review.digests.manifest,
-          reviewDigest: review.reviewDigest,
-          issueCount: review.issues.length,
-        },
-        undefined,
-        deterministicLease,
-      )
-    } finally {
-      await store.unlock(deterministicLease)
-    }
+    if (derivedCommittedRun) await completeDeterministicFoundationAudit(derivedCommittedRun)
   }
 
-  async function resumeDeterministicFoundationAudit(run: DeliveryRun): Promise<void> {
+  async function completeDeterministicFoundationAudit(run: DeliveryRun): Promise<void> {
     const state = run.foundationAuditState
     if (!state || state.status !== 'derived_committed') return
-    const artifacts = await loadFoundationAuditArtifacts({
-      workspacePath: input.workspacePath,
-      revision: state.revision,
-      expectedState: state,
-    })
-    if (!artifacts || !state.derived) throw new Error('committed deterministic audit inputs are unavailable')
+    if (!state.derived) throw new Error('committed deterministic audit inputs are unavailable')
+    const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision })
+    if (!committed) throw new Error('committed derived authority is unavailable')
     const paths = foundationDerivedArtifactPaths(input.workspacePath, state.revision)
+    const sectionValue = JSON.parse(await readFile(paths.sectionIndex, 'utf8')) as { sections?: unknown[] }
     const factValue = JSON.parse(await readFile(paths.factStore, 'utf8')) as { facts?: unknown[] }
-    if (!Array.isArray(factValue.facts)) throw new Error('committed foundation fact store is malformed')
+    if (!Array.isArray(sectionValue.sections) || !Array.isArray(factValue.facts)) throw new Error('committed derived authority is malformed')
+    const sectionIndex = sectionValue.sections as never[]
     const factStore = createFoundationFactStore(factValue.facts as never[])
-    const issues = runProductionDeterministicFoundationAudit({ sectionIndex: artifacts.sectionIndex, factStore })
+    const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore })
     const review = await publishDeterministicFoundationReview({
       workspacePath: input.workspacePath,
       revision: state.revision,
-      documentDigests: artifacts.documentDigests,
-      sectionIndex: artifacts.sectionIndex,
+      documentDigests: committed.documentDigests,
+      sectionIndex,
       factStore,
       issues,
-      manifest: FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
     })
     const reviewRoot = `.beegame/audit/foundation/${state.revision}/staging/review/${review.reviewDigest}`
     const deterministic = {
@@ -1207,7 +1140,7 @@ export function createDeliveryWorkflowController(input: {
     }
     if (run.phase === 'DOCUMENT_REVIEW') {
       if (run.foundationAuditState?.status === 'derived_committed') {
-        await resumeDeterministicFoundationAudit(run)
+        await completeDeterministicFoundationAudit(run)
         return
       }
       if (run.foundationAuditState?.status === 'facts_staged') {

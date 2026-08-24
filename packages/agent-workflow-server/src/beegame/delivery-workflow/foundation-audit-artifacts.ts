@@ -15,7 +15,9 @@ import {
 import type { FoundationAuditState } from './foundation-audit-state'
 import { createFoundationFactStore, digestFactStore, type FoundationFactStore } from './foundation-fact-store'
 import type { AuditIssue } from './foundation-issue-registry'
-import type { FoundationAuditProductionManifest } from './foundation-audit-production-manifest'
+import {
+  FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
+} from './foundation-audit-production-manifest'
 
 export type FoundationAuditManifest = {
   revision: string
@@ -426,22 +428,26 @@ export async function publishDeterministicFoundationReview(input: {
   sectionIndex: FoundationSectionIndex
   factStore: FoundationFactStore
   issues: readonly AuditIssue[]
-  manifest: FoundationAuditProductionManifest
 }): Promise<FoundationDeterministicReview> {
+  if (Object.keys(input).some(key => !['workspacePath', 'revision', 'documentDigests', 'sectionIndex', 'factStore', 'issues'].includes(key)))
+    throw new Error('caller-supplied deterministic manifest is not accepted')
+  const manifest = FOUNDATION_AUDIT_PRODUCTION_MANIFEST
   const documentDigests = canonicalDocumentDigests(input.documentDigests)
   validateIssueIdentity(input.issues)
+  if (input.issues.some(issue => issue.type === 'semantic'))
+    throw new Error('deterministic review prefix cannot contain semantic issues')
   const sectionIndexDigest = digestSectionIndex(input.sectionIndex)
   const factStoreDigest = digestFactStore(input.factStore)
-  if (input.manifest.catalogVersion !== FOUNDATION_FACT_CATALOG_VERSION)
+  if (manifest.catalogVersion !== FOUNDATION_FACT_CATALOG_VERSION)
     throw new Error('deterministic review catalog version is stale')
   const reviewDigest = deterministicReviewDigest({
     revision: input.revision,
     documentDigests,
     sectionIndexDigest,
     factStoreDigest,
-    manifestDigest: input.manifest.digest,
-    catalogVersion: input.manifest.catalogVersion,
-    contractGraphDigest: input.manifest.contractGraphDigest,
+    manifestDigest: manifest.digest,
+    catalogVersion: manifest.catalogVersion,
+    contractGraphDigest: manifest.contractGraphDigest,
     issues: input.issues,
   })
   const paths = foundationDeterministicReviewArtifactPaths(
@@ -494,16 +500,16 @@ export async function publishDeterministicFoundationReview(input: {
     documentDigests,
     sectionIndexDigest,
     factStoreDigest,
-    manifestDigest: input.manifest.digest,
-    catalogVersion: input.manifest.catalogVersion,
-    contractGraphDigest: input.manifest.contractGraphDigest,
+    manifestDigest: manifest.digest,
+    catalogVersion: manifest.catalogVersion,
+    contractGraphDigest: manifest.contractGraphDigest,
     issues: input.issues,
   }
   const manifestValue = {
     revision: input.revision,
     status: 'deterministic_ready' as const,
     reviewDigest,
-    manifest: input.manifest,
+    manifest,
   }
   const issueText = `${JSON.stringify(issueValue, null, 2)}\n`
   const manifestText = `${JSON.stringify(manifestValue, null, 2)}\n`
@@ -549,15 +555,15 @@ export async function publishDeterministicFoundationReview(input: {
     documentDigests,
     sectionIndexDigest,
     factStoreDigest,
-    manifestDigest: input.manifest.digest,
-    catalogVersion: input.manifest.catalogVersion,
-    contractGraphDigest: input.manifest.contractGraphDigest,
+    manifestDigest: manifest.digest,
+    catalogVersion: manifest.catalogVersion,
+    contractGraphDigest: manifest.contractGraphDigest,
     issues: [...input.issues],
     paths,
     digests: {
       issueRegistry: issueRegistryDigest,
       manifest: manifestDigest,
-      marker: sha256(markerText),
+      marker: stableDigest(marker),
     },
   }
 }
@@ -596,6 +602,8 @@ function validateReviewIssue(value: unknown, index: number): void {
     throw new Error(`deterministic review issue ${index} identity is invalid`)
   if (!['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(String(issue.severity)) || !['schema', 'rule', 'contract', 'semantic'].includes(String(issue.type)))
     throw new Error(`deterministic review issue ${index} classification is invalid`)
+  if (issue.type === 'semantic')
+    throw new Error('deterministic review prefix cannot contain semantic issues')
   if (typeof issue.expected !== 'string' || !issue.expected.trim() || typeof issue.actual !== 'string' || !issue.actual.trim())
     throw new Error(`deterministic review issue ${index} text is invalid`)
   validateReviewSection(issue.source, `issue ${index} source`)
@@ -633,17 +641,25 @@ async function validateDeterministicReviewFiles(input: {
     throw new Error('deterministic review manifest shape is invalid')
   const manifestObject = manifestValue as Record<string, unknown>
   const production = manifestObject.manifest
-  if (!production || typeof production !== 'object' || Array.isArray(production) || !exactKeys(production, ['version', 'catalogVersion', 'schemaKeys', 'rules', 'contracts', 'digest', 'contractGraphDigest']))
+  if (!production || typeof production !== 'object' || Array.isArray(production) || !exactKeys(production, ['version', 'catalogVersion', 'schemaKeys', 'contracts', 'deferredSemanticKeys', 'digest', 'contractGraphDigest']))
     throw new Error('deterministic production manifest shape is invalid')
   const productionObject = production as Record<string, unknown>
-  if (manifestObject.revision !== input.revision || manifestObject.status !== 'deterministic_ready' || manifestObject.reviewDigest !== input.reviewDigest || typeof productionObject.version !== 'string' || typeof productionObject.catalogVersion !== 'string' || !Array.isArray(productionObject.schemaKeys) || !Array.isArray(productionObject.rules) || !Array.isArray(productionObject.contracts) || !isDigest(productionObject.digest) || !isDigest(productionObject.contractGraphDigest))
+  if (manifestObject.revision !== input.revision || manifestObject.status !== 'deterministic_ready' || manifestObject.reviewDigest !== input.reviewDigest || typeof productionObject.version !== 'string' || typeof productionObject.catalogVersion !== 'string' || !Array.isArray(productionObject.schemaKeys) || !Array.isArray(productionObject.contracts) || !Array.isArray(productionObject.deferredSemanticKeys) || !isDigest(productionObject.digest) || !isDigest(productionObject.contractGraphDigest))
     throw new Error('deterministic production manifest binding is invalid')
   if (
     productionObject.schemaKeys.some(item => typeof item !== 'string') ||
-    productionObject.rules.some(item => !item || typeof item !== 'object' || Array.isArray(item) || !exactKeys(item, ['id', 'factKeys', 'consumers'])) ||
     productionObject.contracts.some(item => !item || typeof item !== 'object' || Array.isArray(item) || !exactKeys(item, ['id', 'sourceFactKey', 'targetFactKey', 'relation', 'source', 'target', 'severity']))
   )
     throw new Error('deterministic production manifest declarations are invalid')
+  const { digest: _embeddedDigest, ...embeddedWithoutDigest } = productionObject
+  const { digest: _authorityDigest, ...authorityWithoutDigest } = FOUNDATION_AUDIT_PRODUCTION_MANIFEST
+  if (
+    stableDigest(embeddedWithoutDigest) !== stableDigest(authorityWithoutDigest) ||
+    productionObject.digest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest ||
+    productionObject.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion ||
+    productionObject.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest
+  )
+    throw new Error('deterministic production manifest is not the service-owned authority')
 }
 
 export async function loadDeterministicFoundationReview(input: {
@@ -949,6 +965,8 @@ export async function validateFoundationAuditStateArtifacts(input: {
     if (!staged) throw new Error('foundation audit staged index is missing')
     if (input.state.status !== 'derived_committed') {
       if (!input.state.deterministic) throw new Error('foundation deterministic review binding is missing')
+      if (input.state.deterministic.sectionIndexDigest !== input.state.derived?.sectionIndexDigest || input.state.deterministic.factStoreDigest !== input.state.derived?.factStoreDigest)
+        throw new Error('foundation deterministic review digests do not match derived authority')
       const review = await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: input.state.revision, reviewDigest: input.state.deterministic.reviewDigest })
       if (!review || review.sectionIndexDigest !== input.state.deterministic.sectionIndexDigest || review.factStoreDigest !== input.state.deterministic.factStoreDigest || review.digests.issueRegistry !== input.state.deterministic.issueRegistryDigest || review.digests.manifest !== input.state.deterministic.manifestDigest || review.digests.marker !== input.state.deterministic.markerDigest || input.state.deterministic.issueRegistryPath !== relative(resolve(input.workspacePath), review.paths.issueRegistry).replaceAll('\\', '/') || input.state.deterministic.manifestPath !== relative(resolve(input.workspacePath), review.paths.manifest).replaceAll('\\', '/') || input.state.deterministic.markerPath !== relative(resolve(input.workspacePath), review.paths.marker).replaceAll('\\', '/'))
         throw new Error('foundation deterministic review does not match state bindings')

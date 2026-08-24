@@ -31,18 +31,12 @@ type ProductionContractDeclaration = {
   severity: 'BLOCKER' | 'HIGH' | 'MEDIUM' | 'LOW'
 }
 
-type ProductionRuleDeclaration = {
-  id: string
-  factKeys: readonly FoundationFactKey[]
-  consumers: readonly string[]
-}
-
 export type FoundationAuditProductionManifest = {
   version: 'foundation-deterministic.v1'
   catalogVersion: typeof FOUNDATION_FACT_CATALOG_VERSION
   schemaKeys: readonly FoundationFactKey[]
-  rules: readonly ProductionRuleDeclaration[]
   contracts: readonly ProductionContractDeclaration[]
+  deferredSemanticKeys: readonly FoundationFactKey[]
   digest: string
   contractGraphDigest: string
 }
@@ -69,7 +63,7 @@ const PRODUCTION_CONTRACTS: readonly ProductionContractDeclaration[] = [
     'technical-actions-authority',
     'technical.supported_actions',
     'game.mechanics',
-    'equal',
+    'contains-all',
     { documentPath: 'docs/TECHNICAL_DESIGN.md', sectionId: 'input_interaction' },
     { documentPath: 'docs/GDD.md', sectionId: 'player_actions' },
   ),
@@ -85,7 +79,7 @@ const PRODUCTION_CONTRACTS: readonly ProductionContractDeclaration[] = [
     'ui-resources-authority',
     'ui.displayed_resources',
     'game.resources',
-    'equal',
+    'contains-all',
     { documentPath: 'docs/UI_UX_SPEC.md', sectionId: 'hud' },
     { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' },
   ),
@@ -93,7 +87,7 @@ const PRODUCTION_CONTRACTS: readonly ProductionContractDeclaration[] = [
     'asset-inventory-authority',
     'asset.inventory_ids',
     'level.required_assets',
-    'equal',
+    'contains-all',
     { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' },
     { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'content_matrix' },
   ),
@@ -101,17 +95,9 @@ const PRODUCTION_CONTRACTS: readonly ProductionContractDeclaration[] = [
     'asset-art-constraints-authority',
     'asset.art_constraint_refs',
     'art.style_constraints',
-    'equal',
+    'contains-all',
     { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'dependencies' },
     { documentPath: 'docs/ART_DIRECTION.md', sectionId: 'visual_pillars' },
-  ),
-  contract(
-    'technical-performance-authority',
-    'technical.target_fps',
-    'level.complexity_budget',
-    'numeric-less-than-or-equal',
-    { documentPath: 'docs/TECHNICAL_DESIGN.md', sectionId: 'performance' },
-    { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'production_acceptance' },
   ),
 ]
 
@@ -154,26 +140,14 @@ export const FOUNDATION_AUDIT_PRODUCTION_MANIFEST: FoundationAuditProductionMani
     schemaKeys: Object.freeze(
       FOUNDATION_FACT_CATALOG.map(item => item.key),
     ),
-    rules: Object.freeze(
-      FOUNDATION_FACT_CATALOG.map(item =>
-        Object.freeze({
-          id: `catalog.${item.key}`,
-          factKeys: Object.freeze([item.key]),
-          consumers: Object.freeze([...item.consumers]),
-        }),
-      ),
-    ),
     contracts: Object.freeze(PRODUCTION_CONTRACTS.map(item => Object.freeze({ ...item }))),
+    deferredSemanticKeys: Object.freeze(['technical.target_fps', 'level.complexity_budget'] as FoundationFactKey[]),
     digest: digest({
       version: 'foundation-deterministic.v1',
       catalogVersion: FOUNDATION_FACT_CATALOG_VERSION,
       schemaKeys: FOUNDATION_FACT_CATALOG.map(item => item.key),
-      rules: FOUNDATION_FACT_CATALOG.map(item => ({
-        id: `catalog.${item.key}`,
-        factKeys: [item.key],
-        consumers: item.consumers,
-      })),
       contracts: PRODUCTION_CONTRACTS,
+      deferredSemanticKeys: ['technical.target_fps', 'level.complexity_budget'],
     }),
     contractGraphDigest: contractGraphDigest(),
   })

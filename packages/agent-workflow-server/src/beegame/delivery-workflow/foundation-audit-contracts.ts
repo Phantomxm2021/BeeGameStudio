@@ -1,5 +1,4 @@
 import { getGameDocumentContract } from './game-document-contracts'
-import { foundationFactDefinition } from './foundation-fact-definitions'
 import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
 import type {
@@ -12,7 +11,7 @@ export type ContractBindingRelation =
   | 'exists'
   | 'equal'
   | 'numeric-equal'
-  | 'numeric-less-than-or-equal'
+  | 'contains-all'
 
 export type ContractBinding = {
   id: string
@@ -56,8 +55,8 @@ function satisfiesRelation(
   right: unknown,
   relation: ContractBindingRelation,
 ): boolean {
-  if (relation === 'numeric-less-than-or-equal')
-    return typeof left === 'number' && typeof right === 'number' && left <= right
+  if (relation === 'contains-all')
+    return Array.isArray(left) && Array.isArray(right) && right.every(item => left.some(candidate => JSON.stringify(candidate) === JSON.stringify(item)))
   return equal(left, right, relation === 'numeric-equal')
 }
 
@@ -75,25 +74,23 @@ function permittedEdge(binding: ContractBinding): boolean {
     )
   )
   if (direct) return true
-  // A closed catalog owner edge may be checked even when the compact
-  // projection omits that section (for example AssetPlan inventory ↔ GDD
-  // rules). This remains closed to the 24 service-owned keys and preserves
-  // the downstream-only direction; arbitrary caller edges are not admitted.
-  const sourceDefinition = foundationFactDefinition(binding.sourceFactKey)
-  const targetDefinition = foundationFactDefinition(binding.targetFactKey)
-  if (!sourceDefinition || !targetDefinition) return false
-  if (
-    binding.source.documentPath === 'docs/GDD.md' ||
-    binding.target.documentPath === 'docs/ASSET_PLAN.md'
-  )
-    return false
-  return (
-    sourceDefinition.owner.documentPath === binding.source.documentPath &&
-    sourceDefinition.owner.sectionId === binding.source.sectionId &&
-    targetDefinition.owner.documentPath === binding.target.documentPath &&
-    targetDefinition.owner.sectionId === binding.target.sectionId
+  return SERVICE_OWNED_CATALOG_EDGES.some(edge =>
+    edge.sourceFactKey === binding.sourceFactKey &&
+    edge.targetFactKey === binding.targetFactKey &&
+    edge.source.documentPath === binding.source.documentPath &&
+    edge.source.sectionId === binding.source.sectionId &&
+    edge.target.documentPath === binding.target.documentPath &&
+    edge.target.sectionId === binding.target.sectionId,
   )
 }
+
+export const SERVICE_OWNED_CATALOG_EDGES = Object.freeze([
+  { sourceFactKey: 'technical.supported_actions', targetFactKey: 'game.mechanics', source: { documentPath: 'docs/TECHNICAL_DESIGN.md', sectionId: 'input_interaction' }, target: { documentPath: 'docs/GDD.md', sectionId: 'player_actions' } },
+  { sourceFactKey: 'asset.boss.count', targetFactKey: 'game.boss.count', source: { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }, target: { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' } },
+  { sourceFactKey: 'ui.displayed_resources', targetFactKey: 'game.resources', source: { documentPath: 'docs/UI_UX_SPEC.md', sectionId: 'hud' }, target: { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' } },
+  { sourceFactKey: 'asset.inventory_ids', targetFactKey: 'level.required_assets', source: { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }, target: { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'content_matrix' } },
+  { sourceFactKey: 'asset.art_constraint_refs', targetFactKey: 'art.style_constraints', source: { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'dependencies' }, target: { documentPath: 'docs/ART_DIRECTION.md', sectionId: 'visual_pillars' } },
+] as const)
 
 function bindingDrafts(
   context: FoundationAuditContext,

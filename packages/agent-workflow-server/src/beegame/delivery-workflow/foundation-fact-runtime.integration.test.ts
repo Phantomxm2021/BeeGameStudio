@@ -47,11 +47,13 @@ describe('foundation fact runtime controller integration', () => {
       const context = '{"game":"bee"}'
       const run = createInitialDeliveryRun({ projectId: 'project', ownerId: 'owner', confirmedBriefContext: context, confirmedBriefDigest: createHash('sha256').update(context).digest('hex'), documentRevision: 'rev-1', workspaceRevision: 'workspace-1' })
       const ready = { ...run, phase: 'DOCUMENT_DRAFTING' as const, documentStep: 'FOUNDATION_DRAFTING' as const, foundationDraftState: { completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS] }, revision: { ...run.revision, document: 'rev-1' } }
-      const controller = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: port() })
+      const started = new Set<string>()
+      const controller = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: port(started) })
       await controller.store.save(ready)
       await controller.resume(ready)
       let current = await controller.store.load()
       expect(current?.foundationAuditState?.tasks).toHaveLength(8)
+      expect(started.size).toBe(4)
       expect(current?.foundationAuditState?.tasks.filter(task => task.status === 'running')).toHaveLength(4)
       expect(current?.activeDispatch).toBeUndefined()
       async function complete(taskId: string) {
@@ -69,10 +71,25 @@ describe('foundation fact runtime controller integration', () => {
       const secondWave = current!.foundationAuditState!.tasks.filter(task => task.status === 'running').map(task => task.taskId)
       await Promise.all(secondWave.map(complete))
       current = await controller.store.load()
+      expect(started.size).toBe(8)
       expect(current?.foundationAuditState?.status).toBe('deterministic_ready')
       expect(current?.status).toBe('needs_action')
       expect(current?.foundationAuditState?.aggregateUsage?.total_tokens).toBe(40)
       expect(current?.foundationAuditState?.tasks.every(task => task.usage?.total_tokens === 5)).toBe(true)
+      const deterministicBefore = current?.foundationAuditState?.deterministic
+      expect(deterministicBefore?.reviewDigest).toMatch(/^[a-f0-9]{64}$/)
+      await controller.store.commit({
+        ...current!,
+        status: 'running',
+        blockedReason: undefined,
+        foundationAuditState: { ...current!.foundationAuditState!, status: 'derived_committed', deterministic: undefined },
+      }, { runId: current!.runId, type: 'test.interrupt.after.derived', phase: current!.phase, status: 'running', revision: current!.revision.document })
+      const startsBeforeRecovery = started.size
+      await controller.resume((await controller.store.load())!)
+      const recovered = await controller.store.load()
+      expect(started.size).toBe(startsBeforeRecovery)
+      expect(recovered?.foundationAuditState?.status).toBe('deterministic_ready')
+      expect(recovered?.foundationAuditState?.deterministic).toEqual(deterministicBefore)
       const events = await controller.store.readEvents()
       expect(events.some(event => event.type === 'foundation.fact.facts_staged')).toBe(true)
       expect(events.some(event => event.type === 'foundation.fact.derived_committed')).toBe(true)

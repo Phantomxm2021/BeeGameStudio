@@ -422,7 +422,7 @@ function validateRules(
         'exists',
         'equal',
         'numeric-equal',
-        'numeric-less-than-or-equal',
+        'contains-all',
       ].includes(binding.relation)
     )
       throw new Error('contract binding is invalid')

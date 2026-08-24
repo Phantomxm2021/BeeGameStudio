@@ -21,7 +21,9 @@ export type FoundationFixResolutionInput = {
 const authorityRank = (path: FoundationDocumentPath): number => {
   if (path === 'docs/GDD.md') return 0
   if (path === 'docs/TECHNICAL_DESIGN.md') return 1
-  return 2
+  if (path === 'docs/LEVEL_SCENE_DESIGN.md' || path === 'docs/BALANCE_DESIGN.md') return 2
+  if (path === 'docs/ART_DIRECTION.md' || path === 'docs/UI_UX_SPEC.md' || path === 'docs/AUDIO_DESIGN.md') return 3
+  return 4
 }
 
 /**
