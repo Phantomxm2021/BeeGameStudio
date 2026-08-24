@@ -20,10 +20,9 @@ export function canStartFoundationAudit(run: DeliveryRun): boolean {
   )
 }
 
-export async function applyFoundationAuditBoundary(input: {
+export function applyFoundationAuditBoundary(input: {
   run: DeliveryRun
-  dispatch: (request: never) => unknown | Promise<unknown>
-}): Promise<DeliveryRun> {
+}): DeliveryRun {
   if (!canStartFoundationAudit(input.run)) return input.run
   // The clean cutover deliberately stops here. Task 2 owns the replacement
   // audit implementation and its dispatch contract.

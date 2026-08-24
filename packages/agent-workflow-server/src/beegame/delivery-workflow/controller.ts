@@ -314,6 +314,8 @@ export function createDeliveryWorkflowController(input: {
             terminal: result,
             documentSet,
       })
+      if (documentSet === 'foundation' && canStartFoundationAudit(next))
+        next = applyFoundationAuditBoundary({ run: next })
       if (next.blockedReason && next.status === 'running') {
         next = {
           ...next,
@@ -902,7 +904,6 @@ export function createDeliveryWorkflowController(input: {
       if (canStartFoundationAudit(run)) {
         const next = await applyFoundationAuditBoundary({
           run,
-          dispatch: () => undefined as never,
         })
         await persist(next, 'foundation.audit.unavailable')
         return

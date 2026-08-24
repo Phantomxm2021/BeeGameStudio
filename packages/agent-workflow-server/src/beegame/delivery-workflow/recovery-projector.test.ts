@@ -1,0 +1,169 @@
+import { describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { inspectWorkflowSnapshot } from './run-store'
+import { projectExactResumeRun } from './recovery-projector'
+import { createInitialDeliveryRun } from './run-store'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type AcceptedWorkflowUnit,
+  type DeliveryRun,
+  type WorkflowEvent,
+} from './types'
+import { commitAuthoredFoundationDocument } from '../authored-document-receipt'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from '../../__tests__/complete-game-document-fixture'
+import { withTestDocumentMetadata } from '../../__tests__/delivery-workflow-test-helpers'
+import { computeDocumentRevision, computeWorkspaceRevision } from './revision'
+import { createHash } from 'node:crypto'
+
+describe('recovery projector foundation audit boundary', () => {
+  test('reconstructs the durable needs-action cutover from its unavailable sentinel', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-recovery-cutover-'))
+    try {
+      const ownerId = 'recovery-cutover-owner'
+      const projectId = 'recovery-cutover-project'
+      const runId = 'recovery-cutover-run'
+      const confirmedBriefContext = 'confirmed brief for recovery cutover'
+      const confirmedBriefDigest = createHash('sha256')
+        .update(confirmedBriefContext)
+        .digest('hex')
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const units: AcceptedWorkflowUnit[] = []
+      for (const [index, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries()) {
+        const dispatchId = `recovery-document-${index}`
+        await writeFile(
+          join(workspacePath, path),
+          withTestDocumentMetadata(
+            path,
+            renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+          ),
+        )
+        const receipt = await commitAuthoredFoundationDocument({
+          workspacePath,
+          dispatchId,
+          targetPath: path,
+        })
+        units.push({
+          eventSchemaVersion: 1,
+          unitId: `document:${path}`,
+          kind: 'document',
+          phase: 'DOCUMENT_DRAFTING' as const,
+          predecessorUnitIds:
+            index === 0
+              ? []
+              : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[index - 1]}`],
+          inputRevision: 'document-revision-placeholder',
+          dependencyDigests: { [path]: receipt.finalDigest },
+          dispatchId,
+          receiptRef: `.beegame/workflow/document-commits/${dispatchId}.json`,
+          acceptedAt: receipt.updatedAt,
+          payload: { path, revision: 'document-revision-placeholder' },
+        })
+      }
+      const revision = {
+        document: await computeDocumentRevision(
+          workspacePath,
+          confirmedBriefDigest,
+        ),
+        workspace: await computeWorkspaceRevision(workspacePath),
+      }
+      const acceptedEvents: WorkflowEvent[] = [
+        {
+          eventId: 'recovery-cutover-created',
+          runId,
+          type: 'run.created',
+          phase: 'DOCUMENT_REVIEW',
+          status: 'needs_action',
+          revision,
+          createdAt: '2026-08-24T00:00:00.000Z',
+        },
+        {
+          eventId: 'recovery-cutover-usage',
+          runId,
+          type: 'usage.updated',
+          phase: 'DOCUMENT_REVIEW',
+          status: 'needs_action',
+          revision,
+          createdAt: '2026-08-24T00:01:00.000Z',
+          usage: {
+            input_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+          },
+        },
+        ...units.map(
+        (unit, index) => ({
+          eventId: `recovery-cutover-event-${index}`,
+          runId,
+          type: 'workflow.unit.accepted',
+          phase: 'DOCUMENT_DRAFTING' as const,
+          status: 'running' as const,
+          revision,
+          createdAt: '2026-08-24T00:02:00.000Z',
+          projectId,
+          ownerId,
+          unit: {
+            ...unit,
+            inputRevision: revision.document,
+            payload: { path: unit.payload && (unit.payload as { path: string }).path, revision: revision.document },
+          },
+        }),
+        ),
+      ]
+      const initial = createInitialDeliveryRun({
+        runId,
+        projectId,
+        ownerId,
+        confirmedBriefContext,
+        confirmedBriefDigest,
+        documentRevision: revision.document,
+        workspaceRevision: revision.workspace,
+      })
+      const run: DeliveryRun = {
+        ...initial,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'needs_action',
+        blockedReason: 'foundation audit implementation unavailable',
+        foundationDraftState: {
+          completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+        },
+        createdAt: '2026-08-24T00:00:00.000Z',
+        updatedAt: '2026-08-24T00:02:00.000Z',
+      }
+      const store = (await import('./run-store')).createRunStore(
+        workspacePath,
+        ownerId,
+      )
+      await store.save(run)
+      const inspection = await inspectWorkflowSnapshot({
+        snapshotPath: join(workspacePath, '.beegame/workflow/run.json'),
+        ownerId,
+      })
+      const projected = await projectExactResumeRun({
+        inspection,
+        events: acceptedEvents,
+        workspacePath,
+        ownerId,
+        projectId,
+        confirmedBriefContext,
+      })
+
+      expect(projected.activeUnitId).toBe('foundation-audit:unavailable')
+      expect(projected.run).toMatchObject({
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        status: 'needs_action',
+        blockedReason: 'foundation audit implementation unavailable',
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+})

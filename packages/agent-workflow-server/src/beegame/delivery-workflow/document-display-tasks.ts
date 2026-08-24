@@ -42,8 +42,8 @@ export type DocumentDisplayTaskInput = {
 
 /**
  * Projects document work from its phase authority. Authoring completion comes
- * from durable files; review completion comes from canonical artifacts read
- * successfully by the active reviewer dispatch. The two phases never share a
+ * from durable files; downstream completion comes from canonical artifacts read
+ * successfully by the active workflow stage. The two phases never share a
  * completion signal.
  */
 export function projectDocumentDisplayTasks(

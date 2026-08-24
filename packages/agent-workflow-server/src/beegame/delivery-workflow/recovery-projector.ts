@@ -38,6 +38,7 @@ import {
   type WorkflowUnitAcceptedEvent,
   type WorkflowUsage,
 } from './types'
+import { FOUNDATION_AUDIT_UNAVAILABLE } from './foundation-audit-boundary'
 
 export { inspectWorkflowSnapshot }
 export type { WorkflowSnapshotInspection }
@@ -1285,7 +1286,10 @@ function buildProjectionRun(input: {
   let resourceTask: DeliveryRun['resourceProductionState']['currentTask'] =
     'RESOURCE_PLAN'
   const activeUnitId = input.activeUnitId
-  if (activeUnitId?.startsWith('document:')) {
+  if (activeUnitId === 'foundation-audit:unavailable') {
+    phase = 'DOCUMENT_REVIEW'
+    documentStep = 'FOUNDATION_REVIEW'
+  } else if (activeUnitId?.startsWith('document:')) {
     phase = 'DOCUMENT_DRAFTING'
     documentStep = 'FOUNDATION_DRAFTING'
     currentItemId = activeUnitId.slice('document:'.length)
@@ -1364,7 +1368,15 @@ function buildProjectionRun(input: {
     ...base,
     phase,
     ...(documentStep ? { documentStep } : {}),
-    status: activeUnitId ? 'running' : 'completed',
+    status:
+      activeUnitId === 'foundation-audit:unavailable'
+        ? 'needs_action'
+        : activeUnitId
+          ? 'running'
+          : 'completed',
+    ...(activeUnitId === 'foundation-audit:unavailable'
+      ? { blockedReason: FOUNDATION_AUDIT_UNAVAILABLE }
+      : {}),
     revision: {
       ...input.revision,
       ...(gate ? { resource: gate.inputRevision } : {}),

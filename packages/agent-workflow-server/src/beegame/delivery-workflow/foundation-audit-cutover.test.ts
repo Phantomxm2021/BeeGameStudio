@@ -1,10 +1,20 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
-import type { DeliveryRun } from './types'
+import { commitAuthoredFoundationDocument } from '../authored-document-receipt'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type DeliveryRun,
+  type DispatchRecord,
+} from './types'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from '../../__tests__/complete-game-document-fixture'
+import { withTestDocumentMetadata } from '../../__tests__/delivery-workflow-test-helpers'
 
 function runWithEightCommittedDocs(): DeliveryRun {
   const paths = [
@@ -68,6 +78,101 @@ describe('foundation audit cutover', () => {
       expect(dispatches).toEqual([])
       expect(saved).toMatchObject({
         phase: 'DOCUMENT_REVIEW',
+        status: 'needs_action',
+        blockedReason: 'foundation audit implementation unavailable',
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('cuts over immediately after the real eighth author terminal is accepted', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-terminal-cutover-'))
+    const dispatches: unknown[] = []
+    try {
+      const finalPath = CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+        await writeFile(
+          join(workspacePath, path),
+          withTestDocumentMetadata(
+            path,
+            renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+          ),
+        )
+      const dispatchId = 'eighth-author-terminal'
+      await commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId,
+        targetPath: finalPath,
+      })
+      const run = runWithEightCommittedDocs()
+      const request = {
+        dispatchId,
+        runId: run.runId,
+        ownerId: run.ownerId,
+        projectId: run.projectId,
+        workspacePath,
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        taskId: finalPath,
+        revision: run.revision.document,
+        allowedPaths: [finalPath],
+        contract: {
+          confirmedBriefDigest: run.confirmedBriefDigest,
+          documentSet: 'foundation',
+          authoringMode: 'initial',
+          foundationDocumentPath: finalPath,
+        },
+      }
+      const terminal: DispatchRecord = {
+        dispatchId,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: finalPath,
+        revision: run.revision.document,
+        status: 'completed',
+        request,
+        terminalResult: {
+          workerType: 'document-author',
+          status: 'completed',
+          writtenPaths: [finalPath],
+          resolvedFindingIds: [],
+        },
+        startedAt: '2026-08-24T00:00:00.000Z',
+        finishedAt: '2026-08-24T00:01:00.000Z',
+      }
+      const store = createRunStore(workspacePath, run.ownerId)
+      const terminalRun = {
+        ...run,
+        foundationDraftState: {
+          completedPaths: CANONICAL_FOUNDATION_DOCUMENTS.slice(0, -1),
+        },
+        activeDispatch: terminal,
+      }
+      await store.save(terminalRun)
+      const controller = createDeliveryWorkflowController({
+        workspacePath,
+        ownerId: run.ownerId,
+        workerPort: {
+          start: async request => {
+            dispatches.push(request)
+            throw new Error('foundation audit must not dispatch')
+          },
+          submit: async () => undefined,
+          stop: async () => undefined,
+          status: async () => {
+            throw new Error('no dispatch should exist')
+          },
+        },
+      })
+      await controller.resume(terminalRun)
+      const saved = await store.load()
+
+      expect(dispatches).toEqual([])
+      expect(saved).toMatchObject({
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
         status: 'needs_action',
         blockedReason: 'foundation audit implementation unavailable',
       })
