@@ -105,6 +105,10 @@ describe('worker prompts', () => {
         expect(prompt).toContain('Absent requires only key and status and must omit value, evidence, and reason')
         expect(prompt).toContain('Uncertain requires key, status, and reason; omit evidence and value')
         expect(prompt).toContain('service binds immutable provenance')
+      } else {
+        expect(prompt).toContain('PASS omits issues and reason')
+        expect(prompt).toContain('ISSUES includes a non-empty issues array and omits reason')
+        expect(prompt).toContain('UNDECIDABLE includes reason and omits issues')
       }
     }
   })

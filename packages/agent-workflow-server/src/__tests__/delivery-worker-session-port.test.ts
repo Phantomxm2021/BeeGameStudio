@@ -285,6 +285,11 @@ describe('delivery worker session credentials', () => {
     expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'ISSUES' })).toThrow()
     expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'UNDECIDABLE' })).toThrow()
     expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'UNDECIDABLE', issues: [issue], reason: 'ambiguous' })).toThrow()
+    const validate = new Ajv().compile(foundationSemanticReviewerStructuredOutputJsonSchema)
+    expect(validate({ status: 'completed', outcome: 'PASS', reason: 'provider-added explanation' })).toBe(false)
+    expect(validate({ status: 'completed', outcome: 'ISSUES', issues: [issue], reason: 'provider-added explanation' })).toBe(false)
+    expect(validate({ status: 'completed', outcome: 'ISSUES', issues: [issue] })).toBe(true)
+    expect(validate({ status: 'completed', outcome: 'UNDECIDABLE', reason: 'ambiguous packet' })).toBe(true)
   })
 
   test('rejects forged identity, extra fields and malformed model payloads', () => {

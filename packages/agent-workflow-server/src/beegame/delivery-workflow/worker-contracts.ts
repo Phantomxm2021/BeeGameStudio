@@ -243,8 +243,14 @@ export const foundationSemanticReviewerStructuredOutputJsonSchema = {
   type: 'object', additionalProperties: false,
   properties: {
     status: { enum: ['completed', 'failed', 'blocked'] }, outcome: { enum: ['PASS', 'ISSUES', 'UNDECIDABLE'] },
-    issues: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { problem: { type: 'string', minLength: 1 }, expected: { type: 'string', minLength: 1 }, actual: { type: 'string', minLength: 1 }, sourceSectionKey: { type: 'string', minLength: 1 }, fixSectionKey: { type: 'string', minLength: 1 }, reasonCode: { type: 'string', minLength: 1 } }, required: ['problem', 'expected', 'actual', 'sourceSectionKey', 'fixSectionKey'] } }, reason: { type: 'string', minLength: 1 },
-  }, required: ['status', 'outcome'],
+    issues: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, properties: { problem: { type: 'string', minLength: 1 }, expected: { type: 'string', minLength: 1 }, actual: { type: 'string', minLength: 1 }, sourceSectionKey: { type: 'string', minLength: 1 }, fixSectionKey: { type: 'string', minLength: 1 }, reasonCode: { type: 'string', minLength: 1 } }, required: ['problem', 'expected', 'actual', 'sourceSectionKey', 'fixSectionKey'] } }, reason: { type: 'string', minLength: 1 },
+  },
+  required: ['status', 'outcome'],
+  oneOf: [
+    { properties: { outcome: { const: 'PASS' } }, not: { anyOf: [{ required: ['issues'] }, { required: ['reason'] }] } },
+    { properties: { outcome: { const: 'ISSUES' } }, required: ['issues'], not: { required: ['reason'] } },
+    { properties: { outcome: { const: 'UNDECIDABLE' } }, required: ['reason'], not: { required: ['issues'] } },
+  ],
 } as const
 
 const foundationRevisionReceiptSchema = z.object({

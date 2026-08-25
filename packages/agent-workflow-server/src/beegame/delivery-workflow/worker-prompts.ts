@@ -345,7 +345,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'foundation-fact-extractor':
       return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, and value; omit evidence and reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, and reason; omit evidence and value. The service binds immutable provenance from the packet owner section into the durable terminal. Do not call project tools, return terminal JSON as prose, or add completion text.'
     case 'foundation-semantic-reviewer':
-      return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use only PASS, ISSUES, or UNDECIDABLE; do not return Markdown or explanatory text.'
+      return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use exactly one outcome shape: PASS omits issues and reason; ISSUES includes a non-empty issues array and omits reason; UNDECIDABLE includes reason and omits issues. Do not return Markdown or explanatory text.'
     case 'foundation-document-reviser':
       return 'Complete the assigned staged Markdown revision, call SubmitFoundationRevisionResult exactly once, and end the turn normally.'
     case 'document-author':
