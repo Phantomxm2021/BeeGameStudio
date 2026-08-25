@@ -92,11 +92,11 @@ expect(claimed.tasks.filter(task => task.status === 'running')).toHaveLength(4)
 ```ts
 export function foundationFactOutputTokenLimit(factKeyCount: number): number {
   if (!Number.isInteger(factKeyCount) || factKeyCount < 1) throw new Error('foundation fact key count must be a positive integer')
-  return Math.min(4_096, 512 + 256 * factKeyCount)
+  return Math.min(4_096, 768 + 256 * factKeyCount)
 }
 ```
 
-Output admission measures the final structured business payload rather than provider usage. Use one shared deterministic estimator based on the UTF-8 byte length of the JSON payload divided by two (rounded up, conservatively for multilingual text). For facts the payload is `{ status, results }`; for semantic and deep workers it is `{ status, outcome, issues?, reason? }`. Keep the existing per-task cap constants/formula. Provider `completion_tokens` and total usage are retained for cost observation and must not reject a valid small payload, even when a native session performed structured-output repairs.
+Output admission measures the final structured business payload rather than provider usage. Use one shared deterministic estimator based on the UTF-8 byte length of the JSON payload divided by two (rounded up, conservatively for multilingual text). For facts the payload is `{ status, results }`; for semantic and deep workers it is `{ status, outcome, issues?, reason? }`. Facts use `min(4096, 768 + 256 * factKeyCount)`, preserving the typed/evidence envelope for a one-key result and reaching the hard ceiling at 13 keys; semantic and deep workers retain their existing fixed caps. Provider `completion_tokens` and total usage are retained for cost observation and must not reject a valid small payload, even when a native session performed structured-output repairs.
 
 Add `factKeyCount: number` to `FoundationFactTask`; seed it from `packet.keys.length`, persist it in the state schema, and use it for terminal admission instead of a fixed 512-token comparison.
 
@@ -122,7 +122,7 @@ expect(prompt).toContain('packet is the sole input')
 
 2. Add a session-port test that captures `sendWithDisplay()` and proves both the submitted prompt and display payload omit the Brief for fact and semantic workers.
 
-3. Add output-limit tests for 1, 4, 14, and 15 keys: `768`, `1536`, `4096`, and `4096`.
+3. Add output-limit tests for 1, 4, 13, 14, and 15 keys: `1024`, `1792`, `4096`, `4096`, and `4096`.
 
 4. Add admission tests proving high provider completion usage with a small final payload is accepted, while an oversized final structured payload is rejected for ordinary facts, impacted facts, semantic checks, and deep confirmation.
 

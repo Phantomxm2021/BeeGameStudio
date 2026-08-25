@@ -146,6 +146,41 @@ describe('foundation fact runtime', () => {
     expect(oldPhase.state.tasks[0]?.status).toBe('completed')
   })
 
+  test('admits a one-key typed evidence payload within the calibrated envelope', () => {
+    const claimed = claimFoundationFactTasks(createFoundationFactTaskCollection({
+      revision: 'rev-1',
+      phaseStartedAt: '2026-08-24T00:00:00.000Z',
+      packets: [packet('task-a', 'a'.repeat(64), 1)],
+    }), { dispatchIdFor: () => 'dispatch-a', now: '2026-08-24T00:00:01.000Z' })
+    const terminal = {
+      workerType: 'foundation-fact-extractor' as const,
+      status: 'completed' as const,
+      runId: 'run-1',
+      dispatchId: 'dispatch-a',
+      revision: 'rev-1',
+      taskId: 'task-a',
+      packetDigest: 'a'.repeat(64),
+      results: [{
+        key: 'art.style_constraints',
+        status: 'present',
+        value: Array.from({ length: 15 }, (_, index) => `constraint-${index}-${'x'.repeat(76)}`),
+        evidence: { documentPath: 'docs/Art.md', sectionId: 'style', startLine: 1, endLine: 1, digest: 'a'.repeat(64) },
+      }],
+    }
+    const admitted = admitFoundationFactTerminal(claimed, {
+      taskId: 'task-a',
+      dispatchId: 'dispatch-a',
+      revision: 'rev-1',
+      packetDigest: 'a'.repeat(64),
+      terminal,
+      usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 },
+      durationMs: 10,
+      now: '2026-08-24T00:00:02.000Z',
+    })
+    expect(admitted.accepted).toBe(true)
+    expect(admitted.state.tasks[0]?.status).toBe('completed')
+  })
+
   test('zero-task collection is complete without creating a worker dispatch', () => {
     const state = createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: [] })
     expect(state.tasks).toEqual([])
@@ -153,8 +188,9 @@ describe('foundation fact runtime', () => {
   })
 
   test('derives output limit from assigned fact cardinality with a hard ceiling', () => {
-    expect(foundationFactOutputTokenLimit(1)).toBe(768)
-    expect(foundationFactOutputTokenLimit(4)).toBe(1536)
+    expect(foundationFactOutputTokenLimit(1)).toBe(1024)
+    expect(foundationFactOutputTokenLimit(4)).toBe(1792)
+    expect(foundationFactOutputTokenLimit(13)).toBe(4096)
     expect(foundationFactOutputTokenLimit(14)).toBe(4096)
     expect(foundationFactOutputTokenLimit(15)).toBe(4096)
     expect(() => foundationFactOutputTokenLimit(0)).toThrow(/positive integer/)
