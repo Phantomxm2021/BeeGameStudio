@@ -19,7 +19,6 @@ import { transitionDeliveryRun } from './transition'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type DeliveryRun,
-  type FoundationRevisionState,
 } from './types'
 
 const DIGEST = 'a'.repeat(64)
@@ -46,7 +45,6 @@ function auditState(
       status: 'index_staged',
       catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
       sectionIndexDigest: DIGEST,
-      needsAction: 'foundation fact extraction is not part of Task 4A',
     },
   })
   return parseFoundationAuditState({
@@ -104,7 +102,6 @@ function semanticAuditState(
       status: 'index_staged',
       catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
       sectionIndexDigest: DIGEST,
-      needsAction: 'foundation fact extraction is not part of Task 4A',
     },
   })
   return parseFoundationAuditState({
@@ -200,7 +197,7 @@ function auditReadyState(): FoundationAuditState {
   })
 }
 
-function revisionState(): FoundationRevisionState {
+function revisionState(): FoundationAuditState {
   const reason = 'foundation semantic balanced model is not configured'
   const semanticTask = {
     taskId: 'semantic-recheck-0',
@@ -231,53 +228,77 @@ function revisionState(): FoundationRevisionState {
     stagedPath: foundationRevisionStagePath(REVISION, 'docs/GDD.md'),
     baseDocumentDigest: DIGEST,
   }
-  return {
+  const seed = createFoundationAuditState({
+    revision: REVISION,
+    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: DIGEST })),
+    manifest: {
+      revision: REVISION,
+      status: 'index_staged',
+      catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+      sectionIndexDigest: DIGEST,
+    },
+  })
+  return parseFoundationAuditState({
+    ...seed,
     authority: {
       issueAuthority: { kind: 'review', reviewDigest: DIGEST, issueRegistryDigest: DIGEST },
       derivedDigests: { sectionIndex: DIGEST, factStore: DIGEST, manifest: DIGEST },
       documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: DIGEST })),
     },
-    roundBefore: { documentRevision: 'document-rev', issueRegistryDigest: DIGEST },
+    roundBefore: { documentRevision: 'document-rev', issueRegistryDigest: DIGEST, issueAuthority: { kind: 'review', reviewDigest: DIGEST, issueRegistryDigest: DIGEST } },
     revision: REVISION,
     round: 2,
-    phase: 'semantic_recheck',
-    status: 'needs_action',
+    status: 'semantic_recheck',
     phaseStartedAt: OLD_PHASE,
     knownIssueIds: ['issue-0'],
     issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
     tasks: [semanticTask, documentTask],
-  }
+  })
 }
 
-function validationBoundaryState(): FoundationRevisionState {
+function validationBoundaryState(): FoundationAuditState {
   const state = completedRevisionState()
   return {
     ...state,
-    phase: 'validating',
-    status: 'needs_action',
+    status: 'validating',
   }
 }
 
-function revisionRun(state: FoundationRevisionState): DeliveryRun {
+function revisionRun(state: FoundationAuditState): DeliveryRun {
   return {
     ...createTestDeliveryRun({ projectId: 'transition-retry-revision', ownerId: 'transition-owner' }),
     phase: 'DOCUMENT_REVIEW',
     documentStep: 'FOUNDATION_REVIEW',
     status: 'needs_action',
     blockedReason: 'revision worker needs attention',
-    foundationRevisionState: state,
+    foundationAuditState: state,
   }
 }
 
-function completedRevisionState(): FoundationRevisionState {
+function completedRevisionState(): FoundationAuditState {
   const state = revisionState()
   return {
     ...state,
-    status: 'completed',
     tasks: state.tasks.map(task => {
+      const terminalEvidence = {
+        usage: USAGE,
+        durationMs: 1,
+        dispatch: {
+          dispatchId: `dispatch-${task.taskId}`,
+          workerType: task.kind === 'document-revision' ? 'foundation-document-reviser' as const : 'foundation-semantic-reviewer' as const,
+          phase: 'DOCUMENT_REVIEW' as const,
+          taskId: task.taskId,
+          revision: task.revision,
+          status: 'completed' as const,
+          startedAt: OLD_PHASE,
+          finishedAt: OLD_PHASE,
+          terminalResult: {},
+        },
+      }
       if (task.kind === 'semantic-recheck') {
         return {
           ...task,
+          ...terminalEvidence,
           status: 'completed' as const,
           attempt: 1,
           terminalDigest: DIGEST,
@@ -288,6 +309,7 @@ function completedRevisionState(): FoundationRevisionState {
       if (task.kind !== 'document-revision') throw new Error('completed fixture requires document revisions')
       return {
         ...task,
+        ...terminalEvidence,
         status: 'completed' as const,
         attempt: 1,
         terminalDigest: DIGEST,
@@ -323,37 +345,20 @@ describe('foundation retry transitions', () => {
 
   test('retries only eligible semantic-recheck tasks and preserves revision timing', () => {
     const run = revisionRun(revisionState())
-    const before = run.foundationRevisionState!
+    const before = run.foundationAuditState!
     const retried = transitionDeliveryRun(run, { type: 'retry' })
-    const state = retried.foundationRevisionState!
+    const state = retried.foundationAuditState!
 
     expect(retried.status).toBe('running')
     expect(retried.blockedReason).toBeUndefined()
     expect(state.tasks[0]).toMatchObject({ kind: 'semantic-recheck', status: 'pending' })
     expect(state.tasks[0]?.failureReason).toBeUndefined()
     expect(state.tasks[1]).toEqual(before.tasks[1])
-    expect(state.phase).toBe(before.phase)
+    expect(state.status).toBe(before.status)
     expect(state.round).toBe(before.round)
     expect(state.authority).toEqual(before.authority)
     expect(state.phaseStartedAt).toBe(OLD_PHASE)
 
-    const dualRun: DeliveryRun = {
-      ...createTestDeliveryRun({ projectId: 'transition-retry-dual', ownerId: 'transition-owner' }),
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
-      status: 'needs_action',
-      blockedReason: 'revision worker needs attention',
-      foundationAuditState: auditState({}, false),
-      foundationRevisionState: revisionState(),
-    }
-    const auditBefore = dualRun.foundationAuditState!
-    const dualRetry = transitionDeliveryRun(dualRun, { type: 'retry' })
-    const dualRevision = dualRetry.foundationRevisionState!
-
-    expect(dualRetry.status).toBe('running')
-    expect(dualRetry.foundationAuditState).toEqual(auditBefore)
-    expect(dualRevision.tasks[0]).toMatchObject({ kind: 'semantic-recheck', status: 'pending' })
-    expect(dualRevision.tasks[1]).toMatchObject({ kind: 'document-revision', status: 'needs_action' })
   })
 
   test('re-enters a validating boundary without reviving completed workers', () => {
@@ -363,21 +368,20 @@ describe('foundation retry transitions', () => {
 
     expect(retried.status).toBe('running')
     expect(retried.blockedReason).toBeUndefined()
-    expect(retried.foundationRevisionState).toEqual({ ...before, status: 'running' })
+    expect(retried.foundationAuditState).toEqual(before)
 
     const taskRetry = transitionDeliveryRun(run, {
       type: 'retry',
       taskId: before.tasks[0]!.taskId,
     })
     expect(taskRetry.status).toBe('needs_action')
-    expect(taskRetry.foundationRevisionState).toEqual(before)
+    expect(taskRetry.foundationAuditState).toEqual(before)
   })
 
   test('re-enters a failed planning boundary but never bypasses policy terminal states', () => {
     const planning = {
       ...revisionState(),
-      phase: 'planning' as const,
-      status: 'needs_action' as const,
+      status: 'planning' as const,
       tasks: [],
     }
     const retried = transitionDeliveryRun({
@@ -385,14 +389,14 @@ describe('foundation retry transitions', () => {
       blockedReason: 'foundation revision planning materialization failed: transient store error',
     }, { type: 'retry' })
     expect(retried.status).toBe('running')
-    expect(retried.foundationRevisionState?.status).toBe('running')
+    expect(retried.foundationAuditState?.status).toBe('planning')
 
     const closing = transitionDeliveryRun({
-      ...revisionRun({ ...planning, phase: 'round_closing' }),
+      ...revisionRun({ ...planning, status: 'round_closing' }),
       blockedReason: 'foundation revision round limit',
     }, { type: 'retry' })
     expect(closing.status).toBe('needs_action')
-    expect(closing.foundationRevisionState?.status).toBe('needs_action')
+    expect(closing.foundationAuditState?.status).toBe('round_closing')
   })
 
   test('does not retry ineligible foundation failures', () => {
@@ -443,7 +447,7 @@ describe('foundation retry transitions', () => {
 
     const resultPathState = revisionState()
     const resultPathTask = resultPathState.tasks.find(
-      (task): task is Extract<FoundationRevisionState['tasks'][number], { kind: 'semantic-recheck' }> => task.kind === 'semantic-recheck',
+      (task): task is Extract<FoundationAuditState['tasks'][number], { kind: 'semantic-recheck' }> => task.kind === 'semantic-recheck',
     )!
     resultPathState.tasks = resultPathState.tasks.map(task => task.taskId === resultPathTask.taskId
       ? {
@@ -456,19 +460,23 @@ describe('foundation retry transitions', () => {
         }
       : task)
     const resultPathRun = revisionRun(resultPathState)
-    const resultPathBefore = resultPathRun.foundationRevisionState!.tasks
+    const resultPathBefore = resultPathRun.foundationAuditState!.tasks
     const resultPathRetry = transitionDeliveryRun(resultPathRun, { type: 'retry' })
     expect(resultPathRetry.status).toBe('needs_action')
     expect(resultPathRetry.blockedReason).toBe(resultPathRun.blockedReason)
-    expect(resultPathRetry.foundationRevisionState?.tasks).toEqual(resultPathBefore)
+    expect(resultPathRetry.foundationAuditState?.tasks).toEqual(resultPathBefore)
 
     for (const [label, run] of [
       ['audit_ready', auditRun(auditReadyState())],
-      ['completed revision', revisionRun(completedRevisionState())],
+      ['round-closing revision', revisionRun(completedRevisionState())],
     ] as const) {
       const retried = transitionDeliveryRun(run, { type: 'retry' })
-      expect(retried.status, label).toBe('running')
-      expect(retried.blockedReason, label).toBeUndefined()
+      if (label === 'audit_ready') {
+        expect(retried.status, label).toBe('running')
+        expect(retried.blockedReason, label).toBeUndefined()
+      } else {
+        expect(retried.status, label).toBe('needs_action')
+      }
     }
   })
 })

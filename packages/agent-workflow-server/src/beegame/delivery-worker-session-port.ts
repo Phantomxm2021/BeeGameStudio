@@ -445,16 +445,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 ],
               }
             : {}),
-        ...(request.workerType === 'document-author' &&
-        (request.contract.authoringMode === 'initial' ||
-          request.contract.authoringMode === 'parallel-draft')
-          ? {
-              workflowDocumentAuthorMode:
-                request.contract.authoringMode === 'parallel-draft'
-                  ? ('initial' as const)
-                  : request.contract.authoringMode,
-            }
-          : {}),
         ...(isStreamedFoundationAuthoringTurn(request)
           ? {
               workflowMarkdownStreamContract: {

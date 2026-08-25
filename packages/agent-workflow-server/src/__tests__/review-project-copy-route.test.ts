@@ -90,7 +90,7 @@ async function fixture() {
       name: 'Review copy model',
       provider: 'openai-compatible',
       apiKey: 'test-api-key',
-      models: { balanced: 'test-model' },
+      models: { fast: 'test-fast-model', balanced: 'test-model' },
       isDefault: true,
     }),
   })
@@ -134,16 +134,16 @@ describe('POST /api/projects/:projectId/review-copy', () => {
     expect(payload.project.id).not.toBe(projectId)
     expect(payload.project.root_path).not.toBe(sourceWorkspace)
     expect(payload.phase).toBe('DOCUMENT_REVIEW')
-    expect(workflowWorkerStarts()).toBe(0)
+    expect(workflowWorkerStarts()).toBe(4)
     const copiedStore = createRunStore(payload.project.root_path, ownerId)
     expect(await copiedStore.load()).toMatchObject({
       runId: payload.runId,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       confirmedBriefContext: 'The durable confirmed source brief.',
-      status: 'needs_action',
-      blockedReason: 'foundation audit implementation unavailable',
+      status: 'running',
     })
+    expect((await copiedStore.load())?.blockedReason).toBeUndefined()
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       expect(await readFile(join(payload.project.root_path, path))).toEqual(
         await readFile(join(sourceWorkspace, path)),

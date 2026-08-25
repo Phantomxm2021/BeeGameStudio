@@ -54,19 +54,21 @@ describe('foundation revision impact analysis', () => {
     ])
     expect(result.factKeys).toEqual([
       'asset.boss.count',
+      'asset.covered_level_requirements',
       'asset.inventory_ids',
       'game.boss.count',
       'game.resources',
     ])
     expect(result.contractIds).toEqual([
       'asset-boss-count-authority',
-      'asset-inventory-authority',
+      'asset-level-requirement-coverage',
       'ui-resources-authority',
     ])
     expect(result.checkIds).toEqual([
       'asset-inventory-coverage',
       'balance-resource-coverage',
       'boss-count-consistency',
+      'level-asset-coverage',
       'ui-resource-coverage',
     ])
     expect(result.issueIds).toEqual(['AUD-ASSET', 'AUD-RULES'])

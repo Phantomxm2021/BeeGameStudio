@@ -33,6 +33,7 @@ describe('worker prompts', () => {
     expect(prompt).toContain('one resource loading path')
     expect(prompt).toContain('contract.systemDeliveryContract')
     expect(prompt).toContain('assets/asset-manifest.json')
+    expect(prompt).not.toContain('48,000 UTF-8 bytes')
     expect(prompt).toContain(
       'Canonical artifacts: docs/GDD.md, docs/LEVEL_SCENE_DESIGN.md, docs/BALANCE_DESIGN.md, docs/TECHNICAL_DESIGN.md',
     )
@@ -82,7 +83,9 @@ describe('worker prompts', () => {
           packetDigest: 'a'.repeat(64),
           packet: {
             revision: 'revision',
-            keys: ['GDD.player_loop'],
+            keys: workerType === 'foundation-fact-extractor'
+              ? ['asset.covered_level_requirements']
+              : ['GDD.player_loop'],
             sections: [],
             packetDigest: 'a'.repeat(64),
           },
@@ -99,17 +102,48 @@ describe('worker prompts', () => {
       expect(prompt).not.toContain('native tools, reasoning')
       expect(prompt).toContain('packet is the sole input')
       expect(prompt).toContain('Immutable packet contract')
-      expect(prompt).toContain('GDD.player_loop')
       if (workerType === 'foundation-fact-extractor') {
+        expect(prompt).toContain('asset.covered_level_requirements')
         expect(prompt).toContain('present requires key, status, and value; omit evidence and reason')
         expect(prompt).toContain('Absent requires only key and status and must omit value, evidence, and reason')
         expect(prompt).toContain('Uncertain requires key, status, and reason; omit evidence and value')
         expect(prompt).toContain('service binds immutable provenance')
+        expect(prompt).toContain('left side of an explicit AssetPlan inventory mapping table')
+        expect(prompt).toContain('never copy, transform, or infer values from asset.inventory_ids')
       } else {
+        expect(prompt).toContain('GDD.player_loop')
         expect(prompt).toContain('PASS omits issues and reason')
         expect(prompt).toContain('ISSUES includes a non-empty issues array and omits reason')
         expect(prompt).toContain('UNDECIDABLE includes reason and omits issues')
       }
     }
+  })
+
+  test('passes shared resource label rules to fact workers', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'foundation-fact-extractor',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      allowedPaths: [],
+      contract: {
+        workerType: 'foundation-fact-extractor',
+        taskId: 'task',
+        packetDigest: 'a'.repeat(64),
+        packet: {
+          revision: 'revision',
+          keys: ['game.resources', 'ui.displayed_resources'],
+          sections: [],
+          packetDigest: 'a'.repeat(64),
+        },
+        modelTier: 'fast',
+      },
+    })
+    expect(prompt).toContain('same canonical short labels')
+    expect(prompt).toContain('parenthetical English aliases')
+    expect(prompt).toContain('health pool')
   })
 })

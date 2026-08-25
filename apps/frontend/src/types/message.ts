@@ -63,6 +63,8 @@ export interface WorkflowCardTask {
   }
   durationMs?: number
   failureReason?: string
+  failureCode?: string
+  diagnosticId?: string
 }
 
 export type WorkflowCardSubstage =
@@ -98,6 +100,8 @@ export interface WorkflowCardStageSnapshot {
   activeSince?: string
   block?: {
     message: string
+    code?: string
+    diagnosticId?: string
     nextAction?: string
   }
 }
@@ -153,6 +157,8 @@ export interface WorkflowCardPayload {
   lastProvenItemId?: string
   block?: {
     message: string
+    code?: string
+    diagnosticId?: string
     nextAction?: string
   }
   usage?: TokenUsage

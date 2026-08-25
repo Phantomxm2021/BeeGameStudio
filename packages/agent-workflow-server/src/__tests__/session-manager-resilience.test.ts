@@ -707,7 +707,6 @@ describe('BeeGame session runtime resilience', () => {
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
       workflowWorkerType: 'document-author',
-      workflowDocumentAuthorMode: 'initial',
       workflowAllowedPaths: ['docs/GDD.md'],
     })
 
@@ -1058,7 +1057,6 @@ describe('BeeGame session runtime resilience', () => {
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
       workflowWorkerType: 'document-author',
-      workflowDocumentAuthorMode: 'remediation',
       workflowAllowedPaths: ['docs/GDD.md'],
     })
 
@@ -1151,7 +1149,6 @@ describe('BeeGame session runtime resilience', () => {
       workflowRunId: 'run-1',
       workflowDispatchId: 'dispatch-1',
       workflowWorkerType: 'document-author',
-      workflowDocumentAuthorMode: 'remediation',
       workflowAllowedPaths: ['docs/GDD.md', 'assets/content/'],
     })
 

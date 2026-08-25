@@ -91,6 +91,51 @@ describe('displayModels', () => {
     ).toBeUndefined()
   })
 
+  it('keeps the bounded workflow reason projection and drops raw reason fields', () => {
+    const display = toProjectRuntimeDisplayModel({
+      project_id: 'project-reason',
+      blocked: true,
+      blocked_reason: 'Workflow provider failed.',
+      blocked_reason_code: 'provider_failed',
+      blocked_reason_diagnostic_id: 'workflow-abc123def456',
+      workflow: {
+        runId: 'run-reason',
+        status: 'failed',
+        block: {
+          message: 'Workflow provider failed.',
+          code: 'provider_failed',
+          diagnosticId: 'workflow-abc123def456',
+        },
+        tasks: [
+          {
+            id: 'task-provider',
+            title: 'Provider task',
+            status: 'failed',
+            failureReason: 'provider secret: raw internal detail',
+          },
+        ],
+        failureReason: 'provider secret: raw internal detail',
+        blockedReason: 'provider secret: raw internal detail',
+      },
+    })
+
+    expect(display).toMatchObject({
+      blocked_reason: 'Workflow provider failed.',
+      blocked_reason_code: 'provider_failed',
+      blocked_reason_diagnostic_id: 'workflow-abc123def456',
+      workflow: {
+        block: {
+          message: 'Workflow provider failed.',
+          code: 'provider_failed',
+          diagnosticId: 'workflow-abc123def456',
+        },
+      },
+    })
+    expect(display?.workflow).not.toHaveProperty('failureReason')
+    expect(display?.workflow).not.toHaveProperty('blockedReason')
+    expect(display?.workflow?.tasks?.[0]).not.toHaveProperty('failureReason')
+  })
+
   it('preserves a stopped workflow task without converting it to failure', () => {
     expect(
       toProjectRuntimeDisplayModel({

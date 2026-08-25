@@ -8,10 +8,9 @@ import {
   type ResourceProductionTask,
   type DocumentWorkflowStep,
 } from './types'
-import type { FoundationAuditState } from './foundation-audit-state'
-import type { FoundationRevisionState, FoundationRevisionTask, WorkflowUsage } from './types'
-import type { FoundationIssueSummary } from './foundation-audit-state'
-import { isActiveFoundationRevisionState } from './display-progress'
+import type { FoundationAuditState, FoundationIssueSummary, FoundationRevisionTask } from './foundation-audit-state'
+import type { WorkflowUsage } from './types'
+import { isActiveFoundationRepairState } from './display-progress'
 
 export type DocumentDisplayTask = {
   id: string
@@ -48,7 +47,6 @@ export type DocumentDisplayTaskInput = {
   workflowStatus?: string
   thinking?: string
   foundationAuditState?: FoundationAuditState
-  foundationRevisionState?: FoundationRevisionState
 }
 
 const auditTaskTitles = {
@@ -83,7 +81,7 @@ function projectFoundationAuditTasks(
   const semanticActive = state.status === 'semantic_review'
   const issueActive = semanticActive && semanticCompleted
   const auditReady = state.status === 'audit_ready'
-  const knownIssueCount = input.foundationRevisionState?.knownIssueIds?.length ?? state.review?.knownIssueIds?.length
+  const knownIssueCount = state.knownIssueIds?.length ?? state.review?.knownIssueIds?.length
   const factDisplayTasks = factTasks.map(task => projectFoundationAuditTask({
     task,
     title: `事实提取 · ${task.taskId}`,
@@ -171,9 +169,9 @@ function projectFoundationAuditTask(input: {
 function projectFoundationRevisionTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
-  const state = input.foundationRevisionState
+  const state = input.foundationAuditState
   if (!state) return []
-  return state.tasks.map(task => {
+  return state.tasks.filter((task): task is FoundationRevisionTask => task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck').map(task => {
     const status = revisionTaskDisplayStatus(task, input.workflowStatus)
     const base = {
       id: task.kind === 'document-revision' ? `revision:${task.documentPath}` : task.taskId || `${task.kind}:${task.kind === 'semantic-recheck' ? task.issueId : 'unknown'}`,
@@ -217,7 +215,7 @@ export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
   if (input.documentStep === 'FOUNDATION_REVIEW')
-    return isActiveFoundationRevisionState(input.foundationRevisionState)
+    return isActiveFoundationRepairState(input.foundationAuditState)
       ? projectFoundationRevisionTasks(input)
       : projectFoundationAuditTasks(input)
   const workspace = resolve(input.workspacePath)

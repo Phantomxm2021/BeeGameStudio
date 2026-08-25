@@ -86,6 +86,8 @@ export interface ProjectRuntimeDisplayModel {
   phase?: string
   blocked?: boolean
   blocked_reason?: string | null
+  blocked_reason_code?: string | null
+  blocked_reason_diagnostic_id?: string | null
   next_action?: string
   acceptance?: ProjectBaselineStatusPayload['acceptance']
   context?: ContextVisibilityPayload
@@ -218,6 +220,11 @@ const normalizeWorkflowTasks = (
       return []
     }
     const operation = trimString(item.operation).toLowerCase()
+    const failureReason = trimString(
+      item.failureReason ?? item.failure_reason,
+    )
+    const failureCode = trimString(item.failureCode ?? item.failure_code)
+    const diagnosticId = trimString(item.diagnosticId ?? item.diagnostic_id)
     return [
       {
         id,
@@ -237,8 +244,9 @@ const normalizeWorkflowTasks = (
         knownIssueCount: finiteNumber(item.knownIssueCount ?? item.known_issue_count),
         usage: normalizeWorkflowUsage(item.usage),
         durationMs: finiteNumber(item.durationMs ?? item.duration_ms),
-        failureReason:
-          trimString(item.failureReason ?? item.failure_reason) || undefined,
+        ...(failureReason && failureCode && diagnosticId
+          ? { failureReason, failureCode, diagnosticId }
+          : {}),
       },
     ]
   })
@@ -260,6 +268,12 @@ const normalizeWorkflowBlock = (
       : undefined
   return {
     message,
+    ...(trimString(block.code) ? { code: trimString(block.code) } : {}),
+    ...(trimString(block.diagnosticId ?? block.diagnostic_id)
+      ? {
+          diagnosticId: trimString(block.diagnosticId ?? block.diagnostic_id),
+        }
+      : {}),
     nextAction,
   }
 }
@@ -400,12 +414,6 @@ const normalizeWorkflowDisplay = (
   const fields = normalizeWorkflowCardFields(source)
   if (!runId || !fields) return undefined
 
-  const failureReason = trimString(
-    source.failureReason ??
-      source.failure_reason ??
-      source.blockedReason ??
-      source.blocked_reason,
-  )
   const nextActionValue = trimString(source.nextAction ?? source.next_action)
   const recoverable = source.recoverable === true
   const recoveryUnitKind = trimString(
@@ -449,10 +457,7 @@ const normalizeWorkflowDisplay = (
       trimString(source.lastProvenItemId ?? source.last_proven_item_id)
         ? trimString(source.lastProvenItemId ?? source.last_proven_item_id)
         : undefined,
-    block:
-      fields.block || failureReason
-        ? (fields.block ?? { message: failureReason })
-        : undefined,
+    block: fields.block,
     usage:
       source.usage && typeof source.usage === 'object'
         ? (source.usage as WorkflowCardPayload['usage'])
@@ -588,6 +593,10 @@ export const toProjectRuntimeDisplayModel = (
     phase: trimString(normalizedPayload.phase) || undefined,
     blocked: Boolean(normalizedPayload.blocked),
     blocked_reason: normalizedPayload.blocked_reason ?? null,
+    blocked_reason_code:
+      trimString(normalizedPayload.blocked_reason_code) || undefined,
+    blocked_reason_diagnostic_id:
+      trimString(normalizedPayload.blocked_reason_diagnostic_id) || undefined,
     next_action: trimString(normalizedPayload.next_action) || undefined,
     acceptance: normalizedPayload.acceptance,
     context: normalizedPayload.context

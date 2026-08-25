@@ -1,4 +1,12 @@
-import type { FoundationAuditState, FoundationIssueSummary } from './foundation-audit-state'
+import type { FoundationAuditState } from './foundation-audit-state'
+export type {
+  FoundationAuditState,
+  FoundationRevisionDocumentTask,
+  FoundationRevisionImpactedFactsTask,
+  FoundationRevisionRound,
+  FoundationRevisionSemanticRecheckTask,
+  FoundationRevisionTask,
+} from './foundation-audit-state'
 
 export const CANONICAL_PROJECT_DOCUMENTS = [
   'docs/GDD.md',
@@ -60,121 +68,6 @@ export type FoundationDraftState = {
   completedPaths: FoundationDocumentPath[]
   /** Per-document state exists only for the parallel downstream authoring batch. */
   documents?: FoundationDocumentCheckpoint[]
-}
-
-export type FoundationRevisionRound = 1 | 2 | 3
-
-export type FoundationRevisionTaskStatus =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'retryable'
-  | 'needs_action'
-
-export type FoundationRevisionPhase =
-  | 'planning'
-  | 'revising'
-  | 'rebuilding_facts'
-  | 'validating'
-  | 'semantic_recheck'
-  | 'publishing'
-  | 'round_closing'
-
-export type FoundationRevisionAuthority = {
-  issueAuthority:
-    | { kind: 'review'; reviewDigest: string; issueRegistryDigest: string }
-    | { kind: 'publication'; baseRevision: string; authorityDigest: string; issueRegistryDigest: string }
-  derivedDigests: {
-    sectionIndex: string
-    factStore: string
-    manifest: string
-  }
-  documentDigests: Array<{ path: FoundationDocumentPath; digest: string }>
-}
-
-export type FoundationRevisionTaskReceipt = {
-  taskId: string
-  round: FoundationRevisionRound
-  documentPath: FoundationDocumentPath
-  issueIds: string[]
-  baseDocumentDigest: string
-  stagedDocumentDigest: string
-  changedSectionIds: string[]
-  stagedPath: string
-  terminalDigest: string
-}
-
-export type FoundationRevisionTaskCommon = {
-  taskId: string
-  kind: 'document-revision' | 'impacted-facts' | 'semantic-recheck'
-  revision: string
-  round: FoundationRevisionRound
-  packetPath: string
-  packetDigest: string
-  attempt: number
-  status: FoundationRevisionTaskStatus
-  dispatch?: DispatchRecord
-  terminalDigest?: string
-  usage?: WorkflowUsage
-  durationMs?: number
-  failureReason?: string
-}
-
-export type FoundationRevisionDocumentTask = FoundationRevisionTaskCommon & {
-  kind: 'document-revision'
-  documentPath: FoundationDocumentPath
-  issueIds: string[]
-  sectionIds: string[]
-  stagedPath: string
-  baseDocumentDigest: string
-  receipt?: FoundationRevisionTaskReceipt
-}
-
-export type FoundationRevisionImpactedFactsTask = FoundationRevisionTaskCommon & {
-  kind: 'impacted-facts'
-  modelTier: 'fast'
-  receiptPath?: string
-  receiptDigest?: string
-}
-
-export type FoundationRevisionSemanticRecheckTask = FoundationRevisionTaskCommon & {
-  kind: 'semantic-recheck'
-  issueId: string
-  modelTier: 'fast' | 'balanced' | 'strong'
-  resultPath?: string
-  resultDigest?: string
-}
-
-export type FoundationRevisionPublicationBinding = {
-  preparedPath: string
-  journalPath: string
-  committedPath: string
-  authorityDigest: string
-  resultingRevision: string
-  resultingIssueRegistryDigest: string
-}
-
-export type FoundationRevisionTask =
-  | FoundationRevisionDocumentTask
-  | FoundationRevisionImpactedFactsTask
-  | FoundationRevisionSemanticRecheckTask
-
-export type FoundationRevisionState = {
-  authority: FoundationRevisionAuthority
-  roundBefore: {
-    documentRevision: string
-    issueRegistryDigest: string
-  }
-  revision: string
-  round: FoundationRevisionRound
-  phase: FoundationRevisionPhase
-  status: 'running' | 'completed' | 'needs_action'
-  phaseStartedAt: string
-  knownIssueIds: string[]
-  /** Compact projection of the committed Issue Registry; raw issues remain artifact-only. */
-  issueSummary: FoundationIssueSummary
-  tasks: FoundationRevisionTask[]
-  publication?: FoundationRevisionPublicationBinding
 }
 
 export const CANONICAL_DOCUMENT_ARTIFACTS = [
@@ -257,7 +150,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 40 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 42 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -441,7 +334,6 @@ export type DeliveryRun = {
   foundationDraftState: FoundationDraftState
   /** Deterministic post-authoring Section Index + Fact Store binding. */
   foundationAuditState?: FoundationAuditState
-  foundationRevisionState?: FoundationRevisionState
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
   usage?: WorkflowUsage

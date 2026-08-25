@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  FOUNDATION_FACT_MAX_TASKS,
   admitFoundationFactTerminal,
   claimFoundationFactTasks,
   createFoundationFactTaskCollection,
@@ -194,11 +193,11 @@ describe('foundation fact runtime', () => {
     })).toThrow(/positive integer/)
   })
 
-  test('derives the closed catalog task cap and rejects one beyond it', () => {
+  test('accepts more packets than the catalog owner-section count while preserving packet identity', () => {
     const packets = (count: number) => Array.from({ length: count }, (_, index) => packet(`task-${index}`, `${index.toString(16).padStart(2, '0')}`.repeat(32)))
-    expect(FOUNDATION_FACT_MAX_TASKS).toBe(19)
-    expect(createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: packets(19) }).tasks).toHaveLength(19)
-    expect(() => createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: packets(20) })).toThrow(/at most 19 tasks/)
+    expect(createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: packets(20) }).tasks).toHaveLength(20)
+    expect(() => createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: [packet('task-a', 'a'.repeat(64)), packet('task-b', 'a'.repeat(64))] })).toThrow(/packet digest.*unique/i)
+    expect(() => createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: [packet('task-a', 'a'.repeat(64)), { ...packet('task-b', 'b'.repeat(64)), revision: 'other-revision' }] })).toThrow(/revision.*stale/i)
   })
 
   test('fast tier routes to the configured provider model and fails closed when absent', () => {

@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
+import {
+  projectWorkflowCurrentMessage,
+  projectWorkflowDisplayReason,
+  sanitizeWorkflowDisplayMessage,
+} from './workflow-display-message'
 
 describe('sanitizeWorkflowDisplayMessage', () => {
   test('keeps human-readable workflow progress', () => {
@@ -26,5 +30,50 @@ describe('sanitizeWorkflowDisplayMessage', () => {
         '资源审计完成。\n```json\n{"status":"completed"}\n```',
       ),
     ).toBe('资源审计完成。')
+  })
+})
+
+describe('projectWorkflowCurrentMessage', () => {
+  test('hides raw reviewer and reviser prose from the foundation review card', () => {
+    expect(projectWorkflowCurrentMessage({ value: 'I have what I need. Now I will rewrite it.', phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe('')
+  })
+
+  test('keeps sanitized progress outside the foundation review boundary', () => {
+    expect(projectWorkflowCurrentMessage({ value: '正在编写验收清单。', phase: 'DOCUMENT_REVIEW', documentStep: 'CHECKLIST_DRAFTING' })).toBe('正在编写验收清单。')
+  })
+})
+
+describe('projectWorkflowDisplayReason', () => {
+  test.each([
+    ['foundation revision round round_limit', 'round_limit'],
+    ['user stopped workflow', 'user_stopped'],
+    [
+      'foundation audit derivation failed: missing document',
+      'derivation_failed',
+    ],
+    ['dispatch failed: worker transport unavailable', 'dispatch_failed'],
+    ['provider request failed: upstream unavailable', 'provider_failed'],
+  ] as const)('projects %s without exposing the internal reason', (reason, code) => {
+    const projection = projectWorkflowDisplayReason(reason)
+
+    expect(projection?.code).toBe(code)
+    expect(projection?.message).toBeTruthy()
+    expect(projection?.message).not.toContain(reason)
+    expect(projection?.diagnosticId).toMatch(/^workflow-[0-9a-f]{12}$/)
+  })
+
+  test('uses a stable diagnostic id for an internal reason', () => {
+    expect(projectWorkflowDisplayReason('provider request failed')).toEqual(
+      projectWorkflowDisplayReason('provider request failed'),
+    )
+  })
+
+  test('preserves an existing diagnostic id without exposing the detail', () => {
+    const projection = projectWorkflowDisplayReason(
+      '当前项目的工作流状态无效。诊断编号：trace-12345678',
+    )
+
+    expect(projection).toMatchObject({ diagnosticId: 'trace-12345678' })
+    expect(projection?.message).not.toContain('trace-12345678')
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseFoundationAuditState } from './foundation-audit-state'
+import { FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT, FOUNDATION_AUDIT_STATE_SCHEMA_VERSION, parseFoundationAuditState } from './foundation-audit-state'
 import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST, FOUNDATION_SEMANTIC_CHECKS } from './foundation-semantic-audit'
 
 describe('foundation semantic audit integration', () => {
@@ -15,8 +15,8 @@ describe('foundation semantic audit integration', () => {
   }))) {
     const digest = 'a'.repeat(64)
     return {
-      schemaVersion: 6 as const,
-      schemaFingerprint: 'foundation-audit-state-v6' as const,
+      schemaVersion: FOUNDATION_AUDIT_STATE_SCHEMA_VERSION,
+      schemaFingerprint: FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT,
       status: 'semantic_review' as const,
       revision: 'rev',
       documentDigests: Object.fromEntries([
@@ -38,7 +38,7 @@ describe('foundation semantic audit integration', () => {
         reviewDigest: digest, issueRegistryPath: '.beegame/audit/foundation/rev/staging/review/x/issue-registry.json', issueRegistryDigest: digest,
         manifestPath: '.beegame/audit/foundation/rev/staging/review/x/manifest.json', manifestDigest: digest,
         markerPath: '.beegame/audit/foundation/rev/staging/review/x/COMMITTED.json', markerDigest: digest,
-        catalogVersion: 'foundation-facts.v1', contractGraphDigest: digest, sectionIndexDigest: digest, factStoreDigest: digest,
+        catalogVersion: 'foundation-facts.v2', contractGraphDigest: digest, sectionIndexDigest: digest, factStoreDigest: digest,
       },
       semantic: { aggregateUsage: { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 } },
     }
@@ -47,8 +47,8 @@ describe('foundation semantic audit integration', () => {
   test('persists semantic tasks in the sole foundation audit state', () => {
     const digest = 'a'.repeat(64)
     const state = parseFoundationAuditState({
-      schemaVersion: 6,
-      schemaFingerprint: 'foundation-audit-state-v6',
+      schemaVersion: FOUNDATION_AUDIT_STATE_SCHEMA_VERSION,
+      schemaFingerprint: FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT,
       status: 'semantic_review',
       revision: 'rev',
       documentDigests: Object.fromEntries([
@@ -74,7 +74,7 @@ describe('foundation semantic audit integration', () => {
         reviewDigest: digest, issueRegistryPath: '.beegame/audit/foundation/rev/staging/review/x/issue-registry.json', issueRegistryDigest: digest,
         manifestPath: '.beegame/audit/foundation/rev/staging/review/x/manifest.json', manifestDigest: digest,
         markerPath: '.beegame/audit/foundation/rev/staging/review/x/COMMITTED.json', markerDigest: digest,
-        catalogVersion: 'foundation-facts.v1', contractGraphDigest: digest, sectionIndexDigest: digest, factStoreDigest: digest,
+        catalogVersion: 'foundation-facts.v2', contractGraphDigest: digest, sectionIndexDigest: digest, factStoreDigest: digest,
       },
       semantic: {
         aggregateUsage: { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 },

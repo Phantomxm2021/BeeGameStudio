@@ -265,7 +265,6 @@ export type BeeGameSessionRunnerStartInput = {
   workflowReadOnlyPaths?: string[]
   /** Native structured-output authority for workers that must return JSON. */
   workflowJsonSchema?: Record<string, unknown>
-  workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
@@ -401,7 +400,6 @@ type SessionRecord = {
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
-  workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
   atomicTaskPlannerEvidenceWriteGranted?: boolean
@@ -637,7 +635,6 @@ export type StartBeeGameSessionInput = {
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
-  workflowDocumentAuthorMode?: 'initial' | 'remediation'
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
 }
@@ -793,9 +790,6 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowJsonSchema
         ? { workflowJsonSchema: structuredClone(input.workflowJsonSchema) }
-        : {}),
-      ...(input.workflowDocumentAuthorMode
-        ? { workflowDocumentAuthorMode: input.workflowDocumentAuthorMode }
         : {}),
       ...(input.workflowResourceContentCommitContract
         ? {
@@ -1528,11 +1522,6 @@ export class BeeGameSessionManager {
             : {}),
           ...(record.workflowJsonSchema
             ? { workflowJsonSchema: structuredClone(record.workflowJsonSchema) }
-            : {}),
-          ...(record.workflowDocumentAuthorMode
-            ? {
-                workflowDocumentAuthorMode: record.workflowDocumentAuthorMode,
-              }
             : {}),
           ...(record.workflowResourceContentCommitContract
             ? {

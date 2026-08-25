@@ -93,19 +93,14 @@ describe('workflow display tasks', () => {
       documentStep: 'FOUNDATION_REVIEW',
       workflowStatus: 'running',
       thinking: 'working',
-      foundationRevisionState: {
-        phase: 'revising',
-        status: 'running',
+      foundationAuditState: {
+        status: 'revising',
         tasks: [
           { kind: 'document-revision', documentPath: 'docs/GDD.md', status: 'completed', attempt: 2 },
           { kind: 'document-revision', documentPath: 'docs/ART_DIRECTION.md', status: 'needs_action', attempt: 1, failureReason: 'blocked' },
           { kind: 'document-revision', documentPath: 'docs/AUDIO_DESIGN.md', status: 'pending', attempt: 0 },
           { kind: 'impacted-facts', status: 'completed', attempt: 1 },
         ],
-      } as never,
-      foundationAuditState: {
-        status: 'audit_ready',
-        tasks: [],
       } as never,
     })
 
@@ -130,13 +125,11 @@ describe('workflow display tasks', () => {
       documentStep: 'FOUNDATION_REVIEW',
       workflowStatus: 'needs_action',
       foundationAuditState: {
-        status: 'audit_ready',
-        tasks: [{ kind: 'document-facts', taskId: 'facts:gdd', status: 'completed', attempt: 1 }],
-      } as never,
-      foundationRevisionState: {
-        phase: 'revising',
-        status: 'needs_action',
-        tasks: [{ kind: 'document-revision', documentPath: 'docs/GDD.md', status: 'needs_action', attempt: 1 }],
+        status: 'revising',
+        tasks: [
+          { kind: 'document-facts', taskId: 'facts:gdd', status: 'completed', attempt: 1 },
+          { kind: 'document-revision', documentPath: 'docs/GDD.md', status: 'needs_action', attempt: 1 },
+        ],
       } as never,
     })
 
@@ -165,7 +158,7 @@ describe('workflow display tasks', () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
       documentStep: 'CHECKLIST_DRAFTING',
-      foundationRevisionState: { tasks: [] } as never,
+      foundationAuditState: { status: 'audit_ready', tasks: [] } as never,
     })
 
     expect(tasks.map(task => task.title)).toEqual([
@@ -183,13 +176,6 @@ describe('workflow display tasks', () => {
         status: 'audit_ready',
         review: { issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 }, knownIssueIds: ['known-1', 'known-2'] },
         tasks: [{ kind: 'document-facts', taskId: 'facts:gdd', status: 'completed', attempt: 2, usage, durationMs: 321 }],
-      } as never,
-      foundationRevisionState: {
-        phase: 'round_closing',
-        status: 'completed',
-        knownIssueIds: ['known-1', 'known-2'],
-        issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
-        tasks: [{ kind: 'document-revision', documentPath: 'docs/GDD.md', status: 'running', attempt: 1, round: 2, usage, durationMs: 654 }],
       } as never,
     })
     expect(tasks.find(task => task.id === 'facts:gdd')).toMatchObject({ status: 'completed', usage, durationMs: 321 })

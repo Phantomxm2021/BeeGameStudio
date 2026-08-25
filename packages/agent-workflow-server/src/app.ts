@@ -194,7 +194,6 @@ import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delive
 import type {
   DeliveryRun,
   DispatchRecord,
-  FoundationRevisionState,
   ResourceProductionTask,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
@@ -209,7 +208,11 @@ import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
 } from './beegame/delivery-workflow/document-display-tasks'
-import { sanitizeWorkflowDisplayMessage } from './beegame/delivery-workflow/workflow-display-message'
+import {
+  projectWorkflowCurrentMessage,
+  projectWorkflowDisplayReason,
+  sanitizeWorkflowDisplayMessage,
+} from './beegame/delivery-workflow/workflow-display-message'
 import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
 
 type JsonObject = Record<string, unknown>
@@ -5309,9 +5312,11 @@ async function getBeeGameProjectRuntimeState(input: {
       ...idle,
       phase: workflowRuntime.phase,
       blocked: isWorkflowTerminalFailure(workflow),
-      blocked_reason: isWorkflowTerminalFailure(workflow)
-        ? workflowBlockedReason(workflow)
-        : null,
+      ...projectRuntimeBlockedReasonFields(
+        isWorkflowTerminalFailure(workflow)
+          ? workflowDisplayReason(workflow)
+          : undefined,
+      ),
       active_agents: workflowRuntime.activeAgents,
       updated_at: workflowRuntime.updatedAt,
       next_action: workflowRuntime.nextAction,
@@ -5406,6 +5411,13 @@ async function getBeeGameProjectRuntimeState(input: {
       ...workflowUsage,
     }
   }
+  const workflowReason = isWorkflowTerminalFailure(workflowSnapshot)
+    ? workflowDisplayReason(workflowSnapshot)
+    : undefined
+  const runtimeFailureReason =
+    runtime.agentStatus === 'failed'
+      ? projectWorkflowDisplayReason(runtime.nextAction)
+      : undefined
   return {
     project_id: input.project.id,
     phase: runtime.phase,
@@ -5413,12 +5425,11 @@ async function getBeeGameProjectRuntimeState(input: {
       pending.length > 0 ||
       runtime.agentStatus === 'failed' ||
       isWorkflowTerminalFailure(workflowSnapshot),
-    blocked_reason:
-      (isWorkflowTerminalFailure(workflowSnapshot)
-        ? workflowBlockedReason(workflowSnapshot)
-        : null) ??
-      pending[0]?.text ??
-      (runtime.agentStatus === 'failed' ? runtime.nextAction : null),
+    ...(workflowReason
+      ? projectRuntimeBlockedReasonFields(workflowReason)
+      : runtimeFailureReason
+        ? projectRuntimeBlockedReasonFields(runtimeFailureReason)
+        : { blocked_reason: pending[0]?.text ?? null }),
     active_agents: runtime.activeAgents,
     updated_at: runtime.updatedAt,
     next_action: runtime.nextAction,
@@ -5572,6 +5583,41 @@ function workflowBlockedReason(workflow: JsonObject | null): string | null {
   return normalized || null
 }
 
+function workflowDisplayReason(workflow: JsonObject | null) {
+  return projectWorkflowDisplayReason(workflowBlockedReason(workflow))
+}
+
+function projectRuntimeBlockedReasonFields(
+  reason: ReturnType<typeof projectWorkflowDisplayReason>,
+): JsonObject {
+  return reason
+    ? {
+        blocked_reason: reason.message,
+        blocked_reason_code: reason.code,
+        blocked_reason_diagnostic_id: reason.diagnosticId,
+      }
+    : { blocked_reason: null }
+}
+
+function projectWorkflowDisplayTasks(
+  tasks: readonly JsonObject[],
+): JsonObject[] {
+  return tasks.map(task => {
+    const reason = projectWorkflowDisplayReason(task.failureReason)
+    const { failureReason: _rawFailureReason, ...safeTask } = task
+    return {
+      ...safeTask,
+      ...(reason
+        ? {
+            failureReason: reason.message,
+            failureCode: reason.code,
+            diagnosticId: reason.diagnosticId,
+          }
+        : {}),
+    }
+  })
+}
+
 function isWorkflowTerminalFailure(workflow: JsonObject | null): boolean {
   return ['needs_action', 'blocked', 'failed', 'stopped'].includes(
     workflowStatus(workflow),
@@ -5611,10 +5657,10 @@ function applyWorkflowRuntimeStatus(
     }
   }
   if (isWorkflowTerminalFailure(workflow)) {
+    const reason = workflowDisplayReason(workflow)
     return {
       phase: 'paused',
-      nextAction:
-        workflowBlockedReason(workflow) ?? 'Delivery workflow is blocked',
+      nextAction: reason?.message ?? 'Delivery workflow is blocked',
       updatedAt: String(workflow.updatedAt ?? nativeRuntime.updatedAt),
       activeAgents: [],
       agentStatus: 'failed',
@@ -6003,10 +6049,12 @@ function workflowViewForDisplay(
   const messageKey = workflowMessageKey(workflow)
   const nextAction = workflowNextAction(workflow)
   const tasks = Array.isArray(workflow.tasks) ? workflow.tasks : []
-  const currentMessage =
-    typeof workflow.currentMessage === 'string'
-      ? sanitizeWorkflowDisplayMessage(workflow.currentMessage)
-      : ''
+  const currentMessage = projectWorkflowCurrentMessage({
+    value: workflow.currentMessage,
+    phase: workflow.phase,
+    documentStep: workflow.documentStep,
+  })
+  const blockedReason = workflowDisplayReason(workflow)
   const atomicDisplayTasks = tasks.flatMap(task => {
     if (!isObject(task) || typeof task.id !== 'string') return []
     return [
@@ -6027,7 +6075,7 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_DRAFTING' ||
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
-  const displayTasks =
+  const displayTaskSource =
     documentPhase && workspacePath
       ? projectDocumentDisplayTasks({
           workspacePath,
@@ -6080,9 +6128,6 @@ function workflowViewForDisplay(
           foundationAuditState: isObject(workflow.foundationAuditState)
             ? (workflow.foundationAuditState as FoundationAuditState)
             : undefined,
-          foundationRevisionState: isObject(workflow.foundationRevisionState)
-            ? (workflow.foundationRevisionState as FoundationRevisionState)
-            : undefined,
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({
@@ -6094,6 +6139,9 @@ function workflowViewForDisplay(
             resourceProductionTask: resourceProductionTaskForDisplay(workflow),
           })
         : atomicDisplayTasks
+  const displayTasks = projectWorkflowDisplayTasks(
+    displayTaskSource as JsonObject[],
+  )
   const completedTaskCount = displayTasks.filter(
     task => isObject(task) && task.status === 'completed',
   ).length
@@ -6148,9 +6196,8 @@ function workflowViewForDisplay(
     ...(activeDispatch && Object.keys(activeDispatch).length > 0
       ? { activeDispatch }
       : {}),
-    ...(typeof workflow.blockedReason === 'string' &&
-    workflow.blockedReason.trim()
-      ? { blockedReason: workflow.blockedReason.trim() }
+    ...(blockedReason
+      ? { block: { ...blockedReason, ...(nextAction ? { nextAction } : {}) } }
       : {}),
     ...(typeof workflow.workflowStateError === 'boolean'
       ? { workflowStateError: workflow.workflowStateError }
@@ -6191,9 +6238,6 @@ function workflowViewForDisplay(
     thinking: workflowThinkingStatus(workflow),
     completedTaskCount,
     totalTaskCount: displayTasks.length,
-    ...(workflowBlockedReason(workflow)
-      ? { failureReason: workflowBlockedReason(workflow) }
-      : {}),
     ...(nextAction ? { nextAction } : {}),
     ...(stageSnapshots ? { stageSnapshots } : {}),
   }
@@ -6219,24 +6263,33 @@ function workflowStageSnapshotsForDisplay(
       snapshot.stageId === currentProgress.stageId &&
       snapshot.phaseIndex === currentProgress.phaseIndex
     const taskSource = isLive ? liveTasks : snapshot.tasks
-    const tasks = taskSource.map(task => ({
-      id: task.id,
-      title: task.title,
-      status: task.status,
-      ...(task.operation ? { operation: task.operation } : {}),
-      ...(Number.isFinite(Number(task.attempt))
-        ? { attempt: Number(task.attempt) }
-        : {}),
-      ...(typeof task.failureReason === 'string' && task.failureReason.trim()
-        ? { failureReason: task.failureReason.trim() }
-        : {}),
-    }))
-    const block = snapshot.block
+    const tasks = projectWorkflowDisplayTasks(
+      taskSource.map(task => ({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        ...(task.operation ? { operation: task.operation } : {}),
+        ...(Number.isFinite(Number(task.attempt))
+          ? { attempt: Number(task.attempt) }
+          : {}),
+        ...(typeof task.failureReason === 'string' && task.failureReason.trim()
+          ? { failureReason: task.failureReason.trim() }
+          : {}),
+      })) as JsonObject[],
+    )
+    const blockReason = snapshot.block
+      ? projectWorkflowDisplayReason(snapshot.block.message)
+      : undefined
+    const block = blockReason
       ? {
-          message: sanitizeWorkflowDisplayMessage(snapshot.block.message),
+          ...blockReason,
+          ...(snapshot.block?.code ? { code: snapshot.block.code } : {}),
+          ...(snapshot.block?.diagnosticId
+            ? { diagnosticId: snapshot.block.diagnosticId }
+            : {}),
           ...(isLive &&
-          (snapshot.block.nextAction === 'resume' ||
-            snapshot.block.nextAction === 'retry')
+          (snapshot.block?.nextAction === 'resume' ||
+            snapshot.block?.nextAction === 'retry')
             ? { nextAction: snapshot.block.nextAction }
             : {}),
         }
@@ -6261,7 +6314,8 @@ function workflowStageSnapshotsForDisplay(
         ? { currentItemId: snapshot.currentItemId }
         : {}),
       tasks,
-      completedTaskCount: tasks.filter(task => task.status === 'completed').length,
+      completedTaskCount: tasks.filter(task => task.status === 'completed')
+        .length,
       totalTaskCount: tasks.length,
       createdAt: snapshot.createdAt,
       updatedAt: snapshot.updatedAt,

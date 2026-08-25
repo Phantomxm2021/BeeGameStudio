@@ -1695,7 +1695,7 @@ export async function projectExactResumeRun(input: {
       }
       if (
         (state.status === 'facts_staged' || state.status === 'derived_committed') &&
-        !state.tasks.every(task => task.status === 'completed' && task.receiptPath && task.receiptDigest)
+        !state.tasks.filter(task => task.kind === 'document-facts').every(task => task.status === 'completed' && task.receiptPath && task.receiptDigest)
       )
         recoveryError(
           'recovery_checkpoint_missing',

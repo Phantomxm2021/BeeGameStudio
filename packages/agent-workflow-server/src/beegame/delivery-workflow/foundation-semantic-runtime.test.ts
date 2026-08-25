@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   FOUNDATION_SEMANTIC_MAX_RUNNING,
-  FOUNDATION_SEMANTIC_MAX_TASKS,
+  FOUNDATION_SEMANTIC_REQUIRED_CHECK_COUNT,
   digestFoundationSemanticTerminal,
   createFoundationSemanticTaskCollection,
   createFoundationConfirmationTask,
@@ -44,6 +44,33 @@ describe('foundation semantic runtime', () => {
   test('rejects a duplicate semantic check in the ten-task seed', () => {
     const duplicate = ten().map((item, index) => index === 1 ? { ...item, checkId: task(0).checkId } : item)
     expect(() => createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: duplicate })).toThrow(/check IDs.*unique/i)
+  })
+
+  test('requires exactly the service-owned manifest checks without treating their count as a complexity cap', () => {
+    const extra = { ...task(0), taskId: 'rev:semantic:extra', checkId: 'SEM.custom_followup' }
+    expect(FOUNDATION_SEMANTIC_REQUIRED_CHECK_COUNT).toBe(10)
+    expect(() => createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: [...ten(), extra] })).toThrow(/service manifest/i)
+    const collection = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: ten() })
+    const completed = collection.tasks.map(item => ({
+      ...item,
+      status: 'completed' as const,
+      terminalDigest: digest,
+      usage: usage(1),
+      durationMs: 1,
+      dispatch: {
+        dispatchId: `dispatch:${item.taskId}`,
+        workerType: 'foundation-semantic-reviewer' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        taskId: item.taskId,
+        revision: item.revision,
+        status: 'completed' as const,
+        startedAt: new Date(0).toISOString(),
+        finishedAt: new Date(1).toISOString(),
+        terminalResult: { workerType: 'foundation-semantic-reviewer' as const, status: 'completed' as const, runId: 'run', dispatchId: `dispatch:${item.taskId}`, taskId: item.taskId, revision: item.revision, packetDigest: item.packetDigest, outcome: 'PASS' as const },
+      },
+    }))
+    expect(foundationSemanticTasksComplete({ ...collection, tasks: completed })).toBe(true)
+    expect(() => createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: ten().slice(1) })).toThrow(/required.*manifest|coverage/i)
   })
 
   test('routes persisted fast and balanced tiers and fails closed when a tier is missing', () => {
@@ -118,7 +145,7 @@ describe('foundation semantic runtime', () => {
   })
 
   test('retains concurrency and per-dispatch accounting without aggregate gates', () => {
-    expect(FOUNDATION_SEMANTIC_MAX_TASKS).toBe(10)
+    expect(FOUNDATION_SEMANTIC_REQUIRED_CHECK_COUNT).toBe(10)
     expect(FOUNDATION_SEMANTIC_MAX_RUNNING).toBe(4)
     expect(foundationSemanticTasksComplete({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), status: 'semantic_review', tasks: [], aggregateUsage: usage(0) })).toBe(false)
     const oldAndExpensive = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: '2020-01-01T00:00:00.000Z', tasks: ten() })

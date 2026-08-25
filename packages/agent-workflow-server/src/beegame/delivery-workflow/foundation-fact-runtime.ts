@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { DispatchRecord, WorkflowUsage } from './types'
-import { FOUNDATION_FACT_CATALOG_OWNER_SECTIONS } from './foundation-fact-definitions'
 
-export const FOUNDATION_FACT_MAX_TASKS = FOUNDATION_FACT_CATALOG_OWNER_SECTIONS.length
 export const FOUNDATION_FACT_MAX_RUNNING = 4
 
 export type FoundationFactTaskStatus =
@@ -118,10 +116,12 @@ export function createFoundationFactTaskCollection(input: {
   packets: readonly Pick<FoundationFactTask, 'taskId' | 'kind' | 'revision' | 'packetDigest' | 'factKeyCount' | 'modelTier' | 'status' | 'attempt'>[]
 }): FoundationFactTaskCollection {
   if (!input.revision.trim()) throw new Error('foundation fact revision is required')
-  if (input.packets.length > FOUNDATION_FACT_MAX_TASKS)
-    throw new Error(`foundation fact extraction has at most ${FOUNDATION_FACT_MAX_TASKS} tasks`)
+  if (input.packets.some(packet => !packet.taskId.trim()))
+    throw new Error('foundation fact task IDs are required')
   if (new Set(input.packets.map(packet => packet.taskId)).size !== input.packets.length)
     throw new Error('foundation fact task IDs must be stable and unique')
+  if (new Set(input.packets.map(packet => packet.packetDigest)).size !== input.packets.length)
+    throw new Error('foundation fact packet digests must be stable and unique')
   const tasks = input.packets.map(packet => {
     assertDigest(packet.packetDigest, 'foundation fact packet digest')
     if (!Number.isInteger(packet.factKeyCount) || packet.factKeyCount < 1)

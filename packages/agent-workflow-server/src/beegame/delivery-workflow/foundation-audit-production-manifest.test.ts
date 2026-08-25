@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildFoundationSectionIndex } from './foundation-section-index'
 import { extractNormalizedFoundationFacts } from './foundation-fact-extraction'
-import { FOUNDATION_FACT_CATALOG } from './foundation-fact-definitions'
+import { FOUNDATION_FACT_CATALOG, type FoundationFactKey } from './foundation-fact-definitions'
 import { getGameDocumentContract } from './game-document-contracts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import {
@@ -44,16 +44,17 @@ const values: Record<string, string> = {
   'ui.displayed_resources': '[hp, energy]',
   'audio.event_ids': '[boss_spawn, boss_defeated]',
   'asset.inventory_ids': '[player_model, boss_model]',
+  'asset.covered_level_requirements': '[player_model, boss_model]',
   'asset.boss.count': '2',
   'asset.art_constraint_refs': '[low_poly, readable_silhouette]',
   'asset.formats': '[glb, png, wav]',
 }
 
-function fixtureDocuments(): Map<string, string> {
+function fixtureDocuments(overrides: Partial<Record<string, string>> = {}): Map<string, string> {
   const byOwner = new Map<string, string[]>()
   for (const definition of FOUNDATION_FACT_CATALOG) {
     const entries = byOwner.get(`${definition.owner.documentPath}\0${definition.owner.sectionId}`) ?? []
-    entries.push(`${definition.key}: ${values[definition.key]}`)
+    entries.push(`${definition.key}: ${overrides[definition.key] ?? values[definition.key]}`)
     byOwner.set(`${definition.owner.documentPath}\0${definition.owner.sectionId}`, entries)
   }
   return new Map(CANONICAL_FOUNDATION_DOCUMENTS.map(path => {
@@ -70,11 +71,18 @@ function fixtureDocuments(): Map<string, string> {
 describe('service-owned deterministic production audit', () => {
   test('exposes exactly one closed, versioned manifest with catalog-grounded declarations', () => {
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.version).toBe('foundation-deterministic.v1')
-    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion).toBe('foundation-facts.v1')
-    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).toHaveLength(24)
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion).toBe('foundation-facts.v2')
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).toHaveLength(25)
     expect('rules' in FOUNDATION_AUDIT_PRODUCTION_MANIFEST).toBe(false)
-    expect(new Set(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).size).toBe(24)
+    expect(new Set(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).size).toBe(25)
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts.map(item => item.id)).toContain('asset-boss-count-authority')
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts.map(item => item.id)).not.toContain('asset-art-constraints-authority')
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.deferredSemanticKeys).toEqual([
+      'technical.target_fps',
+      'level.complexity_budget',
+      'asset.art_constraint_refs',
+    ])
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest).toBe('2eb15f222f4c51784915041bb9b8483ae2ce49129d9a629291c15904e177f7bc')
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts).toBe(FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS)
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts).toEqual(FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS)
     expect(Object.isFrozen(FOUNDATION_AUDIT_PRODUCTION_MANIFEST)).toBe(true)
@@ -84,9 +92,54 @@ describe('service-owned deterministic production audit', () => {
     const documents = fixtureDocuments()
     const sectionIndex = buildFoundationSectionIndex({ documents })
     const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: [] })
-    expect(issues).toHaveLength(24)
-    expect(issues.filter(issue => issue.type === 'schema')).toHaveLength(24)
+    expect(issues).toHaveLength(22)
+    expect(issues.filter(issue => issue.type === 'schema')).toHaveLength(22)
     expect(issues.filter(issue => issue.type === 'contract')).toHaveLength(0)
+  })
+
+  test('defers absent performance facts to semantic review while retaining non-deferred schema blockers', () => {
+    const documents = fixtureDocuments({ 'asset.boss.count': '3' })
+    const sectionIndex = buildFoundationSectionIndex({ documents })
+    const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex })
+    const withoutDeferred = extraction.facts.filter(fact =>
+      !['technical.target_fps', 'level.complexity_budget'].includes(fact.key),
+    )
+    const deferredIssues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: withoutDeferred })
+    expect(deferredIssues).toEqual([])
+
+    const withoutAnyDeferred = extraction.facts.filter(fact =>
+      !FOUNDATION_AUDIT_PRODUCTION_MANIFEST.deferredSemanticKeys.includes(fact.key as FoundationFactKey),
+    )
+    expect(runProductionDeterministicFoundationAudit({ sectionIndex, factStore: withoutAnyDeferred })).toEqual([])
+
+    const withoutRequired = withoutDeferred.filter(fact => fact.key !== 'game.platform')
+    const requiredIssues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: withoutRequired })
+    expect(requiredIssues.filter(issue => issue.type === 'schema')).toHaveLength(1)
+    expect(requiredIssues[0]?.actual).toBe('missing fact game.platform')
+  })
+
+  test('still validates the catalog value bounds for a present deferred fact', () => {
+    const documents = fixtureDocuments({ 'asset.boss.count': '3' })
+    const sectionIndex = buildFoundationSectionIndex({ documents })
+    const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex })
+    const invalid = extraction.facts.map(fact =>
+      fact.key === 'technical.target_fps' ? { ...fact, value: 0 } : fact,
+    )
+    const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: invalid })
+    expect(issues.filter(issue => issue.type === 'schema')).toHaveLength(1)
+    expect(issues[0]?.actual).toContain('technical.target_fps')
+  })
+
+  test('does not compare art constraint references with visual constraint values', () => {
+    const documents = fixtureDocuments({
+      'asset.boss.count': '3',
+      'art.style_constraints': '[V1, V2]',
+      'asset.art_constraint_refs': '[ART_DIRECTION/VP-1, ART_DIRECTION/AR-1]',
+    })
+    const sectionIndex = buildFoundationSectionIndex({ documents })
+    const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex })
+    const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: extraction.facts })
+    expect(issues.filter(issue => issue.type === 'contract')).toEqual([])
   })
 
   test('runs the real eight-document normalized-fact pipeline without caller rules or a worker', () => {
@@ -104,6 +157,46 @@ describe('service-owned deterministic production audit', () => {
     expect(issues[0]).toMatchObject({
       id: expect.stringMatching(/^AUD-[A-F0-9]{24}$/),
       type: 'contract',
+      fixDocument: 'docs/ASSET_PLAN.md',
+      fixSectionId: 'inventory',
+    })
+  })
+
+  test('compares covered level requirements, not physical inventory IDs', () => {
+    const documents = fixtureDocuments({
+      'level.required_assets': '[网格底板 × 1, 可操控角色 × 1]',
+      'asset.inventory_ids': '[GC-BOARD, GC-HERO]',
+      'asset.covered_level_requirements': '[网格底板 × 1, 可操控角色 × 1]',
+      'asset.boss.count': '3',
+    })
+    const sectionIndex = buildFoundationSectionIndex({ documents })
+    const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex })
+    const issues = runProductionDeterministicFoundationAudit({
+      sectionIndex,
+      factStore: extraction.facts,
+    })
+    expect(issues.filter(issue => issue.type === 'contract')).toEqual([])
+
+    const missingCoverageDocuments = fixtureDocuments({
+      'level.required_assets': '[网格底板 × 1, 可操控角色 × 1]',
+      'asset.inventory_ids': '[GC-BOARD, GC-HERO]',
+      'asset.covered_level_requirements': '[网格底板 × 1]',
+      'asset.boss.count': '3',
+    })
+    const missingCoverageIndex = buildFoundationSectionIndex({ documents: missingCoverageDocuments })
+    const missingCoverageFacts = extractNormalizedFoundationFacts({
+      documents: missingCoverageDocuments,
+      sectionIndex: missingCoverageIndex,
+    })
+    const missingCoverageIssues = runProductionDeterministicFoundationAudit({
+      sectionIndex: missingCoverageIndex,
+      factStore: missingCoverageFacts.facts,
+    })
+    expect(missingCoverageIssues).toHaveLength(1)
+    expect(missingCoverageIssues[0]).toMatchObject({
+      id: expect.stringMatching(/^AUD-[A-F0-9]{24}$/),
+      type: 'contract',
+      severity: 'HIGH',
       fixDocument: 'docs/ASSET_PLAN.md',
       fixSectionId: 'inventory',
     })

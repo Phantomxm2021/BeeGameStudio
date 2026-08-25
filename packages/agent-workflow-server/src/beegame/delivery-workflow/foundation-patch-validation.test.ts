@@ -14,6 +14,7 @@ import {
 import { getGameDocumentContract } from './game-document-contracts'
 import {
   runProductionDeterministicFoundationAudit,
+  runProductionDeterministicFoundationImpactAudit,
   type FoundationAuditProductionManifest,
 } from './foundation-audit-production-manifest'
 import {
@@ -342,6 +343,95 @@ describe('incremental foundation fact rebuilding', () => {
 })
 
 describe('targeted foundation patch validation', () => {
+  test('runs only the selected deterministic contract and does not return unrelated issues', () => {
+    const fixture = productionFixture()
+    const operation: PatchOperation = {
+      kind: 'REPLACE',
+      documentPath: 'docs/UI_UX_SPEC.md',
+      sectionId: 'hud',
+      issueIds: ['issue-1'],
+      beforeDigest: 'c'.repeat(64),
+      afterDigest: 'd'.repeat(64),
+    }
+    const impact = analyzeFoundationImpact([operation])
+
+    expect(impact.contractIds).toEqual(['ui-resources-authority'])
+    expect(runProductionDeterministicFoundationImpactAudit({
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+      impact,
+    })).toEqual([])
+
+    const uiResources = fixture.factStore.find(item => item.key === 'ui.displayed_resources')!
+    uiResources.value = ['unrelated-to-game']
+    const issues = runProductionDeterministicFoundationImpactAudit({
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+      impact,
+    })
+    const fullIssuesAfterMutation = runProductionDeterministicFoundationAudit({
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+    })
+    const expectedImpactedIssue = fullIssuesAfterMutation.find(issue => issue.type === 'contract' && issue.source.sectionId === 'hud')!
+    expect(issues).toHaveLength(1)
+    expect(issues[0]?.type).toBe('contract')
+    expect(issues[0]?.id).toBe(expectedImpactedIssue.id)
+    expect(issues.map(issue => issue.id)).not.toContain(fixture.postIssues.find(issue => issue.type === 'contract' && issue.target?.sectionId === 'rules_systems')?.id)
+  })
+
+  test('rejects unknown impact identities before evaluating deterministic checks', () => {
+    const fixture = productionFixture()
+    const impact = analyzeFoundationImpact([{
+      kind: 'REPLACE',
+      documentPath: 'docs/UI_UX_SPEC.md',
+      sectionId: 'hud',
+      issueIds: ['issue-1'],
+      beforeDigest: 'c'.repeat(64),
+      afterDigest: 'd'.repeat(64),
+    }])
+
+    expect(() => runProductionDeterministicFoundationImpactAudit({
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+      impact: { ...impact, contractIds: ['unknown-contract'] },
+    })).toThrow(/unknown|contract|impact/i)
+    expect(() => runProductionDeterministicFoundationImpactAudit({
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+      impact: { ...impact, factKeys: ['unknown.fact'] as never },
+    })).toThrow(/unknown|fact|impact/i)
+    expect(() => runProductionDeterministicFoundationImpactAudit({
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+      impact: { ...impact, checkIds: ['unknown-check'] },
+    })).toThrow(/unknown|check|impact/i)
+  })
+
+  test('scopes schema and value checks to impacted fact keys', () => {
+    const fixture = productionFixture()
+    const impact = analyzeFoundationImpact([{
+      kind: 'REPLACE',
+      documentPath: 'docs/GDD.md',
+      sectionId: 'vision',
+      issueIds: ['issue-1'],
+      beforeDigest: 'c'.repeat(64),
+      afterDigest: 'd'.repeat(64),
+    }])
+    fixture.factStore.find(item => item.key === 'game.players.max')!.value = 65
+    fixture.factStore.find(item => item.key === 'game.boss.count')!.value = 65
+
+    const targeted = runProductionDeterministicFoundationImpactAudit({
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+      impact,
+    })
+    expect(targeted).toHaveLength(1)
+    expect(targeted[0]?.type).toBe('schema')
+    expect(targeted[0]?.actual).toContain('game.players.max')
+    expect(targeted[0]?.actual).not.toContain('game.boss.count')
+  })
+
   test('returns exactly one deterministic PASS/FAIL per original issue and filters new issues by impact', () => {
     const fixture = productionFixture()
     const impactedPostIssue = fixture.postIssues.find(issue => issue.type === 'contract' && issue.target?.sectionId === 'rules_systems')!

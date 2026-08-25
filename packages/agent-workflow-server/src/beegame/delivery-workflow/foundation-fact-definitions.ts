@@ -1,6 +1,6 @@
 import type { FoundationDocumentPath } from './types'
 
-export const FOUNDATION_FACT_CATALOG_VERSION = 'foundation-facts.v1' as const
+export const FOUNDATION_FACT_CATALOG_VERSION = 'foundation-facts.v2' as const
 
 export type FoundationFactKey =
   | 'game.players.max'
@@ -24,6 +24,7 @@ export type FoundationFactKey =
   | 'ui.displayed_resources'
   | 'audio.event_ids'
   | 'asset.inventory_ids'
+  | 'asset.covered_level_requirements'
   | 'asset.boss.count'
   | 'asset.art_constraint_refs'
   | 'asset.formats'
@@ -164,7 +165,7 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     list(
       'game.resources',
       GDDRules,
-      'Read the canonical resource identifiers as a list.',
+      'Read the same canonical short labels used for tracked gameplay resources: include the HUD-tracked currency and health pool. Strip parenthetical English aliases and explanatory text; return only the short labels shared with UI displayed resources.',
       ['ui-resource-coverage', 'balance-resource-coverage'],
     ),
     list(
@@ -212,7 +213,7 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     list(
       'level.required_assets',
       owner('docs/LEVEL_SCENE_DESIGN.md', 'content_matrix'),
-      'Read stable asset identifiers required by the level content matrix.',
+      'Read the natural-language requirement entries or labels authored in the LEVEL content_matrix, preserving the authored labels with surrounding whitespace normalized; never require, convert, or infer physical asset IDs.',
       ['level-asset-coverage'],
     ),
     integer(
@@ -271,7 +272,7 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     list(
       'ui.displayed_resources',
       owner('docs/UI_UX_SPEC.md', 'hud'),
-      'Read stable resources displayed in the HUD.',
+      'Read the same canonical short labels used for tracked gameplay resources: include the HUD-tracked currency and health pool. Strip parenthetical English aliases and explanatory text; return only the short labels shared with GDD game.resources.',
       ['ui-resource-coverage'],
     ),
     list(
@@ -285,6 +286,16 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
       owner('docs/ASSET_PLAN.md', 'inventory'),
       'Read stable asset inventory identifiers.',
       ['asset-inventory-coverage'],
+    ),
+    list(
+      'asset.covered_level_requirements',
+      owner('docs/ASSET_PLAN.md', 'inventory'),
+      'Read only the Level requirement entries or labels on the left side of an explicit AssetPlan inventory mapping table. If that mapping table or its covered rows is absent or unclear, leave this fact absent or uncertain; never copy, transform, or infer values from asset.inventory_ids, filenames, or other physical asset IDs.',
+      ['level-asset-coverage'],
+      {
+        sourceOfTruthDirection:
+          'LEVEL content matrix owns required asset requirements; ASSET_PLAN inventory maps those requirements to physical inventory IDs.',
+      },
     ),
     integer(
       'asset.boss.count',

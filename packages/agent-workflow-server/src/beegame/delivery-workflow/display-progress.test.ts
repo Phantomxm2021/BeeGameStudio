@@ -47,7 +47,7 @@ describe('delivery progress projection', () => {
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        foundationRevisionState: { phase: 'planning', status: 'running' },
+        foundationAuditState: { status: 'planning' },
       }),
     ).toMatchObject({ substage: 'REPAIRING' })
 
@@ -55,7 +55,7 @@ describe('delivery progress projection', () => {
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        foundationRevisionState: { phase: 'revising', status: 'needs_action' },
+        foundationAuditState: { status: 'revising' },
       }),
     ).toMatchObject({ substage: 'REPAIRING' })
   })

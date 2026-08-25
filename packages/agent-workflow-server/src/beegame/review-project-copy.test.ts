@@ -71,12 +71,12 @@ describe('createReviewProjectCopy', () => {
       ownerId: 'owner-1',
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      status: 'needs_action',
-      blockedReason: 'foundation audit implementation unavailable',
+      status: 'running',
       foundationDraftState: {
         completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
       },
     })
+    expect(result.run.blockedReason).toBeUndefined()
     expect(await digests(destination)).toEqual(before)
     expect(await digests(source)).toEqual(before)
     expect((await readdir(join(destination, 'docs'))).sort()).toEqual(

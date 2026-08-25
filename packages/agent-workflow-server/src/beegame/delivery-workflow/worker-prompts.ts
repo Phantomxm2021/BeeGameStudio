@@ -3,9 +3,10 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
+import { foundationFactDefinition } from './foundation-fact-definitions'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
-  'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
+  'Treat each section as the final decision record, not a derivation transcript. Finish every required section and production material within the response; compact repetition rather than omit or truncate required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const packetWorker =
@@ -225,6 +226,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'foundation-fact-extractor':
       return [
         'Extract only the declared fact keys from the exact packet sections. The packet is the sole input; do not read project files, call Read, Grep or Glob, write files, mutate the platform, or emit issues.',
+        ...factExtractionInstructions(request),
         'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed; the service binds immutable provenance from each catalog owner section into the durable terminal. Do not return evidence, section prose, or values not declared by the packet.',
       ].join(' ')
     case 'foundation-semantic-reviewer':
@@ -338,6 +340,18 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'question-answerer':
       return 'Perform the assigned review or analysis as a read-only worker. Do not modify project files.'
   }
+}
+
+function factExtractionInstructions(request: WorkerDispatchRequest): string[] {
+  const packet = request.contract.packet
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet)) return []
+  const keys = (packet as { keys?: unknown }).keys
+  if (!Array.isArray(keys)) return []
+  return keys.flatMap(key => {
+    if (typeof key !== 'string') return []
+    const instruction = foundationFactDefinition(key)?.extractionInstruction
+    return instruction ? [`Fact ${key}: ${instruction}`] : []
+  })
 }
 
 function terminalInstruction(request: WorkerDispatchRequest): string {

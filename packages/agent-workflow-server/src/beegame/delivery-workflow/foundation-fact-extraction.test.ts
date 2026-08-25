@@ -23,7 +23,7 @@ const docs = {
   'docs/ART_DIRECTION.md': `# ART\n<!-- beegame-section:visual_pillars -->\n## Visual Pillars and References\nstyle_constraints: [bold silhouettes, high contrast]\n`,
   'docs/UI_UX_SPEC.md': `# UI\n<!-- beegame-section:input -->\n## Input, Focus and Interaction\nsupported_actions: [move, attack]\n<!-- beegame-section:hud -->\n## HUD and In-Game Information\ndisplayed_resources: [hp, energy]\n`,
   'docs/AUDIO_DESIGN.md': `# AUDIO\n<!-- beegame-section:event_taxonomy -->\n## Event and Cue Taxonomy\nevent_ids: [player.jump, boss.hit]\n`,
-  'docs/ASSET_PLAN.md': `# ASSET\n<!-- beegame-section:inventory -->\n## Asset Inventory and Coverage\ninventory_ids: [player, boss]\nboss.count: 2\n<!-- beegame-section:dependencies -->\n## Asset Dependencies and Constraints\nart_constraint_refs: [style.bold]\n<!-- beegame-section:formats_budgets -->\n## Formats and Budgets\nformats: [png, wav]\n`,
+  'docs/ASSET_PLAN.md': `# ASSET\n<!-- beegame-section:inventory -->\n## Asset Inventory and Coverage\ninventory_ids: [player, boss]\nasset.covered_level_requirements: [player, boss]\nboss.count: 2\n<!-- beegame-section:dependencies -->\n## Asset Dependencies and Constraints\nart_constraint_refs: [style.bold]\n<!-- beegame-section:formats_budgets -->\n## Formats and Budgets\nformats: [png, wav]\n`,
 } as const
 
 function indexDocuments(input: Record<string, string>): SectionRef[] {
@@ -160,6 +160,68 @@ describe('mechanical normalized foundation extraction', () => {
     expect(fact.evidence!.startLine).toBeGreaterThanOrEqual(fact.source.startLine)
     expect(fact.evidence!.endLine).toBeLessThanOrEqual(fact.source.endLine)
     expect(fact.evidence!.digest).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  test('does not derive covered level requirements from physical inventory IDs', () => {
+    const documents = {
+      ...docs,
+      'docs/ASSET_PLAN.md': docs['docs/ASSET_PLAN.md'].replace(
+        'asset.covered_level_requirements: [player, boss]\n',
+        '',
+      ),
+    }
+    const index = indexDocuments(documents)
+    const result = extractNormalizedFoundationFacts({ documents, sectionIndex: index })
+    expect(result.facts.find(fact => fact.key === 'asset.inventory_ids')?.value).toEqual([
+      'player',
+      'boss',
+    ])
+    expect(result.facts.some(fact => fact.key === 'asset.covered_level_requirements')).toBe(false)
+    expect(result.unresolvedKeys).toContain('asset.covered_level_requirements')
+  })
+
+  test('preserves natural-language level requirement labels while normalizing whitespace', () => {
+    const documents = {
+      ...docs,
+      'docs/LEVEL_SCENE_DESIGN.md': docs['docs/LEVEL_SCENE_DESIGN.md'].replace(
+        'required_assets: [player, boss]',
+        'required_assets: [ 网格底板  × 1 , 可操控角色  × 1 ]',
+      ),
+    }
+    const result = extractNormalizedFoundationFacts({
+      documents,
+      sectionIndex: indexDocuments(documents),
+    })
+    expect(result.facts.find(fact => fact.key === 'level.required_assets')?.value).toEqual([
+      '网格底板 × 1',
+      '可操控角色 × 1',
+    ])
+  })
+
+  test('normalizes parenthetical resource aliases to the same short labels', () => {
+    const documents = {
+      ...docs,
+      'docs/GDD.md': docs['docs/GDD.md'].replace(
+        'resources: [hp, energy]',
+        'resources: [露珠（Dew）, 月光值 (Moonlight)]',
+      ),
+      'docs/UI_UX_SPEC.md': docs['docs/UI_UX_SPEC.md'].replace(
+        'displayed_resources: [hp, energy]',
+        'displayed_resources: [露珠 (currency), 月光值（health pool）]',
+      ),
+    }
+    const result = extractNormalizedFoundationFacts({
+      documents,
+      sectionIndex: indexDocuments(documents),
+    })
+    expect(result.facts.find(fact => fact.key === 'game.resources')?.value).toEqual([
+      '露珠',
+      '月光值',
+    ])
+    expect(result.facts.find(fact => fact.key === 'ui.displayed_resources')?.value).toEqual([
+      '露珠',
+      '月光值',
+    ])
   })
 
   test('creates packets only for unresolved keys and exact owner slices', () => {

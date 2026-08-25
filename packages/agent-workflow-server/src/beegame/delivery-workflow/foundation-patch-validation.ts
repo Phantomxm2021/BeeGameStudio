@@ -20,7 +20,7 @@ import {
 } from './foundation-fact-definitions'
 import { FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS } from './foundation-audit-authority'
 import {
-  runProductionDeterministicFoundationAudit,
+  runProductionDeterministicFoundationImpactAudit,
 } from './foundation-audit-production-manifest'
 import type { AuditIssue } from './foundation-issue-registry'
 import type { FoundationImpactAnalysis } from './foundation-impact-analysis'
@@ -671,11 +671,12 @@ export function validateFoundationPatch(
   )
     throw new Error('foundation PatchOperation issue coverage is not exact')
 
-  // This is deliberately the only audit call in the validation boundary. No
-  // caller rules, contracts, or post-issue collection are accepted.
-  const postIssues = runProductionDeterministicFoundationAudit({
+  // This is deliberately the only targeted audit call in the validation
+  // boundary. No caller rules, contracts, or post-issue collection are accepted.
+  const postIssues = runProductionDeterministicFoundationImpactAudit({
     sectionIndex: input.sectionIndex,
     factStore: input.factStore,
+    impact,
   })
   const postById = new Map<string, AuditIssue>()
   for (const postIssue of postIssues) {

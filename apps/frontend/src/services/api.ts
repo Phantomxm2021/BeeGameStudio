@@ -45,6 +45,8 @@ export interface ProjectBaselineStatusPayload {
   phase: string
   blocked: boolean
   blocked_reason?: string | null
+  blocked_reason_code?: string | null
+  blocked_reason_diagnostic_id?: string | null
   active_agents?: string[]
   updated_at?: string
   next_action?: string
@@ -395,6 +397,9 @@ export const normalizeProjectBaselineStatusPayload = (
     phase: String(normalizedPayload.phase ?? '').trim(),
     blocked: Boolean(normalizedPayload.blocked),
     blocked_reason: normalizedPayload.blocked_reason ?? null,
+    blocked_reason_code: normalizedPayload.blocked_reason_code ?? null,
+    blocked_reason_diagnostic_id:
+      normalizedPayload.blocked_reason_diagnostic_id ?? null,
     active_agents: Array.isArray(normalizedPayload.active_agents)
       ? normalizedPayload.active_agents
           .map(item => String(item).trim())

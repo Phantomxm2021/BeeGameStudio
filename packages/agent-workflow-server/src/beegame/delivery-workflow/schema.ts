@@ -7,7 +7,6 @@ import type {
   DispatchRecord,
   EvidenceRef,
   FoundationDraftState,
-  FoundationRevisionState,
   Revision,
   TasksPlannedEvent,
   TaskVerification,
@@ -21,7 +20,6 @@ import {
   DELIVERY_RUN_SCHEMA_VERSION,
   RESOURCE_PRODUCTION_TASKS,
 } from './types'
-import { foundationRevisionDocumentReceiptMatches, foundationRevisionPacketPath, foundationRevisionSemanticResultPath, foundationRevisionStagePath } from './foundation-revision-stage'
 
 export const DELIVERY_PHASES = [
   'BRIEF_CONFIRMED',
@@ -186,109 +184,6 @@ export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
     finishedAt: z.string().datetime().optional(),
   })
   .strict()
-
-const foundationRevisionDigest = z.string().regex(/^[a-f0-9]{64}$/)
-const foundationRevisionIdentifier = z.string().regex(/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/)
-const foundationRevisionAuthoritySchema = z.object({
-  issueAuthority: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('review'), reviewDigest: foundationRevisionDigest, issueRegistryDigest: foundationRevisionDigest }).strict(),
-    z.object({ kind: z.literal('publication'), baseRevision: foundationRevisionIdentifier, authorityDigest: foundationRevisionDigest, issueRegistryDigest: foundationRevisionDigest }).strict(),
-  ]),
-  derivedDigests: z.object({
-    sectionIndex: foundationRevisionDigest,
-    factStore: foundationRevisionDigest,
-    manifest: foundationRevisionDigest,
-  }).strict(),
-  documentDigests: z.array(z.object({
-    path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
-    digest: foundationRevisionDigest,
-  }).strict()).length(CANONICAL_FOUNDATION_DOCUMENTS.length),
-}).strict()
-
-const foundationRevisionTaskCommonSchema = z.object({
-  taskId: foundationRevisionIdentifier,
-  revision: foundationRevisionIdentifier,
-  round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-  packetPath: z.string().min(1),
-  packetDigest: foundationRevisionDigest,
-  status: z.enum(['pending', 'running', 'completed', 'retryable', 'needs_action']),
-  attempt: z.number().int().min(0).max(2),
-  dispatch: dispatchRecordSchema.optional(),
-  terminalDigest: foundationRevisionDigest.optional(),
-  usage: workflowUsageSchema.optional(),
-  durationMs: z.number().int().nonnegative().optional(),
-  failureReason: z.string().min(1).optional(),
-}).strict()
-
-const foundationRevisionReceiptSchema = z.object({
-  taskId: foundationRevisionIdentifier,
-  round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-  documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
-  issueIds: z.array(z.string().min(1)).min(1),
-  baseDocumentDigest: foundationRevisionDigest,
-  stagedDocumentDigest: foundationRevisionDigest,
-  changedSectionIds: z.array(z.string().min(1)).min(1),
-  stagedPath: z.string().min(1),
-  terminalDigest: foundationRevisionDigest,
-}).strict()
-
-const foundationRevisionDocumentTaskSchema = foundationRevisionTaskCommonSchema.extend({
-  kind: z.literal('document-revision'),
-  documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
-  issueIds: z.array(z.string().min(1)).min(1),
-  sectionIds: z.array(z.string().min(1)).min(1),
-  stagedPath: z.string().min(1),
-  baseDocumentDigest: foundationRevisionDigest,
-  receipt: foundationRevisionReceiptSchema.optional(),
-})
-const foundationRevisionImpactedFactsTaskSchema = foundationRevisionTaskCommonSchema.extend({ kind: z.literal('impacted-facts'), modelTier: z.literal('fast'), receiptPath: z.string().min(1).optional(), receiptDigest: foundationRevisionDigest.optional() })
-const foundationRevisionSemanticRecheckTaskSchema = foundationRevisionTaskCommonSchema.extend({ kind: z.literal('semantic-recheck'), issueId: z.string().min(1), modelTier: z.enum(['fast', 'balanced', 'strong']), resultPath: z.string().min(1).optional(), resultDigest: foundationRevisionDigest.optional() })
-const foundationRevisionTaskSchema = z.discriminatedUnion('kind', [foundationRevisionDocumentTaskSchema, foundationRevisionImpactedFactsTaskSchema, foundationRevisionSemanticRecheckTaskSchema])
-const foundationRevisionPublicationBindingSchema = z.object({
-  preparedPath: z.string().min(1),
-  journalPath: z.string().min(1),
-  committedPath: z.string().min(1),
-  authorityDigest: foundationRevisionDigest,
-  resultingRevision: z.string().min(1),
-  resultingIssueRegistryDigest: foundationRevisionDigest,
-}).strict()
-const foundationIssueSummarySchema = z.object({
-  total: z.number().int().nonnegative(),
-  blocker: z.number().int().nonnegative(),
-  high: z.number().int().nonnegative(),
-  medium: z.number().int().nonnegative(),
-  low: z.number().int().nonnegative(),
-}).strict().superRefine((summary, context) => {
-  if (summary.total !== summary.blocker + summary.high + summary.medium + summary.low)
-    context.addIssue({ code: 'custom', path: ['total'], message: 'foundation issue summary total must equal severity counts' })
-})
-
-export const foundationRevisionStateSchema: z.ZodType<FoundationRevisionState> = z.object({
-  authority: foundationRevisionAuthoritySchema,
-  roundBefore: z.object({ documentRevision: foundationRevisionIdentifier, issueRegistryDigest: foundationRevisionDigest }).strict(),
-  revision: foundationRevisionIdentifier,
-  round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-  phase: z.enum(['planning', 'revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing']),
-  status: z.enum(['running', 'completed', 'needs_action']),
-  phaseStartedAt: z.string().datetime(),
-  knownIssueIds: z.array(z.string().min(1)),
-  issueSummary: foundationIssueSummarySchema,
-  tasks: z.array(foundationRevisionTaskSchema),
-  publication: foundationRevisionPublicationBindingSchema.optional(),
-}).strict().superRefine((state, context) => {
-  for (const [index, task] of state.tasks.entries()) {
-    if (task.packetPath !== foundationRevisionPacketPath(task.revision, task.round, task.taskId))
-      context.addIssue({ code: 'custom', path: ['tasks', index, 'packetPath'], message: 'revision packet path must be derived from task identity' })
-    if (task.kind === 'document-revision' && task.stagedPath !== foundationRevisionStagePath(task.revision, task.documentPath))
-      context.addIssue({ code: 'custom', path: ['tasks', index, 'stagedPath'], message: 'revision stage path must be derived from task identity' })
-    if (task.kind === 'document-revision' && task.status === 'completed' && !foundationRevisionDocumentReceiptMatches(task))
-      context.addIssue({ code: 'custom', path: ['tasks', index], message: 'completed document revision tasks require receipt and terminalDigest' })
-    if (task.kind === 'semantic-recheck' && task.status === 'completed' && (!task.terminalDigest || !task.resultPath || !task.resultDigest))
-      context.addIssue({ code: 'custom', path: ['tasks', index], message: 'completed semantic recheck tasks require terminalDigest, resultPath and resultDigest' })
-    if (task.kind === 'semantic-recheck' && task.status === 'completed' && task.resultPath !== foundationRevisionSemanticResultPath(task.revision, task.round, task.taskId))
-      context.addIssue({ code: 'custom', path: ['tasks', index, 'resultPath'], message: 'completed semantic result path must be derived from task identity' })
-  }
-})
 
 export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
   .object({
@@ -592,7 +487,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       .strict(),
     foundationDraftState: foundationDraftStateSchema,
     foundationAuditState: foundationAuditStateSchema.optional(),
-    foundationRevisionState: foundationRevisionStateSchema.optional(),
     resourceProductionState: resourceProductionStateSchema,
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),

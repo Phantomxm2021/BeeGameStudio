@@ -17,6 +17,7 @@ import {
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import { getGameDocumentContract } from './game-document-contracts'
 import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST } from './foundation-semantic-audit'
+import { FOUNDATION_FACT_CATALOG, FOUNDATION_FACT_CATALOG_VERSION } from './foundation-fact-definitions'
 
 function validDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
@@ -226,11 +227,34 @@ describe('foundation audit artifacts', () => {
       expect(loaded?.sectionIndex).toEqual(staged.sectionIndex)
       expect(loaded?.factStore).toEqual(factStore)
       const markerPath = join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/COMMITTED.json')
-      const manifest = JSON.parse(await readFile(join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/manifest.json'), 'utf8')) as Record<string, unknown>
-      expect(manifest.needsAction).toBeUndefined()
+      const manifestPath = join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/manifest.json')
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
+      expect(manifest.catalogVersion).toBe(FOUNDATION_FACT_CATALOG_VERSION)
+      expect(manifest.catalogKeys).toEqual(FOUNDATION_FACT_CATALOG.map(item => item.key))
       const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
       await writeFile(markerPath, `${JSON.stringify({ ...marker, factStoreDigest: 'f'.repeat(64) })}\n`)
       await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })).rejects.toThrow('binding')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('rejects committed derived manifests from an old or missing catalog contract', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-derived-catalog-cutover-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS) await writeFile(join(workspacePath, path), validDocument(path))
+      const checkpoints = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, status: 'committed' as const }))
+      const staged = await deriveFoundationAuditArtifacts({ workspacePath, revision: 'revision-catalog-cutover', checkpoints })
+      const factStore = createFoundationFactStore([])
+      await publishFoundationDerivedArtifacts({ workspacePath, revision: 'revision-catalog-cutover', documentDigests: staged.documentDigests, sectionIndex: staged.sectionIndex, factStore, normalizedFactDigest: digestFactStore(factStore), manifest: staged.manifest as unknown as Record<string, unknown> })
+      const manifestPath = join(workspacePath, '.beegame/audit/foundation/revision-catalog-cutover/derived/manifest.json')
+      const original = await readFile(manifestPath, 'utf8')
+      await writeFile(manifestPath, `${JSON.stringify({ ...(JSON.parse(original) as Record<string, unknown>), catalogVersion: 'foundation-facts.v1' })}\n`)
+      await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-catalog-cutover' })).rejects.toThrow('binding')
+      await writeFile(manifestPath, `${JSON.stringify((({ catalogVersion: _catalogVersion, ...rest }) => rest)(JSON.parse(original) as Record<string, unknown>))}\n`)
+      await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-catalog-cutover' })).rejects.toThrow('binding')
+      const originalManifest = JSON.parse(original) as Record<string, unknown>
+      await writeFile(manifestPath, `${JSON.stringify({ ...originalManifest, catalogKeys: (originalManifest.catalogKeys as string[]).slice(0, -1) })}\n`)
+      await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-catalog-cutover' })).rejects.toThrow('binding')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 

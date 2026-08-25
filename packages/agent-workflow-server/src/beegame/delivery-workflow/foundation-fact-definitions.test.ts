@@ -6,10 +6,10 @@ import {
 } from './foundation-fact-definitions'
 
 describe('normalized foundation fact catalog', () => {
-  test('is a versioned closed catalog of exactly the 24 service-owned keys', () => {
-    expect(FOUNDATION_FACT_CATALOG_VERSION).toBe('foundation-facts.v1')
-    expect(FOUNDATION_FACT_CATALOG).toHaveLength(24)
-    expect(new Set(FOUNDATION_FACT_CATALOG.map(item => item.key)).size).toBe(24)
+  test('is a versioned closed catalog of exactly the 25 service-owned keys', () => {
+    expect(FOUNDATION_FACT_CATALOG_VERSION).toBe('foundation-facts.v2')
+    expect(FOUNDATION_FACT_CATALOG).toHaveLength(25)
+    expect(new Set(FOUNDATION_FACT_CATALOG.map(item => item.key)).size).toBe(25)
     expect(FOUNDATION_FACT_CATALOG.map(item => item.key)).toEqual([
       'game.players.max',
       'game.boss.count',
@@ -32,6 +32,7 @@ describe('normalized foundation fact catalog', () => {
       'ui.displayed_resources',
       'audio.event_ids',
       'asset.inventory_ids',
+      'asset.covered_level_requirements',
       'asset.boss.count',
       'asset.art_constraint_refs',
       'asset.formats',
@@ -72,5 +73,18 @@ describe('normalized foundation fact catalog', () => {
       documentPath: 'docs/ASSET_PLAN.md',
       sectionId: 'dependencies',
     })
+  })
+
+  test('defines semantic labels for level assets and shared resource facts', () => {
+    expect(foundationFactDefinition('level.required_assets')?.extractionInstruction)
+      .toContain('natural-language')
+    expect(foundationFactDefinition('level.required_assets')?.extractionInstruction)
+      .toContain('physical asset IDs')
+    for (const key of ['game.resources', 'ui.displayed_resources'] as const) {
+      const instruction = foundationFactDefinition(key)?.extractionInstruction
+      expect(instruction).toContain('same canonical short labels')
+      expect(instruction).toContain('parenthetical')
+      expect(instruction).toContain('health pool')
+    }
   })
 })

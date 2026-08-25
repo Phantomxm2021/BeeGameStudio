@@ -10,7 +10,10 @@ import {
   projectDocumentDisplayTasks,
   type DocumentDisplayTask,
 } from './document-display-tasks'
-import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
+import {
+  projectWorkflowCurrentMessage,
+  projectWorkflowDisplayReason,
+} from './workflow-display-message'
 import type {
   DeliveryRun,
   DeliveryRunStatus,
@@ -63,7 +66,12 @@ export type WorkflowStageCardSnapshot = {
   completedAt?: string
   elapsedMs: number
   activeSince?: string
-  block?: { message: string; nextAction?: string }
+  block?: {
+    message: string
+    code?: string
+    diagnosticId?: string
+    nextAction?: string
+  }
 }
 
 export type FrozenWorkflowStageCardEvent = WorkflowEvent & {
@@ -346,7 +354,6 @@ function documentTasks(
     workflowStatus: run.status,
     thinking: workflowThinking(run),
     foundationAuditState: run.foundationAuditState,
-    foundationRevisionState: run.foundationRevisionState,
   }
   return projectDocumentDisplayTasks(input)
 }
@@ -493,13 +500,13 @@ export function projectCurrentStageCard(input: {
       ? normalizeDisplayTasks(resourceTasks(run, input.workspacePath))
       : atomicTasks(run)
   const elapsed = elapsedTiming(run, input.timing)
-  const message =
-    run.status === 'running' && run.currentMessage
-      ? sanitizeWorkflowDisplayMessage(run.currentMessage)
-      : ''
+  const message = run.status === 'running'
+    ? projectWorkflowCurrentMessage({ value: run.currentMessage, phase: run.phase, documentStep: run.documentStep })
+    : ''
   const blockedReason = stringValue(
     run.blockedReason ?? run.activeDispatch?.failureReason,
   )
+  const blockReason = projectWorkflowDisplayReason(blockedReason)
   const nextAction = blockedReason
     ? run.status === 'stopped'
       ? 'resume'
@@ -531,10 +538,10 @@ export function projectCurrentStageCard(input: {
     ...(run.completedAt ? { completedAt: run.completedAt } : {}),
     elapsedMs: elapsed.elapsedMs,
     ...(elapsed.activeSince ? { activeSince: elapsed.activeSince } : {}),
-    ...(blockedReason
+    ...(blockReason
       ? {
           block: {
-            message: blockedReason,
+            ...blockReason,
             ...(nextAction ? { nextAction } : {}),
           },
         }

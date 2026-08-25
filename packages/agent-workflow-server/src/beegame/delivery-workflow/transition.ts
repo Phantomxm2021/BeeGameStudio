@@ -5,10 +5,13 @@ import type {
   DeliveryRun,
   EvidenceRef,
   EvidenceStatus,
-  FoundationRevisionState,
-  FoundationRevisionTask,
 } from './types'
-import type { FoundationAuditTask } from './foundation-audit-state'
+import type {
+  FoundationAuditState,
+  FoundationAuditTask,
+  FoundationRevisionTask,
+} from './foundation-audit-state'
+import { isActiveFoundationRepairState } from './display-progress'
 
 export class WorkflowTransitionError extends Error {
   constructor(
@@ -101,12 +104,13 @@ function isEligibleFoundationRetryTask(
 }
 
 function isRetryableFoundationRevisionBoundary(
-  state: FoundationRevisionState,
+  state: FoundationAuditState,
+  runStatus: DeliveryRun['status'],
   taskId: string | undefined,
 ): boolean {
   if (taskId) return false
-  if (state.status !== 'needs_action') return false
-  if (state.phase !== 'planning' && state.phase !== 'validating') return false
+  if (runStatus !== 'needs_action') return false
+  if (state.status !== 'planning' && state.status !== 'validating') return false
   return state.tasks.length === 0 || state.tasks.every(task => task.status === 'completed')
 }
 
@@ -532,8 +536,8 @@ export function transitionDeliveryRun(
       {
         const revisionState =
           run.phase === 'DOCUMENT_REVIEW' &&
-          run.foundationRevisionState?.status !== 'completed'
-            ? run.foundationRevisionState
+          isActiveFoundationRepairState(run.foundationAuditState)
+            ? run.foundationAuditState
             : undefined
         const auditState =
           run.phase === 'DOCUMENT_REVIEW' && !revisionState
@@ -577,19 +581,18 @@ export function transitionDeliveryRun(
                   failureReason: undefined,
                 }
               }),
-              ...(revisionRevived
-                ? {
-                    status: 'running' as const,
-                  }
-                : {}),
             }
           : undefined
         const revisionBoundaryRevived = revisionState
-          ? isRetryableFoundationRevisionBoundary(revisionState, event.taskId)
+          ? isRetryableFoundationRevisionBoundary(
+              revisionState,
+              run.status,
+              event.taskId,
+            )
           : false
         const foundationStateInCurrentPhase = !!(
           auditState?.tasks.some(task => task.status === 'needs_action') ||
-          revisionState?.status === 'needs_action' ||
+          (revisionState && run.status === 'needs_action') ||
           revisionState?.tasks.some(task => task.status === 'needs_action')
         )
         const foundationRevived = auditRevived || revisionRevived || revisionBoundaryRevived
@@ -599,14 +602,7 @@ export function transitionDeliveryRun(
           ...run,
           status: preserveFoundationActionableState ? run.status : 'running',
           ...(auditRevived ? { foundationAuditState: nextAuditState } : {}),
-          ...(revisionRevived || revisionBoundaryRevived
-            ? {
-                foundationRevisionState: {
-                  ...nextRevisionState!,
-                  ...(revisionBoundaryRevived ? { status: 'running' as const } : {}),
-                },
-              }
-            : {}),
+          ...(revisionRevived ? { foundationAuditState: nextRevisionState } : {}),
           ...(run.phase === 'DOCUMENT_DRAFTING' &&
           run.foundationDraftState.documents
             ? {

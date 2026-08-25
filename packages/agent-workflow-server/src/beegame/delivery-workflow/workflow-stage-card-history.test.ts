@@ -135,8 +135,10 @@ describe('workflow stage card history', () => {
     expect(card?.totalTaskCount).toBe(8)
     expect(card?.elapsedMs).toBe(0)
     expect(card?.activeSince).toBe('2026-08-06T00:00:00.000Z')
-    expect(card?.block).toEqual({
-      message: 'must not leak worker protocol',
+    expect(card?.block).toMatchObject({
+      message: 'Workflow dispatch failed.',
+      code: 'dispatch_failed',
+      diagnosticId: expect.stringMatching(/^workflow-[0-9a-f]{12}$/),
       nextAction: 'retry',
     })
     expect(card?.tasks?.some(task => task.operation === 'write')).toBe(true)
@@ -162,7 +164,11 @@ describe('workflow stage card history', () => {
     })
 
     expect(card?.message).toBeUndefined()
-    expect(card?.block?.message).toBe('user stopped workflow')
+    expect(card?.block).toMatchObject({
+      message: 'Workflow stopped by user.',
+      code: 'user_stopped',
+      diagnosticId: expect.stringMatching(/^workflow-[0-9a-f]{12}$/),
+    })
   })
 
   test('keeps an open running interval out of durable elapsed time', () => {

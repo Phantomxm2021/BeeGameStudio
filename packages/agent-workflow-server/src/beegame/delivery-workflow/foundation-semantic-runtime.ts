@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { DispatchRecord, WorkflowUsage } from './types'
 import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST, type FoundationSemanticResult } from './foundation-semantic-audit'
 
-export const FOUNDATION_SEMANTIC_MAX_TASKS = 10
+export const FOUNDATION_SEMANTIC_REQUIRED_CHECK_COUNT = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.length
 export const FOUNDATION_SEMANTIC_MAX_RUNNING = 4
 export const FOUNDATION_SEMANTIC_MAX_ATTEMPTS = 2
 export const FOUNDATION_DEEP_MAX_ATTEMPTS = 1
@@ -130,12 +130,17 @@ export function createFoundationSemanticTaskCollection(input: {
   tasks: readonly FoundationSemanticTask[]
 }): FoundationSemanticTaskCollection {
   assertTimestamp(input.phaseStartedAt, 'semantic phaseStartedAt')
-  if (input.tasks.length !== FOUNDATION_SEMANTIC_MAX_TASKS) throw new Error('semantic review requires exactly ten tasks')
   if (new Set(input.tasks.map(item => item.taskId)).size !== input.tasks.length) throw new Error('semantic task IDs must be stable and unique')
   if (new Set(input.tasks.map(item => item.checkId)).size !== input.tasks.length) throw new Error('semantic check IDs must be stable and unique')
+  const requiredCheckIds = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => check.checkId)
+  const actualCheckIds = new Set(input.tasks.map(item => item.checkId))
+  if (requiredCheckIds.some(checkId => !actualCheckIds.has(checkId))) throw new Error('semantic task checks must cover every required manifest check exactly once')
   for (const task of input.tasks) {
     if (task.revision !== input.revision || task.kind !== 'semantic' || !['fast', 'balanced'].includes(task.modelTier) || task.status !== 'pending' || task.attempt !== 0) throw new Error('invalid semantic task seed')
     assertDigest(task.packetDigest, 'semantic packet digest')
+    const declaration = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.find(check => check.checkId === task.checkId)
+    if (!declaration) throw new Error(`semantic task check is not in the service manifest: ${task.checkId}`)
+    if (task.modelTier !== declaration.modelTier) throw new Error(`semantic task tier is not bound to manifest: ${task.checkId}`)
   }
   return { revision: input.revision, phaseStartedAt: input.phaseStartedAt, status: 'semantic_review', tasks: input.tasks.map(item => ({ ...item })), aggregateUsage: zeroUsage() }
 }
@@ -242,8 +247,9 @@ export function admitFoundationSemanticTerminal(state: FoundationSemanticTaskCol
 }
 
 export function foundationSemanticTasksComplete(state: FoundationSemanticTaskCollection): boolean {
-  const semanticCount = state.tasks.filter(task => task.kind === 'semantic').length
-  return semanticCount === FOUNDATION_SEMANTIC_MAX_TASKS && state.tasks.every(task => task.status === 'completed' && task.terminalDigest && task.usage && task.durationMs !== undefined && task.dispatch?.status === 'completed') && state.tasks.every(task => task.status !== 'pending' && task.status !== 'running')
+  const semanticTasks = state.tasks.filter(task => task.kind === 'semantic')
+  const requiredChecksCovered = semanticTasks.length === FOUNDATION_SEMANTIC_REQUIRED_CHECK_COUNT && FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.every(check => semanticTasks.some(task => task.checkId === check.checkId))
+  return requiredChecksCovered && state.tasks.every(task => task.status === 'completed' && task.terminalDigest && task.usage && task.durationMs !== undefined && task.dispatch?.status === 'completed') && state.tasks.every(task => task.status !== 'pending' && task.status !== 'running')
 }
 
 export function createFoundationConfirmationTask(input: { taskId: string; sourceTask: FoundationSemanticTask; result: FoundationSemanticResult }): FoundationConfirmationTask {

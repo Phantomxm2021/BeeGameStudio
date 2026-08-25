@@ -56,7 +56,7 @@
 
 Fact Store 不是普通摘要，而是可比较、可校验的标准化事实集合。
 
-Fact extraction uses the closed v1 catalog as authority: packets carry exact owner Section text, sort document/section/key identities canonically, and split only between complete owner sections at the 16 KiB boundary. A fact worker's packet is its sole business input. It returns only business fields (`key`, `status`, typed `value` or `reason`); provenance is service-owned and bound from the immutable packet's catalog owner Section when the durable terminal is constructed. It may receive only language, immutable task/revision/packet identities, the strict output schema, explicit read/write denial, and the packet itself; it must not receive the Confirmed Brief, workspace context, canonical document inventory, or generic project instructions. Brief-derived constraints are projected by local code into catalog keys or immutable digests before dispatch.
+Fact extraction uses the current versioned closed catalog (`foundation-facts.v2`) as authority: packets carry exact owner Section text and sort document/section/key identities canonically. A fact worker's packet is its sole business input. It returns only business fields (`key`, `status`, typed `value` or `reason`); provenance is service-owned and bound from the immutable packet's catalog owner Section when the durable terminal is constructed. It may receive only language, immutable task/revision/packet identities, the strict output schema, explicit read/write denial, and the packet itself; it must not receive the Confirmed Brief, workspace context, canonical document inventory, or generic project instructions. Brief-derived constraints are projected by local code into catalog keys or immutable digests before dispatch.
 
 Local mechanical extraction runs first. Final publication merges mechanically extracted facts with admitted worker facts and their closed receipts. Present mechanical keys and every admitted worker receipt (including absent or uncertain outcomes) must account for the catalog exactly once; the published Fact Store contains present facts only, while absent/uncertain receipts remain durable audit evidence and drive deterministic or semantic issues instead of blocking derived publication. Resolved mechanical facts must not be discarded merely because no worker returned them.
 
@@ -64,7 +64,7 @@ Local mechanical extraction runs first. Final publication merges mechanically ex
 > "players.max": 4,  
 > "boss.count": 3,  
 > "mechanics": \["move", "attack", "dash"\],  
-> "resources": \["hp", "energy"\],  
+> "resources": \["露珠", "月光值"\],
 > "platform": "quest",  
 > "target_fps": 72  
 > }
@@ -111,9 +111,20 @@ Local mechanical extraction runs first. Final publication merges mechanically ex
 > GDD.core_actions ↔ Technical.supported_actions  
 > GDD.boss.count ↔ AssetPlan.boss.count  
 > GDD.resources ↔ UI.displayed_resources  
-> Level.required_assets ↔ AssetPlan.assets  
-> Art.style_constraints ↔ AssetPlan.asset_style  
-> Technical.performance ↔ Level.complexity_budget
+> Level.required_assets ← AssetPlan.covered_level_requirements
+> Art.style_constraints ↔ AssetPlan.asset_constraint_refs（语义覆盖）
+> Technical.performance ↔ Level.production_acceptance（语义可行性）
+
+关卡资产需求与物理资产库存是两层不同事实，不能把自然语言需求和物理 ID 做字面比较。`level.required_assets` 保留 LEVEL
+`content_matrix` 的上游需求条目/标签；`asset.inventory_ids` 保留 ASSET_PLAN
+`inventory` 中的物理资产 ID（例如 `GC-BOARD`）。AssetPlan 映射表把每个关卡需求条目承载到一个或多个物理资产，并由
+`asset.covered_level_requirements` 提取“已由资产承载的关卡需求条目/标签”。唯一的确定性覆盖契约是
+`asset.covered_level_requirements -> level.required_assets` 的 `contains-all`，其缺项仍由 ASSET_PLAN#inventory 修复；
+`asset.inventory_ids` 只能用于物理库存/交付事实，禁止直接与 `level.required_assets` 比较。
+
+`game.resources` 与 `ui.displayed_resources` 也共享同一组 canonical 短标签：包含 HUD 跟踪的货币与生命池，去掉括号内英文别名和说明后再比较；文档中的具体标签仅是项目自身的 authored values，不构成全局固定枚举。
+
+`technical.target_fps`、`level.complexity_budget` 与 `asset.art_constraint_refs` 是保留在 normalized Fact Store 中的 deferred semantic facts：缺失或 `uncertain` 时不先生成 schema BLOCKER，也不把多维 `LEVEL#production_acceptance` 预算强行压成单一整数；若事实已存在，仍执行闭 catalog 的类型/取值校验。语义 packet 必须同时携带其 owner Section：性能检查携带 `LEVEL#production_acceptance`，资产检查携带 `ART#visual_pillars` 与 `ASSET#dependencies`，由模型判断预算可行性和引用/约束覆盖。`asset.art_constraint_refs` 是 ART 约束的引用身份层，禁止与 `art.style_constraints` 的约束值做 deterministic 字面 `contains-all` 比较。
 
 能通过 Fact 直接判定的冲突不调用 LLM；只有语义层面的冲突才进入 Semantic
 Audit。
@@ -127,17 +138,17 @@ Semantic Audit 不做全文自由扫描，也不按“8 份文档各读一次”
 | `SEM.gameplay_level_viability` | `GDD#core_loop` + `LEVEL#pacing_beats` | `game.mechanics`, `level.required_entities` | 核心循环、遭遇、节奏与反制是否可玩且不互相否定 | HIGH / balanced |
 | `SEM.progression_balance_coherence` | `GDD#progression` + `BALANCE#economy,progression_curves` | `game.resources`, `balance.variable_ids` | 进度、资源流与成长曲线是否形成可闭合体验 | HIGH / balanced |
 | `SEM.state_runtime_recovery` | `GDD#states_flow` + `TECHNICAL#runtime_state,save_load` | `game.states` | 状态、失败恢复与持久化语义是否可实现且一致 | HIGH / balanced |
-| `SEM.platform_performance_feasibility` | `TECHNICAL#performance,risks` | `game.platform`, `technical.target_fps`, `level.complexity_budget` | 目标平台、关卡复杂度与性能预算是否现实 | HIGH / balanced |
+| `SEM.platform_performance_feasibility` | `TECHNICAL#performance,risks` + `LEVEL#production_acceptance` | `game.platform`, `technical.target_fps`, `level.complexity_budget` | 目标平台、关卡复杂度与多维性能/验收预算是否现实 | HIGH / balanced |
 | `SEM.interaction_ui_coherence` | `GDD#player_actions` + `UI#input,feedback_errors` | `game.mechanics`, `ui.supported_actions` | 玩家动作、输入、反馈与错误恢复是否连贯 | HIGH / balanced |
 | `SEM.camera_visual_readability` | `LEVEL#camera_readability` + `ART#composition_readability,camera_presentation` | `art.style_constraints` | 镜头、构图、对比与玩法可读性是否一致 | MEDIUM / fast |
-| `SEM.content_asset_feasibility` | `ART#asset_specifications` + `ASSET#formats_budgets` | `level.required_assets`, `asset.inventory_ids`, `asset.art_constraint_refs`, `asset.formats` | 内容需求、资产质量与交付预算是否可执行 | HIGH / balanced |
+| `SEM.content_asset_feasibility` | `ART#asset_specifications` + `ASSET#formats_budgets` + `ART#visual_pillars` + `ASSET#dependencies` | `level.required_assets`, `asset.inventory_ids`, `asset.art_constraint_refs`, `asset.formats` | 内容需求、资产质量、引用/约束覆盖与交付预算是否可执行 | HIGH / balanced |
 | `SEM.audio_state_feedback` | `GDD#states_flow` + `AUDIO#event_taxonomy,music` | `game.states`, `audio.event_ids` | 关键状态、事件与音频反馈是否覆盖且不冲突 | MEDIUM / fast |
 | `SEM.multimodal_accessibility` | `GDD#accessibility_localization` + `UI#accessibility` + `ART#color_lighting` + `AUDIO#ui_feedback` | 无额外 Fact；只使用列出的 Section | 视觉、输入与非视觉替代是否共同满足可访问性 | HIGH / balanced |
 | `SEM.completion_recovery_coherence` | `GDD#states_flow,challenge_recovery` + `LEVEL#objectives_routes,spawn_checkpoint` | `game.states`, `game.win_conditions`, `game.loss_conditions` | 胜负、目标、失败、检查点与重试是否形成闭环 | HIGH / balanced |
 
-Semantic packet discipline is part of this authority: when normalized Facts already project the relevant owner-section information, the packet does not repeat that section merely as duplicate evidence. A marked contract section ends at the next Markdown heading of the same or higher level; an unmarked `Production Materials` or audit appendix is not part of the preceding authoritative section. These rules preserve exact section bytes and the immutable 16 KiB packet boundary.
+Semantic packet discipline is part of this authority: when normalized Facts already project the relevant owner-section information, the packet does not repeat that section merely as duplicate evidence; deferred semantic facts are the explicit exception and always carry their owner Section. A marked contract section ends at the next Markdown heading of the same or higher level; an unmarked `Production Materials` or audit appendix is not part of the preceding authoritative section. Packets are formed from the exact complete Section or explicitly listed check scope; a legal Section is never truncated to satisfy an arbitrary business-size limit. The only fixed output boundary is the existing 2 MiB UTF-8 structured-output infrastructure safeguard in §13.
 
-每个 Check 独立形成一个不超过 16 KiB 的 packet，只携带表中 Section、相关 normalized Facts 与 deterministic issue 引用；不携带其他文档。每个 worker 使用全新、不可累积的上下文，返回 `PASS | ISSUES | UNDECIDABLE`，不生成说明文档。`UNDECIDABLE` 或 BLOCKER 才允许以同一 packet 发起一次 strong confirmation；禁止通过重读全文或扩大上下文解决。
+每个 Check 独立按表中精确完整 Section/明确 check scope 形成 packet，只携带相关 normalized Facts 与 deterministic issue 引用；不携带其他文档或截断合法 Section。每个 worker 使用全新、不可累积的上下文，返回 `PASS | ISSUES | UNDECIDABLE`，不生成说明文档。`UNDECIDABLE` 或 BLOCKER 才允许以同一 packet 发起一次 strong confirmation；禁止通过重读全文或扩大上下文解决。业务 packet 不设固定 KiB 上限；结构化输出仅受 §13 现有 2 MiB UTF-8 基础设施边界约束。
 
 # 7. Issue Registry
 
@@ -254,6 +265,8 @@ Recheck。
 
 每任务的输出边界由严格结构化 Schema、任务身份/作用域、provider/native 输出约束和重试次数共同定义；不得再用一个固定 token 估算值二次拒绝已经满足业务契约的合法结果。Foundation packet worker 的最终结构化输出仅在进入服务的基础设施边界执行 2 MiB UTF-8 JSON 上限，防止异常 payload 造成资源耗尽；该上限不是审计质量、Issue 数量或业务复杂度预算，超限必须明确归类为基础设施失败。
 
+文档 authoring、Fact、semantic 与 revision 的合法业务输入同样不得按统一字符数、token 数或 KiB 数截断或拒绝；作用域必须由 Section、Fact、Issue、Contract 与 Impact 决定。基础设施 payload 防护可保留，但必须与业务复杂度预算分离，并以明确的基础设施错误呈现。
+
 # 14. 停止条件
 
 > Round 1: 修 BLOCKER + HIGH + MEDIUM  
@@ -365,7 +378,11 @@ Recheck。
 
 - 单一 durable task collection 负责 dispatch、恢复与审计记录；不得为暂停恢复、Reviewer 或 revision candidate 创建第二套状态机。
 
-- Dashboard 只投影普通任务状态、轮次、Issue 数量与 Known Issues 摘要；它不是审计或修订 authority，也不展示原始 Registry JSON。
+- 唯一持久化字段是 `foundationAuditState`：audit 与 revision 通过该状态内互斥的 substage/status 和同一 `tasks[]` 表达。禁止保留 `foundationRevisionState`、别名、双读/双写、旧 schema reader、迁移器或 fallback；携带旧顶层字段的 durable run 必须由 strict schema fail closed，而不是被静默接纳。
+
+- Review copy 初始化直接进入唯一可运行的 `FOUNDATION_REVIEW` 状态并由同一 controller 启动；不得先持久化虚假 `needs_action`/`implementation unavailable` 再由另一入口覆盖。
+
+- Dashboard 只投影普通任务状态、轮次、Issue 数量与 Known Issues 摘要；它不是审计或修订 authority，也不展示原始 Registry JSON、worker thinking、过程 prose 或原始 feedback。Foundation review 期间的 worker message 只保留在运行日志与 durable evidence 中，不进入阶段卡片。
 
 - 所有终态任务都保留 usage、duration 与 failure reason，确保成本和失败可按任务追溯。
 

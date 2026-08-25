@@ -1,7 +1,7 @@
 # Document Audit Runtime Closure Design
 
 **Date:** 2026-08-25
-**Status:** Approved; implementation in progress
+**Status:** Superseded in part by the current authority; retained as corrected runtime history
 **Authority:** `docs/Bee_Game_Studio_Doc_Audit_Revision_Optimized.md`
 
 ## Purpose
@@ -31,7 +31,7 @@ Brief constraints are converted locally into closed-catalog values or revision-b
 
 ### Bounds and cost accounting
 
-Keep the 16 KiB fact and semantic packet boundary, fresh context per attempt, maximum concurrency of four, and maximum two attempts. Deep audit may use only authority-selected indexed additions and never a whole document.
+Keep fresh context per attempt, maximum concurrency of four, and the authority-defined per-task attempt boundary. Deep audit may use only authority-selected indexed additions and never a whole document. Fact, semantic, and revision packets contain their exact authorized scope and are not truncated or rejected by an arbitrary business-size limit.
 
 Remove aggregate token caps, fixed token-estimate business gates, and shared phase/round wall-clock deadlines. Each dispatch retains its existing per-worker timeout, strict structured schema, exact task identity and scope, provider/native output constraint, and attempt boundary. Fact-key cardinality remains a packet/state identity and scope check, not a payload-size proxy. A legal terminal is never rejected because one fixed token estimate cannot represent case complexity. At the worker transport boundary, Foundation fact and semantic structured outputs share the existing 2 MiB UTF-8 JSON infrastructure envelope before parsing and persistence; exceeding it is an explicit infrastructure failure rather than an audit finding or business-quality verdict. Provider usage remains complete cost telemetry and never rejects an otherwise valid terminal.
 
@@ -43,7 +43,7 @@ Local mechanical extraction and admitted worker extraction are two producers for
 
 ### Semantic packet discipline
 
-Semantic packets deliberately omit sections whose normalized owner facts already carry the needed structure. A marked contract section terminates at any following same-level-or-higher Markdown heading; unmarked `Production Materials` and audit appendices are outside the preceding authoritative section. This preserves exact section bytes and the immutable 16 KiB packet boundary.
+Semantic packets deliberately omit sections whose normalized owner facts already carry the needed structure. A marked contract section terminates at any following same-level-or-higher Markdown heading; unmarked `Production Materials` and audit appendices are outside the preceding authoritative section. This preserves exact section bytes and the immutable packet identity without imposing a fixed business-size boundary.
 
 ### Integrity failure versus audit result
 
@@ -53,13 +53,13 @@ Stale/conflicting digests, terminal identity mismatch, unauthorized sections, in
 
 Each successful round publishes one immutable revision-bound authority set. Round 1 addresses BLOCKER/HIGH/MEDIUM; Round 2 addresses remaining BLOCKER/HIGH; Round 3 addresses BLOCKER and verifies convergence. PASS requires no BLOCKER/HIGH. Remaining MEDIUM/LOW become Known Issues. BLOCKER/HIGH after Round 3 moves the run to `needs_action`.
 
-Each per-document revision packet keeps the fixed 24 KiB boundary and carries the admitted Issue Registry entries directly. It must not duplicate `actual` as a second `problem` field or repeat source, target, and fix references in an `evidenceRefs` track; the Registry issue and selected immutable sections remain the sole business evidence.
+Each per-document revision packet carries the admitted Issue Registry entries and exact selected immutable sections directly; it is not truncated or rejected by a fixed business-size boundary. It must not duplicate `actual` as a second `problem` field or repeat source, target, and fix references in an `evidenceRefs` track; the Registry issue and selected immutable sections remain the sole business evidence.
 
 ### Recovery and feedback
 
 Recovery uses the same durable task collection and artifact preconditions as the live controller. It replays receipts, retries only incomplete retryable tasks, and preserves attempts, failures, usage, and duration. It does not repair clocks or reset cost.
 
-The Dashboard uses ordinary workflow tasks for fact extraction, deterministic checks, semantic/deep checks, issue compilation, per-document revision, and targeted validation. Audit and revision are distinct live substages of the single `DOCUMENT_REVIEW` delivery phase: the nine top-level delivery phases remain unchanged, while an active `foundationRevisionState` projects `REPAIRING` and the card title `基础文档修订`. During that live substage, the task list contains revision/targeted-validation tasks only, so the card cannot imply that audit and revision are executing concurrently. Completed audit evidence remains durable in `foundationAuditState` and its committed artifacts; stage-card history continues to freeze top-level phase boundaries only. The Dashboard shows status, round, severity counts, Known Issues count, and exact failure reason without exposing raw Registry JSON.
+The Dashboard uses ordinary workflow tasks for fact extraction, deterministic checks, semantic/deep checks, issue compilation, per-document revision, and targeted validation. Audit and revision are distinct live substages of the single `DOCUMENT_REVIEW` delivery phase: the nine top-level delivery phases remain unchanged, while repair statuses on the sole `foundationAuditState` project `REPAIRING` and the card title `基础文档修订`. During that live substage, the same task collection contains revision/targeted-validation tasks only, so the card cannot imply that audit and revision are executing concurrently. Completed audit evidence remains bound through the same state and its committed artifacts; no `foundationRevisionState`, fallback field, migration reader, or parallel recovery branch exists. Stage-card history continues to freeze top-level phase boundaries only. The Dashboard shows status, round, severity counts, Known Issues count, and safe projected failure reason without exposing raw Registry JSON, worker thinking, process prose, or worker feedback; those messages remain in runtime logs and durable evidence only.
 
 ## Boundaries
 

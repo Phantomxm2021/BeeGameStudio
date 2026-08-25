@@ -909,8 +909,6 @@ describe('delivery worker session credentials', () => {
       },
     })
 
-    expect(starts[0]?.workflowDocumentAuthorMode).toBe('initial')
-    expect(starts[1]?.workflowDocumentAuthorMode).toBe('initial')
     expect(starts[0]?.workflowCanonicalDocumentCommitContract).toBeUndefined()
     expect(starts[1]?.workflowCanonicalDocumentCommitContract).toBeUndefined()
   })

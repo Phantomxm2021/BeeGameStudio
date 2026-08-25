@@ -134,7 +134,31 @@ function valueFromText(
     return values.length && values.every(Number.isFinite) ? values : undefined
   }
   const values = splitList(value)
+  if (definition.key === 'level.required_assets') {
+    const normalized = values.map(normalizeLevelRequirementLabel).filter(Boolean)
+    return normalized.length ? normalized : undefined
+  }
+  if (
+    definition.key === 'game.resources' ||
+    definition.key === 'ui.displayed_resources'
+  ) {
+    const normalized = values
+      .map(normalizeSharedResourceLabel)
+      .filter(Boolean)
+    return normalized.length ? normalized : undefined
+  }
   return values.length ? values : undefined
+}
+
+function normalizeSharedResourceLabel(value: string): string {
+  return value
+    .replace(/\s*[（(][^()（）]*[）)]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeLevelRequirementLabel(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
 }
 
 function splitList(value: string): string[] {
