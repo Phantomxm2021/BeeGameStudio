@@ -8,13 +8,15 @@ import {
   type ResourceProductionTask,
   type DocumentWorkflowStep,
 } from './types'
+import type { FoundationAuditState } from './foundation-audit-state'
+import type { FoundationRevisionState } from './types'
 
 export type DocumentDisplayTask = {
   id: string
   title: string
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
   attempt: number
-  operation: 'write' | 'review' | 'produce'
+  operation: 'write' | 'review' | 'revise' | 'produce'
   failureReason?: string
 }
 
@@ -38,6 +40,111 @@ export type DocumentDisplayTaskInput = {
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
+  foundationAuditState?: FoundationAuditState
+  foundationRevisionState?: FoundationRevisionState
+}
+
+const auditTaskTitles = {
+  deterministic: '确定性检查',
+  semantic: '语义检查',
+  issues: '问题汇编',
+} as const
+
+function phaseTaskStatus(input: {
+  active: boolean
+  completed: boolean
+  workflowStatus?: string
+}): DocumentDisplayTask['status'] {
+  if (input.completed) return 'completed'
+  if (!input.active) return 'pending'
+  if (workflowStopped(input.workflowStatus)) return 'stopped'
+  if (workflowFailed(input.workflowStatus)) return 'failed'
+  return 'running'
+}
+
+function projectFoundationAuditTasks(
+  input: DocumentDisplayTaskInput,
+): DocumentDisplayTask[] {
+  const state = input.foundationAuditState
+  if (!state) return []
+  const semanticTasks = state.tasks.filter(
+    task => task.kind === 'semantic' || task.kind === 'confirmation',
+  )
+  const semanticCompleted =
+    semanticTasks.length > 0 && semanticTasks.every(task => task.status === 'completed')
+  const semanticActive = state.status === 'semantic_review'
+  const issueActive = semanticActive && semanticCompleted
+  const auditReady = state.status === 'audit_ready'
+  return [
+    {
+      id: 'audit:deterministic',
+      title: auditTaskTitles.deterministic,
+      status: phaseTaskStatus({
+        active: state.status === 'derived_committed',
+        completed: [
+          'deterministic_ready',
+          'semantic_review',
+          'audit_ready',
+        ].includes(state.status),
+        workflowStatus: input.workflowStatus,
+      }),
+      attempt: 0,
+      operation: 'review',
+    },
+    {
+      id: 'audit:semantic',
+      title: auditTaskTitles.semantic,
+      status: phaseTaskStatus({
+        active: semanticActive,
+        completed: semanticCompleted || auditReady,
+        workflowStatus: input.workflowStatus,
+      }),
+      attempt: 0,
+      operation: 'review',
+    },
+    {
+      id: 'audit:issues',
+      title: auditTaskTitles.issues,
+      status: phaseTaskStatus({
+        active: issueActive,
+        completed: auditReady,
+        workflowStatus: input.workflowStatus,
+      }),
+      attempt: 0,
+      operation: 'review',
+    },
+  ]
+}
+
+function projectFoundationRevisionTasks(
+  input: DocumentDisplayTaskInput,
+): DocumentDisplayTask[] {
+  return (input.foundationRevisionState?.tasks ?? []).flatMap(task =>
+    task.kind === 'document-revision'
+      ? [
+          {
+            id: `revision:${task.documentPath}`,
+            title: task.documentPath,
+            status:
+              task.status === 'completed'
+                ? 'completed'
+                : workflowStopped(input.workflowStatus) &&
+                    task.status === 'running'
+                  ? 'stopped'
+                  : task.status === 'needs_action'
+                    ? 'failed'
+                    : task.status === 'running'
+                      ? 'running'
+                      : 'pending',
+            attempt: task.attempt,
+            operation: 'revise' as const,
+            ...(task.failureReason
+              ? { failureReason: task.failureReason }
+              : {}),
+          },
+        ]
+      : [],
+  )
 }
 
 /**
@@ -49,6 +156,11 @@ export type DocumentDisplayTaskInput = {
 export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
+  if (input.documentStep === 'FOUNDATION_REVIEW')
+    return [
+      ...projectFoundationAuditTasks(input),
+      ...projectFoundationRevisionTasks(input),
+    ]
   const workspace = resolve(input.workspacePath)
   const canonicalReviewArtifacts = [
     ...CANONICAL_PROJECT_DOCUMENTS,

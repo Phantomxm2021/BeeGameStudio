@@ -84,6 +84,7 @@ const documentTitle: Record<string, string> = {
 const displayTaskTitle = (task: WorkflowCardTask): string => {
   const title = documentTitle[task.title] || task.title;
   if (task.operation === 'review') return `审计：${title}`;
+  if (task.operation === 'revise') return `修订：${title}`;
   if (task.operation === 'produce') return `资源：${title}`;
   if (task.operation === 'assemble') return `组合：${title}`;
   return title;
@@ -170,6 +171,12 @@ const useVerticalOverflow = <T extends HTMLElement>(contentKey: string) => {
 
 const taskStatusText = (task: WorkflowCardTask): string => {
   if (task.status === 'stopped') return '已停止';
+  if (task.operation === 'revise') {
+    if (task.status === 'completed') return '已修订';
+    if (task.status === 'running') return '修订中';
+    if (task.status === 'failed' || task.status === 'blocked') return '修订失败';
+    return '待修订';
+  }
   if (task.operation === 'review') {
     if (task.status === 'completed') return '已审计';
     if (task.status === 'running') return '审计中';

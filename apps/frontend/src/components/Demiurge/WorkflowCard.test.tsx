@@ -141,6 +141,33 @@ describe('WorkflowCard', () => {
     expect(screen.queryByText(/verdict|revision|currentMessage/i)).not.toBeInTheDocument();
   });
 
+  it('renders completed document revisions as ordinary checked tasks', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_revision',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          documentStep: 'FOUNDATION_REVIEW',
+          tasks: [
+            {
+              id: 'revision:gdd',
+              title: 'docs/GDD.md',
+              status: 'completed',
+              operation: 'revise',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('修订：游戏设计文档 GDD')).toBeInTheDocument();
+    expect(screen.getByLabelText('任务状态：已修订')).toHaveAttribute(
+      'data-task-icon',
+      'write-completed',
+    );
+  });
+
   it('renders a manually stopped task as stopped instead of failed', () => {
     render(
       <WorkflowCard

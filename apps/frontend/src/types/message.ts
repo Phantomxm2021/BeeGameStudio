@@ -43,7 +43,7 @@ export interface WorkflowCardTask {
   id: string
   title: string
   status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
-  operation?: 'write' | 'review' | 'produce' | 'assemble'
+  operation?: 'write' | 'review' | 'revise' | 'produce' | 'assemble'
   attempt?: number
   failureReason?: string
 }

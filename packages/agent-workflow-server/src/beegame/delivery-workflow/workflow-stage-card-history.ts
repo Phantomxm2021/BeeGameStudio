@@ -23,7 +23,7 @@ export type WorkflowStageCardTask = {
   id: string
   title: string
   status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
-  operation?: 'write' | 'review' | 'produce' | 'assemble'
+  operation?: 'write' | 'review' | 'revise' | 'produce' | 'assemble'
   attempt?: number
   failureReason?: string
 }
@@ -331,6 +331,8 @@ function documentTasks(
     documentStep: run.documentStep as DocumentWorkflowStep | undefined,
     workflowStatus: run.status,
     thinking: workflowThinking(run),
+    foundationAuditState: run.foundationAuditState,
+    foundationRevisionState: run.foundationRevisionState,
   }
   return projectDocumentDisplayTasks(input)
 }
@@ -389,6 +391,7 @@ function normalizeDisplayTasks(
     status: TASK_STATUSES.includes(task.status) ? task.status : 'pending',
     ...(task.operation ? { operation: task.operation } : {}),
     ...(nonnegativeInteger(task.attempt) ? { attempt: task.attempt } : {}),
+    ...(task.failureReason ? { failureReason: task.failureReason } : {}),
   }))
 }
 

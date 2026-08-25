@@ -194,9 +194,11 @@ import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delive
 import type {
   DeliveryRun,
   DispatchRecord,
+  FoundationRevisionState,
   ResourceProductionTask,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
+import type { FoundationAuditState } from './beegame/delivery-workflow/foundation-audit-state'
 import { projectDeliveryProgress } from './beegame/delivery-workflow/display-progress'
 import {
   isWorkflowStageCardSnapshot,
@@ -6055,6 +6057,12 @@ function workflowViewForDisplay(
               : undefined,
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
+          foundationAuditState: isObject(workflow.foundationAuditState)
+            ? (workflow.foundationAuditState as FoundationAuditState)
+            : undefined,
+          foundationRevisionState: isObject(workflow.foundationRevisionState)
+            ? (workflow.foundationRevisionState as FoundationRevisionState)
+            : undefined,
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({

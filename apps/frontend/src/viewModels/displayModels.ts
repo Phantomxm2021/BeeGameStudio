@@ -150,7 +150,7 @@ const WORKFLOW_TASK_STATUSES: readonly WorkflowCardTask['status'][] = [
 
 const WORKFLOW_TASK_OPERATIONS: readonly NonNullable<
   WorkflowCardTask['operation']
->[] = ['write', 'review', 'produce', 'assemble']
+>[] = ['write', 'review', 'revise', 'produce', 'assemble']
 
 const WORKFLOW_EXECUTION_STATUSES = ['working', 'waiting', 'idle'] as const
 
