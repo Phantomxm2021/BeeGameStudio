@@ -5,7 +5,9 @@ import type {
   DeliveryRun,
   EvidenceRef,
   EvidenceStatus,
+  FoundationRevisionTask,
 } from './types'
+import type { FoundationAuditTask } from './foundation-audit-state'
 
 export class WorkflowTransitionError extends Error {
   constructor(
@@ -53,6 +55,49 @@ export type DeliveryTransition =
   | { type: 'retry'; taskId?: string }
 
 const timestamp = () => new Date().toISOString()
+
+const FOUNDATION_MODEL_CONFIGURATION_FAILURES = new Set([
+  'foundation fact fast model is not configured',
+  'foundation fact extractor fast model is not configured',
+  'foundation semantic fast model is not configured',
+  'foundation semantic balanced model is not configured',
+  'foundation semantic strong model is not configured',
+  'foundation semantic model is not configured',
+])
+
+type FoundationRetryTask = FoundationAuditTask | FoundationRevisionTask
+
+function isEligibleFoundationRetryTask(
+  task: FoundationRetryTask,
+  taskId: string | undefined,
+): boolean {
+  const value = task as FoundationRetryTask & {
+    receiptPath?: unknown
+    receiptDigest?: unknown
+    resultDigest?: unknown
+    resultPath?: unknown
+    receipt?: unknown
+    result?: unknown
+    admittedResult?: unknown
+  }
+  return (
+    (!taskId || task.taskId === taskId) &&
+    task.status === 'needs_action' &&
+    task.attempt === 0 &&
+    FOUNDATION_MODEL_CONFIGURATION_FAILURES.has(task.failureReason ?? '') &&
+    task.dispatch === undefined &&
+    task.terminalDigest === undefined &&
+    task.usage === undefined &&
+    task.durationMs === undefined &&
+    value.receiptPath === undefined &&
+    value.receiptDigest === undefined &&
+    value.resultDigest === undefined &&
+    value.resultPath === undefined &&
+    value.receipt === undefined &&
+    value.result === undefined &&
+    value.admittedResult === undefined
+  )
+}
 
 function fail(message: string): never {
   throw new WorkflowTransitionError('invalid_transition', message)
@@ -473,29 +518,118 @@ export function transitionDeliveryRun(
         )
       )
         fail('retry task must be a failed task')
-      next = {
-        ...run,
-        status: 'running',
-        ...(run.phase === 'DOCUMENT_DRAFTING' &&
-        run.foundationDraftState.documents
+      {
+        const now = timestamp()
+        const revisionState =
+          run.phase === 'DOCUMENT_REVIEW' &&
+          run.foundationRevisionState?.status !== 'completed'
+            ? run.foundationRevisionState
+            : undefined
+        const auditState =
+          run.phase === 'DOCUMENT_REVIEW' && !revisionState
+            ? run.foundationAuditState
+            : undefined
+        let auditRevived = false
+        let auditRefreshPhase = false
+        let auditRefreshDeep = false
+        const nextAuditState = auditState
           ? {
-              foundationDraftState: retryFoundationFailures(
-                run.foundationDraftState,
-              ),
+              ...auditState,
+              tasks: auditState.tasks.map(task => {
+                if (
+                  !isEligibleFoundationRetryTask(task, event.taskId) ||
+                  !['document-facts', 'semantic', 'confirmation'].includes(
+                    task.kind,
+                  )
+                )
+                  return task
+                auditRevived = true
+                if (task.kind === 'document-facts' || task.kind === 'semantic')
+                  auditRefreshPhase = true
+                else auditRefreshDeep = true
+                return {
+                  ...task,
+                  status: 'pending' as const,
+                  failureReason: undefined,
+                }
+              }),
+              ...(auditRefreshPhase ? { phaseStartedAt: now } : {}),
+              ...(auditRefreshDeep && auditState.semantic
+                ? {
+                    semantic: {
+                      ...auditState.semantic,
+                      deepPhaseStartedAt: now,
+                    },
+                  }
+                : {}),
             }
-          : {}),
-        ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
+          : undefined
+        let revisionRevived = false
+        const nextRevisionState = revisionState
           ? {
-              activeTaskId: undefined,
-              tasks: run.tasks.map(task =>
-                task.id === run.activeTaskId && task.status === 'running'
-                  ? { ...task, status: 'pending' as const }
-                  : task,
-              ),
+              ...revisionState,
+              tasks: revisionState.tasks.map(task => {
+                if (
+                  !isEligibleFoundationRetryTask(task, event.taskId) ||
+                  !['impacted-facts', 'semantic-recheck'].includes(task.kind)
+                )
+                  return task
+                revisionRevived = true
+                return {
+                  ...task,
+                  status: 'pending' as const,
+                  failureReason: undefined,
+                }
+              }),
+              ...(revisionRevived
+                ? {
+                    status: 'running' as const,
+                    phaseStartedAt: now,
+                    roundDeadlineAt: new Date(
+                      Date.parse(now) + 600_000,
+                    ).toISOString(),
+                  }
+                : {}),
             }
-          : {}),
-        blockedReason: undefined,
-        updatedAt: timestamp(),
+          : undefined
+        const foundationStateInCurrentPhase = !!(
+          auditState?.tasks.some(task => task.status === 'needs_action') ||
+          revisionState?.status === 'needs_action' ||
+          revisionState?.tasks.some(task => task.status === 'needs_action')
+        )
+        const foundationRevived = auditRevived || revisionRevived
+        const preserveFoundationActionableState =
+          foundationStateInCurrentPhase && !foundationRevived
+        next = {
+          ...run,
+          status: preserveFoundationActionableState ? run.status : 'running',
+          ...(auditRevived ? { foundationAuditState: nextAuditState } : {}),
+          ...(revisionRevived
+            ? { foundationRevisionState: nextRevisionState }
+            : {}),
+          ...(run.phase === 'DOCUMENT_DRAFTING' &&
+          run.foundationDraftState.documents
+            ? {
+                foundationDraftState: retryFoundationFailures(
+                  run.foundationDraftState,
+                ),
+              }
+            : {}),
+          ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
+            ? {
+                activeTaskId: undefined,
+                tasks: run.tasks.map(task =>
+                  task.id === run.activeTaskId && task.status === 'running'
+                    ? { ...task, status: 'pending' as const }
+                    : task,
+                ),
+              }
+            : {}),
+          blockedReason: preserveFoundationActionableState
+            ? run.blockedReason
+            : undefined,
+          updatedAt: timestamp(),
+        }
       }
       break
     default:
