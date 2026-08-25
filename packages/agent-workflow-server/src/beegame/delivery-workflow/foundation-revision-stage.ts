@@ -6,6 +6,7 @@ import { buildFoundationSectionIndex } from './foundation-section-index'
 import type { RevisionBatch } from './foundation-revision-batches'
 import type { AuditIssue } from './foundation-issue-registry'
 import { foundationFactPacketDigest, type FoundationFactPacket } from './foundation-fact-extraction'
+import { digestFoundationSemanticRecheckResult, type FoundationSemanticRecheckResult } from './foundation-patch-validation'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationRevisionRound,
@@ -305,6 +306,100 @@ export async function writeFoundationRevisionSemanticPacket(input: {
       throw new Error('foundation semantic packet artifact already exists with a different digest')
   }
   return packetPath
+}
+
+export async function loadFoundationRevisionSemanticPacket(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  packetDigest: string
+}): Promise<Record<string, unknown>> {
+  const packetPath = foundationRevisionPacketPath(input.revision, input.round, input.taskId)
+  const value = JSON.parse(await readFile(resolveProjectPath(input.workspacePath, packetPath), 'utf8')) as Record<string, unknown>
+  if (!value || value.packetDigest !== input.packetDigest || typeof value.issueId !== 'string') throw new Error('foundation semantic packet artifact identity is stale')
+  return value
+}
+
+export function foundationRevisionSemanticResultPath(revision: string, round: FoundationRevisionRound, taskId: string): string {
+  return `${foundationRevisionPacketPath(revision, round, taskId).replace(/packet\.json$/, '')}result.json`
+}
+
+function assertSemanticResultIdentity(input: {
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  issueId: string
+  packetDigest: string
+  result: FoundationSemanticRecheckResult
+  resultDigest: string
+  resultPath?: string
+}): string {
+  const expectedPath = foundationRevisionSemanticResultPath(input.revision, input.round, input.taskId)
+  if (input.resultPath !== undefined && input.resultPath !== expectedPath) throw new Error('foundation semantic result path is stale')
+  const expectedKeys = input.result.reasonCode === undefined ? ['issueId', 'packetDigest', 'status'] : ['issueId', 'packetDigest', 'reasonCode', 'status']
+  const actualKeys = Object.keys(input.result).sort()
+  if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys.slice().sort()[index])) throw new Error('foundation semantic result shape is invalid')
+  if (input.result.issueId !== input.issueId || input.result.packetDigest !== input.packetDigest) throw new Error('foundation semantic result identity is stale')
+  if (input.result.status !== 'PASS' && input.result.status !== 'FAIL') throw new Error('foundation semantic result status is invalid')
+  if (input.result.reasonCode !== undefined && (!input.result.reasonCode || typeof input.result.reasonCode !== 'string')) throw new Error('foundation semantic result reasonCode is invalid')
+  if (digestFoundationSemanticRecheckResult(input.result) !== input.resultDigest) throw new Error('foundation semantic result digest is stale')
+  return expectedPath
+}
+
+export async function writeFoundationRevisionSemanticResult(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  issueId: string
+  packetDigest: string
+  result: FoundationSemanticRecheckResult
+  resultDigest: string
+}): Promise<string> {
+  const resultPath = assertSemanticResultIdentity(input)
+  const absolute = resolveProjectPath(input.workspacePath, resultPath)
+  await mkdir(resolve(absolute, '..'), { recursive: true })
+  const content = JSON.stringify(input.result)
+  try {
+    if ((await readFile(absolute, 'utf8')) !== content) throw new Error('foundation semantic result artifact already exists with a different digest')
+    return resultPath
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' })
+  try {
+    await link(temporary, absolute)
+    await unlink(temporary)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    await unlink(temporary).catch(() => undefined)
+    if ((await readFile(absolute, 'utf8')) !== content) throw new Error('foundation semantic result artifact already exists with a different digest')
+  }
+  return resultPath
+}
+
+export async function loadFoundationRevisionSemanticResult(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  issueId: string
+  packetDigest: string
+  resultDigest: string
+  resultPath: string
+}): Promise<FoundationSemanticRecheckResult> {
+  const expectedPath = foundationRevisionSemanticResultPath(input.revision, input.round, input.taskId)
+  if (input.resultPath !== expectedPath) throw new Error('foundation semantic result path is stale')
+  let result: FoundationSemanticRecheckResult
+  try {
+    result = JSON.parse(await readFile(resolveProjectPath(input.workspacePath, input.resultPath), 'utf8')) as FoundationSemanticRecheckResult
+  } catch {
+    throw new Error('foundation semantic result artifact digest is stale')
+  }
+  assertSemanticResultIdentity({ ...input, result, resultPath: input.resultPath })
+  return result
 }
 
 function resolveProjectPath(

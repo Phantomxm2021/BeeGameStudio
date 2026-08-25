@@ -103,7 +103,7 @@ import { buildFoundationRevisionBatches } from './foundation-revision-batches'
 import { evaluateFoundationRevisionRoundPolicy } from './foundation-revision-round-policy'
 import { analyzeFoundationImpact } from './foundation-impact-analysis'
 import { buildFoundationSectionIndex } from './foundation-section-index'
-import { buildFoundationSemanticRecheckPacket, rebuildFoundationImpactedFacts, validateFoundationPatch } from './foundation-patch-validation'
+import { admitFoundationSemanticRecheckResult, buildFoundationSemanticRecheckPacket, digestFoundationSemanticRecheckResult, rebuildFoundationImpactedFacts, validateFoundationPatch } from './foundation-patch-validation'
 import type { FoundationSemanticRecheckPacket } from './foundation-patch-validation'
 import {
   buildFoundationRevisionAuthority,
@@ -113,12 +113,15 @@ import {
   writeFoundationRevisionFactPacket,
   loadFoundationRevisionFactPacket,
   writeFoundationRevisionSemanticPacket,
+  loadFoundationRevisionSemanticPacket,
+  writeFoundationRevisionSemanticResult,
+  loadFoundationRevisionSemanticResult,
   deriveFoundationPatchOperations,
   type PatchOperation,
 } from './foundation-revision-stage'
 import { recoverFoundationRevision } from './foundation-revision-publication'
 import { foundationRevisionTasksComplete } from './foundation-revision-stage'
-import type { FoundationRevisionState, FoundationRevisionDocumentTask, FoundationRevisionImpactedFactsTask } from './types'
+import type { FoundationRevisionState, FoundationRevisionDocumentTask, FoundationRevisionImpactedFactsTask, FoundationRevisionSemanticRecheckTask } from './types'
 import type { AuditIssue } from './foundation-issue-registry'
 
 function sameDocumentDigests(
@@ -535,6 +538,71 @@ export function createDeliveryWorkflowController(input: {
                 : candidate),
             },
           }, { runId: latest.runId, type: 'foundation.revision.impacted_facts.admission_failed', phase: latest.phase, status: 'needs_action', revision: latest.revision, taskId: foundationRevisionTask.taskId, reason }, undefined, lease)
+        }
+      } finally { await store.unlock(lease) }
+      if (admitted?.status === 'running') await resumeUnlocked(admitted)
+      return
+    }
+    if (foundationRevisionTask?.kind === 'semantic-recheck' && result.workerType === 'foundation-semantic-reviewer') {
+      let admitted: DeliveryRun | undefined
+      const lease = await store.mutationLock(run.runId)
+      try {
+        const locked = await store.load(lease)
+        const task = locked?.foundationRevisionState?.tasks.find(candidate => candidate.taskId === foundationRevisionTask.taskId)
+        if (!locked || !task || task.kind !== 'semantic-recheck' || task.dispatch?.dispatchId !== record.dispatchId) return
+        if (task.status === 'completed' && task.resultPath && task.resultDigest && task.terminalDigest) {
+          await loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, resultDigest: task.resultDigest, resultPath: task.resultPath })
+          if (locked.foundationRevisionState!.phase !== 'semantic_recheck') {
+            admitted = locked
+          } else {
+            const semanticTasks = locked.foundationRevisionState!.tasks.filter(candidate => candidate.kind === 'semantic-recheck')
+            const allCompleted = semanticTasks.length > 0 && semanticTasks.every(candidate => candidate.status === 'completed' && !!candidate.resultPath && !!candidate.resultDigest && !!candidate.terminalDigest)
+            if (!allCompleted) admitted = locked
+            else {
+              let allPass = false
+              let failureReason: string | undefined
+              try {
+                const results = await Promise.all(semanticTasks.map(candidate => loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: candidate.revision, round: candidate.round, taskId: candidate.taskId, issueId: candidate.issueId, packetDigest: candidate.packetDigest, resultDigest: candidate.resultDigest!, resultPath: candidate.resultPath! })))
+                allPass = results.every(candidate => candidate.status === 'PASS')
+                if (!allPass) failureReason = 'foundation semantic result failed or is stale'
+              } catch (error) {
+                failureReason = error instanceof Error ? error.message : 'foundation semantic result artifact is invalid'
+              }
+              admitted = await store.commit({ ...locked, status: allPass ? 'running' : 'needs_action', blockedReason: allPass ? undefined : failureReason, foundationRevisionState: { ...locked.foundationRevisionState!, phase: allPass ? 'publishing' : 'semantic_recheck', status: allPass ? 'running' : 'needs_action', phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: allPass ? 'foundation.revision.publishing' : 'foundation.revision.semantic_recheck.failed', phase: locked.phase, status: allPass ? 'running' : 'needs_action', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, ...(failureReason ? { reason: failureReason } : {}) }, undefined, lease)
+            }
+          }
+        } else {
+          if (result.status !== 'completed') throw new Error('foundation semantic revision terminal did not complete')
+          const packet = await loadFoundationRevisionSemanticPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
+          const admittedResult = result.outcome === 'PASS'
+            ? admitFoundationSemanticRecheckResult(packet as never, { issueId: task.issueId, packetDigest: task.packetDigest, status: 'PASS' })
+            : result.outcome === 'ISSUES'
+              ? admitFoundationSemanticRecheckResult(packet as never, { issueId: task.issueId, packetDigest: task.packetDigest, status: 'FAIL', reasonCode: 'semantic_issue_persists' })
+              : undefined
+          if (!admittedResult) {
+            const reason = result.reason ?? 'foundation semantic recheck is undecidable'
+            admitted = await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationRevisionState: { ...locked.foundationRevisionState!, status: 'needs_action', tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, status: 'needs_action' as const, failureReason: reason } : candidate) } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck.needs_action', phase: locked.phase, status: 'needs_action', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, reason }, undefined, lease)
+          } else {
+            const resultDigest = digestFoundationSemanticRecheckResult(admittedResult)
+            const resultPath = await writeFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, result: admittedResult, resultDigest })
+            const completedTasks = locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, status: 'completed' as const, resultPath, resultDigest, terminalDigest: candidate.terminalDigest ?? (record.terminalResult ? createHash('sha256').update(JSON.stringify(record.terminalResult)).digest('hex') : undefined), dispatch: record } : candidate)
+            const semanticTasks = completedTasks.filter(candidate => candidate.kind === 'semantic-recheck')
+            const allCompleted = semanticTasks.length > 0 && semanticTasks.every(candidate => candidate.status === 'completed' && !!candidate.resultPath && !!candidate.resultDigest && !!candidate.terminalDigest)
+            if (!allCompleted) {
+              admitted = await store.commit({ ...locked, status: 'running', blockedReason: undefined, foundationRevisionState: { ...locked.foundationRevisionState!, phase: 'semantic_recheck', status: 'running', phaseStartedAt: new Date().toISOString(), tasks: completedTasks } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck.progress', phase: locked.phase, status: 'running', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, resultDigest }, undefined, lease)
+            } else {
+              let allPass = false
+              let failureReason: string | undefined
+              try {
+                const results = await Promise.all(semanticTasks.map(candidate => loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: candidate.revision, round: candidate.round, taskId: candidate.taskId, issueId: candidate.issueId, packetDigest: candidate.packetDigest, resultDigest: candidate.resultDigest!, resultPath: candidate.resultPath! })))
+                allPass = results.every(candidate => candidate.status === 'PASS')
+                if (!allPass) failureReason = 'foundation semantic result failed or is stale'
+              } catch (error) {
+                failureReason = error instanceof Error ? error.message : 'foundation semantic result artifact is invalid'
+              }
+              admitted = await store.commit({ ...locked, status: allPass ? 'running' : 'needs_action', blockedReason: allPass ? undefined : failureReason, foundationRevisionState: { ...locked.foundationRevisionState!, phase: allPass ? 'publishing' : 'semantic_recheck', status: allPass ? 'running' : 'needs_action', phaseStartedAt: new Date().toISOString(), tasks: completedTasks } }, { runId: locked.runId, type: allPass ? 'foundation.revision.publishing' : 'foundation.revision.semantic_recheck.failed', phase: locked.phase, status: allPass ? 'running' : 'needs_action', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, resultDigest, ...(failureReason ? { reason: failureReason } : {}) }, undefined, lease)
+            }
+          }
         }
       } finally { await store.unlock(lease) }
       if (admitted?.status === 'running') await resumeUnlocked(admitted)
@@ -1482,7 +1550,7 @@ export function createDeliveryWorkflowController(input: {
         next = await store.commit({ ...locked, foundationRevisionState: { ...locked.foundationRevisionState, phase: 'semantic_recheck', tasks: existing.length ? locked.foundationRevisionState.tasks : [...locked.foundationRevisionState.tasks, ...semanticTasks], phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
       } else next = await store.commit({ ...locked, foundationRevisionState: { ...locked.foundationRevisionState, phase: 'publishing', phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.publishing', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
     } finally { await store.unlock(lease) }
-    if (next?.status === 'running') await resumeUnlocked(next)
+    if (next?.status === 'running' && next.foundationRevisionState?.phase !== 'semantic_recheck') await resumeUnlocked(next)
   }
 
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
@@ -1633,6 +1701,22 @@ export function createDeliveryWorkflowController(input: {
             const locked = await store.load(lease)
             if (locked?.foundationRevisionState?.phase === 'validating') await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationRevisionState: { ...locked.foundationRevisionState, status: 'needs_action', tasks: locked.foundationRevisionState.tasks.map(task => task.status === 'completed' ? task : { ...task, status: 'needs_action' as const, failureReason: reason }) } }, { runId: locked.runId, type: 'foundation.revision.validation.failed', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason }, undefined, lease)
           } finally { await store.unlock(lease) }
+        }
+        return
+      }
+      if (revisionState.phase === 'semantic_recheck') {
+        if (Date.now() >= new Date(revisionState.roundDeadlineAt).getTime()) {
+          const lease = await store.mutationLock(run.runId)
+          try {
+            const locked = await store.load(lease)
+            if (locked?.foundationRevisionState?.phase === 'semantic_recheck') await store.commit({ ...locked, status: 'needs_action', blockedReason: 'foundation revision round deadline exceeded', foundationRevisionState: { ...locked.foundationRevisionState, status: 'needs_action', tasks: locked.foundationRevisionState.tasks.map(task => task.kind === 'semantic-recheck' && task.status !== 'completed' ? { ...task, status: 'needs_action' as const, failureReason: 'foundation revision round deadline exceeded' } : task) } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck.deadline', phase: locked.phase, status: 'needs_action', revision: locked.revision }, undefined, lease)
+          } finally { await store.unlock(lease) }
+          return
+        }
+        const running = revisionState.tasks.filter(task => task.status === 'running').length
+        const available = revisionState.tasks.filter((task): task is FoundationRevisionSemanticRecheckTask => task.kind === 'semantic-recheck' && (task.status === 'pending' || task.status === 'retryable'))
+        for (const task of available.slice(0, Math.max(0, 4 - running))) {
+          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { taskId: task.taskId, revision: task.revision, round: task.round, issueId: task.issueId, packetPath: task.packetPath, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-semantic-reviewer' } })
         }
         return
       }

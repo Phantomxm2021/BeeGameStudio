@@ -21,7 +21,7 @@ import {
   DELIVERY_RUN_SCHEMA_VERSION,
   RESOURCE_PRODUCTION_TASKS,
 } from './types'
-import { foundationRevisionDocumentReceiptMatches, foundationRevisionPacketPath, foundationRevisionStagePath } from './foundation-revision-stage'
+import { foundationRevisionDocumentReceiptMatches, foundationRevisionPacketPath, foundationRevisionSemanticResultPath, foundationRevisionStagePath } from './foundation-revision-stage'
 
 export const DELIVERY_PHASES = [
   'BRIEF_CONFIRMED',
@@ -273,6 +273,10 @@ export const foundationRevisionStateSchema: z.ZodType<FoundationRevisionState> =
       context.addIssue({ code: 'custom', path: ['tasks', index, 'stagedPath'], message: 'revision stage path must be derived from task identity' })
     if (task.kind === 'document-revision' && task.status === 'completed' && !foundationRevisionDocumentReceiptMatches(task))
       context.addIssue({ code: 'custom', path: ['tasks', index], message: 'completed document revision tasks require receipt and terminalDigest' })
+    if (task.kind === 'semantic-recheck' && task.status === 'completed' && (!task.terminalDigest || !task.resultPath || !task.resultDigest))
+      context.addIssue({ code: 'custom', path: ['tasks', index], message: 'completed semantic recheck tasks require terminalDigest, resultPath and resultDigest' })
+    if (task.kind === 'semantic-recheck' && task.status === 'completed' && task.resultPath !== foundationRevisionSemanticResultPath(task.revision, task.round, task.taskId))
+      context.addIssue({ code: 'custom', path: ['tasks', index, 'resultPath'], message: 'completed semantic result path must be derived from task identity' })
   }
 })
 

@@ -15,6 +15,7 @@ import {
   writeFoundationRevisionPacket,
   type RevisionTaskReceipt,
 } from './foundation-revision-stage'
+import { digestFoundationSemanticRecheckResult } from './foundation-patch-validation'
 import type { AuditIssue } from './foundation-issue-registry'
 
 const workspaces: string[] = []
@@ -83,7 +84,7 @@ test('persists semantic result artifacts immutably and binds issue, packet, resu
   if (!api.writeFoundationRevisionSemanticResult || !api.loadFoundationRevisionSemanticResult) return
   const packetDigest = 'a'.repeat(64)
   const result = { issueId: 'AUD-semantic-1', packetDigest, status: 'PASS' }
-  const resultDigest = createHash('sha256').update(JSON.stringify(result)).digest('hex')
+  const resultDigest = digestFoundationSemanticRecheckResult(result as never)
   const input = { workspacePath: workspace, revision, round: 1 as const, taskId: 'revision-recheck-1', issueId: result.issueId, packetDigest, result, resultDigest }
   const resultPath = await api.writeFoundationRevisionSemanticResult(input)
   expect(resultPath).toContain(`/round-${input.round}/tasks/${input.taskId}/`)

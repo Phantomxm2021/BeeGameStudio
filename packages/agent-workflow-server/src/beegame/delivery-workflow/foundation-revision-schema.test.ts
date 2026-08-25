@@ -78,12 +78,17 @@ describe('foundation revision persisted authority', () => {
     }
     const base = { authority: binding, roundBefore: { documentRevision: 'rev-1', issueRegistryDigest: digest }, revision: 'rev-1', round: 1 as const, phase: 'semantic_recheck' as const, status: 'running' as const, phaseStartedAt: new Date().toISOString(), roundDeadlineAt: new Date(Date.now() + 600_000).toISOString(), knownIssueIds: ['AUD-1'], tasks: [task] }
     expect(foundationRevisionStateSchema.safeParse(base).success).toBe(false)
-    const complete = { ...task, resultPath: `${task.packetPath}.result.json`, resultDigest: digest, terminalDigest: digest }
+    const complete = { ...task, resultPath: task.packetPath.replace(/packet\.json$/, 'result.json'), resultDigest: digest, terminalDigest: digest }
     expect(foundationRevisionStateSchema.safeParse({ ...base, tasks: [complete] }).success).toBe(true)
     for (const incomplete of [
       (() => { const { terminalDigest: _omit, ...value } = complete; return value })(),
       (() => { const { resultPath: _omit, ...value } = complete; return value })(),
       (() => { const { resultDigest: _omit, ...value } = complete; return value })(),
     ]) expect(foundationRevisionStateSchema.safeParse({ ...base, tasks: [incomplete] }).success).toBe(false)
+    for (const resultPath of [
+      complete.resultPath.replace('result.json', 'sibling-result.json'),
+      `${complete.resultPath}/../result.json`,
+      '.beegame/audit/other/result.json',
+    ]) expect(foundationRevisionStateSchema.safeParse({ ...base, tasks: [{ ...complete, resultPath }] }).success).toBe(false)
   })
 })
