@@ -21,7 +21,7 @@ import type {
   ResourceProductionTask,
   WorkflowEvent,
 } from './types'
-import type { FoundationIssueSummary } from './foundation-audit-state'
+import type { FoundationIssueSummary, FoundationRevisionRound } from './foundation-audit-state'
 
 export type WorkflowStageCardTask = {
   id: string
@@ -29,9 +29,8 @@ export type WorkflowStageCardTask = {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
   operation?: 'write' | 'review' | 'revise' | 'produce' | 'assemble'
   attempt?: number
-  round?: 1 | 2 | 3
+  round?: FoundationRevisionRound
   issueSummary?: FoundationIssueSummary
-  knownIssueCount?: number
   usage?: WorkflowStageCardTaskUsage
   durationMs?: number
   failureReason?: string
@@ -414,7 +413,6 @@ function normalizeDisplayTasks(
     ...(nonnegativeInteger(task.attempt) ? { attempt: task.attempt } : {}),
     ...(task.round ? { round: task.round } : {}),
     ...(task.issueSummary ? { issueSummary: task.issueSummary } : {}),
-    ...(task.knownIssueCount !== undefined ? { knownIssueCount: task.knownIssueCount } : {}),
     ...(task.usage ? { usage: task.usage } : {}),
     ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
     ...(task.failureReason ? { failureReason: task.failureReason } : {}),

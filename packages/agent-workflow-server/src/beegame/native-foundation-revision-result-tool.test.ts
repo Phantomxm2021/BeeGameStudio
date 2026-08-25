@@ -31,9 +31,16 @@ afterEach(async () =>
   ),
 )
 
-function canonicalDocument(): string {
+function canonicalDocumentBody(): string {
   const contract = getGameDocumentContract(documentPath)
   return `# GDD\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`).join('\n')}`
+}
+
+function canonicalDocument(
+  version = '1.0.0',
+  updatedAt = '2026-08-13T01:00:00.000+08:00',
+): string {
+  return `---\ndocument_id: GDD\nversion: ${version}\nupdated_at: ${updatedAt}\n---\n${canonicalDocumentBody()}`
 }
 
 async function workspaceWithStage() {
@@ -73,7 +80,7 @@ const declaration = {
 } as const
 
 test('accepts only the bounded declaration and derives the full receipt from local bytes', async () => {
-  const { workspace, stage, staged } = await workspaceWithStage()
+  const { workspace, stage } = await workspaceWithStage()
   let received: RevisionTaskReceipt | undefined
   const tool = createTool(workspace, receipt => {
     received = receipt
@@ -83,6 +90,7 @@ test('accepts only the bounded declaration and derives the full receipt from loc
   await expect(tool.call(declaration)).resolves.toMatchObject({
     data: { accepted: true, changedSectionCount: 1, issueCount: 1, receipt: expect.any(Object) },
   })
+  const finalStaged = await readFile(join(workspace, stage.stagedPath))
   const canonical = await readFile(join(workspace, documentPath))
   const expectedWithoutTerminal = {
     taskId,
@@ -90,7 +98,7 @@ test('accepts only the bounded declaration and derives the full receipt from loc
     documentPath,
     issueIds: [...issueIds],
     baseDocumentDigest: createHash('sha256').update(canonical).digest('hex'),
-    stagedDocumentDigest: createHash('sha256').update(staged).digest('hex'),
+    stagedDocumentDigest: createHash('sha256').update(finalStaged).digest('hex'),
     changedSectionIds: [...declaration.changedSectionIds],
     stagedPath: stage.stagedPath,
   }
@@ -146,4 +154,58 @@ test('rejects stale identity, missing stage, and empty stage bytes', async () =>
 
   await writeFile(join(workspace, stage.stagedPath), '')
   await expect(tool.call(declaration)).rejects.toThrow(/empty/i)
+})
+
+test('commits service-owned metadata once and keeps replay idempotent', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-revision-metadata-'))
+  workspaces.push(workspace)
+  await mkdir(join(workspace, 'docs'), { recursive: true })
+  await writeFile(join(workspace, documentPath), canonicalDocument())
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  const stageAbsolute = join(workspace, stage.stagedPath)
+  await writeFile(
+    stageAbsolute,
+    (await readFile(stageAbsolute, 'utf8')).replace('original vision', 'changed vision'),
+  )
+  const tool = createTool(workspace)
+
+  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { accepted: true } })
+  const first = await readFile(stageAbsolute, 'utf8')
+  expect(first).toContain('version: 1.0.1')
+  expect(first).toContain('updated_at: 2026-08-12T17:00:00.001Z')
+
+  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { accepted: true } })
+  await expect(readFile(stageAbsolute, 'utf8')).resolves.toBe(first)
+})
+
+test('fails closed for worker-tampered service metadata', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'beegame-native-revision-metadata-invalid-'))
+  workspaces.push(workspace)
+  await mkdir(join(workspace, 'docs'), { recursive: true })
+  await writeFile(join(workspace, documentPath), canonicalDocument())
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  const stageAbsolute = join(workspace, stage.stagedPath)
+  await writeFile(
+    stageAbsolute,
+    (await readFile(stageAbsolute, 'utf8'))
+      .replace('original vision', 'changed vision')
+      .replace('version: 1.0.0', 'version: 9.0.0'),
+  )
+  await expect(createTool(workspace).call(declaration)).rejects.toThrow(/metadata|version/i)
+
+  await writeFile(
+    stageAbsolute,
+    (await readFile(stageAbsolute, 'utf8'))
+      .replace('version: 9.0.0', 'version: 1.0.1')
+      .replace('updated_at: 2026-08-13T01:00:00.000+08:00', 'updated_at: 2099-01-01T00:00:00.000Z'),
+  )
+  await expect(createTool(workspace).call(declaration)).rejects.toThrow(/metadata|updated_at/i)
 })

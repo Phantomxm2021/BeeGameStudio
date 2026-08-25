@@ -95,11 +95,13 @@ describe('workflow display tasks', () => {
       thinking: 'working',
       foundationAuditState: {
         status: 'revising',
+        issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
         tasks: [
           { kind: 'document-revision', documentPath: 'docs/GDD.md', status: 'completed', attempt: 2 },
           { kind: 'document-revision', documentPath: 'docs/ART_DIRECTION.md', status: 'needs_action', attempt: 1, failureReason: 'blocked' },
           { kind: 'document-revision', documentPath: 'docs/AUDIO_DESIGN.md', status: 'pending', attempt: 0 },
           { kind: 'impacted-facts', status: 'completed', attempt: 1 },
+          { kind: 'semantic-recheck', issueId: 'ISSUE-1', status: 'pending', attempt: 0 },
         ],
       } as never,
     })
@@ -110,12 +112,14 @@ describe('workflow display tasks', () => {
       operation: task.operation,
       status: task.status,
       attempt: task.attempt,
+      issueSummary: task.issueSummary,
       failureReason: task.failureReason,
     }))).toEqual([
-      { id: 'revision:docs/GDD.md', title: 'docs/GDD.md', operation: 'revise', status: 'completed', attempt: 2, failureReason: undefined },
-      { id: 'revision:docs/ART_DIRECTION.md', title: 'docs/ART_DIRECTION.md', operation: 'revise', status: 'failed', attempt: 1, failureReason: 'blocked' },
-      { id: 'revision:docs/AUDIO_DESIGN.md', title: 'docs/AUDIO_DESIGN.md', operation: 'revise', status: 'pending', attempt: 0, failureReason: undefined },
-      { id: 'impacted-facts:unknown', title: '影响事实验证', operation: 'review', status: 'completed', attempt: 1, failureReason: undefined },
+      { id: 'revision:docs/GDD.md', title: 'docs/GDD.md', operation: 'revise', status: 'completed', attempt: 2, issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 }, failureReason: undefined },
+      { id: 'revision:docs/ART_DIRECTION.md', title: 'docs/ART_DIRECTION.md', operation: 'revise', status: 'failed', attempt: 1, issueSummary: undefined, failureReason: 'blocked' },
+      { id: 'revision:docs/AUDIO_DESIGN.md', title: 'docs/AUDIO_DESIGN.md', operation: 'revise', status: 'pending', attempt: 0, issueSummary: undefined, failureReason: undefined },
+      { id: 'impacted-facts:unknown', title: '影响事实验证', operation: 'review', status: 'completed', attempt: 1, issueSummary: undefined, failureReason: undefined },
+      { id: 'semantic-recheck:ISSUE-1', title: '定向语义验证 · ISSUE-1', operation: 'review', status: 'pending', attempt: 0, issueSummary: undefined, failureReason: undefined },
     ])
   })
 
@@ -154,6 +158,29 @@ describe('workflow display tasks', () => {
     ])
   })
 
+  test('projects an interrupted stopped review task as stopped even after retryable classification', async () => {
+    const tasks = projectDocumentDisplayTasks({
+      workspacePath: await workspace(),
+      documentStep: 'FOUNDATION_REVIEW',
+      workflowStatus: 'stopped',
+      foundationAuditState: {
+        status: 'revising',
+        tasks: [{
+          kind: 'document-revision',
+          documentPath: 'docs/GDD.md',
+          status: 'retryable',
+          attempt: 1,
+          failureReason: 'user stopped workflow',
+          dispatch: { status: 'interrupted' },
+        }],
+      } as never,
+    })
+    expect(tasks[0]).toMatchObject({
+      status: 'stopped',
+      operation: 'revise',
+    })
+  })
+
   test('does not let completed revision state replace checklist work', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
@@ -166,7 +193,7 @@ describe('workflow display tasks', () => {
     ])
   })
 
-  test('projects fact evidence, round feedback, severity summary, and known issue count without registry bodies', async () => {
+  test('projects fact evidence, round feedback, and severity summary without registry bodies', async () => {
     const usage = { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 4, total_tokens: 14 }
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
@@ -174,7 +201,7 @@ describe('workflow display tasks', () => {
       workflowStatus: 'running',
       foundationAuditState: {
         status: 'audit_ready',
-        review: { issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 }, knownIssueIds: ['known-1', 'known-2'] },
+        review: { issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 } },
         tasks: [{ kind: 'document-facts', taskId: 'facts:gdd', status: 'completed', attempt: 2, usage, durationMs: 321 }],
       } as never,
     })
@@ -189,11 +216,10 @@ describe('workflow display tasks', () => {
       workflowStatus: 'running',
       foundationAuditState: {
         status: 'audit_ready',
-        review: { issueSummary: { total: 2, blocker: 0, high: 0, medium: 1, low: 1 }, knownIssueIds: ['known-1', 'known-2'] },
+        review: { issueSummary: { total: 2, blocker: 0, high: 0, medium: 1, low: 1 } },
         tasks: [],
       } as never,
     })
-    expect(withoutRevision.find(task => task.id === 'audit:issues')).toMatchObject({ knownIssueCount: 2 })
   })
 
 })

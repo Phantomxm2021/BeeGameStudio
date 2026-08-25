@@ -13,7 +13,7 @@ describe('delivery progress projection', () => {
       }),
     ).toEqual({
       stageId: 'DOCUMENT_REVIEW',
-      phaseIndex: DELIVERY_PROGRESS_STAGES.indexOf('DOCUMENT_REVIEW') + 1,
+      phaseIndex: 3,
       phaseCount: DELIVERY_PROGRESS_STAGES.length,
       substage: 'INITIAL_REVIEW',
     })
@@ -27,7 +27,7 @@ describe('delivery progress projection', () => {
       }),
     ).toEqual({
       stageId: 'DOCUMENT_DRAFTING',
-      phaseIndex: DELIVERY_PROGRESS_STAGES.indexOf('DOCUMENT_DRAFTING') + 1,
+      phaseIndex: 2,
       phaseCount: DELIVERY_PROGRESS_STAGES.length,
       substage: 'INITIAL_DRAFTING',
     })
@@ -49,7 +49,12 @@ describe('delivery progress projection', () => {
         documentStep: 'FOUNDATION_REVIEW',
         foundationAuditState: { status: 'planning' },
       }),
-    ).toMatchObject({ substage: 'REPAIRING' })
+    ).toMatchObject({
+      stageId: 'FOUNDATION_REVISION',
+      phaseIndex: 4,
+      phaseCount: 10,
+      substage: 'REPAIRING',
+    })
 
     expect(
       projectDeliveryProgress({
@@ -57,6 +62,25 @@ describe('delivery progress projection', () => {
         documentStep: 'FOUNDATION_REVIEW',
         foundationAuditState: { status: 'revising' },
       }),
-    ).toMatchObject({ substage: 'REPAIRING' })
+    ).toMatchObject({
+      stageId: 'FOUNDATION_REVISION',
+      phaseIndex: 4,
+      phaseCount: 10,
+      substage: 'REPAIRING',
+    })
+  })
+
+  test('keeps checklist drafting after revision at the virtual revision stage', () => {
+    expect(
+      projectDeliveryProgress({
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_DRAFTING',
+      }),
+    ).toMatchObject({
+      stageId: 'FOUNDATION_REVISION',
+      phaseIndex: 4,
+      phaseCount: 10,
+      substage: 'CHECKLIST_DRAFTING',
+    })
   })
 })

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import {
   BeeGameSessionManager,
   isResourceWorkerDurableProgress,
@@ -126,8 +126,11 @@ describe('BeeGame session runtime resilience', () => {
     await mkdir(join(workspacePath, '.beegame/audit/foundation/rev-1/revision/docs'), { recursive: true })
     await writeFile(join(workspacePath, stagedPath), 'staged')
     const decisions: DashboardPermissionDecision[] = []
+    let started: BeeGameSessionRunnerStartInput | undefined
     const runner: BeeGameSessionRunner = {
-      start: async () => ({
+      start: async input => {
+        started = input
+        return ({
         submit: async ({ requestPermission, onMessage }) => {
           const common = { message: 'revision read', toolUseID: 'scope-test' }
           decisions.push(await requestPermission({ ...common, toolName: 'Read', input: { file_path: stagedPath } }))
@@ -137,13 +140,63 @@ describe('BeeGame session runtime resilience', () => {
           onMessage({ type: 'result', subtype: 'success', is_error: false } as DashboardSDKMessage)
         },
         stop: () => undefined,
-      }),
+        } as BeeGameSessionRunner['start'] extends (...args: never[]) => infer T ? Awaited<T> : never)
+      },
     }
     const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({ workspacePath, projectId: 'project-revision', userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision', workflowWorkerType: 'foundation-document-reviser', workflowAllowedPaths: [stagedPath], workflowProjectReadScope: 'allowed' })
+    const session = manager.start({ workspacePath, projectId: 'project-revision', userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision', workflowWorkerType: 'foundation-document-reviser', workflowAllowedPaths: [stagedPath], workflowProjectReadScope: 'allowed', workflowRevisionContract: { taskId: 'task-revision', revision: 'revision-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['issue-1'], sectionIds: ['section-1'], stagedPath, baseDocumentDigest: 'a'.repeat(64) } })
     await manager.send(session.id, 'read stage')
     await waitForIdle(manager, session.id)
     expect(decisions.map(decision => decision.behavior)).toEqual(['allow', 'deny', 'deny', 'deny'])
+    expect(started?.cwd).not.toBe(workspacePath)
+    expect(started?.env.BEEGAME_WORKSPACE_PATH).toBe(workspacePath)
+    expect(started?.env.BEEGAME_REVISION_STAGED_PATH).toBe(join(workspacePath, stagedPath))
+    expect(started?.cwd).toContain('.beegame/workflow/native-sandbox/')
+    const sandboxPath = started?.cwd
+    expect(sandboxPath).not.toBe(join(workspacePath, stagedPath))
+    await manager.disposeWorkflowWorker(session.id)
+    expect(manager.get(session.id)).toBeUndefined()
+    await expect(stat(sandboxPath!)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  test('allocates a unique empty native sandbox per revision worker and removes it on dispose', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-revision-sandbox-'))
+    const workspacePath = join(root, 'workspace')
+    const stagedPath = '.beegame/audit/foundation/rev-1/revision/docs/GDD.md'
+    await mkdir(join(workspacePath, '.beegame/audit/foundation/rev-1/revision/docs'), { recursive: true })
+    await writeFile(join(workspacePath, stagedPath), 'staged')
+    const started: Array<{ cwd: string; initialEntries: string[] }> = []
+    const runner: BeeGameSessionRunner = {
+      start: async input => {
+        started.push({ cwd: input.cwd, initialEntries: await readdir(input.cwd) })
+        return {
+          submit: async ({ onMessage }) => onMessage({ type: 'result', subtype: 'success', is_error: false } as DashboardSDKMessage),
+          stop: () => undefined,
+        }
+      },
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const contract = {
+      taskId: 'task-revision', revision: 'revision-1', round: 4,
+      documentPath: 'docs/GDD.md' as const, issueIds: ['issue-1'], sectionIds: ['vision'],
+      stagedPath, baseDocumentDigest: 'a'.repeat(64),
+    }
+    const first = manager.start({ workspacePath, userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision-1', workflowWorkerType: 'foundation-document-reviser', workflowRevisionContract: contract })
+    const second = manager.start({ workspacePath, userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision-2', workflowWorkerType: 'foundation-document-reviser', workflowRevisionContract: { ...contract, taskId: 'task-revision-2' } })
+    await manager.send(first.id, 'revise stage')
+    await manager.send(second.id, 'revise stage')
+    await waitForIdle(manager, first.id)
+    await waitForIdle(manager, second.id)
+
+    expect(started).toHaveLength(2)
+    expect(started[0]!.cwd).not.toBe(started[1]!.cwd)
+    expect(started.every(entry => entry.initialEntries.length === 0)).toBe(true)
+    expect(started.every(entry => relative(entry.cwd, join(workspacePath, stagedPath)).startsWith('..'))).toBe(true)
+    const sandboxes = started.map(entry => entry.cwd)
+    await manager.disposeWorkflowWorker(first.id)
+    await manager.disposeWorkflowWorker(second.id)
+    for (const sandbox of sandboxes)
+      await expect(stat(sandbox)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   test('commits a foundation Markdown stream before completing the turn', async () => {

@@ -49,7 +49,6 @@ export function projectWorkflowCurrentMessage(input: {
 }
 
 export type WorkflowDisplayReasonCode =
-  | 'round_limit'
   | 'user_stopped'
   | 'derivation_failed'
   | 'dispatch_failed'
@@ -62,20 +61,42 @@ export type WorkflowDisplayReason = {
   diagnosticId: string
 }
 
+const workflowDisplayReasonCodes = new Set<WorkflowDisplayReasonCode>([
+  'user_stopped',
+  'derivation_failed',
+  'dispatch_failed',
+  'provider_failed',
+  'workflow_blocked',
+])
+
 /** Project internal workflow failures into the stable Dashboard/API shape. */
 export function projectWorkflowDisplayReason(
   value: unknown,
 ): WorkflowDisplayReason | undefined {
+  // Stage snapshots already carry the stable public projection. Preserve it
+  // instead of feeding the localized message back through the raw-reason
+  // classifier ("Workflow stopped by user." does not contain "user stopped").
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as { message?: unknown }).message === 'string' &&
+    workflowDisplayReasonCodes.has(
+      (value as { code?: unknown }).code as WorkflowDisplayReasonCode,
+    ) &&
+    typeof (value as { diagnosticId?: unknown }).diagnosticId === 'string'
+  )
+    return {
+      message: (value as { message: string }).message,
+      code: (value as { code: WorkflowDisplayReasonCode }).code,
+      diagnosticId: (value as { diagnosticId: string }).diagnosticId,
+    }
   const reason = typeof value === 'string' ? value.trim() : ''
   if (!reason) return undefined
   const normalized = reason.toLowerCase().replaceAll('-', ' ')
   let code: WorkflowDisplayReasonCode = 'workflow_blocked'
   let message = 'Workflow is blocked and needs attention.'
 
-  if (/round[ ._:]*limit/.test(normalized)) {
-    code = 'round_limit'
-    message = 'Automatic revision limit reached.'
-  } else if (
+  if (
     normalized.includes('user stopped') ||
     normalized.includes('operator stopped')
   ) {

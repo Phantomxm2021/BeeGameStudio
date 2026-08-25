@@ -24,15 +24,18 @@ import { publishFoundationRevision, recoverFoundationRevision } from './foundati
 import { publishFoundationDerivedArtifacts } from './foundation-audit-artifacts'
 import { digestFactStore } from './foundation-fact-store'
 import { createModelConfig, resetModelConfigs } from '@bee-game-studio/agent-workflow'
+import { commitFoundationRevisionDocumentMetadata } from '../authored-document-receipt'
+
+const DOCUMENT_METADATA = '---\nversion: 1.0.0\nupdated_at: 2026-08-12T00:00:00.000Z\n---\n'
 
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
-  return `${[`# ${path}`, '', ...contract.sections.flatMap(section => [`<!-- beegame-section:${section.sectionId} -->`, `## ${section.title}`, '', 'unresolved prose', ''])].join('\n')}\n`
+  return `${DOCUMENT_METADATA}${[`# ${path}`, '', ...contract.sections.flatMap(section => [`<!-- beegame-section:${section.sectionId} -->`, `## ${section.title}`, '', 'unresolved prose', ''])].join('\n')}\n`
 }
 
 function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
-  return `${[`# ${path}`, '', ...contract.sections.flatMap(section => [
+  return `${DOCUMENT_METADATA}${[`# ${path}`, '', ...contract.sections.flatMap(section => [
     `<!-- beegame-section:${section.sectionId} -->`,
     `## ${section.title}`,
     '',
@@ -578,6 +581,12 @@ describe('foundation fact runtime controller integration', () => {
     const stagedLines = (await readFile(stageAbsolute, 'utf8')).split('\n')
     stagedLines.splice(section.startLine - 1, section.endLine - section.startLine, ...section.text.replace('unresolved prose', replacement).split('\n'))
     await writeFile(stageAbsolute, stagedLines.join('\n'))
+    await commitFoundationRevisionDocumentMetadata({
+      workspacePath,
+      canonicalPath: task.documentPath,
+      stagedPath: task.stagedPath,
+      expectedCanonicalDigest: task.baseDocumentDigest,
+    })
     const stagedBytes = await readFile(stageAbsolute)
     const receiptWithoutTerminal = { taskId: task.taskId, round: task.round, documentPath: task.documentPath, issueIds: [...task.issueIds], baseDocumentDigest: task.baseDocumentDigest, stagedDocumentDigest: createHash('sha256').update(stagedBytes).digest('hex'), changedSectionIds: [task.sectionIds[0]!], stagedPath: task.stagedPath }
     return { workerType: 'foundation-document-reviser' as const, status: 'completed' as const, runId: run!.runId, dispatchId: request.dispatchId!, taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, round: task.round, documentPath: task.documentPath, receipt: { ...receiptWithoutTerminal, terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal) } }
@@ -593,7 +602,7 @@ describe('foundation fact runtime controller integration', () => {
     return { targetFact, rebuilding: (await controller.store.load())! }
   }
 
-  async function seedRoundClosingRevision(options: { resultingIssue?: boolean; round?: 1 | 2 | 3; unchangedBefore?: boolean } = {}) {
+  async function seedRoundClosingRevision(options: { resultingIssue?: boolean; round?: number; unchangedBefore?: boolean } = {}) {
     const prepared = await preparedController()
     const round = options.round ?? 1
     const { rebuilding } = await completeFactOwnerRevision(prepared.controller, prepared.workspacePath, ownerFactText('game.mechanics'))
@@ -666,7 +675,6 @@ describe('foundation fact runtime controller integration', () => {
       round,
       status: 'round_closing',
       phaseStartedAt: new Date().toISOString(),
-      knownIssueIds: [],
       issueSummary: { total: resultingIssues.length, blocker: 0, high: resultingIssues.length, medium: 0, low: 0 },
       tasks: [roundTask],
       publication: { preparedPath: publication.preparedPath, journalPath: publication.journalPath, committedPath: publication.committedPath, authorityDigest: publication.authorityDigest, resultingRevision: publication.resultingRevision, resultingIssueRegistryDigest: publication.resultingIssueRegistryDigest },
@@ -1020,11 +1028,22 @@ describe('foundation fact runtime controller integration', () => {
     try {
       const { run } = await driveToFactOwnerRevisionIssue(controller)
       const task = run.foundationAuditState!.tasks.find(candidate => candidate.kind === 'document-revision' && candidate.status === 'running')!
+      const beforeStop = (await controller.store.load())!
+      await controller.store.save({
+        ...beforeStop,
+        foundationAuditState: {
+          ...beforeStop.foundationAuditState!,
+          tasks: beforeStop.foundationAuditState!.tasks.map(candidate =>
+            candidate.taskId === task.taskId ? { ...candidate, attempt: 2 } : candidate,
+          ) as FoundationAuditState['tasks'],
+        },
+      })
       await controller.dispatcher.stop(task.dispatch!.dispatchId, 'operator stopped foundation revision')
       const stopped = await controller.store.load()
       const interrupted = stopped!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!
       expect(interrupted).toMatchObject({
         status: 'retryable',
+        attempt: 1,
         failureReason: 'operator stopped foundation revision',
         dispatch: { status: 'interrupted', failureReason: 'operator stopped foundation revision' },
         durationMs: expect.any(Number),
@@ -1808,14 +1827,14 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
   })
 
-  test('round two closing with a changed high issue stops at the documented round limit', async () => {
+  test('round two closing with a changed high issue starts round three', async () => {
     const seeded = await seedRoundClosingRevision({ resultingIssue: true, round: 2 })
     try {
       await seeded.controller.resume(seeded.run)
       const after = await seeded.controller.store.load()
-      expect(after!.status).toBe('needs_action')
-      expect(after!.foundationAuditState!.status).toBe('round_closing')
-      expect(after!.blockedReason).toMatch(/round.limit|round limit/i)
+      expect(after!.status).toBe('running')
+      expect(after!.foundationAuditState!.status).toMatch(/planning|revising/)
+      expect(after!.foundationAuditState!.round).toBe(3)
     } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
   })
 
@@ -1830,14 +1849,14 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
   })
 
-  test('round three closing with unresolved publication authority becomes needs_action', async () => {
+  test('round three closing with a changed high issue starts round four', async () => {
     const seeded = await seedRoundClosingRevision({ resultingIssue: true, round: 3 })
     try {
       await seeded.controller.resume(seeded.run)
       const after = await seeded.controller.store.load()
-      expect(after!.status).toBe('needs_action')
-      expect(after!.foundationAuditState!.status).toBe('round_closing')
-      expect(after!.blockedReason).toMatch(/round.limit|round limit/i)
+      expect(after!.status).toBe('running')
+      expect(after!.foundationAuditState!.status).toMatch(/planning|revising/)
+      expect(after!.foundationAuditState!.round).toBe(4)
     } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
   })
 

@@ -8,8 +8,8 @@ import type { FoundationFactTask } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
-    schemaVersion: 7 as const,
-    schemaFingerprint: 'foundation-audit-state-v7' as const,
+    schemaVersion: 8 as const,
+    schemaFingerprint: 'foundation-audit-state-v8' as const,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(
@@ -107,7 +107,6 @@ describe('foundationAuditState schema', () => {
       },
       roundBefore: { documentRevision: 'revision-1', issueRegistryDigest: digest, issueAuthority: { kind: 'publication' as const, baseRevision: 'revision-1', authorityDigest: digest, issueRegistryDigest: digest } },
       round: 1 as const,
-      knownIssueIds: [],
       issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
       tasks: [{
         taskId: 'revision-1.impacted-facts.1.0', kind: 'impacted-facts' as const, revision: 'revision-1', round: 1 as const,

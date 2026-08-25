@@ -20,7 +20,7 @@ import type {
   WorkerDispatchRequest,
 } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
-import type { FoundationAuditTask } from './foundation-audit-state'
+import type { FoundationAuditTask, FoundationRevisionRound } from './foundation-audit-state'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
 import { claimFoundationFactTasks, digestFoundationFactTerminal, type FoundationFactTask, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { claimFoundationSemanticTasks, digestFoundationSemanticTerminal, type FoundationSemanticRuntimeTask, type FoundationSemanticTaskCollection } from './foundation-semantic-runtime'
@@ -445,12 +445,48 @@ export function createDeliveryDispatcher(options: {
         : undefined
       if (!locked || !location?.taskId || !task || task.dispatch?.dispatchId !== dispatchId)
         throw new DispatchError('not_found', 'foundation review task dispatch lost durable authority')
+      // A user stop is a durable authority boundary. Terminal admission and
+      // its downstream handler can finish after that boundary, but neither
+      // may turn the stopped task into a fresh worker failure or reopen the
+      // run. Keep the interrupted/completed evidence already persisted.
+      if (locked.status === 'stopped') return task.dispatch
       const changed = mutate({ task, record: task.dispatch! })
-      const projectedTask = projectTaskTerminalEvidence(changed.task, changed.record)
+      // A needs_action admission is a durable stop boundary. Another
+      // transport callback can arrive after it (for example a retryable
+      // failure or a late terminal from a sibling dispatch), but it must not
+      // reopen the run or make this task claimable again.
+      const preservedTask =
+        task.status === 'needs_action' && changed.task.status !== 'needs_action'
+          ? {
+              ...changed.task,
+              status: 'needs_action' as const,
+              failureReason:
+                task.failureReason ?? changed.task.failureReason,
+            }
+          : changed.task
+      const preserveRunNeedsAction =
+        locked.status === 'needs_action' && changed.runStatus === 'running'
+      const nextStatus = preserveRunNeedsAction
+        ? ('needs_action' as const)
+        : changed.runStatus
+      const projectedTask = projectTaskTerminalEvidence(
+        preservedTask,
+        changed.record,
+      )
       const next = {
         ...locked,
-        ...(changed.runStatus ? { status: changed.runStatus } : {}),
-        ...(changed.blockedReason !== undefined ? { blockedReason: changed.blockedReason } : {}),
+        ...(nextStatus ? { status: nextStatus } : {}),
+        ...(nextStatus === 'needs_action'
+          ? {
+              blockedReason:
+                locked.blockedReason ??
+                changed.blockedReason ??
+                preservedTask.failureReason ??
+                'foundation review requires operator action',
+            }
+          : changed.blockedReason !== undefined
+            ? { blockedReason: changed.blockedReason }
+            : {}),
         foundationAuditState: {
           ...locked.foundationAuditState!,
           tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectedTask : candidate),
@@ -860,7 +896,14 @@ export function createDeliveryDispatcher(options: {
               await completeDispatch(record.dispatchId, terminal)
             })
             .catch(async error => {
-              if (isWorkerNeedsActionError(error))
+              // A foundation review worker that ends without its required
+              // durable terminal has made a failed attempt, not a human
+              // decision. Keep the terminal contract strict and route this
+              // transport failure through the normal per-task retry boundary.
+              if (
+                isWorkerNeedsActionError(error) &&
+                !isRetryableFoundationTerminalError(request, error)
+              )
                 await markDispatchNeedsAction(record.dispatchId, error.message)
               else {
                 const reason =
@@ -880,20 +923,20 @@ export function createDeliveryDispatcher(options: {
               packet: await (revisionRequest ? loadFoundationRevisionPacket({
                 workspacePath: request.workspacePath,
               revision: request.revision,
-              round: Number(request.contract.round) as 1 | 2 | 3,
+              round: Number(request.contract.round) as FoundationRevisionRound,
               taskId: request.taskId!,
               documentPath: request.contract.documentPath as FoundationDocumentPath,
                 packetDigest: String(request.contract.packetDigest),
               }) : revisionFactRequest ? loadFoundationRevisionFactPacket({
                 workspacePath: request.workspacePath,
                 revision: request.revision,
-                round: Number(request.contract.round) as 1 | 2 | 3,
+                round: Number(request.contract.round) as FoundationRevisionRound,
                 taskId: request.taskId!,
                 packetDigest: String(request.contract.packetDigest),
               }) : loadFoundationRevisionSemanticPacket({
                 workspacePath: request.workspacePath,
                 revision: request.revision,
-                round: Number(request.contract.round) as 1 | 2 | 3,
+                round: Number(request.contract.round) as FoundationRevisionRound,
                 taskId: request.taskId!,
                 packetDigest: String(request.contract.packetDigest),
               })),
@@ -929,6 +972,26 @@ export function createDeliveryDispatcher(options: {
 
   function isWorkerNeedsActionError(error: unknown): error is Error {
     return error instanceof Error && error.name === 'WorkerNeedsActionError'
+  }
+
+  function isRetryableFoundationTerminalError(
+    request: WorkerDispatchRequest,
+    error: unknown,
+  ): boolean {
+    if (
+      !request.taskId ||
+      ![
+        'foundation-fact-extractor',
+        'foundation-semantic-reviewer',
+        'foundation-document-reviser',
+      ].includes(request.workerType)
+    )
+      return false
+    const message = error instanceof Error ? error.message : String(error)
+    return (
+      message.startsWith('missing_required_terminal_submission:') ||
+      message === 'worker stopped before producing a durable terminal result'
+    )
   }
 
   function isTerminalFoundationFactFailure(reason: string): boolean {
@@ -1726,13 +1789,21 @@ export function createDeliveryDispatcher(options: {
     const location = run ? dispatchLocation(run, dispatchId) : undefined
     if (!run || !location)
       throw new DispatchError('not_found', 'dispatch is not active')
-    if (location.record.status !== 'running') return location.record
+    if (location.record.status !== 'running') {
+      // stopRun persists every active lane as interrupted before asking the
+      // bridge to tear down transports. The fallback dispatcher path therefore
+      // still needs to release the in-memory worker here.
+      if (location.record.status === 'interrupted')
+        releaseDispatch(dispatchId, { stopReason: reason })
+      return location.record
+    }
     if (location.taskId) {
       const stopped = await mutateFoundationReviewTask(dispatchId, 'dispatch.interrupted', ({ task, record }) => {
         const terminal = parseDispatchRecord({ ...record, status: 'interrupted', finishedAt: now(), failureReason: reason })
-        const needsAction = task.attempt >= 2
         return {
-          task: { ...task, status: needsAction ? 'needs_action' : 'retryable', failureReason: reason, dispatch: terminal },
+          // A user stop interrupts the current attempt; only a worker
+          // failure is allowed to consume the retry budget.
+          task: { ...task, status: 'retryable', attempt: Math.max(0, task.attempt - 1), failureReason: reason, dispatch: terminal } as FoundationAuditTask,
           record: terminal,
           runStatus: 'stopped',
           blockedReason: reason,

@@ -106,7 +106,7 @@ describe('WorkflowCard', () => {
           status: 'running',
           currentPhase: 'DOCUMENT_REVIEW',
           phaseIndex: 3,
-          phaseCount: 9,
+          phaseCount: 10,
           substage: 'INITIAL_REVIEW',
           documentStep: 'FOUNDATION_REVIEW',
           worker: 'document-author',
@@ -129,7 +129,7 @@ describe('WorkflowCard', () => {
     expect(screen.getByLabelText('工作流状态：执行中')).toHaveAttribute('data-animation', 'loop');
     expect(screen.getByText('正在检查当前文档版本。')).toBeInTheDocument();
     expect(screen.getByText(/Document Author · 正在执行 · UI \/ UX 规格/)).toBeInTheDocument();
-    expect(screen.getByText('3 / 9')).toBeInTheDocument();
+    expect(screen.getByText('3 / 10')).toBeInTheDocument();
     expect(screen.getByText('任务 1 / 3')).toBeInTheDocument();
     expect(screen.getByText('审计：游戏设计文档 GDD')).toBeInTheDocument();
     expect(screen.getByLabelText('任务状态：已审计')).toHaveAttribute('data-task-icon', 'review-completed');
@@ -175,8 +175,8 @@ describe('WorkflowCard', () => {
           runId: 'run_revision_substage',
           status: 'running',
           currentPhase: 'DOCUMENT_REVIEW',
-          phaseIndex: 3,
-          phaseCount: 9,
+          phaseIndex: 4,
+          phaseCount: 10,
           substage: 'REPAIRING',
           tasks: [{ id: 'revision:gdd', title: 'docs/GDD.md', status: 'running', operation: 'revise' }],
         }}
@@ -186,6 +186,145 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('基础文档修订')).toBeInTheDocument();
     expect(screen.queryByText('基础文档审计')).not.toBeInTheDocument();
     expect(screen.queryByText('修订审计影响路径')).not.toBeInTheDocument();
+  });
+
+  it('keeps frozen audit stage 3 separate from live revision stage 4', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_audit_revision_deck',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          stageSnapshots: [
+            {
+              stageId: 'DOCUMENT_REVIEW',
+              status: 'completed',
+              currentPhase: 'DOCUMENT_REVIEW',
+              phaseIndex: 3,
+              phaseCount: 10,
+              substage: 'INITIAL_REVIEW',
+              documentStep: 'FOUNDATION_REVIEW',
+              tasks: [],
+            },
+            {
+              stageId: 'FOUNDATION_REVISION',
+              status: 'running',
+              currentPhase: 'DOCUMENT_REVIEW',
+              phaseIndex: 4,
+              phaseCount: 10,
+              substage: 'REPAIRING',
+              documentStep: 'FOUNDATION_REVIEW',
+              tasks: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('4 / 10')).toBeInTheDocument();
+    expect(screen.getByText('基础文档修订')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看上一阶段' }));
+    expect(screen.getByText('3 / 10')).toBeInTheDocument();
+    expect(screen.getByText('基础文档审计')).toBeInTheDocument();
+  });
+
+  it('labels revision patch validations as validation instead of audit', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_revision_validation_labels',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          substage: 'REPAIRING',
+          tasks: [
+            {
+              id: 'impacted-facts:unknown',
+              title: '影响事实验证',
+              status: 'completed',
+              operation: 'review',
+            },
+            {
+              id: 'semantic-recheck:issue-1',
+              title: '定向语义验证 · issue-1',
+              status: 'running',
+              operation: 'review',
+            },
+            {
+              id: 'semantic-recheck:issue-2',
+              title: '定向语义验证 · issue-2',
+              status: 'pending',
+              operation: 'review',
+            },
+            {
+              id: 'semantic-recheck:issue-3',
+              title: '定向语义验证 · issue-3',
+              status: 'failed',
+              operation: 'review',
+            },
+            {
+              id: 'semantic-recheck:issue-4',
+              title: '定向语义验证 · issue-4',
+              status: 'stopped',
+              operation: 'review',
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('验证：影响事实')).toBeInTheDocument();
+    expect(screen.getByText('验证：定向语义 · issue-1')).toBeInTheDocument();
+    expect(screen.getByText('已验证')).toBeInTheDocument();
+    expect(screen.getByText('验证中')).toBeInTheDocument();
+    expect(screen.getByText('待验证')).toBeInTheDocument();
+    expect(screen.getByText('验证失败')).toBeInTheDocument();
+    expect(screen.getByText('已停止')).toBeInTheDocument();
+    expect(screen.getByLabelText('任务状态：已验证')).toHaveAttribute('data-task-icon', 'review-completed');
+    expect(screen.getByLabelText('任务状态：验证中')).toHaveAttribute('data-task-icon', 'review-running');
+    expect(screen.queryByText('审计：影响事实验证')).not.toBeInTheDocument();
+    expect(screen.queryByText('审计：定向语义验证 · issue-1')).not.toBeInTheDocument();
+    expect(screen.queryByText('已审计')).not.toBeInTheDocument();
+    expect(screen.queryByText('审计中')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('任务状态：已审计')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('任务状态：审计中')).not.toBeInTheDocument();
+  });
+
+  it('shows the current repair round once when all repair tasks agree', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_revision_round',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          substage: 'REPAIRING',
+          tasks: [
+            { id: 'revision:gdd', title: 'docs/GDD.md', status: 'running', operation: 'revise', round: 2 },
+            { id: 'impacted-facts:gdd', title: '影响事实验证', status: 'pending', operation: 'review', round: 2 },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getAllByText('第 2 轮')).toHaveLength(1);
+  });
+
+  it('does not display a repair round when task rounds disagree', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_revision_round_mismatch',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          substage: 'REPAIRING',
+          tasks: [
+            { id: 'revision:gdd', title: 'docs/GDD.md', status: 'running', operation: 'revise', round: 2 },
+            { id: 'impacted-facts:gdd', title: '影响事实验证', status: 'pending', operation: 'review', round: 3 },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText(/^第 \d+ 轮$/)).not.toBeInTheDocument();
   });
 
   it('renders compact audit feedback without raw issue registry content', () => {
@@ -201,7 +340,6 @@ describe('WorkflowCard', () => {
             status: 'completed',
             operation: 'review',
             issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
-            knownIssueCount: 2,
             usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 4, total_tokens: 14 },
             durationMs: 321,
             issueRegistry: [{ problem: 'secret' }],
@@ -213,7 +351,7 @@ describe('WorkflowCard', () => {
         }}
       />,
     );
-    expect(screen.getByText('问题 4 · 阻塞 1 · 高 1 · 中 1 · 低 1 · 已知问题 2 · 耗时 321ms · 用量 14 tokens')).toBeInTheDocument();
+    expect(screen.getByText('问题 4 · 阻塞 1 · 高 1 · 中 1 · 低 1 · 耗时 321ms · 用量 14 tokens')).toBeInTheDocument();
     expect(screen.queryByText('secret')).not.toBeInTheDocument();
     expect(screen.queryByText('secret problem')).not.toBeInTheDocument();
     expect(screen.queryByText('secret actual')).not.toBeInTheDocument();

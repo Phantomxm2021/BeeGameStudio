@@ -19,6 +19,7 @@ import {
 } from './foundation-revision-stage'
 import { digestFoundationSemanticRecheckResult } from './foundation-patch-validation'
 import type { AuditIssue } from './foundation-issue-registry'
+import type { FoundationRevisionRound } from './types'
 
 const workspaces: string[] = []
 afterEach(async () =>
@@ -55,6 +56,12 @@ test('does not overwrite a packet and keeps packet paths isolated by round', asy
   const roundTwo = { ...first, round: 2 as const }
   const roundTwoPath = await writeFoundationRevisionPacket({ workspacePath: workspace, revision, round: 2, taskId: identity.taskId, documentPath, packet: roundTwo, packetDigest: foundationRevisionPacketDigest(roundTwo) })
   expect(roundTwoPath).not.toBe(foundationRevisionPacketPath(revision, 1, identity.taskId))
+})
+
+test('rejects invalid dynamic rounds before constructing packet paths', () => {
+  for (const round of [0, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    expect(() => foundationRevisionPacketPath(revision, round as never, 'revision-task-1')).toThrow(/round/i)
+  }
 })
 
 test('builds a revision packet without duplicate issue evidence', async () => {
@@ -160,7 +167,7 @@ test('persists semantic result artifacts immutably and binds issue, packet, resu
     writeFoundationRevisionSemanticResult?: (input: {
       workspacePath: string
       revision: string
-      round: 1 | 2 | 3
+      round: FoundationRevisionRound
       taskId: string
       issueId: string
       packetDigest: string
@@ -170,7 +177,7 @@ test('persists semantic result artifacts immutably and binds issue, packet, resu
     loadFoundationRevisionSemanticResult?: (input: {
       workspacePath: string
       revision: string
-      round: 1 | 2 | 3
+      round: FoundationRevisionRound
       taskId: string
       issueId: string
       packetDigest: string

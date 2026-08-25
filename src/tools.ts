@@ -1,4 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
+import { isAbsolute } from 'node:path'
 import {
   buildTool,
   toolMatchesName,
@@ -308,8 +309,9 @@ function createFoundationRevisionResultToolForWorker(): Tool | undefined {
   const stringValue = (key: string) => typeof contract[key] === 'string' ? contract[key] as string : undefined
   const issueIds = Array.isArray(contract.issueIds) ? contract.issueIds.filter((value): value is string => typeof value === 'string') : []
   const sectionIds = Array.isArray(contract.sectionIds) ? contract.sectionIds.filter((value): value is string => typeof value === 'string') : []
-  const round = contract.round === 1 || contract.round === 2 || contract.round === 3 ? contract.round : undefined
-  if (!stringValue('taskId') || !stringValue('revision') || !stringValue('documentPath') || !stringValue('baseDocumentDigest') || !stringValue('stagedPath') || !round || !issueIds.length || !sectionIds.length) return undefined
+  const round = typeof contract.round === 'number' && Number.isSafeInteger(contract.round) && contract.round > 0 ? contract.round : undefined
+  const workspacePath = process.env.BEEGAME_WORKSPACE_PATH
+  if (!stringValue('taskId') || !stringValue('revision') || !stringValue('documentPath') || !stringValue('baseDocumentDigest') || !stringValue('stagedPath') || !round || !issueIds.length || !sectionIds.length || !workspacePath || !isAbsolute(workspacePath)) return undefined
   return createNativeFoundationRevisionResultTool({
     // Native workflow tools are ToolDef descriptors.  The normal built-in
     // tool path wraps them with buildTool(), which supplies the runtime
@@ -317,7 +319,7 @@ function createFoundationRevisionResultToolForWorker(): Tool | undefined {
     // getToolsForDefaultPreset() during CLI bootstrap, so returning the raw
     // descriptor makes startup throw before the first stream event.
     buildTool: definition => buildTool(definition as ToolDef),
-    workspacePath: process.cwd(),
+    workspacePath,
     expectedTaskId: stringValue('taskId')!,
     expectedRevision: stringValue('revision')!,
     expectedRound: round,

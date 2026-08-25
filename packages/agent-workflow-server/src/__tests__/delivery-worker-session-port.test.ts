@@ -142,15 +142,18 @@ describe('delivery worker session credentials', () => {
       }
       const receipt = { ...receiptWithoutTerminal, terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal) }
       const starts: Array<Record<string, unknown>> = []
+      const prompts: string[] = []
       const sessions = {
         start(input: Record<string, unknown>) { starts.push(input); return { id: 'session-revision' } },
+        updateAuthToken() {},
+        async sendWithDisplay(_sessionId: string, text: string) { prompts.push(text); return {} },
         events() { return [
           { id: 'revision-tool-use', type: 'tool.started' as const, text: 'SubmitFoundationRevisionResult', createdAt: new Date(), payload: { type: 'tool.started', toolName: 'SubmitFoundationRevisionResult', input: { changedSectionIds: ['vision'], receipt: { forged: true } } } },
           { id: 'revision-tool-result', type: 'tool.completed' as const, text: 'SubmitFoundationRevisionResult completed', createdAt: new Date(), payload: { type: 'tool.completed', toolName: 'SubmitFoundationRevisionResult', output: JSON.stringify({ accepted: true, receipt }) } },
           { id: 'revision-end-turn', type: 'turn.completed' as const, text: 'turn completed', createdAt: new Date(), payload: { type: 'turn.completed' } },
         ] },
       } as unknown as BeeGameSessionManager
-      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1', confirmedBriefContext: 'CONFIRMED_SENTINEL' })
       await port.start({
         dispatchId: 'dispatch-revision', runId: 'run-revision', ownerId: 'user-1', projectId: 'project-revision', workspacePath,
         workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', taskId: 'revision-task-1', revision: 'rev-1',
@@ -160,6 +163,41 @@ describe('delivery worker session credentials', () => {
       await expect(port.waitForTerminal?.('dispatch-revision')).resolves.toMatchObject({ workerType: 'foundation-document-reviser', status: 'completed', receipt })
       expect(starts[0]).toMatchObject({ workflowAllowedPaths: [stage.stagedPath], workflowProjectReadScope: 'allowed', workflowProtectedPaths: ['docs/GDD.md'], workflowRevisionContract: expect.objectContaining({ taskId: 'revision-task-1', stagedPath: stage.stagedPath }) })
       expect(starts[0]?.workflowRevisionContract).not.toHaveProperty('packet')
+      await port.submit('dispatch-revision', `Immutable revision packet: {"sections":[]}\nAssigned staged path: ${join(workspacePath, stage.stagedPath)}\nRead and edit only the assigned staged path. After the revision, call SubmitFoundationRevisionResult exactly once with only changedSectionIds; do not return terminal JSON or prose completion text.`)
+      expect(prompts[0]).toContain(join(workspacePath, stage.stagedPath))
+      expect(prompts[0]).not.toContain('CONFIRMED_SENTINEL')
+      expect(prompts[0]).not.toContain('Workspace root:')
+      expect(prompts[0]).not.toContain('README.md')
+
+      const legacySessions = {
+        ...sessions,
+        events() {
+          return [
+            {
+              id: 'legacy-revision-tool-result',
+              type: 'tool.completed' as const,
+              text: 'SubmitFoundationRevisionResult completed',
+              createdAt: new Date(),
+              payload: {
+                type: 'tool.completed',
+                toolName: 'SubmitFoundationRevisionResult',
+                output: JSON.stringify({ accepted: true, data: { receipt } }),
+              },
+            },
+          ]
+        },
+      } as unknown as BeeGameSessionManager
+      const legacyPort = createBeeGameDeliveryWorkerPort({
+        sessions: legacySessions,
+        userId: 'user-1',
+      })
+      await legacyPort.start({
+        dispatchId: 'dispatch-revision-legacy', runId: 'run-revision', ownerId: 'user-1', projectId: 'project-revision', workspacePath,
+        workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', taskId: 'revision-task-1', revision: 'rev-1',
+        allowedPaths: [stage.stagedPath], protectedPaths: ['docs/GDD.md'], projectReadScope: 'allowed',
+        contract: { workerType: 'foundation-document-reviser', taskId: 'revision-task-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['AUD-1'], sectionIds: ['vision'], stagedPath: stage.stagedPath, baseDocumentDigest: stage.baseDocumentDigest, packetPath: foundationRevisionPacketPath('rev-1', 1, 'revision-task-1'), packetDigest: 'a'.repeat(64) },
+      })
+      await expect(legacyPort.waitForTerminal?.('dispatch-revision-legacy')).rejects.toThrow()
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 

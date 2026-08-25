@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import { z } from 'zod/v4'
+import { commitFoundationRevisionDocumentMetadata } from './authored-document-receipt'
 import {
   foundationRevisionStagePath,
   revisionTaskReceiptTerminalDigest,
   type RevisionTaskReceipt,
 } from './delivery-workflow/foundation-revision-stage'
-import type { FoundationDocumentPath } from './delivery-workflow/types'
+import type { FoundationDocumentPath, FoundationRevisionRound } from './delivery-workflow/types'
 
 const declarationSchema = z
   .object({
@@ -59,7 +60,7 @@ export function createNativeFoundationRevisionResultTool(options: {
   workspacePath: string
   expectedTaskId: string
   expectedRevision: string
-  expectedRound: 1 | 2 | 3
+  expectedRound: FoundationRevisionRound
   expectedDocumentPath: FoundationDocumentPath
   expectedIssueIds: readonly string[]
   expectedSectionIds: readonly string[]
@@ -72,7 +73,7 @@ export function createNativeFoundationRevisionResultTool(options: {
     alwaysLoad: true,
     inputSchema: declarationSchema,
     isConcurrencySafe: () => false,
-    isReadOnly: () => true,
+    isReadOnly: () => false,
     async description() {
       return 'Submit the bounded declaration for an isolated foundation document revision; the service derives the receipt from project-local bytes.'
     },
@@ -117,13 +118,23 @@ export function createNativeFoundationRevisionResultTool(options: {
       if (stagedBytes.length === 0)
         throw new Error('foundation revision staged document is empty')
 
+      await commitFoundationRevisionDocumentMetadata({
+        workspacePath: options.workspacePath,
+        canonicalPath: options.expectedDocumentPath,
+        stagedPath,
+        expectedCanonicalDigest: sha256(baseBytes),
+      })
+      const finalStagedBytes = await readFile(stagedAbsolute)
+      if (finalStagedBytes.length === 0)
+        throw new Error('foundation revision staged document is empty')
+
       const receiptWithoutTerminal = {
         taskId: options.expectedTaskId,
         round: options.expectedRound,
         documentPath: options.expectedDocumentPath,
         issueIds: [...options.expectedIssueIds],
         baseDocumentDigest: sha256(baseBytes),
-        stagedDocumentDigest: sha256(stagedBytes),
+        stagedDocumentDigest: sha256(finalStagedBytes),
         changedSectionIds: [...parsed.changedSectionIds],
         stagedPath,
       } satisfies Omit<RevisionTaskReceipt, 'terminalDigest'>

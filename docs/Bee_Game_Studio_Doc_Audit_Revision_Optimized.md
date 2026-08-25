@@ -165,10 +165,11 @@ Semantic packet discipline is part of this authority: when normalized Facts alre
 > "fix_section": "Boss Assets"  
 > }
 
-严重程度：BLOCKER / HIGH / MEDIUM / LOW。默认自动处理
-BLOCKER、HIGH、MEDIUM；LOW 可记录为 Known Issues。
+严重程度：BLOCKER / HIGH / MEDIUM / LOW。所有已进入 Registry 的问题都必须自动进入修订，不因 severity 被豁免。
 
-审计问题与运行完整性失败必须分离：业务矛盾、遗漏和新发现的问题进入并发布唯一的 Issue Registry，驱动下一修订轮；stale digest、越权 Section、非法 Patch、缺失 receipt、身份不匹配等完整性失败不进入 Registry，直接 fail closed 并进入 `needs_action`。发现新 Issue 不是拒绝发布本轮 Registry 的理由。
+审计问题与运行完整性失败必须分离：业务矛盾、遗漏和新发现的问题进入并发布唯一的 Issue Registry，驱动下一修订轮；已提交“完成”的终态却缺失、非法或冲突的 receipt，stale digest、越权 Section、非法 Patch、身份不匹配等完整性失败不进入 Registry，直接 fail closed 并进入 `needs_action`。发现新 Issue 不是拒绝发布本轮 Registry 的理由。未调用 terminal 或在 durable terminal 前结束属于 task attempt 失败，按下文重试边界处理。
+
+Worker 未调用必需的 durable terminal，或在 durable terminal 之前结束，只表示该 task 的本次 attempt 失败；不得伪造 receipt、不得把缺 terminal 当作业务 PASS/ISSUE，也不得立即把整个 Foundation run 变成人工 `needs_action`。只要该 task 尚未达到其既有 attempt boundary，controller 必须按普通 failed/retryable 语义创建 fresh dispatch；attempt 耗尽后才允许该 task 与 run 进入 `needs_action`。真正的完整性失败、强确认后的 `UNDECIDABLE`、产品决策或 authority 无进展仍直接进入 `needs_action`。
 
 # 8. Source of Truth
 
@@ -209,6 +210,8 @@ GDD，但不能静默改变玩法。
 > }
 
 支持 INSERT / REPLACE / DELETE。禁止默认整篇重写。
+
+修订提交时，文档 frontmatter 的 `version` 与 `updated_at` 是服务所有的元数据：服务以本轮修订前的 canonical 文档为唯一 authority，将 PATCH 版本递增一次并推进 `updated_at`，然后才从最终 staged bytes 派生 receipt、验证和发布 digest。worker 不得改变这两个字段；同一 task/round 的重试或 Submit 重放必须保持已递增的元数据不变，缺失、格式非法、非预期版本或时间未推进都必须 fail closed。
 
 # 10. 修订后验证：验证 Patch，不重新审整份文档
 
@@ -252,11 +255,10 @@ Recheck。
 |------------|------------------------------------------|
 | LLM 输入   | 只传 Issue + 目标 Section + 必要 Facts   |
 | LLM 输出   | 强制 JSON / Patch，不允许长篇解释        |
-| Issue 处理 | 优先 BLOCKER/HIGH/MEDIUM                 |
+| Issue 处理 | Registry 中的所有 severity 均须处理       |
 | 修订调用   | 同文档合并，一文档尽量一次               |
 | 并行度     | 有界并行；默认同时运行上限 4，任务声明可取更低值；并发上限不得解释为必需任务总数上限 |
 | 复审       | 优先 Patch Validation，不做全文 Re-Audit |
-| 最大循环   | 2–3 轮                                   |
 | 全文读取   | 禁止；L3 也只能追加明确选中的索引 Section |
 
 必需任务数必须按当前 case 的文档规模、Issue Registry、风险覆盖与确认依赖动态生成，不得预设统一总数上限。由封闭事实目录或本规范明确风险域推导出的固定数量，只表示必须完整覆盖的集合基数，不是复杂度预算，也不得阻止为实际发现追加合法的 deep / confirmation / revision 任务。
@@ -269,14 +271,9 @@ Recheck。
 
 # 14. 停止条件
 
-> Round 1: 修 BLOCKER + HIGH + MEDIUM  
-> Round 2: 修新增 BLOCKER + HIGH  
-> Round 3: 仅修 BLOCKER  
->   
-> 无 BLOCKER / HIGH → PASS
-> 剩余 MEDIUM / LOW → Known Issues
+每轮成功验证后必须原子发布一个新的、不可变且 revision-bound 的文档 authority、derived artifacts 与 Issue Registry；下一轮只能引用该 authority。只要 Registry 非空，就必须修订其中全部 severity，并在 authority 发生变化后进入 `round + 1` 的定向增量验证；不得设置固定最大轮次或按预设轮次分配 severity 预算。只有 Registry 为空才允许 PASS/进入后续流程。
 
-每轮成功验证后必须原子发布一个新的、不可变且 revision-bound 的文档 authority、derived artifacts 与 Issue Registry；下一轮只能引用该 authority。新 Issue 随本轮 Registry 发布后进入下一轮，不得因“存在新 Issue”回退为未发布状态。Round 3 后若仍有 BLOCKER/HIGH，流程进入 `needs_action`，不得静默 PASS，也不得创建另一条候选/兼容修订轨道。
+仅在完整性失败、强确认后仍为 `UNDECIDABLE` 或需要产品决策、或 authority 确实无进展时进入 `needs_action`；Issue Registry 是唯一完成与进展 authority，同一 Registry digest 在一轮修订和定向验证后仍然不变即表示无进展，即使 worker 改动了文档 bytes、生成了新 document revision，也不得用这些内容漂移掩盖无进展并继续下一轮。不得以任何 severity 豁免未清零的 Registry，也不得创建另一条候选/兼容修订轨道。
 
 # 15. 最终生产 Pipeline
 
@@ -377,12 +374,15 @@ Recheck。
 - LLM 负责语义判断，而不是承担所有审计。
 
 - 单一 durable task collection 负责 dispatch、恢复与审计记录；不得为暂停恢复、Reviewer 或 revision candidate 创建第二套状态机。
+- 原生 revision worker 每个 dispatch 使用唯一空 sandbox cwd；真实 project workspace 只能通过 service 注入的受信环境变量供 receipt tool 使用。Read/Edit 必须在 tool input validation 层精确拒绝 canonical、其他 staged path、workspace 外路径和 symlink，即使全局 permission rule 会自动 allow；普通非 revision worker 的工具行为不变。
+- 原生 revision worker 的工具面只能包含 `Read`、`Edit` 和 `SubmitFoundationRevisionResult`；不得暴露 Bash、Grep、Glob 或任何其他文件访问/旁路工具。该白名单与 Read/Edit 的输入层拒绝共同构成唯一 revision 文件访问边界。
 
 - 唯一持久化字段是 `foundationAuditState`：audit 与 revision 通过该状态内互斥的 substage/status 和同一 `tasks[]` 表达。禁止保留 `foundationRevisionState`、别名、双读/双写、旧 schema reader、迁移器或 fallback；携带旧顶层字段的 durable run 必须由 strict schema fail closed，而不是被静默接纳。
 
 - Review copy 初始化直接进入唯一可运行的 `FOUNDATION_REVIEW` 状态并由同一 controller 启动；不得先持久化虚假 `needs_action`/`implementation unavailable` 再由另一入口覆盖。
 
-- Dashboard 只投影普通任务状态、轮次、Issue 数量与 Known Issues 摘要；它不是审计或修订 authority，也不展示原始 Registry JSON、worker thinking、过程 prose 或原始 feedback。Foundation review 期间的 worker message 只保留在运行日志与 durable evidence 中，不进入阶段卡片。
+- Dashboard 只投影普通任务状态、轮次与 Issue 数量；它不是审计或修订 authority，也不展示原始 Registry JSON、worker thinking、过程 prose 或原始 feedback。Foundation review 期间的 worker message 只保留在运行日志与 durable evidence 中，不进入阶段卡片。
+- 阶段显示必须将 Foundation 审计与修订分开：审计固定为显示 stage 3，修订固定为显示 stage 4。stage 4 是仅用于显示的虚拟 identity，底层仍只有 `DOCUMENT_REVIEW` 与唯一持久化 `foundationAuditState`；冻结的审计卡必须保留 stage 3，进入修订时生成 stage 4 live card，checklist drafting 不得回退到 stage 3。
 
 - 所有终态任务都保留 usage、duration 与 failure reason，确保成本和失败可按任务追溯。
 

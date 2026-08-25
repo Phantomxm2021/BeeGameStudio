@@ -1453,7 +1453,7 @@ function frozenStageEvent(
     stageSnapshot: {
       stageId: phase,
       phaseIndex,
-      phaseCount: 9,
+      phaseCount: 10,
       status: 'completed',
       currentPhase: phase,
       message: 'frozen stage status',

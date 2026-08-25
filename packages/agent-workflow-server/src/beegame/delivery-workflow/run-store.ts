@@ -307,7 +307,7 @@ function withDispatchUsage(
           ...run.foundationAuditState,
           tasks: run.foundationAuditState.tasks.map(task =>
             task.dispatch?.dispatchId === dispatchId
-              ? { ...task, dispatch: update(task.dispatch) }
+              ? { ...task, usage, dispatch: update(task.dispatch) }
               : task,
           ),
         }

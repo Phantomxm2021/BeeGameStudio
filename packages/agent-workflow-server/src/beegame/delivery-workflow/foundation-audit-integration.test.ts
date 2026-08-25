@@ -113,7 +113,6 @@ describe('foundation semantic audit integration', () => {
       manifestPath: '.beegame/audit/foundation/rev/review/' + 'b'.repeat(64) + '/manifest.json', manifestDigest: 'b'.repeat(64), markerPath: '.beegame/audit/foundation/rev/review/' + 'b'.repeat(64) + '/COMMITTED.json', markerDigest: 'b'.repeat(64),
       sectionIndexDigest: 'a'.repeat(64), factStoreDigest: 'a'.repeat(64), semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest,
       issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
-      knownIssueIds: [],
     }
     expect(() => parseFoundationAuditState({ ...valid, review })).toThrow(/atomic|audit_ready|review/i)
     expect(() => parseFoundationAuditState({ ...valid, status: 'audit_ready', semantic: undefined, review })).toThrow(/semantic|metrics|review/i)

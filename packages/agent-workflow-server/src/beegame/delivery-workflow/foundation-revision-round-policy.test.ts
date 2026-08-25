@@ -40,6 +40,13 @@ const snapshot = (
 })
 
 describe('foundation revision round policy', () => {
+  test('proceeds from an empty registry during initial planning', () => {
+    expect(evaluateFoundationRevisionRoundPolicy({ phase: 'plan', round: 1, issues: [] })).toEqual({
+      status: 'proceed',
+      repairIssueIds: [],
+    })
+  })
+
   test('plans the initial round without caller-side severity filtering', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
       phase: 'plan',
@@ -54,26 +61,21 @@ describe('foundation revision round policy', () => {
     expect(result).toEqual({
       status: 'repair',
       round: 1,
-      repairIssueIds: ['AUD-B', 'AUD-M'],
-      knownIssueIds: ['AUD-L'],
+      repairIssueIds: ['AUD-B', 'AUD-L', 'AUD-M'],
     })
   })
 
-  test('proceeds from a plan with only medium or low issues', () => {
+  test('repairs medium and low issues instead of exempting them', () => {
     expect(
       evaluateFoundationRevisionRoundPolicy({
         phase: 'plan',
         round: 1,
         issues: [issue('AUD-L', 'LOW')],
       }),
-    ).toEqual({
-      status: 'proceed',
-      repairIssueIds: [],
-      knownIssueIds: ['AUD-L'],
-    })
+    ).toEqual({ status: 'repair', round: 1, repairIssueIds: ['AUD-L'] })
   })
 
-  test('stops a round-three plan with an unrepairable high issue', () => {
+  test('plans high issues in any positive round', () => {
     expect(
       evaluateFoundationRevisionRoundPolicy({
         phase: 'plan',
@@ -81,10 +83,9 @@ describe('foundation revision round policy', () => {
         issues: [issue('AUD-H', 'HIGH')],
       }),
     ).toEqual({
-      status: 'needs_action',
-      repairIssueIds: [],
-      knownIssueIds: [],
-      reason: 'round_limit',
+      status: 'repair',
+      round: 3,
+      repairIssueIds: ['AUD-H'],
     })
   })
 
@@ -115,12 +116,11 @@ describe('foundation revision round policy', () => {
     expect(result).toEqual({
       status: 'continue',
       nextRound: 2,
-      repairIssueIds: ['AUD-B2', 'AUD-H2'],
-      knownIssueIds: ['AUD-M2'],
+      repairIssueIds: ['AUD-B2', 'AUD-H2', 'AUD-M2'],
     })
   })
 
-  test('round 2 repairs current and new blocker/high issues, but not medium', () => {
+  test('round 2 repairs every unresolved severity', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
       phase: 'evaluate',
       round: 2,
@@ -139,12 +139,11 @@ describe('foundation revision round policy', () => {
     expect(result).toEqual({
       status: 'continue',
       nextRound: 3,
-      repairIssueIds: ['AUD-B2'],
-      knownIssueIds: ['AUD-M'],
+      repairIssueIds: ['AUD-B2', 'AUD-H2', 'AUD-M'],
     })
   })
 
-  test('round plans use the exact severity budget for every round', () => {
+  test('round plans repair every issue at round 2 and beyond', () => {
     expect(
       evaluateFoundationRevisionRoundPolicy({
         phase: 'plan',
@@ -159,8 +158,7 @@ describe('foundation revision round policy', () => {
     ).toEqual({
       status: 'repair',
       round: 2,
-      repairIssueIds: ['AUD-B', 'AUD-H'],
-      knownIssueIds: ['AUD-L', 'AUD-M'],
+      repairIssueIds: ['AUD-B', 'AUD-H', 'AUD-L', 'AUD-M'],
     })
     expect(
       evaluateFoundationRevisionRoundPolicy({
@@ -171,12 +169,11 @@ describe('foundation revision round policy', () => {
     ).toEqual({
       status: 'repair',
       round: 3,
-      repairIssueIds: ['AUD-B'],
-      knownIssueIds: ['AUD-M'],
+      repairIssueIds: ['AUD-B', 'AUD-H', 'AUD-M'],
     })
   })
 
-  test('round 3 repairs only blockers and never starts round 4', () => {
+  test('round 3 continues to round 4 when the registry remains non-empty', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
       phase: 'evaluate',
       round: 3,
@@ -189,15 +186,14 @@ describe('foundation revision round policy', () => {
     })
 
     expect(result).toEqual({
-      status: 'needs_action',
-      repairIssueIds: [],
-      knownIssueIds: [],
-      reason: 'round_limit',
+      status: 'continue',
+      nextRound: 4,
+      repairIssueIds: ['AUD-B2', 'AUD-H'],
     })
-    expect('nextRound' in result).toBe(false)
+    expect('nextRound' in result).toBe(true)
   })
 
-  test('proceeds with medium and low issues as known issues when no blocker or high remains', () => {
+  test('does not proceed while medium and low issues remain in the registry', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
       phase: 'evaluate',
       round: 3,
@@ -210,13 +206,13 @@ describe('foundation revision round policy', () => {
     })
 
     expect(result).toEqual({
-      status: 'proceed',
-      repairIssueIds: [],
-      knownIssueIds: ['AUD-L', 'AUD-M'],
+      status: 'continue',
+      nextRound: 4,
+      repairIssueIds: ['AUD-L', 'AUD-M'],
     })
   })
 
-  test('round three passes medium and low but needs action for either blocker or high', () => {
+  test('only an empty registry can proceed', () => {
     const before = snapshot([issue('AUD-B', 'BLOCKER')], digest('a'), 'doc-1')
     expect(
       evaluateFoundationRevisionRoundPolicy({
@@ -225,7 +221,7 @@ describe('foundation revision round policy', () => {
         before,
         after: snapshot([issue('AUD-M', 'MEDIUM'), issue('AUD-L', 'LOW')], digest('b'), 'doc-2'),
       }),
-    ).toMatchObject({ status: 'proceed', knownIssueIds: ['AUD-L', 'AUD-M'] })
+    ).toMatchObject({ status: 'continue', nextRound: 4, repairIssueIds: ['AUD-L', 'AUD-M'] })
     for (const severity of ['HIGH', 'BLOCKER'] as const) {
       expect(
         evaluateFoundationRevisionRoundPolicy({
@@ -234,11 +230,11 @@ describe('foundation revision round policy', () => {
           before,
           after: snapshot([issue(`AUD-${severity}`, severity)], digest('b'), 'doc-2'),
         }),
-      ).toMatchObject({ status: 'needs_action', reason: 'round_limit' })
+      ).toMatchObject({ status: 'continue', nextRound: 4 })
     }
   })
 
-  test('stops on explicit no-progress with unchanged authoritative identities and document revision', () => {
+  test('stops when issue authority is unchanged even if document bytes drifted', () => {
     const issues = [issue('AUD-B', 'BLOCKER'), issue('AUD-H', 'HIGH')]
     const result = evaluateFoundationRevisionRoundPolicy({
       phase: 'evaluate',
@@ -247,14 +243,13 @@ describe('foundation revision round policy', () => {
       after: snapshot(
         issues.map(item => ({ ...item })),
         digest('a'),
-        'doc-1',
+        'doc-2',
       ),
     })
 
     expect(result).toEqual({
       status: 'needs_action',
       repairIssueIds: [],
-      knownIssueIds: [],
       reason: 'no_progress',
     })
   })
@@ -273,7 +268,7 @@ describe('foundation revision round policy', () => {
     expect(() =>
       evaluateFoundationRevisionRoundPolicy({
         phase: 'evaluate',
-        round: 4 as never,
+        round: 0 as never,
         before: snapshot([issue('AUD-B', 'BLOCKER')], digest('a'), 'doc-1'),
         after: snapshot([], digest('b'), 'doc-2'),
       }),
@@ -287,7 +282,7 @@ describe('foundation revision round policy', () => {
         after: snapshot(
           [issue('AUD-B', 'HIGH', 'changed')],
           digest('a'),
-          'doc-1',
+          'doc-2',
         ),
       }),
     ).toThrow(/identity|digest|authoritative/i)

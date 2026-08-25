@@ -45,7 +45,6 @@ describe('projectWorkflowCurrentMessage', () => {
 
 describe('projectWorkflowDisplayReason', () => {
   test.each([
-    ['foundation revision round round_limit', 'round_limit'],
     ['user stopped workflow', 'user_stopped'],
     [
       'foundation audit derivation failed: missing document',
@@ -66,6 +65,15 @@ describe('projectWorkflowDisplayReason', () => {
     expect(projectWorkflowDisplayReason('provider request failed')).toEqual(
       projectWorkflowDisplayReason('provider request failed'),
     )
+  })
+
+  test('preserves an already projected reason instead of classifying its message again', () => {
+    const projected = {
+      message: 'Workflow stopped by user.',
+      code: 'user_stopped' as const,
+      diagnosticId: 'workflow-stop-1234',
+    }
+    expect(projectWorkflowDisplayReason(projected)).toEqual(projected)
   })
 
   test('preserves an existing diagnostic id without exposing the detail', () => {

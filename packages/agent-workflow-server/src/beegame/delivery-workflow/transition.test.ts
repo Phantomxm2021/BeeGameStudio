@@ -192,7 +192,6 @@ function auditReadyState(): FoundationAuditState {
       factStoreDigest: DIGEST,
       semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest,
       issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
-      knownIssueIds: [],
     },
   })
 }
@@ -250,7 +249,6 @@ function revisionState(): FoundationAuditState {
     round: 2,
     status: 'semantic_recheck',
     phaseStartedAt: OLD_PHASE,
-    knownIssueIds: ['issue-0'],
     issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
     tasks: [semanticTask, documentTask],
   })
@@ -393,7 +391,7 @@ describe('foundation retry transitions', () => {
 
     const closing = transitionDeliveryRun({
       ...revisionRun({ ...planning, status: 'round_closing' }),
-      blockedReason: 'foundation revision round limit',
+      blockedReason: 'foundation revision authority made no progress',
     }, { type: 'retry' })
     expect(closing.status).toBe('needs_action')
     expect(closing.foundationAuditState?.status).toBe('round_closing')

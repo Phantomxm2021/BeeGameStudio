@@ -31,11 +31,13 @@ import {
   projectExactResumeRun,
   proveExactRawActiveUnitId,
 } from './recovery-projector'
+import type { FoundationAuditTask } from './foundation-audit-state'
 import { reconcileAuthoredDocumentReceipt } from '../authored-document-receipt'
 import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
+import { projectTaskTerminalEvidence } from './task-terminal-evidence'
 
 export {
   inspectWorkflowSnapshot,
@@ -1008,26 +1010,76 @@ export async function stopRun(input: {
     sessionIsOpen: input.sessionIsOpen,
   })
   let persisted: DeliveryRun
-  const dispatchId =
-    acquired.run.activeDispatch?.status === 'running'
-      ? acquired.run.activeDispatch.dispatchId
-      : undefined
+  const dispatchIds = new Set<string>()
+  if (acquired.run.activeDispatch?.status === 'running')
+    dispatchIds.add(acquired.run.activeDispatch.dispatchId)
+  for (const document of acquired.run.foundationDraftState.documents ?? [])
+    if (document.dispatch?.status === 'running')
+      dispatchIds.add(document.dispatch.dispatchId)
+  for (const task of acquired.run.foundationAuditState?.tasks ?? [])
+    if (task.dispatch?.status === 'running')
+      dispatchIds.add(task.dispatch.dispatchId)
   try {
     const stopped = transitionDeliveryRun(acquired.run, {
       type: 'stop',
       reason: input.reason,
     })
+    const interruptedDispatch = (dispatch: DispatchRecord): DispatchRecord => ({
+      ...dispatch,
+      status: 'interrupted',
+      finishedAt: new Date().toISOString(),
+      failureReason: input.reason,
+    })
     persisted = {
       ...stopped,
       activeDispatch:
         stopped.activeDispatch?.status === 'running'
-          ? {
-              ...stopped.activeDispatch,
-              status: 'interrupted' as const,
-              finishedAt: new Date().toISOString(),
-              failureReason: input.reason,
-            }
+          ? interruptedDispatch(stopped.activeDispatch)
           : stopped.activeDispatch,
+      foundationDraftState: {
+        ...stopped.foundationDraftState,
+        ...(stopped.foundationDraftState.documents
+          ? {
+              documents: stopped.foundationDraftState.documents.map(document =>
+                document.dispatch?.status === 'running'
+                  ? {
+                      ...document,
+                      status: 'needs_action' as const,
+                      failureReason: input.reason,
+                      dispatch: interruptedDispatch(document.dispatch),
+                    }
+                  : document,
+              ),
+            }
+          : {}),
+      },
+      ...(stopped.foundationAuditState
+        ? {
+            foundationAuditState: {
+              ...stopped.foundationAuditState,
+              tasks: stopped.foundationAuditState.tasks.map(task =>
+                task.dispatch?.status === 'running'
+                  ? (() => {
+                      const terminal = interruptedDispatch(task.dispatch!)
+                      return projectTaskTerminalEvidence(
+                        {
+                          ...task,
+                          // A user stop interrupts the current attempt; it is
+                          // not a worker failure and must not consume the
+                          // attempt available to the next Continue action.
+                          status: 'retryable' as const,
+                          attempt: Math.max(0, task.attempt - 1),
+                          failureReason: input.reason,
+                          dispatch: terminal,
+                        } as FoundationAuditTask,
+                        terminal,
+                      )
+                    })()
+                  : task,
+              ),
+            },
+          }
+        : {}),
     }
     persisted = await input.store.commit(
       persisted,
@@ -1045,6 +1097,12 @@ export async function stopRun(input: {
   } finally {
     await acquired.unlock()
   }
-  if (dispatchId) await input.stopDispatch?.(dispatchId, input.reason)
+  const stopResults = await Promise.allSettled(
+    [...dispatchIds].map(dispatchId =>
+      input.stopDispatch?.(dispatchId, input.reason),
+    ),
+  )
+  const failedStop = stopResults.find(result => result.status === 'rejected')
+  if (failedStop?.status === 'rejected') throw failedStop.reason
   return persisted
 }

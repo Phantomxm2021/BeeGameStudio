@@ -45,6 +45,7 @@ const statusLabel: Record<WorkflowCardStageSnapshot['status'], string> = {
 const stageLabel: Record<string, string> = {
   FOUNDATION_DRAFTING: '基础文档编写',
   FOUNDATION_REVIEW: '基础文档审计',
+  FOUNDATION_REVISION: '基础文档修订',
   CHECKLIST_DRAFTING: 'Gameplay Checklist 编写',
   BRIEF_CONFIRMED: '需求确认',
   DOCUMENT_DRAFTING: '基础文档编写',
@@ -83,7 +84,11 @@ const documentTitle: Record<string, string> = {
 
 const displayTaskTitle = (task: WorkflowCardTask): string => {
   const title = documentTitle[task.title] || task.title;
-  if (task.operation === 'review') return `审计：${title}`;
+  if (task.operation === 'review') {
+    if (task.title === '影响事实验证') return '验证：影响事实';
+    if (task.title.startsWith('定向语义验证')) return task.title.replace('定向语义验证', '验证：定向语义');
+    return `审计：${title}`;
+  }
   if (task.operation === 'revise') return `修订：${title}`;
   if (task.operation === 'produce') return `资源：${title}`;
   if (task.operation === 'assemble') return `组合：${title}`;
@@ -169,8 +174,20 @@ const useVerticalOverflow = <T extends HTMLElement>(contentKey: string) => {
   return { elementRef, isOverflowing };
 };
 
+const isPatchValidationTask = (task: WorkflowCardTask): boolean =>
+  task.id.startsWith('impacted-facts:') ||
+  task.id.startsWith('semantic-recheck:') ||
+  task.title === '影响事实验证' ||
+  task.title.startsWith('定向语义验证');
+
 const taskStatusText = (task: WorkflowCardTask): string => {
   if (task.status === 'stopped') return '已停止';
+  if (isPatchValidationTask(task)) {
+    if (task.status === 'completed') return '已验证';
+    if (task.status === 'running') return '验证中';
+    if (task.status === 'failed' || task.status === 'blocked') return '验证失败';
+    return '待验证';
+  }
   if (task.operation === 'revise') {
     if (task.status === 'completed') return '已修订';
     if (task.status === 'running') return '修订中';
@@ -206,14 +223,13 @@ const taskFeedbackText = (task: WorkflowCardTask): string | undefined => {
   const issueText = summary
     ? `问题 ${summary.total} · 阻塞 ${summary.blocker} · 高 ${summary.high} · 中 ${summary.medium} · 低 ${summary.low}`
     : undefined;
-  const knownText = task.knownIssueCount !== undefined ? `已知问题 ${task.knownIssueCount}` : undefined;
   const evidenceText = task.durationMs !== undefined || task.usage
     ? [
         task.durationMs !== undefined ? `耗时 ${Math.max(0, Math.round(task.durationMs))}ms` : undefined,
         task.usage ? `用量 ${task.usage.total_tokens} tokens` : undefined,
       ].filter(Boolean).join(' · ')
     : undefined;
-  return [issueText, knownText, evidenceText].filter(Boolean).join(' · ') || undefined;
+  return [issueText, evidenceText].filter(Boolean).join(' · ') || undefined;
 };
 
 const taskIcon = (task: WorkflowCardTask) => {
@@ -407,6 +423,15 @@ export function WorkflowStageCard({
   );
   const completedCount = snapshot.completedTaskCount ?? tasks.filter(task => task.status === 'completed').length;
   const totalCount = snapshot.totalTaskCount ?? tasks.length;
+  const repairTaskRounds = snapshot.substage === 'REPAIRING' ? tasks.map(task => task.round) : [];
+  const firstRepairRound = repairTaskRounds[0];
+  const repairRound =
+    typeof firstRepairRound === 'number' &&
+    Number.isSafeInteger(firstRepairRound) &&
+    firstRepairRound > 0 &&
+    repairTaskRounds.every(round => round === firstRepairRound)
+      ? firstRepairRound
+      : undefined;
   const hasPhaseProgress =
     Number.isInteger(snapshot.phaseIndex) &&
     Number.isInteger(snapshot.phaseCount) &&
@@ -426,7 +451,7 @@ export function WorkflowStageCard({
             : undefined;
   const stageTitle = isRecoverable
     ? '工作流需要恢复'
-    : snapshot.substage && [4, 6].includes(Number(snapshot.phaseIndex))
+    : snapshot.substage && [4, 6].includes(Number(snapshot.phaseIndex)) && snapshot.substage !== 'REPAIRING'
       ? convergenceTitle
       : substageTitle ||
         stageLabel[snapshot.documentStep || ''] ||
@@ -434,9 +459,13 @@ export function WorkflowStageCard({
         snapshot.currentPhase ||
         '等待阶段';
   const convergencePosition =
-    substageTitle && [4, 6].includes(Number(snapshot.phaseIndex)) && snapshot.substage !== 'INITIAL_DRAFTING'
+    substageTitle &&
+    snapshot.substage !== 'REPAIRING' &&
+    [4, 6].includes(Number(snapshot.phaseIndex)) &&
+    snapshot.substage !== 'INITIAL_DRAFTING'
       ? [snapshot.convergencePass ? `第 ${snapshot.convergencePass} 轮` : '', substageTitle].filter(Boolean).join(' · ')
       : undefined;
+  const repairRoundTitle = repairRound ? `第 ${repairRound} 轮` : undefined;
   const startedAt = Date.parse(snapshot.createdAt || snapshot.stageStartedAt || '');
   const finishedAt = Date.parse(snapshot.completedAt || (!isActive ? snapshot.updatedAt || '' : ''));
   const activeSince = Date.parse(snapshot.activeSince || '');
@@ -511,6 +540,7 @@ export function WorkflowStageCard({
                     </span>
                   ) : null}
                 </div>
+                {repairRoundTitle ? <p className="mt-1 text-xs text-zinc-400">{repairRoundTitle}</p> : null}
                 {convergencePosition ? <p className="mt-1 text-xs text-zinc-400">{convergencePosition}</p> : null}
                 {isRecoverable && (recoveryPhaseTitle || recoveryUnitTitle) ? (
                   <p className="mt-1 text-xs text-zinc-400">

@@ -30,7 +30,7 @@ import {
   type PatchOperation,
 } from './foundation-revision-stage'
 import type { SectionRef } from './foundation-section-index'
-import type { FoundationDocumentPath } from './types'
+import type { FoundationDocumentPath, FoundationRevisionRound } from './types'
 
 type DocumentInput = ReadonlyMap<string, string> | Record<string, string>
 
@@ -46,7 +46,7 @@ const VALID_ISSUE_TYPES = new Set<AuditIssue['type']>([
 /** One service-owned verdict for one original deterministic issue. */
 export type PatchValidation = {
   validatorTaskId: string
-  round: 1 | 2 | 3
+  round: FoundationRevisionRound
   issueId: string
   documentPath: FoundationDocumentPath
   baseDocumentDigest: string
@@ -60,7 +60,7 @@ export type PatchValidation = {
 
 export type FoundationPatchValidationInput = {
   validatorTaskId: string
-  round: 1 | 2 | 3
+  round: FoundationRevisionRound
   documentPath: FoundationDocumentPath
   baseDocumentDigest: string
   postPatchDocumentDigest: string
@@ -633,7 +633,7 @@ export function validateFoundationPatch(
   ], 'foundation patch validation input')
   if (typeof input.validatorTaskId !== 'string' || !TASK_ID.test(input.validatorTaskId))
     throw new Error('foundation patch validatorTaskId is invalid')
-  if (input.round !== 1 && input.round !== 2 && input.round !== 3)
+  if (!Number.isSafeInteger(input.round) || input.round < 1)
     throw new Error('foundation patch validation round is invalid')
   assertDigest(input.baseDocumentDigest, 'foundation patch baseDocumentDigest')
   assertDigest(input.postPatchDocumentDigest, 'foundation patch postPatchDocumentDigest')

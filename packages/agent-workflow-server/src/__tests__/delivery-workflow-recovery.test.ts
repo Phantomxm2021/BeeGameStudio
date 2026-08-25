@@ -19,6 +19,7 @@ import {
 } from '../beegame/delivery-workflow/recovery'
 import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
+import { projectTaskTerminalEvidence } from '../beegame/delivery-workflow/task-terminal-evidence'
 import {
   beginParallelFoundationAuthoring,
   recordFoundationDispatch,
@@ -67,7 +68,7 @@ import {
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { createFoundationAuditState, parseFoundationAuditState } from '../beegame/delivery-workflow/foundation-audit-state'
-import { foundationRevisionPacketPath, foundationRevisionStagePath } from '../beegame/delivery-workflow/foundation-revision-stage'
+import { foundationRevisionPacketDigest, foundationRevisionPacketPath, foundationRevisionStagePath, writeFoundationRevisionPacket } from '../beegame/delivery-workflow/foundation-revision-stage'
 import { FOUNDATION_AUDIT_PRODUCTION_MANIFEST } from '../beegame/delivery-workflow/foundation-audit-production-manifest'
 
 const RECOVERY_OWNER_ID = 'recovery-owner'
@@ -1210,6 +1211,124 @@ describe('delivery workflow recovery', () => {
     expect(retried.foundationAuditState).toEqual(foundationAuditState)
   })
 
+  test('retries missing foundation terminals once, then locks needs_action against a late sibling failure', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'foundation-terminal-retry-'))
+    const digest = 'd'.repeat(64)
+    const revision = 'terminal-retry'
+    const documents = [
+      { taskId: 'revision-a', documentPath: 'docs/GDD.md' as const, sectionId: 'vision' },
+      { taskId: 'revision-b', documentPath: 'docs/LEVEL_SCENE_DESIGN.md' as const, sectionId: 'scene_flow' },
+    ]
+    const baseDocumentDigest = new Map<string, string>()
+    for (const document of documents) {
+      const markdown = `# ${document.documentPath}\n\nbase\n`
+      const documentPath = join(workspace, document.documentPath)
+      await mkdir(join(documentPath, '..'), { recursive: true })
+      await writeFile(documentPath, markdown)
+      baseDocumentDigest.set(document.taskId, createHash('sha256').update(markdown).digest('hex'))
+    }
+    const packetDigests = new Map<string, string>()
+    const packetPaths = new Map<string, string>()
+    for (const document of documents) {
+      const packet = { schema: 'test-foundation-revision-packet', revision, round: 1, taskId: document.taskId, documentPath: document.documentPath, sections: [] }
+      const packetDigest = foundationRevisionPacketDigest(packet)
+      packetDigests.set(document.taskId, packetDigest)
+      packetPaths.set(document.taskId, await writeFoundationRevisionPacket({ workspacePath: workspace, revision, round: 1, taskId: document.taskId, documentPath: document.documentPath, packet, packetDigest }))
+    }
+    const foundationAuditState = parseFoundationAuditState({
+      ...createFoundationAuditState({
+        revision,
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        manifest: {
+          revision,
+          status: 'index_staged',
+          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+          sectionIndexDigest: digest,
+        },
+      }),
+      status: 'revising' as const,
+      authority: {
+        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
+        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+      },
+      roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
+      round: 1 as const,
+      phaseStartedAt: new Date().toISOString(),
+      issueSummary: { total: 2, blocker: 0, high: 2, medium: 0, low: 0 },
+      tasks: [
+        ...documents.map(document => ({ taskId: document.taskId, kind: 'document-revision' as const, revision, round: 1 as const, packetPath: packetPaths.get(document.taskId)!, packetDigest: packetDigests.get(document.taskId)!, status: 'pending' as const, attempt: 0, documentPath: document.documentPath, issueIds: ['AUD-1'], sectionIds: [document.sectionId], stagedPath: foundationRevisionStagePath(revision, document.documentPath), baseDocumentDigest: baseDocumentDigest.get(document.taskId)! })),
+      ],
+    })
+    const run = {
+      ...createTestDeliveryRun({ runId: 'terminal-retry', projectId: 'project', ownerId: RECOVERY_OWNER_ID }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      foundationAuditState,
+    }
+    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
+    await store.save(run)
+    const taskByDispatch = new Map<string, string>()
+    let releaseSibling!: () => void
+    const siblingGate = new Promise<void>(resolve => { releaseSibling = resolve })
+    const missingTerminal = () => {
+      const error = new Error('missing_required_terminal_submission: SubmitFoundationRevisionResult')
+      error.name = 'WorkerNeedsActionError'
+      return error
+    }
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          taskByDispatch.set(request.dispatchId!, request.taskId!)
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit() {},
+        async waitForTerminal(dispatchId) {
+          if (taskByDispatch.get(dispatchId) === 'revision-b') await siblingGate
+          throw missingTerminal()
+        },
+        async stop() {},
+        async close() {},
+        async status() { throw new Error('not used') },
+      },
+    })
+    const request = (taskId: string): WorkerDispatchRequest => ({
+      runId: run.runId,
+      ownerId: run.ownerId,
+      projectId: run.projectId,
+      workspacePath: workspace,
+      workerType: 'foundation-document-reviser',
+      phase: 'DOCUMENT_REVIEW',
+      taskId,
+      revision,
+      contract: { workerType: 'foundation-document-reviser', taskId, round: 1, documentPath: documents.find(document => document.taskId === taskId)!.documentPath, issueIds: ['AUD-1'], sectionIds: [documents.find(document => document.taskId === taskId)!.sectionId], stagedPath: foundationRevisionStagePath(revision, documents.find(document => document.taskId === taskId)!.documentPath), baseDocumentDigest: baseDocumentDigest.get(taskId)!, packetPath: packetPaths.get(taskId)!, packetDigest: packetDigests.get(taskId)! },
+    })
+
+    await dispatcher.dispatch(request('revision-a'))
+    await dispatcher.waitForTerminalReconciliation()
+    const firstAttempt = await store.load()
+    expect(firstAttempt?.status).toBe('running')
+    expect(firstAttempt?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 1 })
+
+    await dispatcher.dispatch(request('revision-b'))
+    await dispatcher.dispatch(request('revision-a'))
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const current = await store.load()
+      const task = current?.foundationAuditState?.tasks.find(candidate => candidate.taskId === 'revision-a')
+      if (current?.status === 'needs_action' && task?.status === 'needs_action') break
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    const blocked = await store.load()
+    expect(blocked).toMatchObject({ status: 'needs_action', blockedReason: expect.stringContaining('missing_required_terminal_submission') })
+    releaseSibling()
+    await dispatcher.waitForTerminalReconciliation()
+    const final = await store.load()
+    expect(final).toMatchObject({ status: 'needs_action', blockedReason: expect.stringContaining('missing_required_terminal_submission') })
+    expect(final?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'needs_action', attempt: 2 })
+    expect(final?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-b')).toMatchObject({ status: 'retryable', attempt: 1 })
+  })
+
   test('retryRun resumes a failed revision planning boundary without redispatching', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'revision-planning-retry-'))
     const digest = 'c'.repeat(64)
@@ -1234,7 +1353,6 @@ describe('delivery workflow recovery', () => {
       roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
       round: 1 as const,
       phaseStartedAt: '2026-08-25T00:00:00.000Z',
-      knownIssueIds: [],
       issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
       tasks: [],
     })
@@ -1313,7 +1431,6 @@ describe('delivery workflow recovery', () => {
       roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
       round,
       phaseStartedAt: '2026-08-25T00:00:00.000Z',
-      knownIssueIds: ['AUD-1'],
       issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
       tasks: [{
         taskId,
@@ -2460,6 +2577,382 @@ describe('delivery workflow recovery', () => {
     expect(continued.activeDispatch).toBeUndefined()
   })
 
+  test('stopping a foundation review interrupts every nested worker and preserves stopped-tail usage', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-stop-foundation-review-'))
+    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
+    const digest = 'e'.repeat(64)
+    const revision = 'stop-foundation-review'
+    const documents = CANONICAL_FOUNDATION_DOCUMENTS.slice(0, 4)
+    const foundationAuditState = parseFoundationAuditState({
+      ...createFoundationAuditState({
+        revision,
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        manifest: {
+          revision,
+          status: 'index_staged',
+          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+          sectionIndexDigest: digest,
+        },
+      }),
+      status: 'revising' as const,
+      authority: {
+        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
+        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+      },
+      roundBefore: {
+        documentRevision: 'revision-before',
+        issueRegistryDigest: digest,
+        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
+      },
+      round: 1,
+      phaseStartedAt: new Date().toISOString(),
+      issueSummary: { total: 4, blocker: 0, high: 4, medium: 0, low: 0 },
+      tasks: documents.map((documentPath, index) => {
+        const taskId = `revision-${index}`
+        const dispatchId = `dispatch-${index}`
+        return {
+          taskId,
+          kind: 'document-revision' as const,
+          revision,
+          round: 1,
+          packetPath: foundationRevisionPacketPath(revision, 1, taskId),
+          packetDigest: digest,
+          status: 'running' as const,
+          attempt: 2,
+          documentPath,
+          issueIds: [`AUD-${index}`],
+          sectionIds: ['section'],
+          stagedPath: foundationRevisionStagePath(revision, documentPath),
+          baseDocumentDigest: digest,
+          dispatch: {
+            dispatchId,
+            workerType: 'foundation-document-reviser' as const,
+            phase: 'DOCUMENT_REVIEW' as const,
+            taskId,
+            revision,
+            status: 'running' as const,
+            startedAt: new Date().toISOString(),
+          },
+        }
+      }),
+    })
+    const run = {
+      ...createTestDeliveryRun({
+        runId: 'stop-foundation-review',
+        projectId: 'project',
+        ownerId: RECOVERY_OWNER_ID,
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      foundationAuditState,
+    }
+    await store.save(run)
+    expect((await store.load())?.foundationAuditState?.tasks).toHaveLength(4)
+    expect((await store.load())?.foundationAuditState?.tasks.every(task => task.dispatch?.status === 'running')).toBe(true)
+
+    const stoppedDispatches: string[] = []
+    const stoppedTailResults: Array<DeliveryRun | null> = []
+    const stopped = await stopRun({
+      store,
+      runId: run.runId,
+      reason: 'user stopped workflow',
+      sessionIsOpen: async () => true,
+      stopDispatch: async dispatchId => {
+        stoppedDispatches.push(dispatchId)
+        stoppedTailResults.push(
+          await store.addWorkflowUsage(
+            run.runId,
+            {
+              input_tokens: 1,
+              cache_read_tokens: 0,
+              cache_creation_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 1,
+            },
+            dispatchId,
+          ),
+        )
+      },
+    })
+
+    expect(stopped.status).toBe('stopped')
+    expect(stoppedDispatches).toEqual([
+      'dispatch-0',
+      'dispatch-1',
+      'dispatch-2',
+      'dispatch-3',
+    ])
+    expect(stopped.foundationAuditState?.tasks).toHaveLength(4)
+    expect(stopped.foundationAuditState?.tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'retryable',
+          dispatch: expect.objectContaining({ status: 'interrupted' }),
+        }),
+      ]),
+    )
+    expect(stopped.foundationAuditState?.tasks.every(task => task.dispatch?.status === 'interrupted')).toBe(true)
+    expect(stoppedTailResults.every(result => result?.status === 'stopped')).toBe(true)
+    expect(stoppedTailResults.every(result => (result?.usage?.total_tokens ?? 0) > 0)).toBe(true)
+    expect(
+      stoppedTailResults.every(result =>
+        result?.foundationAuditState?.tasks.some(
+          task => task.usage?.total_tokens === 1 && task.durationMs !== undefined,
+        ),
+      ),
+    ).toBe(true)
+
+    const continued = await retryRun({ store, runId: run.runId })
+    expect(continued).toMatchObject({
+      status: 'running',
+      foundationAuditState: {
+        tasks: expect.arrayContaining([
+          expect.objectContaining({ status: 'pending', attempt: 1 }),
+        ]),
+      },
+    })
+  })
+
+  test('late terminal handler failure cannot reopen a run stopped after terminal admission', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-stop-handler-race-'))
+    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
+    const digest = 'f'.repeat(64)
+    const revision = 'stop-handler-race'
+    const dispatchId = 'semantic-dispatch-race'
+    const taskId = 'semantic-task-race'
+    const foundationAuditState = parseFoundationAuditState({
+      ...createFoundationAuditState({
+        revision,
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        manifest: {
+          revision,
+          status: 'index_staged',
+          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+          sectionIndexDigest: digest,
+        },
+      }),
+      status: 'extracting_facts' as const,
+      phaseStartedAt: new Date().toISOString(),
+      aggregateUsage: {
+        input_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+      },
+      tasks: [{
+        taskId,
+        kind: 'document-facts' as const,
+        revision,
+        factKeyCount: 1,
+        modelTier: 'fast' as const,
+        packetDigest: digest,
+        status: 'running' as const,
+        attempt: 1,
+        dispatch: {
+          dispatchId,
+          workerType: 'foundation-fact-extractor' as const,
+          phase: 'DOCUMENT_REVIEW' as const,
+          taskId,
+          revision,
+          status: 'running' as const,
+          startedAt: new Date().toISOString(),
+          request: {
+            runId: 'stop-handler-race-run',
+            ownerId: RECOVERY_OWNER_ID,
+            projectId: 'stop-handler-race-project',
+            workspacePath: workspace,
+            workerType: 'foundation-fact-extractor',
+            phase: 'DOCUMENT_REVIEW',
+            revision,
+            allowedPaths: ['.beegame/audit/foundation/'],
+            taskId,
+            contract: { packetDigest: digest },
+          },
+        },
+      }],
+    })
+    const run = {
+      ...createTestDeliveryRun({
+        runId: 'stop-handler-race-run',
+        projectId: 'stop-handler-race-project',
+        ownerId: RECOVERY_OWNER_ID,
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      foundationAuditState,
+    }
+    await store.save(run)
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit() {},
+        async stop() {},
+        async close() {},
+        async status() { throw new Error('not used') },
+      },
+      onTerminal: async () => {
+        const admitted = (await store.load())!
+        const admittedTask = admitted.foundationAuditState!.tasks.map(task =>
+          task.taskId === taskId
+            ? projectTaskTerminalEvidence(
+                {
+                  ...task,
+                  status: 'completed' as const,
+                  terminalDigest: digest,
+                  receiptPath: `.beegame/audit/foundation/${revision}/receipts/${taskId}.json`,
+                  receiptDigest: digest,
+                },
+                task.dispatch!,
+              )
+            : task,
+        )
+        await store.commit(
+          {
+            ...admitted,
+            foundationAuditState: {
+              ...admitted.foundationAuditState!,
+              status: 'facts_staged',
+              tasks: admittedTask,
+            },
+          },
+          {
+            runId: admitted.runId,
+            type: 'foundation.fact.terminal.admitted',
+            phase: admitted.phase,
+            status: admitted.status,
+            revision: admitted.revision,
+            taskId,
+            dispatchId,
+          },
+        )
+        await stopRun({
+          store,
+          runId: run.runId,
+          reason: 'user stopped workflow',
+        })
+        throw new Error('workflow project is locked')
+      },
+    })
+
+    await expect(
+      dispatcher.completeDispatch(dispatchId, {
+        workerType: 'foundation-fact-extractor',
+        status: 'completed',
+        runId: run.runId,
+        dispatchId,
+        taskId,
+        revision,
+        packetDigest: digest,
+        results: [],
+      }),
+    ).rejects.toThrow('workflow project is locked')
+
+    const stopped = await store.load()
+    const task = stopped?.foundationAuditState?.tasks.find(candidate => candidate.taskId === taskId)
+    expect(stopped).toMatchObject({
+      status: 'stopped',
+      foundationAuditState: { status: 'facts_staged' },
+    })
+    expect(task).toMatchObject({
+      status: 'completed',
+      attempt: 1,
+      dispatch: { status: 'completed' },
+    })
+    expect(task?.failureReason).toBeUndefined()
+    expect(stopped?.blockedReason).toBe('user stopped workflow')
+  })
+
+  test('stopping parallel foundation drafts stops nested documents exactly once alongside active dispatch', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-stop-foundation-drafts-'))
+    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
+    const initial = createTestDeliveryRun({
+      runId: 'stop-foundation-drafts',
+      projectId: 'project',
+      ownerId: RECOVERY_OWNER_ID,
+    })
+    const dispatch = (dispatchId: string, taskId: string) => ({
+      dispatchId,
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      taskId,
+      revision: initial.revision.document,
+      status: 'running' as const,
+      startedAt: new Date().toISOString(),
+    })
+    let foundationDraftState = beginParallelFoundationAuthoring(['docs/GDD.md'])
+    foundationDraftState = recordFoundationDispatch(
+      foundationDraftState,
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'drafting',
+      dispatch('draft-dispatch-1', 'docs/LEVEL_SCENE_DESIGN.md'),
+    )
+    foundationDraftState = recordFoundationDispatch(
+      foundationDraftState,
+      'docs/BALANCE_DESIGN.md',
+      'drafting',
+      dispatch('draft-dispatch-2', 'docs/BALANCE_DESIGN.md'),
+    )
+    const run = {
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      activeDispatch: dispatch('active-dispatch', 'docs/GDD.md'),
+      foundationDraftState,
+    }
+    await store.save(run)
+
+    const stoppedDispatches: string[] = []
+    const stopping = stopRun({
+      store,
+      runId: run.runId,
+      reason: 'user stopped workflow',
+      sessionIsOpen: async () => true,
+      stopDispatch: async dispatchId => {
+        stoppedDispatches.push(dispatchId)
+        if (dispatchId === 'active-dispatch')
+          throw new Error('transport stop failed')
+      },
+    })
+    await expect(stopping).rejects.toThrow('transport stop failed')
+    const stopped = await store.load()
+    if (!stopped) throw new Error('stopped workflow snapshot is missing')
+
+    expect(stopped.status).toBe('stopped')
+    expect(stoppedDispatches).toHaveLength(3)
+    expect(new Set(stoppedDispatches)).toEqual(
+      new Set(['active-dispatch', 'draft-dispatch-1', 'draft-dispatch-2']),
+    )
+    expect(stopped.activeDispatch).toMatchObject({
+      dispatchId: 'active-dispatch',
+      status: 'interrupted',
+    })
+    expect(stopped.foundationDraftState.documents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'docs/LEVEL_SCENE_DESIGN.md',
+          status: 'needs_action',
+          dispatch: expect.objectContaining({
+            dispatchId: 'draft-dispatch-1',
+            status: 'interrupted',
+          }),
+        }),
+        expect.objectContaining({
+          path: 'docs/BALANCE_DESIGN.md',
+          status: 'needs_action',
+          dispatch: expect.objectContaining({
+            dispatchId: 'draft-dispatch-2',
+            status: 'interrupted',
+          }),
+        }),
+      ]),
+    )
+  })
+
   test('continue repairs an implementation snapshot stopped before active-task release was persisted', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-continue-repair-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -3056,6 +3549,72 @@ describe('delivery workflow recovery', () => {
         status: 'running',
       },
     })
+  })
+
+  test('fallback stop releases a transport after stopRun persists interrupted authority', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-stop-fallback-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-fallback-stop',
+      projectId: 'project-fallback-stop',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-fallback-stop',
+    })
+    await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
+    const transportStops: string[] = []
+    const transportCloses: string[] = []
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
+        },
+        async submit() {},
+        async stop(dispatchId) {
+          transportStops.push(dispatchId)
+        },
+        async close(dispatchId) {
+          transportCloses.push(dispatchId)
+        },
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    const request: WorkerDispatchRequest = {
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'resource-curator',
+      phase: 'RESOURCE_PREPARATION',
+      revision: initial.revision.document,
+      allowedPaths: ['assets/', '.beegame/workflow/evidence/'],
+      contract: {},
+    }
+    const dispatch = await dispatcher.dispatch(request)
+
+    await stopRun({
+      store,
+      runId: initial.runId,
+      reason: 'user stopped workflow',
+      sessionIsOpen: async () => true,
+      stopDispatch: dispatchId => dispatcher.stop(dispatchId, 'user stopped workflow'),
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(await store.load()).toMatchObject({
+      status: 'stopped',
+      activeDispatch: {
+        dispatchId: dispatch.dispatchId,
+        status: 'interrupted',
+      },
+    })
+    expect(transportStops).toEqual([dispatch.dispatchId])
+    expect(transportCloses).toEqual([dispatch.dispatchId])
   })
 
   test('does not submit a worker after its durable dispatch loses authority during start', async () => {

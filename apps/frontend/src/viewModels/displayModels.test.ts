@@ -177,7 +177,6 @@ describe('displayModels', () => {
           operation: 'review',
           round: 2,
           issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
-          knownIssueCount: 2,
           usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 4, total_tokens: 14 },
           durationMs: 321,
           issueRegistry: [{ body: 'secret raw issue' }],
@@ -192,7 +191,6 @@ describe('displayModels', () => {
     expect(task).toMatchObject({
       round: 2,
       issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
-      knownIssueCount: 2,
       durationMs: 321,
       usage: { total_tokens: 14 },
     })

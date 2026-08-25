@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
+import { mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
@@ -219,6 +219,89 @@ export async function commitRemediatedDocumentMetadata(input: {
   await durableWrite(target, lines.join('\n'))
 }
 
+type RemediatedDocumentMetadata = {
+  version: string
+  updatedAt: string
+}
+
+const remediatedUpdatedAtSchema = z.string().datetime({ offset: true })
+
+/**
+ * Commit service-owned metadata for a staged foundation revision. The
+ * canonical document is the only previous-version authority; an already
+ * advanced staged pair is accepted as an idempotent replay.
+ */
+export async function commitFoundationRevisionDocumentMetadata(input: {
+  workspacePath: string
+  canonicalPath: FoundationDocumentPath
+  stagedPath: string
+  expectedCanonicalDigest: string
+}): Promise<void> {
+  await assertWorkspaceFilePath(input.workspacePath, input.canonicalPath)
+  await assertWorkspaceFilePath(input.workspacePath, input.stagedPath)
+  const canonical = await readFile(
+    resolve(input.workspacePath, input.canonicalPath),
+    'utf8',
+  )
+  if (digest(canonical) !== input.expectedCanonicalDigest)
+    throw new Error('remediated document canonical bytes changed during commit')
+  const previous = parseRemediatedDocumentMetadata(canonical)
+  const stagedAbsolute = resolve(input.workspacePath, input.stagedPath)
+  const staged = await readFile(stagedAbsolute, 'utf8')
+  const current = parseRemediatedDocumentMetadata(staged)
+  const previousParts = parseRemediatedVersion(previous.version)
+  const nextVersion = `${previousParts[0]}.${previousParts[1]}.${previousParts[2]! + 1}`
+  const expectedUpdatedAt = nextRemediatedUpdatedAt(previous.updatedAt)
+  if (
+    current.version === nextVersion &&
+    current.updatedAt === expectedUpdatedAt
+  )
+    return
+  if (
+    current.version !== previous.version ||
+    current.updatedAt !== previous.updatedAt
+  )
+    throw new Error('remediated document staged service metadata is invalid')
+  await commitRemediatedDocumentMetadata({
+    workspacePath: input.workspacePath,
+    targetPath: input.stagedPath,
+    previousVersion: previous.version,
+    previousUpdatedAt: previous.updatedAt,
+    updatedAt: expectedUpdatedAt,
+  })
+}
+
+/** Validate the exact service-owned metadata transition in final document bytes. */
+export function validateFoundationRevisionDocumentMetadataTransition(
+  previousMarkdown: string,
+  revisedMarkdown: string,
+): void {
+  const previous = parseRemediatedDocumentMetadata(previousMarkdown)
+  const revised = parseRemediatedDocumentMetadata(revisedMarkdown)
+  const previousParts = parseRemediatedVersion(previous.version)
+  const expectedVersion = `${previousParts[0]}.${previousParts[1]}.${previousParts[2]! + 1}`
+  const expectedUpdatedAt = nextRemediatedUpdatedAt(previous.updatedAt)
+  if (
+    revised.version !== expectedVersion ||
+    revised.updatedAt !== expectedUpdatedAt
+  )
+    throw new Error('remediated document service metadata transition is invalid')
+}
+
+function nextRemediatedUpdatedAt(previousUpdatedAt: string): string {
+  return new Date(Date.parse(previousUpdatedAt) + 1).toISOString()
+}
+
+async function assertWorkspaceFilePath(
+  workspacePath: string,
+  filePath: string,
+): Promise<void> {
+  const root = `${await realpath(resolve(workspacePath))}/`
+  const candidate = await realpath(resolve(workspacePath, filePath))
+  if (!candidate.startsWith(root))
+    throw new Error('remediated document path escapes the workspace')
+}
+
 export async function reconcileAuthoredDocumentReceipt(input: {
   workspacePath: string
   dispatchId: string
@@ -344,6 +427,76 @@ async function readOptionalFile(path: string): Promise<string | undefined> {
 
 function digest(content: string): string {
   return createHash('sha256').update(content).digest('hex')
+}
+
+function parseRemediatedVersion(value: string): [number, number, number] {
+  const parts = value.split('.').map(Number)
+  if (
+    parts.length !== 3 ||
+    parts.some((part, index) =>
+      !Number.isSafeInteger(part) ||
+      part < 0 ||
+      String(part) !== value.split('.')[index],
+    )
+  )
+    throw new Error('remediated document version is invalid')
+  return [parts[0]!, parts[1]!, parts[2]!]
+}
+
+function parseRemediatedDocumentMetadata(
+  markdown: string,
+): RemediatedDocumentMetadata {
+  const lines = markdown.split('\n')
+  if (lines[0]?.trim() !== '---')
+    throw new Error('remediated document front matter is missing')
+  const closingIndex = lines.findIndex(
+    (line, index) => index > 0 && line.trim() === '---',
+  )
+  if (closingIndex < 1)
+    throw new Error('remediated document front matter is invalid')
+  const values = new Map<string, string>()
+  for (let index = 1; index < closingIndex; index += 1) {
+    const line = lines[index] ?? ''
+    const separator = line.indexOf(':')
+    if (separator < 1) continue
+    const field = line.slice(0, separator).trim()
+    if (field !== 'version' && field !== 'updated_at') continue
+    if (values.has(field))
+      throw new Error('remediated document service metadata is invalid')
+    const raw = line.slice(separator + 1).trim()
+    const quoted =
+      (raw.startsWith('"') && raw.endsWith('"')) ||
+      (raw.startsWith("'") && raw.endsWith("'"))
+    const value = quoted ? raw.slice(1, -1).trim() : raw
+    if (!value)
+      throw new Error('remediated document service metadata is invalid')
+    values.set(field, value)
+  }
+  const version = values.get('version')
+  const updatedAt = values.get('updated_at')
+  if (!version || !updatedAt)
+    throw new Error('remediated document service metadata is invalid')
+  parseRemediatedVersion(version)
+  if (!remediatedUpdatedAtSchema.safeParse(updatedAt).success)
+    throw new Error('remediated document updated_at is invalid')
+  return { version, updatedAt }
+}
+
+export function normalizeServiceOwnedDocumentMetadata(markdown: string): string {
+  const lines = markdown.split('\n')
+  if (lines[0]?.trim() !== '---') return markdown
+  const closingIndex = lines.findIndex(
+    (line, index) => index > 0 && line.trim() === '---',
+  )
+  if (closingIndex < 1) return markdown
+  for (let index = 1; index < closingIndex; index += 1) {
+    const separator = lines[index]!.indexOf(':')
+    if (separator < 1) continue
+    const field = lines[index]!.slice(0, separator).trim()
+    if (field === 'version' || field === 'updated_at')
+      lines[index] = `${field}: <service-owned>`
+  }
+  return lines.join('\n')
 }
 
 function canonicalizeAuthoredDocument(

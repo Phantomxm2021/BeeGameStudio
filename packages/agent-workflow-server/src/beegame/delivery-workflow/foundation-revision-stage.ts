@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
+import { normalizeServiceOwnedDocumentMetadata } from '../authored-document-receipt'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildFoundationSectionIndex } from './foundation-section-index'
 import type { RevisionBatch } from './foundation-revision-batches'
@@ -16,7 +17,7 @@ import {
 
 export type RevisionTaskReceipt = {
   taskId: string
-  round: 1 | 2 | 3
+  round: FoundationRevisionRound
   documentPath: FoundationDocumentPath
   issueIds: string[]
   baseDocumentDigest: string
@@ -79,7 +80,7 @@ export function foundationRevisionTasksComplete(tasks: readonly import('./types'
 
 type RevisionTaskReceiptCore = {
   taskId: string
-  round: 1 | 2 | 3
+  round: FoundationRevisionRound
   documentPath: FoundationDocumentPath
   issueIds: readonly string[]
   baseDocumentDigest: string
@@ -156,6 +157,8 @@ export function foundationRevisionPacketPath(
   taskId: string,
 ): string {
   assertRevision(revision)
+  if (!Number.isSafeInteger(round) || round < 1)
+    throw new Error('foundation revision round must be a positive safe integer')
   assertTaskId(taskId)
   return `.beegame/audit/foundation/${revision}/round-${round}/tasks/${taskId}/packet.json`
 }
@@ -698,7 +701,7 @@ function validateReceipt(
     throw new Error('revision receipt taskId is invalid')
   if (input.taskId !== undefined && value.taskId !== input.taskId)
     throw new Error('revision receipt taskId mismatch')
-  if (value.round !== 1 && value.round !== 2 && value.round !== 3)
+  if (typeof value.round !== 'number' || !Number.isSafeInteger(value.round) || value.round < 1)
     throw new Error('revision receipt round is invalid')
   if (value.documentPath !== input.documentPath)
     throw new Error('revision receipt document path mismatch')
@@ -882,7 +885,7 @@ export async function deriveFoundationPatchOperations(input: {
       cursor = end
     }
     chunks.push(lines.slice(cursor).join('\n'))
-    return chunks.join('\n')
+    return normalizeServiceOwnedDocumentMetadata(chunks.join('\n'))
   }
   const allowed = new Set(input.batch.sectionIds)
   if (

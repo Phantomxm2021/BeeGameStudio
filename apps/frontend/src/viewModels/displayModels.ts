@@ -237,11 +237,10 @@ const normalizeWorkflowTasks = (
           : undefined,
         attempt: finiteNumber(item.attempt),
         round:
-          [1, 2, 3].includes(Number(item.round))
-            ? (Number(item.round) as 1 | 2 | 3)
+          Number.isSafeInteger(Number(item.round)) && Number(item.round) >= 1
+            ? Number(item.round)
             : undefined,
         issueSummary: normalizeIssueSummary(item.issueSummary ?? item.issue_summary),
-        knownIssueCount: finiteNumber(item.knownIssueCount ?? item.known_issue_count),
         usage: normalizeWorkflowUsage(item.usage),
         durationMs: finiteNumber(item.durationMs ?? item.duration_ms),
         ...(failureReason && failureCode && diagnosticId

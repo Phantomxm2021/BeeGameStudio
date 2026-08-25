@@ -103,6 +103,18 @@ function isEligibleFoundationRetryTask(
   )
 }
 
+function isUserStoppedFoundationRetryTask(
+  task: FoundationRetryTask,
+  taskId: string | undefined,
+): boolean {
+  return (
+    (!taskId || task.taskId === taskId) &&
+    task.status === 'retryable' &&
+    task.dispatch?.status === 'interrupted' &&
+    /(?:user|operator) stopped/i.test(task.failureReason ?? '')
+  )
+}
+
 function isRetryableFoundationRevisionBoundary(
   state: FoundationAuditState,
   runStatus: DeliveryRun['status'],
@@ -549,7 +561,8 @@ export function transitionDeliveryRun(
               ...auditState,
               tasks: auditState.tasks.map(task => {
                 if (
-                  !isEligibleFoundationRetryTask(task, event.taskId) ||
+                  (!isEligibleFoundationRetryTask(task, event.taskId) &&
+                    !isUserStoppedFoundationRetryTask(task, event.taskId)) ||
                   !['document-facts', 'semantic', 'confirmation'].includes(
                     task.kind,
                   )
@@ -570,8 +583,11 @@ export function transitionDeliveryRun(
               ...revisionState,
               tasks: revisionState.tasks.map(task => {
                 if (
-                  !isEligibleFoundationRetryTask(task, event.taskId) ||
-                  !['impacted-facts', 'semantic-recheck'].includes(task.kind)
+                  (!isEligibleFoundationRetryTask(task, event.taskId) &&
+                    !isUserStoppedFoundationRetryTask(task, event.taskId)) ||
+                  (!['impacted-facts', 'semantic-recheck'].includes(task.kind) &&
+                    !(task.kind === 'document-revision' &&
+                      isUserStoppedFoundationRetryTask(task, event.taskId)))
                 )
                   return task
                 revisionRevived = true

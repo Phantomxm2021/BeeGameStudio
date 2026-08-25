@@ -119,6 +119,43 @@ describe('worker prompts', () => {
     }
   })
 
+  test('keeps revision workers on the packet and one absolute staged path', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace-secret',
+      workerType: 'foundation-document-reviser',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      allowedPaths: ['.beegame/audit/foundation/revision/revision/docs/GDD.md'],
+      contract: {
+        workerType: 'foundation-document-reviser',
+        taskId: 'task',
+        revision: 'revision',
+        round: 4,
+        documentPath: 'docs/GDD.md',
+        issueIds: ['issue-1'],
+        sectionIds: ['section-1'],
+        stagedPath: '.beegame/audit/foundation/revision/revision/docs/GDD.md',
+        packet: {
+          taskId: 'task',
+          documentPath: 'docs/GDD.md',
+          sections: [{ sectionId: 'section-1', content: 'IMMUTABLE_PACKET_SENTINEL' }],
+        },
+        packetDigest: 'a'.repeat(64),
+        confirmedBriefContext: 'CONFIRMED_BRIEF_SENTINEL',
+        canonicalArtifacts: 'CANONICAL_ARTIFACT_SENTINEL',
+      },
+    })
+    expect(prompt).toContain('IMMUTABLE_PACKET_SENTINEL')
+    expect(prompt).toContain('/workspace-secret/.beegame/audit/foundation/revision/revision/docs/GDD.md')
+    expect(prompt).not.toContain('CONFIRMED_BRIEF_SENTINEL')
+    expect(prompt).not.toContain('CANONICAL_ARTIFACT_SENTINEL')
+    expect(prompt).not.toContain('Workspace root:')
+    expect(prompt).not.toContain('Canonical artifacts:')
+  })
+
   test('passes shared resource label rules to fact workers', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',

@@ -287,6 +287,8 @@ export type RuntimeLaunchContract = {
 const RUNTIME_MODEL_ENV_KEYS = new Set([
   'BEEGAME_WORKFLOW_WORKER_TYPE',
   'BEEGAME_REVISION_CONTRACT',
+  'BEEGAME_WORKSPACE_PATH',
+  'BEEGAME_REVISION_STAGED_PATH',
   'BEEGAME_CONFIG_DIR',
   'BEEGAME_MODEL_TYPE',
   'ANTHROPIC_BASE_URL',
@@ -402,6 +404,7 @@ type SessionRecord = {
   workflowJsonSchema?: Record<string, unknown>
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
+  nativeRuntimeCwd?: string
   atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
@@ -725,6 +728,11 @@ export class BeeGameSessionManager {
       )
     }
     mkdirSync(cwd, { recursive: true })
+    const nativeRuntimeCwd =
+      input.workflowWorkerType === 'foundation-document-reviser'
+        ? join(cwd, '.beegame', 'workflow', 'native-sandbox', randomUUID())
+        : undefined
+    if (nativeRuntimeCwd) mkdirSync(nativeRuntimeCwd, { recursive: true })
     const runtime = input.modelConfigId
       ? mapModelConfigToRuntime(input.modelConfigId)
       : undefined
@@ -800,6 +808,7 @@ export class BeeGameSessionManager {
       ...(input.workflowRevisionContract
         ? { workflowRevisionContract: structuredClone(input.workflowRevisionContract) }
         : {}),
+      ...(nativeRuntimeCwd ? { nativeRuntimeCwd } : {}),
       runtime,
       userId: input.userId,
       ...(input.authToken ? { authToken: input.authToken } : {}),
@@ -1293,6 +1302,8 @@ export class BeeGameSessionManager {
       getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
       { force: true },
     )
+    if (record.nativeRuntimeCwd)
+      await rm(record.nativeRuntimeCwd, { recursive: true, force: true })
     this.sessions.delete(sessionId)
   }
 
@@ -1447,11 +1458,36 @@ export class BeeGameSessionManager {
         if (!record.workflowModelTier) throw new Error('foundation semantic model tier is missing')
         selectedEnvironment = selectFoundationSemanticRuntime(record.runtime, selectedEnvironment, record.workflowModelTier)
       }
+      let revisionStagedPath: string | undefined
+      if (
+        record.workflowWorkerType === 'foundation-document-reviser' &&
+        record.workflowRevisionContract
+      ) {
+        const configuredPath = record.workflowRevisionContract.stagedPath
+        if (typeof configuredPath !== 'string' || !configuredPath.trim())
+          throw new Error('foundation revision staged path authority is missing')
+        const candidate = resolve(record.session.cwd, configuredPath)
+        const workspaceRelative = relative(resolve(record.session.cwd), candidate)
+        if (
+          workspaceRelative === '' ||
+          workspaceRelative.startsWith('..') ||
+          isAbsolute(workspaceRelative)
+        )
+          throw new Error('foundation revision staged path escaped the project workspace')
+        revisionStagedPath = candidate
+      }
       const env = buildRuntimeEnv({
         ...selectedEnvironment,
         ...(record.workflowWorkerType === 'foundation-document-reviser' && record.workflowRevisionContract
           ? {
               BEEGAME_WORKFLOW_WORKER_TYPE: record.workflowWorkerType,
+              // The native process deliberately runs in an empty sandbox cwd.
+              // These two values are the only trusted bridge back to the
+              // project: the result tool uses the workspace path for receipts
+              // and the built-in Read/Edit validators use the exact staged
+              // path for input-level enforcement.
+              BEEGAME_WORKSPACE_PATH: record.session.cwd,
+              BEEGAME_REVISION_STAGED_PATH: revisionStagedPath!,
               BEEGAME_REVISION_CONTRACT: JSON.stringify({
                 taskId: record.workflowRevisionContract.taskId,
                 revision: record.workflowRevisionContract.revision,
@@ -1482,7 +1518,7 @@ export class BeeGameSessionManager {
             record.nativeSessionId = nativeSessionId
             this.persistRuntimeSnapshot(record)
           },
-          cwd: record.session.cwd,
+          cwd: record.nativeRuntimeCwd ?? record.session.cwd,
           env,
           runtimeLaunchContract: buildRuntimeLaunchContract(
             selectedEnvironment,

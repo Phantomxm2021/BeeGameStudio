@@ -32,7 +32,9 @@ describe('foundation revision native tool registration', () => {
   test('builds a complete tool for the CLI bootstrap inventory', () => {
     const previousWorkerType = process.env.BEEGAME_WORKFLOW_WORKER_TYPE
     const previousContract = process.env.BEEGAME_REVISION_CONTRACT
+    const previousWorkspace = process.env.BEEGAME_WORKSPACE_PATH
     process.env.BEEGAME_WORKFLOW_WORKER_TYPE = 'foundation-document-reviser'
+    process.env.BEEGAME_WORKSPACE_PATH = '/workspace'
     process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({
       taskId: 'task-1',
       revision: 'revision-1',
@@ -58,6 +60,74 @@ describe('foundation revision native tool registration', () => {
       if (previousContract === undefined)
         delete process.env.BEEGAME_REVISION_CONTRACT
       else process.env.BEEGAME_REVISION_CONTRACT = previousContract
+      if (previousWorkspace === undefined)
+        delete process.env.BEEGAME_WORKSPACE_PATH
+      else process.env.BEEGAME_WORKSPACE_PATH = previousWorkspace
+    }
+  })
+
+  test('registers a dynamic round and rejects invalid rounds', () => {
+    const previousWorkerType = process.env.BEEGAME_WORKFLOW_WORKER_TYPE
+    const previousContract = process.env.BEEGAME_REVISION_CONTRACT
+    const previousWorkspace = process.env.BEEGAME_WORKSPACE_PATH
+    process.env.BEEGAME_WORKFLOW_WORKER_TYPE = 'foundation-document-reviser'
+    process.env.BEEGAME_WORKSPACE_PATH = '/workspace'
+    const base = {
+      taskId: 'task-4',
+      revision: 'revision-4',
+      documentPath: 'docs/GDD.md',
+      issueIds: ['issue-1'],
+      sectionIds: ['section-1'],
+      stagedPath: '.beegame/audit/foundation/revision/docs/GDD.md',
+      baseDocumentDigest: 'a'.repeat(64),
+    }
+    try {
+      process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, round: 4 })
+      expect(
+        getTools(getEmptyToolPermissionContext()).find(
+          candidate => candidate.name === 'SubmitFoundationRevisionResult',
+        ),
+      ).toBeDefined()
+
+      process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, round: 0 })
+      expect(
+        getTools(getEmptyToolPermissionContext()).find(
+          candidate => candidate.name === 'SubmitFoundationRevisionResult',
+        ),
+      ).toBeUndefined()
+
+      for (const round of [Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+        process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, round })
+        expect(
+          getTools(getEmptyToolPermissionContext()).find(
+            candidate => candidate.name === 'SubmitFoundationRevisionResult',
+          ),
+        ).toBeUndefined()
+      }
+
+      process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, round: 4 })
+      delete process.env.BEEGAME_WORKSPACE_PATH
+      expect(
+        getTools(getEmptyToolPermissionContext()).find(
+          candidate => candidate.name === 'SubmitFoundationRevisionResult',
+        ),
+      ).toBeUndefined()
+      process.env.BEEGAME_WORKSPACE_PATH = 'relative/workspace'
+      expect(
+        getTools(getEmptyToolPermissionContext()).find(
+          candidate => candidate.name === 'SubmitFoundationRevisionResult',
+        ),
+      ).toBeUndefined()
+    } finally {
+      if (previousWorkerType === undefined)
+        delete process.env.BEEGAME_WORKFLOW_WORKER_TYPE
+      else process.env.BEEGAME_WORKFLOW_WORKER_TYPE = previousWorkerType
+      if (previousContract === undefined)
+        delete process.env.BEEGAME_REVISION_CONTRACT
+      else process.env.BEEGAME_REVISION_CONTRACT = previousContract
+      if (previousWorkspace === undefined)
+        delete process.env.BEEGAME_WORKSPACE_PATH
+      else process.env.BEEGAME_WORKSPACE_PATH = previousWorkspace
     }
   })
 })

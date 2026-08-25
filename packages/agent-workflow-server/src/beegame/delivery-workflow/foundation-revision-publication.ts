@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
+import {
+  normalizeServiceOwnedDocumentMetadata,
+  validateFoundationRevisionDocumentMetadataTransition,
+} from '../authored-document-receipt'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildFoundationSectionIndex, type SectionRef } from './foundation-section-index'
 import {
@@ -13,7 +17,7 @@ import {
 import type { RevisionBatch } from './foundation-revision-batches'
 import type { FoundationSemanticRecheckResult, PatchValidation } from './foundation-patch-validation'
 import type { AuditIssue, AuditSeverity } from './foundation-issue-registry'
-import { CANONICAL_FOUNDATION_DOCUMENTS, type FoundationDocumentPath } from './types'
+import { CANONICAL_FOUNDATION_DOCUMENTS, type FoundationDocumentPath, type FoundationRevisionRound } from './types'
 import { computeDocumentRevision } from './revision'
 
 const DIGEST = /^[a-f0-9]{64}$/
@@ -24,7 +28,7 @@ const SEVERITIES = new Set<AuditSeverity>(['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'])
 
 export type FoundationRevisionPreparedDocument = {
   documentPath: FoundationDocumentPath
-  round: 1 | 2 | 3
+  round: FoundationRevisionRound
   taskId: string
   issueIds: string[]
   changedSectionIds: string[]
@@ -45,7 +49,7 @@ export type FoundationRevisionPrepared = {
   status: 'prepared'
   revision: string
   confirmedBriefDigest: string
-  round: 1 | 2 | 3
+  round: FoundationRevisionRound
   documents: FoundationRevisionPreparedDocument[]
   resultingIssues: readonly AuditIssue[]
   resultingIssueRegistryDigest: string
@@ -87,7 +91,7 @@ type Committed = {
   status: 'committed'
   baseRevision: string
   confirmedBriefDigest: string
-  round: 1 | 2 | 3
+  round: FoundationRevisionRound
   authorityDigest: string
   resultingRevision: string
   resultingIssueRegistryDigest: string
@@ -98,7 +102,7 @@ export type FoundationRevisionPublicationInput = {
   workspacePath: string
   revision: string
   confirmedBriefDigest: string
-  round: 1 | 2 | 3
+  round: FoundationRevisionRound
   batches: readonly RevisionBatch[]
   receipts: readonly RevisionTaskReceipt[]
   patchOperations: readonly PatchOperation[]
@@ -247,7 +251,7 @@ function validateReceipt(value: unknown, revision: string): RevisionTaskReceipt 
   assertExactKeys(value, ['baseDocumentDigest', 'changedSectionIds', 'documentPath', 'issueIds', 'round', 'stagedDocumentDigest', 'stagedPath', 'taskId', 'terminalDigest'], 'revision receipt')
   assertCanonical(value.documentPath, 'revision receipt document path')
   if (typeof value.taskId !== 'string' || !TASK.test(value.taskId)) throw new Error('revision receipt taskId is invalid')
-  if (value.round !== 1 && value.round !== 2 && value.round !== 3) throw new Error('revision receipt round is invalid')
+  if (typeof value.round !== 'number' || !Number.isSafeInteger(value.round) || value.round < 1) throw new Error('revision receipt round is invalid')
   const issueIds = strings(value.issueIds, 'revision receipt issueIds')
   const changedSectionIds = strings(value.changedSectionIds, 'revision receipt changedSectionIds')
   assertDigest(value.baseDocumentDigest, 'revision receipt baseDocumentDigest')
@@ -292,13 +296,17 @@ function outsideSections(bytes: Buffer, index: readonly SectionRef[], allowed: R
     cursor = end
   }
   chunks.push(lines.slice(cursor).join('\n'))
-  return chunks.join('\n')
+  return normalizeServiceOwnedDocumentMetadata(chunks.join('\n'))
 }
 
 async function validateDocumentBytes(input: { workspacePath: string; revision: string; receipt: RevisionTaskReceipt; operations: readonly PatchOperation[]; initial: boolean }): Promise<void> {
   const canonicalPath = resolveProjectPath(input.workspacePath, input.receipt.documentPath)
   const stagedPath = resolveProjectPath(input.workspacePath, input.receipt.stagedPath)
   const [canonicalBytes, stagedBytes] = await Promise.all([readFile(canonicalPath), readFile(stagedPath)])
+  validateFoundationRevisionDocumentMetadataTransition(
+    canonicalBytes.toString('utf8'),
+    stagedBytes.toString('utf8'),
+  )
   const canonicalDigest = sha256(canonicalBytes)
   if (input.initial && canonicalDigest !== input.receipt.baseDocumentDigest) throw new Error(`canonical bytes are stale for ${input.receipt.documentPath}`)
   if (!input.initial && canonicalDigest !== input.receipt.baseDocumentDigest && canonicalDigest !== input.receipt.stagedDocumentDigest) {
@@ -337,7 +345,7 @@ function validateValidation(value: unknown): PatchValidation {
   assertExactKeys(value, ['baseDocumentDigest', 'changedSectionIds', 'checkedContractIds', 'checkedFactKeys', 'documentPath', 'issueId', 'patchDigest', 'postPatchDocumentDigest', 'round', 'status', 'validatorTaskId'], 'PatchValidation')
   assertCanonical(value.documentPath, 'PatchValidation document path')
   if (typeof value.validatorTaskId !== 'string' || !TASK.test(value.validatorTaskId) || typeof value.issueId !== 'string' || !value.issueId) throw new Error('PatchValidation identity is invalid')
-  if (value.round !== 1 && value.round !== 2 && value.round !== 3) throw new Error('PatchValidation round is invalid')
+  if (typeof value.round !== 'number' || !Number.isSafeInteger(value.round) || value.round < 1) throw new Error('PatchValidation round is invalid')
   if (value.status !== 'PASS' && value.status !== 'FAIL') throw new Error('PatchValidation status is invalid')
   assertDigest(value.baseDocumentDigest, 'PatchValidation baseDocumentDigest')
   assertDigest(value.postPatchDocumentDigest, 'PatchValidation postPatchDocumentDigest')
@@ -441,7 +449,7 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
 function validatePrepared(value: unknown): FoundationRevisionPrepared {
   assertObject(value, 'foundation revision PREPARED authority')
   assertExactKeys(value, ['authorityDigest', 'confirmedBriefDigest', 'documents', 'revision', 'resultingIssueRegistryDigest', 'resultingIssues', 'round', 'schema', 'status'], 'PREPARED authority')
-  if (value.schema !== 'beegame-foundation-revision-publish-v2' || value.status !== 'prepared' || typeof value.revision !== 'string' || !REVISION.test(value.revision) || (value.round !== 1 && value.round !== 2 && value.round !== 3) || !Array.isArray(value.documents) || value.documents.length === 0) throw new Error('foundation revision PREPARED authority is invalid')
+  if (value.schema !== 'beegame-foundation-revision-publish-v2' || value.status !== 'prepared' || typeof value.revision !== 'string' || !REVISION.test(value.revision) || typeof value.round !== 'number' || !Number.isSafeInteger(value.round) || value.round < 1 || !Array.isArray(value.documents) || value.documents.length === 0) throw new Error('foundation revision PREPARED authority is invalid')
   assertDigest(value.confirmedBriefDigest, 'PREPARED confirmedBriefDigest')
   assertDigest(value.authorityDigest, 'PREPARED authorityDigest')
   const resultingIssues = validateResultingIssues(value.resultingIssues)
@@ -461,7 +469,7 @@ function validatePrepared(value: unknown): FoundationRevisionPrepared {
     return { documentPath: receipt.documentPath, round: receipt.round, taskId: receipt.taskId, issueIds: receipt.issueIds, changedSectionIds: receipt.changedSectionIds, baseDocumentDigest: receipt.baseDocumentDigest, stagedDocumentDigest: receipt.stagedDocumentDigest, stagedPath: receipt.stagedPath, terminalDigest: receipt.terminalDigest, receiptDigest: raw.receiptDigest as string, operationDigest: raw.operationDigest as string, validationDigest: raw.validationDigest as string, semanticResultDigest: raw.semanticResultDigest as string, resultDigest: raw.resultDigest as string, patchOperations }
   })
   if (new Set(documents.map(document => document.documentPath)).size !== documents.length) throw new Error('PREPARED authority contains duplicate document paths')
-  const withoutDigest = { schema: 'beegame-foundation-revision-publish-v2' as const, status: 'prepared' as const, revision: value.revision as string, confirmedBriefDigest: value.confirmedBriefDigest as string, round: value.round as 1 | 2 | 3, documents, resultingIssues, resultingIssueRegistryDigest: value.resultingIssueRegistryDigest as string }
+  const withoutDigest = { schema: 'beegame-foundation-revision-publish-v2' as const, status: 'prepared' as const, revision: value.revision as string, confirmedBriefDigest: value.confirmedBriefDigest as string, round: value.round as FoundationRevisionRound, documents, resultingIssues, resultingIssueRegistryDigest: value.resultingIssueRegistryDigest as string }
   if (sha256(stable(withoutDigest)) !== value.authorityDigest) throw new Error('PREPARED authority digest mismatch')
   return { ...withoutDigest, authorityDigest: value.authorityDigest as string }
 }

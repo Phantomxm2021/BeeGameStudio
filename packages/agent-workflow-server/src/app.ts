@@ -5603,7 +5603,17 @@ function projectWorkflowDisplayTasks(
   tasks: readonly JsonObject[],
 ): JsonObject[] {
   return tasks.map(task => {
-    const reason = projectWorkflowDisplayReason(task.failureReason)
+    const reason = projectWorkflowDisplayReason(
+      typeof task.failureReason === 'string' &&
+      typeof task.failureCode === 'string' &&
+      typeof task.diagnosticId === 'string'
+        ? {
+            message: task.failureReason,
+            code: task.failureCode,
+            diagnosticId: task.diagnosticId,
+          }
+        : task.failureReason,
+    )
     const { failureReason: _rawFailureReason, ...safeTask } = task
     return {
       ...safeTask,
@@ -6243,7 +6253,71 @@ function workflowViewForDisplay(
   }
 }
 
-function workflowStageSnapshotsForDisplay(
+function nonnegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function displayIssueSummary(value: unknown): JsonObject | undefined {
+  if (!isObject(value)) return undefined
+  const keys = ['total', 'blocker', 'high', 'medium', 'low'] as const
+  const values = keys.map(key => value[key])
+  if (!values.every(entry => Number.isInteger(entry) && (entry as number) >= 0))
+    return undefined
+  const [total, blocker, high, medium, low] = values as number[]
+  if (
+    total !== blocker + high + medium + low
+  )
+    return undefined
+  return { total, blocker, high, medium, low }
+}
+
+function displayUsage(value: unknown): JsonObject | undefined {
+  if (!isObject(value)) return undefined
+  const keys = [
+    'input_tokens',
+    'cache_read_tokens',
+    'cache_creation_tokens',
+    'completion_tokens',
+    'total_tokens',
+  ] as const
+  if (!keys.every(key => nonnegativeFiniteNumber(value[key]))) return undefined
+  return Object.fromEntries(keys.map(key => [key, value[key]]))
+}
+
+function projectWorkflowStageCardTaskForDisplay(task: JsonObject): JsonObject {
+  const issueSummary = displayIssueSummary(task.issueSummary)
+  const usage = displayUsage(task.usage)
+  return {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    ...(task.operation ? { operation: task.operation } : {}),
+    ...(Number.isFinite(Number(task.attempt))
+      ? { attempt: Number(task.attempt) }
+      : {}),
+    ...(typeof task.round === 'number' &&
+    Number.isSafeInteger(task.round) &&
+    task.round > 0
+      ? { round: task.round }
+      : {}),
+    ...(issueSummary ? { issueSummary } : {}),
+    ...(usage ? { usage } : {}),
+    ...(nonnegativeFiniteNumber(task.durationMs)
+      ? { durationMs: task.durationMs }
+      : {}),
+    ...(typeof task.failureReason === 'string' && task.failureReason.trim()
+      ? { failureReason: task.failureReason.trim() }
+      : {}),
+    ...(typeof task.failureCode === 'string'
+      ? { failureCode: task.failureCode }
+      : {}),
+    ...(typeof task.diagnosticId === 'string'
+      ? { diagnosticId: task.diagnosticId }
+      : {}),
+  }
+}
+
+export function workflowStageSnapshotsForDisplay(
   workflow: JsonObject,
   liveTasks: JsonObject[],
 ): JsonObject[] | undefined {
@@ -6264,21 +6338,10 @@ function workflowStageSnapshotsForDisplay(
       snapshot.phaseIndex === currentProgress.phaseIndex
     const taskSource = isLive ? liveTasks : snapshot.tasks
     const tasks = projectWorkflowDisplayTasks(
-      taskSource.map(task => ({
-        id: task.id,
-        title: task.title,
-        status: task.status,
-        ...(task.operation ? { operation: task.operation } : {}),
-        ...(Number.isFinite(Number(task.attempt))
-          ? { attempt: Number(task.attempt) }
-          : {}),
-        ...(typeof task.failureReason === 'string' && task.failureReason.trim()
-          ? { failureReason: task.failureReason.trim() }
-          : {}),
-      })) as JsonObject[],
+      taskSource.map(projectWorkflowStageCardTaskForDisplay),
     )
     const blockReason = snapshot.block
-      ? projectWorkflowDisplayReason(snapshot.block.message)
+      ? projectWorkflowDisplayReason(snapshot.block)
       : undefined
     const block = blockReason
       ? {

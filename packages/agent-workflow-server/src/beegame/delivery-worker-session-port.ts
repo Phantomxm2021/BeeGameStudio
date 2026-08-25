@@ -382,6 +382,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
       const packetWorker = request.workerType === 'foundation-fact-extractor' || request.workerType === 'foundation-semantic-reviewer'
+      const revisionWorker = request.workerType === 'foundation-document-reviser'
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
@@ -498,8 +499,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const packetWorker =
         request?.workerType === 'foundation-fact-extractor' ||
         request?.workerType === 'foundation-semantic-reviewer'
+      const revisionWorker = request?.workerType === 'foundation-document-reviser'
       const confirmedBriefContext =
-        packetWorker
+        packetWorker || revisionWorker
           ? undefined
           : input.confirmedBriefContext ??
             (await input.getConfirmedBriefContext?.())
@@ -552,11 +554,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
             ? 'Use ResourceLibrary match_requirements once, then CommitResourceInventory as the only mutation and terminal operation.'
             : ''
       const workerPrompt = [
-        languageInstruction,
-        ...(packetWorker ? [] : [confirmedBriefContext, documentAuthorAuthorityBlock]),
-        packetWorker && request ? buildWorkerPrompt(request) : prompt,
+        ...(packetWorker || revisionWorker ? [] : [languageInstruction]),
+        ...(packetWorker || revisionWorker ? [] : [confirmedBriefContext, documentAuthorAuthorityBlock]),
+        (packetWorker || revisionWorker) && request && request.contract.packet
+          ? buildWorkerPrompt(request)
+          : prompt,
         initialDocumentPrompt,
-        ...(packetWorker
+        ...(packetWorker || revisionWorker
           ? []
           : [
               nativeToolAutonomyInstruction,
@@ -575,7 +579,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           records.get(dispatchId)?.workerType ?? 'question-answerer',
         ),
         displayKind: 'workflow_worker',
-        ...(!packetWorker && confirmedBriefContext ? { confirmedBriefContext } : {}),
+        ...(!packetWorker && !revisionWorker && confirmedBriefContext ? { confirmedBriefContext } : {}),
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
@@ -1157,14 +1161,9 @@ function createDeterministicFoundationRevisionTerminal(input: {
   try { value = JSON.parse(output) } catch { throw new Error('foundation revision terminal output is malformed') }
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('foundation revision terminal output is not an object')
-  // The native tool result is normally the top-level object. Keep accepting
-  // the older `{ data: ... }` transport envelope, but source the receipt only
-  // from the tool_result payload—not the model's tool_use input.
-  const envelope = value as Record<string, unknown>
-  const data = envelope.data && typeof envelope.data === 'object' && !Array.isArray(envelope.data)
-    ? envelope.data as Record<string, unknown>
-    : envelope
-  const receipt = data.receipt
+  // The native tool result is the top-level object. Do not reintroduce a
+  // compatibility envelope: the durable terminal contract has one shape.
+  const receipt = (value as Record<string, unknown>).receipt
   return foundationDocumentReviserTerminalSchema.parse({
     workerType: 'foundation-document-reviser',
     status: 'completed',

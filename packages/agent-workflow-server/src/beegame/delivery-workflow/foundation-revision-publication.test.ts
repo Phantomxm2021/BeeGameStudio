@@ -40,7 +40,8 @@ function sha256(value: string): string {
 
 function canonicalDocument(path: FoundationDocumentPath = documentPath): string {
   const contract = getGameDocumentContract(path)
-  return `# ${path}\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`).join('\n')}`
+  const body = `# ${path}\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`).join('\n')}`
+  return `---\ndocument_id: GDD\nversion: 1.0.0\nupdated_at: 2026-08-13T01:00:00.000+08:00\n---\n${body}`
 }
 
 async function fixture(paths: readonly FoundationDocumentPath[] = [documentPath]) {
@@ -52,7 +53,10 @@ async function fixture(paths: readonly FoundationDocumentPath[] = [documentPath]
   for (const path of paths) {
     const stage = await createFoundationRevisionStage({ workspacePath: workspace, revision, documentPath: path })
     const original = await readFile(join(workspace, stage.stagedPath), 'utf8')
-    const staged = original.replace(`original ${getGameDocumentContract(path).sections[0]!.sectionId}`, 'revised authority')
+    const staged = original
+      .replace(`original ${getGameDocumentContract(path).sections[0]!.sectionId}`, 'revised authority')
+      .replace('version: 1.0.0', 'version: 1.0.1')
+      .replace('updated_at: 2026-08-13T01:00:00.000+08:00', 'updated_at: 2026-08-12T17:00:00.001Z')
     await writeFile(join(workspace, stage.stagedPath), staged)
     const baseDigest = stage.baseDocumentDigest
     const stagedDigest = sha256(staged)
@@ -141,6 +145,47 @@ describe('foundation revision publication', () => {
     expect(await readFile(join(value.workspace, foundationRevisionCommittedPath(revision)), 'utf8')).toContain('"status": "committed"')
     const committed = JSON.parse(await readFile(join(value.workspace, foundationRevisionCommittedPath(revision)), 'utf8'))
     expect(Object.keys(committed.documentDigests).sort()).toEqual([...CANONICAL_FOUNDATION_DOCUMENTS].sort())
+  })
+
+  test('publishes the final service-owned metadata bytes and digest', async () => {
+    const value = await fixture([documentPath])
+    const result = await publishFoundationRevision(publishInput(value))
+    const canonical = await readFile(join(value.workspace, documentPath), 'utf8')
+    expect(canonical).toContain('version: 1.0.1')
+    expect(canonical).toContain('updated_at: 2026-08-12T17:00:00.001Z')
+    expect(result.documentDigests[documentPath]).toBe(sha256(canonical))
+    const prepared = JSON.parse(await readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8')) as { documents: Array<{ documentPath: string; stagedDocumentDigest: string }> }
+    expect(prepared.documents.find(document => document.documentPath === documentPath)?.stagedDocumentDigest).toBe(sha256(canonical))
+  })
+
+  test('rejects forged service-owned metadata at the publication boundary', async () => {
+    const value = await fixture([documentPath])
+    const stage = value.stages[0]!
+    const forged = (await readFile(join(value.workspace, stage.receipt.stagedPath), 'utf8'))
+      .replace('updated_at: 2026-08-12T17:00:00.001Z', 'updated_at: 2099-01-01T00:00:00.000Z')
+    await writeFile(join(value.workspace, stage.receipt.stagedPath), forged)
+    const { terminalDigest: _terminalDigest, ...receiptCore } = stage.receipt
+    const receiptWithoutTerminal = {
+      ...receiptCore,
+      stagedDocumentDigest: sha256(forged),
+    }
+    const receipt = {
+      ...receiptWithoutTerminal,
+      terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal),
+    }
+    const operations = await deriveFoundationPatchOperations({
+      workspacePath: value.workspace,
+      revision,
+      batch: stage.batch,
+      issues: [{ id: 'AUD-1', fixDocument: documentPath, fixSectionId: stage.receipt.changedSectionIds[0] }] as never,
+      receipt,
+    })
+    const input = publishInput(value, {
+      validations: [validation(documentPath, receipt, operations, 'AUD-1')],
+    })
+    input.receipts = [receipt]
+    input.patchOperations = operations
+    await expect(publishFoundationRevision(input)).rejects.toThrow(/metadata/i)
   })
 
   test('persists an empty resulting issue registry through publication and recovery', async () => {
@@ -244,7 +289,10 @@ describe('foundation revision publication', () => {
     await writeFile(join(value.workspace, secondPath), canonicalDocument(secondPath))
     const secondStage = await createFoundationRevisionStage({ workspacePath: value.workspace, revision, documentPath: secondPath })
     const secondOriginal = await readFile(join(value.workspace, secondStage.stagedPath), 'utf8')
-    const secondStaged = secondOriginal.replace(`original ${getGameDocumentContract(secondPath).sections[0]!.sectionId}`, 'revised technical authority')
+    const secondStaged = secondOriginal
+      .replace(`original ${getGameDocumentContract(secondPath).sections[0]!.sectionId}`, 'revised technical authority')
+      .replace('version: 1.0.0', 'version: 1.0.1')
+      .replace('updated_at: 2026-08-13T01:00:00.000+08:00', 'updated_at: 2026-08-12T17:00:00.001Z')
     await writeFile(join(value.workspace, secondStage.stagedPath), secondStaged)
     const secondIssue = 'AUD-2'
     const secondReceiptWithoutTerminal = {

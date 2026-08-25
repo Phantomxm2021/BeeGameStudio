@@ -1,3 +1,4 @@
+import { resolve } from 'node:path'
 import {
   CANONICAL_PROJECT_ARTIFACTS,
   CANONICAL_PROJECT_DOCUMENTS,
@@ -13,6 +14,8 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     request.workerType === 'foundation-fact-extractor' ||
     request.workerType === 'foundation-semantic-reviewer'
   if (packetWorker) return buildPacketWorkerPrompt(request)
+  if (request.workerType === 'foundation-document-reviser')
+    return buildFoundationRevisionWorkerPrompt(request)
   const initialFoundationAuthor =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
@@ -90,6 +93,23 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       : 'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
     formatContract(request),
+  ].join('\n')
+}
+
+function buildFoundationRevisionWorkerPrompt(
+  request: WorkerDispatchRequest,
+): string {
+  const packet = request.contract.packet
+  const stagedPath = request.contract.stagedPath
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+    throw new Error('foundation revision worker requires one immutable packet')
+  if (typeof stagedPath !== 'string' || !stagedPath.trim())
+    throw new Error('foundation revision worker requires one staged path')
+  const absoluteStagedPath = resolve(request.workspacePath, stagedPath)
+  return [
+    `Immutable revision packet: ${JSON.stringify(packet)}`,
+    `Assigned staged path: ${absoluteStagedPath}`,
+    'Read and edit only the assigned staged path. After the revision, call SubmitFoundationRevisionResult exactly once with only changedSectionIds; do not return terminal JSON or prose completion text.',
   ].join('\n')
 }
 

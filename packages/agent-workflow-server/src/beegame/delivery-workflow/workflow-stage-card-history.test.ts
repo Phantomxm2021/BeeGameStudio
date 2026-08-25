@@ -64,6 +64,67 @@ describe('workflow stage card history', () => {
     ).toBeUndefined()
   })
 
+  test('freezes audit stage 3 before entering virtual revision stage 4', () => {
+    const base = createTestDeliveryRun({
+      projectId: 'project-audit-revision-stages',
+      ownerId: 'owner-audit-revision-stages',
+    })
+    const previous: DeliveryRun = {
+      ...base,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+    }
+    const next: DeliveryRun = {
+      ...previous,
+      foundationAuditState: { status: 'planning', tasks: [] } as never,
+      updatedAt: '2026-08-06T00:00:02.000Z',
+    }
+    const frozen = freezePreviousStageCard({
+      previous,
+      next,
+      workspacePath,
+      stageStartedAt: previous.createdAt,
+      stageEndedAt: next.updatedAt,
+      elapsedMs: 250,
+    })
+
+    expect(frozen).toMatchObject({
+      stageId: 'DOCUMENT_REVIEW',
+      phaseIndex: 3,
+      phaseCount: 10,
+      substage: 'INITIAL_REVIEW',
+      status: 'completed',
+    })
+    if (!frozen) return
+    expect(
+      projectCurrentStageCard({ run: next, workspacePath })
+    ).toMatchObject({
+      stageId: 'FOUNDATION_REVISION',
+      phaseIndex: 4,
+      phaseCount: 10,
+      substage: 'REPAIRING',
+    })
+    const history = projectWorkflowStageCardHistory({
+      run: next,
+      workspacePath,
+      events: [{
+        eventId: 'audit-stage-frozen',
+        runId: next.runId,
+        type: 'phase.entered',
+        phase: 'DOCUMENT_REVIEW',
+        status: 'running',
+        revision: next.revision,
+        createdAt: next.updatedAt,
+        stageSnapshot: frozen,
+      }],
+      now: next.updatedAt,
+    })
+    expect(history.map(card => card.stageId)).toEqual([
+      'DOCUMENT_REVIEW',
+      'FOUNDATION_REVISION',
+    ])
+  })
+
   test('keeps the latest frozen value per stage and omits stages after current', () => {
     const base = createTestDeliveryRun({
       projectId: 'project-regressed',
@@ -210,6 +271,12 @@ describe('workflow stage card history', () => {
       isWorkflowStageCardSnapshot({
         ...snapshot,
         stageId: 'DOCUMENT_DRAFTING',
+      }),
+    ).toBe(false)
+    expect(
+      isWorkflowStageCardSnapshot({
+        ...snapshot,
+        phaseCount: 9,
       }),
     ).toBe(false)
     expect(

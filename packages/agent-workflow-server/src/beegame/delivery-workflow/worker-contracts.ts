@@ -255,7 +255,7 @@ export const foundationSemanticReviewerStructuredOutputJsonSchema = {
 
 const foundationRevisionReceiptSchema = z.object({
   taskId: z.string().min(1),
-  round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  round: z.number().int().positive(),
   documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
   issueIds: z.array(z.string().min(1)).min(1),
   baseDocumentDigest: z.string().regex(/^[a-f0-9]{64}$/),
@@ -273,7 +273,7 @@ export const foundationDocumentReviserTerminalSchema = z.object({
   taskId: z.string().min(1),
   revision: z.string().min(1),
   packetDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  round: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  round: z.number().int().positive(),
   documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
   receipt: foundationRevisionReceiptSchema,
 }).strict()
