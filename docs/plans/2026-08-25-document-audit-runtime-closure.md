@@ -310,6 +310,7 @@ type DocumentDisplayTask = {
 - Persist only the compact issue summary and Known Issues IDs/count in workflow state. Raw Registry JSON remains artifact-only.
 - Failed task cards show the exact task failure reason. Completed task cards show their checkmark. Usage and duration remain optional display metadata and must come from task evidence.
 - No Reviewer-specific component or route is added.
+- Keep audit and revision as separate live substages within the existing `DOCUMENT_REVIEW` top-level phase. An active `foundationRevisionState` projects `REPAIRING` and `基础文档修订`; its live task list must not mix completed audit tasks. Completed audit evidence remains in durable audit state and committed artifacts, while history continues to freeze only top-level phase boundaries, preserving the nine-phase and task-count contracts.
 - Add `issueSummary` to the committed audit review binding and current revision state, then increment `FOUNDATION_AUDIT_STATE_SCHEMA_VERSION` and `DELIVERY_RUN_SCHEMA_VERSION` once for this task.
 
 **Test cycle**

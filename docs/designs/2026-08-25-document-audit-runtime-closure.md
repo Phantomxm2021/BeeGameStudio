@@ -1,7 +1,7 @@
 # Document Audit Runtime Closure Design
 
 **Date:** 2026-08-25
-**Status:** Approved; implementation pending
+**Status:** Approved; implementation in progress
 **Authority:** `docs/Bee_Game_Studio_Doc_Audit_Revision_Optimized.md`
 
 ## Purpose
@@ -59,7 +59,7 @@ Each per-document revision packet keeps the fixed 24 KiB boundary and carries th
 
 Recovery uses the same durable task collection and artifact preconditions as the live controller. It replays receipts, retries only incomplete retryable tasks, and preserves attempts, failures, usage, and duration. It does not repair clocks or reset cost.
 
-The Dashboard uses ordinary workflow tasks for fact extraction, deterministic checks, semantic/deep checks, issue compilation, per-document revision, and targeted validation. It shows status, round, severity counts, Known Issues count, and exact failure reason without exposing raw Registry JSON.
+The Dashboard uses ordinary workflow tasks for fact extraction, deterministic checks, semantic/deep checks, issue compilation, per-document revision, and targeted validation. Audit and revision are distinct live substages of the single `DOCUMENT_REVIEW` delivery phase: the nine top-level delivery phases remain unchanged, while an active `foundationRevisionState` projects `REPAIRING` and the card title `基础文档修订`. During that live substage, the task list contains revision/targeted-validation tasks only, so the card cannot imply that audit and revision are executing concurrently. Completed audit evidence remains durable in `foundationAuditState` and its committed artifacts; stage-card history continues to freeze top-level phase boundaries only. The Dashboard shows status, round, severity counts, Known Issues count, and exact failure reason without exposing raw Registry JSON.
 
 ## Boundaries
 

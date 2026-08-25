@@ -11,6 +11,7 @@ import {
 import type { FoundationAuditState } from './foundation-audit-state'
 import type { FoundationRevisionState, FoundationRevisionTask, WorkflowUsage } from './types'
 import type { FoundationIssueSummary } from './foundation-audit-state'
+import { isActiveFoundationRevisionState } from './display-progress'
 
 export type DocumentDisplayTask = {
   id: string
@@ -216,10 +217,9 @@ export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
   if (input.documentStep === 'FOUNDATION_REVIEW')
-    return [
-      ...projectFoundationAuditTasks(input),
-      ...projectFoundationRevisionTasks(input),
-    ]
+    return isActiveFoundationRevisionState(input.foundationRevisionState)
+      ? projectFoundationRevisionTasks(input)
+      : projectFoundationAuditTasks(input)
   const workspace = resolve(input.workspacePath)
   const canonicalReviewArtifacts = [
     ...CANONICAL_PROJECT_DOCUMENTS,

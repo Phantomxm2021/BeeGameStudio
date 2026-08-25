@@ -41,4 +41,22 @@ describe('delivery progress projection', () => {
       }),
     ).toMatchObject({ substage: 'CHECKLIST_DRAFTING' })
   })
+
+  test('projects an active foundation revision as a repairing substage', () => {
+    expect(
+      projectDeliveryProgress({
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        foundationRevisionState: { phase: 'planning', status: 'running' },
+      }),
+    ).toMatchObject({ substage: 'REPAIRING' })
+
+    expect(
+      projectDeliveryProgress({
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        foundationRevisionState: { phase: 'revising', status: 'needs_action' },
+      }),
+    ).toMatchObject({ substage: 'REPAIRING' })
+  })
 })

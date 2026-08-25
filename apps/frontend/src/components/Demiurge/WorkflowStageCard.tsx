@@ -420,7 +420,7 @@ export function WorkflowStageCard({
       : snapshot.substage === 'INITIAL_REVIEW'
         ? '基础文档审计'
         : snapshot.substage === 'REPAIRING'
-          ? '修订审计影响路径'
+          ? '基础文档修订'
           : snapshot.substage === 'CHECKLIST_DRAFTING'
             ? '编写验收清单'
             : undefined;

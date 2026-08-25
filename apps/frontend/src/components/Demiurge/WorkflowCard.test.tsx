@@ -168,6 +168,26 @@ describe('WorkflowCard', () => {
     );
   });
 
+  it('labels the revision substage separately from the audit substage', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_revision_substage',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          phaseIndex: 3,
+          phaseCount: 9,
+          substage: 'REPAIRING',
+          tasks: [{ id: 'revision:gdd', title: 'docs/GDD.md', status: 'running', operation: 'revise' }],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('基础文档修订')).toBeInTheDocument();
+    expect(screen.queryByText('基础文档审计')).not.toBeInTheDocument();
+    expect(screen.queryByText('修订审计影响路径')).not.toBeInTheDocument();
+  });
+
   it('renders compact audit feedback without raw issue registry content', () => {
     render(
       <WorkflowCard

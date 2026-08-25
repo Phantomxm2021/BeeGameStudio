@@ -5,6 +5,7 @@ export const DELIVERY_PROGRESS_STAGES = [...DELIVERY_PHASES] as const
 export const DELIVERY_PROGRESS_SUBSTAGES = [
   'INITIAL_DRAFTING',
   'INITIAL_REVIEW',
+  'REPAIRING',
   'CHECKLIST_DRAFTING',
 ] as const
 
@@ -12,6 +13,34 @@ export type DeliveryProgressSubstage =
   (typeof DELIVERY_PROGRESS_SUBSTAGES)[number]
 
 export type DeliveryProgressStage = (typeof DELIVERY_PROGRESS_STAGES)[number]
+
+const FOUNDATION_REVISION_PHASES = [
+  'planning',
+  'revising',
+  'rebuilding_facts',
+  'validating',
+  'semantic_recheck',
+  'publishing',
+  'round_closing',
+] as const
+
+/**
+ * Revision remains inside DOCUMENT_REVIEW's top-level delivery phase, but it
+ * owns a separate live substage.  A completed revision is cleared when the
+ * workflow proceeds to checklist drafting; if a state is retained during
+ * recovery, needs_action must still render as revision rather than audit.
+ */
+export function isActiveFoundationRevisionState(
+  value: unknown,
+): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const state = value as { phase?: unknown; status?: unknown }
+  return (
+    FOUNDATION_REVISION_PHASES.includes(
+      state.phase as (typeof FOUNDATION_REVISION_PHASES)[number],
+    ) && state.status !== 'completed'
+  )
+}
 
 export type DeliveryProgress = {
   stageId: DeliveryProgressStage
@@ -29,7 +58,9 @@ export function projectDeliveryProgress(
     workflow.documentStep === 'FOUNDATION_DRAFTING'
       ? 'INITIAL_DRAFTING'
       : workflow.documentStep === 'FOUNDATION_REVIEW'
-        ? 'INITIAL_REVIEW'
+        ? isActiveFoundationRevisionState(workflow.foundationRevisionState)
+          ? 'REPAIRING'
+          : 'INITIAL_REVIEW'
         : workflow.documentStep === 'CHECKLIST_DRAFTING'
           ? 'CHECKLIST_DRAFTING'
           : undefined
