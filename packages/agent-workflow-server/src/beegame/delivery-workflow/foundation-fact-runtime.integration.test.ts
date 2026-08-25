@@ -475,7 +475,7 @@ describe('foundation fact runtime controller integration', () => {
       revision: publication.resultingRevision,
       round,
       phase: 'round_closing',
-      status: 'completed',
+      status: 'running',
       phaseStartedAt: new Date().toISOString(),
       roundDeadlineAt: new Date(Date.now() + 600_000).toISOString(),
       knownIssueIds: [],
@@ -1326,10 +1326,11 @@ describe('foundation fact runtime controller integration', () => {
       await controller.resume(publishing!)
       const closed = await controller.store.load()
       expect(closed!.foundationRevisionState!.phase).toBe('round_closing')
-      expect(closed!.foundationRevisionState!.publication).toMatchObject({ resultingRevision: expect.any(String), committedPath: foundationRevisionCommittedPath(revisionId) })
+      expect(closed!.foundationRevisionState!.publication!.committedPath).toBe(foundationRevisionCommittedPath(revisionId))
       const committed = JSON.parse(await readFile(join(workspacePath, foundationRevisionCommittedPath(revisionId)), 'utf8')) as { status: string; resultingRevision: string }
       expect(committed.status).toBe('committed')
       expect(committed.resultingRevision).toBe(closed!.foundationRevisionState!.publication!.resultingRevision)
+      expect(typeof committed.resultingRevision).toBe('string')
       await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: committed.resultingRevision })).resolves.toBeDefined()
       expect(requests.filter(candidate => candidate.taskId === task.taskId)).toHaveLength(1)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }

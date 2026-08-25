@@ -64,6 +64,7 @@ export type FoundationRevisionPublicationResult = {
   preparedPath: string
   journalPath: string
   committedPath: string
+  readonly patchOperations: readonly PatchOperation[]
 }
 
 type JournalEntry = {
@@ -568,7 +569,7 @@ async function recoverPrepared(input: FoundationRevisionRecoveryInput, prepared:
   const resultingRevision = await computeDocumentRevision(input.workspacePath, prepared.confirmedBriefDigest)
   if (priorCommitted && (priorCommitted.resultingRevision !== resultingRevision || stable(priorCommitted.documentDigests) !== stable(documentDigests))) throw new Error('COMMITTED marker contradicts canonical bytes')
   if (!priorCommitted) await atomicJson(committedPath, { schema: 'beegame-foundation-revision-commit-v2', status: 'committed', baseRevision: prepared.revision, confirmedBriefDigest: prepared.confirmedBriefDigest, round: prepared.round, authorityDigest: prepared.authorityDigest, resultingRevision, resultingIssueRegistryDigest: prepared.resultingIssueRegistryDigest, documentDigests } satisfies Committed)
-  return { status: 'committed', baseRevision: prepared.revision, resultingRevision, confirmedBriefDigest: prepared.confirmedBriefDigest, authorityDigest: prepared.authorityDigest, resultingIssues: frozenResultingIssues(prepared.resultingIssues), resultingIssueRegistryDigest: prepared.resultingIssueRegistryDigest, documentDigests, preparedPath: foundationRevisionPreparedPath(prepared.revision), journalPath: foundationRevisionJournalPath(prepared.revision), committedPath: foundationRevisionCommittedPath(prepared.revision) }
+  return { status: 'committed', baseRevision: prepared.revision, resultingRevision, confirmedBriefDigest: prepared.confirmedBriefDigest, authorityDigest: prepared.authorityDigest, resultingIssues: frozenResultingIssues(prepared.resultingIssues), resultingIssueRegistryDigest: prepared.resultingIssueRegistryDigest, documentDigests, preparedPath: foundationRevisionPreparedPath(prepared.revision), journalPath: foundationRevisionJournalPath(prepared.revision), committedPath: foundationRevisionCommittedPath(prepared.revision), patchOperations: Object.freeze(prepared.documents.flatMap(document => document.patchOperations.map(operation => cloneJsonValue(operation) as PatchOperation))) }
 }
 
 /** Validates actual revision authority, durably writes PREPARED, and rolls forward staged Markdown. */
