@@ -1031,6 +1031,7 @@ export async function stopRun(input: {
               ...stopped.activeDispatch,
               status: 'interrupted' as const,
               finishedAt: new Date().toISOString(),
+              failureReason: input.reason,
             }
           : stopped.activeDispatch,
     }

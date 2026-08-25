@@ -79,6 +79,10 @@ describe('foundation fact runtime', () => {
     expect(first.state.tasks[0]?.status).toBe('completed')
     expect(first.state.tasks[0]?.terminalDigest).toMatch(/^[a-f0-9]{64}$/)
     expect(first.state.tasks[0]?.usage?.total_tokens).toBe(3)
+    expect(first.state.tasks[0]).toMatchObject({
+      durationMs: 10,
+      dispatch: { status: 'completed', terminalResult: terminal },
+    })
     const replay = admitFoundationFactTerminal(first.state, {
       taskId: 'task-a',
       dispatchId: 'dispatch-a',
@@ -121,7 +125,17 @@ describe('foundation fact runtime', () => {
     const base = { taskId: 'task-a', dispatchId: 'dispatch-a', revision: 'rev-1', packetDigest: 'a'.repeat(64), terminal: { workerType: 'foundation-fact-extractor' as const, status: 'failed' as const, runId: 'run-1', dispatchId: 'dispatch-a', revision: 'rev-1', taskId: 'task-a', packetDigest: 'a'.repeat(64), results: [] }, durationMs: 1, now: '2026-08-24T00:00:02.000Z' }
     const failed = admitFoundationFactTerminal(claimed, { ...base, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 } })
     expect(failed.accepted).toBe(false)
-    expect(failed.state.tasks[0]?.status).toBe('retryable')
+    expect(failed.state.tasks[0]).toMatchObject({
+      status: 'retryable',
+      usage: { total_tokens: 2 },
+      durationMs: 1,
+      failureReason: 'foundation fact worker did not complete',
+      dispatch: {
+        status: 'failed',
+        finishedAt: base.now,
+        terminalResult: base.terminal,
+      },
+    })
     const capped = admitFoundationFactTerminal(claimed, { ...base, terminal: { ...base.terminal, status: 'completed' }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 769, total_tokens: 770 } })
     expect(capped.accepted).toBe(false)
     expect(capped.state.tasks[0]?.failureReason).toContain('output token cap')

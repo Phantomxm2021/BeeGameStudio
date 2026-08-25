@@ -1197,9 +1197,51 @@ describe('delivery workflow recovery', () => {
     const recovered = await resumeRun({ store, runId: run.runId })
     expect(recovered.foundationAuditState).toEqual(foundationAuditState)
     expect(recovered.foundationAuditState?.phaseStartedAt).toBe('2020-01-01T00:00:00.000Z')
-    expect(recovered.foundationAuditState?.tasks[0]).toMatchObject({ attempt: 1, usage: { total_tokens: 12 }, durationMs: 42, terminalDigest: digest, receiptDigest: digest })
+    expect(recovered.foundationAuditState?.tasks[0]).toMatchObject({
+      attempt: 1,
+      usage: { total_tokens: 12 },
+      durationMs: 42,
+      terminalDigest: digest,
+      receiptDigest: digest,
+      dispatch: { status: 'completed', terminalResult: expect.any(Object) },
+    })
     const retried = await retryRun({ store, runId: run.runId })
     expect(retried.foundationAuditState).toEqual(foundationAuditState)
+  })
+
+  test('reconcile projects orphaned foundation fact dispatch evidence onto the task', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'orphaned-foundation-fact-evidence-'))
+    const digest = 'a'.repeat(64)
+    const revision = 'orphaned-facts'
+    const seed = createFoundationAuditState({
+      revision,
+      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+      manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest, needsAction: 'foundation fact extraction is not part of Task 4A' },
+    })
+    const foundationAuditState = parseFoundationAuditState({
+      ...seed,
+      status: 'extracting_facts',
+      phaseStartedAt: '2020-01-01T00:00:00.000Z',
+      tasks: [{
+        taskId: 'fact-0', kind: 'document-facts', revision, packetDigest: digest, factKeyCount: 1, modelTier: 'fast', status: 'running', attempt: 1,
+        dispatch: {
+          dispatchId: 'fact-dispatch', workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'fact-0', revision, status: 'running',
+          startedAt: '2020-01-01T00:00:00.000Z',
+          usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 },
+        },
+      }],
+    })
+    const run = { ...createTestDeliveryRun({ runId: 'orphaned-foundation-fact', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'DOCUMENT_REVIEW' as const, documentStep: 'FOUNDATION_REVIEW' as const, status: 'running' as const, foundationAuditState }
+    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
+    await store.save(run)
+    const recovered = await store.reconcile(async () => false)
+    expect(recovered?.foundationAuditState?.tasks[0]).toMatchObject({
+      status: 'retryable',
+      usage: { total_tokens: 12 },
+      durationMs: expect.any(Number),
+      failureReason: 'server stopped before the foundation fact terminal was admitted',
+      dispatch: { status: 'interrupted', failureReason: 'server stopped before the foundation fact terminal was admitted' },
+    })
   })
 
   test('defines every exact-resume checkpoint for every persisted worker type', () => {
@@ -2193,6 +2235,9 @@ describe('delivery workflow recovery', () => {
       thinking: 'idle',
       activeDispatch: { status: 'interrupted' },
     })
+    expect(interrupted?.activeDispatch?.failureReason).toBe(
+      'server stopped before the active worker produced a terminal result',
+    )
 
     const retried = await retryRun({ store, runId: initial.runId })
     expect(retried).toMatchObject({

@@ -27,6 +27,7 @@ import type {
 } from './types'
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
 import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
+import { projectTaskTerminalEvidence } from './task-terminal-evidence'
 
 export type { WorkflowEvent } from './types'
 
@@ -1139,7 +1140,13 @@ export function createRunStore(workspacePath: string, ownerId: string) {
             tasks: tasks.map(task => {
               if (!unavailable.some(item => item.taskId === task.taskId)) return task
               const hasPersistedTerminal = Boolean(task.dispatch?.terminalResult)
-              return {
+              const terminal = task.dispatch ? {
+                ...task.dispatch,
+                status: hasPersistedTerminal ? ('completed' as const) : ('interrupted' as const),
+                finishedAt: now(),
+                ...(hasPersistedTerminal ? {} : { failureReason: 'server stopped before the foundation revision terminal was admitted' }),
+              } : undefined
+              const recovered = {
                 ...task,
                 // Durable terminal envelopes are replayed by the controller;
                 // do not turn them into a retry while admission is pending.
@@ -1148,14 +1155,10 @@ export function createRunStore(workspacePath: string, ownerId: string) {
                   : task.attempt < 2
                     ? ('retryable' as const)
                     : ('needs_action' as const),
-                dispatch: task.dispatch ? {
-                  ...task.dispatch,
-                  status: hasPersistedTerminal ? ('completed' as const) : ('interrupted' as const),
-                  finishedAt: now(),
-                  ...(hasPersistedTerminal ? {} : { failureReason: 'server stopped before the foundation revision terminal was admitted' }),
-                } : undefined,
+                dispatch: terminal,
                 ...(hasPersistedTerminal ? {} : { failureReason: 'server stopped before the foundation revision terminal was admitted' }),
               }
+              return terminal ? projectTaskTerminalEvidence(recovered, terminal) : recovered
             }),
           }
           const nextStatus = nextState.tasks.some(task => task.status === 'needs_action') ? 'needs_action' as const : 'running' as const
@@ -1186,7 +1189,22 @@ export function createRunStore(workspacePath: string, ownerId: string) {
             tasks: tasks.map(task => {
               if (!unavailable.some(item => item.taskId === task.taskId)) return task
               const hasPersistedTerminal = Boolean(task.dispatch?.terminalResult)
-              return {
+              const terminal = task.dispatch
+                ? {
+                    ...task.dispatch,
+                    status: hasPersistedTerminal
+                      ? ('completed' as const)
+                      : ('interrupted' as const),
+                    finishedAt: now(),
+                    ...(hasPersistedTerminal
+                      ? {}
+                      : {
+                          failureReason:
+                            'server stopped before the foundation fact terminal was admitted',
+                        }),
+                  }
+                : undefined
+              const recovered = {
                 ...task,
                 // A terminal envelope is durable evidence for controller
                 // replay. Keep the business task running until admission has
@@ -1196,21 +1214,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
                   : task.attempt < 2
                     ? ('retryable' as const)
                     : ('needs_action' as const),
-                dispatch: task.dispatch
-                  ? {
-                      ...task.dispatch,
-                      status: hasPersistedTerminal
-                        ? ('completed' as const)
-                        : ('interrupted' as const),
-                      finishedAt: now(),
-                      ...(hasPersistedTerminal
-                        ? {}
-                        : {
-                            failureReason:
-                              'server stopped before the foundation fact terminal was admitted',
-                          }),
-                    }
-                  : undefined,
+                dispatch: terminal,
                 ...(hasPersistedTerminal
                   ? {}
                   : {
@@ -1218,6 +1222,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
                         'server stopped before the foundation fact terminal was admitted',
                     }),
               }
+              return terminal ? projectTaskTerminalEvidence(recovered, terminal) : recovered
             }),
           }
           const nextStatus = nextState.tasks.some(task => task.status === 'needs_action') ? 'needs_action' as const : 'running' as const
@@ -1236,6 +1241,8 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           ...run.activeDispatch,
           status: 'interrupted' as const,
           finishedAt: now(),
+          failureReason:
+            'server stopped before the active worker produced a terminal result',
         },
       }
       return commitUnlocked(interrupted, {

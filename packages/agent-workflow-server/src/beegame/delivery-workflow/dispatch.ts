@@ -22,6 +22,7 @@ import type {
 } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
 import type { FoundationAuditTask } from './foundation-audit-state'
+import { projectTaskTerminalEvidence } from './task-terminal-evidence'
 import { claimFoundationFactTasks, digestFoundationFactTerminal, foundationFactOutputTokenLimit, type FoundationFactTask, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { claimFoundationSemanticTasks, digestFoundationSemanticTerminal, type FoundationSemanticRuntimeTask, type FoundationSemanticTaskCollection } from './foundation-semantic-runtime'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
@@ -223,6 +224,17 @@ function usageDelta(
     ),
     total_tokens: Math.max(0, end.total_tokens - start.total_tokens),
   }
+}
+
+function terminalReasonForResult(
+  result: WorkerTerminalResult,
+  status: DispatchRecord['status'],
+): string | undefined {
+  if (status === 'completed') return undefined
+  const reason = 'reason' in result && typeof result.reason === 'string'
+    ? result.reason
+    : undefined
+  return reason || `${result.workerType} dispatch ended with ${status}`
 }
 
 function resourceTaskPerformance(input: {
@@ -442,13 +454,14 @@ export function createDeliveryDispatcher(options: {
       if (!locked || !location?.auditTaskId || !task || task.dispatch?.dispatchId !== dispatchId)
         throw new DispatchError('not_found', 'foundation audit task dispatch lost durable authority')
       const changed = mutate({ task, record: task.dispatch! })
+      const projectedTask = projectTaskTerminalEvidence(changed.task, changed.record)
       const next = {
         ...locked,
         ...(changed.runStatus ? { status: changed.runStatus } : {}),
         ...(changed.blockedReason !== undefined ? { blockedReason: changed.blockedReason } : {}),
         foundationAuditState: {
           ...locked.foundationAuditState!,
-          tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? changed.task : candidate),
+          tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectedTask : candidate),
         },
       }
       await options.store.commit(next, {
@@ -488,6 +501,7 @@ export function createDeliveryDispatcher(options: {
       if (!locked || !location?.revisionTaskId || !task || task.dispatch?.dispatchId !== dispatchId)
         throw new DispatchError('not_found', 'foundation revision task dispatch lost durable authority')
       const changed = mutate({ task, record: task.dispatch! })
+      const projectedTask = projectTaskTerminalEvidence(changed.task, changed.record)
       const next = {
         ...locked,
         ...(changed.runStatus ? { status: changed.runStatus } : {}),
@@ -495,7 +509,7 @@ export function createDeliveryDispatcher(options: {
         foundationRevisionState: {
           ...locked.foundationRevisionState!,
           status: changed.runStatus === 'needs_action' ? 'needs_action' as const : locked.foundationRevisionState!.status,
-          tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? changed.task : candidate),
+          tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectedTask : candidate),
         },
       }
       await options.store.commit(next, {
@@ -996,8 +1010,9 @@ export function createDeliveryDispatcher(options: {
     const factResult = result as Extract<WorkerTerminalResult, { workerType: 'foundation-fact-extractor' }>
     const factTask = run.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.auditTaskId)
     const status = factResult.status === 'completed' ? 'completed' : factResult.status === 'blocked' ? 'blocked' : 'failed'
+    const measuredUsage = location.record.usage ?? usageDelta(run.usage, location.record.startingUsage)
     const durable = await mutateFoundationAuditTask(dispatchId, `dispatch.${status}`, ({ task, record }) => {
-      const completed = parseDispatchRecord({ ...record, status, terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() })
+      const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() })
       return { task: { ...task, dispatch: completed }, record: completed }
     })
     try {
@@ -1047,9 +1062,9 @@ export function createDeliveryDispatcher(options: {
       releaseDispatch(dispatchId); throw new DispatchError('invalid_terminal', 'invalid foundation semantic terminal')
     }
     const status = result.status === 'completed' ? 'completed' : result.status === 'blocked' ? 'blocked' : 'failed'
-    const measuredUsage = usageDelta(run.usage, location.record.startingUsage)
+    const measuredUsage = location.record.usage ?? usageDelta(run.usage, location.record.startingUsage)
     if (Object.values(measuredUsage).some(value => !Number.isFinite(value) || value < 0)) throw new DispatchError('invalid_terminal', 'semantic terminal usage measurement is invalid')
-    const durable = await mutateFoundationAuditTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => { const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() }); return { task: { ...current, dispatch: completed, usage: measuredUsage }, record: completed } })
+    const durable = await mutateFoundationAuditTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => { const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() }); return { task: { ...current, dispatch: completed, usage: measuredUsage }, record: completed } })
     try { await options.credits?.settle?.(request ? idempotencyKey(request, Math.max(1, task.attempt)) : dispatchId, result); await options.onTerminal?.(durable, result, request) } catch (error) {
       const reason = error instanceof Error ? error.message : 'workflow semantic terminal handler failed'
       await mutateFoundationAuditTask(dispatchId, 'workflow.handler_failed', ({ task: current, record }) => { const exhausted = current.kind === 'confirmation' ? current.attempt >= 1 : current.attempt >= 2; return { task: { ...current, status: exhausted ? 'needs_action' : 'retryable', failureReason: reason, dispatch: parseDispatchRecord({ ...record, status: 'failed', failureReason: reason }) }, record: parseDispatchRecord({ ...record, status: 'failed', failureReason: reason }), runStatus: exhausted ? 'needs_action' : 'running', blockedReason: exhausted ? reason : undefined } }).catch(() => undefined)
@@ -1097,13 +1112,13 @@ export function createDeliveryDispatcher(options: {
       throw new DispatchError('invalid_terminal', 'invalid foundation revision terminal')
     }
     const revisionResult = result as Extract<WorkerTerminalResult, { workerType: 'foundation-document-reviser' }>
-    const measuredUsage = usageDelta(run.usage, location.record.startingUsage)
+    const measuredUsage = location.record.usage ?? usageDelta(run.usage, location.record.startingUsage)
     const finishedAt = now()
     const status = revisionResult.status === 'completed' ? 'completed' : revisionResult.status === 'blocked' ? 'blocked' : 'failed'
     const taskStatus = status === 'completed' ? 'completed' : status === 'blocked' || task.attempt >= 2 ? 'needs_action' : 'retryable'
     const durationMs = Math.max(0, new Date(finishedAt).getTime() - new Date(location.record.startedAt).getTime())
     const durable = await mutateFoundationRevisionTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => {
-      const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, terminalResult: result as unknown as Record<string, unknown>, finishedAt })
+      const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt })
       return { task: { ...current, status: taskStatus, ...(revisionResult.status === 'completed' ? { receipt: revisionResult.receipt, terminalDigest: revisionResult.receipt.terminalDigest } : {}), usage: measuredUsage, durationMs, dispatch: completed }, record: completed, ...(taskStatus === 'needs_action' ? { runStatus: 'needs_action' as const, blockedReason: revisionResult.status === 'blocked' ? 'foundation revision worker is blocked' : undefined } : {}) }
     })
     try {
@@ -1152,12 +1167,12 @@ export function createDeliveryDispatcher(options: {
       releaseDispatch(dispatchId)
       throw new DispatchError('invalid_terminal', 'invalid foundation semantic revision terminal')
     }
-    const measuredUsage = usageDelta(run.usage, location.record.startingUsage)
+    const measuredUsage = location.record.usage ?? usageDelta(run.usage, location.record.startingUsage)
     const finishedAt = now()
     const status = result.status === 'completed' ? 'completed' : result.status === 'blocked' ? 'blocked' : 'failed'
     const terminalDigest = createHash('sha256').update(JSON.stringify(result)).digest('hex')
     const durable = await mutateFoundationRevisionTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => {
-      const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, terminalResult: result as unknown as Record<string, unknown>, finishedAt })
+      const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt })
       const nextStatus = status === 'completed' ? 'running' : current.attempt < 2 ? 'retryable' : 'needs_action'
       return { task: { ...current, status: nextStatus, ...(status === 'completed' ? { terminalDigest } : {}), usage: measuredUsage, durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(record.startedAt)), dispatch: completed }, record: completed, ...(nextStatus === 'needs_action' ? { runStatus: 'needs_action' as const, blockedReason: 'foundation semantic revision worker failed' } : {}) }
     })
@@ -1196,10 +1211,10 @@ export function createDeliveryDispatcher(options: {
       throw new DispatchError('invalid_terminal', 'invalid foundation impacted fact terminal')
     }
     const status = result.status === 'completed' ? 'completed' : result.status === 'blocked' ? 'blocked' : 'failed'
-    const measuredUsage = location.record.usage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+    const measuredUsage = location.record.usage ?? usageDelta(run.usage, location.record.startingUsage)
     const durationMs = Math.max(0, Date.parse(now()) - Date.parse(location.record.startedAt))
     const durable = await mutateFoundationRevisionTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => {
-      const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() })
+      const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() })
       // Keep the terminal checkpoint replayable until the controller has
       // validated the receipt and committed it atomically.
       const nextStatus = status === 'completed' ? 'running' : current.attempt < 2 ? 'retryable' : 'needs_action'
@@ -1749,6 +1764,19 @@ export function createDeliveryDispatcher(options: {
       releaseDispatch(dispatchId, { stopReason: reason })
       return interrupted
     }
+    if (location.revisionTaskId) {
+      const interrupted = await mutateFoundationRevisionTask(dispatchId, 'dispatch.needs_action', ({ task, record }) => {
+        const terminal = parseDispatchRecord({ ...record, status: 'interrupted', finishedAt: now(), failureReason: reason })
+        return {
+          task: { ...task, status: 'needs_action', failureReason: reason, dispatch: terminal },
+          record: terminal,
+          runStatus: 'needs_action',
+          blockedReason: reason,
+        }
+      })
+      releaseDispatch(dispatchId, { stopReason: reason })
+      return interrupted
+    }
     const interrupted = parseDispatchRecord({
       ...location.record,
       status: 'interrupted',
@@ -1816,10 +1844,25 @@ export function createDeliveryDispatcher(options: {
       releaseDispatch(dispatchId, { stopReason: reason })
       return stopped
     }
+    if (location.revisionTaskId) {
+      const stopped = await mutateFoundationRevisionTask(dispatchId, 'dispatch.interrupted', ({ task, record }) => {
+        const terminal = parseDispatchRecord({ ...record, status: 'interrupted', finishedAt: now(), failureReason: reason })
+        const needsAction = task.attempt >= 2
+        return {
+          task: { ...task, status: needsAction ? 'needs_action' : 'retryable', failureReason: reason, dispatch: terminal },
+          record: terminal,
+          runStatus: 'stopped',
+          blockedReason: reason,
+        }
+      })
+      releaseDispatch(dispatchId, { stopReason: reason })
+      return stopped
+    }
     const stopped = parseDispatchRecord({
       ...location.record,
       status: 'interrupted',
       finishedAt: now(),
+      failureReason: reason,
     })
     const stoppedRun = location.path
       ? withFoundationDispatch(run, location.path, stopped)

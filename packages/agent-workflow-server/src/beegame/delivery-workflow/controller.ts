@@ -7,6 +7,7 @@ import {
 } from './atomic-task-planner'
 import { auditAssetContract } from '../asset-contract-audit'
 import { createDeliveryDispatcher } from './dispatch'
+import { projectTaskTerminalEvidence } from './task-terminal-evidence'
 import {
   buildChangeImpactDispatch,
   buildQuestionAnswerDispatch,
@@ -523,7 +524,7 @@ export function createDeliveryWorkflowController(input: {
           const durationMs = Math.max(0, Date.parse(record.finishedAt ?? new Date().toISOString()) - Date.parse(record.startedAt))
           const receipt = await writeFoundationFactReceipt({ workspacePath: input.workspacePath, revision: task.revision, receipt: { taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, terminalDigest, normalizedFactDigest: validated.normalizedFactDigest, receipts: validated.receipts, facts: validated.facts, usage, durationMs } })
           receiptWritten = true
-          admitted = await store.commit({ ...locked, foundationRevisionState: { ...locked.foundationRevisionState!, tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, status: 'completed' as const, terminalDigest, receiptPath: receipt.path, receiptDigest: receipt.digest, usage, durationMs, dispatch: record } : candidate) } }, { runId: locked.runId, type: 'foundation.revision.impacted_facts.admitted', phase: locked.phase, status: locked.status, revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, terminalDigest }, undefined, lease)
+          admitted = await store.commit({ ...locked, foundationRevisionState: { ...locked.foundationRevisionState!, tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'completed' as const, terminalDigest, receiptPath: receipt.path, receiptDigest: receipt.digest, usage, durationMs }, record) : candidate) } }, { runId: locked.runId, type: 'foundation.revision.impacted_facts.admitted', phase: locked.phase, status: locked.status, revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, terminalDigest }, undefined, lease)
         }
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'foundation impacted fact admission failed'
@@ -538,7 +539,10 @@ export function createDeliveryWorkflowController(input: {
               ...latest.foundationRevisionState,
               status: 'needs_action',
               tasks: latest.foundationRevisionState.tasks.map(candidate => candidate.taskId === foundationRevisionTask.taskId
-                ? { ...candidate, status: 'needs_action' as const, failureReason: reason }
+                ? projectTaskTerminalEvidence(
+                    { ...candidate, status: 'needs_action' as const },
+                    { ...record, status: 'invalid' as const, failureReason: reason, finishedAt: record.finishedAt ?? new Date().toISOString() },
+                  )
                 : candidate),
             },
           }, { runId: latest.runId, type: 'foundation.revision.impacted_facts.admission_failed', phase: latest.phase, status: 'needs_action', revision: latest.revision, taskId: foundationRevisionTask.taskId, reason }, undefined, lease)
@@ -585,11 +589,12 @@ export function createDeliveryWorkflowController(input: {
               : undefined
           if (!admittedResult) {
             const reason = result.reason ?? 'foundation semantic recheck is undecidable'
-            admitted = await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationRevisionState: { ...locked.foundationRevisionState!, status: 'needs_action', tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, status: 'needs_action' as const, failureReason: reason } : candidate) } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck.needs_action', phase: locked.phase, status: 'needs_action', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, reason }, undefined, lease)
+            const terminal = { ...record, failureReason: reason }
+            admitted = await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationRevisionState: { ...locked.foundationRevisionState!, status: 'needs_action', tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'needs_action' as const }, terminal) : candidate) } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck.needs_action', phase: locked.phase, status: 'needs_action', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, reason }, undefined, lease)
           } else {
             const resultDigest = digestFoundationSemanticRecheckResult(admittedResult)
             const resultPath = await writeFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, result: admittedResult, resultDigest })
-            const completedTasks = locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, status: 'completed' as const, resultPath, resultDigest, terminalDigest: candidate.terminalDigest ?? (record.terminalResult ? createHash('sha256').update(JSON.stringify(record.terminalResult)).digest('hex') : undefined), dispatch: record } : candidate)
+            const completedTasks = locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'completed' as const, resultPath, resultDigest, terminalDigest: candidate.terminalDigest ?? (record.terminalResult ? createHash('sha256').update(JSON.stringify(record.terminalResult)).digest('hex') : undefined) }, record) : candidate)
             const semanticTasks = completedTasks.filter(candidate => candidate.kind === 'semantic-recheck')
             const allCompleted = semanticTasks.length > 0 && semanticTasks.every(candidate => candidate.status === 'completed' && !!candidate.resultPath && !!candidate.resultDigest && !!candidate.terminalDigest)
             if (!allCompleted) {
@@ -621,7 +626,7 @@ export function createDeliveryWorkflowController(input: {
           const locked = await store.load(lease)
           const task = locked?.foundationRevisionState?.tasks.find(candidate => candidate.taskId === foundationRevisionTask.taskId)
           if (locked && task?.kind === 'document-revision' && task.status === 'running') {
-            admitted = await store.commit({ ...locked, foundationRevisionState: { ...locked.foundationRevisionState!, tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? { ...candidate, status: 'completed' as const, receipt: revisionResult.receipt, terminalDigest: revisionResult.receipt.terminalDigest, dispatch: record } : candidate) } }, { runId: locked.runId, type: 'foundation.revision.terminal.replayed', phase: locked.phase, status: locked.status, revision: locked.revision, dispatchId: record.dispatchId, taskId: task.taskId }, undefined, lease)
+            admitted = await store.commit({ ...locked, foundationRevisionState: { ...locked.foundationRevisionState!, tasks: locked.foundationRevisionState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'completed' as const, receipt: revisionResult.receipt, terminalDigest: revisionResult.receipt.terminalDigest }, record) : candidate) } }, { runId: locked.runId, type: 'foundation.revision.terminal.replayed', phase: locked.phase, status: locked.status, revision: locked.revision, dispatchId: record.dispatchId, taskId: task.taskId }, undefined, lease)
           }
         } finally { await store.unlock(lease) }
       }
@@ -645,7 +650,7 @@ export function createDeliveryWorkflowController(input: {
         const admitted = admitFoundationSemanticResult(packet, { checkId: lockedTask.checkId, packetIdentity: packet.identity, outcome: result.outcome, ...(result.issues !== undefined ? { issues: result.issues } : {}), ...(result.reason !== undefined ? { reason: result.reason } : {}) })
         const runtimeState: FoundationSemanticTaskCollection = { revision: lockedState.revision, phaseStartedAt: lockedState.phaseStartedAt!, status: 'semantic_review', tasks: lockedState.tasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticTaskCollection['tasks'], aggregateUsage: lockedState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, ...(lockedState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: lockedState.semantic.deepPhaseStartedAt } : {}), ...(lockedState.semantic?.deepAggregateUsage ? { deepAggregateUsage: lockedState.semantic.deepAggregateUsage } : {}) }
         const admission = admitFoundationSemanticTerminal(runtimeState, { taskId: lockedTask.taskId, dispatchId: record.dispatchId, revision: result.revision, packetDigest: result.packetDigest, terminal: result as never, usage: record.usage, durationMs: Date.parse(record.finishedAt) - Date.parse(record.startedAt), now: new Date().toISOString() })
-        let tasks = admission.state.tasks.map(task => task.taskId === lockedTask.taskId ? { ...task, ...(admission.accepted ? { admittedResult: admitted } : {}) } : task)
+        let tasks = admission.state.tasks.map(task => task.taskId === lockedTask.taskId ? projectTaskTerminalEvidence({ ...task, ...(admission.accepted ? { admittedResult: admitted } : {}) }, record) : task)
         let semanticState = { aggregateUsage: admission.state.aggregateUsage, ...(admission.state.deepPhaseStartedAt ? { deepPhaseStartedAt: admission.state.deepPhaseStartedAt } : {}), ...(admission.state.deepAggregateUsage ? { deepAggregateUsage: admission.state.deepAggregateUsage } : {}) }
         if (admission.accepted && !admission.idempotent && lockedTask.kind === 'semantic' && (admitted.outcome === 'UNDECIDABLE' || FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.find(check => check.checkId === lockedTask.checkId)?.severity === 'BLOCKER')) {
           const confirmation = appendFoundationConfirmationTask({ ...admission.state, tasks: tasks as FoundationSemanticTaskCollection['tasks'] }, { taskId: `${lockedTask.taskId}:confirmation`, sourceTaskId: lockedTask.taskId, admittedResult: admitted, now: new Date().toISOString() })
@@ -693,7 +698,7 @@ export function createDeliveryWorkflowController(input: {
         }
         const runtimeState: FoundationFactTaskCollection = { revision: lockedState.revision, phaseStartedAt: lockedState.phaseStartedAt!, status: lockedState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts', tasks: lockedState.tasks.filter(task => task.kind === 'document-facts'), aggregateUsage: lockedState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 } }
         const admission = admitFoundationFactTerminal(runtimeState, { taskId: lockedTask.taskId, dispatchId: record.dispatchId, revision: result.revision, packetDigest: result.packetDigest, terminal: result, usage: record.usage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, durationMs: Math.max(0, Date.parse(record.finishedAt ?? new Date().toISOString()) - Date.parse(record.startedAt)), now: new Date().toISOString() })
-        let auditState: FoundationAuditState = { ...lockedState, status: admission.state.status, tasks: admission.state.tasks, aggregateUsage: admission.state.aggregateUsage }
+        let auditState: FoundationAuditState = { ...lockedState, status: admission.state.status, tasks: admission.state.tasks.map(task => task.taskId === lockedTask.taskId ? projectTaskTerminalEvidence(task, record) : task), aggregateUsage: admission.state.aggregateUsage }
         const admittedTask = admission.state.tasks.find(task => task.taskId === lockedTask.taskId)!
         if (admission.accepted && !admission.idempotent) {
           const receipt = await writeFoundationFactReceipt({ workspacePath: input.workspacePath, revision: lockedTask.revision, receipt: { taskId: lockedTask.taskId, revision: lockedTask.revision, packetDigest: lockedTask.packetDigest, terminalDigest: admission.terminalDigest, normalizedFactDigest: validated.normalizedFactDigest, receipts: validated.receipts, facts: validated.facts, usage: admittedTask.usage, durationMs: admittedTask.durationMs ?? 0 } })

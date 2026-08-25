@@ -552,6 +552,12 @@ describe('foundation fact runtime controller integration', () => {
       expect(after!.foundationRevisionState!.publication).toBeUndefined()
       expect(after!.foundationAuditState).toEqual(beforeRegistry)
       const admittedTask = after!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)
+      expect(admittedTask).toMatchObject({
+        dispatch: { status: 'completed' },
+        usage: { total_tokens: 0 },
+        durationMs: expect.any(Number),
+      })
+      if (outcome === 'UNDECIDABLE') expect(admittedTask?.failureReason).toBe('insufficient evidence')
       if (outcome === 'ISSUES') {
         expect(admittedTask?.kind === 'semantic-recheck' && admittedTask.resultPath).toBeTruthy()
         if (admittedTask?.kind === 'semantic-recheck' && admittedTask.resultPath) {
@@ -756,7 +762,30 @@ describe('foundation fact runtime controller integration', () => {
       expect(completed.status).toBe('completed')
       expect(completed.receipt).toEqual(terminal.receipt)
       expect(completed.terminalDigest).toBe(terminal.receipt.terminalDigest)
+      expect(completed.dispatch).toMatchObject({ status: 'completed', terminalResult: terminal })
+      expect(completed.usage).toMatchObject({ total_tokens: 0 })
+      expect(completed.durationMs).toBe(
+        Math.max(0, Date.parse(completed.dispatch!.finishedAt!) - Date.parse(completed.dispatch!.startedAt)),
+      )
       for (const [path, contents] of canonicalBefore) expect(await readFile(join(workspacePath, path))).toEqual(contents)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('stopping a running revision task preserves interrupted terminal evidence', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      const { run } = await driveToFactOwnerRevisionIssue(controller)
+      const task = run.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'document-revision' && candidate.status === 'running')!
+      await controller.dispatcher.stop(task.dispatch!.dispatchId, 'operator stopped foundation revision')
+      const stopped = await controller.store.load()
+      const interrupted = stopped!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      expect(interrupted).toMatchObject({
+        status: 'retryable',
+        failureReason: 'operator stopped foundation revision',
+        dispatch: { status: 'interrupted', failureReason: 'operator stopped foundation revision' },
+        durationMs: expect.any(Number),
+      })
+      expect(stopped?.status).toBe('stopped')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
@@ -832,6 +861,11 @@ describe('foundation fact runtime controller integration', () => {
       expect(admitted.status).toBe('completed')
       expect(admitted.kind).toBe('impacted-facts')
       expect('receiptPath' in admitted && admitted.receiptPath).toBeTruthy()
+      expect(admitted.dispatch).toMatchObject({ status: 'completed' })
+      expect(admitted.usage).toMatchObject({ total_tokens: 0 })
+      expect(admitted.durationMs).toBe(
+        Math.max(0, Date.parse(admitted.dispatch!.finishedAt!) - Date.parse(admitted.dispatch!.startedAt)),
+      )
       expect(requests.filter(request => request.workerType === 'foundation-fact-extractor')).toHaveLength(factWorkersBefore + 1)
       let afterValidation = completed!
       if (afterValidation.foundationRevisionState?.phase === 'validating') {
@@ -1344,6 +1378,11 @@ describe('foundation fact runtime controller integration', () => {
       expect(completed.terminalDigest).toMatch(/^[a-f0-9]{64}$/)
       expect(completed.kind === 'semantic-recheck' && completed.resultPath).toMatch(/result|semantic/i)
       expect(completed.kind === 'semantic-recheck' && completed.resultDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(completed.dispatch).toMatchObject({ status: 'completed' })
+      expect(completed.usage).toMatchObject({ total_tokens: 0 })
+      expect(completed.durationMs).toBe(
+        Math.max(0, Date.parse(completed.dispatch!.finishedAt!) - Date.parse(completed.dispatch!.startedAt)),
+      )
       expect(after!.foundationRevisionState!.phase).toBe('publishing')
       expect(requests.filter(candidate => candidate.taskId === task.taskId)).toHaveLength(workerCount)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }

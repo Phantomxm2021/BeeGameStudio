@@ -60,7 +60,13 @@ describe('foundation semantic runtime', () => {
     const collection = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: ten() })
     const claimed = claimFoundationSemanticTasks(collection, { now: new Date(1).toISOString(), dispatchIdFor: () => 'd1', configuredTiers: { fast: true, balanced: true } })
     const failed = admitFoundationSemanticTerminal(claimed, { taskId: task(0).taskId, dispatchId: 'd1', revision: 'rev', packetDigest: digest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'failed', runId: 'run', dispatchId: 'd1', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'PASS' }, usage: usage(1), durationMs: 3, now: new Date(2).toISOString() })
-    expect(failed.state.tasks[0]?.status).toBe('retryable')
+    expect(failed.state.tasks[0]).toMatchObject({
+      status: 'retryable',
+      usage: usage(1),
+      durationMs: 3,
+      failureReason: 'semantic worker did not complete',
+      dispatch: { status: 'failed', finishedAt: new Date(2).toISOString() },
+    })
     const retry = claimFoundationSemanticTasks(failed.state, { now: new Date(3).toISOString(), dispatchIdFor: () => 'd2', configuredTiers: { fast: true, balanced: true } })
     expect(retry.tasks[0]?.dispatch?.dispatchId).toBe('d2')
     const capped = admitFoundationSemanticTerminal(retry, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: 'd2', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'PASS' }, usage: { ...usage(FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS + 1), completion_tokens: FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS + 1, total_tokens: FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS * 2 + 2 }, durationMs: 3, now: new Date(4).toISOString() })
@@ -70,6 +76,11 @@ describe('foundation semantic runtime', () => {
     const nested = { workerType: 'foundation-semantic-reviewer' as const, status: 'completed' as const, runId: 'run', dispatchId: 'd2', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'PASS' as const, metadata: { nested: { marker: 1 } } }
     const replayState = retry.tasks.map(item => item.taskId === task(0).taskId ? { ...item, status: 'running' as const, dispatch: { ...item.dispatch!, dispatchId: 'd2' } } : item)
     const completed = admitFoundationSemanticTerminal({ ...retry, tasks: replayState }, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: nested, usage: usage(1), durationMs: 1, now: new Date(4).toISOString() })
+    expect(completed.state.tasks[0]).toMatchObject({
+      status: 'completed',
+      durationMs: 1,
+      dispatch: { status: 'completed', finishedAt: new Date(4).toISOString(), terminalResult: nested },
+    })
     expect(digestFoundationSemanticTerminal(nested)).toHaveLength(64)
     expect(() => admitFoundationSemanticTerminal(completed.state, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: { ...nested, metadata: { nested: { marker: 2 } } }, usage: usage(1), durationMs: 1, now: new Date(5).toISOString() })).toThrow(/conflicting/i)
   })
