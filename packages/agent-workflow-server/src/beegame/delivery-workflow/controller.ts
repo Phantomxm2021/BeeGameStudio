@@ -8,6 +8,7 @@ import {
 import { auditAssetContract } from '../asset-contract-audit'
 import { createDeliveryDispatcher } from './dispatch'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
+import { estimateStructuredPayloadTokens, foundationFactBusinessPayload } from './structured-output-admission'
 import {
   buildChangeImpactDispatch,
   buildQuestionAnswerDispatch,
@@ -691,7 +692,7 @@ export function createDeliveryWorkflowController(input: {
           validated = validateFoundationFactResults({ packet: packet as never, expectedRevision: lockedTask.revision, documents, sectionIndex: artifacts.sectionIndex, results: result.results as never })
         } catch (error) {
           const invalid = new Error(error instanceof Error ? error.message : 'foundation fact result is invalid')
-          invalid.name = (record.usage?.completion_tokens ?? 0) > foundationFactOutputTokenLimit(lockedTask.factKeyCount)
+          invalid.name = estimateStructuredPayloadTokens(foundationFactBusinessPayload(result)) > foundationFactOutputTokenLimit(lockedTask.factKeyCount)
             ? 'FoundationFactOutputCapError'
             : 'FoundationFactInvalidResultError'
           throw invalid

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { DispatchRecord, WorkflowUsage } from './types'
 import { FOUNDATION_FACT_CATALOG_OWNER_SECTIONS } from './foundation-fact-definitions'
+import { estimateStructuredPayloadTokens, foundationFactBusinessPayload } from './structured-output-admission'
 
 export const FOUNDATION_FACT_MAX_TASKS = FOUNDATION_FACT_CATALOG_OWNER_SECTIONS.length
 export const FOUNDATION_FACT_MAX_RUNNING = 4
@@ -207,7 +208,8 @@ export function admitFoundationFactTerminal(
   }
   if (task.status !== 'running') throw new Error('foundation fact task is not running')
   const measuredUsage = usage(input.usage)
-  const failureReason = measuredUsage.completion_tokens > foundationFactOutputTokenLimit(task.factKeyCount)
+  const outputTokens = estimateStructuredPayloadTokens(foundationFactBusinessPayload(input.terminal))
+  const failureReason = outputTokens > foundationFactOutputTokenLimit(task.factKeyCount)
     ? 'foundation fact output token cap exceeded'
     : input.terminal.status === 'completed' ? undefined : 'foundation fact worker did not complete'
   const completed = !failureReason

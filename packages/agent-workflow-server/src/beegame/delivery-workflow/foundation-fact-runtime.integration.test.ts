@@ -16,7 +16,7 @@ import type { FactValue } from './foundation-fact-store'
 import type { AuditIssue } from './foundation-issue-registry'
 import { buildFoundationSemanticRecheckPacket } from './foundation-patch-validation'
 import { deriveFoundationPatchOperations, foundationRevisionPacketPath, foundationRevisionStagePath, loadFoundationRevisionPacket, revisionTaskReceiptTerminalDigest, writeFoundationRevisionSemanticPacket, type PatchOperation } from './foundation-revision-stage'
-import { digestFoundationFactTerminal, foundationFactOutputTokenLimit, type FoundationFactTask } from './foundation-fact-runtime'
+import { digestFoundationFactTerminal, type FoundationFactTask } from './foundation-fact-runtime'
 import { foundationSemanticReviewerStructuredOutputJsonSchema } from './worker-contracts'
 import { foundationRevisionCommittedPath } from './foundation-revision-publication'
 import { publishFoundationRevision, recoverFoundationRevision } from './foundation-revision-publication'
@@ -281,13 +281,36 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
-  test('does not retry a task whose measured output exceeds the cap', async () => {
+  test('rejects a task whose final structured output exceeds the cap', async () => {
     const { workspacePath, controller } = await preparedController()
     try {
       const current = await controller.store.load()
       const task = current!.foundationAuditState!.tasks.find((candidate): candidate is FoundationFactTask => candidate.kind === 'document-facts' && candidate.status === 'running')!
-      const completionTokens = foundationFactOutputTokenLimit(task.factKeyCount) + 1
-      await controller.store.addWorkflowUsage(current!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: completionTokens, total_tokens: completionTokens + 1 }, task.dispatch!.dispatchId)
+      await controller.store.addWorkflowUsage(current!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 }, task.dispatch!.dispatchId)
+      const packet = task.dispatch!.request!.contract.packet as { keys: string[]; sections: Array<{ documentPath: string; sectionId: string; startLine: number; endLine: number }> }
+      const oversizedResults = (await presentFactResults(workspacePath, packet)) as Array<Record<string, unknown>>
+      const first = oversizedResults[0]!
+      delete first.value
+      first.status = 'uncertain'
+      first.reason = 'x'.repeat(12_000)
+      await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {
+        workerType: 'foundation-fact-extractor', status: 'completed', runId: current!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId,
+        revision: task.revision, packetDigest: task.packetDigest,
+        results: oversizedResults,
+      })
+      const after = await controller.store.load()
+      const failedTask = after!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      expect(failedTask.status).toBe('needs_action')
+      expect(failedTask.failureReason).toContain('output token cap')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('admits a small final payload despite large provider completion usage', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      const current = await controller.store.load()
+      const task = current!.foundationAuditState!.tasks.find((candidate): candidate is FoundationFactTask => candidate.kind === 'document-facts' && candidate.status === 'running')!
+      await controller.store.addWorkflowUsage(current!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 4_897, total_tokens: 4_898 }, task.dispatch!.dispatchId)
       const packet = task.dispatch!.request!.contract.packet as { keys: string[] }
       await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {
         workerType: 'foundation-fact-extractor', status: 'completed', runId: current!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId,
@@ -295,7 +318,7 @@ describe('foundation fact runtime controller integration', () => {
         results: packet.keys.map(key => ({ key, status: 'absent' })),
       })
       const after = await controller.store.load()
-      expect(after!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('needs_action')
+      expect(after!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('completed')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
@@ -1720,18 +1743,24 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
-  test('revision impacted fact terminals enforce the output cap', async () => {
+  test('revision impacted fact terminals enforce the final structured output cap', async () => {
     const { workspacePath, controller } = await preparedController()
     try {
       const { rebuilding } = await completeFactOwnerRevision(controller, workspacePath)
       await controller.resume(rebuilding!)
       const planned = await controller.store.load()
       const task = planned!.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'impacted-facts')!
-      const packet = JSON.parse((await readFile(join(workspacePath, task.packetPath))).toString()) as { keys: string[] }
-      const completionTokens = foundationFactOutputTokenLimit(packet.keys.length) + 1
-      await controller.store.addWorkflowUsage(planned!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: completionTokens, total_tokens: completionTokens + 1 }, task.dispatch!.dispatchId)
-      await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: planned!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, results: packet.keys.map(key => ({ key, status: 'absent' as const })) })).rejects.toThrow(/invalid|cap/i)
-      expect((await controller.store.load())!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('needs_action')
+      const packet = JSON.parse((await readFile(join(workspacePath, task.packetPath))).toString()) as { keys: string[]; sections: Array<{ documentPath: string; sectionId: string; startLine: number; endLine: number }> }
+      await controller.store.addWorkflowUsage(planned!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 }, task.dispatch!.dispatchId)
+      const oversizedResults = (await presentFactResults(workspacePath, packet)) as Array<Record<string, unknown>>
+      const first = oversizedResults[0]!
+      delete first.value
+      first.status = 'uncertain'
+      first.reason = 'x'.repeat(5_000)
+      await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: planned!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, results: oversizedResults })).rejects.toThrow(/invalid|cap/i)
+      const failedTask = (await controller.store.load())!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      expect(failedTask.status).toBe('needs_action')
+      expect(failedTask.failureReason).toContain('output token cap')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 

@@ -140,7 +140,7 @@ describe('foundation semantic audit authority', () => {
     expect(() => admitFoundationSemanticResult(packet, { ...base, issues: [{ ...issue, id: 'AUD-caller' }] })).toThrow(/ID|unknown/i)
   })
 
-  test('admits strict PASS, ISSUES, and UNDECIDABLE unions; output token authority remains measured runtime usage', () => {
+  test('admits strict PASS, ISSUES, and UNDECIDABLE unions; output admission is handled from the final structured payload', () => {
     const packet = buildFoundationSemanticPacket(fullSnapshot())
     const pass = { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'PASS' as const, issues: [] }
     expect(admitFoundationSemanticResult(packet, pass).outcome).toBe('PASS')

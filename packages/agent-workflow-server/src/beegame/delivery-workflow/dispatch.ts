@@ -23,6 +23,7 @@ import type {
 import type { RunStore, WorkflowLock } from './run-store'
 import type { FoundationAuditTask } from './foundation-audit-state'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
+import { estimateStructuredPayloadTokens, foundationFactBusinessPayload } from './structured-output-admission'
 import { claimFoundationFactTasks, digestFoundationFactTerminal, foundationFactOutputTokenLimit, type FoundationFactTask, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { claimFoundationSemanticTasks, digestFoundationSemanticTerminal, type FoundationSemanticRuntimeTask, type FoundationSemanticTaskCollection } from './foundation-semantic-runtime'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
@@ -1200,12 +1201,12 @@ export function createDeliveryDispatcher(options: {
       if (result.workerType !== 'foundation-fact-extractor' || result.runId !== request.runId || result.dispatchId !== dispatchId || result.taskId !== request.taskId || result.revision !== request.revision || result.packetDigest !== request.contract.packetDigest)
         throw new Error('foundation impacted fact terminal identity does not match dispatch contract')
       const packet = await loadFoundationRevisionFactPacket({ workspacePath: request.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
-      if ((location.record.usage?.completion_tokens ?? 0) > foundationFactOutputTokenLimit(packet.keys.length))
-        throw new Error('foundation impacted fact completion token cap exceeded')
+      if (estimateStructuredPayloadTokens(foundationFactBusinessPayload(result)) > foundationFactOutputTokenLimit(packet.keys.length))
+        throw new Error('foundation impacted fact output token cap exceeded')
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid foundation impacted fact terminal'
       const invalid = parseDispatchRecord({ ...location.record, status: 'invalid' as const, finishedAt: now(), failureReason: reason })
-      const terminalCap = reason.includes('completion token cap')
+      const terminalCap = reason.includes('output token cap')
       await mutateFoundationRevisionTask(dispatchId, 'dispatch.invalid', ({ task: current }) => ({ task: { ...current, status: terminalCap || current.attempt >= 2 ? 'needs_action' : 'retryable', failureReason: reason, dispatch: invalid }, record: invalid, runStatus: terminalCap || current.attempt >= 2 ? 'needs_action' : 'running', blockedReason: terminalCap || current.attempt >= 2 ? reason : undefined }))
       releaseDispatch(dispatchId)
       throw new DispatchError('invalid_terminal', 'invalid foundation impacted fact terminal')

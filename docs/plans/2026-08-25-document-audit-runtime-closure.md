@@ -96,6 +96,8 @@ export function foundationFactOutputTokenLimit(factKeyCount: number): number {
 }
 ```
 
+Output admission measures the final structured business payload rather than provider usage. Use one shared deterministic estimator based on the UTF-8 byte length of the JSON payload divided by two (rounded up, conservatively for multilingual text). For facts the payload is `{ status, results }`; for semantic and deep workers it is `{ status, outcome, issues?, reason? }`. Keep the existing per-task cap constants/formula. Provider `completion_tokens` and total usage are retained for cost observation and must not reject a valid small payload, even when a native session performed structured-output repairs.
+
 Add `factKeyCount: number` to `FoundationFactTask`; seed it from `packet.keys.length`, persist it in the state schema, and use it for terminal admission instead of a fixed 512-token comparison.
 
 **Required behavior**
@@ -122,13 +124,15 @@ expect(prompt).toContain('packet is the sole input')
 
 3. Add output-limit tests for 1, 4, 14, and 15 keys: `768`, `1536`, `4096`, and `4096`.
 
-4. Run:
+4. Add admission tests proving high provider completion usage with a small final payload is accepted, while an oversized final structured payload is rejected for ordinary facts, impacted facts, semantic checks, and deep confirmation.
+
+5. Run:
 
 ```bash
 /Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.test.ts
 ```
 
-5. Commit with `fix: isolate document audit packet workers`.
+6. Commit with `fix: isolate document audit packet workers`.
 
 ---
 

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { DispatchRecord, WorkflowUsage } from './types'
 import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST, type FoundationSemanticResult } from './foundation-semantic-audit'
+import { estimateStructuredPayloadTokens, foundationSemanticBusinessPayload } from './structured-output-admission'
 
 export const FOUNDATION_SEMANTIC_MAX_TASKS = 10
 export const FOUNDATION_SEMANTIC_MAX_RUNNING = 4
@@ -239,7 +240,8 @@ export function admitFoundationSemanticTerminal(state: FoundationSemanticTaskCol
   const deep = task.kind === 'confirmation'
   const outputCap = deep ? FOUNDATION_DEEP_OUTPUT_MAX_TOKENS : FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS
   const aggregate = deep ? addUsage(state.deepAggregateUsage ?? zeroUsage(), measured) : addUsage(state.aggregateUsage, measured)
-  const failureReason = measured.completion_tokens > outputCap ? `semantic output token cap exceeded (${outputCap})` : input.terminal.status === 'completed' ? undefined : 'semantic worker did not complete'
+  const outputTokens = estimateStructuredPayloadTokens(foundationSemanticBusinessPayload(input.terminal))
+  const failureReason = outputTokens > outputCap ? `semantic output token cap exceeded (${outputCap})` : input.terminal.status === 'completed' ? undefined : 'semantic worker did not complete'
   const completed = !failureReason
   const nextTask = { ...task, status: completed ? 'completed' as const : failureReason.includes('output token cap') ? 'needs_action' as const : task.attempt < (deep ? FOUNDATION_DEEP_MAX_ATTEMPTS : FOUNDATION_SEMANTIC_MAX_ATTEMPTS) ? 'retryable' as const : 'needs_action' as const, terminalDigest, usage: measured, durationMs: Math.max(0, input.durationMs), failureReason, dispatch: task.dispatch ? { ...task.dispatch, status: completed ? 'completed' as const : 'failed' as const, finishedAt: input.now, terminalResult: input.terminal } : undefined }
   return { state: { ...state, tasks: state.tasks.map(item => item.taskId === task.taskId ? nextTask : item), ...(deep ? { deepAggregateUsage: aggregate } : { aggregateUsage: aggregate }) }, idempotent: false, terminalDigest, accepted: completed }
