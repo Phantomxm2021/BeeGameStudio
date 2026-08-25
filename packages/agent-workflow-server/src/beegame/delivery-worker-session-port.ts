@@ -253,14 +253,14 @@ export function createBeeGameDeliveryWorkerPort(input: {
     async assertFoundationFactFastReady(request) {
       if (request.workerType !== 'foundation-fact-extractor') return
       const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
-      selectFoundationFactFastRuntime(runtime, runtime?.env ?? {})
+      if (runtime) selectFoundationFactFastRuntime(runtime, runtime.env)
     },
     async assertFoundationSemanticModelReady(request) {
       if (request.workerType !== 'foundation-semantic-reviewer') return
       const tier = request.contract.modelTier
       if (tier !== 'fast' && tier !== 'balanced' && tier !== 'strong') throw new Error('foundation semantic model tier is missing')
       const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
-      selectFoundationSemanticRuntime(runtime, runtime?.env ?? {}, tier)
+      if (runtime) selectFoundationSemanticRuntime(runtime, runtime.env, tier)
     },
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()

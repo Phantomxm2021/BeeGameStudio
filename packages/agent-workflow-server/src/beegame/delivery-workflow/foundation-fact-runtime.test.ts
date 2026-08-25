@@ -131,6 +131,36 @@ describe('foundation fact runtime', () => {
     expect(() => selectFoundationFactFastRuntime(undefined, {})).toThrow(/fast model is not configured/)
   })
 
+  test('infers the sole provider from tier keys when runtime config is remote', () => {
+    for (const provider of ['ANTHROPIC', 'OPENAI', 'GEMINI', 'GROK']) {
+      const environment = {
+        [`${provider}_DEFAULT_HAIKU_MODEL`]: `${provider.toLowerCase()}-fast`,
+      }
+      expect(selectFoundationFactFastRuntime(undefined, environment)[`${provider}_DEFAULT_SONNET_MODEL`]).toBe(`${provider.toLowerCase()}-fast`)
+    }
+  })
+
+  test('infers each semantic tier from the sole remote provider', () => {
+    const environment = {
+      OPENAI_DEFAULT_HAIKU_MODEL: 'fast-model',
+      OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',
+      OPENAI_DEFAULT_OPUS_MODEL: 'strong-model',
+    }
+    expect(selectFoundationSemanticRuntime(undefined, environment, 'fast').OPENAI_DEFAULT_SONNET_MODEL).toBe('fast-model')
+    expect(selectFoundationSemanticRuntime(undefined, environment, 'balanced').OPENAI_DEFAULT_SONNET_MODEL).toBe('balanced-model')
+    expect(selectFoundationSemanticRuntime(undefined, environment, 'strong').OPENAI_DEFAULT_SONNET_MODEL).toBe('strong-model')
+  })
+
+  test('rejects ambiguous, absent, and incomplete remote model environments', () => {
+    expect(() => selectFoundationFactFastRuntime(undefined, {
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'anthropic-fast',
+      OPENAI_DEFAULT_HAIKU_MODEL: 'openai-fast',
+    })).toThrow(/multiple providers/)
+    expect(() => selectFoundationSemanticRuntime(undefined, {
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'balanced-model',
+    }, 'fast')).toThrow(/fast.*configured/i)
+  })
+
   test('semantic fast, balanced and strong tiers route to explicit provider models and fail closed', () => {
     const env = { ANTHROPIC_DEFAULT_HAIKU_MODEL: 'fast-model', ANTHROPIC_DEFAULT_SONNET_MODEL: 'balanced-model', ANTHROPIC_DEFAULT_OPUS_MODEL: 'strong-model' }
     expect(selectFoundationSemanticRuntime({ modelType: 'anthropic', env: {} }, env, 'fast').ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('fast-model')

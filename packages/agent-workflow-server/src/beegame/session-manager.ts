@@ -561,24 +561,16 @@ export function selectFoundationFactFastRuntime(
   runtime: RuntimeModelConfig | undefined,
   environment: Record<string, string>,
 ): Record<string, string> {
-  const fastEnvKey = runtime?.modelType === 'openai'
-    ? 'OPENAI_DEFAULT_HAIKU_MODEL'
-    : runtime?.modelType === 'gemini'
-      ? 'GEMINI_DEFAULT_HAIKU_MODEL'
-      : runtime?.modelType === 'grok'
-        ? 'GROK_DEFAULT_HAIKU_MODEL'
-        : runtime?.modelType === 'anthropic'
-          ? 'ANTHROPIC_DEFAULT_HAIKU_MODEL'
-          : undefined
-  if (!fastEnvKey) throw new Error('foundation fact extractor fast model is not configured')
+  const provider = foundationRuntimeProvider(runtime, environment)
+  if (!provider) throw new Error('foundation fact extractor fast model is not configured')
+  const fastEnvKey = `${foundationRuntimeProviderPrefix(provider)}_DEFAULT_HAIKU_MODEL`
   const fastModel = environment[fastEnvKey]
   if (!fastModel) throw new Error('foundation fact extractor fast model is not configured')
-  const providerPrefix = fastEnvKey.replace('_DEFAULT_HAIKU_MODEL', '')
   // The native runtime selects its primary turn model through the provider's
   // sonnet/default alias. Route this worker's isolated process to the
   // configured fast model using a recognized provider key; arbitrary MODEL
   // environment variables are ignored by the runtime.
-  return { ...environment, [`${providerPrefix}_DEFAULT_SONNET_MODEL`]: fastModel }
+  return { ...environment, [`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_SONNET_MODEL`]: fastModel }
 }
 
 export function selectFoundationSemanticRuntime(
@@ -587,14 +579,39 @@ export function selectFoundationSemanticRuntime(
   tier: 'fast' | 'balanced' | 'strong',
 ): Record<string, string> {
   const suffix = tier === 'fast' ? 'HAIKU' : tier === 'balanced' ? 'SONNET' : 'OPUS'
-  const provider = runtime?.modelType
-  const key = provider === 'openai' ? `OPENAI_DEFAULT_${suffix}_MODEL`
-    : provider === 'gemini' ? `GEMINI_DEFAULT_${suffix}_MODEL`
-      : provider === 'grok' ? `GROK_DEFAULT_${suffix}_MODEL`
-        : provider === 'anthropic' ? `ANTHROPIC_DEFAULT_${suffix}_MODEL` : undefined
+  const provider = foundationRuntimeProvider(runtime, environment)
+  if (!provider) throw new Error(`foundation semantic ${tier} model is not configured`)
+  const key = `${foundationRuntimeProviderPrefix(provider)}_DEFAULT_${suffix}_MODEL`
   if (!key || !environment[key]) throw new Error(`foundation semantic ${tier} model is not configured`)
-  const prefix = key.replace(`_DEFAULT_${suffix}_MODEL`, '')
-  return { ...environment, [`${prefix}_DEFAULT_SONNET_MODEL`]: environment[key] }
+  return { ...environment, [`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_SONNET_MODEL`]: environment[key] }
+}
+
+const FOUNDATION_RUNTIME_PROVIDERS: RuntimeModelConfig['modelType'][] = [
+  'anthropic',
+  'openai',
+  'gemini',
+  'grok',
+]
+
+function foundationRuntimeProvider(
+  runtime: RuntimeModelConfig | undefined,
+  environment: Record<string, string>,
+): RuntimeModelConfig['modelType'] | undefined {
+  if (runtime?.modelType) return runtime.modelType
+  const providers = FOUNDATION_RUNTIME_PROVIDERS.filter(provider =>
+    ['HAIKU', 'SONNET', 'OPUS'].some(tier =>
+      Boolean(environment[`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_${tier}_MODEL`]),
+    ),
+  )
+  if (providers.length > 1) throw new Error('Selected model environment contains multiple providers')
+  if (providers.length === 0) return undefined
+  return providers[0]!
+}
+
+function foundationRuntimeProviderPrefix(
+  provider: RuntimeModelConfig['modelType'],
+): string {
+  return provider.toUpperCase()
 }
 
 export type StartBeeGameSessionInput = {

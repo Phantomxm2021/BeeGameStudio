@@ -108,6 +108,19 @@ describe('delivery worker session credentials', () => {
     expect(starts[0]?.workflowJsonSchema).toEqual(request.workflowJsonSchema)
   })
 
+  test('does not reject a remote model config missing from the local registry', async () => {
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions: {} as unknown as BeeGameSessionManager,
+      userId: 'user-1',
+      modelConfigId: 'remote-model-config',
+    })
+    await port.assertFoundationFactFastReady!({ workerType: 'foundation-fact-extractor' } as unknown as WorkerDispatchRequest)
+    await port.assertFoundationSemanticModelReady!({
+      workerType: 'foundation-semantic-reviewer',
+      contract: { modelTier: 'balanced' },
+    } as unknown as WorkerDispatchRequest)
+  })
+
   test('accepts only the planner resource-plan terminal contract', async () => {
     const workspacePath = await createResourceWorkspace()
     try {

@@ -22,6 +22,7 @@ import { foundationRevisionCommittedPath } from './foundation-revision-publicati
 import { publishFoundationRevision } from './foundation-revision-publication'
 import { publishFoundationDerivedArtifacts } from './foundation-audit-artifacts'
 import { digestFactStore } from './foundation-fact-store'
+import { createModelConfig, resetModelConfigs } from '@bee-game-studio/agent-workflow'
 
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
@@ -1119,11 +1120,18 @@ describe('foundation fact runtime controller integration', () => {
 
   test('fails closed once when the production port has no fast model and never starts or retries a worker', async () => {
     let startCalls = 0
+    const config = createModelConfig('owner', {
+      name: 'missing-fast-model',
+      provider: 'anthropic-compatible',
+      apiKey: 'test-key',
+      models: { balanced: 'balanced-model', strong: 'strong-model' },
+    })
     const { workspacePath, controller, started } = await preparedController(() => createBeeGameDeliveryWorkerPort({
       sessions: {
         start() { startCalls += 1; throw new Error('worker start must not be reached') },
       } as never,
       userId: 'owner',
+      modelConfigId: config.id,
     }), false)
     try {
       await expect(controller.resume(await controller.store.load() as never)).rejects.toThrow(/fast model|configured/i)
@@ -1131,7 +1139,10 @@ describe('foundation fact runtime controller integration', () => {
       expect(startCalls).toBe(0)
       expect(started.size).toBe(0)
       expect(after!.foundationAuditState!.tasks.every(task => task.status === 'needs_action' && task.attempt === 0)).toBe(true)
-    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+    } finally {
+      resetModelConfigs()
+      await rm(workspacePath, { recursive: true, force: true })
+    }
   })
 
   test('replays a persisted impacted terminal after callback-before-receipt crash without starting a worker', async () => {
