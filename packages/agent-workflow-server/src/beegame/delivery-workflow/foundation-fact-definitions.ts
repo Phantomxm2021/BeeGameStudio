@@ -316,6 +316,16 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     ),
   ])
 
+export const FOUNDATION_FACT_CATALOG_OWNER_SECTIONS: readonly FoundationFactDefinition['owner'][] = Object.freeze(
+  [...new Map(FOUNDATION_FACT_CATALOG.map(definition => [
+    `${definition.owner.documentPath}\0${definition.owner.sectionId}`,
+    { ...definition.owner },
+  ] as const)).values()].sort((left, right) =>
+    left.documentPath.localeCompare(right.documentPath) ||
+    left.sectionId.localeCompare(right.sectionId),
+  ),
+)
+
 export const FOUNDATION_FACT_CATALOG_BY_KEY: ReadonlyMap<
   FoundationFactKey,
   FoundationFactDefinition

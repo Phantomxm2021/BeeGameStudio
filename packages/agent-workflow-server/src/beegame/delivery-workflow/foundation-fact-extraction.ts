@@ -366,8 +366,11 @@ function canonicalPacketIdentity(
 ): string {
   return JSON.stringify({
     revision: value.revision,
-    keys: value.keys,
-    sections: value.sections,
+    keys: [...value.keys].sort(),
+    sections: [...value.sections].sort((left, right) =>
+      left.documentPath.localeCompare(right.documentPath) ||
+      left.sectionId.localeCompare(right.sectionId),
+    ),
   })
 }
 
@@ -392,59 +395,57 @@ export function buildFoundationFactPackets(input: {
     throw new Error(
       `mechanical-only foundation fact cannot enter a model packet: ${mechanicalKeys.join(', ')}`,
     )
-  const keys = requestedKeys
-  const byDocument = new Map<string, FoundationFactKey[]>()
-  for (const key of keys) {
+  const byDocument = new Map<string, Map<string, { section: FoundationFactPacketSection; keys: FoundationFactKey[] }>>()
+  for (const key of [...requestedKeys].sort()) {
     const definition = foundationFactDefinition(key)!
-    const current = byDocument.get(definition.owner.documentPath) ?? []
-    current.push(key)
-    byDocument.set(definition.owner.documentPath, current)
+    const section = sectionFor(input.sectionIndex, definition)
+    const markdown = documents.get(section.documentPath)
+    if (markdown === undefined)
+      throw new Error(`foundation document is missing: ${section.documentPath}`)
+    const documentSections = byDocument.get(definition.owner.documentPath) ?? new Map()
+    const sectionKey = `${section.documentPath}\0${section.sectionId}`
+    const current = documentSections.get(sectionKey) ?? {
+      section: { ...section, text: sectionText(markdown, section) },
+      keys: [],
+    }
+    current.keys.push(key)
+    documentSections.set(sectionKey, current)
+    byDocument.set(definition.owner.documentPath, documentSections)
   }
-  return [...byDocument.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([documentPath, documentKeys]) => {
-      const sections = [
-        ...new Map(
-          documentKeys.map(key => {
-            const section = sectionFor(
-              input.sectionIndex,
-              foundationFactDefinition(key)!,
-            )
-            const markdown = documents.get(section.documentPath)
-            if (markdown === undefined)
-              throw new Error(
-                `foundation document is missing: ${section.documentPath}`,
-              )
-            return [
-              section.sectionId,
-              { ...section, text: sectionText(markdown, section) },
-            ] as const
-          }),
-        ).values(),
-      ].sort((a, b) => a.sectionId.localeCompare(b.sectionId))
-      const bytesUtf8 = Buffer.byteLength(
-        JSON.stringify({
-          revision: input.revision,
-          keys: documentKeys,
-          sections,
-        }),
-        'utf8',
-      )
-      if (bytesUtf8 > 16 * 1024)
-        throw new Error(
-          `foundation fact packet exceeds 16 KiB: ${documentPath}`,
-        )
-      const identity = {
-        revision: input.revision,
-        keys: [...documentKeys].sort(),
-        sections,
+  const packets: FoundationFactPacket[] = []
+  for (const [documentPath, documentSections] of [...byDocument.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    let currentSections: FoundationFactPacketSection[] = []
+    let currentKeys: FoundationFactKey[] = []
+    const emit = () => {
+      if (!currentSections.length) return
+      const identity = { revision: input.revision, keys: currentKeys, sections: currentSections }
+      const bytesUtf8 = Buffer.byteLength(canonicalPacketIdentity(identity), 'utf8')
+      packets.push({ ...identity, bytesUtf8, packetDigest: sha256(canonicalPacketIdentity(identity)) })
+      currentSections = []
+      currentKeys = []
+    }
+    for (const entry of [...documentSections.values()].sort((left, right) => left.section.sectionId.localeCompare(right.section.sectionId))) {
+      const nextSections = [...currentSections, entry.section]
+      const nextKeys = [...currentKeys, ...entry.keys].sort()
+      const nextIdentity = { revision: input.revision, keys: nextKeys, sections: nextSections }
+      const nextBytes = Buffer.byteLength(canonicalPacketIdentity(nextIdentity), 'utf8')
+      if (nextBytes <= 16 * 1024) {
+        currentSections = nextSections
+        currentKeys = nextKeys
+        continue
       }
-      return {
-        ...identity,
-        bytesUtf8,
-        packetDigest: sha256(canonicalPacketIdentity(identity)),
-      }
-    })
+      if (!currentSections.length)
+        throw new Error(`foundation fact packet exceeds 16 KiB: ${documentPath}`)
+      emit()
+      const singleIdentity = { revision: input.revision, keys: [...entry.keys].sort(), sections: [entry.section] }
+      if (Buffer.byteLength(canonicalPacketIdentity(singleIdentity), 'utf8') > 16 * 1024)
+        throw new Error(`foundation fact packet exceeds 16 KiB: ${documentPath}`)
+      currentSections = [entry.section]
+      currentKeys = [...entry.keys].sort()
+    }
+    emit()
+  }
+  return packets
 }
 
 function evidenceForSection(
@@ -536,14 +537,7 @@ function validatePacket(
     )
       throw new Error(`foundation fact packet key is mis-scoped: ${key}`)
   }
-  const bytesUtf8 = Buffer.byteLength(
-    JSON.stringify({
-      revision: packet.revision,
-      keys: packet.keys,
-      sections: packet.sections,
-    }),
-    'utf8',
-  )
+  const bytesUtf8 = Buffer.byteLength(canonicalPacketIdentity(packet), 'utf8')
   if (packet.bytesUtf8 !== bytesUtf8 || packet.bytesUtf8 > 16 * 1024)
     throw new Error('foundation fact packet byte bound is invalid')
   const identity = {

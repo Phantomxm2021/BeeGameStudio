@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import type { DispatchRecord, WorkflowUsage } from './types'
+import { FOUNDATION_FACT_CATALOG_OWNER_SECTIONS } from './foundation-fact-definitions'
 
-export const FOUNDATION_FACT_MAX_TASKS = 8
+export const FOUNDATION_FACT_MAX_TASKS = FOUNDATION_FACT_CATALOG_OWNER_SECTIONS.length
 export const FOUNDATION_FACT_MAX_RUNNING = 4
 export const FOUNDATION_FACT_MAX_OUTPUT_TOKENS = 512
 export const FOUNDATION_FACT_MAX_MODEL_TOKENS = 32_000
@@ -120,7 +121,7 @@ export function createFoundationFactTaskCollection(input: {
 }): FoundationFactTaskCollection {
   if (!input.revision.trim()) throw new Error('foundation fact revision is required')
   if (input.packets.length > FOUNDATION_FACT_MAX_TASKS)
-    throw new Error('foundation fact extraction has at most eight tasks')
+    throw new Error(`foundation fact extraction has at most ${FOUNDATION_FACT_MAX_TASKS} tasks`)
   if (new Set(input.packets.map(packet => packet.taskId)).size !== input.packets.length)
     throw new Error('foundation fact task IDs must be stable and unique')
   const tasks = input.packets.map(packet => {

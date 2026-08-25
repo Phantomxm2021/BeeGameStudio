@@ -24,9 +24,9 @@ const docs = {
   'docs/ASSET_PLAN.md': `# ASSET\n<!-- beegame-section:inventory -->\n## Asset Inventory and Coverage\ninventory_ids: [player, boss]\nboss.count: 2\n<!-- beegame-section:dependencies -->\n## Asset Dependencies and Constraints\nart_constraint_refs: [style.bold]\n<!-- beegame-section:formats_budgets -->\n## Formats and Budgets\nformats: [png, wav]\n`,
 } as const
 
-function sectionIndex(): SectionRef[] {
+function indexDocuments(input: Record<string, string>): SectionRef[] {
   const output: SectionRef[] = []
-  for (const [documentPath, markdown] of Object.entries(docs)) {
+  for (const [documentPath, markdown] of Object.entries(input)) {
     const lines = markdown.split('\n')
     for (let index = 0; index < lines.length; index += 1) {
       const marker = /^<!-- beegame-section:([a-z0-9._-]+) -->$/.exec(lines[index]!.trim())
@@ -45,6 +45,10 @@ function sectionIndex(): SectionRef[] {
     }
   }
   return output
+}
+
+function sectionIndex(): SectionRef[] {
+  return indexDocuments(docs)
 }
 
 describe('mechanical normalized foundation extraction', () => {
@@ -165,6 +169,49 @@ describe('mechanical normalized foundation extraction', () => {
     expect(packets.every(packet => packet.keys.every(key => FOUNDATION_FACT_CATALOG.some(item => item.key === key)))).toBe(true)
     expect(packets.every(packet => packet.sections.every(section => section.text.length > 0))).toBe(true)
     expect(packets.every(packet => !('documentPathSelector' in packet))).toBe(true)
+  })
+
+  test('splits oversized documents only at complete owner sections', () => {
+    const level = `# LEVEL\n<!-- beegame-section:encounters -->\n## Encounters\nrequired_entities: [player]\n${'x'.repeat(6000)}\n<!-- beegame-section:content_matrix -->\n## Content Matrix\nrequired_assets: [player]\n${'x'.repeat(6000)}\n<!-- beegame-section:production_acceptance -->\n## Production Acceptance\ncomplexity_budget: 100\n${'x'.repeat(6000)}\n`
+    const documents = { ...docs, 'docs/LEVEL_SCENE_DESIGN.md': level }
+    const packets = buildFoundationFactPackets({
+      revision: 'revision-large',
+      documents,
+      sectionIndex: indexDocuments(documents),
+      unresolvedKeys: ['level.complexity_budget', 'level.required_assets', 'level.required_entities'],
+    })
+    expect(packets).toHaveLength(2)
+    expect(packets.every(packet => packet.bytesUtf8 <= 16 * 1024)).toBe(true)
+    expect(packets.flatMap(packet => packet.keys).sort()).toEqual([
+      'level.complexity_budget',
+      'level.required_assets',
+      'level.required_entities',
+    ])
+    expect(packets.flatMap(packet => packet.sections.map(section => section.sectionId)).sort()).toEqual([
+      'content_matrix',
+      'encounters',
+      'production_acceptance',
+    ])
+    expect(packets[0]!.sections.map(section => section.sectionId)).toEqual(['content_matrix', 'encounters'])
+    expect(packets[1]!.sections.map(section => section.sectionId)).toEqual(['production_acceptance'])
+  })
+
+  test('rejects a single owner section that cannot fit an empty packet', () => {
+    const level = `# LEVEL\n<!-- beegame-section:encounters -->\n## Encounters\nrequired_entities: [player]\n${'x'.repeat(20_000)}\n`
+    const documents = { ...docs, 'docs/LEVEL_SCENE_DESIGN.md': level }
+    expect(() => buildFoundationFactPackets({
+      revision: 'revision-too-large',
+      documents,
+      sectionIndex: indexDocuments(documents),
+      unresolvedKeys: ['level.required_entities'],
+    })).toThrow(/exceeds 16 KiB.*LEVEL_SCENE_DESIGN/i)
+  })
+
+  test('canonicalizes reordered unresolved keys to identical packets and digests', () => {
+    const index = sectionIndex()
+    const unresolvedKeys = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: index }).unresolvedKeys
+    const build = (keys: readonly string[]) => buildFoundationFactPackets({ revision: 'revision-order', documents: docs, sectionIndex: index, unresolvedKeys: keys })
+    expect(build([...unresolvedKeys].reverse())).toEqual(build(unresolvedKeys))
   })
 
   test('admits each assigned result exactly once and rejects bad evidence or scope', () => {

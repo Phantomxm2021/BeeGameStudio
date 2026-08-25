@@ -5,6 +5,7 @@ import {
 } from './foundation-audit-state'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import type { FoundationFactTask } from './foundation-fact-runtime'
+import { FOUNDATION_FACT_MAX_TASKS } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
@@ -58,6 +59,19 @@ describe('foundationAuditState schema', () => {
       phaseStartedAt: '2026-08-24T00:00:00.000Z',
       tasks: [task],
     })).toThrow(/pending|receipt|completed/i)
+  })
+
+  test('uses the catalog-derived task cap for the unified state', () => {
+    const tasks = Array.from({ length: FOUNDATION_FACT_MAX_TASKS + 1 }, (_, index) => ({
+      taskId: `revision-1:fact:${index}`,
+      kind: 'document-facts' as const,
+      revision: 'revision-1',
+      packetDigest: 'c'.repeat(64),
+      modelTier: 'fast' as const,
+      status: 'pending' as const,
+      attempt: 0,
+    }))
+    expect(() => parseFoundationAuditState({ ...valid, status: 'extracting_facts', phaseStartedAt: '2026-08-24T00:00:00.000Z', tasks })).toThrow(/too_big|max/i)
   })
 
   test('preserves the exact derived binding through forward audit states', () => {

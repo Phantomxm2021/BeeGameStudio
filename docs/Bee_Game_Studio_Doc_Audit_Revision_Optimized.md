@@ -55,6 +55,8 @@
 
 Fact Store 不是普通摘要，而是可比较、可校验的标准化事实集合。
 
+Fact extraction uses the closed v1 catalog as authority: packets carry exact owner Section text, sort document/section/key identities canonically, and split only between complete owner sections at the 16 KiB boundary.
+
 > {  
 > "players.max": 4,  
 > "boss.count": 3,  

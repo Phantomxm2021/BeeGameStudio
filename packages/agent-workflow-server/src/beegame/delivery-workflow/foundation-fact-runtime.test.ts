@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  FOUNDATION_FACT_MAX_TASKS,
   admitFoundationFactTerminal,
   claimFoundationFactTasks,
   createFoundationFactTaskCollection,
@@ -116,6 +117,13 @@ describe('foundation fact runtime', () => {
     const state = createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: [] })
     expect(state.tasks).toEqual([])
     expect(state.status).toBe('facts_staged')
+  })
+
+  test('derives the closed catalog task cap and rejects one beyond it', () => {
+    const packets = (count: number) => Array.from({ length: count }, (_, index) => packet(`task-${index}`, `${index.toString(16).padStart(2, '0')}`.repeat(32)))
+    expect(FOUNDATION_FACT_MAX_TASKS).toBe(19)
+    expect(createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: packets(19) }).tasks).toHaveLength(19)
+    expect(() => createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: packets(20) })).toThrow(/at most 19 tasks/)
   })
 
   test('fast tier routes to the configured provider model and fails closed when absent', () => {
