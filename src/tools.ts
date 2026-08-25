@@ -1,5 +1,11 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { toolMatchesName, type Tool, type Tools } from './Tool.js'
+import {
+  buildTool,
+  toolMatchesName,
+  type Tool,
+  type ToolDef,
+  type Tools,
+} from './Tool.js'
 import { AgentTool } from '@bee-game-studio/builtin-tools/tools/AgentTool/AgentTool.js'
 import { SkillTool } from '@bee-game-studio/builtin-tools/tools/SkillTool/SkillTool.js'
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js'
@@ -305,7 +311,12 @@ function createFoundationRevisionResultToolForWorker(): Tool | undefined {
   const round = contract.round === 1 || contract.round === 2 || contract.round === 3 ? contract.round : undefined
   if (!stringValue('taskId') || !stringValue('revision') || !stringValue('documentPath') || !stringValue('baseDocumentDigest') || !stringValue('stagedPath') || !round || !issueIds.length || !sectionIds.length) return undefined
   return createNativeFoundationRevisionResultTool({
-    buildTool: definition => definition as Tool,
+    // Native workflow tools are ToolDef descriptors.  The normal built-in
+    // tool path wraps them with buildTool(), which supplies the runtime
+    // defaults (notably isEnabled).  Revision workers call
+    // getToolsForDefaultPreset() during CLI bootstrap, so returning the raw
+    // descriptor makes startup throw before the first stream event.
+    buildTool: definition => buildTool(definition as ToolDef),
     workspacePath: process.cwd(),
     expectedTaskId: stringValue('taskId')!,
     expectedRevision: stringValue('revision')!,

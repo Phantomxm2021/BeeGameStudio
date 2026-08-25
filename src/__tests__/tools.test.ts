@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { parseToolPreset, filterToolsByDenyRules } from '../tools'
+import {
+  filterToolsByDenyRules,
+  getTools,
+  parseToolPreset,
+} from '../tools'
 import { getEmptyToolPermissionContext } from '../Tool'
 
 describe('parseToolPreset', () => {
@@ -21,6 +25,40 @@ describe('parseToolPreset', () => {
 
   test('returns null for random string', () => {
     expect(parseToolPreset('custom-preset')).toBeNull()
+  })
+})
+
+describe('foundation revision native tool registration', () => {
+  test('builds a complete tool for the CLI bootstrap inventory', () => {
+    const previousWorkerType = process.env.BEEGAME_WORKFLOW_WORKER_TYPE
+    const previousContract = process.env.BEEGAME_REVISION_CONTRACT
+    process.env.BEEGAME_WORKFLOW_WORKER_TYPE = 'foundation-document-reviser'
+    process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({
+      taskId: 'task-1',
+      revision: 'revision-1',
+      round: 1,
+      documentPath: 'docs/GDD.md',
+      issueIds: ['issue-1'],
+      sectionIds: ['section-1'],
+      stagedPath: '.beegame/audit/foundation/revision/docs/GDD.md',
+      baseDocumentDigest: 'a'.repeat(64),
+    })
+
+    try {
+      const tool = getTools(getEmptyToolPermissionContext()).find(
+        candidate => candidate.name === 'SubmitFoundationRevisionResult',
+      )
+      expect(tool).toBeDefined()
+      expect(tool?.isEnabled()).toBe(true)
+      expect(tool?.isConcurrencySafe({} as never)).toBe(false)
+    } finally {
+      if (previousWorkerType === undefined)
+        delete process.env.BEEGAME_WORKFLOW_WORKER_TYPE
+      else process.env.BEEGAME_WORKFLOW_WORKER_TYPE = previousWorkerType
+      if (previousContract === undefined)
+        delete process.env.BEEGAME_REVISION_CONTRACT
+      else process.env.BEEGAME_REVISION_CONTRACT = previousContract
+    }
   })
 })
 
