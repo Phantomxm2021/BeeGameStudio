@@ -37,17 +37,18 @@ export const foundationFactExtractorTerminalSchema = z
   })
   .strict()
 
+export const foundationFactModelPayloadSchema = z
+  .object({
+    status: z.enum(['completed', 'failed', 'blocked']),
+    results: z.array(foundationFactResultSchema),
+  })
+  .strict()
+
 export const foundationFactStructuredOutputJsonSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    workerType: { const: 'foundation-fact-extractor' },
     status: { enum: ['completed', 'failed', 'blocked'] },
-    runId: { type: 'string', minLength: 1 },
-    dispatchId: { type: 'string', minLength: 1 },
-    taskId: { type: 'string', minLength: 1 },
-    revision: { type: 'string', minLength: 1 },
-    packetDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
     results: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
       key: { type: 'string', minLength: 1 },
       status: { enum: ['present', 'absent', 'uncertain'] },
@@ -59,7 +60,7 @@ export const foundationFactStructuredOutputJsonSchema = {
       reason: { type: 'string', minLength: 1 },
     }, required: ['key', 'status'] } },
   },
-  required: ['workerType', 'status', 'runId', 'dispatchId', 'taskId', 'revision', 'packetDigest', 'results'],
+  required: ['status', 'results'],
 } as const
 
 const foundationSemanticIssueSchema = z.object({
@@ -70,6 +71,21 @@ const foundationSemanticIssueSchema = z.object({
   fixSectionKey: z.string().min(1),
   reasonCode: z.string().min(1).optional(),
 }).strict()
+
+const foundationSemanticPayloadSchema = z.object({
+  status: z.enum(['completed', 'failed', 'blocked']),
+  outcome: z.enum(['PASS', 'ISSUES', 'UNDECIDABLE']),
+  issues: z.array(foundationSemanticIssueSchema).optional(),
+  reason: z.string().min(1).optional(),
+}).strict().superRefine((value, context) => {
+  const issues = value.issues ?? []
+  if (value.outcome === 'PASS' && issues.length) context.addIssue({ code: 'custom', path: ['issues'], message: 'PASS cannot contain issues' })
+  if (value.outcome === 'ISSUES' && !issues.length) context.addIssue({ code: 'custom', path: ['issues'], message: 'ISSUES requires issue drafts' })
+  if (value.outcome === 'UNDECIDABLE' && (issues.length || !value.reason)) context.addIssue({ code: 'custom', path: ['reason'], message: 'UNDECIDABLE requires a reason and no issue drafts' })
+  if (value.outcome !== 'UNDECIDABLE' && value.reason !== undefined) context.addIssue({ code: 'custom', path: ['reason'], message: 'PASS/ISSUES cannot contain reason' })
+})
+
+export const foundationSemanticModelPayloadSchema = foundationSemanticPayloadSchema
 
 export const foundationSemanticReviewerTerminalSchema = z.object({
   workerType: z.literal('foundation-semantic-reviewer'),
@@ -93,10 +109,9 @@ export const foundationSemanticReviewerTerminalSchema = z.object({
 export const foundationSemanticReviewerStructuredOutputJsonSchema = {
   type: 'object', additionalProperties: false,
   properties: {
-    workerType: { const: 'foundation-semantic-reviewer' }, status: { enum: ['completed', 'failed', 'blocked'] },
-    runId: { type: 'string', minLength: 1 }, dispatchId: { type: 'string', minLength: 1 }, taskId: { type: 'string', minLength: 1 }, revision: { type: 'string', minLength: 1 }, packetDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' }, outcome: { enum: ['PASS', 'ISSUES', 'UNDECIDABLE'] },
+    status: { enum: ['completed', 'failed', 'blocked'] }, outcome: { enum: ['PASS', 'ISSUES', 'UNDECIDABLE'] },
     issues: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { problem: { type: 'string', minLength: 1 }, expected: { type: 'string', minLength: 1 }, actual: { type: 'string', minLength: 1 }, sourceSectionKey: { type: 'string', minLength: 1 }, fixSectionKey: { type: 'string', minLength: 1 }, reasonCode: { type: 'string', minLength: 1 } }, required: ['problem', 'expected', 'actual', 'sourceSectionKey', 'fixSectionKey'] } }, reason: { type: 'string', minLength: 1 },
-  }, required: ['workerType', 'status', 'runId', 'dispatchId', 'taskId', 'revision', 'packetDigest', 'outcome'],
+  }, required: ['status', 'outcome'],
 } as const
 
 const foundationRevisionReceiptSchema = z.object({

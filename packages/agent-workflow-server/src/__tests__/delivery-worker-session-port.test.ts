@@ -23,6 +23,12 @@ import { getGameDocumentContract } from '../beegame/delivery-workflow/game-docum
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
 import { createFoundationRevisionStage, foundationRevisionPacketPath, revisionTaskReceiptTerminalDigest } from '../beegame/delivery-workflow/foundation-revision-stage'
+import {
+  foundationFactModelPayloadSchema,
+  foundationFactStructuredOutputJsonSchema,
+  foundationSemanticModelPayloadSchema,
+  foundationSemanticReviewerStructuredOutputJsonSchema,
+} from '../beegame/delivery-workflow/worker-contracts'
 
 describe('delivery worker session credentials', () => {
   test('exposes the foundation revision terminal and derives a terminal from its successful tool event', async () => {
@@ -63,13 +69,7 @@ describe('delivery worker session credentials', () => {
   test('uses the native StructuredOutput result for fact extraction and passes its strict schema to the runner', async () => {
     const starts: Array<Record<string, unknown>> = []
     const structured = {
-      workerType: 'foundation-fact-extractor',
       status: 'completed',
-      runId: 'run-facts',
-      dispatchId: 'dispatch-facts',
-      taskId: 'task-facts',
-      revision: 'revision-facts',
-      packetDigest: 'a'.repeat(64),
       results: [],
     }
     const sessions = {
@@ -99,13 +99,142 @@ describe('delivery worker session credentials', () => {
       revision: 'revision-facts',
       allowedPaths: [],
       projectReadScope: 'empty' as const,
-      workflowJsonSchema: { type: 'object', additionalProperties: false },
       contract: { taskId: 'task-facts', packetDigest: 'a'.repeat(64), modelTier: 'fast', workerType: 'foundation-fact-extractor' },
     } as unknown as WorkerDispatchRequest
     await port.start(request)
     const terminal = await port.waitForTerminal?.('dispatch-facts')
-    expect(terminal).toEqual(structured)
-    expect(starts[0]?.workflowJsonSchema).toEqual(request.workflowJsonSchema)
+    expect(terminal).toEqual({
+      workerType: 'foundation-fact-extractor',
+      status: 'completed',
+      runId: 'run-facts',
+      dispatchId: 'dispatch-facts',
+      taskId: 'task-facts',
+      revision: 'revision-facts',
+      packetDigest: 'a'.repeat(64),
+      results: [],
+    })
+    const schema = starts[0]?.workflowJsonSchema as { required?: unknown[] } | undefined
+    expect(schema).toMatchObject({
+      additionalProperties: false,
+      required: ['status', 'results'],
+    })
+    expect(schema?.required).not.toContain('runId')
+    expect(schema?.required).not.toContain('dispatchId')
+    expect(schema?.required).not.toContain('taskId')
+    expect(schema?.required).not.toContain('revision')
+    expect(schema?.required).not.toContain('packetDigest')
+  })
+
+  test('binds semantic PASS, ISSUES and UNDECIDABLE payloads to each request', async () => {
+    const issue = {
+      problem: 'The loop is contradictory.',
+      expected: 'A coherent loop.',
+      actual: 'Two incompatible rules.',
+      sourceSectionKey: 'GDD#core_loop',
+      fixSectionKey: 'GDD#core_loop',
+    }
+    const payloads = [
+      { status: 'completed' as const, outcome: 'PASS' as const },
+      { status: 'completed' as const, outcome: 'ISSUES' as const, issues: [issue] },
+      { status: 'completed' as const, outcome: 'UNDECIDABLE' as const, reason: 'The packet is ambiguous.' },
+    ]
+
+    for (const [index, payload] of payloads.entries()) {
+      const request = {
+        dispatchId: `dispatch-semantic-${index}`,
+        runId: `run-semantic-${index}`,
+        ownerId: 'user-1',
+        projectId: 'project-semantic',
+        workspacePath: '/tmp/semantic-project',
+        workerType: 'foundation-semantic-reviewer' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        taskId: `task-semantic-${index}`,
+        revision: `revision-semantic-${index}`,
+        allowedPaths: [],
+        projectReadScope: 'empty' as const,
+        contract: {
+          taskId: `task-semantic-${index}`,
+          packetDigest: 'a'.repeat(64),
+          modelTier: 'balanced' as const,
+          workerType: 'foundation-semantic-reviewer' as const,
+        },
+      } as unknown as WorkerDispatchRequest
+      const sessions = {
+        start() { return { id: `session-semantic-${index}` } },
+        events() {
+          return [{
+            id: `semantic-result-${index}`,
+            type: 'result' as const,
+            text: 'Structured output accepted',
+            createdAt: new Date(),
+            payload: { type: 'result', subtype: 'success', structured_output: payload },
+          }]
+        },
+      } as unknown as BeeGameSessionManager
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+      await port.start(request)
+      await expect(port.waitForTerminal?.(request.dispatchId!)).resolves.toEqual({
+        ...payload,
+        workerType: 'foundation-semantic-reviewer',
+        runId: request.runId,
+        dispatchId: request.dispatchId,
+        taskId: request.taskId,
+        revision: request.revision,
+        packetDigest: request.contract.packetDigest,
+      })
+    }
+
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'PASS', issues: [issue] })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'ISSUES' })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'UNDECIDABLE' })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'UNDECIDABLE', issues: [issue], reason: 'ambiguous' })).toThrow()
+  })
+
+  test('rejects forged identity, extra fields and malformed model payloads', () => {
+    expect(() => foundationFactModelPayloadSchema.parse({ status: 'completed', results: [], taskId: 'spoofed' })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'PASS', runId: 'spoofed' })).toThrow()
+    expect(() => foundationFactModelPayloadSchema.parse({ status: 'completed', results: [{ status: 'present' }] })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'unknown', outcome: 'PASS' })).toThrow()
+    expect(foundationFactStructuredOutputJsonSchema.additionalProperties).toBe(false)
+    expect(foundationSemanticReviewerStructuredOutputJsonSchema.additionalProperties).toBe(false)
+    expect(foundationFactStructuredOutputJsonSchema.properties).not.toHaveProperty('taskId')
+    expect(foundationSemanticReviewerStructuredOutputJsonSchema.properties).not.toHaveProperty('packetDigest')
+    expect(foundationFactStructuredOutputJsonSchema.required).toEqual(['status', 'results'])
+    expect(foundationSemanticReviewerStructuredOutputJsonSchema.required).toEqual(['status', 'outcome'])
+  })
+
+  test('binds identical model payloads to different request identities', async () => {
+    const startFact = async (suffix: string) => {
+      const request = {
+        dispatchId: `dispatch-${suffix}`,
+        runId: `run-${suffix}`,
+        ownerId: 'user-1',
+        projectId: 'project-facts',
+        workspacePath: '/tmp/fact-project',
+        workerType: 'foundation-fact-extractor' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        taskId: `task-${suffix}`,
+        revision: `revision-${suffix}`,
+        allowedPaths: [],
+        projectReadScope: 'empty' as const,
+        contract: { taskId: `task-${suffix}`, packetDigest: 'a'.repeat(64), modelTier: 'fast' as const, workerType: 'foundation-fact-extractor' as const },
+      } as unknown as WorkerDispatchRequest
+      const sessions = {
+        start() { return { id: `session-${suffix}` } },
+        events() {
+          return [{ id: `result-${suffix}`, type: 'result' as const, text: '', createdAt: new Date(), payload: { type: 'result', structured_output: { status: 'completed', results: [] } } }]
+        },
+      } as unknown as BeeGameSessionManager
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+      await port.start(request)
+      return port.waitForTerminal!(request.dispatchId!)
+    }
+
+    const first = await startFact('one')
+    const second = await startFact('two')
+    expect(first).toMatchObject({ runId: 'run-one', dispatchId: 'dispatch-one', taskId: 'task-one', revision: 'revision-one' })
+    expect(second).toMatchObject({ runId: 'run-two', dispatchId: 'dispatch-two', taskId: 'task-two', revision: 'revision-two' })
+    expect(first).not.toEqual(second)
   })
 
   test('does not reject a remote model config missing from the local registry', async () => {

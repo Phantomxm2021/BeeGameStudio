@@ -31,7 +31,7 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactStructuredOutputJsonSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
+import { foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationFactStructuredOutputJsonSchema, foundationSemanticModelPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -983,10 +983,17 @@ function createDeterministicFoundationFactTerminal(input: {
     ? (resultEvent.payload as Record<string, unknown>).structured_output
     : undefined
   if (structured === undefined) return undefined
-  const parsed = foundationFactExtractorTerminalSchema.parse(structured)
-  if (parsed.runId !== input.request.runId || parsed.dispatchId !== input.request.dispatchId || parsed.taskId !== input.request.taskId || parsed.revision !== input.request.revision || parsed.packetDigest !== input.request.contract.packetDigest)
-    throw new Error('foundation fact terminal identity does not match dispatch contract')
-  return parsed
+  const payload = foundationFactModelPayloadSchema.parse(structured)
+  return foundationFactExtractorTerminalSchema.parse({
+    workerType: 'foundation-fact-extractor',
+    status: payload.status,
+    runId: input.request.runId,
+    dispatchId: input.request.dispatchId,
+    taskId: input.request.taskId,
+    revision: input.request.revision,
+    packetDigest: input.request.contract.packetDigest,
+    results: payload.results,
+  })
 }
 
 function createDeterministicFoundationSemanticTerminal(input: {
@@ -997,10 +1004,19 @@ function createDeterministicFoundationSemanticTerminal(input: {
   const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
     ? (resultEvent.payload as Record<string, unknown>).structured_output : undefined
   if (structured === undefined) return undefined
-  const parsed = foundationSemanticReviewerTerminalSchema.parse(structured)
-  if (parsed.runId !== input.request.runId || parsed.dispatchId !== input.request.dispatchId || parsed.taskId !== input.request.taskId || parsed.revision !== input.request.revision || parsed.packetDigest !== input.request.contract.packetDigest)
-    throw new Error('foundation semantic terminal identity does not match dispatch contract')
-  return parsed
+  const payload = foundationSemanticModelPayloadSchema.parse(structured)
+  return foundationSemanticReviewerTerminalSchema.parse({
+    workerType: 'foundation-semantic-reviewer',
+    status: payload.status,
+    runId: input.request.runId,
+    dispatchId: input.request.dispatchId,
+    taskId: input.request.taskId,
+    revision: input.request.revision,
+    packetDigest: input.request.contract.packetDigest,
+    outcome: payload.outcome,
+    ...(payload.issues ? { issues: payload.issues } : {}),
+    ...(payload.reason ? { reason: payload.reason } : {}),
+  })
 }
 
 function createDeterministicFoundationRevisionTerminal(input: {
