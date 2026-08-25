@@ -630,6 +630,10 @@ export function validateFoundationFactResults(input: {
     if (markdown === undefined)
       throw new Error(`foundation document is missing: ${section.documentPath}`)
     if (result.status === 'present') {
+      if (result.reason !== undefined)
+        throw new Error(
+          `present foundation fact must not include reason: ${result.key}`,
+        )
       if (
         !('value' in result) ||
         result.value === undefined ||
@@ -662,7 +666,7 @@ export function validateFoundationFactResults(input: {
       receipts.push({ ...result })
     } else if (result.status === 'absent') {
       if (
-        ('value' in result && result.value !== undefined) ||
+        'value' in result ||
         result.evidence !== undefined ||
         result.reason !== undefined
       )

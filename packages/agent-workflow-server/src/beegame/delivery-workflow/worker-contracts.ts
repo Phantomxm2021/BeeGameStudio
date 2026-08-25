@@ -20,15 +20,34 @@ const foundationFactEvidenceSchema = z
   })
   .strict()
 
-const foundationFactResultSchema = z
-  .object({
-    key: z.string().min(1),
-    status: z.enum(['present', 'absent', 'uncertain']),
-    value: z.unknown().optional(),
-    evidence: foundationFactEvidenceSchema.optional(),
-    reason: z.string().min(1).optional(),
-  })
-  .strict()
+const foundationFactKeySchema = z.string().min(1)
+const foundationFactValueSchema = z.unknown().refine(value => value !== undefined, {
+  message: 'present foundation fact requires value',
+})
+const foundationFactResultSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      key: foundationFactKeySchema,
+      status: z.literal('present'),
+      value: foundationFactValueSchema,
+      evidence: foundationFactEvidenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      key: foundationFactKeySchema,
+      status: z.literal('absent'),
+    })
+    .strict(),
+  z
+    .object({
+      key: foundationFactKeySchema,
+      status: z.literal('uncertain'),
+      reason: z.string().min(1),
+      evidence: foundationFactEvidenceSchema,
+    })
+    .strict(),
+])
 
 export const foundationFactExtractorTerminalSchema = z
   .object({
@@ -135,33 +154,34 @@ function buildFoundationFactSchemaForKeys(
   const resultBranches = keys.flatMap(key => {
     const keySchema = { enum: [key] }
     const evidence = evidenceSchemaFor?.(key) ?? foundationFactEvidenceJsonSchema
-    const common = {
-      key: keySchema,
-      evidence,
-      reason: { type: 'string', minLength: 1 },
-    }
     return [
       {
         type: 'object',
         additionalProperties: false,
         properties: {
-          ...common,
+          key: keySchema,
           status: { enum: ['present'] },
           value: foundationFactValueJsonSchema(key),
+          evidence,
         },
         required: ['key', 'status', 'value', 'evidence'],
       },
       {
         type: 'object',
         additionalProperties: false,
-        properties: { key: keySchema, status: { enum: ['absent'] }, reason: common.reason },
+        properties: { key: keySchema, status: { enum: ['absent'] } },
         required: ['key', 'status'],
       },
       {
         type: 'object',
         additionalProperties: false,
-        properties: { ...common, status: { enum: ['uncertain'] } },
-        required: ['key', 'status'],
+        properties: {
+          key: keySchema,
+          status: { enum: ['uncertain'] },
+          reason: { type: 'string', minLength: 1 },
+          evidence,
+        },
+        required: ['key', 'status', 'reason', 'evidence'],
       },
     ]
   })

@@ -256,6 +256,38 @@ describe('mechanical normalized foundation extraction', () => {
         ],
       }),
     ).toThrow(/duplicate|exactly once/i)
+    expect(() =>
+      validateFoundationFactResults({
+        packet,
+        expectedRevision: 'revision-1',
+        documents: docs,
+        sectionIndex: index,
+        results: [
+          {
+            key: 'game.mechanics',
+            status: 'present',
+            value: fact.value,
+            evidence: fact.evidence!,
+            reason: 'unexpected extra field',
+          },
+        ],
+      }),
+    ).toThrow(/reason|present.*field/i)
+    expect(() =>
+      validateFoundationFactResults({
+        packet,
+        expectedRevision: 'revision-1',
+        documents: docs,
+        sectionIndex: index,
+        results: [
+          {
+            key: 'game.mechanics',
+            status: 'absent',
+            value: undefined,
+          },
+        ],
+      }),
+    ).toThrow(/absent.*value/i)
     const digest = createHash('sha256').update('wrong').digest('hex')
     expect(() =>
       validateFoundationFactResults({

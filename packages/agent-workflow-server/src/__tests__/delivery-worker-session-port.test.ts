@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import Ajv from 'ajv'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -26,6 +27,7 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/typ
 import { createFoundationRevisionStage, foundationRevisionPacketPath, revisionTaskReceiptTerminalDigest } from '../beegame/delivery-workflow/foundation-revision-stage'
 import {
   buildFoundationFactStructuredOutputJsonSchema,
+  foundationFactExtractorTerminalSchema,
   foundationFactModelPayloadSchema,
   foundationFactStructuredOutputJsonSchema,
   foundationSemanticModelPayloadSchema,
@@ -76,6 +78,29 @@ describe('delivery worker session credentials', () => {
     )!
     expect(absentAudio.required).toEqual(['key', 'status'])
     expect(absentAudio.properties).not.toHaveProperty('value')
+    expect(absentAudio.properties).not.toHaveProperty('evidence')
+    expect(absentAudio.properties).not.toHaveProperty('reason')
+    const uncertainAudio = branches.find(branch =>
+      (branch.properties as { key: { enum: string[] }; status: { enum: string[] } }).key.enum[0] === 'audio.event_ids' &&
+      (branch.properties as { status: { enum: string[] } }).status.enum[0] === 'uncertain',
+    )!
+    expect(uncertainAudio.required).toEqual(['key', 'status', 'reason', 'evidence'])
+    const validate = new Ajv().compile(schema)
+    expect(validate({ status: 'completed', results: [{ key: 'audio.event_ids', status: 'absent' }, { key: 'game.players.max', status: 'absent' }] })).toBe(true)
+    expect(validate({
+      status: 'completed',
+      results: [{
+        key: 'audio.event_ids',
+        status: 'absent',
+        value: ['unexpected'],
+        evidence: { documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'a'.repeat(64) },
+        reason: 'unexpected extra fields',
+      }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(false)
+    expect(validate({
+      status: 'completed',
+      results: [{ key: 'audio.event_ids', status: 'uncertain', reason: 'ambiguous' }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(false)
   })
 
   test('exposes the foundation revision terminal and derives a terminal from its successful tool event', async () => {
@@ -253,6 +278,62 @@ describe('delivery worker session credentials', () => {
     expect(foundationSemanticReviewerStructuredOutputJsonSchema.properties).not.toHaveProperty('packetDigest')
     expect(foundationFactStructuredOutputJsonSchema.required).toEqual(['status', 'results'])
     expect(foundationSemanticReviewerStructuredOutputJsonSchema.required).toEqual(['status', 'outcome'])
+  })
+
+  test('enforces status-specific foundation fact fields in model and terminal Zod shapes', () => {
+    const evidence = {
+      documentPath: 'docs/GDD.md',
+      sectionId: 'vision',
+      startLine: 1,
+      endLine: 1,
+      digest: 'a'.repeat(64),
+    }
+    const absent = { key: 'game.boss.count', status: 'absent' as const }
+    expect(
+      foundationFactModelPayloadSchema.parse({ status: 'completed', results: [absent] }),
+    ).toEqual({ status: 'completed', results: [absent] })
+    expect(
+      foundationFactExtractorTerminalSchema.parse({
+        workerType: 'foundation-fact-extractor',
+        status: 'completed',
+        runId: 'run',
+        dispatchId: 'dispatch',
+        taskId: 'task',
+        revision: 'revision',
+        packetDigest: 'a'.repeat(64),
+        results: [absent],
+      }),
+    ).toMatchObject({ results: [absent] })
+    expect(() =>
+      foundationFactModelPayloadSchema.parse({
+        status: 'completed',
+        results: [{ ...absent, value: 0, evidence, reason: 'not found' }],
+      }),
+    ).toThrow()
+    expect(() =>
+      foundationFactModelPayloadSchema.parse({
+        status: 'completed',
+        results: [{ key: absent.key, status: 'uncertain' }],
+      }),
+    ).toThrow()
+    expect(() =>
+      foundationFactModelPayloadSchema.parse({
+        status: 'completed',
+        results: [{ key: absent.key, status: 'uncertain', reason: 'ambiguous' }],
+      }),
+    ).toThrow()
+    expect(() =>
+      foundationFactModelPayloadSchema.parse({
+        status: 'completed',
+        results: [{ key: absent.key, status: 'present' }],
+      }),
+    ).toThrow()
+    expect(() =>
+      foundationFactModelPayloadSchema.parse({
+        status: 'completed',
+        results: [{ key: absent.key, status: 'present', value: undefined, evidence }],
+      }),
+    ).toThrow()
   })
 
   test('binds identical model payloads to different request identities', async () => {

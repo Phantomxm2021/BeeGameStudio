@@ -343,7 +343,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'foundation-fact-extractor':
-      return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. Do not call project tools, return terminal JSON as prose, or add completion text.'
+      return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, value, and evidence; omit reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, reason, and evidence; omit value. Do not call project tools, return terminal JSON as prose, or add completion text.'
     case 'foundation-semantic-reviewer':
       return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use only PASS, ISSUES, or UNDECIDABLE; do not return Markdown or explanatory text.'
     case 'foundation-document-reviser':
