@@ -118,7 +118,10 @@ export function buildFoundationSectionIndex(input: {
           `duplicate foundation section id: ${rawPath}#${sectionId}`,
         )
       seenIds.add(sectionId)
-      const nextHeading = sectionHeadings.find(
+      // Contract markers select immutable sections; any following same-level
+      // heading still terminates the selected section (appendices are not
+      // indexed, but must not be swallowed into the preceding section).
+      const nextHeading = headings.find(
         candidate =>
           candidate.index > heading.index && candidate.level <= heading.level,
       )

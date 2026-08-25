@@ -16,13 +16,13 @@ import {
 } from './foundation-semantic-audit'
 
 const expected = [
-  ['SEM.gameplay_level_viability', ['GDD#core_loop', 'GDD#rules_systems', 'LEVEL#encounters', 'LEVEL#pacing_beats'], ['game.mechanics', 'level.required_entities'], '核心循环、遭遇、节奏与反制是否可玩且不互相否定', 'HIGH', 'balanced'],
+  ['SEM.gameplay_level_viability', ['GDD#core_loop', 'LEVEL#pacing_beats'], ['game.mechanics', 'level.required_entities'], '核心循环、遭遇、节奏与反制是否可玩且不互相否定', 'HIGH', 'balanced'],
   ['SEM.progression_balance_coherence', ['GDD#progression', 'BALANCE#economy', 'BALANCE#progression_curves'], ['game.resources', 'balance.variable_ids'], '进度、资源流与成长曲线是否形成可闭合体验', 'HIGH', 'balanced'],
   ['SEM.state_runtime_recovery', ['GDD#states_flow', 'TECHNICAL#runtime_state', 'TECHNICAL#save_load'], ['game.states'], '状态、失败恢复与持久化语义是否可实现且一致', 'HIGH', 'balanced'],
-  ['SEM.platform_performance_feasibility', ['GDD#vision', 'LEVEL#production_acceptance', 'TECHNICAL#performance', 'TECHNICAL#risks'], ['game.platform', 'technical.target_fps', 'level.complexity_budget'], '目标平台、关卡复杂度与性能预算是否现实', 'HIGH', 'balanced'],
+  ['SEM.platform_performance_feasibility', ['TECHNICAL#performance', 'TECHNICAL#risks'], ['game.platform', 'technical.target_fps', 'level.complexity_budget'], '目标平台、关卡复杂度与性能预算是否现实', 'HIGH', 'balanced'],
   ['SEM.interaction_ui_coherence', ['GDD#player_actions', 'UI#input', 'UI#feedback_errors'], ['game.mechanics', 'ui.supported_actions'], '玩家动作、输入、反馈与错误恢复是否连贯', 'HIGH', 'balanced'],
   ['SEM.camera_visual_readability', ['LEVEL#camera_readability', 'ART#composition_readability', 'ART#camera_presentation'], ['art.style_constraints'], '镜头、构图、对比与玩法可读性是否一致', 'MEDIUM', 'fast'],
-  ['SEM.content_asset_feasibility', ['LEVEL#content_matrix', 'ART#asset_specifications', 'ASSET#inventory', 'ASSET#formats_budgets'], ['level.required_assets', 'asset.inventory_ids', 'asset.art_constraint_refs', 'asset.formats'], '内容需求、资产质量与交付预算是否可执行', 'HIGH', 'balanced'],
+  ['SEM.content_asset_feasibility', ['ART#asset_specifications', 'ASSET#formats_budgets'], ['level.required_assets', 'asset.inventory_ids', 'asset.art_constraint_refs', 'asset.formats'], '内容需求、资产质量与交付预算是否可执行', 'HIGH', 'balanced'],
   ['SEM.audio_state_feedback', ['GDD#states_flow', 'AUDIO#event_taxonomy', 'AUDIO#music'], ['game.states', 'audio.event_ids'], '关键状态、事件与音频反馈是否覆盖且不冲突', 'MEDIUM', 'fast'],
   ['SEM.multimodal_accessibility', ['GDD#accessibility_localization', 'UI#accessibility', 'ART#color_lighting', 'AUDIO#ui_feedback'], [], '视觉、输入与非视觉替代是否共同满足可访问性', 'HIGH', 'balanced'],
   ['SEM.completion_recovery_coherence', ['GDD#states_flow', 'GDD#challenge_recovery', 'LEVEL#objectives_routes', 'LEVEL#spawn_checkpoint'], ['game.states', 'game.win_conditions', 'game.loss_conditions'], '胜负、目标、失败、检查点与重试是否形成闭环', 'HIGH', 'balanced'],
@@ -83,7 +83,7 @@ describe('foundation semantic audit authority', () => {
   test('builds from full committed snapshots and selects only declared sections, facts, and in-scope deterministic references', () => {
     const input = fullSnapshot()
     const packet = buildFoundationSemanticPacket(input)
-    expect(packet.sections.map(item => item.sectionKey)).toEqual(['GDD#core_loop', 'GDD#rules_systems', 'LEVEL#encounters', 'LEVEL#pacing_beats'])
+    expect(packet.sections.map(item => item.sectionKey)).toEqual(['GDD#core_loop', 'LEVEL#pacing_beats'])
     expect(packet.facts.map(item => item.key)).toEqual(['game.mechanics', 'level.required_entities'])
     expect(JSON.stringify(packet)).not.toContain('docs/acceptance')
     expect(packet.fullSectionIndexDigest).toBe(digestSectionIndex(input.sectionIndex))

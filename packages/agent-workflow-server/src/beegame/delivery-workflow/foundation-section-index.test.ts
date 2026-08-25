@@ -3,6 +3,7 @@ import {
   buildFoundationSectionIndex,
   digestSectionIndex,
 } from './foundation-section-index'
+import { getGameDocumentContract } from './game-document-contracts'
 
 describe('foundation section index', () => {
   test('indexes canonical headings into stable line-bounded section references', () => {
@@ -75,5 +76,23 @@ describe('foundation section index', () => {
         ]),
       }),
     ).toThrow('contract')
+  })
+
+  test('ends a marked contract section at an unmarked same-level appendix heading', () => {
+    const contract = getGameDocumentContract('docs/LEVEL_SCENE_DESIGN.md')
+    const markdown = [
+      '# LEVEL',
+      ...contract.sections.flatMap(section => [
+        `<!-- beegame-section:${section.sectionId} -->`,
+        `## ${section.title}`,
+        'body',
+      ]),
+      '## Production Materials',
+      'appendix body',
+    ].join('\n')
+    const index = buildFoundationSectionIndex({ documents: { 'docs/LEVEL_SCENE_DESIGN.md': markdown } })
+    const production = index.find(section => section.sectionId === 'production_acceptance')!
+    expect(markdown.split('\n').slice(production.startLine - 1, production.endLine).join('\n')).not.toContain('Production Materials')
+    expect(production.endLine).toBe(markdown.split('\n').findIndex(line => line === '## Production Materials'))
   })
 })

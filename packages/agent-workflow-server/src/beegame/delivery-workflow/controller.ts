@@ -317,6 +317,26 @@ export function createDeliveryWorkflowController(input: {
     )
   }
 
+  async function failFoundationContinuation(
+    run: DeliveryRun,
+    error: unknown,
+  ): Promise<void> {
+    const reason = `foundation audit continuation failed: ${error instanceof Error ? error.message : String(error)}`
+    const lease = await store.mutationLock(run.runId)
+    try {
+      const locked = await store.load(lease)
+      if (!locked || locked.runId !== run.runId) return
+      await store.commit(
+        { ...locked, status: 'needs_action', blockedReason: reason, thinking: 'idle' },
+        { runId: locked.runId, type: 'foundation.audit.continuation_failed', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason },
+        undefined,
+        lease,
+      )
+    } finally {
+      await store.unlock(lease)
+    }
+  }
+
   async function handleTerminal(
     record: DispatchRecord,
     result: WorkerTerminalResult,
@@ -717,7 +737,13 @@ export function createDeliveryWorkflowController(input: {
         }
         }
       } finally { await store.unlock(lease) }
-      if (factsStagedRun) await finalizeFoundationFacts(factsStagedRun)
+      if (factsStagedRun) {
+        try {
+          await finalizeFoundationFacts(factsStagedRun)
+        } catch (error) {
+          await failFoundationContinuation(factsStagedRun, error)
+        }
+      }
       else {
         const current = await store.load()
         if (current?.status === 'running') await resumeUnlocked(current)
@@ -2058,15 +2084,27 @@ export function createDeliveryWorkflowController(input: {
     }
     if (run.phase === 'DOCUMENT_REVIEW') {
       if (run.foundationAuditState?.status === 'derived_committed') {
-        await completeDeterministicFoundationAudit(run)
+        try {
+          await completeDeterministicFoundationAudit(run)
+        } catch (error) {
+          await failFoundationContinuation(run, error)
+        }
         return
       }
       if (run.foundationAuditState?.status === 'deterministic_ready') {
-        await completeDeterministicFoundationAudit(run)
+        try {
+          await completeDeterministicFoundationAudit(run)
+        } catch (error) {
+          await failFoundationContinuation(run, error)
+        }
         return
       }
       if (run.foundationAuditState?.status === 'facts_staged') {
-        await finalizeFoundationFacts(run)
+        try {
+          await finalizeFoundationFacts(run)
+        } catch (error) {
+          await failFoundationContinuation(run, error)
+        }
         return
       }
       if (run.foundationAuditState?.status === 'semantic_review') {

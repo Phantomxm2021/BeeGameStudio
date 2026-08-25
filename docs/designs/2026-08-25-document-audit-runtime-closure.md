@@ -41,6 +41,10 @@ Record prompt, completion, and total usage, duration, attempt, and failure reaso
 
 Local mechanical extraction and admitted worker extraction are two producers for the same closed catalog. Finalization recomputes the revision-bound mechanical result, merges it with admitted worker facts plus their closed receipts, rejects duplicate/overlapping accounting or receipt disagreement, and verifies that mechanical present keys plus every admitted receipt account for every catalog key exactly once before atomic publication. Absent and uncertain receipts provide coverage but do not enter the present-only Fact Store; deterministic and semantic review own the resulting issues. The zero-worker path uses the same finalizer.
 
+### Semantic packet discipline
+
+Semantic packets deliberately omit sections whose normalized owner facts already carry the needed structure. A marked contract section terminates at any following same-level-or-higher Markdown heading; unmarked `Production Materials` and audit appendices are outside the preceding authoritative section. This preserves exact section bytes and the immutable 16 KiB packet boundary.
+
 ### Integrity failure versus audit result
 
 Stale/conflicting digests, terminal identity mismatch, unauthorized sections, invalid evidence, illegal patches, missing receipts, and exhausted attempts fail closed and move the run to `needs_action`. Business conflicts and newly discovered issues are compiled into the sole Issue Registry. A valid Registry is published even when it contains new issues.

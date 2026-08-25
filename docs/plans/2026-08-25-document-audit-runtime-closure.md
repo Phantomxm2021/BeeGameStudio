@@ -158,7 +158,7 @@ export function mergeFoundationFactResults(input: {
 }): FoundationFact[]
 ```
 
-It canonicalizes through `createFoundationFactStore()`, strictly validates unique closed receipts, rejects mechanical overlap and differing present value/evidence, treats absent/uncertain receipts as coverage only, and verifies exact catalog accounting before returning a present-only Fact Store.
+It canonicalizes through `createFoundationFactStore()`, strictly validates unique closed receipts, rejects mechanical overlap and differing present value/evidence, treats absent/uncertain receipts as coverage only, and verifies exact catalog accounting before returning a present-only Fact Store. Semantic packets retain the immutable 16 KiB bound: gameplay selects `GDD#core_loop` + `LEVEL#pacing_beats`, platform selects `TECHNICAL#performance,risks`, and content selects `ART#asset_specifications` + `ASSET#formats_budgets` because normalized fact owners cover the omitted structure. The section index ends marked sections at any next same-level-or-higher Markdown heading, including unmarked `Production Materials` appendices.
 
 **Required behavior**
 

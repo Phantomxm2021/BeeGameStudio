@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { createDeliveryWorkflowController } from './controller'
 import { createInitialDeliveryRun } from './run-store'
+import { retryRun } from './recovery'
 import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun, type DeliveryWorkerPort, type FoundationRevisionDocumentTask, type FoundationRevisionSemanticRecheckTask, type FoundationRevisionState, type WorkerDispatchRequest } from './types'
 import { createBeeGameDeliveryWorkerPort } from '../delivery-worker-session-port'
 import { getGameDocumentContract } from './game-document-contracts'
@@ -191,6 +192,36 @@ describe('foundation fact runtime controller integration', () => {
       expect(committed?.factStore.some(fact => absentKeys.has(fact.key))).toBe(false)
       expect(committed?.factStore).toHaveLength(FOUNDATION_FACT_CATALOG.length - absentKeys.size)
       expect(current.foundationAuditState?.deterministic?.reviewDigest).toMatch(/^[a-f0-9]{64}$/)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('isolates deterministic seeding failure from admitted fact tasks and fails the run closed', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      const originalGdd = await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')
+      const originalCommit = controller.store.commit.bind(controller.store)
+      controller.store.commit = async (next, event, acceptedUnits, lease) => {
+        const committed = await originalCommit(next, event, acceptedUnits, lease)
+        if (event.type === 'foundation.audit.deterministic_ready') {
+          await writeFile(join(workspacePath, 'docs/GDD.md'), `${await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')}\nchanged after deterministic admission\n`)
+        }
+        return committed
+      }
+
+      const after = await finishFacts(controller)
+      expect(after.status).toBe('needs_action')
+      expect(after.blockedReason).toMatch(/semantic audit source changed after commit: docs\/GDD\.md/)
+      expect(after.foundationAuditState?.status).toBe('deterministic_ready')
+      const factTasks = after.foundationAuditState?.tasks.filter(task => task.kind === 'document-facts') ?? []
+      expect(factTasks).toHaveLength(8)
+      expect(factTasks.every(task => task.status === 'completed' && task.receiptPath && task.receiptDigest && task.terminalDigest)).toBe(true)
+
+      await writeFile(join(workspacePath, 'docs/GDD.md'), originalGdd)
+      const retried = await retryRun({ store: controller.store, runId: after.runId, workspacePath })
+      await controller.resume(retried)
+      const recovered = await controller.store.load()
+      expect(recovered?.status).toBe('running')
+      expect(recovered?.foundationAuditState?.status).toBe('semantic_review')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
@@ -408,7 +439,10 @@ describe('foundation fact runtime controller integration', () => {
 
   async function driveToFactOwnerRevisionIssue(controller: ReturnType<typeof createDeliveryWorkflowController>) {
     await finishFacts(controller, consistentFactValue)
-    const targetFact = FOUNDATION_FACT_CATALOG.find(fact => fact.key === 'game.boss.count')!
+    // `game.boss.count` is intentionally omitted from semantic packets because
+    // its owner section is not needed once normalized facts are bound. Use a
+    // declared packet fact to exercise the revision-owner path.
+    const targetFact = FOUNDATION_FACT_CATALOG.find(fact => fact.key === 'game.mechanics')!
     const documentIdByPath: Record<string, string> = {
       'docs/GDD.md': 'GDD',
       'docs/LEVEL_SCENE_DESIGN.md': 'LEVEL',
@@ -435,7 +469,7 @@ describe('foundation fact runtime controller integration', () => {
       }))
       current = await controller.store.load()
     }
-    if (!issued) throw new Error('semantic packet did not contain the game.boss.count owner section')
+    if (!issued) throw new Error('semantic packet did not contain the declared game.mechanics owner section')
     return { run: current!, targetFact }
   }
 
@@ -472,7 +506,7 @@ describe('foundation fact runtime controller integration', () => {
   async function seedRoundClosingRevision(options: { resultingIssue?: boolean; round?: 1 | 2 | 3; unchangedBefore?: boolean } = {}) {
     const prepared = await preparedController()
     const round = options.round ?? 1
-    const { rebuilding } = await completeFactOwnerRevision(prepared.controller, prepared.workspacePath, ownerFactText('game.boss.count'))
+    const { rebuilding } = await completeFactOwnerRevision(prepared.controller, prepared.workspacePath, ownerFactText('game.mechanics'))
     const current = rebuilding
     const documentTask = current.foundationRevisionState!.tasks.find(task => task.kind === 'document-revision' && task.status === 'completed')! as FoundationRevisionDocumentTask
     const packet = await loadFoundationRevisionPacket({ workspacePath: prepared.workspacePath, revision: documentTask.revision, round: documentTask.round, taskId: documentTask.taskId, documentPath: documentTask.documentPath, packetDigest: documentTask.packetDigest }) as { issues: AuditIssue[] }
@@ -538,7 +572,7 @@ describe('foundation fact runtime controller integration', () => {
   }
 
   async function completeImpactedFact(controller: ReturnType<typeof createDeliveryWorkflowController>, workspacePath: string) {
-    const { rebuilding } = await completeFactOwnerRevision(controller, workspacePath, 'game.boss.count: 1\nunresolved prose')
+    const { rebuilding } = await completeFactOwnerRevision(controller, workspacePath, 'game.resources: []\nunresolved prose')
     await controller.resume(rebuilding!)
     const planned = await controller.store.load()
     const task = planned!.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'impacted-facts')!
@@ -548,7 +582,7 @@ describe('foundation fact runtime controller integration', () => {
   }
 
   async function reachSemanticRecheck(controller: ReturnType<typeof createDeliveryWorkflowController>, workspacePath: string) {
-    await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+    await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.mechanics'))
     let current = await controller.store.load()
     for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
       await controller.resume(current!)
@@ -565,7 +599,7 @@ describe('foundation fact runtime controller integration', () => {
     const { workspacePath, controller, requests } = await preparedController()
     try {
       const canonicalBefore = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(workspacePath, path), 'utf8')] as const)))
-      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.mechanics'))
       let current = await controller.store.load()
       for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
         await controller.resume(current!)
@@ -833,7 +867,7 @@ describe('foundation fact runtime controller integration', () => {
   test('after document receipts, zero unresolved impacted facts advances to targeted semantic recheck', async () => {
     const { workspacePath, controller, requests } = await preparedController()
     try {
-      const { current: currentValue } = await driveToRevisionFactPlanning(controller, workspacePath, ownerFactText('game.boss.count'))
+      const { current: currentValue } = await driveToRevisionFactPlanning(controller, workspacePath, ownerFactText('game.mechanics'))
       const current = currentValue!
       await controller.resume(current)
       expect((await controller.store.load())?.foundationRevisionState?.phase).toBe('semantic_recheck')
@@ -860,7 +894,7 @@ describe('foundation fact runtime controller integration', () => {
         }
         return originalCommit(...args)
       }
-      await completeFactOwnerRevision(controller, workspacePath, 'game.boss.count: 1\ngame.resources: []\nunresolved prose').catch(() => undefined)
+      await completeFactOwnerRevision(controller, workspacePath, 'game.resources: []\nunresolved prose').catch(() => undefined)
       expect(planningCrashObserved).toBe(true)
       const factWorkersBefore = requests.filter(request => request.workerType === 'foundation-fact-extractor').length
       const crashed = await controller.store.load()
@@ -978,7 +1012,7 @@ describe('foundation fact runtime controller integration', () => {
   test('publishes a new impacted issue and starts Round 2 from its registry digest', async () => {
     const { workspacePath, controller } = await preparedController()
     try {
-      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count', 2)).catch(() => undefined)
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.mechanics', ['move', 'dash'])).catch(() => undefined)
       let current = await controller.store.load()
       expect(current?.foundationRevisionState?.phase).toBe('semantic_recheck')
       while (current?.foundationRevisionState?.phase === 'semantic_recheck') {
@@ -1307,7 +1341,7 @@ describe('foundation fact runtime controller integration', () => {
 
     const validating = await preparedController()
     try {
-      const { rebuilding } = await completeFactOwnerRevision(validating.controller, validating.workspacePath, ownerFactText('game.boss.count'))
+      const { rebuilding } = await completeFactOwnerRevision(validating.controller, validating.workspacePath, ownerFactText('game.mechanics'))
       await validating.controller.resume(rebuilding!)
       const ready = await validating.controller.store.load()
       const stale = { ...ready!, foundationRevisionState: { ...ready!.foundationRevisionState!, phase: 'validating' as const, authority: { ...ready!.foundationRevisionState!.authority, documentDigests: ready!.foundationRevisionState!.authority.documentDigests.map((entry, index) => index === 0 ? { ...entry, digest: '3'.repeat(64) } : entry) } } }
@@ -1320,7 +1354,7 @@ describe('foundation fact runtime controller integration', () => {
   test('document and impacted terminals continue the revision chain without a manual resume', async () => {
     const zero = await preparedController()
     try {
-      const { rebuilding } = await completeFactOwnerRevision(zero.controller, zero.workspacePath, ownerFactText('game.boss.count'))
+      const { rebuilding } = await completeFactOwnerRevision(zero.controller, zero.workspacePath, ownerFactText('game.mechanics'))
       expect(rebuilding.foundationRevisionState?.phase).toBe('semantic_recheck')
     } finally { await rm(zero.workspacePath, { recursive: true, force: true }) }
 
@@ -1339,7 +1373,7 @@ describe('foundation fact runtime controller integration', () => {
   test('semantic originals create exact targeted recheck tasks instead of publishing', async () => {
     const { workspacePath, controller } = await preparedController()
     try {
-      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.mechanics'))
       const beforeRecheck = await controller.store.load()
       if (beforeRecheck?.foundationRevisionState?.phase === 'validating') await controller.resume(beforeRecheck)
       const rechecked = await controller.store.load()
@@ -1358,7 +1392,7 @@ describe('foundation fact runtime controller integration', () => {
       return { ...base, async submit(_dispatchId, prompt) { prompts.push(prompt) } }
     })
     try {
-      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.mechanics'))
       let current = await controller.store.load()
       for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
         await controller.resume(current!)
@@ -1397,7 +1431,7 @@ describe('foundation fact runtime controller integration', () => {
   test('admits a semantic PASS result artifact into the revision task and reaches publishing without rerunning the worker', async () => {
     const { workspacePath, controller, requests } = await preparedController()
     try {
-      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.mechanics'))
       let current = await controller.store.load()
       for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
         await controller.resume(current!)
@@ -1599,7 +1633,7 @@ describe('foundation fact runtime controller integration', () => {
     const originalCommit = controller.store.commit.bind(controller.store)
     let crash = true
     try {
-      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
+      await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.mechanics'))
       let current = await controller.store.load()
       for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
         await controller.resume(current!)
