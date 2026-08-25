@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeliveryWorkflowController } from './controller'
 import { createRunStore } from './run-store'
+import { retryRun } from './recovery'
 import { commitAuthoredFoundationDocument } from '../authored-document-receipt'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
   type DeliveryRun,
   type DispatchRecord,
+  type WorkerDispatchRequest,
 } from './types'
 import {
   completeTestSubmission,
@@ -175,6 +177,112 @@ describe('foundation audit cutover', () => {
         status: 'running',
         foundationAuditState: { status: 'extracting_facts' },
       })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('retries derivation from the durable review snapshot after a failed derivation', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-derivation-retry-'))
+    const dispatches: WorkerDispatchRequest[] = []
+    try {
+      const run = {
+        ...runWithEightCommittedDocs(),
+        phase: 'DOCUMENT_REVIEW' as const,
+        documentStep: 'FOUNDATION_REVIEW' as const,
+      }
+      const store = createRunStore(workspacePath, run.ownerId)
+      await store.save(run)
+      const controller = createDeliveryWorkflowController({
+        workspacePath,
+        ownerId: run.ownerId,
+        workerPort: {
+          start: async request => {
+            dispatches.push(request)
+            return { sessionId: `session-${request.taskId}`, dispatchId: request.dispatchId! }
+          },
+          submit: async () => undefined,
+          stop: async () => undefined,
+          status: async dispatchId => ({ dispatchId, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'unknown', revision: run.revision.document, status: 'running', startedAt: new Date().toISOString() }),
+        },
+      })
+
+      await controller.resume(run)
+      expect(await store.load()).toMatchObject({
+        status: 'needs_action',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+      })
+      expect((await store.load())?.foundationAuditState).toBeUndefined()
+
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+        await writeFile(
+          join(workspacePath, path),
+          withTestDocumentMetadata(
+            path,
+            renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+          ),
+        )
+
+      const retried = await retryRun({ store, runId: run.runId, workspacePath })
+      await controller.resume(retried)
+
+      const resumed = await store.load()
+      expect(resumed).toMatchObject({
+        status: 'running',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        foundationAuditState: { status: 'extracting_facts' },
+      })
+      expect(dispatches).toHaveLength(4)
+      expect(new Set(dispatches.map(request => request.taskId)).size).toBe(4)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('concurrent resume of one stale review snapshot keeps one fact task set and four running workers', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-derivation-concurrent-'))
+    const dispatches: WorkerDispatchRequest[] = []
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+        await writeFile(
+          join(workspacePath, path),
+          withTestDocumentMetadata(
+            path,
+            renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+          ),
+        )
+      const run = {
+        ...runWithEightCommittedDocs(),
+        phase: 'DOCUMENT_REVIEW' as const,
+        documentStep: 'FOUNDATION_REVIEW' as const,
+      }
+      const store = createRunStore(workspacePath, run.ownerId)
+      await store.save(run)
+      const workerPort = {
+        start: async (request: WorkerDispatchRequest) => {
+          dispatches.push(request)
+          return { sessionId: `session-${request.taskId}`, dispatchId: request.dispatchId! }
+        },
+        submit: async () => undefined,
+        stop: async () => undefined,
+        status: async (dispatchId: string) => ({ dispatchId, workerType: 'foundation-fact-extractor' as const, phase: 'DOCUMENT_REVIEW' as const, taskId: 'unknown', revision: run.revision.document, status: 'running' as const, startedAt: new Date().toISOString() }),
+      }
+      const first = createDeliveryWorkflowController({ workspacePath, ownerId: run.ownerId, workerPort })
+      const second = createDeliveryWorkflowController({ workspacePath, ownerId: run.ownerId, workerPort })
+
+      await Promise.all([first.resume(run), second.resume(run)])
+
+      const resumed = await store.load()
+      const tasks = resumed?.foundationAuditState?.tasks ?? []
+      expect(resumed).toMatchObject({ status: 'running', foundationAuditState: { status: 'extracting_facts' } })
+      expect(tasks).toHaveLength(8)
+      expect(tasks.filter(task => task.status === 'running')).toHaveLength(4)
+      expect(new Set(tasks.map(task => task.taskId)).size).toBe(8)
+      expect(dispatches).toHaveLength(4)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

@@ -1704,6 +1704,56 @@ export function createDeliveryWorkflowController(input: {
       )
       return
     }
+    // A retry after foundation derivation failure carries a stale caller
+    // snapshot with no audit state. Reconcile from durable state before
+    // deciding whether to derive again; otherwise the retry falls through
+    // the review phase with no state and no fact workers.
+    if (
+      run.phase === 'DOCUMENT_REVIEW' &&
+      run.documentStep === 'FOUNDATION_REVIEW' &&
+      !run.foundationAuditState &&
+      canStartFoundationAudit(run)
+    ) {
+      const lease = await store.mutationLock(run.runId)
+      let next: DeliveryRun | undefined
+      try {
+        const current = await store.load(lease)
+        if (
+          !current ||
+          current.runId !== run.runId
+        ) return
+        if (current.foundationAuditState) {
+          next = current
+        } else if (
+          current.status === 'running' &&
+          current.phase === 'DOCUMENT_REVIEW' &&
+          current.documentStep === 'FOUNDATION_REVIEW' &&
+          canStartFoundationAudit(current)
+        ) {
+          next = await deriveFoundationAudit(current, input.workspacePath)
+          await store.commit(
+            next,
+            {
+              runId: next.runId,
+              type: next.foundationAuditState
+                ? 'foundation.audit.index_staged'
+                : 'foundation.audit.derivation_failed',
+              phase: next.phase,
+              status: next.status,
+              revision: next.revision,
+            },
+            undefined,
+            lease,
+          )
+        }
+      } finally {
+        await store.unlock(lease)
+      }
+      if (next?.status === 'running') {
+        await resumeUnlocked(next)
+      }
+      return
+    }
     if (run.foundationAuditState) {
       const replayableFactDispatches = run.foundationAuditState.tasks
         .filter(task => task.status !== 'completed' && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId))
