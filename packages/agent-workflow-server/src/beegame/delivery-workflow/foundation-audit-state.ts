@@ -6,9 +6,36 @@ import { FOUNDATION_FACT_MAX_TASKS } from './foundation-fact-runtime'
 import type { FoundationSemanticResult } from './foundation-semantic-audit'
 import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST } from './foundation-semantic-audit'
 import type { FoundationSemanticRuntimeTask } from './foundation-semantic-runtime'
+import type { AuditIssue } from './foundation-issue-registry'
 
-export const FOUNDATION_AUDIT_STATE_SCHEMA_VERSION = 5 as const
-export const FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT = 'foundation-audit-state-v5' as const
+export const FOUNDATION_AUDIT_STATE_SCHEMA_VERSION = 6 as const
+export const FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT = 'foundation-audit-state-v6' as const
+export type FoundationIssueSummary = {
+  total: number
+  blocker: number
+  high: number
+  medium: number
+  low: number
+}
+
+export function summarizeFoundationIssues(
+  issues: readonly Pick<AuditIssue, 'severity'>[],
+): FoundationIssueSummary {
+  const summary: FoundationIssueSummary = {
+    total: issues.length,
+    blocker: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+  }
+  for (const issue of issues) {
+    if (issue.severity === 'BLOCKER') summary.blocker += 1
+    else if (issue.severity === 'HIGH') summary.high += 1
+    else if (issue.severity === 'MEDIUM') summary.medium += 1
+    else if (issue.severity === 'LOW') summary.low += 1
+  }
+  return summary
+}
 export type FoundationAuditStatus = 'index_staged' | 'extracting_facts' | 'facts_staged' | 'derived_committed' | 'deterministic_ready' | 'semantic_review' | 'audit_ready'
 export type FoundationAuditState = {
   schemaVersion: typeof FOUNDATION_AUDIT_STATE_SCHEMA_VERSION
@@ -52,12 +79,17 @@ export type FoundationAuditState = {
     sectionIndexDigest: string
     factStoreDigest: string
     semanticManifestDigest: string
+    issueSummary: FoundationIssueSummary
+    knownIssueIds: string[]
   }
 }
 export type FoundationAuditTask = FoundationFactTask | (FoundationSemanticRuntimeTask & { admittedResult?: FoundationSemanticResult })
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/)
 const relativeArtifactPath = z.string().refine(value => value.startsWith('.beegame/audit/foundation/') && !value.startsWith('/') && !value.includes('..'), 'foundation audit artifact paths must remain project-local')
 const workflowUsageSchema = z.object({ input_tokens: z.number().nonnegative(), cache_read_tokens: z.number().nonnegative(), cache_creation_tokens: z.number().nonnegative(), completion_tokens: z.number().nonnegative(), total_tokens: z.number().nonnegative() }).strict()
+const issueSummarySchema = z.object({ total: z.number().int().nonnegative(), blocker: z.number().int().nonnegative(), high: z.number().int().nonnegative(), medium: z.number().int().nonnegative(), low: z.number().int().nonnegative() }).strict().superRefine((summary, context) => {
+  if (summary.total !== summary.blocker + summary.high + summary.medium + summary.low) context.addIssue({ code: 'custom', path: ['total'], message: 'foundation issue summary total must equal severity counts' })
+})
 const dispatchSchema = z.object({ dispatchId: z.string().min(1), workerType: z.enum(['foundation-fact-extractor', 'foundation-semantic-reviewer']), phase: z.literal('DOCUMENT_REVIEW'), taskId: z.string().min(1), revision: z.string().min(1), status: z.enum(['running', 'completed', 'failed', 'blocked', 'interrupted', 'invalid']), request: z.record(z.string(), z.unknown()).optional(), terminalResult: z.record(z.string(), z.unknown()).optional(), failureReason: z.string().min(1).optional(), startingUsage: workflowUsageSchema.optional(), usage: workflowUsageSchema.optional(), startedAt: z.string().datetime(), finishedAt: z.string().datetime().optional() }).strict()
 const commonTask = { taskId: z.string().min(1), revision: z.string().min(1), packetDigest: digestSchema, status: z.enum(['pending', 'running', 'retryable', 'completed', 'needs_action']), dispatch: dispatchSchema.optional(), terminalDigest: digestSchema.optional(), usage: workflowUsageSchema.optional(), durationMs: z.number().nonnegative().optional(), failureReason: z.string().min(1).optional() }
 const admittedResultSchema = z.object({ checkId: z.string().min(1), packetIdentity: digestSchema, outcome: z.enum(['PASS', 'ISSUES', 'UNDECIDABLE']), issues: z.array(z.object({ problem: z.string().min(1), expected: z.string().min(1), actual: z.string().min(1), sourceSectionKey: z.string().min(1), fixSectionKey: z.string().min(1), reasonCode: z.string().min(1).optional() }).strict()).optional(), reason: z.string().min(1).optional() }).strict().superRefine((result, context) => {
@@ -77,7 +109,7 @@ const taskSchema = z.discriminatedUnion('kind', [factTaskSchema, semanticTaskSch
 })
 const deterministicSchema = z.object({ reviewDigest: digestSchema, issueRegistryPath: relativeArtifactPath, issueRegistryDigest: digestSchema, manifestPath: relativeArtifactPath, manifestDigest: digestSchema, markerPath: relativeArtifactPath, markerDigest: digestSchema, catalogVersion: z.string().min(1), contractGraphDigest: digestSchema, sectionIndexDigest: digestSchema, factStoreDigest: digestSchema }).strict()
 const semanticSchema = z.object({ aggregateUsage: workflowUsageSchema, deepPhaseStartedAt: z.string().datetime().optional(), deepAggregateUsage: workflowUsageSchema.optional() }).strict()
-const reviewSchema = z.object({ reviewDigest: digestSchema, issueRegistryPath: relativeArtifactPath, issueRegistryDigest: digestSchema, manifestPath: relativeArtifactPath, manifestDigest: digestSchema, markerPath: relativeArtifactPath, markerDigest: digestSchema, sectionIndexDigest: digestSchema, factStoreDigest: digestSchema, semanticManifestDigest: digestSchema }).strict()
+const reviewSchema = z.object({ reviewDigest: digestSchema, issueRegistryPath: relativeArtifactPath, issueRegistryDigest: digestSchema, manifestPath: relativeArtifactPath, manifestDigest: digestSchema, markerPath: relativeArtifactPath, markerDigest: digestSchema, sectionIndexDigest: digestSchema, factStoreDigest: digestSchema, semanticManifestDigest: digestSchema, issueSummary: issueSummarySchema, knownIssueIds: z.array(z.string().min(1)) }).strict()
 const foundationAuditStateSchemaRaw = z.object({ schemaVersion: z.literal(FOUNDATION_AUDIT_STATE_SCHEMA_VERSION), schemaFingerprint: z.literal(FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT), status: z.enum(['index_staged', 'extracting_facts', 'facts_staged', 'derived_committed', 'deterministic_ready', 'semantic_review', 'audit_ready']), revision: z.string().min(1), documentDigests: z.record(z.string(), digestSchema), sectionIndexDigest: digestSchema, sectionIndexPath: relativeArtifactPath, manifestPath: relativeArtifactPath, tasks: z.array(taskSchema).max(FOUNDATION_FACT_MAX_TASKS), phaseStartedAt: z.string().datetime().optional(), aggregateUsage: workflowUsageSchema.optional(), derived: z.object({ manifestPath: relativeArtifactPath, manifestDigest: digestSchema, markerPath: relativeArtifactPath, markerDigest: digestSchema, factStorePath: relativeArtifactPath, factStoreDigest: digestSchema, sectionIndexPath: relativeArtifactPath, sectionIndexDigest: digestSchema }).strict().optional(), deterministic: deterministicSchema.optional(), semantic: semanticSchema.optional(), review: reviewSchema.optional() }).strict().superRefine((state, context) => {
   const expected = [...CANONICAL_FOUNDATION_DOCUMENTS]
   const paths = Object.keys(state.documentDigests)

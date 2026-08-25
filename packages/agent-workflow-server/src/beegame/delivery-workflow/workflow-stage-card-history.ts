@@ -18,6 +18,7 @@ import type {
   ResourceProductionTask,
   WorkflowEvent,
 } from './types'
+import type { FoundationIssueSummary } from './foundation-audit-state'
 
 export type WorkflowStageCardTask = {
   id: string
@@ -25,7 +26,20 @@ export type WorkflowStageCardTask = {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
   operation?: 'write' | 'review' | 'revise' | 'produce' | 'assemble'
   attempt?: number
+  round?: 1 | 2 | 3
+  issueSummary?: FoundationIssueSummary
+  knownIssueCount?: number
+  usage?: WorkflowStageCardTaskUsage
+  durationMs?: number
   failureReason?: string
+}
+
+type WorkflowStageCardTaskUsage = {
+  input_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  completion_tokens: number
+  total_tokens: number
 }
 
 export type WorkflowStageCardSnapshot = {
@@ -91,7 +105,7 @@ const TASK_STATUSES: readonly WorkflowStageCardTask['status'][] = [
 
 const TASK_OPERATIONS: readonly NonNullable<
   WorkflowStageCardTask['operation']
->[] = ['write', 'review', 'produce', 'assemble']
+>[] = ['write', 'review', 'revise', 'produce', 'assemble']
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -391,6 +405,11 @@ function normalizeDisplayTasks(
     status: TASK_STATUSES.includes(task.status) ? task.status : 'pending',
     ...(task.operation ? { operation: task.operation } : {}),
     ...(nonnegativeInteger(task.attempt) ? { attempt: task.attempt } : {}),
+    ...(task.round ? { round: task.round } : {}),
+    ...(task.issueSummary ? { issueSummary: task.issueSummary } : {}),
+    ...(task.knownIssueCount !== undefined ? { knownIssueCount: task.knownIssueCount } : {}),
+    ...(task.usage ? { usage: task.usage } : {}),
+    ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
     ...(task.failureReason ? { failureReason: task.failureReason } : {}),
   }))
 }

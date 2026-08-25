@@ -1,4 +1,4 @@
-import type { FoundationAuditState } from './foundation-audit-state'
+import type { FoundationAuditState, FoundationIssueSummary } from './foundation-audit-state'
 
 export const CANONICAL_PROJECT_DOCUMENTS = [
   'docs/GDD.md',
@@ -171,6 +171,8 @@ export type FoundationRevisionState = {
   status: 'running' | 'completed' | 'needs_action'
   phaseStartedAt: string
   knownIssueIds: string[]
+  /** Compact projection of the committed Issue Registry; raw issues remain artifact-only. */
+  issueSummary: FoundationIssueSummary
   tasks: FoundationRevisionTask[]
   publication?: FoundationRevisionPublicationBinding
 }
@@ -255,7 +257,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 39 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 40 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

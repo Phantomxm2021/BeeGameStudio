@@ -252,6 +252,16 @@ const foundationRevisionPublicationBindingSchema = z.object({
   resultingRevision: z.string().min(1),
   resultingIssueRegistryDigest: foundationRevisionDigest,
 }).strict()
+const foundationIssueSummarySchema = z.object({
+  total: z.number().int().nonnegative(),
+  blocker: z.number().int().nonnegative(),
+  high: z.number().int().nonnegative(),
+  medium: z.number().int().nonnegative(),
+  low: z.number().int().nonnegative(),
+}).strict().superRefine((summary, context) => {
+  if (summary.total !== summary.blocker + summary.high + summary.medium + summary.low)
+    context.addIssue({ code: 'custom', path: ['total'], message: 'foundation issue summary total must equal severity counts' })
+})
 
 export const foundationRevisionStateSchema: z.ZodType<FoundationRevisionState> = z.object({
   authority: foundationRevisionAuthoritySchema,
@@ -262,6 +272,7 @@ export const foundationRevisionStateSchema: z.ZodType<FoundationRevisionState> =
   status: z.enum(['running', 'completed', 'needs_action']),
   phaseStartedAt: z.string().datetime(),
   knownIssueIds: z.array(z.string().min(1)),
+  issueSummary: foundationIssueSummarySchema,
   tasks: z.array(foundationRevisionTaskSchema),
   publication: foundationRevisionPublicationBindingSchema.optional(),
 }).strict().superRefine((state, context) => {

@@ -168,6 +168,39 @@ describe('WorkflowCard', () => {
     );
   });
 
+  it('renders compact audit feedback without raw issue registry content', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_feedback',
+          status: 'running',
+          currentPhase: 'DOCUMENT_REVIEW',
+          tasks: [{
+            id: 'audit:issues',
+            title: '问题汇编',
+            status: 'completed',
+            operation: 'review',
+            issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
+            knownIssueCount: 2,
+            usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 4, total_tokens: 14 },
+            durationMs: 321,
+            issueRegistry: [{ problem: 'secret' }],
+            problem: 'secret problem',
+            actual: 'secret actual',
+            evidence: 'secret evidence',
+            registryJson: '{"problem":"secret"}',
+          }],
+        }}
+      />,
+    );
+    expect(screen.getByText('问题 4 · 阻塞 1 · 高 1 · 中 1 · 低 1 · 已知问题 2 · 耗时 321ms · 用量 14 tokens')).toBeInTheDocument();
+    expect(screen.queryByText('secret')).not.toBeInTheDocument();
+    expect(screen.queryByText('secret problem')).not.toBeInTheDocument();
+    expect(screen.queryByText('secret actual')).not.toBeInTheDocument();
+    expect(screen.queryByText('secret evidence')).not.toBeInTheDocument();
+    expect(screen.queryByText('{"problem":"secret"}')).not.toBeInTheDocument();
+  });
+
   it('renders a manually stopped task as stopped instead of failed', () => {
     render(
       <WorkflowCard

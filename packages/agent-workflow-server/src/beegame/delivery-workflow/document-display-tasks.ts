@@ -9,7 +9,8 @@ import {
   type DocumentWorkflowStep,
 } from './types'
 import type { FoundationAuditState } from './foundation-audit-state'
-import type { FoundationRevisionState } from './types'
+import type { FoundationRevisionState, FoundationRevisionTask, WorkflowUsage } from './types'
+import type { FoundationIssueSummary } from './foundation-audit-state'
 
 export type DocumentDisplayTask = {
   id: string
@@ -17,6 +18,11 @@ export type DocumentDisplayTask = {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
   attempt: number
   operation: 'write' | 'review' | 'revise' | 'produce'
+  round?: 1 | 2 | 3
+  issueSummary?: FoundationIssueSummary
+  knownIssueCount?: number
+  usage?: WorkflowUsage
+  durationMs?: number
   failureReason?: string
 }
 
@@ -67,6 +73,7 @@ function projectFoundationAuditTasks(
 ): DocumentDisplayTask[] {
   const state = input.foundationAuditState
   if (!state) return []
+  const factTasks = state.tasks.filter(task => task.kind === 'document-facts')
   const semanticTasks = state.tasks.filter(
     task => task.kind === 'semantic' || task.kind === 'confirmation',
   )
@@ -75,7 +82,30 @@ function projectFoundationAuditTasks(
   const semanticActive = state.status === 'semantic_review'
   const issueActive = semanticActive && semanticCompleted
   const auditReady = state.status === 'audit_ready'
+  const knownIssueCount = input.foundationRevisionState?.knownIssueIds?.length ?? state.review?.knownIssueIds?.length
+  const factDisplayTasks = factTasks.map(task => projectFoundationAuditTask({
+    task,
+    title: `事实提取 · ${task.taskId}`,
+    input,
+    knownIssueCount,
+  }))
+  const semanticDisplayTasks = semanticTasks.map(task => projectFoundationAuditTask({
+    task,
+    title: task.kind === 'confirmation' ? `深度确认 · ${task.checkId}` : `语义检查 · ${task.checkId}`,
+    input,
+    knownIssueCount,
+  }))
+  const semanticTasksForDisplay = semanticTasks.length
+    ? semanticDisplayTasks
+    : [{
+        id: 'audit:semantic',
+        title: auditTaskTitles.semantic,
+        status: phaseTaskStatus({ active: semanticActive, completed: semanticCompleted || auditReady, workflowStatus: input.workflowStatus }),
+        attempt: 0,
+        operation: 'review' as const,
+      }]
   return [
+    ...factDisplayTasks,
     {
       id: 'audit:deterministic',
       title: auditTaskTitles.deterministic,
@@ -91,17 +121,7 @@ function projectFoundationAuditTasks(
       attempt: 0,
       operation: 'review',
     },
-    {
-      id: 'audit:semantic',
-      title: auditTaskTitles.semantic,
-      status: phaseTaskStatus({
-        active: semanticActive,
-        completed: semanticCompleted || auditReady,
-        workflowStatus: input.workflowStatus,
-      }),
-      attempt: 0,
-      operation: 'review',
-    },
+    ...semanticTasksForDisplay,
     {
       id: 'audit:issues',
       title: auditTaskTitles.issues,
@@ -112,39 +132,78 @@ function projectFoundationAuditTasks(
       }),
       attempt: 0,
       operation: 'review',
+      ...(state.review?.issueSummary ? { issueSummary: state.review.issueSummary } : {}),
+      ...(knownIssueCount !== undefined ? { knownIssueCount } : {}),
     },
   ]
+}
+
+function projectFoundationAuditTask(input: {
+  task: Extract<FoundationAuditState['tasks'][number], { kind: 'document-facts' | 'semantic' | 'confirmation' }>
+  title: string
+  input: DocumentDisplayTaskInput
+  knownIssueCount?: number
+}): DocumentDisplayTask {
+  const task = input.task
+  const status = task.status === 'completed'
+    ? 'completed'
+    : workflowStopped(input.input.workflowStatus) && task.status === 'running'
+      ? 'stopped'
+      : task.status === 'needs_action'
+        ? 'failed'
+        : task.status === 'running'
+          ? 'running'
+          : 'pending'
+  return {
+    id: task.taskId || `${task.kind}:${task.kind === 'document-facts' ? 'facts' : task.checkId}`,
+    title: input.title.replace('undefined', task.kind === 'document-facts' ? 'facts' : (task.checkId || task.kind)),
+    status,
+    attempt: task.attempt,
+    operation: 'review',
+    ...(input.knownIssueCount !== undefined ? { knownIssueCount: input.knownIssueCount } : {}),
+    ...(task.usage ? { usage: task.usage } : {}),
+    ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
+    ...(task.failureReason ? { failureReason: task.failureReason } : {}),
+  }
 }
 
 function projectFoundationRevisionTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
-  return (input.foundationRevisionState?.tasks ?? []).flatMap(task =>
-    task.kind === 'document-revision'
-      ? [
-          {
-            id: `revision:${task.documentPath}`,
-            title: task.documentPath,
-            status:
-              task.status === 'completed'
-                ? 'completed'
-                : workflowStopped(input.workflowStatus) &&
-                    task.status === 'running'
-                  ? 'stopped'
-                  : task.status === 'needs_action'
-                    ? 'failed'
-                    : task.status === 'running'
-                      ? 'running'
-                      : 'pending',
-            attempt: task.attempt,
-            operation: 'revise' as const,
-            ...(task.failureReason
-              ? { failureReason: task.failureReason }
-              : {}),
-          },
-        ]
-      : [],
-  )
+  const state = input.foundationRevisionState
+  if (!state) return []
+  return state.tasks.map(task => {
+    const status = revisionTaskDisplayStatus(task, input.workflowStatus)
+    const base = {
+      id: task.kind === 'document-revision' ? `revision:${task.documentPath}` : task.taskId || `${task.kind}:${task.kind === 'semantic-recheck' ? task.issueId : 'unknown'}`,
+      title: task.kind === 'document-revision'
+        ? task.documentPath
+        : task.kind === 'impacted-facts'
+          ? '影响事实验证'
+          : `定向语义验证 · ${task.issueId}`,
+      status,
+      attempt: task.attempt,
+      operation: task.kind === 'document-revision' ? 'revise' as const : 'review' as const,
+      round: task.round,
+      ...(state.issueSummary ? { issueSummary: state.issueSummary } : {}),
+      ...(state.knownIssueIds ? { knownIssueCount: state.knownIssueIds.length } : {}),
+      ...(task.usage ? { usage: task.usage } : {}),
+      ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
+      ...(task.failureReason ? { failureReason: task.failureReason } : {}),
+    }
+    return base
+  })
+}
+
+function revisionTaskDisplayStatus(
+  task: FoundationRevisionTask,
+  workflowStatus?: string,
+): DocumentDisplayTask['status'] {
+  if (task.status === 'completed') return 'completed'
+  if (workflowStopped(workflowStatus) && task.status === 'running') return 'stopped'
+  if (task.status === 'needs_action') return 'failed'
+  if (task.status === 'running') return 'running'
+  return 'pending'
 }
 
 /**

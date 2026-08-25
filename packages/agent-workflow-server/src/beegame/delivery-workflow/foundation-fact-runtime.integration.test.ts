@@ -482,6 +482,7 @@ describe('foundation fact runtime controller integration', () => {
       status: 'running',
       phaseStartedAt: new Date().toISOString(),
       knownIssueIds: [],
+      issueSummary: { total: resultingIssues.length, blocker: 0, high: resultingIssues.length, medium: 0, low: 0 },
       tasks: [],
       publication: { preparedPath: publication.preparedPath, journalPath: publication.journalPath, committedPath: publication.committedPath, authorityDigest: publication.authorityDigest, resultingRevision: publication.resultingRevision, resultingIssueRegistryDigest: publication.resultingIssueRegistryDigest },
     }

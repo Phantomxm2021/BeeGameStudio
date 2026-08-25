@@ -9,8 +9,8 @@ import { FOUNDATION_FACT_MAX_TASKS } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
-    schemaVersion: 5 as const,
-    schemaFingerprint: 'foundation-audit-state-v5' as const,
+    schemaVersion: 6 as const,
+    schemaFingerprint: 'foundation-audit-state-v6' as const,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(

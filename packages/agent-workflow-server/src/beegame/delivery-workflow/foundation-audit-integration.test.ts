@@ -15,8 +15,8 @@ describe('foundation semantic audit integration', () => {
   }))) {
     const digest = 'a'.repeat(64)
     return {
-      schemaVersion: 5 as const,
-      schemaFingerprint: 'foundation-audit-state-v5' as const,
+      schemaVersion: 6 as const,
+      schemaFingerprint: 'foundation-audit-state-v6' as const,
       status: 'semantic_review' as const,
       revision: 'rev',
       documentDigests: Object.fromEntries([
@@ -47,8 +47,8 @@ describe('foundation semantic audit integration', () => {
   test('persists semantic tasks in the sole foundation audit state', () => {
     const digest = 'a'.repeat(64)
     const state = parseFoundationAuditState({
-      schemaVersion: 5,
-      schemaFingerprint: 'foundation-audit-state-v5',
+      schemaVersion: 6,
+      schemaFingerprint: 'foundation-audit-state-v6',
       status: 'semantic_review',
       revision: 'rev',
       documentDigests: Object.fromEntries([
@@ -112,6 +112,8 @@ describe('foundation semantic audit integration', () => {
       reviewDigest: 'b'.repeat(64), issueRegistryPath: '.beegame/audit/foundation/rev/review/' + 'b'.repeat(64) + '/issue-registry.json', issueRegistryDigest: 'b'.repeat(64),
       manifestPath: '.beegame/audit/foundation/rev/review/' + 'b'.repeat(64) + '/manifest.json', manifestDigest: 'b'.repeat(64), markerPath: '.beegame/audit/foundation/rev/review/' + 'b'.repeat(64) + '/COMMITTED.json', markerDigest: 'b'.repeat(64),
       sectionIndexDigest: 'a'.repeat(64), factStoreDigest: 'a'.repeat(64), semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest,
+      issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
+      knownIssueIds: [],
     }
     expect(() => parseFoundationAuditState({ ...valid, review })).toThrow(/atomic|audit_ready|review/i)
     expect(() => parseFoundationAuditState({ ...valid, status: 'audit_ready', semantic: undefined, review })).toThrow(/semantic|metrics|review/i)

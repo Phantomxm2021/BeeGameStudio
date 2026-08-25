@@ -194,6 +194,8 @@ function auditReadyState(): FoundationAuditState {
       sectionIndexDigest: DIGEST,
       factStoreDigest: DIGEST,
       semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest,
+      issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
+      knownIssueIds: [],
     },
   })
 }
@@ -242,6 +244,7 @@ function revisionState(): FoundationRevisionState {
     status: 'needs_action',
     phaseStartedAt: OLD_PHASE,
     knownIssueIds: ['issue-0'],
+    issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
     tasks: [semanticTask, documentTask],
   }
 }

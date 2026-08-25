@@ -201,6 +201,21 @@ const taskStatusText = (task: WorkflowCardTask): string => {
   return '待编写';
 };
 
+const taskFeedbackText = (task: WorkflowCardTask): string | undefined => {
+  const summary = task.issueSummary;
+  const issueText = summary
+    ? `问题 ${summary.total} · 阻塞 ${summary.blocker} · 高 ${summary.high} · 中 ${summary.medium} · 低 ${summary.low}`
+    : undefined;
+  const knownText = task.knownIssueCount !== undefined ? `已知问题 ${task.knownIssueCount}` : undefined;
+  const evidenceText = task.durationMs !== undefined || task.usage
+    ? [
+        task.durationMs !== undefined ? `耗时 ${Math.max(0, Math.round(task.durationMs))}ms` : undefined,
+        task.usage ? `用量 ${task.usage.total_tokens} tokens` : undefined,
+      ].filter(Boolean).join(' · ')
+    : undefined;
+  return [issueText, knownText, evidenceText].filter(Boolean).join(' · ') || undefined;
+};
+
 const taskIcon = (task: WorkflowCardTask) => {
   const label = `任务状态：${taskStatusText(task)}`;
   if (task.status === 'completed')
@@ -615,6 +630,11 @@ export function WorkflowStageCard({
                         >
                           {displayTaskTitle(task)}
                         </p>
+                        {taskFeedbackText(task) ? (
+                          <p data-testid={`workflow-task-feedback-${task.id}`} className="mt-0.5 text-[10px] text-zinc-500">
+                            {taskFeedbackText(task)}
+                          </p>
+                        ) : null}
                         {task.failureReason ? (
                           <p className="mt-0.5 line-clamp-2 text-rose-300/80">{task.failureReason}</p>
                         ) : null}

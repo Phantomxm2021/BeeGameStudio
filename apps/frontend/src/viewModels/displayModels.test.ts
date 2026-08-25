@@ -118,6 +118,46 @@ describe('displayModels', () => {
     })
   })
 
+  it('projects compact audit feedback while dropping raw issue registry fields', () => {
+    const display = toProjectRuntimeDisplayModel({
+      project_id: 'project-feedback',
+      workflow: {
+        runId: 'run-feedback',
+        status: 'running',
+        phase: 'DOCUMENT_REVIEW',
+        tasks: [{
+          id: 'facts:gdd',
+          title: '事实提取 · gdd',
+          status: 'completed',
+          operation: 'review',
+          round: 2,
+          issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
+          knownIssueCount: 2,
+          usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 4, total_tokens: 14 },
+          durationMs: 321,
+          issueRegistry: [{ body: 'secret raw issue' }],
+          problem: 'secret problem',
+          actual: 'secret actual',
+          evidence: 'secret evidence',
+          registryJson: '{"problem":"secret"}',
+        }],
+      },
+    })
+    const task = display?.workflow?.tasks?.[0]
+    expect(task).toMatchObject({
+      round: 2,
+      issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
+      knownIssueCount: 2,
+      durationMs: 321,
+      usage: { total_tokens: 14 },
+    })
+    expect(task).not.toHaveProperty('issueRegistry')
+    expect(task).not.toHaveProperty('problem')
+    expect(task).not.toHaveProperty('actual')
+    expect(task).not.toHaveProperty('evidence')
+    expect(task).not.toHaveProperty('registryJson')
+  })
+
   it('normalizes nested stage snapshots from camel and snake case fields in server order', () => {
     const display = toProjectRuntimeDisplayModel({
       project_id: 'project-1',

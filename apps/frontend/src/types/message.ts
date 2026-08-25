@@ -45,6 +45,23 @@ export interface WorkflowCardTask {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
   operation?: 'write' | 'review' | 'revise' | 'produce' | 'assemble'
   attempt?: number
+  round?: 1 | 2 | 3
+  issueSummary?: {
+    total: number
+    blocker: number
+    high: number
+    medium: number
+    low: number
+  }
+  knownIssueCount?: number
+  usage?: {
+    input_tokens: number
+    cache_read_tokens: number
+    cache_creation_tokens: number
+    completion_tokens: number
+    total_tokens: number
+  }
+  durationMs?: number
   failureReason?: string
 }
 

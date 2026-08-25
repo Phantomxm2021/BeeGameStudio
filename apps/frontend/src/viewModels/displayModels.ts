@@ -168,6 +168,38 @@ const finiteNumber = (value: unknown): number | undefined => {
   return Number.isFinite(number) ? number : undefined
 }
 
+const normalizeIssueSummary = (
+  value: unknown,
+): NonNullable<WorkflowCardTask['issueSummary']> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const total = finiteNumber(source.total)
+  const blocker = finiteNumber(source.blocker)
+  const high = finiteNumber(source.high)
+  const medium = finiteNumber(source.medium)
+  const low = finiteNumber(source.low)
+  if (![total, blocker, high, medium, low].every(value => value !== undefined && Number.isInteger(value) && value >= 0)) return undefined
+  if (total !== blocker! + high! + medium! + low!) return undefined
+  return { total: total!, blocker: blocker!, high: high!, medium: medium!, low: low! }
+}
+
+const normalizeWorkflowUsage = (
+  value: unknown,
+): NonNullable<WorkflowCardTask['usage']> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const fields = ['input_tokens', 'cache_read_tokens', 'cache_creation_tokens', 'completion_tokens', 'total_tokens']
+  const values = fields.map(field => finiteNumber(source[field]))
+  if (!values.every(value => value !== undefined && value >= 0)) return undefined
+  return {
+    input_tokens: values[0]!,
+    cache_read_tokens: values[1]!,
+    cache_creation_tokens: values[2]!,
+    completion_tokens: values[3]!,
+    total_tokens: values[4]!,
+  }
+}
+
 const normalizeWorkflowTasks = (
   value: unknown,
 ): WorkflowCardTask[] | undefined => {
@@ -197,6 +229,14 @@ const normalizeWorkflowTasks = (
           ? (operation as NonNullable<WorkflowCardTask['operation']>)
           : undefined,
         attempt: finiteNumber(item.attempt),
+        round:
+          [1, 2, 3].includes(Number(item.round))
+            ? (Number(item.round) as 1 | 2 | 3)
+            : undefined,
+        issueSummary: normalizeIssueSummary(item.issueSummary ?? item.issue_summary),
+        knownIssueCount: finiteNumber(item.knownIssueCount ?? item.known_issue_count),
+        usage: normalizeWorkflowUsage(item.usage),
+        durationMs: finiteNumber(item.durationMs ?? item.duration_ms),
         failureReason:
           trimString(item.failureReason ?? item.failure_reason) || undefined,
       },
