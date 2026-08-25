@@ -6,6 +6,7 @@ import {
   buildFoundationFactPackets,
   extractNormalizedFoundationFacts,
   extractSelectedFoundationFacts,
+  mergeFoundationFactResults,
   validateFoundationFactResults,
 } from './foundation-fact-extraction'
 import { FOUNDATION_FACT_CATALOG, foundationFactDefinition } from './foundation-fact-definitions'
@@ -272,5 +273,42 @@ describe('mechanical normalized foundation extraction', () => {
         ],
       }),
     ).toThrow(/digest/i)
+  })
+
+  test('merges a complete mechanical catalog without requiring worker facts', () => {
+    const extraction = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: sectionIndex() })
+    expect(extraction.unresolvedKeys).toEqual([])
+    expect(mergeFoundationFactResults({ mechanicalFacts: extraction.facts, workerFacts: [] })).toEqual(extraction.facts)
+  })
+
+  test('merges mixed mechanical and worker facts and removes equal duplicates', () => {
+    const extraction = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: sectionIndex() })
+    const split = extraction.facts.filter((_, index) => index % 2 === 0)
+    const worker = extraction.facts.filter((_, index) => index % 2 === 1)
+    const merged = mergeFoundationFactResults({ mechanicalFacts: split, workerFacts: [...worker, ...split.slice(0, 2)] })
+    expect(merged).toEqual(extraction.facts)
+  })
+
+  test('fails closed on conflicting duplicate value or evidence', () => {
+    const extraction = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: sectionIndex() })
+    const fact = extraction.facts.find(item => item.key === 'game.players.max')!
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: extraction.facts,
+      workerFacts: [{ ...fact, value: 5 }],
+    })).toThrow(/conflicting.*game\.players\.max/i)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: extraction.facts,
+      workerFacts: [{ ...fact, evidence: { ...fact.evidence, digest: 'f'.repeat(64) } }],
+    })).toThrow(/conflicting.*game\.players\.max/i)
+  })
+
+  test('fails closed on missing or unknown catalog keys', () => {
+    const extraction = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: sectionIndex() })
+    const missing = extraction.facts.slice(1)
+    expect(() => mergeFoundationFactResults({ mechanicalFacts: missing, workerFacts: [] })).toThrow(/coverage.*incomplete/i)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: extraction.facts,
+      workerFacts: [{ ...extraction.facts[0]!, key: 'unknown.fact' }],
+    })).toThrow(/unknown.*foundation fact key/i)
   })
 })

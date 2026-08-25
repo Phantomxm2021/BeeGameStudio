@@ -16,7 +16,7 @@ import type { FactValue } from './foundation-fact-store'
 import type { AuditIssue } from './foundation-issue-registry'
 import { buildFoundationSemanticRecheckPacket } from './foundation-patch-validation'
 import { deriveFoundationPatchOperations, foundationRevisionPacketPath, foundationRevisionStagePath, loadFoundationRevisionPacket, revisionTaskReceiptTerminalDigest, writeFoundationRevisionSemanticPacket, type PatchOperation } from './foundation-revision-stage'
-import { digestFoundationFactTerminal } from './foundation-fact-runtime'
+import { digestFoundationFactTerminal, foundationFactOutputTokenLimit, type FoundationFactTask } from './foundation-fact-runtime'
 import { foundationSemanticReviewerStructuredOutputJsonSchema } from './worker-contracts'
 import { foundationRevisionCommittedPath } from './foundation-revision-publication'
 import { publishFoundationRevision } from './foundation-revision-publication'
@@ -27,6 +27,19 @@ import { createModelConfig, resetModelConfigs } from '@bee-game-studio/agent-wor
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
   return `${[`# ${path}`, '', ...contract.sections.flatMap(section => [`<!-- beegame-section:${section.sectionId} -->`, `## ${section.title}`, '', 'unresolved prose', ''])].join('\n')}\n`
+}
+
+function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
+  const contract = getGameDocumentContract(path)
+  return `${[`# ${path}`, '', ...contract.sections.flatMap(section => [
+    `<!-- beegame-section:${section.sectionId} -->`,
+    `## ${section.title}`,
+    '',
+    ...FOUNDATION_FACT_CATALOG
+      .filter(fact => fact.owner.documentPath === path && fact.owner.sectionId === section.sectionId)
+      .map(fact => `${fact.key}: ${JSON.stringify(consistentFactValue(fact.key))}`),
+    '',
+  ])].join('\n')}\n`
 }
 
 function port(started = new Set<string>(), requests: WorkerDispatchRequest[] = []): DeliveryWorkerPort {
@@ -82,10 +95,10 @@ async function presentFactResults(workspacePath: string, packet: { keys: string[
 }
 
 describe('foundation fact runtime controller integration', () => {
-  async function preparedController(workerPortFactory?: (started: Set<string>, requests: WorkerDispatchRequest[]) => DeliveryWorkerPort, resumeImmediately = true) {
+  async function preparedController(workerPortFactory?: (started: Set<string>, requests: WorkerDispatchRequest[]) => DeliveryWorkerPort, resumeImmediately = true, documentOverrides: Partial<Record<(typeof CANONICAL_FOUNDATION_DOCUMENTS)[number], string>> = {}) {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-fact-runtime-'))
     await mkdir(join(workspacePath, 'docs'), { recursive: true })
-    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) await writeFile(join(workspacePath, path), document(path))
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) await writeFile(join(workspacePath, path), documentOverrides[path] ?? document(path))
     const context = '{"game":"bee"}'
     const run = createInitialDeliveryRun({ projectId: 'project', ownerId: 'owner', confirmedBriefContext: context, confirmedBriefDigest: createHash('sha256').update(context).digest('hex'), documentRevision: 'rev-1', workspaceRevision: 'workspace-1' })
     const ready = { ...run, phase: 'DOCUMENT_DRAFTING' as const, documentStep: 'FOUNDATION_DRAFTING' as const, foundationDraftState: { completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS] }, revision: { ...run.revision, document: 'rev-1' } }
@@ -117,9 +130,9 @@ describe('foundation fact runtime controller integration', () => {
       async function complete(taskId: string) {
         const snapshot = await controller.store.load()
         const task = snapshot!.foundationAuditState!.tasks.find(candidate => candidate.taskId === taskId)!
-        const packet = task.dispatch!.request!.contract.packet as { keys: string[] }
+        const packet = task.dispatch!.request!.contract.packet as { keys: string[]; sections: Array<{ documentPath: string; sectionId: string; startLine: number; endLine: number; text: string }> }
         await controller.store.addWorkflowUsage(snapshot!.runId, { input_tokens: 2, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 3, total_tokens: 5 }, task.dispatch!.dispatchId)
-        await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: snapshot!.runId, dispatchId: task.dispatch!.dispatchId, taskId, revision: task.revision, packetDigest: task.packetDigest, results: packet.keys.map(key => ({ key, status: 'absent' })) })
+        await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: snapshot!.runId, dispatchId: task.dispatch!.dispatchId, taskId, revision: task.revision, packetDigest: task.packetDigest, results: await presentFactResults(workspacePath, packet) })
       }
       const firstWave = current!.foundationAuditState!.tasks.filter(task => task.status === 'running').map(task => task.taskId)
       await Promise.all(firstWave.map(complete))
@@ -150,11 +163,38 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
+  test('publishes mechanically resolved and worker-resolved facts through one complete store', async () => {
+    const mechanicalGdd = document('docs/GDD.md').replace('unresolved prose', 'players.max: 4')
+    const { workspacePath, controller, requests } = await preparedController(undefined, true, { 'docs/GDD.md': mechanicalGdd })
+    try {
+      await finishFacts(controller)
+      const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'rev-1' })
+      expect(committed?.factStore).toHaveLength(FOUNDATION_FACT_CATALOG.length)
+      expect(committed?.factStore.find(fact => fact.key === 'game.players.max')?.value).toBe(4)
+      expect(committed?.factStore.find(fact => fact.key === 'game.platform')?.value).toBe('quest')
+      const factPackets = requests.filter(request => request.workerType === 'foundation-fact-extractor')
+      expect(factPackets.every(request => !((request.contract as { packet?: { keys?: string[] } }).packet?.keys ?? []).includes('game.players.max'))).toBe(true)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('zero worker packets use the same finalizer and commit a complete store', async () => {
+    const completeDocuments = Object.fromEntries(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, completeDocument(path)])) as Partial<Record<(typeof CANONICAL_FOUNDATION_DOCUMENTS)[number], string>>
+    const { workspacePath, controller, requests } = await preparedController(undefined, true, completeDocuments)
+    try {
+      const current = await controller.store.load()
+      expect(current?.foundationAuditState?.status).toBe('semantic_review')
+      expect(requests.filter(request => request.workerType === 'foundation-fact-extractor')).toHaveLength(0)
+      const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'rev-1' })
+      expect(committed?.factStore).toHaveLength(FOUNDATION_FACT_CATALOG.length)
+      expect(JSON.parse((await readFile(join(workspacePath, '.beegame/audit/foundation/rev-1/derived/COMMITTED.json'))).toString()).status).toBe('committed')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
   test('keeps invalid results retryable and replays an admitted terminal idempotently', async () => {
     const { workspacePath, controller } = await preparedController()
     try {
       let current = await controller.store.load()
-      const task = current!.foundationAuditState!.tasks.find(candidate => candidate.status === 'running')!
+      const task = current!.foundationAuditState!.tasks.find((candidate): candidate is FoundationFactTask => candidate.kind === 'document-facts' && candidate.status === 'running')!
       await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {
         workerType: 'foundation-fact-extractor', status: 'completed', runId: current!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId,
         revision: task.revision, packetDigest: task.packetDigest,
@@ -245,8 +285,9 @@ describe('foundation fact runtime controller integration', () => {
     const { workspacePath, controller } = await preparedController()
     try {
       const current = await controller.store.load()
-      const task = current!.foundationAuditState!.tasks.find(candidate => candidate.status === 'running')!
-      await controller.store.addWorkflowUsage(current!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 513, total_tokens: 514 }, task.dispatch!.dispatchId)
+      const task = current!.foundationAuditState!.tasks.find((candidate): candidate is FoundationFactTask => candidate.kind === 'document-facts' && candidate.status === 'running')!
+      const completionTokens = foundationFactOutputTokenLimit(task.factKeyCount) + 1
+      await controller.store.addWorkflowUsage(current!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: completionTokens, total_tokens: completionTokens + 1 }, task.dispatch!.dispatchId)
       const packet = task.dispatch!.request!.contract.packet as { keys: string[] }
       await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {
         workerType: 'foundation-fact-extractor', status: 'completed', runId: current!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId,
@@ -258,7 +299,7 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
-  async function finishFacts(controller: ReturnType<typeof createDeliveryWorkflowController>, valueForKey?: (key: string) => FactValue | undefined) {
+  async function finishFacts(controller: ReturnType<typeof createDeliveryWorkflowController>, valueForKey: (key: string) => FactValue | undefined = consistentFactValue) {
     while (true) {
       const current = await controller.store.load()
       const running = current?.foundationAuditState?.tasks.filter(task => task.kind === 'document-facts' && task.status === 'running') ?? []
@@ -772,7 +813,7 @@ describe('foundation fact runtime controller integration', () => {
       const packet = JSON.parse((await readFile(join(workspacePath, stableTask.packetPath))).toString()) as { revision: string; packetDigest: string; keys: string[]; sections: Array<{ documentPath: string; sectionId: string; startLine: number; endLine: number }> }
       expect(packet.revision).toBe(stableTask.revision)
       expect(packet.packetDigest).toBe(stableTask.packetDigest)
-      expect(stableTask.dispatch?.request?.contract).not.toHaveProperty('packet')
+      expect(stableTask.dispatch?.request?.contract.packet).toEqual(packet)
       expect((await readFile(join(workspacePath, stableTask.packetPath))).toString()).toBe(plannedAtCrash.bytes)
       expect(requests.filter(request => request.workerType === 'foundation-fact-extractor')).toHaveLength(factWorkersBefore + 1)
       const snapshot = await controller.store.load()
@@ -1213,8 +1254,7 @@ describe('foundation fact runtime controller integration', () => {
       expect(request?.allowedPaths).toEqual([])
       expect(request?.projectReadScope).toBe('empty')
       expect(request?.workflowJsonSchema).toBeDefined()
-      expect(request?.contract).not.toHaveProperty('packet')
-      expect(request?.contract).toMatchObject({ taskId: task.taskId, packetPath: task.packetPath, packetDigest: task.packetDigest, issueId: task.issueId, modelTier: 'strong' })
+      expect(request?.contract).toMatchObject({ taskId: task.taskId, packetPath: task.packetPath, packetDigest: task.packetDigest, packet: expect.any(Object), issueId: task.issueId, modelTier: 'strong' })
       const packet = JSON.parse((await readFile(join(workspacePath, task.packetPath))).toString()) as { expected?: string; actual?: string; sections?: Array<{ text?: string }> }
       expect(claimedTask.kind).toBe('semantic-recheck')
       expect(claimedTask.status).toBe('running')
@@ -1601,7 +1641,8 @@ describe('foundation fact runtime controller integration', () => {
       const planned = await controller.store.load()
       const task = planned!.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'impacted-facts')!
       const packet = JSON.parse((await readFile(join(workspacePath, task.packetPath))).toString()) as { keys: string[] }
-      await controller.store.addWorkflowUsage(planned!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 513, total_tokens: 514 }, task.dispatch!.dispatchId)
+      const completionTokens = foundationFactOutputTokenLimit(packet.keys.length) + 1
+      await controller.store.addWorkflowUsage(planned!.runId, { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: completionTokens, total_tokens: completionTokens + 1 }, task.dispatch!.dispatchId)
       await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: planned!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, results: packet.keys.map(key => ({ key, status: 'absent' as const })) })).rejects.toThrow(/invalid|cap/i)
       expect((await controller.store.load())!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!.status).toBe('needs_action')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }

@@ -70,7 +70,7 @@ import { recordFoundationFailure } from './foundation-authoring-batch'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { extractNormalizedFoundationFacts, buildFoundationFactPackets, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
+import { extractNormalizedFoundationFacts, buildFoundationFactPackets, mergeFoundationFactResults, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
 import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactOutputTokenLimit, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, loadCommittedFoundationDerivedArtifacts, loadDeterministicFoundationReview, publishFoundationSemanticReview, loadFoundationSemanticReview } from './foundation-audit-artifacts'
 import { createFoundationFactStore, digestFactStore, type FoundationFact } from './foundation-fact-store'
@@ -331,13 +331,17 @@ export function createDeliveryWorkflowController(input: {
     if (!state || state.status !== 'facts_staged') return
     const artifacts = await loadFoundationAuditArtifacts({ workspacePath: input.workspacePath, revision: state.revision, expectedState: state })
     if (!artifacts) throw new Error('foundation fact section index is unavailable during finalization')
-    const facts = []
+    const documents = new Map(
+      await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(input.workspacePath, path), 'utf8')] as const)),
+    )
+    const mechanical = extractNormalizedFoundationFacts({ documents, sectionIndex: artifacts.sectionIndex })
+    const workerFacts: FoundationFact[] = []
     for (const task of state.tasks) {
       if (!task.receiptPath || !task.receiptDigest || !task.terminalDigest) throw new Error('foundation fact task receipt binding is incomplete')
       const receipt = await loadFoundationFactReceipt({ workspacePath: input.workspacePath, revision: state.revision, taskId: task.taskId, expectedPacketDigest: task.packetDigest, expectedTerminalDigest: task.terminalDigest, expectedReceiptPath: task.receiptPath, expectedReceiptDigest: task.receiptDigest })
-      facts.push(...receipt.facts)
+      workerFacts.push(...receipt.facts)
     }
-    const factStore = createFoundationFactStore(facts)
+    const factStore = mergeFoundationFactResults({ mechanicalFacts: mechanical.facts, workerFacts })
     const normalizedFactDigest = digestFactStore(factStore)
     const published = await publishFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision, documentDigests: artifacts.documentDigests, sectionIndex: artifacts.sectionIndex, factStore, normalizedFactDigest, manifest: artifacts.manifest as unknown as Record<string, unknown> })
     const lease = await store.mutationLock(run.runId)

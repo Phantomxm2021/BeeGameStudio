@@ -361,6 +361,48 @@ export function extractSelectedFoundationFacts(input: {
   })
 }
 
+function canonicalFactIdentity(fact: FoundationFact): string {
+  return JSON.stringify({
+    key: fact.key,
+    value: fact.value,
+    evidence: {
+      documentPath: fact.evidence.documentPath,
+      sectionId: fact.evidence.sectionId,
+      startLine: fact.evidence.startLine,
+      endLine: fact.evidence.endLine,
+      digest: fact.evidence.digest,
+    },
+  })
+}
+
+/**
+ * Combines the local extraction result with admitted worker facts into the
+ * one closed-catalog Fact Store. Both producers are independently validated;
+ * a duplicate is accepted only when its value and evidence agree.
+ */
+export function mergeFoundationFactResults(input: {
+  mechanicalFacts: readonly FoundationFact[]
+  workerFacts: readonly FoundationFact[]
+}): FoundationFact[] {
+  const byKey = new Map<string, FoundationFact>()
+  for (const fact of [...input.mechanicalFacts, ...input.workerFacts]) {
+    const normalized = createFoundationFactStore([fact])[0]!
+    const existing = byKey.get(normalized.key)
+    if (existing) {
+      if (canonicalFactIdentity(existing) !== canonicalFactIdentity(normalized))
+        throw new Error(`conflicting foundation fact result: ${normalized.key}`)
+      continue
+    }
+    byKey.set(normalized.key, normalized)
+  }
+  const missing = FOUNDATION_FACT_CATALOG
+    .map(definition => definition.key)
+    .filter(key => !byKey.has(key))
+  if (missing.length)
+    throw new Error(`foundation fact catalog coverage is incomplete: ${missing.join(', ')}`)
+  return createFoundationFactStore([...byKey.values()])
+}
+
 function canonicalPacketIdentity(
   value: Omit<FoundationFactPacket, 'packetDigest' | 'bytesUtf8'>,
 ): string {
