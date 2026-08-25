@@ -43,19 +43,22 @@
 > ↓  
 > PASS
 
-# 3. 文档生成时同步产出机器可读信息
+# 3. 文档提交后派生机器可读信息
 
-每份 Markdown 文档生成时，同时产出：
+八份 canonical Markdown 文档全部 durable committed 后，由服务端统一派生：
 
-> document.md  
-> document.fact.json  
-> document.index.json
+> 8 canonical `document.md`
+> `.beegame/audit/foundation/<revision>/derived/fact-store.json`
+> `.beegame/audit/foundation/<revision>/derived/section-index.json`
+> `.beegame/audit/foundation/<revision>/derived/COMMITTED.json`
 
 ## 3.1 Fact Store
 
 Fact Store 不是普通摘要，而是可比较、可校验的标准化事实集合。
 
-Fact extraction uses the closed v1 catalog as authority: packets carry exact owner Section text, sort document/section/key identities canonically, and split only between complete owner sections at the 16 KiB boundary.
+Fact extraction uses the closed v1 catalog as authority: packets carry exact owner Section text, sort document/section/key identities canonically, and split only between complete owner sections at the 16 KiB boundary. A fact worker's packet is its sole business input. It may receive only language, immutable task/revision/packet identities, the strict output schema, explicit read/write denial, and the packet itself; it must not receive the Confirmed Brief, workspace context, canonical document inventory, or generic project instructions. Brief-derived constraints are projected by local code into catalog keys or immutable digests before dispatch.
+
+Local mechanical extraction runs first. Final Fact Store publication merges mechanically extracted facts with admitted worker facts and validates exact closed-catalog coverage; resolved mechanical facts must not be discarded merely because no worker returned them.
 
 > {  
 > "players.max": 4,  
@@ -68,12 +71,14 @@ Fact extraction uses the closed v1 catalog as authority: packets carry exact own
 
 ## 3.2 Section Index
 
-记录关键主题所在章节，发现问题时直接读取目标区域，避免重新扫描全文。
+聚合记录八份文档的稳定 Section ID、边界与 digest。发现问题时按 revision-bound SectionRef 读取目标区域，避免重新扫描全文；行号只能作为显示信息，不能充当身份或 authority。
 
 > {  
-> "combat": "L120-L185",  
-> "boss": "L220-L270",  
-> "progression": "L300-L350"  
+> "document": "GDD",
+> "section_id": "rules_systems",
+> "start_line": 120,
+> "end_line": 185,
+> "digest": "sha256:..."
 > }
 
 # 4. 审计分层
@@ -149,6 +154,8 @@ Semantic Audit 不做全文自由扫描，也不按“8 份文档各读一次”
 
 严重程度：BLOCKER / HIGH / MEDIUM / LOW。默认自动处理
 BLOCKER、HIGH、MEDIUM；LOW 可记录为 Known Issues。
+
+审计问题与运行完整性失败必须分离：业务矛盾、遗漏和新发现的问题进入并发布唯一的 Issue Registry，驱动下一修订轮；stale digest、越权 Section、非法 Patch、缺失 receipt、身份不匹配等完整性失败不进入 Registry，直接 fail closed 并进入 `needs_action`。发现新 Issue 不是拒绝发布本轮 Registry 的理由。
 
 # 8. Source of Truth
 
@@ -234,10 +241,12 @@ Recheck。
 | LLM 输出   | 强制 JSON / Patch，不允许长篇解释        |
 | Issue 处理 | 优先 BLOCKER/HIGH/MEDIUM                 |
 | 修订调用   | 同文档合并，一文档尽量一次               |
-| 并行度     | 单文档语义审计、不同文档修订可并行       |
+| 并行度     | 有界并行；默认上限 4，任务声明可取更低值 |
 | 复审       | 优先 Patch Validation，不做全文 Re-Audit |
 | 最大循环   | 2–3 轮                                   |
-| 全文读取   | 仅 L3 Deep Audit 允许                    |
+| 全文读取   | 禁止；L3 也只能追加明确选中的索引 Section |
+
+预算必须由“必需任务数 × 每任务输入/输出/重试边界”推导，并逐任务记录实际 token、duration 和 failure reason。不得用无法容纳全部必需 packet 的任意全局 token cap，或共享墙钟 deadline，提前终止尚未打开的任务。超时与重试在单任务边界执行；恢复不得重置、绕过或伪造这些边界。
 
 # 14. 停止条件
 
@@ -245,8 +254,10 @@ Recheck。
 > Round 2: 修新增 BLOCKER + HIGH  
 > Round 3: 仅修 BLOCKER  
 >   
-> 无 BLOCKER → PASS  
+> 无 BLOCKER / HIGH → PASS
 > 剩余 MEDIUM / LOW → Known Issues
+
+每轮成功验证后必须原子发布一个新的、不可变且 revision-bound 的文档 authority、derived artifacts 与 Issue Registry；下一轮只能引用该 authority。新 Issue 随本轮 Registry 发布后进入下一轮，不得因“存在新 Issue”回退为未发布状态。Round 3 后若仍有 BLOCKER/HIGH，流程进入 `needs_action`，不得静默 PASS，也不得创建另一条候选/兼容修订轨道。
 
 # 15. 最终生产 Pipeline
 
@@ -345,6 +356,12 @@ Recheck。
 - Patch Validation 代替全文 Re-Audit。
 
 - LLM 负责语义判断，而不是承担所有审计。
+
+- 单一 durable task collection 负责 dispatch、恢复与审计记录；不得为暂停恢复、Reviewer 或 revision candidate 创建第二套状态机。
+
+- Dashboard 只投影普通任务状态、轮次、Issue 数量与 Known Issues 摘要；它不是审计或修订 authority，也不展示原始 Registry JSON。
+
+- 所有终态任务都保留 usage、duration 与 failure reason，确保成本和失败可按任务追溯。
 
 **推荐生产架构：Fact Store + Rule Engine + Contract Validator + LLM
 Semantic Auditor + Incremental Patch**

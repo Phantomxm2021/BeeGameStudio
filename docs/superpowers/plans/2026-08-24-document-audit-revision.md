@@ -1,6 +1,8 @@
 # Bee Game Studio Document Audit and Revision Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-08-25): historical — do not execute as written.** This file is retained as implementation history, not as a second authority or an executable current plan. The authority remains `docs/Bee_Game_Studio_Doc_Audit_Revision_Optimized.md`; the approved runtime closure is specified by `docs/superpowers/specs/2026-08-25-document-audit-runtime-closure-design.md`. The closure design supersedes the fixed aggregate token caps and shared phase/round deadlines in Tasks 4B, 5, and 6; the 512-token fact output ceiling; any L3 whole-document read; any recovery-only pause repair; and any transition that refuses to publish a valid resulting Issue Registry merely because it contains new issues. All unaffected completed work and single-track constraints are context for the forthcoming closure plan, not instructions to resume this checklist.
+
+> **Historical execution note:** This plan originally required superpowers:subagent-driven-development or superpowers:executing-plans. That instruction is inactive with the plan's historical status above.
 
 **Goal:** Implement the authoritative Fact Store + Rule/Contract + semantic audit + issue-driven batch revision pipeline after the eight canonical Markdown documents are committed.
 
