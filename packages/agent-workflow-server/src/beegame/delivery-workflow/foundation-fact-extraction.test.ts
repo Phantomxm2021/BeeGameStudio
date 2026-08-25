@@ -162,7 +162,7 @@ describe('mechanical normalized foundation extraction', () => {
     expect(fact.evidence!.digest).toMatch(/^[a-f0-9]{64}$/)
   })
 
-  test('creates bounded packets only for unresolved keys and exact owner slices', () => {
+  test('creates packets only for unresolved keys and exact owner slices', () => {
     const index = sectionIndex()
     const mechanical = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: index })
     const packets = buildFoundationFactPackets({
@@ -171,13 +171,13 @@ describe('mechanical normalized foundation extraction', () => {
       sectionIndex: index,
       unresolvedKeys: mechanical.unresolvedKeys,
     })
-    expect(packets.every(packet => packet.bytesUtf8 <= 16 * 1024)).toBe(true)
+    expect(packets.every(packet => packet.bytesUtf8 > 0)).toBe(true)
     expect(packets.every(packet => packet.keys.every(key => FOUNDATION_FACT_CATALOG.some(item => item.key === key)))).toBe(true)
     expect(packets.every(packet => packet.sections.every(section => section.text.length > 0))).toBe(true)
     expect(packets.every(packet => !('documentPathSelector' in packet))).toBe(true)
   })
 
-  test('splits oversized documents only at complete owner sections', () => {
+  test('keeps one stable packet per document without dropping complete owner sections', () => {
     const level = `# LEVEL\n<!-- beegame-section:encounters -->\n## Encounters\nrequired_entities: [player]\n${'x'.repeat(6000)}\n<!-- beegame-section:content_matrix -->\n## Content Matrix\nrequired_assets: [player]\n${'x'.repeat(6000)}\n<!-- beegame-section:production_acceptance -->\n## Production Acceptance\ncomplexity_budget: 100\n${'x'.repeat(6000)}\n`
     const documents = { ...docs, 'docs/LEVEL_SCENE_DESIGN.md': level }
     const packets = buildFoundationFactPackets({
@@ -186,8 +186,8 @@ describe('mechanical normalized foundation extraction', () => {
       sectionIndex: indexDocuments(documents),
       unresolvedKeys: ['level.complexity_budget', 'level.required_assets', 'level.required_entities'],
     })
-    expect(packets).toHaveLength(2)
-    expect(packets.every(packet => packet.bytesUtf8 <= 16 * 1024)).toBe(true)
+    expect(packets).toHaveLength(1)
+    expect(packets.every(packet => packet.bytesUtf8 > 0)).toBe(true)
     expect(packets.flatMap(packet => packet.keys).sort()).toEqual([
       'level.complexity_budget',
       'level.required_assets',
@@ -198,19 +198,41 @@ describe('mechanical normalized foundation extraction', () => {
       'encounters',
       'production_acceptance',
     ])
-    expect(packets[0]!.sections.map(section => section.sectionId)).toEqual(['content_matrix', 'encounters'])
-    expect(packets[1]!.sections.map(section => section.sectionId)).toEqual(['production_acceptance'])
+    expect(packets[0]!.sections.map(section => section.sectionId)).toEqual(['content_matrix', 'encounters', 'production_acceptance'])
   })
 
-  test('rejects a single owner section that cannot fit an empty packet', () => {
+  test('builds and validates a legal single owner section larger than 16 KiB', () => {
     const level = `# LEVEL\n<!-- beegame-section:encounters -->\n## Encounters\nrequired_entities: [player]\n${'x'.repeat(20_000)}\n`
     const documents = { ...docs, 'docs/LEVEL_SCENE_DESIGN.md': level }
-    expect(() => buildFoundationFactPackets({
+    const index = indexDocuments(documents)
+    const packet = buildFoundationFactPackets({
       revision: 'revision-too-large',
       documents,
-      sectionIndex: indexDocuments(documents),
+      sectionIndex: index,
       unresolvedKeys: ['level.required_entities'],
-    })).toThrow(/exceeds 16 KiB.*LEVEL_SCENE_DESIGN/i)
+    })[0]!
+    expect(packet.bytesUtf8).toBeGreaterThan(16 * 1024)
+    expect(packet.packetDigest).toMatch(/^[a-f0-9]{64}$/)
+    const admitted = validateFoundationFactResults({
+      packet,
+      expectedRevision: 'revision-too-large',
+      documents,
+      sectionIndex: index,
+      results: [{
+        key: 'level.required_entities',
+        status: 'present',
+        value: ['player'],
+        evidence: {
+          documentPath: 'docs/LEVEL_SCENE_DESIGN.md',
+          sectionId: 'encounters',
+          startLine: 4,
+          endLine: 4,
+          digest: createHash('sha256').update('required_entities: [player]').digest('hex'),
+        },
+      }],
+    })
+    expect(admitted.facts.map(fact => fact.key)).toEqual(['level.required_entities'])
+    expect(admitted.normalizedFactDigest).toMatch(/^[a-f0-9]{64}$/)
   })
 
   test('canonicalizes reordered unresolved keys to identical packets and digests', () => {

@@ -16,7 +16,6 @@ import type { AuditIssue, AuditIssueDraft } from './foundation-issue-registry'
 import type { FoundationDocumentPath } from './types'
 
 export const FOUNDATION_SEMANTIC_AUDIT_VERSION = 'foundation-semantic.v1' as const
-export const SEMANTIC_PACKET_MAX_BYTES = 16 * 1024
 
 export type FoundationSemanticDocumentId =
   | 'GDD'
@@ -289,7 +288,6 @@ export function buildFoundationSemanticPacket(input: FoundationSemanticPacketInp
   const identity = sha256(canonical({ revision: input.revision, manifestDigest: manifest.digest, fullSectionIndexDigest, fullFactStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, selectedDeterministicPrefixDigest, checkId: input.checkId, selectedSectionDigests: sections.map(item => [item.sectionKey, item.ref.digest]) }))
   const packetBody = { version: FOUNDATION_SEMANTIC_AUDIT_VERSION, revision: input.revision, manifestDigest: manifest.digest, checkId: input.checkId, sections, facts, deterministicIssuePrefix, selectedDeterministicPrefixDigest, fullSectionIndexDigest, fullFactStoreDigest, deterministicReviewDigest: input.deterministicReviewDigest, identity, context: { fresh: true as const, resume: false as const, sessionId: null } }
   const bytes = Buffer.byteLength(canonical(packetBody), 'utf8')
-  if (bytes > SEMANTIC_PACKET_MAX_BYTES) throw new Error(`semantic packet exceeds ${SEMANTIC_PACKET_MAX_BYTES} bytes`)
   return deepFreeze({ ...packetBody, bytes })
 }
 

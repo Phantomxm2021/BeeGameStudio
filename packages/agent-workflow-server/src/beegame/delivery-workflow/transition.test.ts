@@ -249,6 +249,15 @@ function revisionState(): FoundationRevisionState {
   }
 }
 
+function validationBoundaryState(): FoundationRevisionState {
+  const state = completedRevisionState()
+  return {
+    ...state,
+    phase: 'validating',
+    status: 'needs_action',
+  }
+}
+
 function revisionRun(state: FoundationRevisionState): DeliveryRun {
   return {
     ...createTestDeliveryRun({ projectId: 'transition-retry-revision', ownerId: 'transition-owner' }),
@@ -345,6 +354,45 @@ describe('foundation retry transitions', () => {
     expect(dualRetry.foundationAuditState).toEqual(auditBefore)
     expect(dualRevision.tasks[0]).toMatchObject({ kind: 'semantic-recheck', status: 'pending' })
     expect(dualRevision.tasks[1]).toMatchObject({ kind: 'document-revision', status: 'needs_action' })
+  })
+
+  test('re-enters a validating boundary without reviving completed workers', () => {
+    const before = validationBoundaryState()
+    const run = revisionRun(before)
+    const retried = transitionDeliveryRun(run, { type: 'retry' })
+
+    expect(retried.status).toBe('running')
+    expect(retried.blockedReason).toBeUndefined()
+    expect(retried.foundationRevisionState).toEqual({ ...before, status: 'running' })
+
+    const taskRetry = transitionDeliveryRun(run, {
+      type: 'retry',
+      taskId: before.tasks[0]!.taskId,
+    })
+    expect(taskRetry.status).toBe('needs_action')
+    expect(taskRetry.foundationRevisionState).toEqual(before)
+  })
+
+  test('re-enters a failed planning boundary but never bypasses policy terminal states', () => {
+    const planning = {
+      ...revisionState(),
+      phase: 'planning' as const,
+      status: 'needs_action' as const,
+      tasks: [],
+    }
+    const retried = transitionDeliveryRun({
+      ...revisionRun(planning),
+      blockedReason: 'foundation revision planning materialization failed: transient store error',
+    }, { type: 'retry' })
+    expect(retried.status).toBe('running')
+    expect(retried.foundationRevisionState?.status).toBe('running')
+
+    const closing = transitionDeliveryRun({
+      ...revisionRun({ ...planning, phase: 'round_closing' }),
+      blockedReason: 'foundation revision round limit',
+    }, { type: 'retry' })
+    expect(closing.status).toBe('needs_action')
+    expect(closing.foundationRevisionState?.status).toBe('needs_action')
   })
 
   test('does not retry ineligible foundation failures', () => {

@@ -301,7 +301,9 @@ async function validateDocumentBytes(input: { workspacePath: string; revision: s
   const [canonicalBytes, stagedBytes] = await Promise.all([readFile(canonicalPath), readFile(stagedPath)])
   const canonicalDigest = sha256(canonicalBytes)
   if (input.initial && canonicalDigest !== input.receipt.baseDocumentDigest) throw new Error(`canonical bytes are stale for ${input.receipt.documentPath}`)
-  if (!input.initial && canonicalDigest !== input.receipt.baseDocumentDigest && canonicalDigest !== input.receipt.stagedDocumentDigest) throw new Error(`canonical bytes are neither base nor staged for ${input.receipt.documentPath}`)
+  if (!input.initial && canonicalDigest !== input.receipt.baseDocumentDigest && canonicalDigest !== input.receipt.stagedDocumentDigest) {
+    throw new Error(`canonical bytes are neither base nor staged for ${input.receipt.documentPath}`)
+  }
   if (sha256(stagedBytes) !== input.receipt.stagedDocumentDigest) throw new Error(`staged bytes are stale for ${input.receipt.documentPath}`)
   const baseSections = sectionMap(input.receipt.documentPath, input.initial ? canonicalBytes : (canonicalDigest === input.receipt.baseDocumentDigest ? canonicalBytes : stagedBytes))
   const stagedSections = sectionMap(input.receipt.documentPath, stagedBytes)
@@ -384,7 +386,11 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
   const allIssueIds = batches.flatMap(batch => batch.issueIds)
   if (new Set(allIssueIds).size !== allIssueIds.length) throw new Error('revision issue coverage contains duplicate IDs')
   const resolvedIssueIds = new Set(allIssueIds)
-  if (resultingIssues.some(issue => resolvedIssueIds.has(issue.id))) throw new Error('resulting AuditIssue overlaps a resolved revision issue')
+  const resultingIssueIds = new Set(resultingIssues.map(issue => issue.id))
+  const failedIssueIds = new Set([
+    ...validations.filter(validation => validation.status === 'FAIL').map(validation => validation.issueId),
+    ...semanticResults.filter(result => result.status === 'FAIL').map(result => result.issueId),
+  ])
   const groupedOperations = new Map<FoundationDocumentPath, PatchOperation[]>()
   for (const operation of operations) groupedOperations.set(operation.documentPath, [...(groupedOperations.get(operation.documentPath) ?? []), operation])
   const groupedValidations = new Map<FoundationDocumentPath, PatchValidation[]>()
@@ -407,12 +413,10 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
     const documentSemantic = semanticResults.filter(result => issueAuthority.get(result.issueId) === batch.documentPath)
     for (const validation of documentValidations) {
       if (validation.round !== input.round || validation.baseDocumentDigest !== receipt.baseDocumentDigest || validation.postPatchDocumentDigest !== receipt.stagedDocumentDigest || validation.patchDigest !== operationDigest || !sameSet(validation.changedSectionIds, receipt.changedSectionIds) || issueAuthority.get(validation.issueId) !== batch.documentPath || accounted.has(validation.issueId)) throw new Error('PatchValidation is stale, unassigned, or duplicated')
-      if (validation.status !== 'PASS') throw new Error('foundation revision publication rejects FAIL PatchValidation')
       accounted.add(validation.issueId)
     }
     for (const result of documentSemantic) {
       if (accounted.has(result.issueId)) throw new Error('issue has both PatchValidation and semantic recheck authority')
-      if (result.status !== 'PASS') throw new Error('foundation revision publication rejects FAIL semantic recheck')
       accounted.add(result.issueId)
     }
     const validationDigest = digestList([...documentValidations].sort((a, b) => a.issueId.localeCompare(b.issueId)))
@@ -421,6 +425,11 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
     documents.push({ documentPath: batch.documentPath, round: receipt.round, taskId: receipt.taskId, issueIds: [...receipt.issueIds], changedSectionIds: [...receipt.changedSectionIds], baseDocumentDigest: receipt.baseDocumentDigest, stagedDocumentDigest: receipt.stagedDocumentDigest, stagedPath: receipt.stagedPath, terminalDigest: receipt.terminalDigest, receiptDigest: receiptDigest(receipt), operationDigest, validationDigest, semanticResultDigest, resultDigest, patchOperations: [...documentOperations].sort(compareOperations) })
   }
   for (const issueId of allIssueIds) if (!accounted.has(issueId)) throw new Error(`revision issue ${issueId} is missing validated result coverage`)
+  for (const issueId of resolvedIssueIds) {
+    const resulting = resultingIssueIds.has(issueId)
+    const failed = failedIssueIds.has(issueId)
+    if (resulting !== failed) throw new Error(failed ? `FAIL PatchValidation or semantic result is missing resulting issue: ${issueId}` : `resulting AuditIssue overlaps a PASS revision issue: ${issueId}`)
+  }
   if (operations.some(operation => !receiptByPath.has(operation.documentPath))) throw new Error('revision has an unassigned document PatchOperation')
   documents.sort((a, b) => a.documentPath.localeCompare(b.documentPath))
   assertDigest(input.confirmedBriefDigest, 'confirmedBriefDigest')
@@ -546,7 +555,9 @@ async function recoverPrepared(input: FoundationRevisionRecoveryInput, prepared:
     const stagedBytes = await readFile(stagedPath)
     if (sha256(stagedBytes) !== document.stagedDocumentDigest) throw new Error(`staged bytes are corrupt for ${document.documentPath}`)
     const canonicalDigest = sha256(await readFile(canonicalPath))
-    if (canonicalDigest !== document.baseDocumentDigest && canonicalDigest !== document.stagedDocumentDigest) throw new Error(`canonical bytes are neither base nor staged for ${document.documentPath}`)
+    if (canonicalDigest !== document.baseDocumentDigest && canonicalDigest !== document.stagedDocumentDigest) {
+      throw new Error(`canonical bytes are neither base nor staged for ${document.documentPath}`)
+    }
     const entry = journal.entries.find(candidate => candidate.documentPath === document.documentPath)
     if (!entry) throw new Error(`publication journal is missing ${document.documentPath}`)
     const alreadyPublished = entry.status === 'published' && canonicalDigest === document.stagedDocumentDigest
@@ -593,4 +604,80 @@ export async function recoverFoundationRevision(input: FoundationRevisionRecover
   assertRevision(input.revision)
   const prepared = await readPrepared(input.workspacePath, input.revision)
   return recoverPrepared(input, prepared)
+}
+
+/**
+ * Reads a committed publication as historical authority without touching the
+ * current canonical documents.  Round policy needs the issue registry from a
+ * previous publication even after a later round has legitimately changed the
+ * canonical files; `recoverFoundationRevision` is intentionally stronger and
+ * may roll those files forward, so it is not suitable for this read path.
+ */
+export async function loadCommittedFoundationRevisionAuthority(
+  input: FoundationRevisionRecoveryInput,
+): Promise<FoundationRevisionPublicationResult> {
+  assertRevision(input.revision)
+  const prepared = await readPrepared(input.workspacePath, input.revision)
+  const committedPath = resolveProjectPath(
+    input.workspacePath,
+    foundationRevisionCommittedPath(input.revision),
+  )
+  const value = JSON.parse(await readFile(committedPath, 'utf8')) as unknown
+  assertObject(value, 'COMMITTED marker')
+  assertExactKeys(
+    value,
+    ['authorityDigest', 'baseRevision', 'confirmedBriefDigest', 'documentDigests', 'resultingIssueRegistryDigest', 'resultingRevision', 'round', 'schema', 'status'],
+    'COMMITTED marker',
+  )
+  if (
+    value.schema !== 'beegame-foundation-revision-commit-v2' ||
+    value.status !== 'committed' ||
+    value.baseRevision !== prepared.revision ||
+    value.confirmedBriefDigest !== prepared.confirmedBriefDigest ||
+    value.round !== prepared.round ||
+    value.authorityDigest !== prepared.authorityDigest ||
+    value.resultingIssueRegistryDigest !== prepared.resultingIssueRegistryDigest
+  ) throw new Error('COMMITTED marker authority is invalid')
+  assertDigest(value.resultingRevision, 'COMMITTED resultingRevision')
+  assertDigest(value.resultingIssueRegistryDigest, 'COMMITTED resulting issue registry authority')
+  assertObject(value.documentDigests, 'COMMITTED documentDigests')
+  const documentDigests = value.documentDigests as Record<string, unknown>
+  assertExactKeys(documentDigests, CANONICAL_FOUNDATION_DOCUMENTS, 'COMMITTED documentDigests')
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+    assertDigest(documentDigests[path], `COMMITTED document digest for ${path}`)
+
+  const journalPath = resolveProjectPath(
+    input.workspacePath,
+    foundationRevisionJournalPath(input.revision),
+  )
+  const journal = validateJournal(
+    JSON.parse(await readFile(journalPath, 'utf8')) as unknown,
+    prepared,
+  )
+  if (journal.entries.some(entry => entry.status !== 'published'))
+    throw new Error('COMMITTED publication journal is incomplete')
+  for (const document of prepared.documents) {
+    const entry = journal.entries.find(candidate => candidate.documentPath === document.documentPath)
+    if (!entry || entry.status !== 'published' || entry.canonicalDocumentDigest !== documentDigests[document.documentPath] || document.stagedDocumentDigest !== documentDigests[document.documentPath])
+      throw new Error('COMMITTED publication authority is inconsistent')
+  }
+
+  return {
+    status: 'committed',
+    baseRevision: prepared.revision,
+    resultingRevision: value.resultingRevision as string,
+    confirmedBriefDigest: prepared.confirmedBriefDigest,
+    authorityDigest: prepared.authorityDigest,
+    resultingIssues: frozenResultingIssues(prepared.resultingIssues),
+    resultingIssueRegistryDigest: prepared.resultingIssueRegistryDigest,
+    documentDigests: Object.fromEntries(
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, documentDigests[path] as string]),
+    ),
+    preparedPath: foundationRevisionPreparedPath(input.revision),
+    journalPath: foundationRevisionJournalPath(input.revision),
+    committedPath: foundationRevisionCommittedPath(input.revision),
+    patchOperations: Object.freeze(
+      prepared.documents.flatMap(document => document.patchOperations.map(operation => cloneJsonValue(operation) as PatchOperation)),
+    ),
+  }
 }

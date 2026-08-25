@@ -542,37 +542,15 @@ export function buildFoundationFactPackets(input: {
     byDocument.set(definition.owner.documentPath, documentSections)
   }
   const packets: FoundationFactPacket[] = []
-  for (const [documentPath, documentSections] of [...byDocument.entries()].sort(([left], [right]) => left.localeCompare(right))) {
-    let currentSections: FoundationFactPacketSection[] = []
-    let currentKeys: FoundationFactKey[] = []
-    const emit = () => {
-      if (!currentSections.length) return
-      const identity = { revision: input.revision, keys: currentKeys, sections: currentSections }
-      const bytesUtf8 = Buffer.byteLength(canonicalPacketIdentity(identity), 'utf8')
-      packets.push({ ...identity, bytesUtf8, packetDigest: sha256(canonicalPacketIdentity(identity)) })
-      currentSections = []
-      currentKeys = []
+  for (const [, documentSections] of [...byDocument.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const sections = [...documentSections.values()].sort((left, right) => left.section.sectionId.localeCompare(right.section.sectionId))
+    const identity = {
+      revision: input.revision,
+      keys: sections.flatMap(entry => entry.keys).sort(),
+      sections: sections.map(entry => entry.section),
     }
-    for (const entry of [...documentSections.values()].sort((left, right) => left.section.sectionId.localeCompare(right.section.sectionId))) {
-      const nextSections = [...currentSections, entry.section]
-      const nextKeys = [...currentKeys, ...entry.keys].sort()
-      const nextIdentity = { revision: input.revision, keys: nextKeys, sections: nextSections }
-      const nextBytes = Buffer.byteLength(canonicalPacketIdentity(nextIdentity), 'utf8')
-      if (nextBytes <= 16 * 1024) {
-        currentSections = nextSections
-        currentKeys = nextKeys
-        continue
-      }
-      if (!currentSections.length)
-        throw new Error(`foundation fact packet exceeds 16 KiB: ${documentPath}`)
-      emit()
-      const singleIdentity = { revision: input.revision, keys: [...entry.keys].sort(), sections: [entry.section] }
-      if (Buffer.byteLength(canonicalPacketIdentity(singleIdentity), 'utf8') > 16 * 1024)
-        throw new Error(`foundation fact packet exceeds 16 KiB: ${documentPath}`)
-      currentSections = [entry.section]
-      currentKeys = [...entry.keys].sort()
-    }
-    emit()
+    const bytesUtf8 = Buffer.byteLength(canonicalPacketIdentity(identity), 'utf8')
+    packets.push({ ...identity, bytesUtf8, packetDigest: sha256(canonicalPacketIdentity(identity)) })
   }
   return packets
 }
@@ -667,8 +645,8 @@ function validatePacket(
       throw new Error(`foundation fact packet key is mis-scoped: ${key}`)
   }
   const bytesUtf8 = Buffer.byteLength(canonicalPacketIdentity(packet), 'utf8')
-  if (packet.bytesUtf8 !== bytesUtf8 || packet.bytesUtf8 > 16 * 1024)
-    throw new Error('foundation fact packet byte bound is invalid')
+  if (packet.bytesUtf8 !== bytesUtf8)
+    throw new Error('foundation fact packet byte evidence is invalid')
   const identity = {
     revision: packet.revision,
     keys: [...packet.keys].sort(),

@@ -140,7 +140,7 @@ describe('foundation semantic runtime', () => {
     expect(foundationSemanticTasksComplete(state)).toBe(true)
   })
 
-  test('admits confirmations only from an admitted undecidable or blocker and caps four unique sources', () => {
+  test('admits every valid confirmation and keeps dispatch concurrency bounded at four', () => {
     const source = { ...task(0), status: 'completed' as const }
     const seeded = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: ten() })
     const admittedSource = {
@@ -157,8 +157,10 @@ describe('foundation semantic runtime', () => {
     expect(state.tasks.at(-1)).toMatchObject({ kind: 'confirmation', sourceTaskId: source.taskId, packetDigest: source.packetDigest, modelTier: 'strong', attempt: 0 })
     expect(() => appendFoundationConfirmationTask(state, { taskId: 'c2', sourceTaskId: source.taskId, admittedResult: admittedResult(source), now: '1970-01-01T00:01:01.000Z' })).toThrow(/already/i)
     expect(() => appendFoundationConfirmationTask(state, { taskId: 'c2', sourceTaskId: task(1).taskId, admittedResult: admittedResult(task(1), 'PASS'), now: '1970-01-01T00:01:01.000Z' })).toThrow(/outcome|UNDECIDABLE|BLOCKER/i)
-    for (let i = 1; i < 4; i++) state = appendFoundationConfirmationTask(state, { taskId: `c${i + 1}`, sourceTaskId: task(i).taskId, admittedResult: admittedResult(task(i)), now: '1970-01-01T00:01:01.000Z' })
-    expect(() => appendFoundationConfirmationTask(state, { taskId: 'c5', sourceTaskId: task(4).taskId, admittedResult: admittedResult(task(4)), now: '1970-01-01T00:01:01.000Z' })).toThrow(/limit/i)
+    for (let i = 1; i < 5; i++) state = appendFoundationConfirmationTask(state, { taskId: `c${i + 1}`, sourceTaskId: task(i).taskId, admittedResult: admittedResult(task(i)), now: '1970-01-01T00:01:01.000Z' })
+    expect(state.tasks.filter(item => item.kind === 'confirmation')).toHaveLength(5)
+    const claimed = claimFoundationSemanticTasks(state, { now: '1970-01-01T00:01:02.000Z', dispatchIdFor: item => `dispatch:${item.taskId}`, configuredTiers: { strong: true } })
+    expect(claimed.tasks.filter(item => item.kind === 'confirmation' && item.status === 'running')).toHaveLength(4)
   })
 
   test('rejects confirmation sources without durable admitted completion evidence', () => {

@@ -144,7 +144,11 @@ describe('delivery worker session credentials', () => {
       const starts: Array<Record<string, unknown>> = []
       const sessions = {
         start(input: Record<string, unknown>) { starts.push(input); return { id: 'session-revision' } },
-        events() { return [{ id: 'revision-terminal', type: 'tool.completed' as const, text: 'SubmitFoundationRevisionResult completed', createdAt: new Date(), payload: { type: 'tool.completed', toolName: 'SubmitFoundationRevisionResult', output: JSON.stringify({ data: { accepted: true, receipt } }) } }] },
+        events() { return [
+          { id: 'revision-tool-use', type: 'tool.started' as const, text: 'SubmitFoundationRevisionResult', createdAt: new Date(), payload: { type: 'tool.started', toolName: 'SubmitFoundationRevisionResult', input: { changedSectionIds: ['vision'], receipt: { forged: true } } } },
+          { id: 'revision-tool-result', type: 'tool.completed' as const, text: 'SubmitFoundationRevisionResult completed', createdAt: new Date(), payload: { type: 'tool.completed', toolName: 'SubmitFoundationRevisionResult', output: JSON.stringify({ accepted: true, receipt }) } },
+          { id: 'revision-end-turn', type: 'turn.completed' as const, text: 'turn completed', createdAt: new Date(), payload: { type: 'turn.completed' } },
+        ] },
       } as unknown as BeeGameSessionManager
       const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
       await port.start({

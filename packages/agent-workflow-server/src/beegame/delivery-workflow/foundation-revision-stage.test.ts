@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { getGameDocumentContract } from './game-document-contracts'
+import { buildFoundationSectionIndex } from './foundation-section-index'
 import * as revisionStage from './foundation-revision-stage'
 import {
   createFoundationRevisionStage,
@@ -105,6 +106,52 @@ test('builds a revision packet without duplicate issue evidence', async () => {
   expect(packetIssues).toEqual([expect.objectContaining({ id: 'AUD-1', actual: 'actual' })])
   expect(packetIssues[0]).not.toHaveProperty('problem')
   expect(packetIssues[0]).not.toHaveProperty('evidenceRefs')
+})
+
+test('accepts a legal complex revision packet above the old 24KiB business cap', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const canonicalPath = join(workspace, documentPath)
+  const original = await readFile(canonicalPath, 'utf8')
+  await writeFile(canonicalPath, original.replace('original vision', 'complex revision context '.repeat(1500)))
+  const sections = buildFoundationSectionIndex({ documents: { [documentPath]: await readFile(canonicalPath, 'utf8') } })
+  const source = sections.find(section => section.sectionId === 'vision')!
+  const target = sections.find(section => section.sectionId === 'progression')!
+  const issue = {
+    id: 'AUD-large-revision-packet',
+    severity: 'HIGH' as const,
+    type: 'semantic' as const,
+    source,
+    target,
+    expected: 'expected',
+    actual: 'detailed admitted issue context '.repeat(1500),
+    fixDocument: documentPath,
+    fixSectionId: 'rules_systems',
+  }
+
+  const authority = await buildFoundationRevisionAuthority({
+    workspacePath: workspace,
+    revision,
+    taskId: 'revision-task-large-packet',
+    round: 1,
+    batch: { documentPath, sectionIds: ['rules_systems'], issueIds: [issue.id] },
+    issues: [issue],
+    sourceAuthorityDigest: 'c'.repeat(64),
+    sourceIssueRegistryDigest: 'd'.repeat(64),
+    sourceDerivedDigests: { sectionIndex: 'e'.repeat(64), factStore: 'f'.repeat(64), manifest: '0'.repeat(64) },
+    sourceDocumentDigests: [{ path: documentPath, digest: '1'.repeat(64) }],
+    normalizedFacts: [],
+  })
+
+  expect(Buffer.byteLength(JSON.stringify(authority.packet), 'utf8')).toBeGreaterThan(24 * 1024)
+  expect(authority.packet.documentPath).toBe(documentPath)
+  expect(authority.packet.issueIds).toEqual([issue.id])
+  expect(authority.packet.sectionIds).toEqual(['rules_systems'])
+  expect(authority.packet.issues).toEqual([issue])
+  expect(authority.packet.sections).toEqual(expect.arrayContaining([
+    expect.objectContaining({ sectionId: 'vision', documentPath }),
+    expect.objectContaining({ sectionId: 'rules_systems', documentPath }),
+  ]))
+  expect(authority.packetDigest).toBe(foundationRevisionPacketDigest(authority.packet))
 })
 
 test('persists semantic result artifacts immutably and binds issue, packet, result digest, and path', async () => {

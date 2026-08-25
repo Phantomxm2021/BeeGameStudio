@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import {
   mkdir,
   mkdtemp,
+  realpath,
   readFile,
   readdir,
   rm,
@@ -12,6 +13,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
 import { createAgentWorkflowApp } from '../app'
+import { DashboardRepository } from '../dashboard-repository'
+import {
+  getBeeGameProjectDatabasePath,
+  BeeGameProjectMetadataStore,
+} from '../project-metadata-store'
+import { getUserDashboardDataRoot } from '../local-runtime-service'
 import {
   registerBeeGameSessionRoutes,
   resolveValidRequestAccessToken,
@@ -913,12 +920,13 @@ describe('delivery workflow session continuation', () => {
       }
       const recoverablePath = CANONICAL_FOUNDATION_DOCUMENTS[1]
       const recoverableDispatchId = 'recoverable-foundation-draft'
+      const canonicalWorkspace = await realpath(workspace)
       const recoverableRequest = {
         dispatchId: recoverableDispatchId,
         runId: journalRun.runId,
         ownerId,
         projectId,
-        workspacePath: workspace,
+        workspacePath: canonicalWorkspace,
         workerType: 'document-author' as const,
         phase: 'DOCUMENT_DRAFTING' as const,
         taskId: recoverablePath,
@@ -1055,6 +1063,302 @@ describe('delivery workflow session continuation', () => {
       ).toHaveLength(1)
     } finally {
       controllerFactory.mockRestore()
+      for (const cleanup of cleanups) cleanup()
+    }
+  })
+
+  it('uses the active session workspace for resume and retry after project root drift', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beegame-session-workspace-'))
+    temporaryDirectories.push(root)
+    const projectsRoot = join(root, 'projects')
+    const ownerId = 'session-workspace-owner'
+    const projectId = 'session-workspace-project'
+    const projectRoot = join(projectsRoot, 'users', ownerId, projectId)
+    const sessionWorkspace = join(
+      projectsRoot,
+      'users',
+      ownerId,
+      `${projectId}-review-copy`,
+    )
+    await mkdir(projectRoot, { recursive: true })
+    await mkdir(sessionWorkspace, { recursive: true })
+    const controllerWorkspaces: string[] = []
+    const createDeliveryController =
+      deliveryControllerModule.createDeliveryWorkflowController
+    const controllerFactory = spyOn(
+      deliveryControllerModule,
+      'createDeliveryWorkflowController',
+    ).mockImplementation(input => {
+      controllerWorkspaces.push(input.workspacePath)
+      return createDeliveryController(input)
+    })
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async ({ signal }) =>
+          new Promise<void>(resolve => {
+            signal.addEventListener('abort', () => resolve(), { once: true })
+          }),
+        stop: () => undefined,
+      }),
+    }
+    const cleanups: Array<() => void> = []
+    const app = createAgentWorkflowApp({
+      currentUser: { id: ownerId, role: 'owner' },
+      dashboardDataRoot: join(root, 'dashboard'),
+      defaultWorkspacePath: projectsRoot,
+      modelConfigStore: false,
+      skillsConfig: false,
+      sessionRunner: runner,
+      registerCleanup: cleanup => cleanups.push(cleanup),
+    })
+
+    try {
+      const projectResponse = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Session workspace fixture',
+          root_path: sessionWorkspace,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectResponse.status).toBe(200)
+      const project = (await projectResponse.json()) as {
+        id: string
+        name: string
+        root_path?: string
+        created_at: number
+      }
+      const sessionResponse = await app.request(
+        `/api/projects/${projectId}/session/ensure`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+      expect(sessionResponse.status).toBe(200)
+
+      new BeeGameProjectMetadataStore(
+        getBeeGameProjectDatabasePath(
+          getUserDashboardDataRoot(join(root, 'dashboard'), ownerId),
+        ),
+      ).upsertProject({ ...project, root_path: projectRoot })
+
+      const brief = JSON.stringify({
+        kind: 'confirmed_build_brief',
+        resource_library_usage: 'optional',
+        document_language: 'English',
+        game_user_visible_language: 'English',
+        agent_response_language: 'English',
+      })
+      const confirmedBriefDigest = createHash('sha256')
+        .update(brief)
+        .digest('hex')
+      const [documentRevision, workspaceRevision] = await Promise.all([
+        computeDocumentRevision(sessionWorkspace, confirmedBriefDigest),
+        computeWorkspaceRevision(sessionWorkspace),
+      ])
+      const run = createTestDeliveryRun({
+        runId: 'session-workspace-run',
+        projectId,
+        ownerId,
+        confirmedBriefContext: brief,
+        foundationDraftComplete: false,
+      })
+      const store = createRunStore(sessionWorkspace, ownerId)
+      const stoppedRun = {
+        ...run,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        documentStep: 'FOUNDATION_DRAFTING' as const,
+        currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
+        status: 'stopped' as const,
+        blockedReason: 'Synthetic interrupted turn.',
+        revision: {
+          document: documentRevision,
+          workspace: workspaceRevision,
+        },
+      }
+      await store.commit(stoppedRun, {
+        runId: stoppedRun.runId,
+        type: 'run.created',
+        phase: stoppedRun.phase,
+        status: stoppedRun.status,
+        revision: stoppedRun.revision,
+        createdAt: stoppedRun.createdAt,
+      })
+
+      const resumeResponse = await app.request(
+        `/api/projects/${projectId}/workflow/resume`,
+        { method: 'POST' },
+      )
+      expect(resumeResponse.status).toBe(200)
+      const retryResponse = await app.request(
+        `/api/projects/${projectId}/workflow/retry`,
+        { method: 'POST' },
+      )
+      expect(retryResponse.status).toBe(202)
+      expect(controllerFactory).toHaveBeenCalledTimes(1)
+      expect(controllerWorkspaces).toEqual([await realpath(sessionWorkspace)])
+      expect(await store.load()).toMatchObject({
+        runId: 'session-workspace-run',
+        projectId,
+        activeDispatch: { status: 'running' },
+      })
+      expect(
+        await Bun.file(join(projectRoot, '.beegame/workflow/run.json')).exists(),
+      ).toBe(false)
+    } finally {
+      controllerFactory.mockRestore()
+      for (const cleanup of cleanups) cleanup()
+    }
+  })
+
+  it('uses the latest persisted session workspace after restart when project root drifted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beegame-persisted-session-'))
+    temporaryDirectories.push(root)
+    const projectsRoot = join(root, 'projects')
+    const ownerId = 'persisted-session-owner'
+    const projectId = 'persisted-session-project'
+    const projectRoot = join(projectsRoot, 'users', ownerId, projectId)
+    const sessionWorkspace = join(
+      projectsRoot,
+      'users',
+      ownerId,
+      `${projectId}-review-copy`,
+    )
+    await mkdir(projectRoot, { recursive: true })
+    await mkdir(sessionWorkspace, { recursive: true })
+    const controllerWorkspaces: string[] = []
+    const createDeliveryController =
+      deliveryControllerModule.createDeliveryWorkflowController
+    const controllerFactory = spyOn(
+      deliveryControllerModule,
+      'createDeliveryWorkflowController',
+    ).mockImplementation(input => {
+      controllerWorkspaces.push(input.workspacePath)
+      return createDeliveryController(input)
+    })
+    const persistedSessions = spyOn(
+      DashboardRepository.prototype,
+      'listProjectSessions',
+    ).mockImplementation(async (_request, _user, requestedProjectId) =>
+      requestedProjectId === projectId
+        ? [
+            {
+              id: 'persisted-copy-session',
+              projectId,
+              workspacePath: await realpath(sessionWorkspace),
+              status: 'stopped',
+              transcriptPath: join(
+                sessionWorkspace,
+                'transcripts',
+                'persisted-copy-session.jsonl',
+              ),
+              createdAt: new Date('2026-08-26T00:00:00.000Z'),
+              updatedAt: new Date('2026-08-26T00:01:00.000Z'),
+            },
+          ]
+        : [],
+    )
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async ({ signal }) =>
+          new Promise<void>(resolve => {
+            signal.addEventListener('abort', () => resolve(), { once: true })
+          }),
+        stop: () => undefined,
+      }),
+    }
+    const cleanups: Array<() => void> = []
+    const app = createAgentWorkflowApp({
+      currentUser: { id: ownerId, role: 'owner' },
+      dashboardDataRoot: join(root, 'dashboard'),
+      defaultWorkspacePath: projectsRoot,
+      modelConfigStore: false,
+      skillsConfig: false,
+      sessionRunner: runner,
+      registerCleanup: cleanup => cleanups.push(cleanup),
+    })
+
+    try {
+      const projectResponse = await app.request('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: projectId,
+          name: 'Persisted session fixture',
+          root_path: projectRoot,
+          created_at: Date.now(),
+        }),
+      })
+      expect(projectResponse.status).toBe(200)
+
+      const brief = JSON.stringify({
+        kind: 'confirmed_build_brief',
+        resource_library_usage: 'optional',
+        document_language: 'English',
+        game_user_visible_language: 'English',
+        agent_response_language: 'English',
+      })
+      const confirmedBriefDigest = createHash('sha256')
+        .update(brief)
+        .digest('hex')
+      const [documentRevision, workspaceRevision] = await Promise.all([
+        computeDocumentRevision(sessionWorkspace, confirmedBriefDigest),
+        computeWorkspaceRevision(sessionWorkspace),
+      ])
+      const run = createTestDeliveryRun({
+        runId: 'persisted-session-run',
+        projectId,
+        ownerId,
+        confirmedBriefContext: brief,
+        foundationDraftComplete: false,
+      })
+      const store = createRunStore(sessionWorkspace, ownerId)
+      const stoppedRun = {
+        ...run,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        documentStep: 'FOUNDATION_DRAFTING' as const,
+        currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
+        status: 'stopped' as const,
+        blockedReason: 'Synthetic interrupted turn.',
+        revision: {
+          document: documentRevision,
+          workspace: workspaceRevision,
+        },
+      }
+      await store.commit(stoppedRun, {
+        runId: stoppedRun.runId,
+        type: 'run.created',
+        phase: stoppedRun.phase,
+        status: stoppedRun.status,
+        revision: stoppedRun.revision,
+        createdAt: stoppedRun.createdAt,
+      })
+
+      const resumeResponse = await app.request(
+        `/api/projects/${projectId}/workflow/resume`,
+        { method: 'POST' },
+      )
+      const retryResponse = await app.request(
+        `/api/projects/${projectId}/workflow/retry`,
+        { method: 'POST' },
+      )
+      expect(resumeResponse.status).toBe(200)
+      expect(retryResponse.status).toBe(202)
+      expect(persistedSessions).toHaveBeenCalled()
+      expect(controllerWorkspaces).toEqual([await realpath(sessionWorkspace)])
+      expect(await store.load()).toMatchObject({
+        runId: 'persisted-session-run',
+        activeDispatch: { status: 'running' },
+      })
+      expect(
+        await Bun.file(join(projectRoot, '.beegame/workflow/run.json')).exists(),
+      ).toBe(false)
+    } finally {
+      controllerFactory.mockRestore()
+      persistedSessions.mockRestore()
       for (const cleanup of cleanups) cleanup()
     }
   })

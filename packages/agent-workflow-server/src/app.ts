@@ -2939,8 +2939,18 @@ export function createAgentWorkflowApp(
         c.req.param('id'),
         dashboardRepository,
       )
-      if (!project?.root_path)
-        return c.json({ error: 'Project not found' }, 404)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      const workspacePath = sessionRef?.workspacePath ?? project.root_path
+      if (!workspacePath)
+        return c.json({ error: 'document_review_not_started' }, 409)
       const body = await readOptionalJson(c.req.raw)
       const runtimeBinding = await resolveProjectWorkflowRuntimeBinding({
         request: c.req.raw,
@@ -2956,7 +2966,7 @@ export function createAgentWorkflowApp(
         request: c.req.raw,
         user,
         projectId: project.id,
-        workspacePath: project.root_path,
+        workspacePath,
         mode: 'resume',
         ...runtimeBinding,
       })
@@ -2979,8 +2989,18 @@ export function createAgentWorkflowApp(
         c.req.param('id'),
         dashboardRepository,
       )
-      if (!project?.root_path)
-        return c.json({ error: 'Project not found' }, 404)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      const workspacePath = sessionRef?.workspacePath ?? project.root_path
+      if (!workspacePath)
+        return c.json({ error: 'document_review_not_started' }, 409)
       const body = await readOptionalJson(c.req.raw)
       const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
       const runtimeBinding = await resolveProjectWorkflowRuntimeBinding({
@@ -2997,7 +3017,7 @@ export function createAgentWorkflowApp(
         request: c.req.raw,
         user,
         projectId: project.id,
-        workspacePath: project.root_path,
+        workspacePath,
         mode: 'retry',
         ...(taskId ? { taskId } : {}),
         ...runtimeBinding,
@@ -6353,7 +6373,7 @@ async function resolveBeeGameProjectSessionReference(input: {
     latest?.id ||
     inferBeeGameSessionIdFromProjectId(input.project.id)
   const workspacePath =
-    live?.cwd || input.project.root_path || latest?.workspacePath
+    live?.cwd || latest?.workspacePath || input.project.root_path
   if (!sessionId || !workspacePath) return undefined
   return {
     sessionId,

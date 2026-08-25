@@ -352,6 +352,76 @@ describe('DashboardView runtime loading', () => {
     expect(loadAgents).not.toHaveBeenCalled();
   });
 
+  it('resumes a durable foundation revision boundary once when reconnecting', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'running' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    mockedProjectStatus = {
+      ...mockedProjectStatus,
+      phase: 'DOCUMENT_REVIEW',
+      blocked: false,
+      workflow: {
+        runId: 'run_round_closing',
+        status: 'running',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        tasks: [
+          { id: 'revision:brief.md', title: 'brief.md', status: 'completed' },
+          { id: 'revision:design.md', title: 'design.md', status: 'completed' },
+        ],
+      },
+    };
+
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    await waitFor(() => expect(loadProjectStatus).toHaveBeenCalledWith('proj_1'));
+    loadProjectStatus.mockClear();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/proj_1/workflow/resume',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    await waitFor(() => expect(loadProjectStatus).toHaveBeenCalledWith('proj_1'));
+
+    await act(async () => Promise.resolve());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reconnect-resume a completed workflow or a workflow with an active worker', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mockedProjectStatus = {
+      ...mockedProjectStatus,
+      phase: 'DOCUMENT_REVIEW',
+      blocked: false,
+      workflow: {
+        runId: 'run_completed',
+        status: 'completed',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        tasks: [{ id: 'revision:brief.md', title: 'brief.md', status: 'completed' }],
+      },
+    };
+
+    const view = render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+    await waitFor(() => expect(loadProjectStatus).toHaveBeenCalledWith('proj_1'));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    mockedProjectStatus = {
+      ...mockedProjectStatus,
+      workflow: {
+        ...mockedProjectStatus.workflow as Record<string, unknown>,
+        status: 'running',
+        worker: 'foundation-revision-worker',
+      },
+    };
+    view.rerender(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+    await act(async () => Promise.resolve());
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('refreshes credits as usage arrives and on explicit credit events', async () => {
     vi.useFakeTimers();
     try {

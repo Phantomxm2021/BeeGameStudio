@@ -1209,6 +1209,43 @@ describe('delivery workflow recovery', () => {
     expect(retried.foundationAuditState).toEqual(foundationAuditState)
   })
 
+  test('retryRun resumes a failed revision planning boundary without redispatching', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'revision-planning-retry-'))
+    const digest = 'c'.repeat(64)
+    const revisionState = {
+      authority: {
+        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
+        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+      },
+      roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest },
+      revision: 'revision-planning-retry',
+      round: 1 as const,
+      phase: 'planning' as const,
+      status: 'needs_action' as const,
+      phaseStartedAt: '2026-08-25T00:00:00.000Z',
+      knownIssueIds: [],
+      issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
+      tasks: [],
+    }
+    const run = {
+      ...createTestDeliveryRun({ runId: 'revision-planning-retry', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'needs_action' as const,
+      blockedReason: 'foundation revision planning materialization failed: transient store error',
+      foundationRevisionState: revisionState,
+    }
+    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
+    await store.save(run)
+
+    const retried = await retryRun({ store, runId: run.runId })
+
+    expect(retried.status).toBe('running')
+    expect(retried.blockedReason).toBeUndefined()
+    expect(retried.foundationRevisionState).toEqual({ ...revisionState, status: 'running' })
+  })
+
   test('reconcile projects orphaned foundation fact dispatch evidence onto the task', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'orphaned-foundation-fact-evidence-'))
     const digest = 'a'.repeat(64)

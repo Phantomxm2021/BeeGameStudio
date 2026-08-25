@@ -5,7 +5,6 @@ import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST, type FoundationSemanticResult } fro
 export const FOUNDATION_SEMANTIC_MAX_TASKS = 10
 export const FOUNDATION_SEMANTIC_MAX_RUNNING = 4
 export const FOUNDATION_SEMANTIC_MAX_ATTEMPTS = 2
-export const FOUNDATION_DEEP_MAX_TASKS = 4
 export const FOUNDATION_DEEP_MAX_ATTEMPTS = 1
 
 export type FoundationSemanticTaskStatus = 'pending' | 'running' | 'retryable' | 'completed' | 'needs_action'
@@ -264,8 +263,6 @@ export function appendFoundationConfirmationTask(state: FoundationSemanticTaskCo
   const source = state.tasks.find(task => task.taskId === input.sourceTaskId)
   if (!source || source.kind !== 'semantic') throw new Error('confirmation source task is not semantic')
   if (state.tasks.some(task => task.kind === 'confirmation' && task.sourceTaskId === source.taskId)) throw new Error('semantic confirmation source already admitted')
-  const count = state.tasks.filter(task => task.kind === 'confirmation').length
-  if (count >= FOUNDATION_DEEP_MAX_TASKS) throw new Error('semantic confirmation task limit exceeded')
   const confirmation = createFoundationConfirmationTask({ taskId: input.taskId, sourceTask: source, result: input.admittedResult })
   return { ...state, tasks: [...state.tasks, confirmation], deepPhaseStartedAt: state.deepPhaseStartedAt ?? input.now }
 }

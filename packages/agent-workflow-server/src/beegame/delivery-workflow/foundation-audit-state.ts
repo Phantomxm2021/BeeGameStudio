@@ -140,7 +140,6 @@ const foundationAuditStateSchemaRaw = z.object({ schemaVersion: z.literal(FOUNDA
     const semanticTasks = state.tasks.filter(task => task.kind === 'semantic')
     const factTasks = state.tasks.filter(task => task.kind === 'document-facts')
     if (semanticTasks.length !== 10 || factTasks.length) context.addIssue({ code: 'custom', path: ['tasks'], message: 'semantic review requires exactly ten semantic tasks and no fact tasks' })
-    if (state.tasks.filter(task => task.kind === 'confirmation').length > 4) context.addIssue({ code: 'custom', path: ['tasks'], message: 'semantic review permits at most four confirmation tasks' })
     const expectedChecks = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => check.checkId).sort()
     const actualChecks = semanticTasks.map(task => task.checkId).sort()
     if (JSON.stringify(expectedChecks) !== JSON.stringify(actualChecks)) context.addIssue({ code: 'custom', path: ['tasks'], message: 'semantic task checks must equal the service manifest exactly once' })

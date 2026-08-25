@@ -18,6 +18,7 @@ import {
   toChatDisplayMessages,
   toProjectRuntimeDisplayModel,
   toPermissionDisplayModels,
+  type ProjectRuntimeDisplayModel,
 } from '../../viewModels/displayModels';
 import {
   getCreditBalance,
@@ -61,6 +62,23 @@ const logDashboardReadError = (label: string, error: unknown): void => {
   }
 };
 
+const shouldResumeFoundationRevisionOnReconnect = (
+  workflow: ProjectRuntimeDisplayModel['workflow'],
+): boolean => {
+  if (
+    !workflow ||
+    workflow.status !== 'running' ||
+    workflow.currentPhase !== 'DOCUMENT_REVIEW' ||
+    workflow.documentStep !== 'FOUNDATION_REVIEW' ||
+    workflow.worker ||
+    workflow.executionStatus === 'working'
+  ) {
+    return false;
+  }
+  const tasks = workflow.tasks;
+  return Boolean(tasks?.length && tasks.every(task => task.status === 'completed'));
+};
+
 const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -83,6 +101,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const creditRefreshPromiseRef = useRef<{ projectId: string; promise: Promise<void> } | null>(null);
+  const reconnectResumeProjectRef = useRef<string | null>(null);
   const activeCreditProjectRef = useRef(projectId);
   activeCreditProjectRef.current = projectId;
   const previousBeeGameStatusRef = useRef<string | null>(null);
@@ -384,6 +403,32 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     const failedResult = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (failedResult) throw failedResult.reason;
   }, [loadProjectRuntimeState, projectId, translateBeeGame]);
+
+  useEffect(() => {
+    if (
+      authenticationStatus !== 'authenticated' ||
+      !hasCurrentRuntimeSnapshot ||
+      reconnectResumeProjectRef.current === projectId ||
+      !shouldResumeFoundationRevisionOnReconnect(projectRuntimeDisplay?.workflow)
+    ) {
+      return;
+    }
+    reconnectResumeProjectRef.current = projectId;
+    void (async () => {
+      try {
+        await api.resumeWorkflow(projectId);
+        await loadProjectRuntimeState(projectId);
+      } catch (error) {
+        logDashboardReadError('Failed to resume workflow after reconnect:', error);
+      }
+    })();
+  }, [
+    authenticationStatus,
+    hasCurrentRuntimeSnapshot,
+    loadProjectRuntimeState,
+    projectId,
+    projectRuntimeDisplay?.workflow,
+  ]);
 
   // Poll the persisted workflow snapshot as a reconnect-safe fallback.
   useEffect(() => {

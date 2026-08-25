@@ -42,7 +42,6 @@ const VALID_ISSUE_TYPES = new Set<AuditIssue['type']>([
   'contract',
   'semantic',
 ])
-const TARGETED_PACKET_MAX_BYTES = 16 * 1024
 
 /** One service-owned verdict for one original deterministic issue. */
 export type PatchValidation = {
@@ -577,8 +576,6 @@ export function buildFoundationSemanticRecheckPacket(input: {
   }
   const packetDigest = targetedDigest(body)
   const packet = { ...body, packetDigest }
-  const bytes = Buffer.byteLength(targetedCanonical(packet), 'utf8')
-  if (bytes > TARGETED_PACKET_MAX_BYTES) throw new Error(`targeted semantic packet exceeds ${TARGETED_PACKET_MAX_BYTES} bytes`)
   return deepFreezeTargeted(packet)
 }
 

@@ -73,6 +73,14 @@ function now(): string {
   return new Date().toISOString()
 }
 
+function foundationNeedsAction(run: DeliveryRun): boolean {
+  return Boolean(
+    run.foundationAuditState?.tasks.some(task => task.status === 'needs_action') ||
+      run.foundationRevisionState?.status === 'needs_action' ||
+      run.foundationRevisionState?.tasks.some(task => task.status === 'needs_action'),
+  )
+}
+
 function isMissingFile(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -1161,8 +1169,8 @@ export function createRunStore(workspacePath: string, ownerId: string) {
               return terminal ? projectTaskTerminalEvidence(recovered, terminal) : recovered
             }),
           }
-          const nextStatus = nextState.tasks.some(task => task.status === 'needs_action') ? 'needs_action' as const : 'running' as const
-          return commitUnlocked({ ...run, foundationRevisionState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? 'foundation revision requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: 'foundation.revision.recovered', phase: run.phase, status: nextStatus, revision: run.revision })
+          const nextStatus = foundationNeedsAction({ ...run, foundationRevisionState: nextState }) ? 'needs_action' as const : 'running' as const
+          return commitUnlocked({ ...run, foundationRevisionState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? run.blockedReason ?? 'foundation revision requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: 'foundation.revision.recovered', phase: run.phase, status: nextStatus, revision: run.revision })
         }
       }
       if (run.foundationAuditState) {
@@ -1225,11 +1233,27 @@ export function createRunStore(workspacePath: string, ownerId: string) {
               return terminal ? projectTaskTerminalEvidence(recovered, terminal) : recovered
             }),
           }
-          const nextStatus = nextState.tasks.some(task => task.status === 'needs_action') ? 'needs_action' as const : 'running' as const
-          return commitUnlocked({ ...run, foundationAuditState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? 'foundation fact extraction requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: 'foundation.fact.recovered', phase: run.phase, status: nextStatus, revision: run.revision })
+          const nextStatus = foundationNeedsAction({ ...run, foundationAuditState: nextState }) ? 'needs_action' as const : 'running' as const
+          return commitUnlocked({ ...run, foundationAuditState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? run.blockedReason ?? 'foundation fact extraction requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: 'foundation.fact.recovered', phase: run.phase, status: nextStatus, revision: run.revision })
         }
       }
-      if (!run.activeDispatch || run.activeDispatch.status !== 'running') return run
+      if (!run.activeDispatch || run.activeDispatch.status !== 'running') {
+        if (run.status !== 'running' || !foundationNeedsAction(run)) return run
+        const recovered = {
+          ...run,
+          status: 'needs_action' as const,
+          thinking: 'idle' as const,
+          blockedReason: run.blockedReason ?? 'foundation workflow requires action after recovery',
+        }
+        return commitUnlocked(recovered, {
+          runId: recovered.runId,
+          type: 'foundation.recovery.needs_action',
+          phase: recovered.phase,
+          status: recovered.status,
+          revision: recovered.revision,
+          reason: recovered.blockedReason,
+        })
+      }
       if (await sessionIsOpen(run.activeDispatch)) return run
       const interrupted = {
         ...run,

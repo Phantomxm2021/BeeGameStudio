@@ -815,7 +815,7 @@ export function createDeliveryDispatcher(options: {
             'foundation document authoring batch is active',
           )
         const next = revisionTaskRequest && request.taskId && currentRevisionTask
-          ? { ...current, foundationRevisionState: { ...current.foundationRevisionState!, tasks: current.foundationRevisionState!.tasks.map(task => task.taskId === request.taskId ? { ...task, status: 'running' as const, attempt: task.attempt + 1, dispatch: record } : task) } }
+          ? { ...current, foundationRevisionState: { ...current.foundationRevisionState!, tasks: current.foundationRevisionState!.tasks.map(task => task.taskId === request.taskId ? { ...task, status: 'running' as const, attempt: task.attempt + 1, dispatch: record, failureReason: undefined } : task) } }
           : factRequest && request.taskId && claimedFoundationState
           ? { ...current, foundationAuditState: { ...current.foundationAuditState!, status: 'extracting_facts' as const, tasks: claimedFoundationState.tasks.map(task => task.taskId === request.taskId ? { ...task, dispatch: record } : task) } }
           : semanticRequest && request.taskId && claimedSemanticState

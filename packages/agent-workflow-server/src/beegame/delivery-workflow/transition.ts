@@ -5,6 +5,7 @@ import type {
   DeliveryRun,
   EvidenceRef,
   EvidenceStatus,
+  FoundationRevisionState,
   FoundationRevisionTask,
 } from './types'
 import type { FoundationAuditTask } from './foundation-audit-state'
@@ -97,6 +98,16 @@ function isEligibleFoundationRetryTask(
     value.result === undefined &&
     value.admittedResult === undefined
   )
+}
+
+function isRetryableFoundationRevisionBoundary(
+  state: FoundationRevisionState,
+  taskId: string | undefined,
+): boolean {
+  if (taskId) return false
+  if (state.status !== 'needs_action') return false
+  if (state.phase !== 'planning' && state.phase !== 'validating') return false
+  return state.tasks.length === 0 || state.tasks.every(task => task.status === 'completed')
 }
 
 function fail(message: string): never {
@@ -573,20 +584,28 @@ export function transitionDeliveryRun(
                 : {}),
             }
           : undefined
+        const revisionBoundaryRevived = revisionState
+          ? isRetryableFoundationRevisionBoundary(revisionState, event.taskId)
+          : false
         const foundationStateInCurrentPhase = !!(
           auditState?.tasks.some(task => task.status === 'needs_action') ||
           revisionState?.status === 'needs_action' ||
           revisionState?.tasks.some(task => task.status === 'needs_action')
         )
-        const foundationRevived = auditRevived || revisionRevived
+        const foundationRevived = auditRevived || revisionRevived || revisionBoundaryRevived
         const preserveFoundationActionableState =
           foundationStateInCurrentPhase && !foundationRevived
         next = {
           ...run,
           status: preserveFoundationActionableState ? run.status : 'running',
           ...(auditRevived ? { foundationAuditState: nextAuditState } : {}),
-          ...(revisionRevived
-            ? { foundationRevisionState: nextRevisionState }
+          ...(revisionRevived || revisionBoundaryRevived
+            ? {
+                foundationRevisionState: {
+                  ...nextRevisionState!,
+                  ...(revisionBoundaryRevived ? { status: 'running' as const } : {}),
+                },
+              }
             : {}),
           ...(run.phase === 'DOCUMENT_DRAFTING' &&
           run.foundationDraftState.documents

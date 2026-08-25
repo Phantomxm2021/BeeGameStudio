@@ -22,6 +22,7 @@ import {
   foundationRevisionCommittedPath,
   foundationRevisionJournalPath,
   foundationRevisionPreparedPath,
+  loadCommittedFoundationRevisionAuthority,
   publishFoundationRevision,
   recoverFoundationRevision,
 } from './foundation-revision-publication'
@@ -171,6 +172,29 @@ describe('foundation revision publication', () => {
     expect(Object.isFrozen(recovered.resultingIssues)).toBe(true)
   })
 
+  test('loads a historical committed authority without comparing current canonical bytes', async () => {
+    const value = await fixture()
+    const resultingIssues = [resultingIssue('ROUND-2-HIGH')]
+    const published = await publishFoundationRevision(publishInput(value, { resultingIssues }))
+    await writeFile(join(value.workspace, documentPath), `${await readFile(join(value.workspace, documentPath), 'utf8')}\nhigher-round revision\n`)
+
+    const historical = await loadCommittedFoundationRevisionAuthority({ workspacePath: value.workspace, revision })
+    expect(historical.baseRevision).toBe(revision)
+    expect(historical.resultingRevision).toBe(published.resultingRevision)
+    expect(historical.resultingIssues).toEqual(resultingIssues)
+    expect(historical.resultingIssueRegistryDigest).toBe(published.resultingIssueRegistryDigest)
+  })
+
+  test('rejects a tampered committed historical authority', async () => {
+    const value = await fixture()
+    await publishFoundationRevision(publishInput(value, { resultingIssues: [resultingIssue('ROUND-2-HIGH')] }))
+    const committedPath = join(value.workspace, foundationRevisionCommittedPath(revision))
+    const committed = JSON.parse(await readFile(committedPath, 'utf8')) as Record<string, unknown>
+    committed.resultingIssueRegistryDigest = '0'.repeat(64)
+    await writeFile(committedPath, JSON.stringify(committed))
+    await expect(loadCommittedFoundationRevisionAuthority({ workspacePath: value.workspace, revision })).rejects.toThrow(/COMMITTED|authority|digest/i)
+  })
+
   test('binds the resulting revision to unchanged canonical documents as well', async () => {
     const baseline = await fixture()
     const baselineResult = await publishFoundationRevision(publishInput(baseline))
@@ -183,7 +207,7 @@ describe('foundation revision publication', () => {
     expect(changedResult.documentDigests[unrelatedPath]).toBe(sha256(`${unrelated}\nunchanged-owner revision input`))
   })
 
-  test('rejects stale canonical bytes and missing or failed validation before PREPARED', async () => {
+  test('rejects stale canonical bytes and missing validation before PREPARED', async () => {
     const stale = await fixture()
     await writeFile(join(stale.workspace, documentPath), `${canonicalDocument()}\nstale`) 
     await expect(publishFoundationRevision(publishInput(stale))).rejects.toThrow(/stale|base|canonical/i)
@@ -191,9 +215,6 @@ describe('foundation revision publication', () => {
     const missing = await fixture()
     await expect(publishFoundationRevision(publishInput(missing, { validations: [] }))).rejects.toThrow(/validation|coverage/i)
 
-    const failed = await fixture()
-    const stage = failed.stages[0]!
-    await expect(publishFoundationRevision(publishInput(failed, { validations: [validation(stage.receipt.documentPath, stage.receipt, stage.operations, stage.receipt.issueIds[0]!, 'FAIL')] }))).rejects.toThrow(/FAIL|validation/i)
   })
 
   test('requires a semantic recheck result for uncovered semantic issue authority', async () => {
@@ -270,9 +291,17 @@ describe('foundation revision publication', () => {
     await expect(publishFoundationRevision(altered)).rejects.toThrow(/authority|coverage|issue/i)
   })
 
-  test('rejects resulting issue overlap, duplicates, and unsupported severity', async () => {
-    const overlap = await fixture()
-    await expect(publishFoundationRevision(publishInput(overlap, { resultingIssues: [resultingIssue('AUD-1')] }))).rejects.toThrow(/overlap|resolved|issue/i)
+  test('allows resulting overlap only for a corresponding FAIL and rejects PASS or missing FAIL overlap', async () => {
+    const failed = await fixture()
+    const failedStage = failed.stages[0]!
+    const failedValidation = validation(failedStage.receipt.documentPath, failedStage.receipt, failedStage.operations, failedStage.receipt.issueIds[0]!, 'FAIL')
+    await expect(publishFoundationRevision(publishInput(failed, { validations: [failedValidation], resultingIssues: [resultingIssue('AUD-1')] }))).resolves.toMatchObject({ status: 'committed' })
+
+    const pass = await fixture()
+    await expect(publishFoundationRevision(publishInput(pass, { resultingIssues: [resultingIssue('AUD-1')] }))).rejects.toThrow(/overlap|PASS|issue/i)
+
+    const missing = await fixture()
+    await expect(publishFoundationRevision(publishInput(missing, { validations: [validation(missing.stages[0]!.receipt.documentPath, missing.stages[0]!.receipt, missing.stages[0]!.operations, 'AUD-1', 'FAIL')] }))).rejects.toThrow(/missing resulting|FAIL|issue/i)
 
     const duplicate = await fixture()
     await expect(publishFoundationRevision(publishInput(duplicate, { resultingIssues: [resultingIssue('NEXT'), resultingIssue('NEXT')] }))).rejects.toThrow(/duplicate|issue/i)

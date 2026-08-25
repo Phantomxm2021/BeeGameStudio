@@ -512,15 +512,22 @@ describe('semantic patch targeted recheck authority', () => {
     expect(() => admitFoundationSemanticRecheckResult(packet, { ...pass, extra: true })).toThrow(/extra|shape|key/i)
   })
 
-  test('rejects oversized packets and facts or sections outside the impact/current index', () => {
+  test('accepts oversized targeted sections while rejecting facts or sections outside the impact/current index', () => {
     const input = snapshot()
-    expect(() => buildFoundationSemanticRecheckPacket({
+    const largePacket = buildFoundationSemanticRecheckPacket({
       ...packetInput(input),
       documents: { 'docs/GDD.md': `${input.sourceText}\n${text('vision', 'x'.repeat(17 * 1024))}\n` },
       sectionIndex: [input.source, { ...input.target, digest: createHash('sha256').update(text('vision', 'x'.repeat(17 * 1024))).digest('hex') }],
       patchOperation: { ...input.operation, afterDigest: createHash('sha256').update(text('vision', 'x'.repeat(17 * 1024))).digest('hex') },
       factStore: [input.fact],
-    })).toThrow(/16.*KiB|bytes|size/i)
+    })
+    expect(largePacket.sections.find(section => section.ref.sectionId === 'vision')?.text.length).toBeGreaterThan(16 * 1024)
+    expect(largePacket.packetDigest).toMatch(/^[a-f0-9]{64}$/)
+    expect(admitFoundationSemanticRecheckResult(largePacket, {
+      issueId: largePacket.issueId,
+      packetDigest: largePacket.packetDigest,
+      status: 'PASS',
+    }).packetDigest).toBe(largePacket.packetDigest)
     expect(() => buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [{ ...input.fact, key: 'game.mechanics' as const }] })).toThrow(/impact|fact|scope/i)
     expect(() => buildFoundationSemanticRecheckPacket({
       ...packetInput(input),

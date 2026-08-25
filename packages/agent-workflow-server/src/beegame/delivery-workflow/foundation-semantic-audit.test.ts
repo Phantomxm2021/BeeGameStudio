@@ -115,7 +115,7 @@ describe('foundation semantic audit authority', () => {
     expect(() => buildFoundationSemanticPacket({ ...input, factStore: [{ ...input.factStore[0]!, value: { caller: true } as never }] })).toThrow(/fact|value/i)
   })
 
-  test('requires exact committed section bytes, rejects body facts, and fails closed above 16KiB UTF-8', () => {
+  test('requires exact committed section bytes, rejects body facts, and accepts large committed sections', () => {
     const input = fullSnapshot()
     const wrongBytes = new Map(input.sectionBytes)
     wrongBytes.set('docs/GDD.md#core_loop', 'changed bytes')
@@ -127,7 +127,17 @@ describe('foundation semantic audit authority', () => {
     expect(() => buildFoundationSemanticPacket({ ...input, factStore: [{ ...input.factStore[0]!, value: [body] }], sectionBytes: bodyBytes })).toThrow(/body/i)
     const hugeBytes = new Map(input.sectionBytes)
     hugeBytes.set('docs/GDD.md#core_loop', 'x'.repeat(17 * 1024))
-    expect(() => buildFoundationSemanticPacket({ ...input, sectionIndex: input.sectionIndex.map(item => item.sectionId === 'core_loop' ? { ...item, digest: hash('x'.repeat(17 * 1024)) } : item), sectionBytes: hugeBytes })).toThrow(/16.*KiB|bytes/i)
+    const largePacket = buildFoundationSemanticPacket({ ...input, sectionIndex: input.sectionIndex.map(item => item.sectionId === 'core_loop' ? { ...item, digest: hash('x'.repeat(17 * 1024)) } : item), sectionBytes: hugeBytes })
+    expect(largePacket.bytes).toBeGreaterThan(16 * 1024)
+    expect(largePacket.sections).toHaveLength(2)
+    expect(largePacket.sections[0]?.ref.digest).toBe(hash('x'.repeat(17 * 1024)))
+    expect(largePacket.identity).toMatch(/^[a-f0-9]{64}$/)
+    expect(admitFoundationSemanticResult(largePacket, {
+      checkId: largePacket.checkId,
+      packetIdentity: largePacket.identity,
+      outcome: 'PASS',
+      issues: [],
+    }).packetIdentity).toBe(largePacket.identity)
   })
 
   test('uses exactly one canonical model sectionKey representation', () => {

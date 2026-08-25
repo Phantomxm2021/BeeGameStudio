@@ -1165,8 +1165,16 @@ function createDeterministicFoundationRevisionTerminal(input: {
   if (typeof output !== 'string') throw new Error('foundation revision terminal output is missing')
   let value: unknown
   try { value = JSON.parse(output) } catch { throw new Error('foundation revision terminal output is malformed') }
-  const data = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).data : undefined
-  const receipt = data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).receipt : undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('foundation revision terminal output is not an object')
+  // The native tool result is normally the top-level object. Keep accepting
+  // the older `{ data: ... }` transport envelope, but source the receipt only
+  // from the tool_result payload—not the model's tool_use input.
+  const envelope = value as Record<string, unknown>
+  const data = envelope.data && typeof envelope.data === 'object' && !Array.isArray(envelope.data)
+    ? envelope.data as Record<string, unknown>
+    : envelope
+  const receipt = data.receipt
   return foundationDocumentReviserTerminalSchema.parse({
     workerType: 'foundation-document-reviser',
     status: 'completed',

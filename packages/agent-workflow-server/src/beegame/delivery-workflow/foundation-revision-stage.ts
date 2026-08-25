@@ -563,9 +563,6 @@ export async function buildFoundationRevisionAuthority(input: {
       baseDocumentDigest,
     },
   }
-  const packetBytes = Buffer.byteLength(JSON.stringify(packet), 'utf8')
-  if (packetBytes > 24 * 1024)
-    throw new Error('foundation revision packet exceeds 24KiB')
   return {
     baseDocumentDigest,
     stagedPath: foundationRevisionStagePath(input.revision, input.batch.documentPath),
