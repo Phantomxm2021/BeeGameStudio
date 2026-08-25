@@ -24,7 +24,30 @@ const foundationFactKeySchema = z.string().min(1)
 const foundationFactValueSchema = z.unknown().refine(value => value !== undefined, {
   message: 'present foundation fact requires value',
 })
-const foundationFactResultSchema = z.discriminatedUnion('status', [
+const foundationFactModelResultSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      key: foundationFactKeySchema,
+      status: z.literal('present'),
+      value: foundationFactValueSchema,
+    })
+    .strict(),
+  z
+    .object({
+      key: foundationFactKeySchema,
+      status: z.literal('absent'),
+    })
+    .strict(),
+  z
+    .object({
+      key: foundationFactKeySchema,
+      status: z.literal('uncertain'),
+      reason: z.string().min(1),
+    })
+    .strict(),
+])
+
+const foundationFactTerminalResultSchema = z.discriminatedUnion('status', [
   z
     .object({
       key: foundationFactKeySchema,
@@ -58,51 +81,16 @@ export const foundationFactExtractorTerminalSchema = z
     taskId: z.string().min(1),
     revision: z.string().min(1),
     packetDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    results: z.array(foundationFactResultSchema),
+    results: z.array(foundationFactTerminalResultSchema),
   })
   .strict()
 
 export const foundationFactModelPayloadSchema = z
   .object({
     status: z.enum(['completed', 'failed', 'blocked']),
-    results: z.array(foundationFactResultSchema),
+    results: z.array(foundationFactModelResultSchema),
   })
   .strict()
-
-const foundationFactEvidenceJsonSchema = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    documentPath: { type: 'string', minLength: 1 },
-    sectionId: { type: 'string', minLength: 1 },
-    startLine: { type: 'integer', minimum: 1 },
-    endLine: { type: 'integer', minimum: 1 },
-    digest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-  },
-  required: ['documentPath', 'sectionId', 'startLine', 'endLine', 'digest'],
-} as const
-
-function foundationFactPacketEvidenceJsonSchema(packet: FoundationFactPacket, key: FoundationFactKey) {
-  const definition = foundationFactDefinition(key)
-  const section = packet.sections.find(
-    candidate =>
-      candidate.documentPath === definition?.owner.documentPath &&
-      candidate.sectionId === definition?.owner.sectionId,
-  )
-  if (!section) throw new Error(`foundation fact packet owner section is missing: ${key}`)
-  return {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      documentPath: { enum: [section.documentPath] },
-      sectionId: { enum: [section.sectionId] },
-      startLine: { enum: [section.startLine] },
-      endLine: { enum: [section.endLine] },
-      digest: { enum: [section.digest] },
-    },
-    required: ['documentPath', 'sectionId', 'startLine', 'endLine', 'digest'],
-  } as const
-}
 
 function foundationFactValueJsonSchema(key: FoundationFactKey) {
   const definition = foundationFactDefinition(key)
@@ -146,14 +134,12 @@ function foundationFactValueJsonSchema(key: FoundationFactKey) {
 
 function buildFoundationFactSchemaForKeys(
   keys: readonly FoundationFactKey[],
-  evidenceSchemaFor?: (key: FoundationFactKey) => Record<string, unknown>,
 ) {
   if (!keys.length) throw new Error('foundation fact schema requires packet keys')
   if (new Set(keys).size !== keys.length)
     throw new Error('foundation fact schema packet keys must be unique')
   const resultBranches = keys.flatMap(key => {
     const keySchema = { enum: [key] }
-    const evidence = evidenceSchemaFor?.(key) ?? foundationFactEvidenceJsonSchema
     return [
       {
         type: 'object',
@@ -162,9 +148,8 @@ function buildFoundationFactSchemaForKeys(
           key: keySchema,
           status: { enum: ['present'] },
           value: foundationFactValueJsonSchema(key),
-          evidence,
         },
-        required: ['key', 'status', 'value', 'evidence'],
+        required: ['key', 'status', 'value'],
       },
       {
         type: 'object',
@@ -179,9 +164,8 @@ function buildFoundationFactSchemaForKeys(
           key: keySchema,
           status: { enum: ['uncertain'] },
           reason: { type: 'string', minLength: 1 },
-          evidence,
         },
-        required: ['key', 'status', 'reason', 'evidence'],
+        required: ['key', 'status', 'reason'],
       },
     ]
   })
@@ -205,9 +189,7 @@ function buildFoundationFactSchemaForKeys(
 export function buildFoundationFactStructuredOutputJsonSchema(
   packet: FoundationFactPacket,
 ) {
-  return buildFoundationFactSchemaForKeys(packet.keys, key =>
-    foundationFactPacketEvidenceJsonSchema(packet, key),
-  )
+  return buildFoundationFactSchemaForKeys(packet.keys)
 }
 
 export const foundationFactStructuredOutputJsonSchema = buildFoundationFactSchemaForKeys(

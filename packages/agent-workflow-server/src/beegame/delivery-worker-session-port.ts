@@ -48,7 +48,11 @@ import {
 import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
-import { isFoundationFactKey } from './delivery-workflow/foundation-fact-definitions'
+import {
+  foundationFactDefinition,
+  isFoundationFactKey,
+  type FoundationFactKey,
+} from './delivery-workflow/foundation-fact-definitions'
 import type { FoundationFactPacket } from './delivery-workflow/foundation-fact-extraction'
 import {
   canonicalFoundationAuthorityProjectionBytes,
@@ -56,9 +60,37 @@ import {
   type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
 
-function foundationFactSchemaForRequest(
+type FoundationFactPacketContract = {
+  keys: FoundationFactKey[]
+  sections: Array<{
+    documentPath: string
+    sectionId: string
+    startLine: number
+    endLine: number
+    digest: string
+  }>
+}
+
+function foundationFactOwnerSection(
+  packet: FoundationFactPacketContract,
+  key: FoundationFactKey,
+): FoundationFactPacketContract['sections'][number] {
+  const definition = foundationFactDefinition(key)
+  if (!definition)
+    throw new Error(`foundation fact result has an unknown key: ${key}`)
+  const section = packet.sections.find(
+    candidate =>
+      candidate.documentPath === definition.owner.documentPath &&
+      candidate.sectionId === definition.owner.sectionId,
+  )
+  if (!section)
+    throw new Error(`foundation fact packet owner section is missing: ${key}`)
+  return section
+}
+
+function foundationFactPacketForRequest(
   request: WorkerDispatchRequest,
-): Record<string, unknown> {
+): FoundationFactPacketContract {
   const packet = request.contract.packet
   const keys =
     packet &&
@@ -76,12 +108,38 @@ function foundationFactSchemaForRequest(
     (packet as { sections: unknown[] }).sections.every(section => {
       if (!section || typeof section !== 'object') return false
       const value = section as Record<string, unknown>
-      return ['documentPath', 'sectionId', 'startLine', 'endLine', 'digest'].every(field => field in value)
+      return (
+        typeof value.documentPath === 'string' &&
+        value.documentPath.length > 0 &&
+        typeof value.sectionId === 'string' &&
+        value.sectionId.length > 0 &&
+        typeof value.startLine === 'number' &&
+        Number.isInteger(value.startLine) &&
+        value.startLine > 0 &&
+        typeof value.endLine === 'number' &&
+        Number.isInteger(value.endLine) &&
+        value.endLine >= value.startLine &&
+        typeof value.digest === 'string' &&
+        /^[a-f0-9]{64}$/.test(value.digest)
+      )
     })
   if (!keys || !sections)
     throw new Error('foundation fact extractor requires one complete packet')
+  const completePacket = {
+    keys: (packet as { keys: FoundationFactKey[] }).keys,
+    sections: (packet as { sections: FoundationFactPacketContract['sections'] }).sections,
+  }
+  for (const key of completePacket.keys)
+    foundationFactOwnerSection(completePacket, key)
+  return completePacket
+}
+
+function foundationFactSchemaForRequest(
+  request: WorkerDispatchRequest,
+): Record<string, unknown> {
+  const packet = foundationFactPacketForRequest(request)
   return buildFoundationFactStructuredOutputJsonSchema(
-    packet as FoundationFactPacket,
+    packet as unknown as FoundationFactPacket,
   ) as unknown as Record<string, unknown>
 }
 import { documentAuthoringMetrics } from './document-authoring-metrics'
@@ -1024,6 +1082,17 @@ function createDeterministicFoundationFactTerminal(input: {
     : undefined
   if (structured === undefined) return undefined
   const payload = foundationFactModelPayloadSchema.parse(structured)
+  const packet = foundationFactPacketForRequest(input.request)
+  const results = payload.results.map(result => {
+    if (!isFoundationFactKey(result.key))
+      throw new Error(`foundation fact result has an unknown key: ${result.key}`)
+    if (!packet.keys.includes(result.key))
+      throw new Error(`foundation fact result key is not assigned: ${result.key}`)
+    const section = foundationFactOwnerSection(packet, result.key)
+    return result.status === 'absent'
+      ? result
+      : { ...result, evidence: section }
+  })
   return foundationFactExtractorTerminalSchema.parse({
     workerType: 'foundation-fact-extractor',
     status: payload.status,
@@ -1032,7 +1101,7 @@ function createDeterministicFoundationFactTerminal(input: {
     taskId: input.request.taskId,
     revision: input.request.revision,
     packetDigest: input.request.contract.packetDigest,
-    results: payload.results,
+    results,
   })
 }
 

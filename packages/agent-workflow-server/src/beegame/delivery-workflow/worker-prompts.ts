@@ -225,7 +225,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'foundation-fact-extractor':
       return [
         'Extract only the declared fact keys from the exact packet sections. The packet is the sole input; do not read project files, call Read, Grep or Glob, write files, mutate the platform, or emit issues.',
-        'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed and cite exact evidence lines from the packet. Do not return section prose or values not declared by the packet.',
+        'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed; the service binds immutable provenance from each catalog owner section into the durable terminal. Do not return evidence, section prose, or values not declared by the packet.',
       ].join(' ')
     case 'foundation-semantic-reviewer':
       return [
@@ -343,7 +343,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'foundation-fact-extractor':
-      return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, value, and evidence; omit reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, reason, and evidence; omit value. Do not call project tools, return terminal JSON as prose, or add completion text.'
+      return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, and value; omit evidence and reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, and reason; omit evidence and value. The service binds immutable provenance from the packet owner section into the durable terminal. Do not call project tools, return terminal JSON as prose, or add completion text.'
     case 'foundation-semantic-reviewer':
       return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use only PASS, ISSUES, or UNDECIDABLE; do not return Markdown or explanatory text.'
     case 'foundation-document-reviser':

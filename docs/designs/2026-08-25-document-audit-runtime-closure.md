@@ -25,7 +25,7 @@ The runtime also has these correctness gaps:
 
 ### Packet-only worker input
 
-Fact and semantic workers receive only the immutable packet plus language, task/revision/packet identity and digest, explicit project read/write denial, and the strict terminal schema. They do not receive the Confirmed Brief, workspace path, canonical document list, or generic native-tool instructions.
+Fact and semantic workers receive only the immutable packet plus language, task/revision/packet identity and digest, explicit project read/write denial, and the strict terminal schema. Fact model output contains business fields only; the service binds immutable catalog-owner provenance into the durable terminal. Workers do not receive the Confirmed Brief, workspace path, canonical document list, or generic native-tool instructions.
 
 Brief constraints are converted locally into closed-catalog values or revision-bound digests before packet construction. A worker cannot use the Brief as an undeclared second source of truth.
 
@@ -33,7 +33,7 @@ Brief constraints are converted locally into closed-catalog values or revision-b
 
 Keep the 16 KiB fact and semantic packet boundary, fresh context per attempt, maximum concurrency of four, and maximum two attempts. Deep audit may use only authority-selected indexed additions and never a whole document.
 
-Remove aggregate token caps and shared phase/round wall-clock deadlines. Each dispatch retains its existing per-worker timeout. Per-dispatch output admission continues to use `min(4096, 768 + 256 × assignedFactKeyCount)` for facts, `768` for semantic checks, and `1024` for deep confirmation. The fact baseline preserves enough room for the typed/evidence envelope of a one-key result; the ceiling is reached at 13 keys. The measured value is the final structured business payload, not provider-reported completion usage: facts measure `{status, results}`, while semantic/deep workers measure `{status, outcome, issues?, reason?}`. The service estimates this payload deterministically from its UTF-8 JSON size at two bytes per conservative token, including JSON structure but excluding transport/session metadata. Provider usage remains complete cost telemetry and never rejects an otherwise valid final payload.
+Remove aggregate token caps and shared phase/round wall-clock deadlines. Each dispatch retains its existing per-worker timeout. Per-dispatch output admission continues to use `min(4096, 768 + 256 × assignedFactKeyCount)` for facts, `768` for semantic checks, and `1024` for deep confirmation. The fact baseline preserves enough room for the service-bound terminal envelope of a one-key result; the ceiling is reached at 13 keys. The measured value is the final structured business payload, not provider-reported completion usage: facts measure `{status, results}`, while semantic/deep workers measure `{status, outcome, issues?, reason?}`. The service estimates this payload deterministically from its UTF-8 JSON size at two bytes per conservative token, including JSON structure but excluding transport/session metadata. Provider usage remains complete cost telemetry and never rejects an otherwise valid final payload.
 
 Record prompt, completion, and total usage, duration, attempt, and failure reason on every terminal task. Cost is observable but does not cancel unopened mandatory packets.
 

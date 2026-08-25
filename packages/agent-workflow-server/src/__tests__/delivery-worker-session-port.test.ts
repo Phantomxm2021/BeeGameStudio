@@ -54,22 +54,14 @@ describe('delivery worker session credentials', () => {
       (branch.properties as { status: { enum: string[] } }).status.enum[0] === 'present',
     )!
     expect(presentAudio.additionalProperties).toBe(false)
-    expect(presentAudio.required).toEqual(['key', 'status', 'value', 'evidence'])
+    expect(presentAudio.required).toEqual(['key', 'status', 'value'])
+    expect(presentAudio.properties).not.toHaveProperty('evidence')
     expect(presentAudio.properties).toMatchObject({
       value: {
         type: 'array',
         minItems: 1,
         maxItems: 256,
         items: { type: 'string', pattern: '^\\S(?:.*\\S)?$' },
-      },
-      evidence: {
-        properties: {
-          documentPath: { enum: ['docs/AUDIO_DESIGN.md'] },
-          sectionId: { enum: ['event_taxonomy'] },
-          startLine: { enum: [65] },
-          endLine: { enum: [80] },
-          digest: { enum: ['a'.repeat(64)] },
-        },
       },
     })
     const absentAudio = branches.find(branch =>
@@ -84,7 +76,8 @@ describe('delivery worker session credentials', () => {
       (branch.properties as { key: { enum: string[] }; status: { enum: string[] } }).key.enum[0] === 'audio.event_ids' &&
       (branch.properties as { status: { enum: string[] } }).status.enum[0] === 'uncertain',
     )!
-    expect(uncertainAudio.required).toEqual(['key', 'status', 'reason', 'evidence'])
+    expect(uncertainAudio.required).toEqual(['key', 'status', 'reason'])
+    expect(uncertainAudio.properties).not.toHaveProperty('evidence')
     const validate = new Ajv().compile(schema)
     expect(validate({ status: 'completed', results: [{ key: 'audio.event_ids', status: 'absent' }, { key: 'game.players.max', status: 'absent' }] })).toBe(true)
     expect(validate({
@@ -99,8 +92,35 @@ describe('delivery worker session credentials', () => {
     })).toBe(false)
     expect(validate({
       status: 'completed',
-      results: [{ key: 'audio.event_ids', status: 'uncertain', reason: 'ambiguous' }, { key: 'game.players.max', status: 'absent' }],
+      results: [{
+        key: 'audio.event_ids',
+        status: 'present',
+        value: ['player.jump'],
+        evidence: [],
+      }, { key: 'game.players.max', status: 'absent' }],
     })).toBe(false)
+    expect(validate({
+      status: 'completed',
+      results: [{
+        key: 'audio.event_ids',
+        status: 'present',
+        value: ['player.jump'],
+        evidence: {},
+      }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(false)
+    expect(validate({
+      status: 'completed',
+      results: [{
+        key: 'audio.event_ids',
+        status: 'present',
+        value: ['player.jump'],
+        evidence: { documentPath: 'docs/GDD.md', sectionId: 'vision', startLine: 10, endLine: 20, digest: 'a'.repeat(64) },
+      }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(false)
+    expect(validate({
+      status: 'completed',
+      results: [{ key: 'audio.event_ids', status: 'uncertain', reason: 'ambiguous' }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(true)
   })
 
   test('exposes the foundation revision terminal and derives a terminal from its successful tool event', async () => {
@@ -293,6 +313,12 @@ describe('delivery worker session credentials', () => {
       foundationFactModelPayloadSchema.parse({ status: 'completed', results: [absent] }),
     ).toEqual({ status: 'completed', results: [absent] })
     expect(
+      foundationFactModelPayloadSchema.parse({
+        status: 'completed',
+        results: [{ key: absent.key, status: 'present', value: 1 }],
+      }),
+    ).toMatchObject({ results: [{ key: absent.key, status: 'present', value: 1 }] })
+    expect(
       foundationFactExtractorTerminalSchema.parse({
         workerType: 'foundation-fact-extractor',
         status: 'completed',
@@ -304,6 +330,18 @@ describe('delivery worker session credentials', () => {
         results: [absent],
       }),
     ).toMatchObject({ results: [absent] })
+    expect(
+      foundationFactExtractorTerminalSchema.parse({
+        workerType: 'foundation-fact-extractor',
+        status: 'completed',
+        runId: 'run',
+        dispatchId: 'dispatch',
+        taskId: 'task',
+        revision: 'revision',
+        packetDigest: 'a'.repeat(64),
+        results: [{ key: absent.key, status: 'present', value: 1, evidence }],
+      }),
+    ).toMatchObject({ results: [{ status: 'present', evidence }] })
     expect(() =>
       foundationFactModelPayloadSchema.parse({
         status: 'completed',
@@ -319,7 +357,7 @@ describe('delivery worker session credentials', () => {
     expect(() =>
       foundationFactModelPayloadSchema.parse({
         status: 'completed',
-        results: [{ key: absent.key, status: 'uncertain', reason: 'ambiguous' }],
+        results: [{ key: absent.key, status: 'uncertain', reason: 'ambiguous', evidence }],
       }),
     ).toThrow()
     expect(() =>
@@ -334,6 +372,77 @@ describe('delivery worker session credentials', () => {
         results: [{ key: absent.key, status: 'present', value: undefined, evidence }],
       }),
     ).toThrow()
+  })
+
+  test('binds model facts to immutable packet owner evidence and rejects missing owners', async () => {
+    const ownerSection = {
+      documentPath: 'docs/AUDIO_DESIGN.md',
+      sectionId: 'event_taxonomy',
+      startLine: 65,
+      endLine: 80,
+      digest: 'b'.repeat(64),
+    }
+    const request = {
+      dispatchId: 'dispatch-facts-bound',
+      runId: 'run-facts-bound',
+      ownerId: 'user-1',
+      projectId: 'project-facts-bound',
+      workspacePath: '/tmp/fact-project',
+      workerType: 'foundation-fact-extractor' as const,
+      phase: 'DOCUMENT_REVIEW' as const,
+      taskId: 'task-facts-bound',
+      revision: 'revision-facts-bound',
+      allowedPaths: [],
+      projectReadScope: 'empty' as const,
+      contract: {
+        taskId: 'task-facts-bound',
+        packetDigest: 'a'.repeat(64),
+        modelTier: 'fast' as const,
+        workerType: 'foundation-fact-extractor' as const,
+        packet: { keys: ['audio.event_ids'], sections: [ownerSection] },
+      },
+    } as unknown as WorkerDispatchRequest
+    const payloads = [
+      { key: 'audio.event_ids', status: 'present' as const, value: ['player.jump'] },
+      { key: 'audio.event_ids', status: 'uncertain' as const, reason: 'ambiguous packet text' },
+      { key: 'audio.event_ids', status: 'absent' as const },
+    ]
+    for (const [index, result] of payloads.entries()) {
+      const sessions = {
+        start() { return { id: `session-facts-bound-${index}` } },
+        events() {
+          return [{
+            id: `fact-result-bound-${index}`,
+            type: 'result' as const,
+            text: 'Structured output accepted',
+            createdAt: new Date(),
+            payload: { type: 'result', subtype: 'success', structured_output: { status: 'completed', results: [result] } },
+          }]
+        },
+      } as unknown as BeeGameSessionManager
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+      await port.start({ ...request, dispatchId: `dispatch-facts-bound-${index}` })
+      await expect(port.waitForTerminal?.(`dispatch-facts-bound-${index}`)).resolves.toMatchObject({
+        results: [
+          result.status === 'present' || result.status === 'uncertain'
+            ? { ...result, evidence: ownerSection }
+            : result,
+        ],
+      })
+    }
+
+    const missingOwnerSessions = {
+      start() { return { id: 'session-facts-missing-owner' } },
+      events() {
+        return [{ id: 'fact-result-missing-owner', type: 'result' as const, text: 'Structured output accepted', createdAt: new Date(), payload: { type: 'result', subtype: 'success', structured_output: { status: 'completed', results: [{ key: 'audio.event_ids', status: 'present', value: ['player.jump'] }] } } }]
+      },
+    } as unknown as BeeGameSessionManager
+    const missingOwnerPort = createBeeGameDeliveryWorkerPort({ sessions: missingOwnerSessions, userId: 'user-1' })
+    await expect(missingOwnerPort.start({
+      ...request,
+      dispatchId: 'dispatch-facts-missing-owner',
+      contract: { ...request.contract, packet: { keys: ['audio.event_ids'], sections: [] } },
+    })).rejects.toThrow(/owner section|missing/i)
   })
 
   test('binds identical model payloads to different request identities', async () => {

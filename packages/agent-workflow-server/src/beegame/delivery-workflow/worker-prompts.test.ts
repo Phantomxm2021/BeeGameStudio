@@ -101,9 +101,10 @@ describe('worker prompts', () => {
       expect(prompt).toContain('Immutable packet contract')
       expect(prompt).toContain('GDD.player_loop')
       if (workerType === 'foundation-fact-extractor') {
-        expect(prompt).toContain('present requires key, status, value, and evidence')
+        expect(prompt).toContain('present requires key, status, and value; omit evidence and reason')
         expect(prompt).toContain('Absent requires only key and status and must omit value, evidence, and reason')
-        expect(prompt).toContain('Uncertain requires key, status, reason, and evidence')
+        expect(prompt).toContain('Uncertain requires key, status, and reason; omit evidence and value')
+        expect(prompt).toContain('service binds immutable provenance')
       }
     }
   })

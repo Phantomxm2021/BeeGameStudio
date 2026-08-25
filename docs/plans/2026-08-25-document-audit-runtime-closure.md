@@ -96,7 +96,7 @@ export function foundationFactOutputTokenLimit(factKeyCount: number): number {
 }
 ```
 
-Output admission measures the final structured business payload rather than provider usage. Use one shared deterministic estimator based on the UTF-8 byte length of the JSON payload divided by two (rounded up, conservatively for multilingual text). For facts the payload is `{ status, results }`; for semantic and deep workers it is `{ status, outcome, issues?, reason? }`. Facts use `min(4096, 768 + 256 * factKeyCount)`, preserving the typed/evidence envelope for a one-key result and reaching the hard ceiling at 13 keys; semantic and deep workers retain their existing fixed caps. Provider `completion_tokens` and total usage are retained for cost observation and must not reject a valid small payload, even when a native session performed structured-output repairs.
+Output admission measures the final structured business payload rather than provider usage. Use one shared deterministic estimator based on the UTF-8 byte length of the JSON payload divided by two (rounded up, conservatively for multilingual text). For facts the payload is `{ status, results }`; for semantic and deep workers it is `{ status, outcome, issues?, reason? }`. Facts use `min(4096, 768 + 256 * factKeyCount)`, preserving the service-bound terminal envelope for a one-key result and reaching the hard ceiling at 13 keys; semantic and deep workers retain their existing fixed caps. Provider `completion_tokens` and total usage are retained for cost observation and must not reject a valid small payload, even when a native session performed structured-output repairs.
 
 Add `factKeyCount: number` to `FoundationFactTask`; seed it from `packet.keys.length`, persist it in the state schema, and use it for terminal admission instead of a fixed 512-token comparison.
 
@@ -105,6 +105,7 @@ Add `factKeyCount: number` to `FoundationFactTask`; seed it from `packet.keys.le
 - `buildWorkerPrompt()` returns a dedicated packet prompt before constructing the generic workspace/canonical-artifact preamble for fact and semantic workers.
 - `delivery-worker-session-port.submit()` excludes `confirmedBriefContext`, document authority blocks, native-tool autonomy text, and confirmed-brief display metadata for packet workers.
 - The dedicated prompt contains language, explicit read/write denial, strict result instruction, and the immutable contract containing the packet and service-owned identity.
+- Fact model results contain only `key`, `status`, typed `value`, or `reason`; the session port rejects model-supplied provenance and binds exact evidence from each immutable packet catalog-owner section before constructing the durable terminal.
 - Other worker prompts and display metadata remain unchanged.
 - Increment `FOUNDATION_AUDIT_STATE_SCHEMA_VERSION` once for the required `factKeyCount` field; add no reader for the prior feature-branch schema.
 
