@@ -6,10 +6,10 @@ import { estimateStructuredPayloadTokens, foundationSemanticBusinessPayload } fr
 export const FOUNDATION_SEMANTIC_MAX_TASKS = 10
 export const FOUNDATION_SEMANTIC_MAX_RUNNING = 4
 export const FOUNDATION_SEMANTIC_MAX_ATTEMPTS = 2
-export const FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS = 768
+export const FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS = 2_048
 export const FOUNDATION_DEEP_MAX_TASKS = 4
 export const FOUNDATION_DEEP_MAX_ATTEMPTS = 1
-export const FOUNDATION_DEEP_OUTPUT_MAX_TOKENS = 1_024
+export const FOUNDATION_DEEP_OUTPUT_MAX_TOKENS = 2_048
 
 export type FoundationSemanticTaskStatus = 'pending' | 'running' | 'retryable' | 'completed' | 'needs_action'
 export type FoundationSemanticTier = 'fast' | 'balanced' | 'strong'

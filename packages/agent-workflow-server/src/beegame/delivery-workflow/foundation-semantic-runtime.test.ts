@@ -15,6 +15,7 @@ import {
   type FoundationSemanticTaskCollection,
 } from './foundation-semantic-runtime'
 import { FOUNDATION_SEMANTIC_CHECKS, type FoundationSemanticResult } from './foundation-semantic-audit'
+import { estimateStructuredPayloadTokens, foundationSemanticBusinessPayload } from './structured-output-admission'
 
 const digest = 'a'.repeat(64)
 const task = (index: number): FoundationSemanticTask => ({
@@ -71,7 +72,7 @@ describe('foundation semantic runtime', () => {
     expect(retry.tasks[0]?.dispatch?.dispatchId).toBe('d2')
     const highProviderUsage = admitFoundationSemanticTerminal(retry, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: 'd2', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'PASS' }, usage: { ...usage(1), completion_tokens: 4_897, total_tokens: 4_898 }, durationMs: 3, now: new Date(4).toISOString() })
     expect(highProviderUsage.state.tasks[0]?.status).toBe('completed')
-    const oversized = admitFoundationSemanticTerminal({ ...retry, tasks: retry.tasks.map(item => item.taskId === task(0).taskId ? { ...item, status: 'running' as const, dispatch: { ...item.dispatch!, dispatchId: 'd2' } } : item) }, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: 'd2', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'ISSUES', issues: [{ problem: 'x'.repeat(2_000), expected: 'e', actual: 'a', sourceSectionKey: 'GDD#vision', fixSectionKey: 'GDD#vision' }] }, usage: usage(1), durationMs: 3, now: new Date(4).toISOString() })
+    const oversized = admitFoundationSemanticTerminal({ ...retry, tasks: retry.tasks.map(item => item.taskId === task(0).taskId ? { ...item, status: 'running' as const, dispatch: { ...item.dispatch!, dispatchId: 'd2' } } : item) }, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: 'd2', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'ISSUES', issues: [{ problem: 'x'.repeat(5_000), expected: 'e', actual: 'a', sourceSectionKey: 'GDD#vision', fixSectionKey: 'GDD#vision' }] }, usage: usage(1), durationMs: 3, now: new Date(4).toISOString() })
     expect(oversized.state.tasks[0]?.status).toBe('needs_action')
     expect(() => admitFoundationSemanticTerminal(oversized.state, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: 'd2', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'PASS' }, usage: usage(1), durationMs: 1, now: new Date(5).toISOString() })).toThrow(/running|replay/i)
 
@@ -87,10 +88,37 @@ describe('foundation semantic runtime', () => {
     expect(() => admitFoundationSemanticTerminal(completed.state, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: { ...nested, metadata: { nested: { marker: 2 } } }, usage: usage(1), durationMs: 1, now: new Date(5).toISOString() })).toThrow(/conflicting/i)
   })
 
+  test('admits the real multilingual two-issue semantic payload while retaining a hard per-dispatch cap', () => {
+    const issue = (suffix: string) => ({
+      problem: `状态运行时恢复必须保留所有已确认的语义证据与上下文。${'恢复'.repeat(74)}${suffix}`,
+      expected: '每个检查都应输出稳定、可重放且绑定当前语义包的结论。',
+      actual: '当前输出在多语言问题描述中包含额外细节，导致固定预算边界被触发。',
+      sourceSectionKey: 'GDD#core_loop',
+      fixSectionKey: 'GDD#core_loop',
+    })
+    const terminal = { workerType: 'foundation-semantic-reviewer' as const, status: 'completed' as const, runId: 'run', dispatchId: 'dispatch', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'ISSUES' as const, issues: [issue('!'), issue('')] }
+    const payload = foundationSemanticBusinessPayload(terminal)
+    expect(Buffer.byteLength(JSON.stringify(payload), 'utf8')).toBe(1661)
+    expect(estimateStructuredPayloadTokens(payload)).toBe(831)
+    const collection = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: ten() })
+    const claimed = claimFoundationSemanticTasks(collection, { now: new Date(1).toISOString(), dispatchIdFor: () => 'dispatch', configuredTiers: { fast: true, balanced: true } })
+    const admitted = admitFoundationSemanticTerminal(claimed, { taskId: task(0).taskId, dispatchId: 'dispatch', revision: 'rev', packetDigest: digest, terminal, usage: usage(1), durationMs: 1, now: new Date(2).toISOString() })
+    expect(admitted.state.tasks[0]?.status).toBe('completed')
+    const completedTasks = collection.tasks.map(item => ({ ...item, status: 'completed' as const, terminalDigest: terminalDigest(item, 'UNDECIDABLE'), usage: usage(1), durationMs: 1, dispatch: { dispatchId: `source-${item.taskId}`, workerType: 'foundation-semantic-reviewer' as const, phase: 'DOCUMENT_REVIEW' as const, taskId: item.taskId, revision: item.revision, status: 'completed' as const, startedAt: '1970-01-01T00:00:00.000Z', finishedAt: '1970-01-01T00:00:00.001Z', terminalResult: terminalEvidence(item, 'UNDECIDABLE') } }))
+    const deepSeed = appendFoundationConfirmationTask({ ...collection, tasks: completedTasks }, { taskId: 'deep-real-size', sourceTaskId: task(0).taskId, admittedResult: admittedResult(task(0)), now: '1970-01-01T00:01:00.000Z' })
+    const deepClaimed = claimFoundationSemanticTasks(deepSeed, { onlyTaskId: 'deep-real-size', now: '1970-01-01T00:01:01.000Z', dispatchIdFor: () => 'deep-dispatch', configuredTiers: { strong: true } })
+    const deepTask = deepClaimed.tasks.find(item => item.taskId === 'deep-real-size')!
+    const deepAdmitted = admitFoundationSemanticTerminal(deepClaimed, { taskId: deepTask.taskId, dispatchId: 'deep-dispatch', revision: 'rev', packetDigest: digest, terminal: { ...terminal, taskId: deepTask.taskId, dispatchId: 'deep-dispatch' }, usage: usage(1), durationMs: 1, now: new Date(2).toISOString() })
+    expect(deepAdmitted.state.tasks.find(item => item.taskId === deepTask.taskId)?.status).toBe('completed')
+    const oversized = { ...terminal, issues: [issue('!'.repeat(2_500)), issue('')] }
+    const rejected = admitFoundationSemanticTerminal({ ...claimed, tasks: claimed.tasks.map(item => item.taskId === task(0).taskId ? { ...item, dispatch: { ...item.dispatch!, dispatchId: 'dispatch' } } : item) }, { taskId: task(0).taskId, dispatchId: 'dispatch', revision: 'rev', packetDigest: digest, terminal: oversized, usage: usage(1), durationMs: 1, now: new Date(2).toISOString() })
+    expect(rejected.state.tasks[0]?.status).toBe('needs_action')
+  })
+
   test('retains concurrency and per-dispatch accounting without aggregate gates', () => {
     expect(FOUNDATION_SEMANTIC_MAX_TASKS).toBe(10)
     expect(FOUNDATION_SEMANTIC_MAX_RUNNING).toBe(4)
-    expect(FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS).toBe(768)
+    expect(FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS).toBe(2_048)
     expect(foundationSemanticTasksComplete({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), status: 'semantic_review', tasks: [], aggregateUsage: usage(0) })).toBe(false)
     const oldAndExpensive = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: '2020-01-01T00:00:00.000Z', tasks: ten() })
     const claimed = claimFoundationSemanticTasks({ ...oldAndExpensive, aggregateUsage: usage(200_000) }, { now: '2026-08-25T00:00:00.000Z', dispatchIdFor: item => `old:${item.taskId}`, configuredTiers: { fast: true, balanced: true } })
@@ -178,7 +206,8 @@ describe('foundation semantic runtime', () => {
     expect(() => admitFoundationSemanticTerminal(claimed, { ...base, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: 'dispatch', taskId: task(0).taskId, revision: 'rev', packetDigest: 'b'.repeat(64), outcome: 'PASS' } })).toThrow(/packet/i)
   })
 
-  test('uses deep confirmation output cap independently from semantic accounting', () => {
+  test('uses the shared deep confirmation output cap independently from semantic accounting', () => {
+    expect(FOUNDATION_DEEP_OUTPUT_MAX_TOKENS).toBe(2_048)
     const seeded = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date().toISOString(), tasks: ten() })
     const completedTasks = seeded.tasks.map(item => ({ ...item, status: 'completed' as const, terminalDigest: terminalDigest(item, 'UNDECIDABLE'), usage: usage(1), durationMs: 1, dispatch: { dispatchId: `source-${item.taskId}`, workerType: 'foundation-semantic-reviewer' as const, phase: 'DOCUMENT_REVIEW' as const, taskId: item.taskId, revision: item.revision, status: 'completed' as const, startedAt: '1970-01-01T00:00:00.000Z', finishedAt: '1970-01-01T00:00:00.001Z', terminalResult: terminalEvidence(item, 'UNDECIDABLE') } }))
     let state: FoundationSemanticTaskCollection = { ...seeded, tasks: completedTasks }
@@ -191,7 +220,7 @@ describe('foundation semantic runtime', () => {
     const withSecondConfirmation = appendFoundationConfirmationTask(admitted.state, { taskId: 'deep-2', sourceTaskId: task(1).taskId, admittedResult: admittedResult(task(1)), now: '1970-01-01T00:02:00.000Z' })
     const claimedSecond = claimFoundationSemanticTasks(withSecondConfirmation, { onlyTaskId: 'deep-2', now: '1970-01-01T00:02:01.000Z', dispatchIdFor: item => `dispatch:${item.taskId}`, configuredTiers: { strong: true } })
     const deepSecond = claimedSecond.tasks.find(item => item.taskId === 'deep-2')!
-    const oversized = admitFoundationSemanticTerminal(claimedSecond, { taskId: deepSecond.taskId, dispatchId: deepSecond.dispatch!.dispatchId, revision: deepSecond.revision, packetDigest: deepSecond.packetDigest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: deepSecond.dispatch!.dispatchId, taskId: deepSecond.taskId, revision: deepSecond.revision, packetDigest: deepSecond.packetDigest, outcome: 'ISSUES', issues: [{ problem: 'x'.repeat(3_000), expected: 'e', actual: 'a', sourceSectionKey: 'GDD#vision', fixSectionKey: 'GDD#vision' }] }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 }, durationMs: 1, now: '1970-01-01T00:02:02.000Z' })
+    const oversized = admitFoundationSemanticTerminal(claimedSecond, { taskId: deepSecond.taskId, dispatchId: deepSecond.dispatch!.dispatchId, revision: deepSecond.revision, packetDigest: deepSecond.packetDigest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: deepSecond.dispatch!.dispatchId, taskId: deepSecond.taskId, revision: deepSecond.revision, packetDigest: deepSecond.packetDigest, outcome: 'ISSUES', issues: [{ problem: 'x'.repeat(5_000), expected: 'e', actual: 'a', sourceSectionKey: 'GDD#vision', fixSectionKey: 'GDD#vision' }] }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 }, durationMs: 1, now: '1970-01-01T00:02:02.000Z' })
     expect(oversized.state.tasks.find(item => item.taskId === 'deep-2')?.status).toBe('needs_action')
   })
 })

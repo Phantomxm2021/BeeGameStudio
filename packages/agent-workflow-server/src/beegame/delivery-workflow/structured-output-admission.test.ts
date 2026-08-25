@@ -16,6 +16,6 @@ describe('structured output admission measurement', () => {
   test('semantic and deep payloads exclude transport identity and provider usage', () => {
     const payload = foundationSemanticBusinessPayload({ status: 'completed', outcome: 'UNDECIDABLE', reason: '证据不足', issues: undefined })
     expect(payload).toEqual({ status: 'completed', outcome: 'UNDECIDABLE', reason: '证据不足' })
-    expect(estimateStructuredPayloadTokens(payload)).toBeLessThan(768)
+    expect(estimateStructuredPayloadTokens(payload)).toBeLessThan(2_048)
   })
 })

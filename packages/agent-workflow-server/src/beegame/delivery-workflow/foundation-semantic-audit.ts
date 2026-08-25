@@ -17,7 +17,7 @@ import type { FoundationDocumentPath } from './types'
 
 export const FOUNDATION_SEMANTIC_AUDIT_VERSION = 'foundation-semantic.v1' as const
 export const SEMANTIC_PACKET_MAX_BYTES = 16 * 1024
-export const SEMANTIC_OUTPUT_MAX_TOKENS = 768
+export const SEMANTIC_OUTPUT_MAX_TOKENS = 2_048
 
 export type FoundationSemanticDocumentId =
   | 'GDD'

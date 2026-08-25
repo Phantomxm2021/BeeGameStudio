@@ -148,7 +148,7 @@ describe('foundation semantic audit authority', () => {
     expect(() => admitFoundationSemanticResult(packet, { ...pass, outcome: 'ISSUES', issues: [] })).toThrow(/issue/i)
     const large = { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'ISSUES' as const, issues: [{ problem: 'x'.repeat(9000), expected: 'e', actual: 'a', fixSectionKey: 'GDD#core_loop', sourceSectionKey: 'GDD#core_loop' }] }
     expect(admitFoundationSemanticResult(packet, large).outcome).toBe('ISSUES')
-    expect(SEMANTIC_OUTPUT_MAX_TOKENS).toBe(768)
+    expect(SEMANTIC_OUTPUT_MAX_TOKENS).toBe(2_048)
   })
 
   test('allows one same-packet strong confirmation only for UNDECIDABLE and emits drafts without IDs', () => {
