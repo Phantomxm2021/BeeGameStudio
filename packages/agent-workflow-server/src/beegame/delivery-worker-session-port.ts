@@ -47,6 +47,7 @@ import {
 } from './native-resource-content-tool'
 import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
@@ -388,9 +389,14 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const authToken = await input.getAuthToken?.()
       input.sessions.updateAuthToken(sessionId, authToken)
       const request = requests.get(dispatchId)
+      const packetWorker =
+        request?.workerType === 'foundation-fact-extractor' ||
+        request?.workerType === 'foundation-semantic-reviewer'
       const confirmedBriefContext =
-        input.confirmedBriefContext ??
-        (await input.getConfirmedBriefContext?.())
+        packetWorker
+          ? undefined
+          : input.confirmedBriefContext ??
+            (await input.getConfirmedBriefContext?.())
       const languageInstruction = input.language
         ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
         : ''
@@ -441,17 +447,20 @@ export function createBeeGameDeliveryWorkerPort(input: {
             : ''
       const workerPrompt = [
         languageInstruction,
-        confirmedBriefContext,
-        documentAuthorAuthorityBlock,
-        prompt,
+        ...(packetWorker ? [] : [confirmedBriefContext, documentAuthorAuthorityBlock]),
+        packetWorker && request ? buildWorkerPrompt(request) : prompt,
         initialDocumentPrompt,
-        nativeToolAutonomyInstruction,
-        atomicTaskEvidenceInstruction,
-        implementationResultInstruction,
-        validationResultInstruction,
-        workflowResultInstruction,
-        revisionResultInstruction,
-        assetManifestInstruction,
+        ...(packetWorker
+          ? []
+          : [
+              nativeToolAutonomyInstruction,
+              atomicTaskEvidenceInstruction,
+              implementationResultInstruction,
+              validationResultInstruction,
+              workflowResultInstruction,
+              revisionResultInstruction,
+              assetManifestInstruction,
+            ]),
       ]
         .filter(Boolean)
         .join('\n\n')
@@ -460,7 +469,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           records.get(dispatchId)?.workerType ?? 'question-answerer',
         ),
         displayKind: 'workflow_worker',
-        ...(confirmedBriefContext ? { confirmedBriefContext } : {}),
+        ...(!packetWorker && confirmedBriefContext ? { confirmedBriefContext } : {}),
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })

@@ -4,7 +4,12 @@ import { FOUNDATION_FACT_CATALOG_OWNER_SECTIONS } from './foundation-fact-defini
 
 export const FOUNDATION_FACT_MAX_TASKS = FOUNDATION_FACT_CATALOG_OWNER_SECTIONS.length
 export const FOUNDATION_FACT_MAX_RUNNING = 4
-export const FOUNDATION_FACT_MAX_OUTPUT_TOKENS = 512
+
+export function foundationFactOutputTokenLimit(factKeyCount: number): number {
+  if (!Number.isInteger(factKeyCount) || factKeyCount < 1)
+    throw new Error('foundation fact key count must be a positive integer')
+  return Math.min(4_096, 512 + 256 * factKeyCount)
+}
 
 export type FoundationFactTaskStatus =
   | 'pending'
@@ -18,6 +23,7 @@ export type FoundationFactTask = {
   kind: 'document-facts'
   revision: string
   packetDigest: string
+  factKeyCount: number
   modelTier: 'fast'
   status: FoundationFactTaskStatus
   attempt: number
@@ -115,7 +121,7 @@ function assertDigest(value: string, label: string): void {
 export function createFoundationFactTaskCollection(input: {
   revision: string
   phaseStartedAt: string
-  packets: readonly Pick<FoundationFactTask, 'taskId' | 'kind' | 'revision' | 'packetDigest' | 'modelTier' | 'status' | 'attempt'>[]
+  packets: readonly Pick<FoundationFactTask, 'taskId' | 'kind' | 'revision' | 'packetDigest' | 'factKeyCount' | 'modelTier' | 'status' | 'attempt'>[]
 }): FoundationFactTaskCollection {
   if (!input.revision.trim()) throw new Error('foundation fact revision is required')
   if (input.packets.length > FOUNDATION_FACT_MAX_TASKS)
@@ -124,6 +130,7 @@ export function createFoundationFactTaskCollection(input: {
     throw new Error('foundation fact task IDs must be stable and unique')
   const tasks = input.packets.map(packet => {
     assertDigest(packet.packetDigest, 'foundation fact packet digest')
+    foundationFactOutputTokenLimit(packet.factKeyCount)
     if (packet.revision !== input.revision) throw new Error('foundation fact task revision is stale')
     if (packet.kind !== 'document-facts' || packet.modelTier !== 'fast')
       throw new Error('foundation fact task has an invalid kind or model tier')
@@ -200,7 +207,7 @@ export function admitFoundationFactTerminal(
   }
   if (task.status !== 'running') throw new Error('foundation fact task is not running')
   const measuredUsage = usage(input.usage)
-  const failureReason = measuredUsage.completion_tokens > FOUNDATION_FACT_MAX_OUTPUT_TOKENS
+  const failureReason = measuredUsage.completion_tokens > foundationFactOutputTokenLimit(task.factKeyCount)
     ? 'foundation fact output token cap exceeded'
     : input.terminal.status === 'completed' ? undefined : 'foundation fact worker did not complete'
   const completed = !failureReason

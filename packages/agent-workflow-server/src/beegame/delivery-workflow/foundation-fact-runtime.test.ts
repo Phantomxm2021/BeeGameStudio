@@ -4,15 +4,17 @@ import {
   admitFoundationFactTerminal,
   claimFoundationFactTasks,
   createFoundationFactTaskCollection,
+  foundationFactOutputTokenLimit,
   type FoundationFactTaskCollection,
 } from './foundation-fact-runtime'
 import { selectFoundationFactFastRuntime, selectFoundationSemanticRuntime } from '../session-manager'
 
-const packet = (taskId: string, packetDigest: string) => ({
+const packet = (taskId: string, packetDigest: string, factKeyCount = 1) => ({
   taskId,
   kind: 'document-facts' as const,
   revision: 'rev-1',
   packetDigest,
+  factKeyCount,
   modelTier: 'fast' as const,
   status: 'pending' as const,
   attempt: 0,
@@ -120,7 +122,7 @@ describe('foundation fact runtime', () => {
     const failed = admitFoundationFactTerminal(claimed, { ...base, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 } })
     expect(failed.accepted).toBe(false)
     expect(failed.state.tasks[0]?.status).toBe('retryable')
-    const capped = admitFoundationFactTerminal(claimed, { ...base, terminal: { ...base.terminal, status: 'completed' }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 513, total_tokens: 514 } })
+    const capped = admitFoundationFactTerminal(claimed, { ...base, terminal: { ...base.terminal, status: 'completed' }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 769, total_tokens: 770 } })
     expect(capped.accepted).toBe(false)
     expect(capped.state.tasks[0]?.failureReason).toContain('output token cap')
     const oldPhase = admitFoundationFactTerminal({ ...claimed, phaseStartedAt: '2020-01-01T00:00:00.000Z', aggregateUsage: { input_tokens: 200_000, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 200_000 } }, { ...base, terminal: { ...base.terminal, status: 'completed' }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 }, now: '2026-08-25T00:06:00.000Z' })
@@ -131,6 +133,14 @@ describe('foundation fact runtime', () => {
     const state = createFoundationFactTaskCollection({ revision: 'rev-1', phaseStartedAt: '2026-08-24T00:00:00.000Z', packets: [] })
     expect(state.tasks).toEqual([])
     expect(state.status).toBe('facts_staged')
+  })
+
+  test('derives output limit from assigned fact cardinality with a hard ceiling', () => {
+    expect(foundationFactOutputTokenLimit(1)).toBe(768)
+    expect(foundationFactOutputTokenLimit(4)).toBe(1536)
+    expect(foundationFactOutputTokenLimit(14)).toBe(4096)
+    expect(foundationFactOutputTokenLimit(15)).toBe(4096)
+    expect(() => foundationFactOutputTokenLimit(0)).toThrow(/positive integer/)
   })
 
   test('derives the closed catalog task cap and rejects one beyond it', () => {

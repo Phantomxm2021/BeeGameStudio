@@ -15,8 +15,8 @@ describe('foundation semantic audit integration', () => {
   }))) {
     const digest = 'a'.repeat(64)
     return {
-      schemaVersion: 4 as const,
-      schemaFingerprint: 'foundation-audit-state-v4' as const,
+      schemaVersion: 5 as const,
+      schemaFingerprint: 'foundation-audit-state-v5' as const,
       status: 'semantic_review' as const,
       revision: 'rev',
       documentDigests: Object.fromEntries([
@@ -47,8 +47,8 @@ describe('foundation semantic audit integration', () => {
   test('persists semantic tasks in the sole foundation audit state', () => {
     const digest = 'a'.repeat(64)
     const state = parseFoundationAuditState({
-      schemaVersion: 4,
-      schemaFingerprint: 'foundation-audit-state-v4',
+      schemaVersion: 5,
+      schemaFingerprint: 'foundation-audit-state-v5',
       status: 'semantic_review',
       revision: 'rev',
       documentDigests: Object.fromEntries([

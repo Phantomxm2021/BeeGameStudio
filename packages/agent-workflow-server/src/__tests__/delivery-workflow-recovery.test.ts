@@ -1185,7 +1185,7 @@ describe('delivery workflow recovery', () => {
       status: 'extracting_facts',
       phaseStartedAt: '2020-01-01T00:00:00.000Z',
       tasks: [{
-        taskId: 'fact-0', kind: 'document-facts', revision, packetDigest: digest, modelTier: 'fast', status: 'completed', attempt: 1,
+        taskId: 'fact-0', kind: 'document-facts', revision, packetDigest: digest, factKeyCount: 1, modelTier: 'fast', status: 'completed', attempt: 1,
         terminalDigest: digest, receiptPath: `.beegame/audit/foundation/${revision}/staging/receipts/fact-0.json`, receiptDigest: digest,
         usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 }, durationMs: 42,
         dispatch: { dispatchId: 'fact-dispatch', workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'fact-0', revision, status: 'completed', startedAt: '2020-01-01T00:00:00.000Z', finishedAt: '2020-01-01T00:00:01.000Z', terminalResult: { workerType: 'foundation-fact-extractor', status: 'completed', runId: 'run', dispatchId: 'fact-dispatch', taskId: 'fact-0', revision, packetDigest: digest, results: [] } },

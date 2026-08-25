@@ -692,6 +692,43 @@ describe('delivery worker session credentials', () => {
     }
   })
 
+  test('omits brief and authority display metadata for packet workers', async () => {
+    for (const workerType of ['foundation-fact-extractor', 'foundation-semantic-reviewer'] as const) {
+      let submittedPrompt = ''
+      let display: Record<string, unknown> | undefined
+      const sessions = {
+        start() { return { id: `session-${workerType}` } },
+        updateAuthToken() {},
+        async sendWithDisplay(_sessionId: string, prompt: string, metadata: Record<string, unknown>) {
+          submittedPrompt = prompt
+          display = metadata
+        },
+      } as unknown as BeeGameSessionManager
+      const request: WorkerDispatchRequest = {
+        dispatchId: `dispatch-${workerType}`,
+        runId: 'run-packet', ownerId: 'user-1', projectId: 'project-packet', workspacePath: '/workspace-secret',
+        workerType, phase: 'DOCUMENT_REVIEW', taskId: `task-${workerType}`, revision: 'revision-packet', allowedPaths: [], projectReadScope: 'empty',
+        contract: {
+          workerType, taskId: `task-${workerType}`, revision: 'revision-packet', packetDigest: 'a'.repeat(64), modelTier: workerType === 'foundation-fact-extractor' ? 'fast' : 'balanced',
+          packet: { revision: 'revision-packet', keys: ['GDD.player_loop'], sections: [], packetDigest: 'a'.repeat(64) },
+          confirmedBriefContext: 'CONFIRMED_BRIEF_SENTINEL',
+        },
+      }
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions,
+        userId: 'user-1',
+        confirmedBriefContext: 'CONFIRMED_BRIEF_SENTINEL',
+        async getConfirmedBriefContext() { throw new Error('packet workers must not load the confirmed brief') },
+      })
+      await port.start(request)
+      await port.submit(request.dispatchId!, 'CONFIRMED_BRIEF_SENTINEL /workspace-secret')
+      expect(submittedPrompt).not.toContain('CONFIRMED_BRIEF_SENTINEL')
+      expect(submittedPrompt).not.toContain('/workspace-secret')
+      expect(submittedPrompt).toContain('Immutable packet contract')
+      expect(display).not.toHaveProperty('confirmedBriefContext')
+    }
+  })
+
   test('assigns the atomic planner one structured submission lane', async () => {
     let submittedPrompt = ''
     const sessions = {

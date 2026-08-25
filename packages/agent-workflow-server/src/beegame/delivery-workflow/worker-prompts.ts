@@ -8,6 +8,10 @@ const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. The complete Markdown response must not exceed 48,000 UTF-8 bytes and must finish every required section and production material within that single response; compact earlier sections rather than omit or truncate any later required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
+  const packetWorker =
+    request.workerType === 'foundation-fact-extractor' ||
+    request.workerType === 'foundation-semantic-reviewer'
+  if (packetWorker) return buildPacketWorkerPrompt(request)
   const initialFoundationAuthor =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
@@ -86,6 +90,37 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     terminalInstruction(request),
     formatContract(request),
   ].join('\n')
+}
+
+function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
+  const contract = formatPacketContract(request)
+  return [
+    `BeeGame delivery worker: ${request.workerType}`,
+    `Revision: ${request.revision}`,
+    `Task: ${String(request.contract.taskId ?? request.taskId ?? '')}`,
+    `Packet digest: ${String(request.contract.packetDigest ?? '')}`,
+    'The packet is the sole input for this task. It is immutable service-owned authority.',
+    'Do not read project files, call Read, Grep or Glob, inspect the workspace, use native tools, write files, mutate the platform, or add context from any other source.',
+    'Return only the strict structured result for the assigned packet; do not return Markdown, prose explanations, or additional fields.',
+    workerInstruction(request),
+    terminalInstruction(request),
+    `Immutable packet contract: ${contract}`,
+  ].join('\n')
+}
+
+function formatPacketContract(request: WorkerDispatchRequest): string {
+  const allowedKeys = [
+    'workerType',
+    'taskId',
+    'revision',
+    'packetDigest',
+    'packet',
+    'checkId',
+    'modelTier',
+  ] as const
+  return JSON.stringify(Object.fromEntries(
+    allowedKeys.flatMap(key => Object.hasOwn(request.contract, key) ? [[key, request.contract[key]]] : []),
+  ))
 }
 
 function formatContract(request: WorkerDispatchRequest): string {

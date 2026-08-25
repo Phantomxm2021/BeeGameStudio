@@ -9,8 +9,8 @@ import { FOUNDATION_FACT_MAX_TASKS } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
-    schemaVersion: 4 as const,
-    schemaFingerprint: 'foundation-audit-state-v4' as const,
+    schemaVersion: 5 as const,
+    schemaFingerprint: 'foundation-audit-state-v5' as const,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(
@@ -43,12 +43,21 @@ describe('foundationAuditState schema', () => {
     ).toThrow()
   })
 
+  test('rejects the prior audit-state schema without a compatibility reader', () => {
+    expect(() => parseFoundationAuditState({
+      ...valid,
+      schemaVersion: 4,
+      schemaFingerprint: 'foundation-audit-state-v4',
+    })).toThrow(/schemaVersion|schemaFingerprint/)
+  })
+
   test('rejects staged states that still contain pending or running tasks', () => {
     const task = {
       taskId: 'revision-1:fact:0',
       kind: 'document-facts' as const,
       revision: 'revision-1',
       packetDigest: 'c'.repeat(64),
+      factKeyCount: 1,
       modelTier: 'fast' as const,
       status: 'pending' as const,
       attempt: 0,
@@ -67,6 +76,7 @@ describe('foundationAuditState schema', () => {
       kind: 'document-facts' as const,
       revision: 'revision-1',
       packetDigest: 'c'.repeat(64),
+      factKeyCount: 1,
       modelTier: 'fast' as const,
       status: 'pending' as const,
       attempt: 0,

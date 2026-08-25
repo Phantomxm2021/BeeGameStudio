@@ -64,4 +64,42 @@ describe('worker prompts', () => {
         expect(terminalInstruction).not.toContain(serviceOwnedField)
     }
   })
+
+  test('keeps packet workers on the immutable packet-only contract', () => {
+    for (const workerType of ['foundation-fact-extractor', 'foundation-semantic-reviewer'] as const) {
+      const prompt = buildWorkerPrompt({
+        runId: 'run',
+        ownerId: 'owner',
+        projectId: 'project',
+        workspacePath: '/workspace-secret',
+        workerType,
+        phase: 'DOCUMENT_REVIEW',
+        revision: 'revision',
+        allowedPaths: [],
+        contract: {
+          workerType,
+          taskId: 'task',
+          packetDigest: 'a'.repeat(64),
+          packet: {
+            revision: 'revision',
+            keys: ['GDD.player_loop'],
+            sections: [],
+            packetDigest: 'a'.repeat(64),
+          },
+          modelTier: workerType === 'foundation-fact-extractor' ? 'fast' : 'balanced',
+          confirmedBriefContext: 'CONFIRMED_BRIEF_SENTINEL',
+          workspacePath: '/workspace-secret',
+          canonicalArtifacts: 'Canonical artifacts: sentinel',
+          nativeToolProse: 'native tools, reasoning',
+        },
+      })
+      expect(prompt).not.toContain('/workspace-secret')
+      expect(prompt).not.toContain('CONFIRMED_BRIEF_SENTINEL')
+      expect(prompt).not.toContain('Canonical artifacts: sentinel')
+      expect(prompt).not.toContain('native tools, reasoning')
+      expect(prompt).toContain('packet is the sole input')
+      expect(prompt).toContain('Immutable packet contract')
+      expect(prompt).toContain('GDD.player_loop')
+    }
+  })
 })

@@ -71,7 +71,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
-import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
+import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactOutputTokenLimit, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, loadCommittedFoundationDerivedArtifacts, loadDeterministicFoundationReview, publishFoundationSemanticReview, loadFoundationSemanticReview } from './foundation-audit-artifacts'
 import { createFoundationFactStore, digestFactStore, type FoundationFact } from './foundation-fact-store'
 import type { FoundationAuditState } from './foundation-audit-state'
@@ -166,7 +166,7 @@ async function deriveFoundationAudit(
     const packets = buildFoundationFactPackets({ revision: artifacts.revision, documents, sectionIndex: artifacts.sectionIndex, unresolvedKeys: extraction.unresolvedKeys })
     const phaseStartedAt = new Date().toISOString()
     const baseState = createFoundationAuditState({ revision: artifacts.revision, documentDigests: artifacts.documentDigests, manifest: artifacts.manifest })
-    const tasks = packets.map((packet, index) => ({ taskId: `${artifacts.revision}:fact:${index}:${packet.packetDigest.slice(0, 12)}`, kind: 'document-facts' as const, revision: artifacts.revision, packetDigest: packet.packetDigest, modelTier: 'fast' as const, status: 'pending' as const, attempt: 0 }))
+    const tasks = packets.map((packet, index) => ({ taskId: `${artifacts.revision}:fact:${index}:${packet.packetDigest.slice(0, 12)}`, kind: 'document-facts' as const, revision: artifacts.revision, packetDigest: packet.packetDigest, factKeyCount: packet.keys.length, modelTier: 'fast' as const, status: 'pending' as const, attempt: 0 }))
     for (const [index, packet] of packets.entries()) await writeFoundationFactPacket({ workspacePath, revision: artifacts.revision, taskId: tasks[index]!.taskId, packet })
     let nextState: FoundationAuditState = { ...baseState, status: packets.length ? ('extracting_facts' as const) : ('facts_staged' as const), tasks, phaseStartedAt }
     return {
@@ -664,6 +664,7 @@ export function createDeliveryWorkflowController(input: {
         const locked = await store.load(lease)
         const lockedTask = locked?.foundationAuditState?.tasks.find(task => task.taskId === foundationFactTask.taskId)
         if (!locked || !lockedTask || !lockedTask.dispatch || lockedTask.dispatch.dispatchId !== record.dispatchId) return
+        if (lockedTask.kind !== 'document-facts') throw new Error('foundation fact terminal reached a non-fact task')
         const lockedState = locked.foundationAuditState!
         if (lockedTask.status === 'completed') {
           if (lockedTask.terminalDigest !== digestFoundationFactTerminal(result as never)) throw new Error('conflicting foundation fact terminal replay')
@@ -676,10 +677,12 @@ export function createDeliveryWorkflowController(input: {
         const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(input.workspacePath, path), 'utf8')] as const)))
         let validated: ReturnType<typeof validateFoundationFactResults>
         try {
+          if (!Array.isArray((packet as { keys?: unknown }).keys) || (packet as { keys: unknown[] }).keys.length !== lockedTask.factKeyCount)
+            throw new Error('foundation fact task key count does not match its immutable packet')
           validated = validateFoundationFactResults({ packet: packet as never, expectedRevision: lockedTask.revision, documents, sectionIndex: artifacts.sectionIndex, results: result.results as never })
         } catch (error) {
           const invalid = new Error(error instanceof Error ? error.message : 'foundation fact result is invalid')
-          invalid.name = (record.usage?.completion_tokens ?? 0) > 512
+          invalid.name = (record.usage?.completion_tokens ?? 0) > foundationFactOutputTokenLimit(lockedTask.factKeyCount)
             ? 'FoundationFactOutputCapError'
             : 'FoundationFactInvalidResultError'
           throw invalid
@@ -1828,7 +1831,8 @@ export function createDeliveryWorkflowController(input: {
         const running = state.tasks.filter(task => task.kind === 'impacted-facts' && task.status === 'running').length
         const available = state.tasks.filter((task): task is FoundationRevisionImpactedFactsTask => task.kind === 'impacted-facts' && (task.status === 'pending' || task.status === 'retryable'))
         for (const task of available.slice(0, Math.max(0, 4 - running))) {
-          await dispatcher.dispatch({ runId: current.runId, ownerId: current.ownerId, projectId: current.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { round: task.round, taskId: task.taskId, revision: task.revision, packetPath: task.packetPath, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-fact-extractor' } })
+          const packet = await loadFoundationRevisionFactPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
+          await dispatcher.dispatch({ runId: current.runId, ownerId: current.ownerId, projectId: current.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { round: task.round, taskId: task.taskId, revision: task.revision, packetPath: task.packetPath, packet, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-fact-extractor' } })
         }
         return
       }
@@ -1849,7 +1853,8 @@ export function createDeliveryWorkflowController(input: {
         const running = revisionState.tasks.filter(task => task.status === 'running').length
         const available = revisionState.tasks.filter((task): task is FoundationRevisionSemanticRecheckTask => task.kind === 'semantic-recheck' && (task.status === 'pending' || task.status === 'retryable'))
         for (const task of available.slice(0, Math.max(0, 4 - running))) {
-          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { taskId: task.taskId, revision: task.revision, round: task.round, issueId: task.issueId, packetPath: task.packetPath, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-semantic-reviewer' } })
+          const packet = await loadFoundationRevisionSemanticPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
+          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { taskId: task.taskId, revision: task.revision, round: task.round, issueId: task.issueId, packetPath: task.packetPath, packet, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-semantic-reviewer' } })
         }
         return
       }

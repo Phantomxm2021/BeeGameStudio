@@ -7,8 +7,8 @@ import type { FoundationSemanticResult } from './foundation-semantic-audit'
 import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST } from './foundation-semantic-audit'
 import type { FoundationSemanticRuntimeTask } from './foundation-semantic-runtime'
 
-export const FOUNDATION_AUDIT_STATE_SCHEMA_VERSION = 4 as const
-export const FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT = 'foundation-audit-state-v4' as const
+export const FOUNDATION_AUDIT_STATE_SCHEMA_VERSION = 5 as const
+export const FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT = 'foundation-audit-state-v5' as const
 export type FoundationAuditStatus = 'index_staged' | 'extracting_facts' | 'facts_staged' | 'derived_committed' | 'deterministic_ready' | 'semantic_review' | 'audit_ready'
 export type FoundationAuditState = {
   schemaVersion: typeof FOUNDATION_AUDIT_STATE_SCHEMA_VERSION
@@ -66,7 +66,7 @@ const admittedResultSchema = z.object({ checkId: z.string().min(1), packetIdenti
   if (result.outcome === 'ISSUES' && (!issueCount || result.reason !== undefined)) context.addIssue({ code: 'custom', path: ['outcome'], message: 'ISSUES admitted results require issue drafts and no reason' })
   if (result.outcome === 'UNDECIDABLE' && (issueCount || !result.reason)) context.addIssue({ code: 'custom', path: ['outcome'], message: 'UNDECIDABLE admitted results require only a reason' })
 })
-const factTaskSchema = z.object({ ...commonTask, kind: z.literal('document-facts'), modelTier: z.literal('fast'), attempt: z.number().int().nonnegative().max(2), receiptPath: relativeArtifactPath.optional(), receiptDigest: digestSchema.optional() }).strict()
+const factTaskSchema = z.object({ ...commonTask, kind: z.literal('document-facts'), factKeyCount: z.number().int().positive(), modelTier: z.literal('fast'), attempt: z.number().int().nonnegative().max(2), receiptPath: relativeArtifactPath.optional(), receiptDigest: digestSchema.optional() }).strict()
 const semanticTaskSchema = z.object({ ...commonTask, kind: z.literal('semantic'), checkId: z.string().min(1), modelTier: z.enum(['fast', 'balanced']), attempt: z.number().int().nonnegative().max(2), admittedResult: admittedResultSchema.optional() }).strict()
 const confirmationTaskSchema = z.object({ ...commonTask, kind: z.literal('confirmation'), checkId: z.string().min(1), sourceTaskId: z.string().min(1), modelTier: z.literal('strong'), attempt: z.number().int().nonnegative().max(1), admittedResult: admittedResultSchema.optional() }).strict()
 const taskSchema = z.discriminatedUnion('kind', [factTaskSchema, semanticTaskSchema, confirmationTaskSchema]).superRefine((task, context) => {

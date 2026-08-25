@@ -22,7 +22,7 @@ import type {
 } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
 import type { FoundationAuditTask } from './foundation-audit-state'
-import { claimFoundationFactTasks, digestFoundationFactTerminal, type FoundationFactTask, type FoundationFactTaskCollection } from './foundation-fact-runtime'
+import { claimFoundationFactTasks, digestFoundationFactTerminal, foundationFactOutputTokenLimit, type FoundationFactTask, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { claimFoundationSemanticTasks, digestFoundationSemanticTerminal, type FoundationSemanticRuntimeTask, type FoundationSemanticTaskCollection } from './foundation-semantic-runtime'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
 import {
@@ -1184,7 +1184,8 @@ export function createDeliveryDispatcher(options: {
       result = parseWorkerTerminalResult(terminalValue)
       if (result.workerType !== 'foundation-fact-extractor' || result.runId !== request.runId || result.dispatchId !== dispatchId || result.taskId !== request.taskId || result.revision !== request.revision || result.packetDigest !== request.contract.packetDigest)
         throw new Error('foundation impacted fact terminal identity does not match dispatch contract')
-      if ((location.record.usage?.completion_tokens ?? 0) > 512)
+      const packet = await loadFoundationRevisionFactPacket({ workspacePath: request.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
+      if ((location.record.usage?.completion_tokens ?? 0) > foundationFactOutputTokenLimit(packet.keys.length))
         throw new Error('foundation impacted fact completion token cap exceeded')
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid foundation impacted fact terminal'
