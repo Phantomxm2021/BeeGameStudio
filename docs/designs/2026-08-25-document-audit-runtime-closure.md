@@ -53,6 +53,8 @@ Stale/conflicting digests, terminal identity mismatch, unauthorized sections, in
 
 Each successful round publishes one immutable revision-bound authority set. Round 1 addresses BLOCKER/HIGH/MEDIUM; Round 2 addresses remaining BLOCKER/HIGH; Round 3 addresses BLOCKER and verifies convergence. PASS requires no BLOCKER/HIGH. Remaining MEDIUM/LOW become Known Issues. BLOCKER/HIGH after Round 3 moves the run to `needs_action`.
 
+Each per-document revision packet keeps the fixed 24 KiB boundary and carries the admitted Issue Registry entries directly. It must not duplicate `actual` as a second `problem` field or repeat source, target, and fix references in an `evidenceRefs` track; the Registry issue and selected immutable sections remain the sole business evidence.
+
 ### Recovery and feedback
 
 Recovery uses the same durable task collection and artifact preconditions as the live controller. It replays receipts, retries only incomplete retryable tasks, and preserves attempts, failures, usage, and duration. It does not repair clocks or reset cost.

@@ -506,24 +506,6 @@ function sectionSlices(
   }))
 }
 
-function issueEvidenceRefs(
-  issue: AuditIssue,
-  selectedSections: readonly FoundationRevisionSectionSlice[],
-): Array<Record<string, unknown>> {
-  const selectedDigests = new Map(
-    selectedSections.map(section => [
-      `${section.documentPath}\0${section.sectionId}`,
-      section.digest,
-    ]),
-  )
-  return [issue.source, ...(issue.target ? [issue.target] : []), { documentPath: issue.fixDocument, sectionId: issue.fixSectionId }]
-    .map(ref => ({
-      documentPath: ref.documentPath,
-      sectionId: ref.sectionId,
-      digest: (ref as { digest?: string }).digest ?? selectedDigests.get(`${ref.documentPath}\0${ref.sectionId}`) ?? null,
-    }))
-}
-
 export async function buildFoundationRevisionAuthority(input: {
   workspacePath: string
   revision: string
@@ -560,13 +542,6 @@ export async function buildFoundationRevisionAuthority(input: {
     const source = (fact as { source?: { documentPath?: string; sectionId?: string } }).source
     return source && issueRefs.has(`${source.documentPath}\0${source.sectionId}`)
   })
-  const issues = input.issues.map(issue => ({
-    ...issue,
-    // The persisted registry intentionally omits the worker's prose problem;
-    // retain the bounded, admitted actual as the packet's problem statement.
-    problem: issue.actual,
-    evidenceRefs: issueEvidenceRefs(issue, selectedSections),
-  }))
   const packet: Record<string, unknown> = {
     schema: 'beegame-foundation-revision-packet-v1',
     revision: input.revision,
@@ -575,7 +550,9 @@ export async function buildFoundationRevisionAuthority(input: {
     documentPath: input.batch.documentPath,
     issueIds: [...input.batch.issueIds],
     sectionIds: [...input.batch.sectionIds],
-    issues,
+    // Keep the admitted registry issue as-is. `problem` duplicated `actual`,
+    // while `evidenceRefs` duplicated the immutable source/target/fix refs.
+    issues: input.issues,
     sections: selectedSections,
     normalizedFacts: selectedFacts,
     immutableDigests: {

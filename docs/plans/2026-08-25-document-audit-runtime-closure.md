@@ -203,6 +203,7 @@ It canonicalizes through `createFoundationFactStore()`, strictly validates uniqu
 - The next round loads issues only from the committed publication authority.
 - Round policy is exact: Round 1 fixes BLOCKER/HIGH/MEDIUM; Round 2 fixes BLOCKER/HIGH; Round 3 fixes BLOCKER; PASS requires no BLOCKER/HIGH; remaining MEDIUM/LOW become Known Issues; BLOCKER/HIGH after Round 3 becomes `needs_action`.
 - Every next-round state binds `roundBefore` and `authority` to the preceding committed revision and Issue Registry digest.
+- Keep the per-document revision packet at 24 KiB, carry admitted Issue Registry entries without a duplicate `problem` or `evidenceRefs` projection, and reject any genuinely oversized packet at that task boundary.
 
 **Test cycle**
 

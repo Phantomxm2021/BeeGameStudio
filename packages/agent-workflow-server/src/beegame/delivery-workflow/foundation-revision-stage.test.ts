@@ -7,6 +7,7 @@ import { getGameDocumentContract } from './game-document-contracts'
 import * as revisionStage from './foundation-revision-stage'
 import {
   createFoundationRevisionStage,
+  buildFoundationRevisionAuthority,
   deriveFoundationPatchOperations,
   foundationRevisionPacketDigest,
   foundationRevisionPacketPath,
@@ -53,6 +54,57 @@ test('does not overwrite a packet and keeps packet paths isolated by round', asy
   const roundTwo = { ...first, round: 2 as const }
   const roundTwoPath = await writeFoundationRevisionPacket({ workspacePath: workspace, revision, round: 2, taskId: identity.taskId, documentPath, packet: roundTwo, packetDigest: foundationRevisionPacketDigest(roundTwo) })
   expect(roundTwoPath).not.toBe(foundationRevisionPacketPath(revision, 1, identity.taskId))
+})
+
+test('builds a revision packet without duplicate issue evidence', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const source = {
+    documentPath,
+    sectionId: 'vision',
+    heading: 'Vision',
+    startLine: 3,
+    endLine: 5,
+    digest: 'a'.repeat(64),
+  }
+  const target = {
+    documentPath,
+    sectionId: 'progression',
+    heading: 'Progression, Rewards and Economy Boundary',
+    startLine: 9,
+    endLine: 11,
+    digest: 'b'.repeat(64),
+  }
+  const issue = {
+    id: 'AUD-1',
+    severity: 'HIGH' as const,
+    type: 'semantic' as const,
+    source,
+    target,
+    expected: 'expected',
+    actual: 'actual',
+    fixDocument: documentPath,
+    fixSectionId: 'rules_systems',
+  }
+  const authority = await buildFoundationRevisionAuthority({
+    workspacePath: workspace,
+    revision,
+    taskId: 'revision-task-1',
+    round: 1,
+    batch: { documentPath, sectionIds: ['rules_systems'], issueIds: ['AUD-1'] },
+    issues: [issue],
+    sourceAuthorityDigest: 'c'.repeat(64),
+    sourceIssueRegistryDigest: 'd'.repeat(64),
+    sourceDerivedDigests: { sectionIndex: 'e'.repeat(64), factStore: 'f'.repeat(64), manifest: '0'.repeat(64) },
+    sourceDocumentDigests: [{ path: documentPath, digest: '1'.repeat(64) }],
+    normalizedFacts: [{ source, payload: 'duplicate fact prose'.repeat(1000) }],
+  })
+
+  expect(authority.packet.sections).toHaveLength(3)
+  expect(authority.packet.normalizedFacts).toHaveLength(1)
+  const packetIssues = authority.packet.issues as Array<Record<string, unknown>>
+  expect(packetIssues).toEqual([expect.objectContaining({ id: 'AUD-1', actual: 'actual' })])
+  expect(packetIssues[0]).not.toHaveProperty('problem')
+  expect(packetIssues[0]).not.toHaveProperty('evidenceRefs')
 })
 
 test('persists semantic result artifacts immutably and binds issue, packet, result digest, and path', async () => {
