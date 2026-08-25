@@ -67,7 +67,7 @@ import {
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, mergeFoundationFactResults, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
@@ -1456,6 +1456,87 @@ export function createDeliveryWorkflowController(input: {
     return operations
   }
 
+  /**
+   * Resolve the issue registry that was committed for a round's `roundBefore`
+   * revision.  Publication authorities are stored by their base revision, so
+   * the resulting revision is deliberately looked up through its committed
+   * marker instead of being treated as a new publication input.
+   */
+  async function loadRoundBeforeIssues(
+    run: DeliveryRun,
+    state: FoundationRevisionState,
+  ): Promise<AuditIssue[]> {
+    const before = state.roundBefore
+    const reviewState = run.foundationAuditState
+    if (
+      reviewState?.revision === before.documentRevision &&
+      reviewState.review?.issueRegistryDigest === before.issueRegistryDigest
+    ) {
+      const review = await loadFoundationSemanticReview({
+        workspacePath: input.workspacePath,
+        revision: before.documentRevision,
+        reviewDigest: reviewState.review.reviewDigest,
+      })
+      if (
+        !review ||
+        review.digests.issueRegistry !== before.issueRegistryDigest
+      )
+        throw new Error('foundation revision round-before review authority is stale')
+      return [...review.issues]
+    }
+
+    const publicationRoot = join(
+      input.workspacePath,
+      '.beegame/audit/foundation',
+    )
+    let entries: Array<{ name: string; isDirectory(): boolean }>
+    try {
+      entries = await readdir(publicationRoot, { withFileTypes: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+        throw new Error('foundation revision round-before publication authority is missing')
+      throw error
+    }
+    const matches: AuditIssue[][] = []
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const committedPath = join(
+        publicationRoot,
+        entry.name,
+        'revision/COMMITTED.json',
+      )
+      let marker: Record<string, unknown>
+      try {
+        marker = JSON.parse(await readFile(committedPath, 'utf8')) as Record<
+          string,
+          unknown
+        >
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+        throw new Error('foundation revision publication marker is malformed')
+      }
+      if (
+        marker.resultingRevision !== before.documentRevision ||
+        marker.resultingIssueRegistryDigest !== before.issueRegistryDigest ||
+        typeof marker.baseRevision !== 'string'
+      )
+        continue
+      const publication = await recoverFoundationRevision({
+        workspacePath: input.workspacePath,
+        revision: marker.baseRevision,
+      })
+      if (
+        publication.resultingRevision !== before.documentRevision ||
+        publication.resultingIssueRegistryDigest !== before.issueRegistryDigest
+      )
+        throw new Error('foundation revision round-before publication binding is stale')
+      matches.push([...publication.resultingIssues])
+    }
+    if (matches.length !== 1)
+      throw new Error('foundation revision round-before publication authority is ambiguous or missing')
+    return matches[0]!
+  }
+
   async function planImpactedFacts(run: DeliveryRun): Promise<DeliveryRun | undefined> {
     const state = run.foundationRevisionState
     if (!state || state.phase !== 'rebuilding_facts') return run
@@ -1538,7 +1619,10 @@ export function createDeliveryWorkflowController(input: {
         if (issue && operation) semanticCandidates.push({ issue, operation })
       }
     }
-    const failure = validations.some(item => item.status === 'FAIL') || newIssues.length > 0
+    // Newly discovered impacted issues are valid audit output.  They must be
+    // carried into the publication registry, while only an explicit FAIL in
+    // the deterministic patch verdict is an operational validation failure.
+    const failure = validations.some(item => item.status === 'FAIL')
     const semanticTasks = await Promise.all([...new Map(semanticCandidates.map(candidate => [candidate.issue.id, candidate])).values()].map(async (candidate, index) => {
       const packet = buildFoundationSemanticRecheckPacket({ issue: candidate.issue, patchOperation: candidate.operation, sectionIndex, documents: Object.fromEntries(documents), impact: analyzeFoundationImpact([candidate.operation]), factStore: rebuilt.factStore })
       const taskId = `${state.revision}.semantic-recheck.${state.round}.${index}`
@@ -1599,7 +1683,6 @@ export function createDeliveryWorkflowController(input: {
     }
     if (recoveredPublication) return commitPublished(recoveredPublication, rebuilt.factStore)
     const patchValidations = []
-    const newIssues: AuditIssue[] = []
     const batches = []
     const receipts = []
     for (const task of state.tasks) {
@@ -1617,7 +1700,6 @@ export function createDeliveryWorkflowController(input: {
       })
       const checked = validateFoundationPatch({ validatorTaskId: `${state.revision}.validator.${task.taskId}`, round: state.round, documentPath: task.documentPath, baseDocumentDigest: task.baseDocumentDigest, postPatchDocumentDigest: task.receipt.stagedDocumentDigest, patchOperations: taskOperations, impact: taskImpact, admittedIssues, sectionIndex, factStore: rebuilt.factStore })
       patchValidations.push(...checked.patchValidations)
-      newIssues.push(...checked.newImpactedIssues)
       batches.push({ documentPath: task.documentPath, sectionIds: task.sectionIds, issueIds: task.issueIds })
       receipts.push(task.receipt)
     }
@@ -1625,7 +1707,24 @@ export function createDeliveryWorkflowController(input: {
       if (!task.resultPath || !task.resultDigest || !task.terminalDigest) throw new Error('foundation semantic result binding is incomplete')
       return loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, resultDigest: task.resultDigest, resultPath: task.resultPath })
     }))
-    const publication = await publishFoundationRevision({ workspacePath: input.workspacePath, revision: state.revision, confirmedBriefDigest: run.confirmedBriefDigest, round: state.round, batches, receipts, patchOperations: operations, patchValidations, semanticRecheckResults, resultingIssues: newIssues })
+    // Recompute the complete post-publication registry at the publication
+    // boundary.  Validation only returns impacted discoveries; the registry
+    // must also retain unresolved issues from the preceding committed
+    // authority and refresh deterministic issues against the rebuilt store.
+    const beforeIssues = await loadRoundBeforeIssues(run, state)
+    const resolvedIssueIds = new Set(batches.flatMap(batch => batch.issueIds))
+    const postDeterministicIssues = runProductionDeterministicFoundationAudit({
+      sectionIndex,
+      factStore: rebuilt.factStore,
+    })
+    const resultingById = new Map<string, AuditIssue>()
+    for (const issue of beforeIssues) {
+      if (!resolvedIssueIds.has(issue.id)) resultingById.set(issue.id, issue)
+    }
+    for (const issue of postDeterministicIssues) {
+      if (!resolvedIssueIds.has(issue.id)) resultingById.set(issue.id, issue)
+    }
+    const publication = await publishFoundationRevision({ workspacePath: input.workspacePath, revision: state.revision, confirmedBriefDigest: run.confirmedBriefDigest, round: state.round, batches, receipts, patchOperations: operations, patchValidations, semanticRecheckResults, resultingIssues: [...resultingById.values()] })
     return commitPublished(publication, rebuilt.factStore)
   }
 
@@ -1633,10 +1732,20 @@ export function createDeliveryWorkflowController(input: {
     const state = run.foundationRevisionState
     if (!state || state.phase !== 'round_closing') return run
     if (state.status === 'completed') return undefined
-    const publication = state.authority.issueAuthority.kind === 'publication' ? await recoverFoundationRevision({ workspacePath: input.workspacePath, revision: state.authority.issueAuthority.baseRevision }) : undefined
-    const review = run.foundationAuditState?.review ? await loadFoundationSemanticReview({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision, reviewDigest: run.foundationAuditState.review.reviewDigest }) : undefined
-    const beforeIssues = publication?.resultingIssues ?? review?.issues ?? []
-    const afterIssues = publication?.resultingIssues ?? []
+    const beforeIssues = await loadRoundBeforeIssues(run, state)
+    if (state.authority.issueAuthority.kind !== 'publication')
+      throw new Error('foundation revision round closing requires committed publication authority')
+    const publication = await recoverFoundationRevision({
+      workspacePath: input.workspacePath,
+      revision: state.authority.issueAuthority.baseRevision,
+    })
+    if (
+      publication.resultingRevision !== state.revision ||
+      publication.resultingIssueRegistryDigest !==
+        state.authority.issueAuthority.issueRegistryDigest
+    )
+      throw new Error('foundation revision round-closing publication authority is stale')
+    const afterIssues = [...publication.resultingIssues]
     const policy = evaluateFoundationRevisionRoundPolicy({ phase: 'evaluate', round: state.round, before: { issues: beforeIssues, issueRegistryDigest: state.roundBefore.issueRegistryDigest, documentRevision: state.roundBefore.documentRevision }, after: { issues: afterIssues, issueRegistryDigest: state.authority.issueAuthority.issueRegistryDigest, documentRevision: state.revision } })
     const lease = await store.mutationLock(run.runId)
     let next: DeliveryRun | undefined

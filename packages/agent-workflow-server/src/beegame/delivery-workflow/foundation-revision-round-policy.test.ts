@@ -144,6 +144,38 @@ describe('foundation revision round policy', () => {
     })
   })
 
+  test('round plans use the exact severity budget for every round', () => {
+    expect(
+      evaluateFoundationRevisionRoundPolicy({
+        phase: 'plan',
+        round: 2,
+        issues: [
+          issue('AUD-L', 'LOW'),
+          issue('AUD-M', 'MEDIUM'),
+          issue('AUD-H', 'HIGH'),
+          issue('AUD-B', 'BLOCKER'),
+        ],
+      }),
+    ).toEqual({
+      status: 'repair',
+      round: 2,
+      repairIssueIds: ['AUD-B', 'AUD-H'],
+      knownIssueIds: ['AUD-L', 'AUD-M'],
+    })
+    expect(
+      evaluateFoundationRevisionRoundPolicy({
+        phase: 'plan',
+        round: 3,
+        issues: [issue('AUD-B', 'BLOCKER'), issue('AUD-H', 'HIGH'), issue('AUD-M', 'MEDIUM')],
+      }),
+    ).toEqual({
+      status: 'repair',
+      round: 3,
+      repairIssueIds: ['AUD-B'],
+      knownIssueIds: ['AUD-M'],
+    })
+  })
+
   test('round 3 repairs only blockers and never starts round 4', () => {
     const result = evaluateFoundationRevisionRoundPolicy({
       phase: 'evaluate',
@@ -182,6 +214,28 @@ describe('foundation revision round policy', () => {
       repairIssueIds: [],
       knownIssueIds: ['AUD-L', 'AUD-M'],
     })
+  })
+
+  test('round three passes medium and low but needs action for either blocker or high', () => {
+    const before = snapshot([issue('AUD-B', 'BLOCKER')], digest('a'), 'doc-1')
+    expect(
+      evaluateFoundationRevisionRoundPolicy({
+        phase: 'evaluate',
+        round: 3,
+        before,
+        after: snapshot([issue('AUD-M', 'MEDIUM'), issue('AUD-L', 'LOW')], digest('b'), 'doc-2'),
+      }),
+    ).toMatchObject({ status: 'proceed', knownIssueIds: ['AUD-L', 'AUD-M'] })
+    for (const severity of ['HIGH', 'BLOCKER'] as const) {
+      expect(
+        evaluateFoundationRevisionRoundPolicy({
+          phase: 'evaluate',
+          round: 3,
+          before,
+          after: snapshot([issue(`AUD-${severity}`, severity)], digest('b'), 'doc-2'),
+        }),
+      ).toMatchObject({ status: 'needs_action', reason: 'round_limit' })
+    }
   })
 
   test('stops on explicit no-progress with unchanged authoritative identities and document revision', () => {
