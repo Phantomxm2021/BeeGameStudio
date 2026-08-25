@@ -6,7 +6,7 @@ import {
   type AtomicTaskContractFacts,
 } from './atomic-task-planner'
 import { auditAssetContract } from '../asset-contract-audit'
-import { createDeliveryDispatcher } from './dispatch'
+import { createDeliveryDispatcher, DispatchError } from './dispatch'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
 import { estimateStructuredPayloadTokens, foundationFactBusinessPayload } from './structured-output-admission'
 import {
@@ -1794,6 +1794,28 @@ export function createDeliveryWorkflowController(input: {
     return next
   }
 
+  async function dispatchFoundationAuditTask(request: WorkerDispatchRequest): Promise<void> {
+    try {
+      await dispatcher.dispatch(request)
+    } catch (error) {
+      if (!(error instanceof DispatchError) || error.code !== 'duplicate' || !request.taskId)
+        throw error
+      const current = await store.load()
+      const task = current?.foundationAuditState?.tasks.find(candidate => candidate.taskId === request.taskId)
+      const sameTask = task && task.revision === request.revision && task.packetDigest === request.contract.packetDigest && (
+        request.workerType === 'foundation-fact-extractor'
+          ? task.kind === 'document-facts'
+          : (task.kind === 'semantic' || task.kind === 'confirmation')
+      )
+      if (!current || !task || !sameTask) throw error
+      if (task.status === 'running' && task.dispatch?.status === 'running' && task.dispatch.workerType === request.workerType)
+        return
+      if ((task.status === 'pending' || task.status === 'retryable') && (current.foundationAuditState?.tasks.filter(candidate => candidate.status === 'running').length ?? 0) >= 4)
+        return
+      throw error
+    }
+  }
+
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
     if (run.status !== 'running') return
     if (
@@ -2132,7 +2154,7 @@ export function createDeliveryWorkflowController(input: {
         for (const task of available.slice(0, FOUNDATION_SEMANTIC_MAX_RUNNING - running)) {
           const packet = await buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision, checkId: task.checkId, sectionIndex: committed.sectionIndex, factStore: committed.factStore, deterministicReviewDigest: prefix.reviewDigest, deterministicIssuePrefix: prefix.issues, documentDigests: committed.documentDigests })
           if (packet.identity !== task.packetDigest) throw new Error('semantic retry packet differs from immutable task packet')
-          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-semantic-reviewer', checkId: task.checkId } })
+          await dispatchFoundationAuditTask({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-semantic-reviewer', checkId: task.checkId } })
         }
         return
       }
@@ -2143,7 +2165,7 @@ export function createDeliveryWorkflowController(input: {
         for (const task of available.slice(0, 4 - running)) {
           const packetPath = join(input.workspacePath, `.beegame/audit/foundation/${run.foundationAuditState.revision}/staging/packets/${task.taskId}.json`)
           const packet = JSON.parse(await readFile(packetPath, 'utf8')) as Record<string, unknown>
-          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: buildFoundationFactStructuredOutputJsonSchema(packet as FoundationFactPacket), contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-fact-extractor' } })
+          await dispatchFoundationAuditTask({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: buildFoundationFactStructuredOutputJsonSchema(packet as FoundationFactPacket), contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-fact-extractor' } })
         }
         return
       }

@@ -672,6 +672,36 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
+  test('ignores stale semantic resume when another wave fills the durable concurrency limit', async () => {
+    const { workspacePath, controller, started, requests } = await preparedController()
+    try {
+      await finishFacts(controller)
+      const durable = await controller.store.load()
+      const audit = durable?.foundationAuditState
+      expect(audit?.status).toBe('semantic_review')
+      const runningSemantic = audit?.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status === 'running') ?? []
+      expect(runningSemantic).toHaveLength(4)
+      const staleTasks = (audit?.tasks ?? []).map(task => {
+        if (task.kind !== 'semantic' && task.kind !== 'confirmation') return task
+        const { dispatch: _dispatch, ...withoutDispatch } = task
+        return { ...withoutDispatch, status: 'pending' as const, attempt: 0 } as typeof task
+      })
+      const semanticTarget = staleTasks.find(task => task.kind === 'semantic' && task.status === 'pending' && task.taskId !== runningSemantic[0]?.taskId)
+      if (!durable || !audit || !semanticTarget) throw new Error('semantic stale snapshot fixture is incomplete')
+      const orderedStaleTasks = [semanticTarget, ...staleTasks.filter(task => task.taskId !== semanticTarget.taskId)]
+      const stale = { ...durable, foundationAuditState: { ...audit, tasks: orderedStaleTasks } } as DeliveryRun
+      const second = createDeliveryWorkflowController({ workspacePath, ownerId: durable.ownerId, workerPort: port(started, requests) })
+
+      await second.resume(stale)
+
+      const converged = await controller.store.load()
+      expect(converged).toMatchObject({ status: 'running', foundationAuditState: { status: 'semantic_review' } })
+      expect(converged?.foundationAuditState?.tasks.filter(task => task.status === 'running')).toHaveLength(4)
+      expect(started.size).toBe(12)
+      expect(requests.filter(request => request.workerType === 'foundation-semantic-reviewer')).toHaveLength(4)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
   test('rebuilds the same semantic packet after interruption without duplicate resume dispatches', async () => {
     const { workspacePath, controller, started } = await preparedController()
     try {

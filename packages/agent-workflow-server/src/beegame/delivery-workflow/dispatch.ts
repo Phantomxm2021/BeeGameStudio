@@ -654,10 +654,24 @@ export function createDeliveryDispatcher(options: {
           ? current.foundationRevisionState?.tasks.find(task => task.taskId === request.taskId)
           : undefined
         if (auditRequest) {
-          if (!currentFactTask || !['pending', 'retryable'].includes(currentFactTask.status))
+          if (!currentFactTask)
             throw new DispatchError('duplicate', 'foundation fact task is not claimable')
           if (currentFactTask.revision !== request.revision || currentFactTask.packetDigest !== request.contract.packetDigest || (semanticRequest && (currentFactTask.kind !== 'semantic' && currentFactTask.kind !== 'confirmation')) || (factRequest && currentFactTask.kind !== 'document-facts'))
             throw new DispatchError('blocked', 'foundation fact packet or revision is stale')
+          if (!['pending', 'retryable'].includes(currentFactTask.status)) {
+            const active = currentFactTask.dispatch?.status === 'running'
+              ? currentFactTask.dispatch
+              : undefined
+            if (active && active.phase === request.phase && active.revision === request.revision && active.taskId === request.taskId && active.workerType === request.workerType) {
+              // A separate controller may have derived the same stale snapshot
+              // and reached the durable claim after the first controller. The
+              // durable task is already authoritative; do not claim, commit, or
+              // start another worker for this benign duplicate.
+              forgetDispatch(record.dispatchId)
+              return active
+            }
+            throw new DispatchError('duplicate', 'foundation fact task is not claimable')
+          }
           if ((current.foundationAuditState?.tasks.filter(task => task.status === 'running').length ?? 0) >= 4)
             throw new DispatchError('duplicate', 'foundation fact concurrency limit reached')
           if (currentFactTask.attempt >= 2)

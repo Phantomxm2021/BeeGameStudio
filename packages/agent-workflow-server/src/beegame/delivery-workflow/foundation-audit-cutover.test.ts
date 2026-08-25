@@ -283,6 +283,30 @@ describe('foundation audit cutover', () => {
       expect(tasks.filter(task => task.status === 'running')).toHaveLength(4)
       expect(new Set(tasks.map(task => task.taskId)).size).toBe(8)
       expect(dispatches).toHaveLength(4)
+
+      // A stale controller can also present a pending task that was not in the
+      // first controller's wave. Once the durable state has four workers, the
+      // concurrency-limit duplicate is benign and must not leak or mutate the
+      // run into needs_action.
+      const durable = await store.load()
+      if (!durable?.foundationAuditState) throw new Error('foundation audit state is missing')
+      const staleTasks = durable.foundationAuditState.tasks.map(task => {
+        const { dispatch: _dispatch, ...withoutDispatch } = task
+        return { ...withoutDispatch, status: 'pending' as const, attempt: 0 } as typeof task
+      })
+      const pendingTarget = staleTasks[4]!
+      const stale = {
+        ...durable,
+        foundationAuditState: {
+          ...durable.foundationAuditState,
+          tasks: [pendingTarget, ...staleTasks.filter(task => task.taskId !== pendingTarget.taskId)],
+        },
+      } as DeliveryRun
+      await second.resume(stale)
+      const converged = await store.load()
+      expect(converged).toMatchObject({ status: 'running', foundationAuditState: { status: 'extracting_facts' } })
+      expect(converged?.foundationAuditState?.tasks.filter(task => task.status === 'running')).toHaveLength(4)
+      expect(dispatches).toHaveLength(4)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
