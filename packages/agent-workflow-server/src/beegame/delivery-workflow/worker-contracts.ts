@@ -1,6 +1,12 @@
 import { z } from 'zod/v4'
 import { atomicTaskSchema } from './schema'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import {
+  FOUNDATION_FACT_CATALOG,
+  foundationFactDefinition,
+  type FoundationFactKey,
+} from './foundation-fact-definitions'
+import type { FoundationFactPacket } from './foundation-fact-extraction'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
 
@@ -44,24 +50,149 @@ export const foundationFactModelPayloadSchema = z
   })
   .strict()
 
-export const foundationFactStructuredOutputJsonSchema = {
+const foundationFactEvidenceJsonSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    status: { enum: ['completed', 'failed', 'blocked'] },
-    results: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
-      key: { type: 'string', minLength: 1 },
-      status: { enum: ['present', 'absent', 'uncertain'] },
-      value: {},
-      evidence: { type: 'object', additionalProperties: false, properties: {
-        documentPath: { type: 'string', minLength: 1 }, sectionId: { type: 'string', minLength: 1 },
-        startLine: { type: 'integer', minimum: 1 }, endLine: { type: 'integer', minimum: 1 }, digest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-      }, required: ['documentPath', 'sectionId', 'startLine', 'endLine', 'digest'] },
-      reason: { type: 'string', minLength: 1 },
-    }, required: ['key', 'status'] } },
+    documentPath: { type: 'string', minLength: 1 },
+    sectionId: { type: 'string', minLength: 1 },
+    startLine: { type: 'integer', minimum: 1 },
+    endLine: { type: 'integer', minimum: 1 },
+    digest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
   },
-  required: ['status', 'results'],
+  required: ['documentPath', 'sectionId', 'startLine', 'endLine', 'digest'],
 } as const
+
+function foundationFactPacketEvidenceJsonSchema(packet: FoundationFactPacket, key: FoundationFactKey) {
+  const definition = foundationFactDefinition(key)
+  const section = packet.sections.find(
+    candidate =>
+      candidate.documentPath === definition?.owner.documentPath &&
+      candidate.sectionId === definition?.owner.sectionId,
+  )
+  if (!section) throw new Error(`foundation fact packet owner section is missing: ${key}`)
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      documentPath: { enum: [section.documentPath] },
+      sectionId: { enum: [section.sectionId] },
+      startLine: { enum: [section.startLine] },
+      endLine: { enum: [section.endLine] },
+      digest: { enum: [section.digest] },
+    },
+    required: ['documentPath', 'sectionId', 'startLine', 'endLine', 'digest'],
+  } as const
+}
+
+function foundationFactValueJsonSchema(key: FoundationFactKey) {
+  const definition = foundationFactDefinition(key)
+  if (!definition) throw new Error(`unknown foundation fact key: ${key}`)
+  const spec = definition.valueSpec
+  switch (definition.valueType) {
+    case 'string':
+      return {
+        type: 'string',
+        minLength: 1,
+        ...(spec.enum ? { enum: [...spec.enum] } : {}),
+      }
+    case 'number':
+      return {
+        type: 'integer',
+        ...(spec.min === undefined ? {} : { minimum: spec.min }),
+        ...(spec.max === undefined ? {} : { maximum: spec.max }),
+      }
+    case 'boolean':
+      return { type: 'boolean' }
+    case 'string[]':
+      return {
+        type: 'array',
+        ...(spec.minItems === undefined ? {} : { minItems: spec.minItems }),
+        ...(spec.maxItems === undefined ? {} : { maxItems: spec.maxItems }),
+        items: {
+          type: 'string',
+          minLength: 1,
+          ...(spec.itemPattern ? { pattern: spec.itemPattern } : {}),
+        },
+      }
+    case 'number[]':
+      return {
+        type: 'array',
+        ...(spec.minItems === undefined ? {} : { minItems: spec.minItems }),
+        ...(spec.maxItems === undefined ? {} : { maxItems: spec.maxItems }),
+        items: { type: 'number' },
+      }
+  }
+}
+
+function buildFoundationFactSchemaForKeys(
+  keys: readonly FoundationFactKey[],
+  evidenceSchemaFor?: (key: FoundationFactKey) => Record<string, unknown>,
+) {
+  if (!keys.length) throw new Error('foundation fact schema requires packet keys')
+  if (new Set(keys).size !== keys.length)
+    throw new Error('foundation fact schema packet keys must be unique')
+  const resultBranches = keys.flatMap(key => {
+    const keySchema = { enum: [key] }
+    const evidence = evidenceSchemaFor?.(key) ?? foundationFactEvidenceJsonSchema
+    const common = {
+      key: keySchema,
+      evidence,
+      reason: { type: 'string', minLength: 1 },
+    }
+    return [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ...common,
+          status: { enum: ['present'] },
+          value: foundationFactValueJsonSchema(key),
+        },
+        required: ['key', 'status', 'value', 'evidence'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: { key: keySchema, status: { enum: ['absent'] }, reason: common.reason },
+        required: ['key', 'status'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: { ...common, status: { enum: ['uncertain'] } },
+        required: ['key', 'status'],
+      },
+    ]
+  })
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      status: { enum: ['completed', 'failed', 'blocked'] },
+      results: {
+        type: 'array',
+        minItems: keys.length,
+        maxItems: keys.length,
+        items: { oneOf: resultBranches },
+      },
+    },
+    required: ['status', 'results'],
+  } as const
+}
+
+/** Builds the closed result schema for exactly one immutable packet. */
+export function buildFoundationFactStructuredOutputJsonSchema(
+  packet: FoundationFactPacket,
+) {
+  return buildFoundationFactSchemaForKeys(packet.keys, key =>
+    foundationFactPacketEvidenceJsonSchema(packet, key),
+  )
+}
+
+export const foundationFactStructuredOutputJsonSchema = buildFoundationFactSchemaForKeys(
+  FOUNDATION_FACT_CATALOG.map(definition => definition.key),
+)
 
 const foundationSemanticIssueSchema = z.object({
   problem: z.string().min(1),

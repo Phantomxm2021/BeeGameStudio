@@ -31,7 +31,7 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationFactStructuredOutputJsonSchema, foundationSemanticModelPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
+import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationSemanticModelPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -48,11 +48,42 @@ import {
 import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
+import { isFoundationFactKey } from './delivery-workflow/foundation-fact-definitions'
+import type { FoundationFactPacket } from './delivery-workflow/foundation-fact-extraction'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
   type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
+
+function foundationFactSchemaForRequest(
+  request: WorkerDispatchRequest,
+): Record<string, unknown> {
+  const packet = request.contract.packet
+  const keys =
+    packet &&
+    typeof packet === 'object' &&
+    Array.isArray((packet as { keys?: unknown }).keys) &&
+    (packet as { keys: unknown[] }).keys.every(
+      key => typeof key === 'string' && isFoundationFactKey(key),
+    )
+      ? (packet as { keys: string[] }).keys
+      : undefined
+  const sections =
+    packet &&
+    typeof packet === 'object' &&
+    Array.isArray((packet as { sections?: unknown }).sections) &&
+    (packet as { sections: unknown[] }).sections.every(section => {
+      if (!section || typeof section !== 'object') return false
+      const value = section as Record<string, unknown>
+      return ['documentPath', 'sectionId', 'startLine', 'endLine', 'digest'].every(field => field in value)
+    })
+  if (!keys || !sections)
+    throw new Error('foundation fact extractor requires one complete packet')
+  return buildFoundationFactStructuredOutputJsonSchema(
+    packet as FoundationFactPacket,
+  ) as unknown as Record<string, unknown>
+}
 import { documentAuthoringMetrics } from './document-authoring-metrics'
 import { readAuthoredDocumentReceipt } from './authored-document-receipt'
 
@@ -300,7 +331,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ...(request.workerType === 'foundation-document-reviser' ? { workflowRevisionContract: request.contract } : {}),
         workflowAllowedPaths: request.allowedPaths ?? [],
         ...(request.workerType === 'foundation-fact-extractor'
-          ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown> }
+          ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactSchemaForRequest(request) }
           : request.workerType === 'foundation-semantic-reviewer'
             ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown> }
           : {}),

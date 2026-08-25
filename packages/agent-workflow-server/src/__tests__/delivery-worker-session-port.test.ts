@@ -13,6 +13,7 @@ import {
 } from '../beegame/asset-contracts'
 import type { BeeGameSessionManager } from '../beegame/session-manager'
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
+import type { FoundationFactPacket } from '../beegame/delivery-workflow/foundation-fact-extraction'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
   computeDocumentRevision,
@@ -24,6 +25,7 @@ import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
 import { createFoundationRevisionStage, foundationRevisionPacketPath, revisionTaskReceiptTerminalDigest } from '../beegame/delivery-workflow/foundation-revision-stage'
 import {
+  buildFoundationFactStructuredOutputJsonSchema,
   foundationFactModelPayloadSchema,
   foundationFactStructuredOutputJsonSchema,
   foundationSemanticModelPayloadSchema,
@@ -31,6 +33,51 @@ import {
 } from '../beegame/delivery-workflow/worker-contracts'
 
 describe('delivery worker session credentials', () => {
+  test('builds a packet-specific closed schema for typed present facts', () => {
+    const schema = buildFoundationFactStructuredOutputJsonSchema({
+      revision: 'revision',
+      keys: ['audio.event_ids', 'game.players.max'],
+      sections: [
+        { documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', heading: 'Events', startLine: 65, endLine: 80, digest: 'a'.repeat(64), text: 'events' },
+        { documentPath: 'docs/GDD.md', sectionId: 'vision', heading: 'Vision', startLine: 10, endLine: 20, digest: 'b'.repeat(64), text: 'vision' },
+      ],
+      bytesUtf8: 1,
+      packetDigest: 'c'.repeat(64),
+    } satisfies FoundationFactPacket) as { properties: { results: { items: { oneOf: Array<Record<string, unknown>> } } } }
+    expect(schema.properties.results).toMatchObject({ minItems: 2, maxItems: 2 })
+    const branches = schema.properties.results.items.oneOf
+    expect(branches).toHaveLength(6)
+    const presentAudio = branches.find(branch =>
+      (branch.properties as { key: { enum: string[] }; status: { enum: string[] } }).key.enum[0] === 'audio.event_ids' &&
+      (branch.properties as { status: { enum: string[] } }).status.enum[0] === 'present',
+    )!
+    expect(presentAudio.additionalProperties).toBe(false)
+    expect(presentAudio.required).toEqual(['key', 'status', 'value', 'evidence'])
+    expect(presentAudio.properties).toMatchObject({
+      value: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 256,
+        items: { type: 'string', pattern: '^\\S(?:.*\\S)?$' },
+      },
+      evidence: {
+        properties: {
+          documentPath: { enum: ['docs/AUDIO_DESIGN.md'] },
+          sectionId: { enum: ['event_taxonomy'] },
+          startLine: { enum: [65] },
+          endLine: { enum: [80] },
+          digest: { enum: ['a'.repeat(64)] },
+        },
+      },
+    })
+    const absentAudio = branches.find(branch =>
+      (branch.properties as { key: { enum: string[] }; status: { enum: string[] } }).key.enum[0] === 'audio.event_ids' &&
+      (branch.properties as { status: { enum: string[] } }).status.enum[0] === 'absent',
+    )!
+    expect(absentAudio.required).toEqual(['key', 'status'])
+    expect(absentAudio.properties).not.toHaveProperty('value')
+  })
+
   test('exposes the foundation revision terminal and derives a terminal from its successful tool event', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'revision-session-port-'))
     try {
@@ -99,7 +146,7 @@ describe('delivery worker session credentials', () => {
       revision: 'revision-facts',
       allowedPaths: [],
       projectReadScope: 'empty' as const,
-      contract: { taskId: 'task-facts', packetDigest: 'a'.repeat(64), modelTier: 'fast', workerType: 'foundation-fact-extractor' },
+      contract: { taskId: 'task-facts', packetDigest: 'a'.repeat(64), modelTier: 'fast', workerType: 'foundation-fact-extractor', packet: { keys: ['audio.event_ids'], sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }] } },
     } as unknown as WorkerDispatchRequest
     await port.start(request)
     const terminal = await port.waitForTerminal?.('dispatch-facts')
@@ -113,7 +160,10 @@ describe('delivery worker session credentials', () => {
       packetDigest: 'a'.repeat(64),
       results: [],
     })
-    const schema = starts[0]?.workflowJsonSchema as { required?: unknown[] } | undefined
+    const schema = starts[0]?.workflowJsonSchema as {
+      required?: unknown[]
+      properties?: { results?: unknown }
+    } | undefined
     expect(schema).toMatchObject({
       additionalProperties: false,
       required: ['status', 'results'],
@@ -123,6 +173,8 @@ describe('delivery worker session credentials', () => {
     expect(schema?.required).not.toContain('taskId')
     expect(schema?.required).not.toContain('revision')
     expect(schema?.required).not.toContain('packetDigest')
+    const itemSchema = schema?.properties?.results as { items?: { oneOf?: Array<Record<string, unknown>> } } | undefined
+    expect(itemSchema?.items?.oneOf).toHaveLength(3)
   })
 
   test('binds semantic PASS, ISSUES and UNDECIDABLE payloads to each request', async () => {
@@ -217,7 +269,16 @@ describe('delivery worker session credentials', () => {
         revision: `revision-${suffix}`,
         allowedPaths: [],
         projectReadScope: 'empty' as const,
-        contract: { taskId: `task-${suffix}`, packetDigest: 'a'.repeat(64), modelTier: 'fast' as const, workerType: 'foundation-fact-extractor' as const },
+        contract: {
+          taskId: `task-${suffix}`,
+          packetDigest: 'a'.repeat(64),
+          modelTier: 'fast' as const,
+          workerType: 'foundation-fact-extractor' as const,
+          packet: {
+            keys: ['audio.event_ids'],
+            sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }],
+          },
+        },
       } as unknown as WorkerDispatchRequest
       const sessions = {
         start() { return { id: `session-${suffix}` } },
@@ -710,7 +771,14 @@ describe('delivery worker session credentials', () => {
         workerType, phase: 'DOCUMENT_REVIEW', taskId: `task-${workerType}`, revision: 'revision-packet', allowedPaths: [], projectReadScope: 'empty',
         contract: {
           workerType, taskId: `task-${workerType}`, revision: 'revision-packet', packetDigest: 'a'.repeat(64), modelTier: workerType === 'foundation-fact-extractor' ? 'fast' : 'balanced',
-          packet: { revision: 'revision-packet', keys: ['GDD.player_loop'], sections: [], packetDigest: 'a'.repeat(64) },
+          packet: workerType === 'foundation-fact-extractor'
+            ? {
+                revision: 'revision-packet',
+                keys: ['audio.event_ids'],
+                sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }],
+                packetDigest: 'a'.repeat(64),
+              }
+            : { revision: 'revision-packet', keys: ['GDD.player_loop'], sections: [], packetDigest: 'a'.repeat(64) },
           confirmedBriefContext: 'CONFIRMED_BRIEF_SENTINEL',
         },
       }

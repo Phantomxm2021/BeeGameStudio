@@ -64,7 +64,7 @@ import type {
 } from './types'
 import {
   parseWorkerTerminalResult,
-  foundationFactStructuredOutputJsonSchema,
+  buildFoundationFactStructuredOutputJsonSchema,
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
@@ -1950,7 +1950,7 @@ export function createDeliveryWorkflowController(input: {
         const available = state.tasks.filter((task): task is FoundationRevisionImpactedFactsTask => task.kind === 'impacted-facts' && (task.status === 'pending' || task.status === 'retryable'))
         for (const task of available.slice(0, Math.max(0, 4 - running))) {
           const packet = await loadFoundationRevisionFactPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
-          await dispatcher.dispatch({ runId: current.runId, ownerId: current.ownerId, projectId: current.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { round: task.round, taskId: task.taskId, revision: task.revision, packetPath: task.packetPath, packet, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-fact-extractor' } })
+          await dispatcher.dispatch({ runId: current.runId, ownerId: current.ownerId, projectId: current.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: buildFoundationFactStructuredOutputJsonSchema(packet), contract: { round: task.round, taskId: task.taskId, revision: task.revision, packetPath: task.packetPath, packet, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-fact-extractor' } })
         }
         return
       }
@@ -2102,7 +2102,7 @@ export function createDeliveryWorkflowController(input: {
         for (const task of available.slice(0, 4 - running)) {
           const packetPath = join(input.workspacePath, `.beegame/audit/foundation/${run.foundationAuditState.revision}/staging/packets/${task.taskId}.json`)
           const packet = JSON.parse(await readFile(packetPath, 'utf8')) as Record<string, unknown>
-          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationFactStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-fact-extractor' } })
+          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: buildFoundationFactStructuredOutputJsonSchema(packet as FoundationFactPacket), contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-fact-extractor' } })
         }
         return
       }
