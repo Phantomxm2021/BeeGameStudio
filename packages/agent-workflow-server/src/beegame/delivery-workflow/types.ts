@@ -170,7 +170,6 @@ export type FoundationRevisionState = {
   phase: FoundationRevisionPhase
   status: 'running' | 'completed' | 'needs_action'
   phaseStartedAt: string
-  roundDeadlineAt: string
   knownIssueIds: string[]
   tasks: FoundationRevisionTask[]
   publication?: FoundationRevisionPublicationBinding
@@ -256,7 +255,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 37 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 38 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

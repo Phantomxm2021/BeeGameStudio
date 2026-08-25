@@ -261,7 +261,6 @@ export const foundationRevisionStateSchema: z.ZodType<FoundationRevisionState> =
   phase: z.enum(['planning', 'revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing']),
   status: z.enum(['running', 'completed', 'needs_action']),
   phaseStartedAt: z.string().datetime(),
-  roundDeadlineAt: z.string().datetime(),
   knownIssueIds: z.array(z.string().min(1)),
   tasks: z.array(foundationRevisionTaskSchema),
   publication: foundationRevisionPublicationBindingSchema.optional(),

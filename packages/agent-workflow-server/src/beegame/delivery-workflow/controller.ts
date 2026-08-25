@@ -469,7 +469,7 @@ export function createDeliveryWorkflowController(input: {
           documentDigests: committed.documentDigests,
         }
         const now = new Date().toISOString()
-        continuation = { ...locked, foundationAuditState: finalState, foundationRevisionState: { authority, roundBefore: { documentRevision: state.revision, issueRegistryDigest: review.digests.issueRegistry }, revision: state.revision, round: 1, phase: 'planning', status: 'running', phaseStartedAt: now, roundDeadlineAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(), knownIssueIds: policy.knownIssueIds, tasks: [] }, status: 'running', blockedReason: undefined, thinking: 'idle' }
+        continuation = { ...locked, foundationAuditState: finalState, foundationRevisionState: { authority, roundBefore: { documentRevision: state.revision, issueRegistryDigest: review.digests.issueRegistry }, revision: state.revision, round: 1, phase: 'planning', status: 'running', phaseStartedAt: now, knownIssueIds: policy.knownIssueIds, tasks: [] }, status: 'running', blockedReason: undefined, thinking: 'idle' }
       }
       await store.commit(continuation, { runId: locked.runId, type: 'foundation.audit.audit_ready', phase: locked.phase, status: 'running', revision: locked.revision, reviewDigest: review.reviewDigest }, undefined, lease)
     } finally { await store.unlock(lease) }
@@ -1637,7 +1637,7 @@ export function createDeliveryWorkflowController(input: {
       const locked = await store.load(lease)
       if (!locked?.foundationRevisionState || locked.foundationRevisionState.phase !== 'round_closing') return undefined
       if (policy.status === 'proceed') next = await store.commit({ ...locked, documentStep: 'CHECKLIST_DRAFTING', status: 'running', blockedReason: undefined, foundationRevisionState: { ...locked.foundationRevisionState, status: 'completed', knownIssueIds: policy.knownIssueIds } }, { runId: locked.runId, type: 'foundation.revision.proceed', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
-      else if (policy.status === 'continue') next = await store.commit({ ...locked, status: 'running', blockedReason: undefined, foundationRevisionState: { ...locked.foundationRevisionState, round: policy.nextRound, phase: 'planning', status: 'running', phaseStartedAt: new Date().toISOString(), roundDeadlineAt: new Date(Date.now() + 600_000).toISOString(), roundBefore: { documentRevision: state.revision, issueRegistryDigest: state.authority.issueAuthority.issueRegistryDigest }, tasks: [], publication: undefined, knownIssueIds: policy.knownIssueIds } }, { runId: locked.runId, type: 'foundation.revision.next_round', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
+      else if (policy.status === 'continue') next = await store.commit({ ...locked, status: 'running', blockedReason: undefined, foundationRevisionState: { ...locked.foundationRevisionState, round: policy.nextRound, phase: 'planning', status: 'running', phaseStartedAt: new Date().toISOString(), roundBefore: { documentRevision: state.revision, issueRegistryDigest: state.authority.issueAuthority.issueRegistryDigest }, tasks: [], publication: undefined, knownIssueIds: policy.knownIssueIds } }, { runId: locked.runId, type: 'foundation.revision.next_round', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
       else if (policy.status === 'needs_action') next = await store.commit({ ...locked, status: 'needs_action', blockedReason: `foundation revision round ${policy.reason}`, foundationRevisionState: { ...locked.foundationRevisionState, status: 'needs_action', knownIssueIds: policy.knownIssueIds } }, { runId: locked.runId, type: 'foundation.revision.needs_action', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason: policy.reason }, undefined, lease)
       else throw new Error('foundation revision round policy returned an invalid evaluate result')
     } finally { await store.unlock(lease) }
@@ -1846,14 +1846,6 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       if (revisionState.phase === 'semantic_recheck') {
-        if (Date.now() >= new Date(revisionState.roundDeadlineAt).getTime()) {
-          const lease = await store.mutationLock(run.runId)
-          try {
-            const locked = await store.load(lease)
-            if (locked?.foundationRevisionState?.phase === 'semantic_recheck') await store.commit({ ...locked, status: 'needs_action', blockedReason: 'foundation revision round deadline exceeded', foundationRevisionState: { ...locked.foundationRevisionState, status: 'needs_action', tasks: locked.foundationRevisionState.tasks.map(task => task.kind === 'semantic-recheck' && task.status !== 'completed' ? { ...task, status: 'needs_action' as const, failureReason: 'foundation revision round deadline exceeded' } : task) } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck.deadline', phase: locked.phase, status: 'needs_action', revision: locked.revision }, undefined, lease)
-          } finally { await store.unlock(lease) }
-          return
-        }
         const running = revisionState.tasks.filter(task => task.status === 'running').length
         const available = revisionState.tasks.filter((task): task is FoundationRevisionSemanticRecheckTask => task.kind === 'semantic-recheck' && (task.status === 'pending' || task.status === 'retryable'))
         for (const task of available.slice(0, Math.max(0, 4 - running))) {
@@ -1878,16 +1870,6 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       if (revisionState.phase !== 'revising') return
-      if (Date.now() >= new Date(revisionState.roundDeadlineAt).getTime()) {
-        const lease = await store.mutationLock(run.runId)
-        try {
-          const locked = await store.load(lease)
-          if (locked?.foundationRevisionState?.phase === 'revising') {
-            await store.commit({ ...locked, status: 'needs_action', blockedReason: 'foundation revision round deadline exceeded', foundationRevisionState: { ...locked.foundationRevisionState, status: 'needs_action', tasks: locked.foundationRevisionState.tasks.map(task => task.status === 'completed' ? task : { ...task, status: 'needs_action' as const, failureReason: 'foundation revision round deadline exceeded' }) } }, { runId: locked.runId, type: 'foundation.revision.deadline', phase: locked.phase, status: 'needs_action', revision: locked.revision }, undefined, lease)
-          }
-        } finally { await store.unlock(lease) }
-        return
-      }
       const running = revisionState.tasks.filter(task => task.status === 'running').length
       const available = revisionState.tasks.filter((task): task is Extract<typeof task, { kind: 'document-revision' }> => task.kind === 'document-revision' && (task.status === 'pending' || task.status === 'retryable'))
       for (const task of available.slice(0, Math.max(0, 4 - running))) {

@@ -45,7 +45,6 @@ export {
 
 const workspaceRecoveryQueues = new Map<string, Promise<void>>()
 const workspaceResumeQueues = new Map<string, Promise<DeliveryRun>>()
-
 export function shouldRefreshProvisionalResourceInventory(
   run: Pick<DeliveryRun, 'phase' | 'resourceProductionState'>,
   audit: Pick<AssetContractAudit, 'valid' | 'requirements' | 'resources'>,

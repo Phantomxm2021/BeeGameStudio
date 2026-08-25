@@ -5,8 +5,6 @@ import { FOUNDATION_FACT_CATALOG_OWNER_SECTIONS } from './foundation-fact-defini
 export const FOUNDATION_FACT_MAX_TASKS = FOUNDATION_FACT_CATALOG_OWNER_SECTIONS.length
 export const FOUNDATION_FACT_MAX_RUNNING = 4
 export const FOUNDATION_FACT_MAX_OUTPUT_TOKENS = 512
-export const FOUNDATION_FACT_MAX_MODEL_TOKENS = 32_000
-export const FOUNDATION_FACT_PHASE_DEADLINE_MS = 5 * 60 * 1000
 
 export type FoundationFactTaskStatus =
   | 'pending'
@@ -144,15 +142,13 @@ export function claimFoundationFactTasks(
   state: FoundationFactTaskCollection,
   input: { dispatchIdFor: (task: FoundationFactTask) => string; now: string; onlyTaskId?: string; modelReady?: boolean },
 ): FoundationFactTaskCollection {
-  const phaseExpired = Date.parse(input.now) - Date.parse(state.phaseStartedAt) > FOUNDATION_FACT_PHASE_DEADLINE_MS
-  const aggregateCapped = state.aggregateUsage.total_tokens >= FOUNDATION_FACT_MAX_MODEL_TOKENS
   const modelUnavailable = input.modelReady === false
-  if (phaseExpired || aggregateCapped || modelUnavailable)
+  if (modelUnavailable)
     return {
       ...state,
       tasks: state.tasks.map(task =>
         task.status === 'pending' || task.status === 'retryable'
-          ? { ...task, status: 'needs_action', failureReason: phaseExpired ? 'foundation fact extraction phase deadline exceeded' : aggregateCapped ? 'foundation fact aggregate model token cap exceeded' : 'foundation fact fast model is not configured' }
+          ? { ...task, status: 'needs_action', failureReason: 'foundation fact fast model is not configured' }
           : task,
       ),
     }
@@ -204,17 +200,13 @@ export function admitFoundationFactTerminal(
   }
   if (task.status !== 'running') throw new Error('foundation fact task is not running')
   const measuredUsage = usage(input.usage)
-  const phaseExpired = Date.parse(input.now) - Date.parse(state.phaseStartedAt) > FOUNDATION_FACT_PHASE_DEADLINE_MS
-  const capReason = measuredUsage.completion_tokens > FOUNDATION_FACT_MAX_OUTPUT_TOKENS
+  const failureReason = measuredUsage.completion_tokens > FOUNDATION_FACT_MAX_OUTPUT_TOKENS
     ? 'foundation fact output token cap exceeded'
-    : addUsage(state.aggregateUsage, measuredUsage).total_tokens > FOUNDATION_FACT_MAX_MODEL_TOKENS
-      ? 'foundation fact aggregate model token cap exceeded'
-      : phaseExpired ? 'foundation fact extraction phase deadline exceeded' : undefined
-  const failureReason = capReason ?? (input.terminal.status === 'completed' ? undefined : 'foundation fact worker did not complete')
+    : input.terminal.status === 'completed' ? undefined : 'foundation fact worker did not complete'
   const completed = !failureReason
   const nextTask: FoundationFactTask = {
     ...task,
-    status: completed ? 'completed' : capReason ? 'needs_action' : task.attempt < 2 ? 'retryable' : 'needs_action',
+    status: completed ? 'completed' : failureReason === 'foundation fact output token cap exceeded' ? 'needs_action' : task.attempt < 2 ? 'retryable' : 'needs_action',
     terminalDigest,
     usage: measuredUsage,
     durationMs: Math.max(0, input.durationMs),

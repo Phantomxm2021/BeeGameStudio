@@ -6,13 +6,9 @@ export const FOUNDATION_SEMANTIC_MAX_TASKS = 10
 export const FOUNDATION_SEMANTIC_MAX_RUNNING = 4
 export const FOUNDATION_SEMANTIC_MAX_ATTEMPTS = 2
 export const FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS = 768
-export const FOUNDATION_SEMANTIC_MAX_MODEL_TOKENS = 80_000
-export const FOUNDATION_SEMANTIC_PHASE_DEADLINE_MS = 5 * 60 * 1000
 export const FOUNDATION_DEEP_MAX_TASKS = 4
 export const FOUNDATION_DEEP_MAX_ATTEMPTS = 1
 export const FOUNDATION_DEEP_OUTPUT_MAX_TOKENS = 1_024
-export const FOUNDATION_DEEP_MAX_MODEL_TOKENS = 32_000
-export const FOUNDATION_DEEP_PHASE_DEADLINE_MS = 5 * 60 * 1000
 
 export type FoundationSemanticTaskStatus = 'pending' | 'running' | 'retryable' | 'completed' | 'needs_action'
 export type FoundationSemanticTier = 'fast' | 'balanced' | 'strong'
@@ -147,11 +143,6 @@ export function createFoundationSemanticTaskCollection(input: {
   return { revision: input.revision, phaseStartedAt: input.phaseStartedAt, status: 'semantic_review', tasks: input.tasks.map(item => ({ ...item })), aggregateUsage: zeroUsage() }
 }
 
-function deadlineExceeded(startedAt: string, now: string, limit: number): boolean {
-  const start = Date.parse(startedAt); const end = Date.parse(now)
-  return Number.isFinite(start) && Number.isFinite(end) && end - start > limit
-}
-
 function assertAdmittedResult(value: FoundationSemanticResult): FoundationSemanticResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('admitted semantic result is invalid')
   const keys = Object.keys(value as Record<string, unknown>).sort()
@@ -209,10 +200,7 @@ export function claimFoundationSemanticTasks(
     if (input.onlyTaskId && task.taskId !== input.onlyTaskId) return task
     const tierReady = input.configuredTiers[task.modelTier]
     const deep = task.kind === 'confirmation'
-    const aggregate = deep ? (state.deepAggregateUsage?.total_tokens ?? 0) : state.aggregateUsage.total_tokens
-    const expired = deadlineExceeded(deep ? (state.deepPhaseStartedAt ?? state.phaseStartedAt) : state.phaseStartedAt, input.now, deep ? FOUNDATION_DEEP_PHASE_DEADLINE_MS : FOUNDATION_SEMANTIC_PHASE_DEADLINE_MS)
-    const capped = aggregate >= (deep ? FOUNDATION_DEEP_MAX_MODEL_TOKENS : FOUNDATION_SEMANTIC_MAX_MODEL_TOKENS)
-    if (expired || capped || tierReady === false || tierReady === undefined) return { ...task, status: 'needs_action' as const, failureReason: capped ? `${deep ? 'deep' : 'semantic'} aggregate model token cap exceeded` : expired ? `${deep ? 'deep' : 'semantic'} review phase deadline exceeded` : `${task.modelTier} semantic model is not configured` }
+    if (tierReady === false || tierReady === undefined) return { ...task, status: 'needs_action' as const, failureReason: `${task.modelTier} semantic model is not configured` }
     return task
   })
   let slots = Math.max(0, FOUNDATION_SEMANTIC_MAX_RUNNING - tasks.filter(task => task.status === 'running').length)
@@ -250,12 +238,10 @@ export function admitFoundationSemanticTerminal(state: FoundationSemanticTaskCol
   const measured = normalizeUsage(input.usage)
   const deep = task.kind === 'confirmation'
   const outputCap = deep ? FOUNDATION_DEEP_OUTPUT_MAX_TOKENS : FOUNDATION_SEMANTIC_OUTPUT_MAX_TOKENS
-  const totalCap = deep ? FOUNDATION_DEEP_MAX_MODEL_TOKENS : FOUNDATION_SEMANTIC_MAX_MODEL_TOKENS
   const aggregate = deep ? addUsage(state.deepAggregateUsage ?? zeroUsage(), measured) : addUsage(state.aggregateUsage, measured)
-  const expired = deadlineExceeded(deep ? (state.deepPhaseStartedAt ?? state.phaseStartedAt) : state.phaseStartedAt, input.now, deep ? FOUNDATION_DEEP_PHASE_DEADLINE_MS : FOUNDATION_SEMANTIC_PHASE_DEADLINE_MS)
-  const failureReason = measured.completion_tokens > outputCap ? `semantic output token cap exceeded (${outputCap})` : aggregate.total_tokens > totalCap ? 'semantic aggregate model token cap exceeded' : expired ? 'semantic review phase deadline exceeded' : input.terminal.status === 'completed' ? undefined : 'semantic worker did not complete'
+  const failureReason = measured.completion_tokens > outputCap ? `semantic output token cap exceeded (${outputCap})` : input.terminal.status === 'completed' ? undefined : 'semantic worker did not complete'
   const completed = !failureReason
-  const nextTask = { ...task, status: completed ? 'completed' as const : failureReason && (failureReason.includes('cap') || failureReason.includes('deadline')) ? 'needs_action' as const : task.attempt < (deep ? FOUNDATION_DEEP_MAX_ATTEMPTS : FOUNDATION_SEMANTIC_MAX_ATTEMPTS) ? 'retryable' as const : 'needs_action' as const, terminalDigest, usage: measured, durationMs: Math.max(0, input.durationMs), failureReason, dispatch: task.dispatch ? { ...task.dispatch, status: completed ? 'completed' as const : 'failed' as const, finishedAt: input.now, terminalResult: input.terminal } : undefined }
+  const nextTask = { ...task, status: completed ? 'completed' as const : failureReason.includes('output token cap') ? 'needs_action' as const : task.attempt < (deep ? FOUNDATION_DEEP_MAX_ATTEMPTS : FOUNDATION_SEMANTIC_MAX_ATTEMPTS) ? 'retryable' as const : 'needs_action' as const, terminalDigest, usage: measured, durationMs: Math.max(0, input.durationMs), failureReason, dispatch: task.dispatch ? { ...task.dispatch, status: completed ? 'completed' as const : 'failed' as const, finishedAt: input.now, terminalResult: input.terminal } : undefined }
   return { state: { ...state, tasks: state.tasks.map(item => item.taskId === task.taskId ? nextTask : item), ...(deep ? { deepAggregateUsage: aggregate } : { aggregateUsage: aggregate }) }, idempotent: false, terminalDigest, accepted: completed }
 }
 

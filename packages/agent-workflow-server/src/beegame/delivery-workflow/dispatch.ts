@@ -665,11 +665,6 @@ export function createDeliveryDispatcher(options: {
             await options.store.commit({ ...current, status: 'needs_action', blockedReason: reason, foundationRevisionState: { ...current.foundationRevisionState!, status: 'needs_action', tasks: current.foundationRevisionState!.tasks.map(task => task.taskId === request.taskId ? { ...task, status: 'needs_action' as const, failureReason: reason } : task) } }, { runId: current.runId, type: 'foundation.revision.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, taskId: request.taskId, reason }, undefined, lease)
             throw new DispatchError('blocked', reason)
           }
-          if (Date.now() >= new Date(current.foundationRevisionState!.roundDeadlineAt).getTime()) {
-            const reason = 'foundation revision round deadline exceeded'
-            await options.store.commit({ ...current, status: 'needs_action', blockedReason: reason, foundationRevisionState: { ...current.foundationRevisionState!, status: 'needs_action', tasks: current.foundationRevisionState!.tasks.map(task => task.taskId === request.taskId ? { ...task, status: 'needs_action' as const, failureReason: reason } : task) } }, { runId: current.runId, type: 'foundation.revision.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, taskId: request.taskId, reason }, undefined, lease)
-            throw new DispatchError('blocked', reason)
-          }
         }
         let fastModelError: string | undefined
         if (factRequest && options.workerPort.assertFoundationFactFastReady) {
@@ -693,27 +688,6 @@ export function createDeliveryDispatcher(options: {
             },
           }, { runId: current.runId, type: 'foundation.revision.impacted_facts.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, taskId: request.taskId, reason: fastModelError }, undefined, lease)
           throw new DispatchError('blocked', fastModelError)
-        }
-        if (revisionFactRequest && current.foundationRevisionState) {
-          const totalTokens = current.foundationRevisionState.tasks
-            .filter(task => task.kind === 'impacted-facts')
-            .reduce((total, task) => total + (task.usage?.total_tokens ?? 0), 0)
-          if (totalTokens >= 32_000) {
-            const reason = 'foundation impacted fact round usage cap exceeded'
-            await options.store.commit({
-              ...current,
-              status: 'needs_action',
-              blockedReason: reason,
-              foundationRevisionState: {
-                ...current.foundationRevisionState,
-                status: 'needs_action',
-                tasks: current.foundationRevisionState.tasks.map(task => task.taskId === request.taskId
-                  ? { ...task, status: 'needs_action' as const, failureReason: reason }
-                  : task),
-              },
-            }, { runId: current.runId, type: 'foundation.revision.impacted_facts.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, taskId: request.taskId, reason }, undefined, lease)
-            throw new DispatchError('blocked', reason)
-          }
         }
         if ((semanticRequest || revisionSemanticRequest) && options.workerPort.assertFoundationSemanticModelReady) {
           try { await options.workerPort.assertFoundationSemanticModelReady(request) }
@@ -989,7 +963,7 @@ export function createDeliveryDispatcher(options: {
   }
 
   function isTerminalFoundationFactFailure(reason: string): boolean {
-    return /(?:fast model|model config|phase deadline|extraction phase|aggregate model|output cap|packet cap|attempt cap|not configured)/i.test(reason)
+    return /(?:fast model|model config|output cap|packet cap|attempt cap|not configured)/i.test(reason)
   }
 
   async function completeFoundationFactDispatch(
@@ -1098,12 +1072,7 @@ export function createDeliveryDispatcher(options: {
       throw new DispatchError('invalid_terminal', 'conflicting foundation revision terminal replay')
     }
     let result: WorkerTerminalResult
-    let deadlineExceeded = false
     try {
-      if (Date.now() >= new Date(run.foundationRevisionState!.roundDeadlineAt).getTime()) {
-        deadlineExceeded = true
-        throw new Error('foundation revision round deadline exceeded')
-      }
       result = parseWorkerTerminalResult(terminalValue)
       if (result.workerType !== 'foundation-document-reviser' || result.taskId !== request.taskId || result.revision !== request.revision || result.packetDigest !== request.contract.packetDigest || result.round !== request.contract.round || result.documentPath !== request.contract.documentPath)
         throw new Error('foundation revision terminal identity does not match dispatch contract')
@@ -1117,7 +1086,7 @@ export function createDeliveryDispatcher(options: {
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid foundation revision terminal'
       const invalid = parseDispatchRecord({ ...location.record, status: 'invalid' as const, finishedAt: now(), failureReason: reason })
-      const retryable = !deadlineExceeded && task.attempt < 2
+      const retryable = task.attempt < 2
       await mutateFoundationRevisionTask(dispatchId, 'dispatch.invalid', ({ task: current }) => ({
         task: { ...current, status: retryable ? 'retryable' : 'needs_action', failureReason: reason, dispatch: invalid },
         record: invalid,
@@ -1173,7 +1142,6 @@ export function createDeliveryDispatcher(options: {
     if (!task || task.kind !== 'semantic-recheck' || !request) throw new DispatchError('not_found', 'foundation semantic revision task authority is missing')
     let result: WorkerTerminalResult
     try {
-      if (Date.now() >= new Date(run.foundationRevisionState!.roundDeadlineAt).getTime()) throw new Error('foundation revision round deadline exceeded')
       result = parseWorkerTerminalResult(terminalValue)
       if (result.workerType !== 'foundation-semantic-reviewer' || result.runId !== request.runId || result.dispatchId !== dispatchId || result.taskId !== request.taskId || result.revision !== request.revision || result.packetDigest !== request.contract.packetDigest)
         throw new Error('foundation semantic revision terminal identity does not match dispatch contract')
@@ -1218,7 +1186,6 @@ export function createDeliveryDispatcher(options: {
         throw new Error('foundation impacted fact terminal identity does not match dispatch contract')
       if ((location.record.usage?.completion_tokens ?? 0) > 512)
         throw new Error('foundation impacted fact completion token cap exceeded')
-      if (Date.now() >= new Date(run.foundationRevisionState!.roundDeadlineAt).getTime()) throw new Error('foundation revision round deadline exceeded')
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid foundation impacted fact terminal'
       const invalid = parseDispatchRecord({ ...location.record, status: 'invalid' as const, finishedAt: now(), failureReason: reason })

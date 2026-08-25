@@ -66,6 +66,8 @@ import {
   computeResourceInventoryRevision,
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
+import { createFoundationAuditState, parseFoundationAuditState } from '../beegame/delivery-workflow/foundation-audit-state'
+import { FOUNDATION_AUDIT_PRODUCTION_MANIFEST } from '../beegame/delivery-workflow/foundation-audit-production-manifest'
 
 const RECOVERY_OWNER_ID = 'recovery-owner'
 
@@ -1165,9 +1167,39 @@ async function createCanonicalReceiptRecoveryFixture(input?: {
 
 describe('delivery workflow recovery', () => {
   let workspace = ''
-
   afterEach(async () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
+  })
+
+  test('resume preserves durable foundation task evidence and phase timing', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'durable-evidence-'))
+    const digest = 'a'.repeat(64)
+    const revision = 'recovery-facts'
+    const seed = createFoundationAuditState({
+      revision,
+      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+      manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest, needsAction: 'foundation fact extraction is not part of Task 4A' },
+    })
+    const foundationAuditState = parseFoundationAuditState({
+      ...seed,
+      status: 'extracting_facts',
+      phaseStartedAt: '2020-01-01T00:00:00.000Z',
+      tasks: [{
+        taskId: 'fact-0', kind: 'document-facts', revision, packetDigest: digest, modelTier: 'fast', status: 'completed', attempt: 1,
+        terminalDigest: digest, receiptPath: `.beegame/audit/foundation/${revision}/staging/receipts/fact-0.json`, receiptDigest: digest,
+        usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 }, durationMs: 42,
+        dispatch: { dispatchId: 'fact-dispatch', workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'fact-0', revision, status: 'completed', startedAt: '2020-01-01T00:00:00.000Z', finishedAt: '2020-01-01T00:00:01.000Z', terminalResult: { workerType: 'foundation-fact-extractor', status: 'completed', runId: 'run', dispatchId: 'fact-dispatch', taskId: 'fact-0', revision, packetDigest: digest, results: [] } },
+      }],
+    })
+    const run = { ...createTestDeliveryRun({ runId: 'recovery-durable-evidence', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'DOCUMENT_REVIEW' as const, documentStep: 'FOUNDATION_REVIEW' as const, status: 'needs_action' as const, blockedReason: 'durable evidence test', foundationAuditState }
+    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
+    await store.save(run)
+    const recovered = await resumeRun({ store, runId: run.runId })
+    expect(recovered.foundationAuditState).toEqual(foundationAuditState)
+    expect(recovered.foundationAuditState?.phaseStartedAt).toBe('2020-01-01T00:00:00.000Z')
+    expect(recovered.foundationAuditState?.tasks[0]).toMatchObject({ attempt: 1, usage: { total_tokens: 12 }, durationMs: 42, terminalDigest: digest, receiptDigest: digest })
+    const retried = await retryRun({ store, runId: run.runId })
+    expect(retried.foundationAuditState).toEqual(foundationAuditState)
   })
 
   test('defines every exact-resume checkpoint for every persisted worker type', () => {

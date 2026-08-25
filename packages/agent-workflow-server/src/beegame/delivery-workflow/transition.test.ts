@@ -25,7 +25,6 @@ import {
 const DIGEST = 'a'.repeat(64)
 const REVISION = 'rev-1'
 const OLD_PHASE = '2026-08-24T00:00:00.000Z'
-const OLD_DEADLINE = '2026-08-24T00:01:00.000Z'
 const MODEL_REASON = 'foundation fact fast model is not configured'
 const USAGE = {
   input_tokens: 11,
@@ -240,7 +239,6 @@ function revisionState(): FoundationRevisionState {
     phase: 'semantic_recheck',
     status: 'needs_action',
     phaseStartedAt: OLD_PHASE,
-    roundDeadlineAt: OLD_DEADLINE,
     knownIssueIds: ['issue-0'],
     tasks: [semanticTask, documentTask],
   }
@@ -305,11 +303,11 @@ describe('foundation retry transitions', () => {
     expect(retried.blockedReason).toBeUndefined()
     expect(state.tasks.map(task => task.status)).toEqual(['pending', 'pending'])
     expect(state.tasks.every(task => task.failureReason === undefined)).toBe(true)
-    expect(state.phaseStartedAt).not.toBe(OLD_PHASE)
+    expect(state.phaseStartedAt).toBe(OLD_PHASE)
     expect(state.aggregateUsage).toEqual(USAGE)
   })
 
-  test('retries only eligible semantic-recheck tasks and refreshes revision timing', () => {
+  test('retries only eligible semantic-recheck tasks and preserves revision timing', () => {
     const run = revisionRun(revisionState())
     const before = run.foundationRevisionState!
     const retried = transitionDeliveryRun(run, { type: 'retry' })
@@ -323,8 +321,7 @@ describe('foundation retry transitions', () => {
     expect(state.phase).toBe(before.phase)
     expect(state.round).toBe(before.round)
     expect(state.authority).toEqual(before.authority)
-    expect(state.phaseStartedAt).not.toBe(OLD_PHASE)
-    expect(state.roundDeadlineAt).not.toBe(OLD_DEADLINE)
+    expect(state.phaseStartedAt).toBe(OLD_PHASE)
 
     const dualRun: DeliveryRun = {
       ...createTestDeliveryRun({ projectId: 'transition-retry-dual', ownerId: 'transition-owner' }),
@@ -349,7 +346,7 @@ describe('foundation retry transitions', () => {
     const cases = [
       { label: 'attempt 1', override: { attempt: 1 } },
       { label: 'usage', override: { usage: USAGE } },
-      { label: 'deadline reason', override: { failureReason: 'foundation fact extraction phase deadline exceeded' } },
+      { label: 'integrity failure', override: { failureReason: 'foundation fact terminal identity mismatch' } },
       {
         label: 'dispatch',
         override: {

@@ -20,7 +20,6 @@ describe('foundation revision persisted authority', () => {
       phase: 'revising',
       status: 'running',
       phaseStartedAt: new Date().toISOString(),
-      roundDeadlineAt: new Date(Date.now() + 600_000).toISOString(),
       knownIssueIds: ['AUD-1'],
       tasks: [{
         taskId: 'rev-1.revision.1.0',
@@ -65,7 +64,7 @@ describe('foundation revision persisted authority', () => {
       receipt: { taskId: 'rev-1.revision.1.0', round: 1 as const, documentPath: 'docs/GDD.md' as const, issueIds: ['AUD-1'], baseDocumentDigest: digest, stagedDocumentDigest: digest, changedSectionIds: ['vision'], stagedPath: '.beegame/audit/foundation/rev-1/revision/docs/GDD.md', terminalDigest: digest },
     }
     for (const [field, value] of Object.entries({ taskId: 'other', round: 2, documentPath: 'docs/LEVEL_SCENE_DESIGN.md', issueIds: ['AUD-2'], baseDocumentDigest: 'b'.repeat(64), stagedPath: 'stale', terminalDigest: 'b'.repeat(64) })) {
-      const parsed = foundationRevisionStateSchema.safeParse({ authority: binding, roundBefore: { documentRevision: 'rev-1', issueRegistryDigest: digest }, revision: 'rev-1', round: 1, phase: 'revising', status: 'running', phaseStartedAt: new Date().toISOString(), roundDeadlineAt: new Date(Date.now() + 600_000).toISOString(), knownIssueIds: ['AUD-1'], tasks: [{ ...task, receipt: { ...task.receipt, [field]: value } }] })
+      const parsed = foundationRevisionStateSchema.safeParse({ authority: binding, roundBefore: { documentRevision: 'rev-1', issueRegistryDigest: digest }, revision: 'rev-1', round: 1, phase: 'revising', status: 'running', phaseStartedAt: new Date().toISOString(), knownIssueIds: ['AUD-1'], tasks: [{ ...task, receipt: { ...task.receipt, [field]: value } }] })
       expect(parsed.success).toBe(false)
     }
   })
@@ -76,7 +75,7 @@ describe('foundation revision persisted authority', () => {
       packetPath: foundationRevisionPacketPath('rev-1', 1, 'rev-1.recheck.1.0'), packetDigest: digest,
       status: 'completed' as const, attempt: 1, modelTier: 'strong' as const, issueId: 'AUD-1',
     }
-    const base = { authority: binding, roundBefore: { documentRevision: 'rev-1', issueRegistryDigest: digest }, revision: 'rev-1', round: 1 as const, phase: 'semantic_recheck' as const, status: 'running' as const, phaseStartedAt: new Date().toISOString(), roundDeadlineAt: new Date(Date.now() + 600_000).toISOString(), knownIssueIds: ['AUD-1'], tasks: [task] }
+    const base = { authority: binding, roundBefore: { documentRevision: 'rev-1', issueRegistryDigest: digest }, revision: 'rev-1', round: 1 as const, phase: 'semantic_recheck' as const, status: 'running' as const, phaseStartedAt: new Date().toISOString(), knownIssueIds: ['AUD-1'], tasks: [task] }
     expect(foundationRevisionStateSchema.safeParse(base).success).toBe(false)
     const complete = { ...task, resultPath: task.packetPath.replace(/packet\.json$/, 'result.json'), resultDigest: digest, terminalDigest: digest }
     expect(foundationRevisionStateSchema.safeParse({ ...base, tasks: [complete] }).success).toBe(true)
@@ -90,5 +89,15 @@ describe('foundation revision persisted authority', () => {
       `${complete.resultPath}/../result.json`,
       '.beegame/audit/other/result.json',
     ]) expect(foundationRevisionStateSchema.safeParse({ ...base, tasks: [{ ...complete, resultPath }] }).success).toBe(false)
+  })
+
+  test('rejects the removed shared round deadline field', () => {
+    const result = foundationRevisionStateSchema.safeParse({
+      authority: binding,
+      roundBefore: { documentRevision: 'rev-1', issueRegistryDigest: digest },
+      revision: 'rev-1', round: 1, phase: 'planning', status: 'running', phaseStartedAt: new Date().toISOString(),
+      knownIssueIds: [], tasks: [], roundDeadlineAt: new Date().toISOString(),
+    })
+    expect(result.success).toBe(false)
   })
 })

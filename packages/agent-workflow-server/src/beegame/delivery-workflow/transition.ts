@@ -519,7 +519,6 @@ export function transitionDeliveryRun(
       )
         fail('retry task must be a failed task')
       {
-        const now = timestamp()
         const revisionState =
           run.phase === 'DOCUMENT_REVIEW' &&
           run.foundationRevisionState?.status !== 'completed'
@@ -530,8 +529,6 @@ export function transitionDeliveryRun(
             ? run.foundationAuditState
             : undefined
         let auditRevived = false
-        let auditRefreshPhase = false
-        let auditRefreshDeep = false
         const nextAuditState = auditState
           ? {
               ...auditState,
@@ -544,24 +541,12 @@ export function transitionDeliveryRun(
                 )
                   return task
                 auditRevived = true
-                if (task.kind === 'document-facts' || task.kind === 'semantic')
-                  auditRefreshPhase = true
-                else auditRefreshDeep = true
                 return {
                   ...task,
                   status: 'pending' as const,
                   failureReason: undefined,
                 }
               }),
-              ...(auditRefreshPhase ? { phaseStartedAt: now } : {}),
-              ...(auditRefreshDeep && auditState.semantic
-                ? {
-                    semantic: {
-                      ...auditState.semantic,
-                      deepPhaseStartedAt: now,
-                    },
-                  }
-                : {}),
             }
           : undefined
         let revisionRevived = false
@@ -584,10 +569,6 @@ export function transitionDeliveryRun(
               ...(revisionRevived
                 ? {
                     status: 'running' as const,
-                    phaseStartedAt: now,
-                    roundDeadlineAt: new Date(
-                      Date.parse(now) + 600_000,
-                    ).toISOString(),
                   }
                 : {}),
             }
