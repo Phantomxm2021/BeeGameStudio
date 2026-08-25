@@ -154,20 +154,22 @@ Add one pure merger beside fact extraction:
 export function mergeFoundationFactResults(input: {
   mechanicalFacts: readonly FoundationFact[]
   workerFacts: readonly FoundationFact[]
+  workerReceipts: readonly FoundationFactReceipt[]
 }): FoundationFact[]
 ```
 
-It canonicalizes through `createFoundationFactStore()`, rejects differing values/evidence for the same catalog key, and verifies exact catalog accounting before returning.
+It canonicalizes through `createFoundationFactStore()`, strictly validates unique closed receipts, rejects mechanical overlap and differing present value/evidence, treats absent/uncertain receipts as coverage only, and verifies exact catalog accounting before returning a present-only Fact Store.
 
 **Required behavior**
 
-- `finalizeFoundationFacts()` reads the eight revision-bound documents, reruns `extractNormalizedFoundationFacts()`, loads worker receipts, merges both sets, and publishes the merged store.
+- `finalizeFoundationFacts()` reads the eight revision-bound documents, reruns `extractNormalizedFoundationFacts()`, loads worker facts and receipts, validates exact accounting, and publishes the present-only merged store.
 - Mechanical keys are never requested from workers and never disappear at publication.
+- Admitted absent/uncertain receipts do not become synthetic facts and do not block derived publication; deterministic and semantic review own the resulting issues.
 - The zero-packet path calls the same finalizer and publishes a complete Fact Store.
 
 **Test cycle**
 
-1. Add unit tests for mechanical-only, mixed mechanical/worker, duplicate-equal, duplicate-conflicting, missing key, and unknown key cases.
+1. Add unit tests for mechanical-only, mixed present/absent/uncertain accounting, overlap, receipt/fact disagreement, missing key, and unknown key cases.
 
 2. Add an integration fixture where at least one catalog key resolves mechanically and another requires a worker; assert both appear in committed `derived/fact-store.json`.
 

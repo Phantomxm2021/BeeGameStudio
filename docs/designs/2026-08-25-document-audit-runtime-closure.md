@@ -39,7 +39,7 @@ Record prompt, completion, and total usage, duration, attempt, and failure reaso
 
 ### Exact Fact Store completion
 
-Local mechanical extraction and admitted worker extraction are two producers for the same closed catalog. Finalization recomputes the revision-bound mechanical result, merges it with admitted worker facts, rejects duplicate disagreement, and verifies that every required catalog key is accounted for exactly once before atomic publication. The zero-worker path uses the same finalizer.
+Local mechanical extraction and admitted worker extraction are two producers for the same closed catalog. Finalization recomputes the revision-bound mechanical result, merges it with admitted worker facts plus their closed receipts, rejects duplicate/overlapping accounting or receipt disagreement, and verifies that mechanical present keys plus every admitted receipt account for every catalog key exactly once before atomic publication. Absent and uncertain receipts provide coverage but do not enter the present-only Fact Store; deterministic and semantic review own the resulting issues. The zero-worker path uses the same finalizer.
 
 ### Integrity failure versus audit result
 

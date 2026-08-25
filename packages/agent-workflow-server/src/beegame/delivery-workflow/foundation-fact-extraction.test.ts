@@ -8,6 +8,7 @@ import {
   extractSelectedFoundationFacts,
   mergeFoundationFactResults,
   validateFoundationFactResults,
+  type FoundationFactReceipt,
 } from './foundation-fact-extraction'
 import { FOUNDATION_FACT_CATALOG, foundationFactDefinition } from './foundation-fact-definitions'
 import { completeTestSubmission, renderTestCompleteGameDocument } from '../../__tests__/complete-game-document-fixture'
@@ -50,6 +51,10 @@ function indexDocuments(input: Record<string, string>): SectionRef[] {
 
 function sectionIndex(): SectionRef[] {
   return indexDocuments(docs)
+}
+
+function receiptKey(key: string): FoundationFactReceipt['key'] {
+  return key as FoundationFactReceipt['key']
 }
 
 describe('mechanical normalized foundation extraction', () => {
@@ -310,37 +315,103 @@ describe('mechanical normalized foundation extraction', () => {
   test('merges a complete mechanical catalog without requiring worker facts', () => {
     const extraction = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: sectionIndex() })
     expect(extraction.unresolvedKeys).toEqual([])
-    expect(mergeFoundationFactResults({ mechanicalFacts: extraction.facts, workerFacts: [] })).toEqual(extraction.facts)
+    expect(mergeFoundationFactResults({ mechanicalFacts: extraction.facts, workerFacts: [], workerReceipts: [] })).toEqual(extraction.facts)
   })
 
-  test('merges mixed mechanical and worker facts and removes equal duplicates', () => {
+  test('merges mixed present, absent, and uncertain worker accounting into a present-only store', () => {
     const extraction = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: sectionIndex() })
-    const split = extraction.facts.filter((_, index) => index % 2 === 0)
-    const worker = extraction.facts.filter((_, index) => index % 2 === 1)
-    const merged = mergeFoundationFactResults({ mechanicalFacts: split, workerFacts: [...worker, ...split.slice(0, 2)] })
-    expect(merged).toEqual(extraction.facts)
+    const absent = extraction.facts.find(fact => fact.key === 'game.players.max')!
+    const uncertain = extraction.facts.find(fact => fact.key === 'game.platform')!
+    const worker = extraction.facts.find(fact => fact.key === 'game.mechanics')!
+    const mechanical = extraction.facts.filter(fact => ![absent, uncertain, worker].includes(fact))
+    const merged = mergeFoundationFactResults({
+      mechanicalFacts: mechanical,
+      workerFacts: [worker],
+      workerReceipts: [
+        { key: receiptKey(worker.key), status: 'present', value: worker.value, evidence: worker.evidence },
+        { key: receiptKey(absent.key), status: 'absent' },
+        { key: receiptKey(uncertain.key), status: 'uncertain', reason: 'owner section is ambiguous', evidence: uncertain.evidence },
+      ],
+    })
+    expect(merged).toEqual(extraction.facts.filter(fact => fact !== absent && fact !== uncertain))
   })
 
-  test('fails closed on conflicting duplicate value or evidence', () => {
+  test('fails closed on duplicate, overlap, and mismatched worker accounting', () => {
     const extraction = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: sectionIndex() })
     const fact = extraction.facts.find(item => item.key === 'game.players.max')!
     expect(() => mergeFoundationFactResults({
       mechanicalFacts: extraction.facts,
       workerFacts: [{ ...fact, value: 5 }],
-    })).toThrow(/conflicting.*game\.players\.max/i)
+      workerReceipts: [{ key: receiptKey(fact.key), status: 'present', value: 5, evidence: fact.evidence }],
+    })).toThrow(/overlap|mechanical/i)
     expect(() => mergeFoundationFactResults({
       mechanicalFacts: extraction.facts,
       workerFacts: [{ ...fact, evidence: { ...fact.evidence, digest: 'f'.repeat(64) } }],
-    })).toThrow(/conflicting.*game\.players\.max/i)
+      workerReceipts: [{ key: receiptKey(fact.key), status: 'present', value: fact.value, evidence: fact.evidence }],
+    })).toThrow(/overlap|mechanical/i)
+    const worker = extraction.facts.find(item => item.key === 'game.mechanics')!
+    const mechanical = extraction.facts.filter(item => item.key !== worker.key)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: mechanical,
+      workerFacts: [worker],
+      workerReceipts: [
+        { key: receiptKey(worker.key), status: 'absent' },
+      ],
+    })).toThrow(/absent.*worker fact|worker fact.*absent/i)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: mechanical,
+      workerFacts: [worker],
+      workerReceipts: [
+        { key: receiptKey(worker.key), status: 'present', value: ['wrong'], evidence: worker.evidence },
+      ],
+    })).toThrow(/value|receipt|matching/i)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: mechanical,
+      workerFacts: [],
+      workerReceipts: [
+        { key: receiptKey(worker.key), status: 'present', value: worker.value, evidence: worker.evidence },
+      ],
+    })).toThrow(/worker fact|present/i)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: mechanical,
+      workerFacts: [worker],
+      workerReceipts: [
+        { key: receiptKey(worker.key), status: 'present', value: worker.value, evidence: worker.evidence },
+        { key: receiptKey(worker.key), status: 'present', value: worker.value, evidence: worker.evidence },
+      ],
+    })).toThrow(/duplicate/i)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: mechanical,
+      workerFacts: [],
+      workerReceipts: [
+        { key: receiptKey(worker.key), status: 'absent', extra: true } as never,
+      ],
+    })).toThrow(/unexpected fields/i)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: mechanical,
+      workerFacts: [],
+      workerReceipts: [{
+        key: receiptKey(worker.key),
+        status: 'uncertain',
+        reason: 'ambiguous',
+        evidence: { ...worker.evidence, sectionId: 'wrong-owner' },
+      }],
+    })).toThrow(/uncertain.*incomplete/i)
   })
 
   test('fails closed on missing or unknown catalog keys', () => {
     const extraction = extractNormalizedFoundationFacts({ documents: docs, sectionIndex: sectionIndex() })
     const missing = extraction.facts.slice(1)
-    expect(() => mergeFoundationFactResults({ mechanicalFacts: missing, workerFacts: [] })).toThrow(/coverage.*incomplete/i)
+    expect(() => mergeFoundationFactResults({ mechanicalFacts: missing, workerFacts: [], workerReceipts: [] })).toThrow(/coverage.*incomplete/i)
     expect(() => mergeFoundationFactResults({
       mechanicalFacts: extraction.facts,
       workerFacts: [{ ...extraction.facts[0]!, key: 'unknown.fact' }],
-    })).toThrow(/unknown.*foundation fact key/i)
+      workerReceipts: [],
+    })).toThrow(/unknown.*foundation fact (key|receipt key)/i)
+    expect(() => mergeFoundationFactResults({
+      mechanicalFacts: extraction.facts,
+      workerFacts: [],
+      workerReceipts: [{ key: 'unknown.fact' as never, status: 'absent' }],
+    })).toThrow(/unknown.*foundation fact (key|receipt key)/i)
   })
 })

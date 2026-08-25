@@ -338,12 +338,14 @@ export function createDeliveryWorkflowController(input: {
     )
     const mechanical = extractNormalizedFoundationFacts({ documents, sectionIndex: artifacts.sectionIndex })
     const workerFacts: FoundationFact[] = []
+    const workerReceipts: FoundationFactReceipt[] = []
     for (const task of state.tasks) {
       if (!task.receiptPath || !task.receiptDigest || !task.terminalDigest) throw new Error('foundation fact task receipt binding is incomplete')
       const receipt = await loadFoundationFactReceipt({ workspacePath: input.workspacePath, revision: state.revision, taskId: task.taskId, expectedPacketDigest: task.packetDigest, expectedTerminalDigest: task.terminalDigest, expectedReceiptPath: task.receiptPath, expectedReceiptDigest: task.receiptDigest })
       workerFacts.push(...receipt.facts)
+      workerReceipts.push(...(receipt.receipts as FoundationFactReceipt[]))
     }
-    const factStore = mergeFoundationFactResults({ mechanicalFacts: mechanical.facts, workerFacts })
+    const factStore = mergeFoundationFactResults({ mechanicalFacts: mechanical.facts, workerFacts, workerReceipts })
     const normalizedFactDigest = digestFactStore(factStore)
     const published = await publishFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision, documentDigests: artifacts.documentDigests, sectionIndex: artifacts.sectionIndex, factStore, normalizedFactDigest, manifest: artifacts.manifest as unknown as Record<string, unknown> })
     const lease = await store.mutationLock(run.runId)

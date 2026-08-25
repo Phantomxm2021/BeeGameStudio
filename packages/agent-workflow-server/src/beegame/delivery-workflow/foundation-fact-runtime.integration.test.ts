@@ -177,6 +177,23 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
+  test('publishes admitted absent facts and lets deterministic review own missing-value issues', async () => {
+    const { workspacePath, controller } = await preparedController()
+    try {
+      const absentKeys = new Set(['game.boss.count', 'asset.boss.count'])
+      const current = await finishFacts(controller, key =>
+        absentKeys.has(key) ? undefined : consistentFactValue(key),
+      )
+      expect(current.status).toBe('running')
+      expect(current.foundationAuditState?.status).toBe('semantic_review')
+      expect(current.blockedReason).toBeUndefined()
+      const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'rev-1' })
+      expect(committed?.factStore.some(fact => absentKeys.has(fact.key))).toBe(false)
+      expect(committed?.factStore).toHaveLength(FOUNDATION_FACT_CATALOG.length - absentKeys.size)
+      expect(current.foundationAuditState?.deterministic?.reviewDigest).toMatch(/^[a-f0-9]{64}$/)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
   test('zero worker packets use the same finalizer and commit a complete store', async () => {
     const completeDocuments = Object.fromEntries(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, completeDocument(path)])) as Partial<Record<(typeof CANONICAL_FOUNDATION_DOCUMENTS)[number], string>>
     const { workspacePath, controller, requests } = await preparedController(undefined, true, completeDocuments)

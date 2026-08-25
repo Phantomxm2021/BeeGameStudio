@@ -58,7 +58,7 @@ Fact Store 不是普通摘要，而是可比较、可校验的标准化事实集
 
 Fact extraction uses the closed v1 catalog as authority: packets carry exact owner Section text, sort document/section/key identities canonically, and split only between complete owner sections at the 16 KiB boundary. A fact worker's packet is its sole business input. It returns only business fields (`key`, `status`, typed `value` or `reason`); provenance is service-owned and bound from the immutable packet's catalog owner Section when the durable terminal is constructed. It may receive only language, immutable task/revision/packet identities, the strict output schema, explicit read/write denial, and the packet itself; it must not receive the Confirmed Brief, workspace context, canonical document inventory, or generic project instructions. Brief-derived constraints are projected by local code into catalog keys or immutable digests before dispatch.
 
-Local mechanical extraction runs first. Final Fact Store publication merges mechanically extracted facts with admitted worker facts and validates exact closed-catalog coverage; resolved mechanical facts must not be discarded merely because no worker returned them.
+Local mechanical extraction runs first. Final publication merges mechanically extracted facts with admitted worker facts and their closed receipts. Present mechanical keys and every admitted worker receipt (including absent or uncertain outcomes) must account for the catalog exactly once; the published Fact Store contains present facts only, while absent/uncertain receipts remain durable audit evidence and drive deterministic or semantic issues instead of blocking derived publication. Resolved mechanical facts must not be discarded merely because no worker returned them.
 
 > {  
 > "players.max": 4,  

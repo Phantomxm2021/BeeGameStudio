@@ -375,32 +375,119 @@ function canonicalFactIdentity(fact: FoundationFact): string {
   })
 }
 
+function canonicalFactReceiptIdentity(
+  value: Pick<FoundationFactReceipt, 'key' | 'value' | 'evidence'>,
+): string {
+  return JSON.stringify({
+    key: value.key,
+    value: value.value,
+    evidence: value.evidence
+      ? {
+          documentPath: value.evidence.documentPath,
+          sectionId: value.evidence.sectionId,
+          startLine: value.evidence.startLine,
+          endLine: value.evidence.endLine,
+          digest: value.evidence.digest,
+        }
+      : undefined,
+  })
+}
+
+function validWorkerReceiptEvidence(
+  value: unknown,
+  key: FoundationFactKey,
+): value is FoundationFactEvidence {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const evidence = value as Record<string, unknown>
+  const definition = foundationFactDefinition(key)
+  return (
+    Boolean(definition) &&
+    Object.keys(evidence).sort().join('|') ===
+      'digest|documentPath|endLine|sectionId|startLine' &&
+    evidence.documentPath === definition!.owner.documentPath &&
+    evidence.sectionId === definition!.owner.sectionId &&
+    Number.isInteger(evidence.startLine) &&
+    (evidence.startLine as number) > 0 &&
+    Number.isInteger(evidence.endLine) &&
+    (evidence.endLine as number) >= (evidence.startLine as number) &&
+    typeof evidence.digest === 'string' &&
+    /^[a-f0-9]{64}$/.test(evidence.digest)
+  )
+}
+
 /**
- * Combines the local extraction result with admitted worker facts into the
- * one closed-catalog Fact Store. Both producers are independently validated;
- * a duplicate is accepted only when its value and evidence agree.
+ * Combines local extraction with admitted worker receipts into one
+ * closed-catalog Fact Store. The store contains present values only; worker
+ * absent/uncertain receipts are nevertheless authoritative coverage.
  */
 export function mergeFoundationFactResults(input: {
   mechanicalFacts: readonly FoundationFact[]
   workerFacts: readonly FoundationFact[]
+  workerReceipts: readonly FoundationFactReceipt[]
 }): FoundationFact[] {
-  const byKey = new Map<string, FoundationFact>()
-  for (const fact of [...input.mechanicalFacts, ...input.workerFacts]) {
-    const normalized = createFoundationFactStore([fact])[0]!
-    const existing = byKey.get(normalized.key)
-    if (existing) {
-      if (canonicalFactIdentity(existing) !== canonicalFactIdentity(normalized))
-        throw new Error(`conflicting foundation fact result: ${normalized.key}`)
-      continue
+  const mechanical = createFoundationFactStore(input.mechanicalFacts)
+  const worker = createFoundationFactStore(input.workerFacts)
+  const mechanicalKeys = new Set(mechanical.map(fact => fact.key))
+  const workerByKey = new Map(worker.map(fact => [fact.key, fact]))
+  const receipts = input.workerReceipts
+  const receiptByKey = new Map<string, FoundationFactReceipt>()
+  for (const receipt of receipts) {
+    if (!isFoundationFactKey(receipt.key))
+      throw new Error(`unknown foundation fact receipt key: ${String(receipt.key)}`)
+    if (receiptByKey.has(receipt.key))
+      throw new Error(`duplicate foundation fact receipt: ${receipt.key}`)
+    if (mechanicalKeys.has(receipt.key))
+      throw new Error(`worker receipt overlaps mechanical fact: ${receipt.key}`)
+    const allowedFields = receipt.status === 'present'
+      ? ['key', 'status', 'value', 'evidence']
+      : receipt.status === 'absent'
+        ? ['key', 'status']
+        : receipt.status === 'uncertain'
+          ? ['key', 'status', 'reason', 'evidence']
+          : []
+    if (Object.keys(receipt).some(field => !allowedFields.includes(field)))
+      throw new Error(`foundation fact receipt has unexpected fields: ${receipt.key}`)
+    receiptByKey.set(receipt.key, receipt)
+    const fact = workerByKey.get(receipt.key)
+    if (receipt.status === 'present') {
+      if (
+        !('value' in receipt) ||
+        receipt.value === undefined ||
+        !validWorkerReceiptEvidence(receipt.evidence, receipt.key)
+      )
+        throw new Error(`present worker receipt is incomplete: ${receipt.key}`)
+      if (!fact)
+        throw new Error(`present worker receipt has no worker fact: ${receipt.key}`)
+      if (canonicalFactReceiptIdentity(receipt) !== canonicalFactIdentity(fact))
+        throw new Error(`worker fact does not match receipt: ${receipt.key}`)
+    } else if (receipt.status === 'absent') {
+      if ('value' in receipt || receipt.evidence !== undefined || receipt.reason !== undefined)
+        throw new Error(`absent worker receipt has unexpected fields: ${receipt.key}`)
+      if (fact)
+        throw new Error(`absent worker receipt has a worker fact: ${receipt.key}`)
+    } else if (receipt.status === 'uncertain') {
+      if (
+        'value' in receipt ||
+        !receipt.reason?.trim() ||
+        !validWorkerReceiptEvidence(receipt.evidence, receipt.key)
+      )
+        throw new Error(`uncertain worker receipt is incomplete: ${receipt.key}`)
+      if (fact)
+        throw new Error(`uncertain worker receipt has a worker fact: ${receipt.key}`)
+    } else {
+      throw new Error(`invalid worker receipt status: ${receipt.key}`)
     }
-    byKey.set(normalized.key, normalized)
+  }
+  for (const fact of worker) {
+    if (!receiptByKey.has(fact.key))
+      throw new Error(`worker fact has no receipt: ${fact.key}`)
   }
   const missing = FOUNDATION_FACT_CATALOG
     .map(definition => definition.key)
-    .filter(key => !byKey.has(key))
+    .filter(key => !mechanicalKeys.has(key) && !receiptByKey.has(key))
   if (missing.length)
     throw new Error(`foundation fact catalog coverage is incomplete: ${missing.join(', ')}`)
-  return createFoundationFactStore([...byKey.values()])
+  return createFoundationFactStore([...mechanical, ...worker])
 }
 
 function canonicalPacketIdentity(
