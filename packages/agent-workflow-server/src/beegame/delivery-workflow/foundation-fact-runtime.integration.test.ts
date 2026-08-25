@@ -329,7 +329,7 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
-  test('rejects a task whose final structured output exceeds the cap', async () => {
+  test('admits a detailed fact result without a fixed business token gate', async () => {
     const { workspacePath, controller } = await preparedController()
     try {
       const current = await controller.store.load()
@@ -347,9 +347,9 @@ describe('foundation fact runtime controller integration', () => {
         results: oversizedResults,
       })
       const after = await controller.store.load()
-      const failedTask = after!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!
-      expect(failedTask.status).toBe('needs_action')
-      expect(failedTask.failureReason).toContain('output token cap')
+      const completedTask = after!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      expect(completedTask.status).toBe('completed')
+      expect(completedTask.failureReason).toBeUndefined()
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
@@ -1824,7 +1824,7 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
-  test('revision impacted fact terminals enforce the final structured output cap', async () => {
+  test('revision impacted fact terminals admit detailed valid results', async () => {
     const { workspacePath, controller } = await preparedController()
     try {
       const { rebuilding } = await completeFactOwnerRevision(controller, workspacePath)
@@ -1838,10 +1838,10 @@ describe('foundation fact runtime controller integration', () => {
       delete first.value
       first.status = 'uncertain'
       first.reason = 'x'.repeat(10_000)
-      await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: planned!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, results: oversizedResults })).rejects.toThrow(/invalid|cap/i)
-      const failedTask = (await controller.store.load())!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
-      expect(failedTask.status).toBe('needs_action')
-      expect(failedTask.failureReason).toContain('output token cap')
+      await controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: planned!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, results: oversizedResults })
+      const completedTask = (await controller.store.load())!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      expect(completedTask.status).toBe('completed')
+      expect(completedTask.failureReason).toBeUndefined()
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 

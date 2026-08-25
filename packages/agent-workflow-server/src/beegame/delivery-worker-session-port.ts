@@ -154,7 +154,25 @@ function foundationFactSchemaForRequest(
 import { documentAuthoringMetrics } from './document-authoring-metrics'
 import { readAuthoredDocumentReceipt } from './authored-document-receipt'
 
-const FOUNDATION_MARKDOWN_STREAM_MAX_BYTES = 2 * 1024 * 1024
+export const FOUNDATION_WORKER_OUTPUT_MAX_BYTES = 2 * 1024 * 1024
+
+function assertFoundationStructuredOutputWithinInfrastructureBoundary(
+  value: unknown,
+): void {
+  const serialized = JSON.stringify(value)
+  if (serialized === undefined)
+    throw new Error('foundation structured output is not serializable')
+  if (
+    Buffer.byteLength(serialized, 'utf8') >
+    FOUNDATION_WORKER_OUTPUT_MAX_BYTES
+  ) {
+    const error = new Error(
+      `foundation structured output exceeds infrastructure boundary (${FOUNDATION_WORKER_OUTPUT_MAX_BYTES} bytes)`,
+    )
+    error.name = 'WorkerInfrastructureBoundaryError'
+    throw error
+  }
+}
 
 function taskTypeForWorker(
   workerType: WorkerDispatchRequest['workerType'],
@@ -445,7 +463,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 dispatchId,
                 targetPath: request.contract
                   .foundationDocumentPath as FoundationDocumentPath,
-                maxBytes: FOUNDATION_MARKDOWN_STREAM_MAX_BYTES,
+                maxBytes: FOUNDATION_WORKER_OUTPUT_MAX_BYTES,
               },
             }
           : {}),
@@ -1090,6 +1108,7 @@ function createDeterministicFoundationFactTerminal(input: {
     ? (resultEvent.payload as Record<string, unknown>).structured_output
     : undefined
   if (structured === undefined) return undefined
+  assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
   const payload = foundationFactModelPayloadSchema.parse(structured)
   const packet = foundationFactPacketForRequest(input.request)
   const results = payload.results.map(result => {
@@ -1121,6 +1140,7 @@ function createDeterministicFoundationSemanticTerminal(input: {
   const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
     ? (resultEvent.payload as Record<string, unknown>).structured_output : undefined
   if (structured === undefined) return undefined
+  assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
   const payload = foundationSemanticModelPayloadSchema.parse(structured)
   return foundationSemanticReviewerTerminalSchema.parse({
     workerType: 'foundation-semantic-reviewer',

@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
+  FOUNDATION_WORKER_OUTPUT_MAX_BYTES,
   buildDocumentAuthorAuthorityBlock,
   createBeeGameDeliveryWorkerPort,
 } from '../beegame/delivery-worker-session-port'
@@ -290,6 +291,53 @@ describe('delivery worker session credentials', () => {
     expect(validate({ status: 'completed', outcome: 'ISSUES', issues: [issue], reason: 'provider-added explanation' })).toBe(false)
     expect(validate({ status: 'completed', outcome: 'ISSUES', issues: [issue] })).toBe(true)
     expect(validate({ status: 'completed', outcome: 'UNDECIDABLE', reason: 'ambiguous packet' })).toBe(true)
+  })
+
+  test('rejects oversized foundation structured output at the infrastructure boundary', async () => {
+    const request = {
+      dispatchId: 'dispatch-semantic-oversized',
+      runId: 'run-semantic-oversized',
+      ownerId: 'user-1',
+      projectId: 'project-semantic',
+      workspacePath: '/tmp/semantic-project',
+      workerType: 'foundation-semantic-reviewer' as const,
+      phase: 'DOCUMENT_REVIEW' as const,
+      taskId: 'task-semantic-oversized',
+      revision: 'revision-semantic-oversized',
+      allowedPaths: [],
+      projectReadScope: 'empty' as const,
+      contract: {
+        taskId: 'task-semantic-oversized',
+        packetDigest: 'a'.repeat(64),
+        modelTier: 'balanced' as const,
+        workerType: 'foundation-semantic-reviewer' as const,
+      },
+    } as unknown as WorkerDispatchRequest
+    const sessions = {
+      start() { return { id: 'session-semantic-oversized' } },
+      events() {
+        return [{
+          id: 'semantic-result-oversized',
+          type: 'result' as const,
+          text: 'Structured output accepted',
+          createdAt: new Date(),
+          payload: {
+            type: 'result',
+            subtype: 'success',
+            structured_output: {
+              status: 'completed',
+              outcome: 'UNDECIDABLE',
+              reason: 'x'.repeat(FOUNDATION_WORKER_OUTPUT_MAX_BYTES),
+            },
+          },
+        }]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    await port.start(request)
+    await expect(port.waitForTerminal?.(request.dispatchId!)).rejects.toThrow(
+      /structured output exceeds infrastructure boundary/i,
+    )
   })
 
   test('rejects forged identity, extra fields and malformed model payloads', () => {

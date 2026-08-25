@@ -6,7 +6,6 @@ import type { AuditIssue } from './foundation-issue-registry'
 import {
   FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
   FOUNDATION_SEMANTIC_CHECKS,
-  SEMANTIC_OUTPUT_MAX_TOKENS,
   admitFoundationSemanticResult,
   buildFoundationSemanticPacket,
   createDeepConfirmationRequest,
@@ -140,7 +139,7 @@ describe('foundation semantic audit authority', () => {
     expect(() => admitFoundationSemanticResult(packet, { ...base, issues: [{ ...issue, id: 'AUD-caller' }] })).toThrow(/ID|unknown/i)
   })
 
-  test('admits strict PASS, ISSUES, and UNDECIDABLE unions; output admission is handled from the final structured payload', () => {
+  test('admits strict PASS, ISSUES, and UNDECIDABLE unions', () => {
     const packet = buildFoundationSemanticPacket(fullSnapshot())
     const pass = { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'PASS' as const, issues: [] }
     expect(admitFoundationSemanticResult(packet, pass).outcome).toBe('PASS')
@@ -148,7 +147,6 @@ describe('foundation semantic audit authority', () => {
     expect(() => admitFoundationSemanticResult(packet, { ...pass, outcome: 'ISSUES', issues: [] })).toThrow(/issue/i)
     const large = { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'ISSUES' as const, issues: [{ problem: 'x'.repeat(9000), expected: 'e', actual: 'a', fixSectionKey: 'GDD#core_loop', sourceSectionKey: 'GDD#core_loop' }] }
     expect(admitFoundationSemanticResult(packet, large).outcome).toBe('ISSUES')
-    expect(SEMANTIC_OUTPUT_MAX_TOKENS).toBe(2_048)
   })
 
   test('allows one same-packet strong confirmation only for UNDECIDABLE and emits drafts without IDs', () => {

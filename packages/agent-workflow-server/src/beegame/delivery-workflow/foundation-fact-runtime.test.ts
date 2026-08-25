@@ -4,7 +4,6 @@ import {
   admitFoundationFactTerminal,
   claimFoundationFactTasks,
   createFoundationFactTaskCollection,
-  foundationFactOutputTokenLimit,
   type FoundationFactTaskCollection,
 } from './foundation-fact-runtime'
 import { selectFoundationFactFastRuntime, selectFoundationSemanticRuntime } from '../session-manager'
@@ -120,7 +119,7 @@ describe('foundation fact runtime', () => {
     expect(claimed.tasks.filter(task => task.status === 'running')).toHaveLength(4)
   })
 
-  test('does not complete failed terminals and still enforces per-dispatch output cap', () => {
+  test('does not complete failed terminals and treats provider usage as telemetry', () => {
     const claimed = claimFoundationFactTasks(collection(), { dispatchIdFor: () => 'dispatch-a', now: '2026-08-24T00:00:01.000Z' })
     const base = { taskId: 'task-a', dispatchId: 'dispatch-a', revision: 'rev-1', packetDigest: 'a'.repeat(64), terminal: { workerType: 'foundation-fact-extractor' as const, status: 'failed' as const, runId: 'run-1', dispatchId: 'dispatch-a', revision: 'rev-1', taskId: 'task-a', packetDigest: 'a'.repeat(64), results: [] }, durationMs: 1, now: '2026-08-24T00:00:02.000Z' }
     const failed = admitFoundationFactTerminal(claimed, { ...base, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 } })
@@ -139,14 +138,14 @@ describe('foundation fact runtime', () => {
     const highProviderUsage = admitFoundationFactTerminal(claimed, { ...base, terminal: { ...base.terminal, status: 'completed' }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 4_897, total_tokens: 4_898 } })
     expect(highProviderUsage.accepted).toBe(true)
     expect(highProviderUsage.state.tasks[0]?.status).toBe('completed')
-    const oversized = admitFoundationFactTerminal(claimFoundationFactTasks(collection(), { dispatchIdFor: () => 'dispatch-a', now: '2026-08-24T00:00:01.000Z' }), { ...base, terminal: { ...base.terminal, status: 'completed', results: [{ key: 'game.title', status: 'present', value: 'x'.repeat(10_000) }] }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 } })
-    expect(oversized.accepted).toBe(false)
-    expect(oversized.state.tasks[0]?.failureReason).toContain('output token cap')
+    const detailed = admitFoundationFactTerminal(claimFoundationFactTasks(collection(), { dispatchIdFor: () => 'dispatch-a', now: '2026-08-24T00:00:01.000Z' }), { ...base, terminal: { ...base.terminal, status: 'completed', results: [{ key: 'game.title', status: 'present', value: 'x'.repeat(10_000) }] }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 } })
+    expect(detailed.accepted).toBe(true)
+    expect(detailed.state.tasks[0]?.status).toBe('completed')
     const oldPhase = admitFoundationFactTerminal({ ...claimed, phaseStartedAt: '2020-01-01T00:00:00.000Z', aggregateUsage: { input_tokens: 200_000, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 200_000 } }, { ...base, terminal: { ...base.terminal, status: 'completed' }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 }, now: '2026-08-25T00:06:00.000Z' })
     expect(oldPhase.state.tasks[0]?.status).toBe('completed')
   })
 
-  test('admits a one-key multi-item typed evidence payload within the fixed envelope', () => {
+  test('admits a one-key multi-item typed evidence payload', () => {
     const claimed = claimFoundationFactTasks(createFoundationFactTaskCollection({
       revision: 'rev-1',
       phaseStartedAt: '2026-08-24T00:00:00.000Z',
@@ -187,13 +186,12 @@ describe('foundation fact runtime', () => {
     expect(state.status).toBe('facts_staged')
   })
 
-  test('keeps a fixed output cap while validating assigned fact cardinality', () => {
-    expect(foundationFactOutputTokenLimit(1)).toBe(4096)
-    expect(foundationFactOutputTokenLimit(4)).toBe(4096)
-    expect(foundationFactOutputTokenLimit(13)).toBe(4096)
-    expect(foundationFactOutputTokenLimit(14)).toBe(4096)
-    expect(foundationFactOutputTokenLimit(15)).toBe(4096)
-    expect(() => foundationFactOutputTokenLimit(0)).toThrow(/positive integer/)
+  test('validates assigned fact cardinality without deriving an output budget from it', () => {
+    expect(() => createFoundationFactTaskCollection({
+      revision: 'rev-1',
+      phaseStartedAt: '2026-08-24T00:00:00.000Z',
+      packets: [packet('task-a', 'a'.repeat(64), 0)],
+    })).toThrow(/positive integer/)
   })
 
   test('derives the closed catalog task cap and rejects one beyond it', () => {

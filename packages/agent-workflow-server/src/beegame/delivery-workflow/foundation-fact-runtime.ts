@@ -1,16 +1,9 @@
 import { createHash } from 'node:crypto'
 import type { DispatchRecord, WorkflowUsage } from './types'
 import { FOUNDATION_FACT_CATALOG_OWNER_SECTIONS } from './foundation-fact-definitions'
-import { estimateStructuredPayloadTokens, foundationFactBusinessPayload } from './structured-output-admission'
 
 export const FOUNDATION_FACT_MAX_TASKS = FOUNDATION_FACT_CATALOG_OWNER_SECTIONS.length
 export const FOUNDATION_FACT_MAX_RUNNING = 4
-
-export function foundationFactOutputTokenLimit(factKeyCount: number): number {
-  if (!Number.isInteger(factKeyCount) || factKeyCount < 1)
-    throw new Error('foundation fact key count must be a positive integer')
-  return 4_096
-}
 
 export type FoundationFactTaskStatus =
   | 'pending'
@@ -131,7 +124,8 @@ export function createFoundationFactTaskCollection(input: {
     throw new Error('foundation fact task IDs must be stable and unique')
   const tasks = input.packets.map(packet => {
     assertDigest(packet.packetDigest, 'foundation fact packet digest')
-    foundationFactOutputTokenLimit(packet.factKeyCount)
+    if (!Number.isInteger(packet.factKeyCount) || packet.factKeyCount < 1)
+      throw new Error('foundation fact key count must be a positive integer')
     if (packet.revision !== input.revision) throw new Error('foundation fact task revision is stale')
     if (packet.kind !== 'document-facts' || packet.modelTier !== 'fast')
       throw new Error('foundation fact task has an invalid kind or model tier')
@@ -208,14 +202,11 @@ export function admitFoundationFactTerminal(
   }
   if (task.status !== 'running') throw new Error('foundation fact task is not running')
   const measuredUsage = usage(input.usage)
-  const outputTokens = estimateStructuredPayloadTokens(foundationFactBusinessPayload(input.terminal))
-  const failureReason = outputTokens > foundationFactOutputTokenLimit(task.factKeyCount)
-    ? 'foundation fact output token cap exceeded'
-    : input.terminal.status === 'completed' ? undefined : 'foundation fact worker did not complete'
+  const failureReason = input.terminal.status === 'completed' ? undefined : 'foundation fact worker did not complete'
   const completed = !failureReason
   const nextTask: FoundationFactTask = {
     ...task,
-    status: completed ? 'completed' : failureReason === 'foundation fact output token cap exceeded' ? 'needs_action' : task.attempt < 2 ? 'retryable' : 'needs_action',
+    status: completed ? 'completed' : task.attempt < 2 ? 'retryable' : 'needs_action',
     terminalDigest,
     usage: measuredUsage,
     durationMs: Math.max(0, input.durationMs),

@@ -250,6 +250,8 @@ Recheck。
 
 预算必须由“必需任务数 × 每任务输入/输出/重试边界”推导，并逐任务记录实际 token、duration 和 failure reason。不得用无法容纳全部必需 packet 的任意全局 token cap，或共享墙钟 deadline，提前终止尚未打开的任务。超时与重试在单任务边界执行；恢复不得重置、绕过或伪造这些边界。
 
+每任务的输出边界由严格结构化 Schema、任务身份/作用域、provider/native 输出约束和重试次数共同定义；不得再用一个固定 token 估算值二次拒绝已经满足业务契约的合法结果。Foundation packet worker 的最终结构化输出仅在进入服务的基础设施边界执行 2 MiB UTF-8 JSON 上限，防止异常 payload 造成资源耗尽；该上限不是审计质量、Issue 数量或业务复杂度预算，超限必须明确归类为基础设施失败。
+
 # 14. 停止条件
 
 > Round 1: 修 BLOCKER + HIGH + MEDIUM  

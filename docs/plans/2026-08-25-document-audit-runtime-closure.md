@@ -89,16 +89,9 @@ expect(claimed.tasks.filter(task => task.status === 'running')).toHaveLength(4)
 
 **Interfaces**
 
-```ts
-export function foundationFactOutputTokenLimit(factKeyCount: number): number {
-  if (!Number.isInteger(factKeyCount) || factKeyCount < 1) throw new Error('foundation fact key count must be a positive integer')
-  return 4_096
-}
-```
+`factKeyCount` remains mandatory for packet/state identity and scope validation, but cardinality is not a payload-size proxy because one legal array-valued fact may be larger than several scalar facts. Fact, semantic, and deep terminals are admitted by their strict schema and exact task/revision/packet scope; no fixed token estimator is a second business gate. Provider `completion_tokens` and total usage are retained for cost observation only, including native sessions that performed structured-output repairs. Before model structured output enters terminal parsing or workflow persistence, the delivery worker transport enforces a shared 2 MiB UTF-8 JSON infrastructure envelope for Foundation fact and semantic workers. That envelope protects resources, emits an infrastructure-specific failure, and is not used to judge audit quality or case complexity.
 
-Output admission measures the final structured business payload rather than provider usage. Use one shared deterministic estimator based on the UTF-8 byte length of the JSON payload divided by two (rounded up, conservatively for multilingual text). For facts the payload is `{ status, results }`; for semantic and deep workers it is `{ status, outcome, issues?, reason? }`. Facts use a fixed `4096` token per-dispatch cap; semantic and deep workers use one shared fixed `2048` token per-dispatch cap so confirmation cannot reject a legal issue union admitted by semantic review. `factKeyCount` remains mandatory for packet/state identity and scope validation, but cardinality is not a payload-size proxy because one legal array-valued fact may be larger than several scalar facts. Provider `completion_tokens` and total usage are retained for cost observation and must not reject a valid small payload, even when a native session performed structured-output repairs.
-
-Add `factKeyCount: number` to `FoundationFactTask`; seed it from `packet.keys.length`, persist it in the state schema, and use it to validate packet/task identity and scope. Do not derive the final payload cap from cardinality.
+Add `factKeyCount: number` to `FoundationFactTask`; seed it from `packet.keys.length`, persist it in the state schema, and use it to validate packet/task identity and scope. Do not derive final payload acceptance from cardinality.
 
 **Required behavior**
 

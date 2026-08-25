@@ -8,7 +8,6 @@ import {
 import { auditAssetContract } from '../asset-contract-audit'
 import { createDeliveryDispatcher, DispatchError } from './dispatch'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
-import { estimateStructuredPayloadTokens, foundationFactBusinessPayload } from './structured-output-admission'
 import {
   buildChangeImpactDispatch,
   buildQuestionAnswerDispatch,
@@ -73,7 +72,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, mergeFoundationFactResults, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
-import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactOutputTokenLimit, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
+import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
 import { loadFoundationAuditArtifacts, loadFoundationFactReceipt, publishFoundationDerivedArtifacts, writeFoundationFactPacket, writeFoundationFactReceipt, publishDeterministicFoundationReview, loadCommittedFoundationDerivedArtifacts, loadDeterministicFoundationReview, publishFoundationSemanticReview, loadFoundationSemanticReview } from './foundation-audit-artifacts'
 import { createFoundationFactStore, digestFactStore, type FoundationFact } from './foundation-fact-store'
 import { summarizeFoundationIssues, type FoundationAuditState } from './foundation-audit-state'
@@ -714,9 +713,7 @@ export function createDeliveryWorkflowController(input: {
           validated = validateFoundationFactResults({ packet: packet as never, expectedRevision: lockedTask.revision, documents, sectionIndex: artifacts.sectionIndex, results: result.results as never })
         } catch (error) {
           const invalid = new Error(error instanceof Error ? error.message : 'foundation fact result is invalid')
-          invalid.name = estimateStructuredPayloadTokens(foundationFactBusinessPayload(result)) > foundationFactOutputTokenLimit(lockedTask.factKeyCount)
-            ? 'FoundationFactOutputCapError'
-            : 'FoundationFactInvalidResultError'
+          invalid.name = 'FoundationFactInvalidResultError'
           throw invalid
         }
         const runtimeState: FoundationFactTaskCollection = { revision: lockedState.revision, phaseStartedAt: lockedState.phaseStartedAt!, status: lockedState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts', tasks: lockedState.tasks.filter(task => task.kind === 'document-facts'), aggregateUsage: lockedState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 } }
