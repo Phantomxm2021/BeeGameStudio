@@ -9,7 +9,7 @@ export const FOUNDATION_FACT_MAX_RUNNING = 4
 export function foundationFactOutputTokenLimit(factKeyCount: number): number {
   if (!Number.isInteger(factKeyCount) || factKeyCount < 1)
     throw new Error('foundation fact key count must be a positive integer')
-  return Math.min(4_096, 768 + 256 * factKeyCount)
+  return 4_096
 }
 
 export type FoundationFactTaskStatus =

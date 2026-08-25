@@ -1756,7 +1756,7 @@ describe('foundation fact runtime controller integration', () => {
       const first = oversizedResults[0]!
       delete first.value
       first.status = 'uncertain'
-      first.reason = 'x'.repeat(5_000)
+      first.reason = 'x'.repeat(10_000)
       await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, { workerType: 'foundation-fact-extractor', status: 'completed', runId: planned!.runId, dispatchId: task.dispatch!.dispatchId, taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, results: oversizedResults })).rejects.toThrow(/invalid|cap/i)
       const failedTask = (await controller.store.load())!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
       expect(failedTask.status).toBe('needs_action')

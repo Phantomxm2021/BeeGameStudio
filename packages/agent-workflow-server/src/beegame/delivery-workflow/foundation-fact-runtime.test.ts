@@ -139,14 +139,14 @@ describe('foundation fact runtime', () => {
     const highProviderUsage = admitFoundationFactTerminal(claimed, { ...base, terminal: { ...base.terminal, status: 'completed' }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 4_897, total_tokens: 4_898 } })
     expect(highProviderUsage.accepted).toBe(true)
     expect(highProviderUsage.state.tasks[0]?.status).toBe('completed')
-    const oversized = admitFoundationFactTerminal(claimFoundationFactTasks(collection(), { dispatchIdFor: () => 'dispatch-a', now: '2026-08-24T00:00:01.000Z' }), { ...base, terminal: { ...base.terminal, status: 'completed', results: [{ key: 'game.title', status: 'present', value: 'x'.repeat(2_000) }] }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 } })
+    const oversized = admitFoundationFactTerminal(claimFoundationFactTasks(collection(), { dispatchIdFor: () => 'dispatch-a', now: '2026-08-24T00:00:01.000Z' }), { ...base, terminal: { ...base.terminal, status: 'completed', results: [{ key: 'game.title', status: 'present', value: 'x'.repeat(10_000) }] }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 } })
     expect(oversized.accepted).toBe(false)
     expect(oversized.state.tasks[0]?.failureReason).toContain('output token cap')
     const oldPhase = admitFoundationFactTerminal({ ...claimed, phaseStartedAt: '2020-01-01T00:00:00.000Z', aggregateUsage: { input_tokens: 200_000, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 200_000 } }, { ...base, terminal: { ...base.terminal, status: 'completed' }, usage: { input_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 1, total_tokens: 2 }, now: '2026-08-25T00:06:00.000Z' })
     expect(oldPhase.state.tasks[0]?.status).toBe('completed')
   })
 
-  test('admits a one-key typed evidence payload within the calibrated envelope', () => {
+  test('admits a one-key multi-item typed evidence payload within the fixed envelope', () => {
     const claimed = claimFoundationFactTasks(createFoundationFactTaskCollection({
       revision: 'rev-1',
       phaseStartedAt: '2026-08-24T00:00:00.000Z',
@@ -163,7 +163,7 @@ describe('foundation fact runtime', () => {
       results: [{
         key: 'art.style_constraints',
         status: 'present',
-        value: Array.from({ length: 15 }, (_, index) => `constraint-${index}-${'x'.repeat(76)}`),
+        value: Array.from({ length: 15 }, (_, index) => `constraint-${index}-${'x'.repeat(118)}`),
         evidence: { documentPath: 'docs/Art.md', sectionId: 'style', startLine: 1, endLine: 1, digest: 'a'.repeat(64) },
       }],
     }
@@ -187,9 +187,9 @@ describe('foundation fact runtime', () => {
     expect(state.status).toBe('facts_staged')
   })
 
-  test('derives output limit from assigned fact cardinality with a hard ceiling', () => {
-    expect(foundationFactOutputTokenLimit(1)).toBe(1024)
-    expect(foundationFactOutputTokenLimit(4)).toBe(1792)
+  test('keeps a fixed output cap while validating assigned fact cardinality', () => {
+    expect(foundationFactOutputTokenLimit(1)).toBe(4096)
+    expect(foundationFactOutputTokenLimit(4)).toBe(4096)
     expect(foundationFactOutputTokenLimit(13)).toBe(4096)
     expect(foundationFactOutputTokenLimit(14)).toBe(4096)
     expect(foundationFactOutputTokenLimit(15)).toBe(4096)

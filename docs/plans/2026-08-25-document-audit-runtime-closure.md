@@ -92,13 +92,13 @@ expect(claimed.tasks.filter(task => task.status === 'running')).toHaveLength(4)
 ```ts
 export function foundationFactOutputTokenLimit(factKeyCount: number): number {
   if (!Number.isInteger(factKeyCount) || factKeyCount < 1) throw new Error('foundation fact key count must be a positive integer')
-  return Math.min(4_096, 768 + 256 * factKeyCount)
+  return 4_096
 }
 ```
 
-Output admission measures the final structured business payload rather than provider usage. Use one shared deterministic estimator based on the UTF-8 byte length of the JSON payload divided by two (rounded up, conservatively for multilingual text). For facts the payload is `{ status, results }`; for semantic and deep workers it is `{ status, outcome, issues?, reason? }`. Facts use `min(4096, 768 + 256 * factKeyCount)`, preserving the service-bound terminal envelope for a one-key result and reaching the hard ceiling at 13 keys; semantic and deep workers retain their existing fixed caps. Provider `completion_tokens` and total usage are retained for cost observation and must not reject a valid small payload, even when a native session performed structured-output repairs.
+Output admission measures the final structured business payload rather than provider usage. Use one shared deterministic estimator based on the UTF-8 byte length of the JSON payload divided by two (rounded up, conservatively for multilingual text). For facts the payload is `{ status, results }`; for semantic and deep workers it is `{ status, outcome, issues?, reason? }`. Facts use a fixed `4096` token per-dispatch cap; semantic and deep workers retain their existing fixed caps. `factKeyCount` remains mandatory for packet/state identity and scope validation, but cardinality is not a payload-size proxy because one legal array-valued fact may be larger than several scalar facts. Provider `completion_tokens` and total usage are retained for cost observation and must not reject a valid small payload, even when a native session performed structured-output repairs.
 
-Add `factKeyCount: number` to `FoundationFactTask`; seed it from `packet.keys.length`, persist it in the state schema, and use it for terminal admission instead of a fixed 512-token comparison.
+Add `factKeyCount: number` to `FoundationFactTask`; seed it from `packet.keys.length`, persist it in the state schema, and use it to validate packet/task identity and scope. Do not derive the final payload cap from cardinality.
 
 **Required behavior**
 
@@ -123,7 +123,7 @@ expect(prompt).toContain('packet is the sole input')
 
 2. Add a session-port test that captures `sendWithDisplay()` and proves both the submitted prompt and display payload omit the Brief for fact and semantic workers.
 
-3. Add output-limit tests for 1, 4, 13, 14, and 15 keys: `1024`, `1792`, `4096`, `4096`, and `4096`.
+3. Add output-limit tests for 1, 4, 13, and 15 keys: `4096`, `4096`, `4096`, and `4096`; add a multi-item array-valued one-key payload that remains admitted under the fixed cap.
 
 4. Add admission tests proving high provider completion usage with a small final payload is accepted, while an oversized final structured payload is rejected for ordinary facts, impacted facts, semantic checks, and deep confirmation.
 
