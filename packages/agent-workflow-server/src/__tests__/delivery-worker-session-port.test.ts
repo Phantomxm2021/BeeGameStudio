@@ -378,9 +378,18 @@ describe('delivery worker session credentials', () => {
     const ownerSection = {
       documentPath: 'docs/AUDIO_DESIGN.md',
       sectionId: 'event_taxonomy',
+      heading: 'Event Taxonomy',
       startLine: 65,
       endLine: 80,
       digest: 'b'.repeat(64),
+      text: '## Event Taxonomy',
+    }
+    const ownerEvidence = {
+      documentPath: ownerSection.documentPath,
+      sectionId: ownerSection.sectionId,
+      startLine: ownerSection.startLine,
+      endLine: ownerSection.endLine,
+      digest: ownerSection.digest,
     }
     const request = {
       dispatchId: 'dispatch-facts-bound',
@@ -425,7 +434,7 @@ describe('delivery worker session credentials', () => {
       await expect(port.waitForTerminal?.(`dispatch-facts-bound-${index}`)).resolves.toMatchObject({
         results: [
           result.status === 'present' || result.status === 'uncertain'
-            ? { ...result, evidence: ownerSection }
+            ? { ...result, evidence: ownerEvidence }
             : result,
         ],
       })

@@ -88,6 +88,15 @@ function foundationFactOwnerSection(
   return section
 }
 
+function foundationFactEvidenceForPacket(
+  packet: FoundationFactPacketContract,
+  key: FoundationFactKey,
+) {
+  const { documentPath, sectionId, startLine, endLine, digest } =
+    foundationFactOwnerSection(packet, key)
+  return { documentPath, sectionId, startLine, endLine, digest }
+}
+
 function foundationFactPacketForRequest(
   request: WorkerDispatchRequest,
 ): FoundationFactPacketContract {
@@ -1088,10 +1097,9 @@ function createDeterministicFoundationFactTerminal(input: {
       throw new Error(`foundation fact result has an unknown key: ${result.key}`)
     if (!packet.keys.includes(result.key))
       throw new Error(`foundation fact result key is not assigned: ${result.key}`)
-    const section = foundationFactOwnerSection(packet, result.key)
     return result.status === 'absent'
       ? result
-      : { ...result, evidence: section }
+      : { ...result, evidence: foundationFactEvidenceForPacket(packet, result.key) }
   })
   return foundationFactExtractorTerminalSchema.parse({
     workerType: 'foundation-fact-extractor',
