@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { createDeliveryWorkflowController } from './controller'
 import { createInitialDeliveryRun } from './run-store'
-import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun, type DeliveryWorkerPort, type FoundationRevisionDocumentTask, type FoundationRevisionSemanticRecheckTask, type WorkerDispatchRequest } from './types'
+import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun, type DeliveryWorkerPort, type FoundationRevisionDocumentTask, type FoundationRevisionSemanticRecheckTask, type FoundationRevisionState, type WorkerDispatchRequest } from './types'
 import { createBeeGameDeliveryWorkerPort } from '../delivery-worker-session-port'
 import { getGameDocumentContract } from './game-document-contracts'
 import { loadCommittedFoundationDerivedArtifacts, loadFoundationSemanticReview } from './foundation-audit-artifacts'
@@ -15,9 +15,13 @@ import { FOUNDATION_FACT_CATALOG, foundationFactDefinition } from './foundation-
 import type { FactValue } from './foundation-fact-store'
 import type { AuditIssue } from './foundation-issue-registry'
 import { buildFoundationSemanticRecheckPacket } from './foundation-patch-validation'
-import { foundationRevisionPacketPath, foundationRevisionStagePath, loadFoundationRevisionPacket, revisionTaskReceiptTerminalDigest, writeFoundationRevisionSemanticPacket, type PatchOperation } from './foundation-revision-stage'
+import { deriveFoundationPatchOperations, foundationRevisionPacketPath, foundationRevisionStagePath, loadFoundationRevisionPacket, revisionTaskReceiptTerminalDigest, writeFoundationRevisionSemanticPacket, type PatchOperation } from './foundation-revision-stage'
 import { digestFoundationFactTerminal } from './foundation-fact-runtime'
 import { foundationSemanticReviewerStructuredOutputJsonSchema } from './worker-contracts'
+import { foundationRevisionCommittedPath } from './foundation-revision-publication'
+import { publishFoundationRevision } from './foundation-revision-publication'
+import { publishFoundationDerivedArtifacts } from './foundation-audit-artifacts'
+import { digestFactStore } from './foundation-fact-store'
 
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
@@ -421,6 +425,68 @@ describe('foundation fact runtime controller integration', () => {
     return { targetFact, rebuilding: (await controller.store.load())! }
   }
 
+  async function seedRoundClosingRevision(options: { resultingIssue?: boolean; round?: 1 | 2 | 3; unchangedBefore?: boolean } = {}) {
+    const prepared = await preparedController()
+    const round = options.round ?? 1
+    const { rebuilding } = await completeFactOwnerRevision(prepared.controller, prepared.workspacePath, ownerFactText('game.boss.count'))
+    const current = rebuilding
+    const documentTask = current.foundationRevisionState!.tasks.find(task => task.kind === 'document-revision' && task.status === 'completed')! as FoundationRevisionDocumentTask
+    const packet = await loadFoundationRevisionPacket({ workspacePath: prepared.workspacePath, revision: documentTask.revision, round: documentTask.round, taskId: documentTask.taskId, documentPath: documentTask.documentPath, packetDigest: documentTask.packetDigest }) as { issues: AuditIssue[] }
+    const receiptCore = { ...documentTask.receipt!, round }
+    const roundReceipt = { ...receiptCore, terminalDigest: revisionTaskReceiptTerminalDigest((({ terminalDigest: _terminal, ...core }) => core)(receiptCore)) }
+    const roundTask = { ...documentTask, round, receipt: roundReceipt }
+    const operations = await deriveFoundationPatchOperations({ workspacePath: prepared.workspacePath, revision: roundTask.revision, taskId: roundTask.taskId, batch: { documentPath: roundTask.documentPath, issueIds: roundTask.issueIds, sectionIds: roundTask.sectionIds }, issues: packet.issues, receipt: roundReceipt })
+    const baseDerived = await loadCommittedFoundationDerivedArtifacts({ workspacePath: prepared.workspacePath, revision: current.foundationRevisionState!.revision })
+    if (!baseDerived) throw new Error('round fixture requires committed derived authority')
+    const sourceIssue = packet.issues[0]!
+    const resultingIssues = options.resultingIssue ? [{ ...sourceIssue, id: `NEXT-${options.round ?? 1}`, severity: 'HIGH' as const }] : []
+    const publication = await publishFoundationRevision({
+      workspacePath: prepared.workspacePath,
+      revision: current.foundationRevisionState!.revision,
+      confirmedBriefDigest: current.confirmedBriefDigest,
+      round,
+      batches: [{ documentPath: roundTask.documentPath, sectionIds: roundTask.sectionIds, issueIds: roundTask.issueIds }],
+      receipts: [roundReceipt],
+      patchOperations: operations,
+      patchValidations: [],
+      semanticRecheckResults: [{ issueId: roundTask.issueIds[0]!, packetDigest: roundTask.packetDigest, status: 'PASS' }],
+      resultingIssues,
+    })
+    const documents = Object.fromEntries(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(prepared.workspacePath, path), 'utf8')] as const)))
+    const resultingDerived = await publishFoundationDerivedArtifacts({
+      workspacePath: prepared.workspacePath,
+      revision: publication.resultingRevision,
+      documentDigests: Object.entries(publication.documentDigests).map(([path, digest]) => ({ path, digest })) as Array<{ path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]; digest: string }>,
+      sectionIndex: buildFoundationSectionIndex({ documents }),
+      factStore: baseDerived.factStore,
+      normalizedFactDigest: digestFactStore(baseDerived.factStore),
+      manifest: {},
+    })
+    const before = options.unchangedBefore
+      ? { documentRevision: publication.resultingRevision, issueRegistryDigest: publication.resultingIssueRegistryDigest }
+      : { documentRevision: current.foundationRevisionState!.revision, issueRegistryDigest: current.foundationRevisionState!.authority.issueAuthority.kind === 'review' ? current.foundationRevisionState!.authority.issueAuthority.issueRegistryDigest : publication.resultingIssueRegistryDigest }
+    const foundationRevisionState: FoundationRevisionState = {
+      authority: {
+        issueAuthority: { kind: 'publication', baseRevision: current.foundationRevisionState!.revision, authorityDigest: publication.authorityDigest, issueRegistryDigest: publication.resultingIssueRegistryDigest },
+        derivedDigests: { sectionIndex: resultingDerived.digests.sectionIndex, factStore: resultingDerived.digests.factStore, manifest: resultingDerived.digests.manifest },
+        documentDigests: Object.entries(publication.documentDigests).map(([path, digest]) => ({ path, digest })) as Array<{ path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]; digest: string }>,
+      },
+      roundBefore: before,
+      revision: publication.resultingRevision,
+      round,
+      phase: 'round_closing',
+      status: 'completed',
+      phaseStartedAt: new Date().toISOString(),
+      roundDeadlineAt: new Date(Date.now() + 600_000).toISOString(),
+      knownIssueIds: [],
+      tasks: [],
+      publication: { preparedPath: publication.preparedPath, journalPath: publication.journalPath, committedPath: publication.committedPath, authorityDigest: publication.authorityDigest, resultingRevision: publication.resultingRevision, resultingIssueRegistryDigest: publication.resultingIssueRegistryDigest },
+    }
+    const seeded = { ...current, status: 'running' as const, documentStep: 'FOUNDATION_REVIEW' as const, revision: { ...current.revision, document: publication.resultingRevision }, foundationRevisionState }
+    await prepared.controller.store.commit(seeded, { runId: seeded.runId, type: 'test.foundation.revision.round_closing', phase: seeded.phase, status: seeded.status, revision: seeded.revision })
+    return { ...prepared, run: seeded, resultingIssues }
+  }
+
   async function driveToRevisionFactPlanning(controller: ReturnType<typeof createDeliveryWorkflowController>, workspacePath: string, replacement = 'revised prose') {
     const { targetFact, rebuilding } = await completeFactOwnerRevision(controller, workspacePath, replacement)
     await controller.resume(rebuilding!)
@@ -454,6 +520,7 @@ describe('foundation fact runtime controller integration', () => {
   async function exerciseSemanticNegativeOutcome(outcome: 'ISSUES' | 'UNDECIDABLE') {
     const { workspacePath, controller, requests } = await preparedController()
     try {
+      const canonicalBefore = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(workspacePath, path), 'utf8')] as const)))
       await completeFactOwnerRevision(controller, workspacePath, ownerFactText('game.boss.count'))
       let current = await controller.store.load()
       for (let attempt = 0; attempt < 4 && current?.foundationRevisionState?.phase !== 'semantic_recheck'; attempt++) {
@@ -489,6 +556,7 @@ describe('foundation fact runtime controller integration', () => {
           expect(resultArtifact.status).toBe('FAIL')
         }
       }
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS) expect(await readFile(join(workspacePath, path), 'utf8')).toBe(canonicalBefore.get(path)!)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   }
 
@@ -1240,6 +1308,118 @@ describe('foundation fact runtime controller integration', () => {
       expect(after!.foundationRevisionState!.phase).toBe('publishing')
       expect(requests.filter(candidate => candidate.taskId === task.taskId)).toHaveLength(workerCount)
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('publishes an all-PASS revision, commits resulting derived authority, and closes the round', async () => {
+    const { workspacePath, controller, requests } = await preparedController()
+    try {
+      const pending = await reachSemanticRecheck(controller, workspacePath)
+      const task = pending.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')!
+      await controller.resume(pending)
+      const claimed = await controller.store.load()
+      const request = requests.find(candidate => candidate.taskId === task.taskId)!
+      const runningTask = claimed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      await controller.dispatcher.completeDispatch(request.dispatchId!, { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: claimed!.runId, dispatchId: request.dispatchId!, taskId: runningTask.taskId, revision: runningTask.revision, packetDigest: runningTask.packetDigest, outcome: 'PASS' })
+      const publishing = await controller.store.load()
+      expect(publishing!.foundationRevisionState!.phase).toBe('publishing')
+      const revisionId = publishing!.foundationRevisionState!.revision
+      await controller.resume(publishing!)
+      const closed = await controller.store.load()
+      expect(closed!.foundationRevisionState!.phase).toBe('round_closing')
+      expect(closed!.foundationRevisionState!.publication).toMatchObject({ resultingRevision: expect.any(String), committedPath: foundationRevisionCommittedPath(revisionId) })
+      const committed = JSON.parse(await readFile(join(workspacePath, foundationRevisionCommittedPath(revisionId)), 'utf8')) as { status: string; resultingRevision: string }
+      expect(committed.status).toBe('committed')
+      expect(committed.resultingRevision).toBe(closed!.foundationRevisionState!.publication!.resultingRevision)
+      await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: committed.resultingRevision })).resolves.toBeDefined()
+      expect(requests.filter(candidate => candidate.taskId === task.taskId)).toHaveLength(1)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('round closing with no resulting issues proceeds to checklist drafting', async () => {
+    const seeded = await seedRoundClosingRevision()
+    try {
+      await seeded.controller.resume(seeded.run)
+      const after = await seeded.controller.store.load()
+      expect(after!.documentStep).toBe('CHECKLIST_DRAFTING')
+    } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('round closing with a changed high issue starts the next planning round with a fresh task set', async () => {
+    const seeded = await seedRoundClosingRevision({ resultingIssue: true, round: 1 })
+    try {
+      await seeded.controller.resume(seeded.run)
+      const after = await seeded.controller.store.load()
+      expect(after!.foundationRevisionState!.phase).toMatch(/planning|revising/)
+      expect(after!.foundationRevisionState!.round).toBe(2)
+      expect(after!.foundationRevisionState!.authority.issueAuthority.kind).toBe('publication')
+      expect(after!.foundationRevisionState!.authority.issueAuthority.issueRegistryDigest).toBe(seeded.run.foundationRevisionState!.publication!.resultingIssueRegistryDigest)
+      expect(after!.foundationRevisionState!.tasks.every(task => task.round === 2)).toBe(true)
+    } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('round closing with unchanged publication authority becomes needs_action', async () => {
+    const seeded = await seedRoundClosingRevision({ resultingIssue: true, round: 2, unchangedBefore: true })
+    try {
+      await seeded.controller.resume(seeded.run)
+      const after = await seeded.controller.store.load()
+      expect(after!.status).toBe('needs_action')
+      expect(after!.foundationRevisionState!.status).toBe('needs_action')
+      expect(after!.blockedReason).toMatch(/no.progress|no progress/i)
+    } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('round three closing with unresolved publication authority becomes needs_action', async () => {
+    const seeded = await seedRoundClosingRevision({ resultingIssue: true, round: 3 })
+    try {
+      await seeded.controller.resume(seeded.run)
+      const after = await seeded.controller.store.load()
+      expect(after!.status).toBe('needs_action')
+      expect(after!.foundationRevisionState!.status).toBe('needs_action')
+      expect(after!.blockedReason).toMatch(/round.limit|round limit/i)
+    } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
+  })
+
+  test('replays publishing after a controller crash without rerunning canonical writers', async () => {
+    const { workspacePath, controller, requests } = await preparedController()
+    const originalCommit = controller.store.commit.bind(controller.store)
+    let crash = true
+    try {
+      const pending = await reachSemanticRecheck(controller, workspacePath)
+      const task = pending.foundationRevisionState!.tasks.find(candidate => candidate.kind === 'semantic-recheck')!
+      await controller.resume(pending)
+      const claimed = await controller.store.load()
+      const request = requests.find(candidate => candidate.taskId === task.taskId)!
+      const runningTask = claimed!.foundationRevisionState!.tasks.find(candidate => candidate.taskId === task.taskId)!
+      await controller.dispatcher.completeDispatch(request.dispatchId!, { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: claimed!.runId, dispatchId: request.dispatchId!, taskId: runningTask.taskId, revision: runningTask.revision, packetDigest: runningTask.packetDigest, outcome: 'PASS' })
+      const publishing = await controller.store.load()
+      controller.store.commit = async (...args) => {
+        const next = args[0] as DeliveryRun
+        if (crash && next.foundationRevisionState?.phase === 'round_closing') {
+          crash = false
+          throw new Error('simulated publishing controller crash')
+        }
+        return originalCommit(...args)
+      }
+      await expect(controller.resume(publishing!)).rejects.toThrow(/crash|publishing/i)
+      controller.store.commit = originalCommit
+      const crashed = await controller.store.load()
+      expect(crashed!.foundationRevisionState!.phase).toBe('publishing')
+      const committed = JSON.parse(await readFile(join(workspacePath, foundationRevisionCommittedPath(publishing!.foundationRevisionState!.revision)), 'utf8')) as { status: string; resultingRevision: string; documentDigests: Record<string, string> }
+      expect(committed.status).toBe('committed')
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS) expect(committed.documentDigests[path]).toBe(createHash('sha256').update(await readFile(join(workspacePath, path))).digest('hex'))
+      const completedDocuments = publishing!.foundationRevisionState!.tasks.filter((task): task is FoundationRevisionDocumentTask => task.kind === 'document-revision' && task.status === 'completed')
+      for (const task of completedDocuments) expect(await readFile(join(workspacePath, task.documentPath), 'utf8')).toBe(await readFile(join(workspacePath, task.stagedPath), 'utf8'))
+      await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: committed.resultingRevision })).resolves.toBeDefined()
+      const freshRequests: WorkerDispatchRequest[] = []
+      const freshStarted = new Set<string>()
+      const freshController = createDeliveryWorkflowController({ workspacePath, ownerId: 'owner', workerPort: port(freshStarted, freshRequests) })
+      await freshController.resume(crashed!)
+      const recovered = await freshController.store.load()
+      expect(recovered!.foundationRevisionState!.phase).toBe('round_closing')
+      expect(freshRequests).toHaveLength(0)
+      expect(recovered!.foundationRevisionState!.publication).toBeDefined()
+      expect(recovered!.foundationRevisionState!.publication!.resultingRevision).toBe(committed.resultingRevision)
+    } finally { controller.store.commit = originalCommit; await rm(workspacePath, { recursive: true, force: true }) }
   })
 
   test('loads every semantic result artifact before publishing and fails closed on a tampered sibling', async () => {

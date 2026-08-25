@@ -203,6 +203,19 @@ describe('foundation revision publication', () => {
     await expect(publishFoundationRevision(publishInput(value, { validations: [], semantic: [semanticResult(stage.receipt.issueIds[0]!)] }))).resolves.toMatchObject({ status: 'committed' })
   })
 
+  test('rejects a stale receipt before PREPARED', async () => {
+    const receipt = await fixture()
+    const receiptStage = receipt.stages[0]!
+    const staleReceipt = { ...receiptStage.receipt, stagedDocumentDigest: sha256('stale-stage') }
+    await expect(publishFoundationRevision({ ...publishInput(receipt), receipts: [staleReceipt] })).rejects.toThrow(/receipt|stale|digest|canonical/i)
+  })
+
+  test('rejects a stale patch operation before PREPARED', async () => {
+    const operation = await fixture()
+    const staleOperation = { ...operation.stages[0]!.operations[0]!, ...(operation.stages[0]!.operations[0]!.kind === 'DELETE' ? { beforeDigest: sha256('stale-operation') } : { afterDigest: sha256('stale-operation') }) }
+    await expect(publishFoundationRevision({ ...publishInput(operation), patchOperations: [staleOperation] })).rejects.toThrow(/operation|authority|digest|canonical/i)
+  })
+
   test('recovers after a crash following one path and is idempotent thereafter', async () => {
     const value = await fixture([documentPath])
     const secondPath = 'docs/TECHNICAL_DESIGN.md' as const
@@ -233,8 +246,11 @@ describe('foundation revision publication', () => {
     }
     let published = 0
     await expect(publishFoundationRevision({ ...input, onPathPublished: () => { published += 1; if (published === 1) throw new Error('simulated crash') } })).rejects.toThrow('simulated crash')
-    await expect(recoverFoundationRevision({ workspacePath: value.workspace, revision })).resolves.toMatchObject({ status: 'committed', resultingRevision: expect.any(String) })
-    await expect(recoverFoundationRevision({ workspacePath: value.workspace, revision })).resolves.toMatchObject({ status: 'committed', resultingRevision: expect.any(String) })
+    const recovered = await recoverFoundationRevision({ workspacePath: value.workspace, revision, onPathPublished: () => { published += 1 } })
+    expect(recovered).toMatchObject({ status: 'committed', resultingRevision: expect.any(String), patchOperations: input.patchOperations })
+    const replayed = await recoverFoundationRevision({ workspacePath: value.workspace, revision })
+    expect(replayed).toMatchObject({ status: 'committed', resultingRevision: recovered.resultingRevision, patchOperations: input.patchOperations })
+    expect(published).toBe(2)
     expect(JSON.parse(await readFile(join(value.workspace, foundationRevisionJournalPath(revision)), 'utf8')).entries.every((entry: { status: string }) => entry.status === 'published')).toBe(true)
   })
 
