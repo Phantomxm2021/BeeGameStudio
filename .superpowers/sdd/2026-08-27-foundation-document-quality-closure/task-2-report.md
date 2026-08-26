@@ -86,6 +86,31 @@ Both exited successfully with no diagnostics.
 - Operation objects remain body-free and contain only digests/identity/issue bindings.
 - Existing test fixtures and all existing BeeGame tests remain green.
 
-## Concerns
+## Round 1 closure
 
-`buildFoundationSectionIndex` continues to accept sections-only intermediate drafts for canonical paths. When a canonical document contains any summary/material marker, it strictly requires the complete ordered derived marker set and validates derived headings. This preserves the existing authoring/fact-review intermediate flow while enabling complete documents to expose derived blocks; if canonical paths must reject every sections-only intermediate draft, the existing draft fixtures and intermediate pipeline contracts would need a separate coordinated migration.
+The round-1 review required canonical paths to reject sections-only documents. Production callers were audited: controller revision flows read committed/normalized complete documents, and artifact/publication paths consume normalized canonical bytes. No real production intermediate caller was found. Sections-only test fixtures were migrated to include the summary, production-materials heading, and every ordered material marker.
+
+The index now unconditionally requires exactly one executive-summary marker and the exact ordered material marker set for canonical paths. It validates derived headings and boundaries through the same parser. The revision-batch ordering now directly reuses the canonical block-order map.
+
+## Final concerns
+
+None. The previous sections-only compatibility concern is closed.
+
+## Round 1 final verification
+
+```text
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-section-index.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.test.ts
+76 pass
+0 fail
+
+bun test packages/agent-workflow-server/src/beegame
+539 pass
+0 fail
+
+bun run typecheck
+$ tsc --noEmit
+
+git diff --check
+```
+
+The final full-suite run was clean; typecheck and whitespace validation also exited successfully.

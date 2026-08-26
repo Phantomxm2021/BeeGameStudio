@@ -75,15 +75,12 @@ export function buildFoundationRevisionBatches(input: {
       const blockOrder = new Map(
         canonicalFoundationBlockIds(documentPath).map((blockId, index) => [blockId, index]),
       )
-      const sectionRank = new Map(
-        [...blockOrder.entries()],
-      )
       return {
         documentPath,
         sectionIds: [...value.sectionIds].sort(
           (left, right) =>
-            (sectionRank.get(left) ?? Number.MAX_SAFE_INTEGER) -
-              (sectionRank.get(right) ?? Number.MAX_SAFE_INTEGER),
+            (blockOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+              (blockOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
         ),
         issueIds: [...value.issueIds].sort(compareStable),
       }

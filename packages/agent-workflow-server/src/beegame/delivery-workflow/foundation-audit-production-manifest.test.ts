@@ -59,11 +59,22 @@ function fixtureDocuments(overrides: Partial<Record<string, string>> = {}): Map<
   }
   return new Map(CANONICAL_FOUNDATION_DOCUMENTS.map(path => {
     const contract = getGameDocumentContract(path)
-    const lines = [`# ${path}`, '']
+    const lines = [
+      `# ${path}`,
+      '',
+      '<!-- beegame-executive-summary -->',
+      '## Executive Summary',
+      '',
+      'summary authority',
+      '',
+    ]
     for (const section of contract.sections) {
       lines.push(`<!-- beegame-section:${section.sectionId} -->`, `## ${section.title}`, '')
       lines.push(...(byOwner.get(`${path}\0${section.sectionId}`) ?? ['authored content']), '')
     }
+    lines.push('<!-- beegame-production-materials -->', '## Production Materials', '')
+    for (const material of contract.productionMaterials)
+      lines.push(`<!-- beegame-material:${material.materialId} -->`, `### ${material.title}`, '', `material ${material.materialId}`, '')
     return [path, `${lines.join('\n')}\n`] as const
   }))
 }

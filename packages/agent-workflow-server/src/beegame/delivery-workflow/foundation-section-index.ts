@@ -91,7 +91,7 @@ export function buildFoundationSectionIndex(input: {
     )
     const contract = getContractIfCanonical(path)
     const seenIds = new Set<string>()
-    if (contract && (summaryMarkers.length > 0 || materialMarkers.length > 0)) {
+    if (contract) {
       const expectedMaterials = contract.productionMaterials.map(
         material => `material.${material.materialId}`,
       )

@@ -167,4 +167,20 @@ describe('foundation section index', () => {
       )
     }
   })
+
+  test('rejects a canonical document with no executive summary or production-material markers', () => {
+    const contract = getGameDocumentContract('docs/GDD.md')
+    const markdown = [
+      '# GDD',
+      '',
+      ...contract.sections.flatMap(section => [
+        `<!-- beegame-section:${section.sectionId} -->`,
+        `## ${section.title}`,
+        '',
+        `authority ${section.sectionId}`,
+        '',
+      ]),
+    ].join('\n')
+    expect(() => buildFoundationSectionIndex({ documents: { 'docs/GDD.md': markdown } })).toThrow(/derived|summary|material/i)
+  })
 })

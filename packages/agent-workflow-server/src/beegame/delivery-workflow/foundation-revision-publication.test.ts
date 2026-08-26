@@ -41,7 +41,9 @@ function sha256(value: string): string {
 
 function canonicalDocument(path: FoundationDocumentPath = documentPath): string {
   const contract = getGameDocumentContract(path)
-  const body = `# ${path}\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`).join('\n')}`
+  const sections = contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`).join('\n')
+  const materials = contract.productionMaterials.map(material => `<!-- beegame-material:${material.materialId} -->\n### ${material.title}\n\nmaterial ${material.materialId}\n`).join('\n')
+  const body = `# ${path}\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nsummary authority\n\n${sections}<!-- beegame-production-materials -->\n## Production Materials\n\n${materials}<!-- beegame-audit-appendix -->\n## Audit Appendix\n\naudit metadata`
   return `---\ndocument_id: GDD\nversion: 1.0.0\nupdated_at: 2026-08-13T01:00:00.000+08:00\n---\n${body}`
 }
 

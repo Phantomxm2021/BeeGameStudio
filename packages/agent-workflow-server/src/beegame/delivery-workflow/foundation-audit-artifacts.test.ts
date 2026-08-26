@@ -26,11 +26,26 @@ function validDocument(
   return `${[
     `# ${path}`,
     '',
+    '<!-- beegame-executive-summary -->',
+    '## Executive Summary',
+    '',
+    'summary authority',
+    '',
     ...contract.sections.flatMap(section => [
       `<!-- beegame-section:${section.sectionId} -->`,
       `## ${section.title}`,
       '',
       'body',
+      '',
+    ]),
+    '<!-- beegame-production-materials -->',
+    '## Production Materials',
+    '',
+    ...contract.productionMaterials.flatMap(material => [
+      `<!-- beegame-material:${material.materialId} -->`,
+      `### ${material.title}`,
+      '',
+      `material ${material.materialId}`,
       '',
     ]),
   ].join('\n')}\n`

@@ -10,7 +10,12 @@ import {
 function documents(overrides: Record<string, string> = {}): Map<string, string> {
   const result = new Map<string, string>(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [
     path,
-    `# ${path}\n\n${getGameDocumentContract(path).sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\n${overrides[path] && ((path === 'docs/GDD.md' && section.sectionId === 'progression') || (path === 'docs/BALANCE_DESIGN.md' && section.sectionId === 'economy')) ? overrides[path] : 'canonical content'}\n`).join('\n')}`,
+    (() => {
+      const contract = getGameDocumentContract(path)
+      const sections = contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\n${overrides[path] && ((path === 'docs/GDD.md' && section.sectionId === 'progression') || (path === 'docs/BALANCE_DESIGN.md' && section.sectionId === 'economy')) ? overrides[path] : 'canonical content'}\n`).join('\n')
+      const materials = contract.productionMaterials.map(material => `<!-- beegame-material:${material.materialId} -->\n### ${material.title}\n\nmaterial ${material.materialId}\n`).join('\n')
+      return `# ${path}\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nsummary authority\n\n${sections}<!-- beegame-production-materials -->\n## Production Materials\n\n${materials}`
+    })(),
   ]))
   const canonicalPaths = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
   for (const [path, body] of Object.entries(overrides))

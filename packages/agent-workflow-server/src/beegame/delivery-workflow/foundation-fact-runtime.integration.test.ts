@@ -30,12 +30,12 @@ const DOCUMENT_METADATA = '---\nversion: 1.0.0\nupdated_at: 2026-08-12T00:00:00.
 
 function document(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
-  return `${DOCUMENT_METADATA}${[`# ${path}`, '', ...contract.sections.flatMap(section => [`<!-- beegame-section:${section.sectionId} -->`, `## ${section.title}`, '', 'unresolved prose', ''])].join('\n')}\n`
+  return `${DOCUMENT_METADATA}${[`# ${path}`, '', '<!-- beegame-executive-summary -->', '## Executive Summary', '', 'summary authority', '', ...contract.sections.flatMap(section => [`<!-- beegame-section:${section.sectionId} -->`, `## ${section.title}`, '', 'unresolved prose', '']), '<!-- beegame-production-materials -->', '## Production Materials', '', ...contract.productionMaterials.flatMap(material => [`<!-- beegame-material:${material.materialId} -->`, `### ${material.title}`, '', `material ${material.materialId}`, ''])].join('\n')}\n`
 }
 
 function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]): string {
   const contract = getGameDocumentContract(path)
-  return `${DOCUMENT_METADATA}${[`# ${path}`, '', ...contract.sections.flatMap(section => [
+  return `${DOCUMENT_METADATA}${[`# ${path}`, '', '<!-- beegame-executive-summary -->', '## Executive Summary', '', 'summary authority', '', ...contract.sections.flatMap(section => [
     `<!-- beegame-section:${section.sectionId} -->`,
     `## ${section.title}`,
     '',
@@ -43,7 +43,7 @@ function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number])
       .filter(fact => fact.owner.documentPath === path && fact.owner.sectionId === section.sectionId)
       .map(fact => `${fact.key}: ${JSON.stringify(consistentFactValue(fact.key))}`),
     '',
-  ])].join('\n')}\n`
+    ]), '<!-- beegame-production-materials -->', '## Production Materials', '', ...contract.productionMaterials.flatMap(material => [`<!-- beegame-material:${material.materialId} -->`, `### ${material.title}`, '', `material ${material.materialId}`, ''])].join('\n')}\n`
 }
 
 function port(started = new Set<string>(), requests: WorkerDispatchRequest[] = []): DeliveryWorkerPort {
