@@ -110,4 +110,81 @@ describe('complete game document contracts', () => {
     }
   })
 
+  test('requires reproducible balance, spatial, and interface evidence', () => {
+    const balance = getGameDocumentContract('docs/BALANCE_DESIGN.md')
+    const balancePurpose = (sectionId: string) =>
+      balance.sections.find(item => item.sectionId === sectionId)?.purpose
+    expect(balancePurpose('units_variables')).toContain('owner inputs')
+    expect(balancePurpose('units_variables')).toContain('units')
+    expect(balancePurpose('formulas')).toContain('formulas')
+    expect(balancePurpose('formulas')).toContain('rounding')
+    expect(balancePurpose('formulas')).toContain('boundaries')
+    for (const sectionId of ['economy', 'progression_curves', 'challenge_model']) {
+      expect(balancePurpose(sectionId)).toContain('recomputable results and totals')
+    }
+    expect(balancePurpose('tuning_validation')).toContain('validation chain')
+
+    const level = getGameDocumentContract('docs/LEVEL_SCENE_DESIGN.md')
+    const levelPurpose = (sectionId: string) =>
+      level.sections.find(item => item.sectionId === sectionId)?.purpose
+    expect(levelPurpose('world_structure')).toContain('coordinate space')
+    expect(levelPurpose('world_structure')).toContain('path')
+    expect(levelPurpose('world_structure')).toContain('trigger')
+    expect(levelPurpose('world_structure')).toContain('off-screen')
+    expect(levelPurpose('objectives_routes')).toContain('path/slot/trigger')
+    expect(levelPurpose('objectives_routes')).toContain('mutual exclusion')
+    expect(levelPurpose('objectives_routes')).toContain('computable layout evidence')
+    expect(levelPurpose('camera_readability')).toContain('coordinate space')
+    expect(levelPurpose('camera_readability')).toContain('off-screen')
+    expect(levelPurpose('production_acceptance')).toContain('computable layout evidence')
+
+    const ui = getGameDocumentContract('docs/UI_UX_SPEC.md')
+    const uiPurpose = (sectionId: string) =>
+      ui.sections.find(item => item.sectionId === sectionId)?.purpose
+    for (const term of ['minimum viewport', 'safe-area', 'breakpoints', 'compression order']) {
+      expect(uiPurpose('experience_architecture')).toContain(term)
+    }
+    expect(uiPurpose('hud')).toContain('minimum region sizes')
+    expect(uiPurpose('input')).toContain('hit/focus evidence')
+    expect(uiPurpose('prototype_acceptance')).toContain('overflow/scroll')
+    expect(uiPurpose('prototype_acceptance')).toContain('evidence')
+  })
+
+  test('requires cross-document visual, audio, and asset authority', () => {
+    const art = getGameDocumentContract('docs/ART_DIRECTION.md')
+    for (const sectionId of ['composition_readability', 'camera_presentation']) {
+      const purpose = art.sections.find(item => item.sectionId === sectionId)?.purpose
+      expect(purpose).toContain('Level and UI geometry')
+      expect(purpose).toContain('not invent layout dimensions')
+    }
+    for (const materialId of [
+      'visual-pillar-board',
+      'palette-board',
+      'silhouette-scale-board',
+    ]) {
+      const purpose = art.productionMaterials.find(item => item.materialId === materialId)?.purpose
+      expect(purpose).toContain('unique visual acceptance evidence')
+    }
+
+    const audio = getGameDocumentContract('docs/AUDIO_DESIGN.md')
+    const audioPurpose = (sectionId: string) =>
+      audio.sections.find(item => item.sectionId === sectionId)?.purpose
+    expect(audioPurpose('music')).toContain('manual pause')
+    expect(audioPurpose('music')).toContain('focus loss')
+    expect(audioPurpose('music')).toContain('state mappings')
+    expect(audioPurpose('mix')).toContain('mute')
+    expect(audioPurpose('mix')).toContain('ducking')
+    expect(audioPurpose('production')).toContain('never mark available upstream as unavailable')
+
+    const asset = getGameDocumentContract('docs/ASSET_PLAN.md')
+    const assetPurpose = (sectionId: string) =>
+      asset.sections.find(item => item.sectionId === sectionId)?.purpose
+    expect(assetPurpose('inventory')).toContain('type, instance and file')
+    expect(assetPurpose('formats_budgets')).toContain('file')
+    expect(assetPurpose('validation')).toContain('recomputed from unique detail')
+    expect(
+      asset.productionMaterials.find(item => item.materialId === 'asset-inventory-table')?.purpose,
+    ).toContain('type, instance and file')
+  })
+
 })
