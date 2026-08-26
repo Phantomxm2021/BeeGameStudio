@@ -5,8 +5,11 @@ import {
   normalizeServiceOwnedDocumentMetadata,
   validateFoundationRevisionDocumentMetadataTransition,
 } from '../authored-document-receipt'
-import { getGameDocumentContract } from './game-document-contracts'
-import { buildFoundationSectionIndex, type SectionRef } from './foundation-section-index'
+import {
+  buildFoundationSectionIndex,
+  canonicalFoundationBlockIds,
+  type SectionRef,
+} from './foundation-section-index'
 import {
   foundationPatchOperationsDigest,
   foundationRevisionStagePath,
@@ -246,7 +249,7 @@ function validateOperation(value: unknown): PatchOperation {
   const expected = value.kind === 'INSERT' ? ['afterDigest', 'documentPath', 'issueIds', 'kind', 'sectionId'] : value.kind === 'DELETE' ? ['beforeDigest', 'documentPath', 'issueIds', 'kind', 'sectionId'] : ['afterDigest', 'beforeDigest', 'documentPath', 'issueIds', 'kind', 'sectionId']
   assertExactKeys(value, expected, 'PatchOperation')
   assertCanonical(value.documentPath, 'PatchOperation document path')
-  if (typeof value.sectionId !== 'string' || !getGameDocumentContract(value.documentPath).sections.some(section => section.sectionId === value.sectionId)) throw new Error('PatchOperation section is not canonical')
+  if (typeof value.sectionId !== 'string' || !canonicalFoundationBlockIds(value.documentPath).includes(value.sectionId)) throw new Error('PatchOperation section is not canonical')
   const issueIds = strings(value.issueIds, 'PatchOperation issueIds')
   if (value.kind !== 'INSERT') assertDigest(value.beforeDigest, 'PatchOperation beforeDigest')
   if (value.kind !== 'DELETE') assertDigest(value.afterDigest, 'PatchOperation afterDigest')
@@ -282,7 +285,7 @@ function validateBatch(value: unknown): RevisionBatch {
   assertCanonical(value.documentPath, 'revision batch document path')
   const sectionIds = strings(value.sectionIds, 'revision batch sectionIds')
   const issueIds = strings(value.issueIds, 'revision batch issueIds')
-  const known = new Set(getGameDocumentContract(value.documentPath).sections.map(section => section.sectionId))
+  const known = new Set(canonicalFoundationBlockIds(value.documentPath))
   if (sectionIds.some(sectionId => !known.has(sectionId))) throw new Error('revision batch section is not canonical')
   return { documentPath: value.documentPath, sectionIds, issueIds }
 }

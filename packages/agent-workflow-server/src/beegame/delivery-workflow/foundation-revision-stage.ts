@@ -3,7 +3,10 @@ import { link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promis
 import { relative, resolve, sep } from 'node:path'
 import { normalizeServiceOwnedDocumentMetadata } from '../authored-document-receipt'
 import { getGameDocumentContract } from './game-document-contracts'
-import { buildFoundationSectionIndex } from './foundation-section-index'
+import {
+  buildFoundationSectionIndex,
+  canonicalFoundationBlockIds,
+} from './foundation-section-index'
 import type { RevisionBatch } from './foundation-revision-batches'
 import type { AuditIssue } from './foundation-issue-registry'
 import { foundationFactPacketDigest, type FoundationFactPacket } from './foundation-fact-extraction'
@@ -822,8 +825,7 @@ function assertBatch(batch: RevisionBatch): void {
   assertCanonicalDocument(batch.documentPath)
   assertUniqueStrings(batch.sectionIds, 'revision batch sectionIds')
   assertUniqueStrings(batch.issueIds, 'revision batch issueIds')
-  const contract = getGameDocumentContract(batch.documentPath)
-  const known = new Set(contract.sections.map(section => section.sectionId))
+  const known = new Set(canonicalFoundationBlockIds(batch.documentPath))
   if (batch.sectionIds.some(sectionId => !known.has(sectionId)))
     throw new Error('revision batch section is not canonical')
 }
@@ -837,11 +839,7 @@ function issueAuthority(
   const batchIds = new Set(batch.issueIds)
   const seen = new Set<string>()
   const grouped = new Map<string, string[]>()
-  const contractSections = new Set(
-    getGameDocumentContract(batch.documentPath).sections.map(
-      section => section.sectionId,
-    ),
-  )
+  const contractSections = new Set(canonicalFoundationBlockIds(batch.documentPath))
   for (const issue of issues) {
     if (
       !issue ||
@@ -967,8 +965,8 @@ export async function deriveFoundationPatchOperations(input: {
     throw new Error('revision changed bytes outside authorized sections')
 
   const contractOrder = new Map(
-    getGameDocumentContract(input.batch.documentPath).sections.map(
-      (section, index) => [section.sectionId, index],
+    canonicalFoundationBlockIds(input.batch.documentPath).map(
+      (sectionId, index) => [sectionId, index],
     ),
   )
   changed.sort(

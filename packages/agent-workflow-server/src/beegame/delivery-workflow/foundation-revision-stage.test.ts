@@ -312,7 +312,9 @@ function canonicalDocument(): string {
 function canonicalDocumentFor(path: FoundationDocumentPath): string {
   const contract = getGameDocumentContract(path)
   const title = path === documentPath ? 'GDD' : path
-  return `# ${title}\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\n${section.sectionId === 'progression' ? '' : `original ${section.sectionId}`}\n`).join('\n')}`
+  const sections = contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\n${section.sectionId === 'progression' ? '' : `original ${section.sectionId}`}\n`).join('\n')
+  const materials = contract.productionMaterials.map(material => `<!-- beegame-material:${material.materialId} -->\n### ${material.title}\n\nmaterial ${material.materialId}\n`).join('\n')
+  return `# ${title}\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nsummary authority\n\n${sections}<!-- beegame-production-materials -->\n## Production Materials\n\n${materials}<!-- beegame-audit-appendix -->\n## Audit Appendix\n\naudit metadata\n`
 }
 
 async function workspaceWithCanonicalDocument() {
@@ -321,6 +323,49 @@ async function workspaceWithCanonicalDocument() {
   await mkdirFor(join(workspace, 'docs'))
   await writeFile(join(workspace, documentPath), canonicalDocument())
   return workspace
+}
+
+async function workspaceWithCompleteCanonicalDocument() {
+  const workspace = await mkdtemp(join(tmpdir(), 'beegame-revision-stage-'))
+  workspaces.push(workspace)
+  await mkdirFor(join(workspace, 'docs'))
+  await writeFile(join(workspace, documentPath), completeCanonicalDocument())
+  return workspace
+}
+
+function completeCanonicalDocument(): string {
+  const contract = getGameDocumentContract(documentPath)
+  const lines = [
+    '# GDD',
+    '',
+    '<!-- beegame-executive-summary -->',
+    '## Executive Summary',
+    '',
+    'summary authority',
+    '',
+    ...contract.sections.flatMap(section => [
+      `<!-- beegame-section:${section.sectionId} -->`,
+      `## ${section.title}`,
+      '',
+      `original ${section.sectionId}`,
+      '',
+    ]),
+    '<!-- beegame-production-materials -->',
+    '## Production Materials',
+    '',
+    ...contract.productionMaterials.flatMap(material => [
+      `<!-- beegame-material:${material.materialId} -->`,
+      `### ${material.title}`,
+      '',
+      `material ${material.materialId}`,
+      '',
+    ]),
+    '<!-- beegame-audit-appendix -->',
+    '## Audit Appendix',
+    '',
+    'audit metadata',
+  ]
+  return lines.join('\n')
 }
 
 async function workspaceWithCanonicalDocuments(paths: readonly FoundationDocumentPath[]) {
@@ -436,6 +481,62 @@ test('derives INSERT, REPLACE and DELETE section operations without content fiel
     'AUD-DELETE',
     'AUD-INSERT',
   ])
+})
+
+test('derives admitted summary and material blocks while rejecting unlisted derived or authoritative changes', async () => {
+  const workspace = await workspaceWithCompleteCanonicalDocument()
+  const stage = await createFoundationRevisionStage({ workspacePath: workspace, revision, documentPath })
+  const original = await readFile(join(workspace, stage.stagedPath), 'utf8')
+  const materials = getGameDocumentContract(documentPath).productionMaterials
+  const materialId = materials[0]!.materialId
+  const unlistedMaterialId = materials[1]!.materialId
+  const changed = original
+    .replace('summary authority', 'changed summary authority')
+    .replace(`material ${materialId}`, `changed material ${materialId}`)
+  await writeFile(join(workspace, stage.stagedPath), changed)
+  const admittedSectionIds = ['executive_summary', `material.${materialId}`]
+  const admittedIssueIds = ['AUD-SUMMARY', 'AUD-MATERIAL']
+  const makeInput = (document: string, receipt: RevisionTaskReceipt) => ({
+    workspacePath: workspace,
+    revision,
+    batch: { documentPath, sectionIds: admittedSectionIds, issueIds: admittedIssueIds },
+    issues: [
+      admittedIssue('AUD-SUMMARY', 'executive_summary'),
+      admittedIssue('AUD-MATERIAL', `material.${materialId}`),
+    ],
+    receipt,
+  })
+  const operations = await deriveFoundationPatchOperations(makeInput(changed, receiptFor({
+    issueIds: admittedIssueIds,
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: stageDigest(changed),
+    stagedPath: stage.stagedPath,
+    changedSectionIds: admittedSectionIds,
+  })))
+  expect(operations.map(operation => operation.sectionId)).toEqual(admittedSectionIds)
+
+  const unlistedDerived = changed.replace(
+    `material ${unlistedMaterialId}`,
+    `changed unlisted material ${unlistedMaterialId}`,
+  )
+  await writeFile(join(workspace, stage.stagedPath), unlistedDerived)
+  await expect(deriveFoundationPatchOperations(makeInput(unlistedDerived, receiptFor({
+    issueIds: admittedIssueIds,
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: stageDigest(unlistedDerived),
+    stagedPath: stage.stagedPath,
+    changedSectionIds: admittedSectionIds,
+  })))).rejects.toThrow(/unauthorized|outside/i)
+
+  const authoritativeDrift = changed.replace('original vision', 'changed authoritative vision')
+  await writeFile(join(workspace, stage.stagedPath), authoritativeDrift)
+  await expect(deriveFoundationPatchOperations(makeInput(authoritativeDrift, receiptFor({
+    issueIds: admittedIssueIds,
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: stageDigest(authoritativeDrift),
+    stagedPath: stage.stagedPath,
+    changedSectionIds: admittedSectionIds,
+  })))).rejects.toThrow(/unauthorized|outside/i)
 })
 
 test('rejects stale base, traversal paths, user-directory staging and unauthorized sections', async () => {

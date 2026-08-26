@@ -1,4 +1,3 @@
-import { getGameDocumentContract } from './game-document-contracts'
 import type {
   AuditIssue,
   IssueRegistryContext,
@@ -7,6 +6,7 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from './types'
+import { canonicalFoundationBlockIds } from './foundation-section-index'
 
 export type RevisionBatch = {
   documentPath: FoundationDocumentPath
@@ -46,14 +46,14 @@ export function buildFoundationRevisionBatches(input: {
     if (!isCanonicalDocument(documentPath) || !sectionIds.length || new Set(sectionIds).size !== sectionIds.length)
       throw new Error(`revision issue patch target is outside canonical authority: ${issue.id}`)
 
-    const contract = getGameDocumentContract(documentPath)
+    const knownBlockIds = new Set(canonicalFoundationBlockIds(documentPath))
     for (const sectionId of sectionIds) {
       const authority = input.registry.section(documentPath, sectionId)
       if (!authority)
         throw new Error(`revision issue patch section is unknown to the validated registry: ${documentPath}#${sectionId}`)
       if (authority.documentPath !== documentPath || authority.sectionId !== sectionId)
         throw new Error(`revision issue patch section disagrees with registry authority: ${issue.id}`)
-      if (!contract.sections.some(section => section.sectionId === sectionId))
+      if (!knownBlockIds.has(sectionId))
         throw new Error(`revision issue patch section is not canonical: ${documentPath}#${sectionId}`)
     }
 
@@ -72,9 +72,11 @@ export function buildFoundationRevisionBatches(input: {
   return [...grouped.entries()]
     .sort(([left], [right]) => documentRank(left) - documentRank(right))
     .map(([documentPath, value]) => {
-      const contract = getGameDocumentContract(documentPath)
+      const blockOrder = new Map(
+        canonicalFoundationBlockIds(documentPath).map((blockId, index) => [blockId, index]),
+      )
       const sectionRank = new Map(
-        contract.sections.map((section, index) => [section.sectionId, index]),
+        [...blockOrder.entries()],
       )
       return {
         documentPath,

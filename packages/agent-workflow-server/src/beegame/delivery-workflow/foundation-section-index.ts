@@ -34,6 +34,18 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
+/** Stable block IDs accepted by the single Foundation revision authority. */
+export function canonicalFoundationBlockIds(
+  path: FoundationDocumentPath,
+): string[] {
+  const contract = getGameDocumentContract(path)
+  return [
+    'executive_summary',
+    ...contract.sections.map(section => section.sectionId),
+    ...contract.productionMaterials.map(material => `material.${material.materialId}`),
+  ]
+}
+
 /** Indexes authored Markdown using the immutable contract when the path is canonical. */
 export function buildFoundationSectionIndex(input: {
   documents: DocumentInput
@@ -56,11 +68,46 @@ export function buildFoundationSectionIndex(input: {
       )
       return match ? [{ index, sectionId: match[1]! }] : []
     })
+    const summaryMarkers = lines.flatMap((line, index) =>
+      line.trim() === '<!-- beegame-executive-summary -->'
+        ? [{ index, sectionId: 'executive_summary' }]
+        : [],
+    )
+    const materialMarkers = lines.flatMap((line, index) => {
+      const match = /^<!--\s*beegame-material:([a-z0-9._-]+)\s*-->$/.exec(
+        line.trim(),
+      )
+      return match
+        ? [{ index, sectionId: `material.${match[1]!}` }]
+        : []
+    })
+    const blockMarkers = [...summaryMarkers, ...markers, ...materialMarkers].sort(
+      (left, right) => left.index - right.index,
+    )
+    const boundaryMarkers = lines.flatMap((line, index) =>
+      /^(?:<!--\s*beegame-(?:executive-summary|section:[a-z0-9._-]+|production-materials|material:[a-z0-9._-]+|audit-appendix)\s*-->)$/.test(line.trim())
+        ? [index]
+        : [],
+    )
     const contract = getContractIfCanonical(path)
     const seenIds = new Set<string>()
-    const sectionHeadings = markers.length
+    if (contract && (summaryMarkers.length > 0 || materialMarkers.length > 0)) {
+      const expectedMaterials = contract.productionMaterials.map(
+        material => `material.${material.materialId}`,
+      )
+      const actualMaterials = materialMarkers.map(marker => marker.sectionId)
+      if (
+        summaryMarkers.length !== 1 ||
+        actualMaterials.length !== expectedMaterials.length ||
+        actualMaterials.some((id, index) => id !== expectedMaterials[index])
+      )
+        throw new Error(
+          `foundation document derived block markers do not satisfy their immutable contract: ${rawPath}`,
+        )
+    }
+    const sectionHeadings = blockMarkers.length
       ? headings.filter(heading =>
-          markers.some(
+          blockMarkers.some(
             marker =>
               marker.index < heading.index && heading.index - marker.index <= 2,
           ),
@@ -106,13 +153,43 @@ export function buildFoundationSectionIndex(input: {
           )
       }
     }
-    for (const heading of sectionHeadings) {
-      const marker = markers.find(
-        candidate =>
-          candidate.index < heading.index &&
-          heading.index - candidate.index <= 2,
-      )
+    const selectedHeadings = blockMarkers.length
+      ? blockMarkers.map(marker => ({
+          marker,
+          heading: headings.find(
+            candidate =>
+              candidate.index > marker.index &&
+              candidate.index - marker.index <= 2,
+          ),
+        }))
+      : sectionHeadings.map(heading => ({ heading, marker: undefined }))
+    for (const { heading, marker } of selectedHeadings) {
+      if (!heading) {
+        throw new Error(
+          `foundation service marker has no heading: ${rawPath}#${marker?.sectionId ?? 'unknown'}`,
+        )
+      }
       const sectionId = marker?.sectionId ?? slugHeading(heading.heading)
+      if (contract && marker) {
+        const material = contract.productionMaterials.find(
+          candidate => `material.${candidate.materialId}` === sectionId,
+        )
+        const expectedHeading = sectionId === 'executive_summary'
+          ? { level: 2, heading: 'Executive Summary' }
+          : material
+              ? {
+                  level: 3,
+                  heading: material.title,
+                }
+              : undefined
+        if (
+          expectedHeading &&
+          (heading.level !== expectedHeading.level || heading.heading !== expectedHeading.heading)
+        )
+          throw new Error(
+            `foundation document derived block marker or heading does not satisfy its immutable contract: ${rawPath}#${sectionId}`,
+          )
+      }
       if (!sectionId || seenIds.has(sectionId))
         throw new Error(
           `duplicate foundation section id: ${rawPath}#${sectionId}`,
@@ -128,7 +205,10 @@ export function buildFoundationSectionIndex(input: {
       const nextMarker = markers.find(
         candidate => candidate.index > heading.index,
       )
-      const boundary = [nextHeading?.index, nextMarker?.index]
+      const nextBoundaryMarker = boundaryMarkers.find(
+        candidate => candidate > heading.index,
+      )
+      const boundary = [nextHeading?.index, nextBoundaryMarker, nextMarker?.index]
         .filter((value): value is number => value !== undefined)
         .sort((left, right) => left - right)[0]
       const endExclusive = boundary ?? lines.length
@@ -144,7 +224,7 @@ export function buildFoundationSectionIndex(input: {
     }
     // A marker without its required heading is a malformed committed document,
     // not an inferred section.
-    for (const marker of markers)
+    for (const marker of blockMarkers)
       if (
         !headings.some(
           heading =>
