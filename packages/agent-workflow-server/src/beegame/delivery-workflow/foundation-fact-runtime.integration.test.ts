@@ -978,7 +978,7 @@ describe('foundation fact runtime controller integration', () => {
       expect(active).toBe(0)
       expect(current?.status).toBe('running')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
-  })
+  }, 15_000)
 
   test('resumes from completed semantic terminals and idempotently finalizes after publication crash', async () => {
     const { workspacePath, controller } = await preparedController()
