@@ -47,3 +47,25 @@ git diff --check                            # passed with no output
 ## Concerns
 
 None identified for Task 1. The new output-policy literals are intentionally part of the shared contract surface and should be consumed by later derived-block work.
+
+## Fix round 1
+
+- Removed the redundant `makes the summary and production materials derived authority views` test; the preceding exact output-policy assertion already covers the same fields.
+- Added symmetric prompt coverage proving that a `parallel-draft` request with neither `availableUpstreamPaths` nor `upstreamDocumentPaths` retains the explicit unavailable-upstream assumption instruction.
+- No production code or authority behavior changed in this review fix.
+
+Fix-round verification:
+
+```text
+/Users/nswell/.bun/bin/bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts
+21 pass
+0 fail
+418 expect() calls
+
+/Users/nswell/.bun/bin/bun run typecheck   # tsc --noEmit; passed
+git diff --check                            # passed with no output
+```
+
+The focused baseline before the test cleanup was 21 pass / 0 fail / 425 expect calls. This was test-only coverage maintenance, so no new production RED phase was applicable; the new symmetric assertion validates the already-implemented absent-path branch.
+
+Fix-round concerns: none.

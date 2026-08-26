@@ -189,6 +189,31 @@ describe('worker prompts', () => {
     )
   })
 
+  test('records unavailable upstream decisions only when no upstream path is present', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision',
+      allowedPaths: ['docs/BALANCE_DESIGN.md'],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'parallel-draft',
+        foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
+        completeDocumentContract: getGameDocumentContract(
+          'docs/BALANCE_DESIGN.md',
+        ),
+      },
+    })
+
+    expect(prompt).toContain(
+      'Record genuinely unavailable upstream decisions as explicit assumptions',
+    )
+  })
+
   test('derives checklist cardinality from observable scenarios without fixed business caps', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',

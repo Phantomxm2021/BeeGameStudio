@@ -110,14 +110,4 @@ describe('complete game document contracts', () => {
     }
   })
 
-  test('makes the summary and production materials derived authority views', () => {
-    for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
-      expect(contract.outputPolicy).toMatchObject({
-        executiveSummaryStyle: 'authority_index',
-        productionMaterialStyle: 'derived_compact_views',
-        derivedViewAuthority: 'owner_references_only',
-        mutableFactPolicy: 'single_owner_no_copied_totals',
-      })
-    }
-  })
 })
