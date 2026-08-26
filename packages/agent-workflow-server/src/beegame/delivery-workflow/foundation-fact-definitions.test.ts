@@ -4,6 +4,7 @@ import {
   FOUNDATION_FACT_CATALOG_VERSION,
   foundationFactDefinition,
 } from './foundation-fact-definitions'
+import { GAME_DOCUMENT_CONTRACTS } from './game-document-contracts'
 
 describe('normalized foundation fact catalog', () => {
   test('is a versioned closed catalog of exactly the 25 service-owned keys', () => {
@@ -86,5 +87,23 @@ describe('normalized foundation fact catalog', () => {
       expect(instruction).toContain('parenthetical')
       expect(instruction).toContain('health pool')
     }
+  })
+
+  test('uses one canonical player-facing action namespace across GDD and Technical', () => {
+    const mechanicsInstruction = foundationFactDefinition('game.mechanics')?.extractionInstruction
+    const technicalActionsInstruction = foundationFactDefinition('technical.supported_actions')?.extractionInstruction
+    const gddPurpose = GAME_DOCUMENT_CONTRACTS['docs/GDD.md'].sections.find(section => section.sectionId === 'player_actions')?.purpose
+    const technicalPurpose = GAME_DOCUMENT_CONTRACTS['docs/TECHNICAL_DESIGN.md'].sections.find(section => section.sectionId === 'input_interaction')?.purpose
+
+    expect(mechanicsInstruction).toContain('GDD player_actions')
+    expect(mechanicsInstruction).toContain('canonical player-facing action/mechanic labels')
+    expect(technicalActionsInstruction).toContain('same GDD-owned player-action labels')
+    expect(technicalActionsInstruction).toContain('runtime ACTION codes')
+    expect(technicalActionsInstruction).toContain('mapping table')
+    expect(technicalActionsInstruction).toContain('never extract the ACTION codes')
+    expect(gddPurpose).toContain('canonical player-facing action/mechanic labels')
+    expect(technicalPurpose).toContain('same canonical player-action labels')
+    expect(technicalPurpose).toContain('runtime ACTION code')
+    expect(technicalPurpose).toContain('independent mapping column')
   })
 })

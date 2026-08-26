@@ -6,8 +6,6 @@ import {
   recordFoundationCommit,
   recordFoundationDispatch,
   recordFoundationFailure,
-  recordFoundationHandlerFailure,
-  retryFoundationFailures,
 } from './foundation-authoring-batch'
 import type { FoundationDocumentPath, FoundationDraftState } from './types'
 
@@ -112,99 +110,10 @@ describe('parallel foundation authoring batch', () => {
       'provider stopped',
     )
     expect(failed.documents?.[1]).toMatchObject({
-      status: 'needs_action',
+      status: 'pending',
       failureReason: 'provider stopped',
     })
     expect(failed.documents?.[2]?.status).toBe('pending')
   })
 
-  test('returns failed documents to the native scheduling queue on explicit retry', () => {
-    let state = beginParallelFoundationAuthoring(['docs/GDD.md'])
-    state = dispatchAndCommit(state, 'docs/LEVEL_SCENE_DESIGN.md')
-    state = recordFoundationFailure(
-      recordFoundationDispatch(state, 'docs/BALANCE_DESIGN.md', 'drafting', {
-        dispatchId: 'dispatch-balance',
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
-        taskId: 'docs/BALANCE_DESIGN.md',
-        revision: 'revision-1',
-        status: 'running',
-        startedAt: new Date().toISOString(),
-      }),
-      'docs/BALANCE_DESIGN.md',
-      'stream receipt missing',
-    )
-
-    const retried = retryFoundationFailures(state)
-
-    expect(
-      retried.documents?.find(
-        document => document.path === 'docs/BALANCE_DESIGN.md',
-      ),
-    ).toEqual({
-      path: 'docs/BALANCE_DESIGN.md',
-      status: 'pending',
-    })
-    expect(readyDraftPaths(retried)).toContain('docs/BALANCE_DESIGN.md')
-  })
-
-  test('preserves a completed native terminal when only local commit handling fails', () => {
-    const state = beginParallelFoundationAuthoring(['docs/GDD.md'])
-    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
-    const running = {
-      dispatchId: 'dispatch-level-handler-failure',
-      workerType: 'document-author' as const,
-      phase: 'DOCUMENT_DRAFTING' as const,
-      taskId: path,
-      revision: 'revision-1',
-      status: 'running' as const,
-      startedAt: '2026-08-15T00:00:00.000Z',
-      request: {
-        dispatchId: 'dispatch-level-handler-failure',
-        runId: 'run-1',
-        ownerId: 'owner-1',
-        projectId: 'project-1',
-        workspacePath: '/workspace',
-        workerType: 'document-author' as const,
-        phase: 'DOCUMENT_DRAFTING' as const,
-        taskId: path,
-        revision: 'revision-1',
-        allowedPaths: [path],
-        contract: {
-          authoringMode: 'parallel-draft' as const,
-          foundationDocumentPath: path,
-        },
-      },
-    }
-    const drafting = recordFoundationDispatch(state, path, 'drafting', running)
-    const completed = {
-      ...running,
-      status: 'completed' as const,
-      finishedAt: '2026-08-15T00:01:00.000Z',
-      terminalResult: {
-        workerType: 'document-author' as const,
-        status: 'completed' as const,
-        writtenPaths: [path],
-        resolvedFindingIds: [],
-      },
-    }
-
-    const failed = recordFoundationHandlerFailure(
-      drafting,
-      path,
-      'accepted unit journal failed',
-      completed,
-    )
-
-    expect(failed.documents?.[1]).toMatchObject({
-      status: 'drafting',
-      failureReason: 'accepted unit journal failed',
-      dispatch: {
-        dispatchId: completed.dispatchId,
-        status: 'completed',
-        terminalResult: completed.terminalResult,
-      },
-    })
-    expect(retryFoundationFailures(failed)).toEqual(failed)
-  })
 })

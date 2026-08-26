@@ -28,6 +28,10 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     request.contract.documentSet === 'foundation' &&
     (request.contract.authoringMode === 'initial' ||
       request.contract.authoringMode === 'parallel-draft')
+  const priorFailureReason = streamedFoundationAuthor &&
+    typeof request.contract.priorFailureReason === 'string'
+    ? request.contract.priorFailureReason
+    : undefined
   const resourceContentReadPaths =
     request.workerType === 'resource-content-author'
       ? [
@@ -88,6 +92,9 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     'The durable confirmed brief context and its digest are the product authority for this run.',
     'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
     workerInstruction(request),
+    priorFailureReason
+      ? `Automatic retry after the previous document-author failure: ${priorFailureReason}. Correct that failure in the assigned canonical Markdown document before ending the turn.`
+      : undefined,
     initialFoundationAuthor
       ? undefined
       : 'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
@@ -215,6 +222,15 @@ function formatContract(request: WorkerDispatchRequest): string {
                 })
               : productionMaterials,
           },
+          closedHeadingSet: [
+            '## Executive Summary',
+            ...(Array.isArray(sections)
+              ? sections.map(value => `## ${(value as Record<string, unknown>).title}`)
+              : []),
+            '## Production Materials',
+          ],
+          additionalH2: 'forbidden',
+          supportingContent: 'must be nested under one of the closed H2 headings',
         },
       }
     }

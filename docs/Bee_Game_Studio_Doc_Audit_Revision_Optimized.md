@@ -108,7 +108,9 @@ Local mechanical extraction runs first. Final publication merges mechanically ex
 
 避免反复读取两份完整文档，改为定义具体 Contract：
 
-> GDD.core_actions ↔ Technical.supported_actions  
+规范：跨文档事实比较必须共享同一语义身份命名空间；映射/别名不能代替修改被提取的权威值。
+
+> GDD.player_actions ↔ Technical.supported_actions
 > GDD.boss.count ↔ AssetPlan.boss.count  
 > GDD.resources ↔ UI.displayed_resources  
 > Level.required_assets ← AssetPlan.covered_level_requirements
@@ -410,6 +412,8 @@ Reviewer 发现业务 Issue 后，controller 必须立即将其纳入唯一 Issu
 - 唯一持久化字段是 `foundationAuditState`：audit 与 revision 通过该状态内互斥的 substage/status 和同一 `tasks[]` 表达。禁止保留 `foundationRevisionState`、别名、双读/双写、旧 schema reader、迁移器或 fallback；携带旧顶层字段的 durable run 必须由 strict schema fail closed，而不是被静默接纳。
 
 - Review copy 初始化直接进入唯一可运行的 `FOUNDATION_REVIEW` 状态并由同一 controller 启动；不得先持久化虚假 `needs_action`/`implementation unavailable` 再由另一入口覆盖。
+
+- Stage 2 初始 Foundation document-author 的机械/结构校验失败、非法 terminal，以及短暂的 provider/receipt/callback/会话中断均属于失败 attempt；必须保留诊断并自动重派同一文档，不设固定 attempt 上限，不得进入人工 `needs_action`。只有不可恢复的 authority/integrity 冲突或当前进程无法恢复的外部前置缺失（模型配置、凭据或 credits）可进入 `needs_action`。Strict complete-document validation 不得放宽；失败的 staged/pending bytes 不得提交 canonical。该路径继续复用唯一 durable task collection，不引入第二状态机或兼容轨。
 
 - Dashboard 只投影普通任务状态、轮次、Issue 数量/严重程度摘要、按任务聚合的 compact task telemetry（usage/duration）与 safe projected failure reason；它不是审计或修订 authority，也不展示 raw Registry JSON、`problem`/`actual`/`evidence`、worker prose/thinking 或 worker feedback。Foundation review 期间的 worker message 只保留在运行日志与 durable evidence 中，不进入阶段卡片。
 - 阶段显示必须将 Foundation 审计与修订分开：审计固定为显示 stage 3，修订固定为显示 stage 4。stage 4 是仅用于显示的虚拟 identity，底层仍只有 `DOCUMENT_REVIEW` 与唯一持久化 `foundationAuditState`；冻结的审计卡必须保留 stage 3，进入修订时生成 stage 4 live card，checklist drafting 不得回退到 stage 3。

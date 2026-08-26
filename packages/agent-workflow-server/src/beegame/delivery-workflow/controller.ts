@@ -19,7 +19,7 @@ import {
   startDocumentStage,
 } from './document-stage'
 import { canStartFoundationAudit } from './foundation-audit-boundary'
-import { activeFoundationRevisionBundle, activeFoundationRevisionTasks, createFoundationAuditState, foundationRuntimeTasks } from './foundation-audit-state'
+import { activeFoundationRevisionBundle, activeFoundationRevisionTasks, createFoundationAuditState, foundationRuntimeTasks, isFoundationRevisionPhase } from './foundation-audit-state'
 import { deriveFoundationAuditArtifacts } from './foundation-audit-artifacts'
 import {
   completeResourceTask,
@@ -924,21 +924,21 @@ export function createDeliveryWorkflowController(input: {
           ? 'checklist'
           : 'foundation'
       next = await completeDocumentDraft({
-            run: {
-              ...next,
-              activeDispatch: record,
-              phase:
-                documentSet === 'checklist'
-                  ? 'DOCUMENT_REVIEW'
-                  : 'DOCUMENT_DRAFTING',
-            },
-            workspacePath: input.workspacePath,
-            terminal: result,
-            documentSet,
+        run: {
+          ...next,
+          activeDispatch: record,
+          phase:
+            documentSet === 'checklist'
+              ? 'DOCUMENT_REVIEW'
+              : 'DOCUMENT_DRAFTING',
+        },
+        workspacePath: input.workspacePath,
+        terminal: result,
+        documentSet,
       })
       if (documentSet === 'foundation' && canStartFoundationAudit(next))
         next = await deriveFoundationAudit(next, input.workspacePath)
-      if (next.blockedReason && next.status === 'running') {
+      if (documentSet !== 'foundation' && next.blockedReason && next.status === 'running') {
         next = {
           ...next,
           status: 'needs_action',
@@ -1918,7 +1918,14 @@ export function createDeliveryWorkflowController(input: {
             .catch(() => false)
           if (!isOpen) unavailable.push(document)
         }
-        if (!unavailable.length) return
+        if (!unavailable.length) {
+          await startDocumentStage({
+            run,
+            workspacePath: input.workspacePath,
+            dispatcher,
+          })
+          return
+        }
         let foundationDraftState = run.foundationDraftState
         for (const document of unavailable)
           foundationDraftState = recordFoundationFailure(
@@ -1926,17 +1933,12 @@ export function createDeliveryWorkflowController(input: {
             document.path,
             'preserved native document session is unavailable',
           )
-        const stillRunning = foundationDraftState.documents?.some(
-          document => document.dispatch?.status === 'running',
-        )
         const recovered = await persist(
           {
             ...run,
             foundationDraftState,
-            status: stillRunning ? 'running' : 'needs_action',
-            blockedReason: stillRunning
-              ? undefined
-              : 'one or more preserved native document sessions are unavailable',
+            status: 'running',
+            blockedReason: undefined,
           },
           'document.parallel.session_unavailable',
         )
@@ -2024,7 +2026,7 @@ export function createDeliveryWorkflowController(input: {
         return
       }
     }
-    if (run.foundationAuditState && ['revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing'].includes(run.foundationAuditState.status)) {
+    if (run.foundationAuditState && isFoundationRevisionPhase(run.foundationAuditState.status) && run.foundationAuditState.status !== 'planning') {
       const replayableRevisionDispatches = foundationRuntimeTasks(run.foundationAuditState)
         .filter(task => (task.status !== 'completed' || (task.kind === 'impacted-facts' && !task.receiptPath)) && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId))
         .map(task => task.dispatch!)
@@ -2034,7 +2036,7 @@ export function createDeliveryWorkflowController(input: {
         return
       }
     }
-    if (run.foundationAuditState && ['planning', 'revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing'].includes(run.foundationAuditState.status)) {
+    if (run.foundationAuditState && isFoundationRevisionPhase(run.foundationAuditState.status)) {
       const revisionState = run.foundationAuditState
       if (revisionState.status === 'planning') {
         try {

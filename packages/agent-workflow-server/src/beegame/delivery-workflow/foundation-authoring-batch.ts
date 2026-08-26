@@ -103,6 +103,8 @@ export function recordFoundationFailure(
   state: FoundationDraftState,
   path: FoundationDocumentPath,
   reason: string,
+  status: Extract<FoundationAuthoringStatus, 'pending' | 'needs_action'> =
+    'pending',
 ): FoundationDraftState {
   if (!reason.trim()) throw new Error('foundation failure reason is required')
   const current = checkpoint(state, path)
@@ -110,33 +112,8 @@ export function recordFoundationFailure(
     throw new Error(`foundation document has no active dispatch: ${path}`)
   return replace(state, path, value => ({
     ...value,
-    status: 'needs_action',
+    status,
     dispatch: undefined,
-    failureReason: reason,
-  }))
-}
-
-export function recordFoundationHandlerFailure(
-  state: FoundationDraftState,
-  path: FoundationDocumentPath,
-  reason: string,
-  dispatch: DispatchRecord,
-): FoundationDraftState {
-  if (!reason.trim()) throw new Error('foundation failure reason is required')
-  const current = checkpoint(state, path)
-  if (current.status !== 'drafting')
-    throw new Error(`foundation document has no active dispatch: ${path}`)
-  if (
-    dispatch.taskId !== path ||
-    dispatch.workerType !== 'document-author' ||
-    dispatch.status !== 'completed' ||
-    !dispatch.terminalResult
-  )
-    throw new Error(`foundation handler failure is not replayable: ${path}`)
-  return replace(state, path, value => ({
-    ...value,
-    status: 'drafting',
-    dispatch: { ...dispatch },
     failureReason: reason,
   }))
 }
@@ -156,22 +133,6 @@ export function recordFoundationCommit(
     dispatch: undefined,
     failureReason: undefined,
   }))
-}
-
-export function retryFoundationFailures(
-  state: FoundationDraftState,
-): FoundationDraftState {
-  if (!state.documents) return state
-  const documents = state.documents.map(document =>
-    document.status === 'needs_action'
-      ? {
-          path: document.path,
-          status: 'pending' as const,
-        }
-      : { ...document },
-  )
-  const next = { ...state, documents }
-  return { ...next, completedPaths: foundationCommittedPrefix(next) }
 }
 
 export function foundationCommittedPrefix(

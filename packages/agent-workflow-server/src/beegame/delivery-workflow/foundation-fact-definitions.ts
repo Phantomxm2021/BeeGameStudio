@@ -158,9 +158,13 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     list(
       'game.mechanics',
       GDDActions,
-      'Read the canonical player mechanic identifiers as a list.',
+      'Read the GDD player_actions canonical player-facing action/mechanic labels as a list; these labels are the shared fact identity for downstream documents.',
       ['technical-action-coverage', 'level-encounter-coverage'],
-      { resolution: 'model_if_unresolved' },
+      {
+        resolution: 'model_if_unresolved',
+        sourceOfTruthDirection:
+          'GDD player_actions owns the canonical player-facing action/mechanic labels consumed by downstream documents.',
+      },
     ),
     list(
       'game.resources',
@@ -239,8 +243,12 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     list(
       'technical.supported_actions',
       owner('docs/TECHNICAL_DESIGN.md', 'input_interaction'),
-      'Read stable input action identifiers supported by the runtime boundary.',
+      'Read the same GDD-owned player-action labels from Technical input_interaction. If Technical includes runtime ACTION codes or a mapping table, extract only the player-facing label column; never extract the ACTION codes as fact values.',
       ['technical-action-coverage'],
+      {
+        sourceOfTruthDirection:
+          'GDD player_actions owns canonical player-facing action/mechanic labels; Technical input_interaction projects the same labels and may keep runtime ACTION codes only in an independent mapping column.',
+      },
     ),
     integer(
       'technical.target_fps',

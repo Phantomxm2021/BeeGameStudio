@@ -39,6 +39,51 @@ describe('worker prompts', () => {
     )
   })
 
+  test('declares a closed H2 heading protocol for initial and parallel foundation authors', () => {
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      const prompt = buildWorkerPrompt({
+        runId: 'run',
+        ownerId: 'owner',
+        projectId: 'project',
+        workspacePath: '/workspace',
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision',
+        allowedPaths: ['docs/UI_UX_SPEC.md'],
+        contract: {
+          documentSet: 'foundation',
+          authoringMode,
+          foundationDocumentPath: 'docs/UI_UX_SPEC.md',
+          completeDocumentContract: getGameDocumentContract(
+            'docs/UI_UX_SPEC.md',
+          ),
+        },
+      })
+      const contract = JSON.parse(prompt.split('\n').at(-1)!) as {
+        completeDocumentContract: {
+          mechanicalMarkdownProtocol: {
+            closedHeadingSet: string[]
+            additionalH2: string
+            supportingContent: string
+          }
+        }
+      }
+      const expectedH2s = [
+        '## Executive Summary',
+        ...getGameDocumentContract('docs/UI_UX_SPEC.md').sections.map(
+          section => `## ${section.title}`,
+        ),
+        '## Production Materials',
+      ]
+
+      expect(contract.completeDocumentContract.mechanicalMarkdownProtocol).toMatchObject({
+        closedHeadingSet: expectedH2s,
+        additionalH2: 'forbidden',
+        supportingContent: 'must be nested under one of the closed H2 headings',
+      })
+    }
+  })
+
   test('does not ask foundation models to echo service-owned terminal identity', () => {
     for (const workerType of ['foundation-fact-extractor', 'foundation-semantic-reviewer'] as const) {
       const prompt = buildWorkerPrompt({

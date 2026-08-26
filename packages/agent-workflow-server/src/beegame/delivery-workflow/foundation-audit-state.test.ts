@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import {
   activeFoundationRevisionBundle,
   activeFoundationRevisionTasks,
+  FOUNDATION_AUDIT_NON_REVISION_STATUSES,
+  FOUNDATION_REVISION_PHASES,
   foundationAuditStateSchema,
   foundationRuntimeTasks,
   parseFoundationAuditState,
@@ -24,6 +26,32 @@ describe('foundationAuditState schema', () => {
     manifestPath: '.beegame/audit/foundation/revision-1/staging/manifest.json',
     tasks: [] as FoundationFactTask[],
   } as const
+
+  test('keeps audit-only statuses separate from the shared revision phase authority', () => {
+    expect(FOUNDATION_AUDIT_NON_REVISION_STATUSES).toEqual([
+      'index_staged',
+      'extracting_facts',
+      'facts_staged',
+      'derived_committed',
+      'deterministic_ready',
+      'semantic_review',
+      'audit_ready',
+      'revision_ready',
+    ])
+    expect(FOUNDATION_REVISION_PHASES).toContain('planning')
+    expect(FOUNDATION_REVISION_PHASES).not.toContain('revision_ready')
+
+    const statusSchema = (foundationAuditStateSchema as unknown as {
+      shape: { status: { safeParse(value: unknown): { success: boolean } } }
+    }).shape.status
+    for (const status of [
+      ...FOUNDATION_AUDIT_NON_REVISION_STATUSES,
+      ...FOUNDATION_REVISION_PHASES,
+    ]) {
+      expect(statusSchema.safeParse(status).success).toBe(true)
+    }
+    expect(statusSchema.safeParse('not-a-foundation-status').success).toBe(false)
+  })
 
   test('accepts only the index staged scaffold and binds its revision and digest', () => {
     expect(parseFoundationAuditState(valid)).toEqual(valid)

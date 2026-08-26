@@ -54,7 +54,6 @@ import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
 import {
   commitAuthoredFoundationDocument,
-  readAuthoredDocumentReceipt,
 } from '../beegame/authored-document-receipt'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
@@ -1893,142 +1892,6 @@ describe('delivery workflow recovery', () => {
     })
   })
 
-  test('replays local document validation after a completed author handoff without redispatching that document', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-local-retry-'))
-    await mkdir(join(workspace, 'docs'), { recursive: true })
-    const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
-    const initial = {
-      ...createTestDeliveryRun({
-        runId: 'run-local-document-retry',
-        projectId: 'project-local-document-retry',
-        ownerId: 'owner-1',
-        foundationDraftComplete: false,
-      }),
-      phase: 'DOCUMENT_DRAFTING' as const,
-      documentStep: 'FOUNDATION_DRAFTING' as const,
-    }
-    const request: WorkerDispatchRequest = {
-      dispatchId: 'completed-gdd-author',
-      runId: initial.runId,
-      ownerId: initial.ownerId,
-      projectId: initial.projectId,
-      workspacePath: workspace,
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      taskId: path,
-      revision: initial.revision.document,
-      allowedPaths: [path],
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'initial',
-        foundationDocumentPath: path,
-      },
-    }
-    const terminal = {
-      workerType: 'document-author' as const,
-      status: 'completed' as const,
-      writtenPaths: [path],
-      resolvedFindingIds: [],
-    }
-    const completedDispatch = {
-      dispatchId: request.dispatchId!,
-      workerType: 'document-author' as const,
-      phase: 'DOCUMENT_DRAFTING' as const,
-      taskId: path,
-      revision: initial.revision.document,
-      status: 'completed' as const,
-      request,
-      terminalResult: terminal,
-      startedAt: '2026-08-12T00:00:00.000Z',
-      finishedAt: '2026-08-12T00:01:00.000Z',
-    }
-    await writeFile(
-      join(workspace, path),
-      matrixCompleteDocument(path).replace(
-        '## Executive Summary',
-        '## Invalid Executive Summary',
-      ),
-    )
-
-    const rejected = await completeDocumentDraft({
-      run: { ...initial, activeDispatch: completedDispatch },
-      workspacePath: workspace,
-      terminal,
-      documentSet: 'foundation',
-      audit: () => ({ valid: true, issues: [] }),
-    })
-
-    expect(rejected.blockedReason).toContain(
-      'complete game document executive summary heading is invalid',
-    )
-    expect(rejected.activeDispatch).toMatchObject({
-      dispatchId: request.dispatchId,
-      status: 'completed',
-      terminalResult: terminal,
-    })
-
-    const started: WorkerDispatchRequest[] = []
-    const controller = createDeliveryWorkflowController({
-      workspacePath: workspace,
-      ownerId: initial.ownerId,
-      workerPort: {
-        async start(nextRequest) {
-          started.push(nextRequest)
-          return {
-            sessionId: `session-${nextRequest.taskId}`,
-            dispatchId: nextRequest.dispatchId!,
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-    await controller.store.save({
-      ...rejected,
-      status: 'needs_action',
-    })
-    const stillInvalid = await retryRun({
-      store: controller.store,
-      runId: initial.runId,
-      workspacePath: workspace,
-    })
-    await controller.resume(stillInvalid)
-
-    expect(started).toHaveLength(0)
-    expect(await controller.store.load()).toMatchObject({
-      status: 'needs_action',
-      activeDispatch: {
-        dispatchId: request.dispatchId,
-        status: 'completed',
-        terminalResult: terminal,
-      },
-    })
-
-    await writeFile(join(workspace, path), matrixCompleteDocument(path))
-    const retried = await retryRun({
-      store: controller.store,
-      runId: initial.runId,
-      workspacePath: workspace,
-    })
-    await controller.resume(retried)
-
-    const resumed = await controller.store.load()
-    expect(resumed?.foundationDraftState.completedPaths).toEqual([path])
-    expect(started.map(candidate => candidate.taskId)).toEqual([
-      'docs/LEVEL_SCENE_DESIGN.md',
-    ])
-    await expect(
-      readAuthoredDocumentReceipt(workspace, request.dispatchId!),
-    ).resolves.toMatchObject({
-      dispatchId: request.dispatchId,
-      targetPath: path,
-      status: 'committed',
-    })
-  })
-
   test('reconciles an invalid snapshots active canonical document receipt before projection', async () => {
     const fixture = await createCanonicalReceiptRecoveryFixture()
     workspace = fixture.workspacePath
@@ -3620,7 +3483,7 @@ describe('delivery workflow recovery', () => {
         document => document.path === 'docs/LEVEL_SCENE_DESIGN.md',
       ),
     ).toMatchObject({
-      status: 'needs_action',
+      status: 'pending',
       failureReason: expect.any(String),
     })
     expect(
@@ -3630,7 +3493,351 @@ describe('delivery workflow recovery', () => {
     ).toBe(running.dispatchId)
   })
 
-  test('pauses an orphaned parallel author instead of silently restarting it', async () => {
+  test('returns a failed parallel document to pending and keeps the run running', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-dispatch-failure-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-foundation-dispatch-failure',
+      projectId: 'project-foundation-dispatch-failure',
+      ownerId: 'owner-1',
+      foundationDraftComplete: false,
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
+    })
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit() {
+          throw new Error('canonical heading missing')
+        },
+        async stop() {},
+        async close() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+
+    await expect(
+      dispatcher.dispatch({
+        runId: initial.runId,
+        ownerId: initial.ownerId,
+        projectId: initial.projectId,
+        workspacePath: workspace,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: path,
+        revision: initial.revision.document,
+        allowedPaths: [path],
+        contract: {
+          authoringMode: 'parallel-draft',
+          documentSet: 'foundation',
+          foundationDocumentPath: path,
+        },
+      }),
+    ).rejects.toThrow('canonical heading missing')
+
+    expect(await store.load()).toMatchObject({
+      status: 'running',
+      foundationDraftState: {
+        documents: expect.arrayContaining([
+          expect.objectContaining({
+            path,
+            status: 'pending',
+            failureReason: 'canonical heading missing',
+          }),
+        ]),
+      },
+    })
+  })
+
+  test('automatically retries a parallel document with its prior failure diagnostic', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-prior-failure-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-foundation-prior-failure',
+      projectId: 'project-foundation-prior-failure',
+      ownerId: 'owner-1',
+      foundationDraftComplete: false,
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
+    })
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const started: WorkerDispatchRequest[] = []
+    const prompts: string[] = []
+    let attempt = 0
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: initial.ownerId,
+      workerPort: {
+        async start(request) {
+          started.push(request)
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit(_dispatchId, prompt) {
+          prompts.push(prompt)
+          attempt += 1
+          if (attempt === 1) throw new Error('provider disconnected')
+        },
+        async stop() {},
+        async close() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    const run = (await store.load())!
+    await controller.store.save(run)
+
+    await expect(controller.resume(run)).rejects.toThrow('provider disconnected')
+    for (let index = 0; index < 400 && prompts.length < 2; index += 1)
+      await new Promise(resolve => setTimeout(resolve, 5))
+
+    expect(started).toHaveLength(2)
+    expect(started[1]?.contract.priorFailureReason).toBe('provider disconnected')
+    expect(prompts[1]).toContain('provider disconnected')
+    const retried = await controller.store.load()
+    const retriedDocument = retried?.foundationDraftState.documents?.find(
+      document => document.path === path,
+    )
+    expect(retried).toMatchObject({
+      status: 'running',
+      foundationDraftState: {
+        documents: expect.arrayContaining([
+          expect.objectContaining({
+            path,
+            status: 'drafting',
+          }),
+        ]),
+      },
+    })
+    expect(retriedDocument?.path).toBe(path)
+    expect(retriedDocument?.failureReason).toBeUndefined()
+  })
+
+  test('refills a parallel foundation slot while sibling authors remain open', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-parallel-refill-'))
+    const initial = createTestDeliveryRun({
+      runId: 'run-foundation-parallel-refill',
+      projectId: 'project-foundation-parallel-refill',
+      ownerId: 'owner-1',
+      confirmedBriefDigest: 'brief-1',
+      foundationDraftComplete: false,
+    })
+    const seeded = beginParallelFoundationAuthoring(['docs/GDD.md'])
+    const foundationDraftState = {
+      completedPaths: [
+        'docs/GDD.md',
+        'docs/LEVEL_SCENE_DESIGN.md',
+      ] as FoundationDocumentPath[],
+      documents: seeded.documents!.map(document => ({
+        ...document,
+        status:
+          document.path === 'docs/GDD.md' ||
+          document.path === 'docs/LEVEL_SCENE_DESIGN.md'
+            ? ('committed' as const)
+            : ('pending' as const),
+      })),
+    }
+    const run = {
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      foundationDraftState,
+    }
+    await createRunStore(workspace, 'owner-1').save(run)
+
+    const started: WorkerDispatchRequest[] = []
+    let firstBalanceDispatchId: string | undefined
+    let rejectFirstBalanceTerminal: ((error: Error) => void) | undefined
+    const firstBalanceTerminal = new Promise<never>((_, reject) => {
+      rejectFirstBalanceTerminal = reject
+    })
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: initial.ownerId,
+      workerPort: {
+        async start(request) {
+          started.push(request)
+          if (request.taskId === 'docs/BALANCE_DESIGN.md' && !firstBalanceDispatchId)
+            firstBalanceDispatchId = request.dispatchId
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit() {},
+        async stop() {},
+        async close() {},
+        async status() {
+          return {
+            dispatchId: 'open-sibling',
+            workerType: 'document-author',
+            phase: 'DOCUMENT_DRAFTING',
+            revision: initial.revision.document,
+            status: 'running',
+            startedAt: new Date().toISOString(),
+          }
+        },
+        async waitForTerminal(dispatchId) {
+          if (dispatchId === firstBalanceDispatchId) return firstBalanceTerminal
+          return new Promise(() => {})
+        },
+      },
+    })
+
+    const resuming = controller.resume(run)
+    for (let index = 0; index < 400 && started.length < 3; index += 1)
+      await new Promise(resolve => setTimeout(resolve, 5))
+    expect(started.map(request => request.taskId)).toEqual([
+      'docs/BALANCE_DESIGN.md',
+      'docs/ART_DIRECTION.md',
+      'docs/UI_UX_SPEC.md',
+    ])
+    rejectFirstBalanceTerminal!(new Error('balance heading missing'))
+    await resuming
+    for (let index = 0; index < 400 && started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md').length < 2; index += 1)
+      await new Promise(resolve => setTimeout(resolve, 5))
+
+    expect(started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md')).toHaveLength(2)
+    expect(started.filter(request => request.taskId === 'docs/ART_DIRECTION.md')).toHaveLength(1)
+    expect(started.filter(request => request.taskId === 'docs/UI_UX_SPEC.md')).toHaveLength(1)
+    expect(
+      started.find(request => request.taskId === 'docs/BALANCE_DESIGN.md' && request.contract.priorFailureReason)?.contract.priorFailureReason,
+    ).toBe('balance heading missing')
+    const saved = await controller.store.load()
+    expect(saved?.status).toBe('running')
+    expect(saved?.blockedReason).toBeUndefined()
+  })
+
+  test('automatically restarts a failed initial document author with its diagnostic', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-initial-foundation-retry-'))
+    const initial = createTestDeliveryRun({
+      runId: 'run-initial-foundation-retry',
+      projectId: 'project-initial-foundation-retry',
+      ownerId: 'owner-1',
+      foundationDraftComplete: false,
+    })
+    const run = {
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      foundationDraftState: { completedPaths: [] },
+    }
+    const started: WorkerDispatchRequest[] = []
+    const prompts: string[] = []
+    let submits = 0
+    const controller = createDeliveryWorkflowController({
+      workspacePath: workspace,
+      ownerId: initial.ownerId,
+      workerPort: {
+        async start(request) {
+          started.push(request)
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit(_dispatchId, prompt) {
+          prompts.push(prompt)
+          submits += 1
+          if (submits === 1) throw new Error('initial provider disconnected')
+        },
+        async stop() {},
+        async close() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await controller.store.save(run)
+
+    await expect(controller.resume(run)).rejects.toThrow('initial provider disconnected')
+    for (let index = 0; index < 400 && prompts.length < 2; index += 1)
+      await new Promise(resolve => setTimeout(resolve, 5))
+
+    expect(started).toHaveLength(2)
+    expect(started[1]?.contract.authoringMode).toBe('initial')
+    expect(started[1]?.contract.priorFailureReason).toBe(
+      'initial provider disconnected',
+    )
+    expect(prompts[1]).toContain('initial provider disconnected')
+    expect(await controller.store.load()).toMatchObject({
+      status: 'running',
+      activeDispatch: { status: 'running' },
+    })
+  })
+
+  test('keeps a parallel document WorkerNeedsActionError at the human boundary', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-needs-action-'))
+    const store = createRunStore(workspace, 'owner-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-foundation-needs-action',
+      projectId: 'project-foundation-needs-action',
+      ownerId: 'owner-1',
+      foundationDraftComplete: false,
+    })
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      documentStep: 'FOUNDATION_DRAFTING',
+      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
+    })
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const dispatcher = createDeliveryDispatcher({
+      store,
+      workerPort: {
+        async start(request) {
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit() {},
+        async waitForTerminal() {
+          const error = new Error('external prerequisite unavailable')
+          error.name = 'WorkerNeedsActionError'
+          throw error
+        },
+        async stop() {},
+        async close() {},
+        async status() {
+          throw new Error('not used')
+        },
+      },
+    })
+    await dispatcher.dispatch({
+      runId: initial.runId,
+      ownerId: initial.ownerId,
+      projectId: initial.projectId,
+      workspacePath: workspace,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: path,
+      revision: initial.revision.document,
+      allowedPaths: [path],
+      contract: {
+        authoringMode: 'parallel-draft',
+        documentSet: 'foundation',
+        foundationDocumentPath: path,
+      },
+    })
+    await dispatcher.waitForTerminalReconciliation()
+
+    expect(await store.load()).toMatchObject({
+      status: 'needs_action',
+      foundationDraftState: {
+        documents: expect.arrayContaining([
+          expect.objectContaining({ path, status: 'needs_action' }),
+        ]),
+      },
+    })
+  })
+
+  test('restarts an orphaned parallel author as a pending running document', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-orphan-'))
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-orphan',
@@ -3678,12 +3885,14 @@ describe('delivery workflow recovery', () => {
       documentStep: 'FOUNDATION_DRAFTING',
       foundationDraftState,
     }
+    const started: WorkerDispatchRequest[] = []
     const controller = createDeliveryWorkflowController({
       workspacePath: workspace,
       ownerId: initial.ownerId,
       workerPort: {
-        async start() {
-          throw new Error('must not silently start a replacement author')
+        async start(nextRequest) {
+          started.push(nextRequest)
+          return { sessionId: nextRequest.dispatchId!, dispatchId: nextRequest.dispatchId! }
         },
         async submit() {},
         async stop() {},
@@ -3697,17 +3906,21 @@ describe('delivery workflow recovery', () => {
     await controller.resume(run)
 
     expect(await controller.store.load()).toMatchObject({
-      status: 'needs_action',
+      status: 'running',
       foundationDraftState: {
         documents: expect.arrayContaining([
           expect.objectContaining({
             path,
-            status: 'needs_action',
-            failureReason: 'preserved native document session is unavailable',
+            status: 'drafting',
           }),
         ]),
       },
     })
+    expect(started).toHaveLength(1)
+    expect(started[0]?.taskId).toBe(path)
+    expect(started[0]?.contract.priorFailureReason).toBe(
+      'preserved native document session is unavailable',
+    )
   })
 
   test('claims the first dispatch durably across independent dispatcher instances', async () => {

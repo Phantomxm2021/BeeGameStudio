@@ -12,6 +12,7 @@ import { getGameDocumentContract } from './game-document-contracts'
 import {
   beginParallelFoundationAuthoring,
   recordFoundationCommit,
+  recordFoundationFailure,
   readyDraftPaths,
 } from './foundation-authoring-batch'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
@@ -479,6 +480,19 @@ async function completeInitialFoundationDocumentDraft(input: {
     input.run.confirmedBriefDigest,
   )
   const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
+  const initialFoundationFailure =
+    input.run.activeDispatch?.request?.contract.authoringMode === 'initial' &&
+    input.run.activeDispatch?.request?.contract.documentSet === 'foundation'
+  const failedActiveDispatch =
+    issues.length && initialFoundationFailure && input.run.activeDispatch
+      ? {
+          ...input.run.activeDispatch,
+          status: 'failed' as const,
+          terminalResult: undefined,
+          failureReason: issues.join('; '),
+          finishedAt: new Date().toISOString(),
+        }
+      : input.run.activeDispatch
   const base: DeliveryRun = {
     ...input.run,
     revision: {
@@ -486,13 +500,14 @@ async function completeInitialFoundationDocumentDraft(input: {
       document: documentRevision,
       workspace: workspaceRevision,
     },
-    // Keep the completed author handoff when only Studio-side validation or
-    // receipt creation failed. A retry can then replay the exact terminal
-    // result and re-run the local commit boundary without starting another
-    // model turn. Successful validation clears it through the same branch.
-    activeDispatch: issues.length ? input.run.activeDispatch : undefined,
+    // Retain a failed initial-author dispatch as the durable retry diagnostic;
+    // claiming the next dispatch replaces and clears this evidence.
+    activeDispatch: issues.length ? failedActiveDispatch : undefined,
     currentItemId: expectedPath,
-    blockedReason: issues.length ? issues.join('; ') : undefined,
+    blockedReason:
+      issues.length && !initialFoundationFailure
+        ? issues.join('; ')
+        : undefined,
     updatedAt: new Date().toISOString(),
   }
   if (issues.length) return base
@@ -584,8 +599,13 @@ async function completeParallelFoundationDraft(input: {
     return {
       ...input.run,
       activeDispatch: undefined,
-      status: 'needs_action',
-      blockedReason: issues.join('; '),
+      foundationDraftState: recordFoundationFailure(
+        input.run.foundationDraftState,
+        canonicalPath,
+        issues.join('; '),
+      ),
+      status: 'running',
+      blockedReason: undefined,
     }
   const foundationDraftState = recordFoundationCommit(
     input.run.foundationDraftState,

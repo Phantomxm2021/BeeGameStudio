@@ -1,4 +1,5 @@
 import { DELIVERY_PHASES } from './schema'
+import { isFoundationRevisionPhase } from './foundation-audit-state'
 
 /**
  * Display-only stages. `FOUNDATION_REVISION` is deliberately not a durable
@@ -25,16 +26,6 @@ export type DeliveryProgressStage = (typeof DELIVERY_PROGRESS_STAGES)[number]
 
 export const FOUNDATION_REVISION_STAGE = 'FOUNDATION_REVISION' as const
 
-const FOUNDATION_REVISION_PHASES = [
-  'planning',
-  'revising',
-  'rebuilding_facts',
-  'validating',
-  'semantic_recheck',
-  'publishing',
-  'round_closing',
-] as const
-
 /**
  * Revision remains inside DOCUMENT_REVIEW's top-level delivery phase, but it
  * shares the audit state's durable collection. A completed revision is
@@ -45,11 +36,7 @@ export function isActiveFoundationRepairState(
 ): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const state = value as { status?: unknown }
-  return (
-    FOUNDATION_REVISION_PHASES.includes(
-      state.status as (typeof FOUNDATION_REVISION_PHASES)[number],
-    ) && state.status !== 'completed'
-  )
+  return isFoundationRevisionPhase(state.status)
 }
 
 export type DeliveryProgress = {

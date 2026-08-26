@@ -28,7 +28,10 @@ import type {
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
 import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
-import { foundationRuntimeTasks } from './foundation-audit-state'
+import {
+  foundationRuntimeTasks,
+  isFoundationRevisionPhase,
+} from './foundation-audit-state'
 import type { FoundationAuditTask, FoundationRevisionTask } from './foundation-audit-state'
 
 export type { WorkflowEvent } from './types'
@@ -80,22 +83,6 @@ function foundationNeedsAction(run: DeliveryRun): boolean {
     run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(
       task => task.status === 'needs_action',
     ),
-  )
-}
-
-const FOUNDATION_REVISION_STATUSES = [
-  'planning',
-  'revising',
-  'rebuilding_facts',
-  'validating',
-  'semantic_recheck',
-  'publishing',
-  'round_closing',
-] as const
-
-function isFoundationRevisionStatus(status: string): boolean {
-  return FOUNDATION_REVISION_STATUSES.includes(
-    status as (typeof FOUNDATION_REVISION_STATUSES)[number],
   )
 }
 
@@ -1256,7 +1243,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
             }),
           }
           const nextStatus = foundationNeedsAction({ ...run, foundationAuditState: nextState }) ? 'needs_action' as const : 'running' as const
-          const eventType = isFoundationRevisionStatus(run.foundationAuditState.status)
+          const eventType = isFoundationRevisionPhase(run.foundationAuditState.status)
             ? 'foundation.revision.recovered'
             : 'foundation.fact.recovered'
           return commitUnlocked({ ...run, foundationAuditState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? run.blockedReason ?? 'foundation workflow requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: eventType, phase: run.phase, status: nextStatus, revision: run.revision })

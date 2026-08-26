@@ -1,5 +1,4 @@
 import { parseDeliveryRun } from './schema'
-import { retryFoundationFailures } from './foundation-authoring-batch'
 import type {
   AtomicTask,
   DeliveryRun,
@@ -655,14 +654,6 @@ export function transitionDeliveryRun(
           ...(revisionRevived ? { foundationAuditState: nextRevisionState } : {}),
           ...(revisionBoundaryNeedsFactReplan
             ? { foundationAuditState: { ...revisionState!, status: 'rebuilding_facts' as const } }
-            : {}),
-          ...(run.phase === 'DOCUMENT_DRAFTING' &&
-          run.foundationDraftState.documents
-            ? {
-                foundationDraftState: retryFoundationFailures(
-                  run.foundationDraftState,
-                ),
-              }
             : {}),
           ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
             ? {

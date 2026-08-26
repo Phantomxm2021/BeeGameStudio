@@ -1542,6 +1542,67 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
+  test('does not expose document-author assistant text as workflow progress', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-document-assistant-progress-'))
+    const workspacePath = join(root, 'workspace')
+    const store = createRunStore(workspacePath, 'user-1')
+    const initial = createTestDeliveryRun({
+      runId: 'run-document-assistant-progress',
+      projectId: 'project-document-assistant-progress',
+      ownerId: 'user-1',
+      foundationDraftComplete: false,
+    })
+    const dispatchId = 'dispatch-document-assistant-progress'
+    await store.save({
+      ...initial,
+      phase: 'DOCUMENT_DRAFTING',
+      status: 'running',
+      documentStep: 'FOUNDATION_DRAFTING',
+      activeDispatch: {
+        dispatchId,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: 'docs/GDD.md',
+        revision: initial.revision.document,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+      },
+    })
+    const markdown = '# Private document body\n\nThis must not become card progress.'
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async ({ onMessage }) => {
+          onMessage({
+            type: 'assistant',
+            message: { content: [{ type: 'text', text: markdown }] },
+          } as DashboardSDKMessage)
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: initial.runId,
+      workflowDispatchId: dispatchId,
+      workflowWorkerType: 'document-author',
+    })
+
+    await manager.send(session.id, 'author the assigned document')
+    await waitForIdle(manager, session.id)
+    let active = await store.load()
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (active?.currentMessage !== undefined) break
+      await new Promise(resolve => setTimeout(resolve, 5))
+      active = await store.load()
+    }
+
+    expect(active?.currentMessage).toBeUndefined()
+    manager.dispose()
+  })
+
   test('keeps a document worker visibly active while native tool input is prepared', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-document-input-progress-'))
     const workspacePath = join(root, 'workspace')

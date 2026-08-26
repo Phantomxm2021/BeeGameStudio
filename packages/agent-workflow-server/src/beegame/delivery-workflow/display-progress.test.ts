@@ -1,10 +1,46 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  FOUNDATION_REVISION_PHASES,
+  isFoundationRevisionPhase,
+} from './foundation-audit-state'
+import {
   DELIVERY_PROGRESS_STAGES,
   projectDeliveryProgress,
 } from './display-progress'
 
 describe('delivery progress projection', () => {
+  test('uses the shared revision phase authority for every active repair phase', () => {
+    expect(FOUNDATION_REVISION_PHASES).toEqual([
+      'planning',
+      'revising',
+      'rebuilding_facts',
+      'validating',
+      'semantic_recheck',
+      'publishing',
+      'round_closing',
+    ])
+
+    for (const status of FOUNDATION_REVISION_PHASES) {
+      expect(isFoundationRevisionPhase(status)).toBe(true)
+      expect(
+        projectDeliveryProgress({
+          phase: 'DOCUMENT_REVIEW',
+          documentStep: 'FOUNDATION_REVIEW',
+          foundationAuditState: { status },
+        }),
+      ).toMatchObject({ stageId: 'FOUNDATION_REVISION', substage: 'REPAIRING' })
+    }
+
+    expect(isFoundationRevisionPhase('revision_ready')).toBe(false)
+    expect(
+      projectDeliveryProgress({
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        foundationAuditState: { status: 'revision_ready' },
+      }),
+    ).toMatchObject({ stageId: 'DOCUMENT_REVIEW', substage: 'INITIAL_REVIEW' })
+  })
+
   test('projects the document audit boundary directly from the workflow phase', () => {
     expect(
       projectDeliveryProgress({

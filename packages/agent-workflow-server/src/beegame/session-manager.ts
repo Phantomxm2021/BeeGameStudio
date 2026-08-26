@@ -2123,10 +2123,7 @@ export class BeeGameSessionManager {
       )
         ? (resourceActivityMessage ?? '')
         : record.workflowWorkerType === 'document-author'
-          ? (documentActivityMessage ??
-            (event.type === 'assistant.message'
-              ? sanitizeWorkflowDisplayMessage(event.text)
-              : ''))
+          ? (documentActivityMessage ?? '')
           : event.type === 'assistant.message'
             ? sanitizeWorkflowDisplayMessage(event.text)
             : ''
