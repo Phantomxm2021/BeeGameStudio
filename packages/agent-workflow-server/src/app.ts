@@ -197,7 +197,7 @@ import type {
   ResourceProductionTask,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
-import { summarizeFoundationIssues, type FoundationAuditState } from './beegame/delivery-workflow/foundation-audit-state'
+import { foundationRuntimeTasks, summarizeFoundationIssues, type FoundationAuditState } from './beegame/delivery-workflow/foundation-audit-state'
 import { loadCommittedFoundationDerivedArtifacts, loadFoundationSemanticReview } from './beegame/delivery-workflow/foundation-audit-artifacts'
 import { loadCommittedFoundationRevisionAuthority } from './beegame/delivery-workflow/foundation-revision-publication'
 import {
@@ -5516,12 +5516,37 @@ async function readBeeGameWorkflowSnapshot(
         lastProvenWorkflowSummary(await store.readEvents()),
       )
     let currentRun = inspection.currentRun
+    // Capture this before reconciling a stale top-level dispatch: that
+    // reconciliation also repairs nested foundation tasks, so checking only
+    // the post-reconcile snapshot would lose the reconnect signal.
+    let resumeOnReconnect = await foundationResumeOnReconnectRequired(
+      currentRun,
+      sessionIsOpen,
+    )
     const activeDispatch = currentRun.activeDispatch
     if (
       activeDispatch?.status === 'running' &&
       !(await sessionIsOpen(activeDispatch))
     ) {
       const reconciled = await store.reconcile(async () => false)
+      if (reconciled) currentRun = reconciled
+    }
+    // Foundation revision/recheck workers are stored inside the single
+    // foundation task collection, not in the top-level activeDispatch. After
+    // a server restart that task can still say `running` while its transport
+    // is gone. Ask the session manager whether any of those dispatches are
+    // actually live; the projection, rather than the task list, is the
+    // reconnect authority consumed by the dashboard.
+    if (!resumeOnReconnect) {
+      resumeOnReconnect = await foundationResumeOnReconnectRequired(
+        currentRun,
+        sessionIsOpen,
+      )
+    }
+    if (resumeOnReconnect && !activeDispatch) {
+      const reconciled = await store.reconcile(dispatch =>
+        Promise.resolve(sessionIsOpen(dispatch)),
+      )
       if (reconciled) currentRun = reconciled
     }
     const events = await store.readEvents()
@@ -5537,11 +5562,39 @@ async function readBeeGameWorkflowSnapshot(
     return {
       ...(run as unknown as JsonObject),
       ...timing,
+      ...(resumeOnReconnect ? { resumeOnReconnect: true } : {}),
       stageSnapshots,
     }
   } catch (error) {
     return createWorkflowStateErrorView(error)
   }
+}
+
+async function foundationResumeOnReconnectRequired(
+  run: DeliveryRun,
+  sessionIsOpen: (dispatch: DispatchRecord) => Promise<boolean> | boolean,
+): Promise<boolean> {
+  if (
+    run.status !== 'running' ||
+    run.phase !== 'DOCUMENT_REVIEW' ||
+    run.documentStep !== 'FOUNDATION_REVIEW' ||
+    !run.foundationAuditState
+  )
+    return false
+  const runningTasks = foundationRuntimeTasks(run.foundationAuditState).filter(
+    task => task.status === 'running',
+  )
+  if (!runningTasks.length) return false
+  const liveWorker = (
+    await Promise.all(
+      runningTasks.map(task =>
+        task.dispatch?.status === 'running' && task.dispatch
+          ? Promise.resolve(sessionIsOpen(task.dispatch))
+          : false,
+      ),
+    )
+  ).some(Boolean)
+  return !liveWorker
 }
 
 function workflowElapsedTiming(
@@ -6276,6 +6329,9 @@ function workflowViewForDisplay(
       : {}),
     ...(typeof workflow.activeSince === 'string'
       ? { activeSince: workflow.activeSince }
+      : {}),
+    ...(workflow.resumeOnReconnect === true
+      ? { resumeOnReconnect: true }
       : {}),
     ...(usage ? { usage } : {}),
     // Only a persisted worker response is allowed to override the localized

@@ -367,9 +367,10 @@ describe('DashboardView runtime loading', () => {
         status: 'running',
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
+        resumeOnReconnect: true,
         tasks: [
-          { id: 'revision:brief.md', title: 'brief.md', status: 'completed' },
-          { id: 'revision:design.md', title: 'design.md', status: 'completed' },
+          { id: 'revision:brief.md', title: 'brief.md', status: 'running' },
+          { id: 'revision:design.md', title: 'design.md', status: 'pending' },
         ],
       },
     };
@@ -415,10 +416,32 @@ describe('DashboardView runtime loading', () => {
         ...mockedProjectStatus.workflow as Record<string, unknown>,
         status: 'running',
         worker: 'foundation-revision-worker',
+        resumeOnReconnect: true,
       },
     };
     view.rerender(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
     await act(async () => Promise.resolve());
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not infer reconnect recovery from foundation task statuses', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    mockedProjectStatus = {
+      ...mockedProjectStatus,
+      phase: 'DOCUMENT_REVIEW',
+      blocked: false,
+      workflow: {
+        runId: 'run_without_service_signal',
+        status: 'running',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        tasks: [{ id: 'semantic-recheck', title: 'semantic-recheck', status: 'running' }],
+      },
+    };
+
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+    await waitFor(() => expect(loadProjectStatus).toHaveBeenCalledWith('proj_1'));
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

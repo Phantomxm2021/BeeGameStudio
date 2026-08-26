@@ -75,8 +75,12 @@ const shouldResumeFoundationRevisionOnReconnect = (
   ) {
     return false;
   }
-  const tasks = workflow.tasks;
-  return Boolean(tasks?.length && tasks.every(task => task.status === 'completed'));
+  // The server owns the reconnect decision. A running foundation task can be
+  // left in the durable snapshot after its transport disappears; the task
+  // list alone cannot distinguish that state from a live worker or a task
+  // that is still being reconciled. Only resume when the service projection
+  // explicitly marks this run for reconnect recovery.
+  return workflow.resumeOnReconnect === true;
 };
 
 const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string): Promise<T> => {

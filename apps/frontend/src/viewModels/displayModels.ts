@@ -433,6 +433,7 @@ const normalizeWorkflowDisplay = (
       nextActionValue === 'resume' || nextActionValue === 'retry'
         ? nextActionValue
         : undefined,
+    resumeOnReconnect: source.resumeOnReconnect === true,
     recoverable,
     lastProvenPhase:
       recoverable &&

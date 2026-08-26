@@ -144,6 +144,8 @@ export interface WorkflowCardPayload {
   activeSince?: string
   stageSnapshots?: WorkflowCardStageSnapshot[]
   nextAction?: WorkflowCardAction
+  /** Server-owned reconnect signal for a stale foundation worker snapshot. */
+  resumeOnReconnect?: boolean
   /** True only when the server can recover from the durable workflow state. */
   recoverable?: boolean
   /** Last phase proven by the durable accepted-unit journal. */
