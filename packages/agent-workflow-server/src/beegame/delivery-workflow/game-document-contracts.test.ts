@@ -100,9 +100,23 @@ describe('complete game document contracts', () => {
     for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
       expect(contract.outputPolicy).toEqual({
         sectionStyle: 'final_owned_decisions',
-        productionMaterialStyle: 'canonical_compact_views',
+        executiveSummaryStyle: 'authority_index',
+        productionMaterialStyle: 'derived_compact_views',
+        derivedViewAuthority: 'owner_references_only',
+        mutableFactPolicy: 'single_owner_no_copied_totals',
         workedExamples: 'one_per_distinct_boundary',
         acceptanceScenarios: 'materially_distinct_only',
+      })
+    }
+  })
+
+  test('makes the summary and production materials derived authority views', () => {
+    for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
+      expect(contract.outputPolicy).toMatchObject({
+        executiveSummaryStyle: 'authority_index',
+        productionMaterialStyle: 'derived_compact_views',
+        derivedViewAuthority: 'owner_references_only',
+        mutableFactPolicy: 'single_owner_no_copied_totals',
       })
     }
   })

@@ -10,7 +10,7 @@ const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. Complete every required section and production material; omit only equivalent repetition, never required content. Keep rationale to the minimum needed for a production decision.'
 
 const FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION =
-  'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Define each authoritative fact once and prefer production-dense tables or matrices when they add implementation authority. Do not restate the confirmed brief, upstream authority or another section; reference stable authority. Downstream documents may specialize only already-authorized behavior and must not redefine upstream rules.'
+  'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Define each authoritative fact once and prefer production-dense tables or matrices when they add implementation authority. Do not restate the confirmed brief, upstream authority or another section; reference stable authority. Downstream documents may specialize only already-authorized behavior and must not redefine upstream rules. Executive Summary is an authority index, not an independent fact owner. Production Materials are derived compact views with owner references. Do not copy mutable facts or independently maintained totals into derived views.'
 
 const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
   'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority; each Issue sourceSectionKey, expected, and actual must match its single-document authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
@@ -309,7 +309,18 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           : request.contract.authoringMode === 'parallel-draft'
             ? [
                 `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation.`,
-                'Use only the available committed upstream authority named by the contract. Record genuinely unavailable upstream decisions as explicit assumptions in the existing dependency and risk sections; do not invent a second document track.',
+                ...((Array.isArray(request.contract.availableUpstreamPaths)
+                  ? request.contract.availableUpstreamPaths
+                  : Array.isArray(request.contract.upstreamDocumentPaths)
+                    ? request.contract.upstreamDocumentPaths
+                    : []
+                ).length > 0
+                  ? [
+                      'Use only the available committed upstream authority named by the contract. When an upstream path is present, use its committed authority; do not describe it as unavailable. Do not invent a second document track.',
+                    ]
+                  : [
+                      'Use only the available committed upstream authority named by the contract. Record genuinely unavailable upstream decisions as explicit assumptions in the existing dependency and risk sections; do not invent a second document track.',
+                    ]),
                 FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
                 DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
                 'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',

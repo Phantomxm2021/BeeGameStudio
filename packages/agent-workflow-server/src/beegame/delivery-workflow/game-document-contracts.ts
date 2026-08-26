@@ -52,7 +52,10 @@ export type GameDocumentUpstreamProjection = {
 
 export type GameDocumentOutputPolicy = Readonly<{
   sectionStyle: 'final_owned_decisions'
-  productionMaterialStyle: 'canonical_compact_views'
+  executiveSummaryStyle: 'authority_index'
+  productionMaterialStyle: 'derived_compact_views'
+  derivedViewAuthority: 'owner_references_only'
+  mutableFactPolicy: 'single_owner_no_copied_totals'
   workedExamples: 'one_per_distinct_boundary'
   acceptanceScenarios: 'materially_distinct_only'
 }>
@@ -71,7 +74,10 @@ export type GameDocumentContract = {
 export const GAME_DOCUMENT_OUTPUT_POLICY: GameDocumentOutputPolicy =
   Object.freeze({
     sectionStyle: 'final_owned_decisions',
-    productionMaterialStyle: 'canonical_compact_views',
+    executiveSummaryStyle: 'authority_index',
+    productionMaterialStyle: 'derived_compact_views',
+    derivedViewAuthority: 'owner_references_only',
+    mutableFactPolicy: 'single_owner_no_copied_totals',
     workedExamples: 'one_per_distinct_boundary',
     acceptanceScenarios: 'materially_distinct_only',
   })

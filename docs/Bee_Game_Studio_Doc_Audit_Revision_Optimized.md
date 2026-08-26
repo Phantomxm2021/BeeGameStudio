@@ -52,6 +52,12 @@
 > `.beegame/audit/foundation/<revision>/derived/section-index.json`
 > `.beegame/audit/foundation/<revision>/derived/COMMITTED.json`
 
+## 3.0 人类文档 authority 与派生视图
+
+每份 canonical 文档的 `Executive Summary` 只是 authority index：它只能索引本文件拥有的最终决定与稳定 Section/Material 引用，不能创建第二份事实或独立的可变总数。`Production Materials` 是由所属 Section 决定派生的 compact views；每个视图必须引用其 owner Section/事实，不得复制可变事实、维护独立总计或以视图内容覆盖 owner。每个可变事实只能有一个 canonical owner。
+
+authoring contract 只把实际存在且已提交的 upstream path 当作可用 authority；path 存在时必须直接使用，不能保留“upstream unavailable”分支。只有 contract 明确没有可用 path 时，才能在既有 dependency/risk Section 中记录未决上游决定；不得因此创建第二条文档轨道。
+
 ## 3.1 Fact Store
 
 Fact Store 不是普通摘要，而是可比较、可校验的标准化事实集合。

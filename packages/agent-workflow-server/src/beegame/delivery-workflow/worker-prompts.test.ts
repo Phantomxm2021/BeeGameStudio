@@ -131,6 +131,64 @@ describe('worker prompts', () => {
     }
   })
 
+  test('requires derived views to reference owners instead of copying mutable facts', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision',
+      allowedPaths: ['docs/BALANCE_DESIGN.md'],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
+        completeDocumentContract: getGameDocumentContract(
+          'docs/BALANCE_DESIGN.md',
+        ),
+      },
+    })
+
+    expect(prompt).toContain('Executive Summary is an authority index')
+    expect(prompt).toContain(
+      'Production Materials are derived compact views with owner references',
+    )
+    expect(prompt).toContain(
+      'Do not copy mutable facts or independently maintained totals into derived views',
+    )
+  })
+
+  test('does not preserve an upstream-unavailable branch when the path is present', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision',
+      allowedPaths: ['docs/BALANCE_DESIGN.md'],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'parallel-draft',
+        foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
+        availableUpstreamPaths: ['docs/GDD.md'],
+        completeDocumentContract: getGameDocumentContract(
+          'docs/BALANCE_DESIGN.md',
+        ),
+      },
+    })
+
+    expect(prompt).toContain(
+      'When an upstream path is present, use its committed authority; do not describe it as unavailable',
+    )
+    expect(prompt).not.toContain(
+      'Record genuinely unavailable upstream decisions as explicit assumptions',
+    )
+  })
+
   test('derives checklist cardinality from observable scenarios without fixed business caps', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
