@@ -9,6 +9,9 @@ import { foundationFactDefinition } from './foundation-fact-definitions'
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Treat each section as the final decision record, not a derivation transcript. Finish every required section and production material within the response; compact repetition rather than omit or truncate required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
 
+const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
+  'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority; each Issue sourceSectionKey, expected, and actual must match its single-document authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
+
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const packetWorker =
     request.workerType === 'foundation-fact-extractor' ||
@@ -106,10 +109,16 @@ function buildFoundationRevisionWorkerPrompt(
   if (typeof stagedPath !== 'string' || !stagedPath.trim())
     throw new Error('foundation revision worker requires one staged path')
   const absoluteStagedPath = resolve(request.workspacePath, stagedPath)
+  const priorFailureReason = typeof request.contract.priorFailureReason === 'string'
+    ? request.contract.priorFailureReason
+    : undefined
   return [
     `Immutable revision packet: ${JSON.stringify(packet)}`,
     `Assigned staged path: ${absoluteStagedPath}`,
-    'Read and edit only the assigned staged path. After the revision, call SubmitFoundationRevisionResult exactly once with only changedSectionIds; do not return terminal JSON or prose completion text.',
+    'The packet sectionIds are the complete write authority: only those sections may change. Every other section—including related, risk, consistency, dependency, and production-material sections—must remain byte-identical; do not edit them to keep prose synchronized. Read and edit only the assigned staged path. Unmarked Production Materials and audit appendices are outside the packet authority; do not edit them even when they appear related to an admitted Issue. Make every admitted Issue expected true and remove its actual. For fact/schema repairs, packet.factConstraints is binding authority: satisfy its extractionInstruction and sourceOfTruthDirection. If an extractionInstruction requires an explicit mapping table or other semantic structure, do not substitute a standalone fact declaration, formatting-only change, alias, compatibility prose, risk registration, wording qualification, or downstream reinterpretation. Call SubmitFoundationRevisionResult exactly once with status APPLIED and only the exact changedSectionIds; the service injects task, round, document, Issue and base-authority identity. Do not return terminal JSON or prose completion text.',
+    ...(priorFailureReason
+      ? [`Automatic retry after the previous strict validation failure: ${priorFailureReason}. Correct that failure in the authorized packet sections only; do not broaden scope.`]
+      : []),
   ].join('\n')
 }
 
@@ -250,14 +259,17 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed; the service binds immutable provenance from each catalog owner section into the durable terminal. Do not return evidence, section prose, or values not declared by the packet.',
       ].join(' ')
     case 'foundation-semantic-reviewer':
+      if (typeof request.contract.issueId === 'string')
+        return 'Recheck only the admitted Issue expected against the packet current evidence. Return only PASS or FAIL in the supplied StructuredOutput schema. PASS means the exact expected is now true and the admitted actual is removed. FAIL requires one structured diagnostic grounded in packet evidence; do not discover, split, rewrite, or remediate Issues.'
       return [
         'Review only the exact semantic packet sections, normalized facts, and deterministic references. Do not read project files, call Read, Grep or Glob, write files, mutate the platform, or expand context.',
+        FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT,
         'Return only PASS, ISSUES, or UNDECIDABLE in the supplied StructuredOutput schema. Issue drafts must use only assigned section keys and contain no IDs. Do not return Markdown, prose explanations, or additional fields.',
       ].join(' ')
     case 'foundation-document-reviser':
       return [
         'Revise only the assigned staged canonical Markdown document and exact target sections for the supplied Issue Registry issue IDs. Read and write only the staged path; never modify the canonical document or unrelated paths.',
-        'Preserve all section markers and document structure. After the bounded revision is complete, call SubmitFoundationRevisionResult exactly once with only changedSectionIds; the service owns task identity, round, document and issue authority.',
+        'Preserve all section markers and document structure. Make every admitted expected true and remove each admitted actual; never use aliases, compatibility notes, risk registration, wording qualifications or downstream reinterpretation as a substitute. Submit APPLIED with only the exact changedSectionIds; the service owns task, round, document, Issue and base-authority identity.',
       ].join(' ')
     case 'document-author':
       return [
@@ -379,9 +391,11 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'foundation-fact-extractor':
       return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, and value; omit evidence and reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, and reason; omit evidence and value. The service binds immutable provenance from the packet owner section into the durable terminal. Do not call project tools, return terminal JSON as prose, or add completion text.'
     case 'foundation-semantic-reviewer':
+      if (typeof request.contract.issueId === 'string')
+        return 'Return exactly one native StructuredOutput value conforming to the targeted semantic recheck schema. Use PASS without diagnostic, or FAIL with exactly one structured diagnostic containing observedActual, evidence, failureReasonCode, and scopeAssessment. Do not return ISSUES, UNDECIDABLE, Markdown, or explanatory text.'
       return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use exactly one outcome shape: PASS omits issues and reason; ISSUES includes a non-empty issues array and omits reason; UNDECIDABLE includes reason and omits issues. Do not return Markdown or explanatory text.'
     case 'foundation-document-reviser':
-      return 'Complete the assigned staged Markdown revision, call SubmitFoundationRevisionResult exactly once, and end the turn normally.'
+      return 'Complete the assigned staged Markdown revision so every admitted expected is true and every admitted actual is removed. Call SubmitFoundationRevisionResult exactly once with APPLIED plus the exact changedSectionIds; do not submit task, round, document or Issue identity, and do not end with prose completion text.'
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||

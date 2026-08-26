@@ -8,8 +8,8 @@ import type { FoundationSemanticRuntimeTask } from './foundation-semantic-runtim
 import type { AuditIssue } from './foundation-issue-registry'
 import { foundationRevisionDocumentReceiptMatches, foundationRevisionPacketPath, foundationRevisionSemanticResultPath, foundationRevisionStagePath } from './foundation-revision-stage'
 
-export const FOUNDATION_AUDIT_STATE_SCHEMA_VERSION = 8 as const
-export const FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT = 'foundation-audit-state-v8' as const
+export const FOUNDATION_AUDIT_STATE_SCHEMA_VERSION = 9 as const
+export const FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT = 'foundation-audit-state-v9' as const
 export type FoundationIssueSummary = {
   total: number
   blocker: number
@@ -72,6 +72,9 @@ export type FoundationRevisionTaskCommon = {
   usage?: WorkflowUsage
   durationMs?: number
   failureReason?: string
+  /** Immutable attempt-bundle identity; superseded tasks remain evidence only. */
+  bundleId: string
+  supersededBy?: string
 }
 export type FoundationRevisionDocumentTask = FoundationRevisionTaskCommon & {
   kind: 'document-revision'
@@ -80,6 +83,8 @@ export type FoundationRevisionDocumentTask = FoundationRevisionTaskCommon & {
   sectionIds: string[]
   stagedPath: string
   baseDocumentDigest: string
+  dependencyDigests: Record<string, string>
+  frozen: boolean
   receipt?: FoundationRevisionTaskReceipt
 }
 export type FoundationRevisionImpactedFactsTask = FoundationRevisionTaskCommon & {
@@ -91,6 +96,7 @@ export type FoundationRevisionImpactedFactsTask = FoundationRevisionTaskCommon &
 export type FoundationRevisionSemanticRecheckTask = FoundationRevisionTaskCommon & {
   kind: 'semantic-recheck'
   issueId: string
+  issue: AuditIssue
   modelTier: 'fast' | 'balanced' | 'strong'
   resultPath?: string
   resultDigest?: string
@@ -125,6 +131,18 @@ export type FoundationAuditState = {
   round?: FoundationRevisionRound
   issueSummary?: FoundationIssueSummary
   publication?: FoundationRevisionPublicationBinding
+  activeBundleId?: string
+  revisionBundles?: Array<{
+    bundleId: string
+    status: 'active' | 'superseded'
+    round: FoundationRevisionRound
+    baseDocumentRevision: string
+    baseDocumentDigests: Array<{ path: FoundationDocumentPath; digest: string }>
+    remediationDigest: string
+    taskIds: string[]
+    frozenTaskIds: string[]
+    supersededBy?: string
+  }>
   phaseStartedAt?: string
   aggregateUsage?: FoundationFactTask['usage']
   derived?: { manifestPath: string; manifestDigest: string; markerPath: string; markerDigest: string; factStorePath: string; factStoreDigest: string; sectionIndexPath: string; sectionIndexDigest: string }
@@ -161,6 +179,80 @@ export type FoundationAuditState = {
   }
 }
 export type FoundationAuditTask = FoundationFactTask | (FoundationSemanticRuntimeTask & { admittedResult?: FoundationSemanticResult }) | FoundationRevisionTask
+export type FoundationRevisionBundle = NonNullable<FoundationAuditState['revisionBundles']>[number]
+
+function isFoundationRevisionTask(task: FoundationAuditTask): task is FoundationRevisionTask {
+  return task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck'
+}
+
+/** Select the sole durable runtime authority. Missing or ambiguous state fails closed. */
+export function activeFoundationRevisionBundle(
+  state: Pick<FoundationAuditState, 'activeBundleId' | 'revisionBundles'>,
+): FoundationRevisionBundle {
+  if (!state.activeBundleId || !state.revisionBundles)
+    throw new Error('foundation revision active bundle is missing')
+  if (new Set(state.revisionBundles.map(bundle => bundle.bundleId)).size !== state.revisionBundles.length)
+    throw new Error('foundation revision bundle identity is duplicated')
+  const bundleIds = new Set(state.revisionBundles.map(bundle => bundle.bundleId))
+  if (state.revisionBundles.some(bundle => bundle.supersededBy !== undefined && (!bundleIds.has(bundle.supersededBy) || bundle.supersededBy === bundle.bundleId)))
+    throw new Error('foundation superseded bundle authority is invalid')
+  const active = state.revisionBundles.filter(bundle => bundle.status === 'active')
+  if (active.length !== 1 || active[0]!.bundleId !== state.activeBundleId)
+    throw new Error('foundation revision active bundle is ambiguous or stale')
+  return active[0]!
+}
+
+/** Return only current revision tasks. Superseded tasks remain immutable evidence. */
+export function activeFoundationRevisionTasks(
+  state: Pick<FoundationAuditState, 'activeBundleId' | 'revisionBundles' | 'tasks'>,
+): FoundationRevisionTask[] {
+  const bundle = activeFoundationRevisionBundle(state)
+  if (new Set(state.tasks.map(task => task.taskId)).size !== state.tasks.length)
+    throw new Error('foundation task identity is duplicated')
+  const owned = new Set(bundle.taskIds)
+  const frozen = new Set(bundle.frozenTaskIds)
+  if (owned.size !== bundle.taskIds.length || frozen.size !== bundle.frozenTaskIds.length || [...owned].some(taskId => frozen.has(taskId)))
+    throw new Error('foundation active bundle task references are duplicated')
+  const byId = new Map(state.tasks.map(task => [task.taskId, task]))
+  const ownedBy = new Map<string, string>()
+  for (const candidate of state.revisionBundles!) {
+    for (const taskId of candidate.taskIds) {
+      const previous = ownedBy.get(taskId)
+      if (previous && previous !== candidate.bundleId)
+        throw new Error('foundation revision task is owned by multiple bundles')
+      ownedBy.set(taskId, candidate.bundleId)
+    }
+  }
+  for (const taskId of owned) {
+    const task = byId.get(taskId)
+    if (!task || !isFoundationRevisionTask(task) || task.bundleId !== bundle.bundleId)
+      throw new Error('foundation active bundle owns a task with mismatched identity')
+    if (task.supersededBy)
+      throw new Error('foundation active bundle owns a superseded task')
+    if (ownedBy.get(taskId) !== bundle.bundleId)
+      throw new Error('foundation active task is owned by multiple bundles')
+    if (task.kind === 'document-revision' && task.frozen)
+      throw new Error('foundation active bundle owns a frozen task')
+  }
+  for (const taskId of frozen) {
+    const task = byId.get(taskId)
+    const supersededOwners = state.revisionBundles!.filter(candidate => candidate.status === 'superseded' && candidate.taskIds.includes(taskId))
+    if (!task || task.kind !== 'document-revision' || task.bundleId === bundle.bundleId || supersededOwners.length !== 1 || task.status !== 'completed' || !task.receipt || !task.frozen || task.supersededBy || task.receipt.taskId !== task.taskId || task.receipt.documentPath !== task.documentPath || task.receipt.baseDocumentDigest !== task.baseDocumentDigest)
+      throw new Error('foundation active bundle frozen evidence binding is invalid')
+  }
+  return state.tasks.filter((task): task is FoundationRevisionTask => isFoundationRevisionTask(task) && (frozen.has(task.taskId) || (owned.has(task.taskId) && !task.supersededBy)))
+}
+
+/** Single runtime task projection for recovery, status, and dispatch bookkeeping. */
+export function foundationRuntimeTasks(state: FoundationAuditState): FoundationAuditTask[] {
+  if (state.status === 'planning') return []
+  if (['revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing', 'revision_ready'].includes(state.status)) {
+    const activeTaskIds = new Set(activeFoundationRevisionBundle(state).taskIds)
+    return activeFoundationRevisionTasks(state).filter(task => activeTaskIds.has(task.taskId))
+  }
+  return state.tasks.filter(task => !isFoundationRevisionTask(task))
+}
+
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/)
 const relativeArtifactPath = z.string().refine(value => value.startsWith('.beegame/audit/foundation/') && !value.startsWith('/') && !value.includes('..'), 'foundation audit artifact paths must remain project-local')
 const workflowUsageSchema = z.object({ input_tokens: z.number().nonnegative(), cache_read_tokens: z.number().nonnegative(), cache_creation_tokens: z.number().nonnegative(), completion_tokens: z.number().nonnegative(), total_tokens: z.number().nonnegative() }).strict()
@@ -169,7 +261,10 @@ const issueSummarySchema = z.object({ total: z.number().int().nonnegative(), blo
 })
 const dispatchSchema = z.object({ dispatchId: z.string().min(1), workerType: z.enum(['foundation-fact-extractor', 'foundation-semantic-reviewer']), phase: z.literal('DOCUMENT_REVIEW'), taskId: z.string().min(1), revision: z.string().min(1), status: z.enum(['running', 'completed', 'failed', 'blocked', 'interrupted', 'invalid']), request: z.record(z.string(), z.unknown()).optional(), terminalResult: z.record(z.string(), z.unknown()).optional(), failureReason: z.string().min(1).optional(), startingUsage: workflowUsageSchema.optional(), usage: workflowUsageSchema.optional(), startedAt: z.string().datetime(), finishedAt: z.string().datetime().optional() }).strict()
 const commonTask = { taskId: z.string().min(1), revision: z.string().min(1), packetDigest: digestSchema, status: z.enum(['pending', 'running', 'retryable', 'completed', 'needs_action']), dispatch: dispatchSchema.optional(), terminalDigest: digestSchema.optional(), usage: workflowUsageSchema.optional(), durationMs: z.number().nonnegative().optional(), failureReason: z.string().min(1).optional() }
-const admittedResultSchema = z.object({ checkId: z.string().min(1), packetIdentity: digestSchema, outcome: z.enum(['PASS', 'ISSUES', 'UNDECIDABLE']), issues: z.array(z.object({ problem: z.string().min(1), expected: z.string().min(1), actual: z.string().min(1), sourceSectionKey: z.string().min(1), fixSectionKey: z.string().min(1), reasonCode: z.string().min(1).optional() }).strict()).optional(), reason: z.string().min(1).optional() }).strict().superRefine((result, context) => {
+const admittedRemediationSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('patch'), sectionKeys: z.array(z.string().min(1)).min(1) }).strict(),
+])
+const admittedResultSchema = z.object({ checkId: z.string().min(1), packetIdentity: digestSchema, outcome: z.enum(['PASS', 'ISSUES', 'UNDECIDABLE']), issues: z.array(z.object({ problem: z.string().min(1), expected: z.string().min(1), actual: z.string().min(1), sourceSectionKey: z.string().min(1), remediation: admittedRemediationSchema, reasonCode: z.string().min(1).optional() }).strict()).optional(), reason: z.string().min(1).optional() }).strict().superRefine((result, context) => {
   const issueCount = result.issues?.length ?? 0
   if (result.outcome === 'PASS' && (issueCount || result.reason !== undefined)) context.addIssue({ code: 'custom', path: ['outcome'], message: 'PASS admitted results cannot contain issues or reason' })
   if (result.outcome === 'ISSUES' && (!issueCount || result.reason !== undefined)) context.addIssue({ code: 'custom', path: ['outcome'], message: 'ISSUES admitted results require issue drafts and no reason' })
@@ -182,11 +277,11 @@ const revisionDispatchSchema = z.object({ dispatchId: z.string().min(1), workerT
 const revisionDigest = z.string().regex(/^[a-f0-9]{64}$/)
 const revisionIdentifier = z.string().regex(/^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/)
 const revisionRoundSchema = z.number().int().positive()
-const revisionTaskCommonSchema = z.object({ taskId: revisionIdentifier, revision: revisionIdentifier, round: revisionRoundSchema, packetPath: z.string().min(1), packetDigest: revisionDigest, status: z.enum(['pending', 'running', 'completed', 'retryable', 'needs_action']), attempt: z.number().int().min(0).max(2), dispatch: revisionDispatchSchema.optional(), terminalDigest: revisionDigest.optional(), usage: workflowUsageSchema.optional(), durationMs: z.number().int().nonnegative().optional(), failureReason: z.string().min(1).optional() }).strict()
+const revisionTaskCommonSchema = z.object({ taskId: revisionIdentifier, revision: revisionIdentifier, round: revisionRoundSchema, packetPath: z.string().min(1), packetDigest: revisionDigest, status: z.enum(['pending', 'running', 'completed', 'retryable', 'needs_action']), attempt: z.number().int().min(0), dispatch: revisionDispatchSchema.optional(), terminalDigest: revisionDigest.optional(), usage: workflowUsageSchema.optional(), durationMs: z.number().int().nonnegative().optional(), failureReason: z.string().min(1).optional(), bundleId: z.string().min(1), supersededBy: z.string().min(1).optional() }).strict()
 const revisionReceiptSchema = z.object({ taskId: revisionIdentifier, round: revisionRoundSchema, documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS), issueIds: z.array(z.string().min(1)).min(1), baseDocumentDigest: revisionDigest, stagedDocumentDigest: revisionDigest, changedSectionIds: z.array(z.string().min(1)).min(1), stagedPath: z.string().min(1), terminalDigest: revisionDigest }).strict()
-const revisionDocumentTaskSchema = revisionTaskCommonSchema.extend({ kind: z.literal('document-revision'), documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS), issueIds: z.array(z.string().min(1)).min(1), sectionIds: z.array(z.string().min(1)).min(1), stagedPath: z.string().min(1), baseDocumentDigest: revisionDigest, receipt: revisionReceiptSchema.optional() })
+const revisionDocumentTaskSchema = revisionTaskCommonSchema.extend({ kind: z.literal('document-revision'), documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS), issueIds: z.array(z.string().min(1)).min(1), sectionIds: z.array(z.string().min(1)).min(1), stagedPath: z.string().min(1), baseDocumentDigest: revisionDigest, dependencyDigests: z.record(z.string().min(1), revisionDigest), frozen: z.boolean(), receipt: revisionReceiptSchema.optional() })
 const revisionImpactedFactsTaskSchema = revisionTaskCommonSchema.extend({ kind: z.literal('impacted-facts'), modelTier: z.literal('fast'), receiptPath: z.string().min(1).optional(), receiptDigest: revisionDigest.optional() })
-const revisionSemanticRecheckTaskSchema = revisionTaskCommonSchema.extend({ kind: z.literal('semantic-recheck'), issueId: z.string().min(1), modelTier: z.enum(['fast', 'balanced', 'strong']), resultPath: z.string().min(1).optional(), resultDigest: revisionDigest.optional() })
+const revisionSemanticRecheckTaskSchema = revisionTaskCommonSchema.extend({ kind: z.literal('semantic-recheck'), issueId: z.string().min(1), issue: z.record(z.string(), z.unknown()), modelTier: z.enum(['fast', 'balanced', 'strong']), resultPath: z.string().min(1).optional(), resultDigest: revisionDigest.optional() })
 const taskSchema = z.discriminatedUnion('kind', [factTaskSchema, semanticTaskSchema, confirmationTaskSchema, revisionDocumentTaskSchema, revisionImpactedFactsTaskSchema, revisionSemanticRecheckTaskSchema]).superRefine((task, context) => {
   if (task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck') {
     const expectedWorker = task.kind === 'document-revision'
@@ -214,11 +309,17 @@ const reviewSchema = z.object({ reviewDigest: digestSchema, issueRegistryPath: r
 const revisionIssueAuthoritySchema = z.discriminatedUnion('kind', [z.object({ kind: z.literal('review'), reviewDigest: revisionDigest, issueRegistryDigest: revisionDigest }).strict(), z.object({ kind: z.literal('publication'), baseRevision: revisionIdentifier, authorityDigest: revisionDigest, issueRegistryDigest: revisionDigest }).strict()])
 const revisionAuthoritySchema = z.object({ issueAuthority: revisionIssueAuthoritySchema, derivedDigests: z.object({ sectionIndex: revisionDigest, factStore: revisionDigest, manifest: revisionDigest }).strict(), documentDigests: z.array(z.object({ path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS), digest: revisionDigest }).strict()).length(CANONICAL_FOUNDATION_DOCUMENTS.length) }).strict()
 const publicationSchema = z.object({ preparedPath: z.string().min(1), journalPath: z.string().min(1), committedPath: z.string().min(1), authorityDigest: revisionDigest, resultingRevision: revisionIdentifier, resultingIssueRegistryDigest: revisionDigest }).strict()
-const foundationAuditStateSchemaRaw = z.object({ schemaVersion: z.literal(FOUNDATION_AUDIT_STATE_SCHEMA_VERSION), schemaFingerprint: z.literal(FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT), status: z.enum(['index_staged', 'extracting_facts', 'facts_staged', 'derived_committed', 'deterministic_ready', 'semantic_review', 'audit_ready', 'revision_ready', 'planning', 'revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing']), revision: z.string().min(1), documentDigests: z.record(z.string(), digestSchema), sectionIndexDigest: digestSchema, sectionIndexPath: relativeArtifactPath, manifestPath: relativeArtifactPath, tasks: z.array(taskSchema), phaseStartedAt: z.string().datetime().optional(), aggregateUsage: workflowUsageSchema.optional(), derived: z.object({ manifestPath: relativeArtifactPath, manifestDigest: digestSchema, markerPath: relativeArtifactPath, markerDigest: digestSchema, factStorePath: relativeArtifactPath, factStoreDigest: revisionDigest, sectionIndexPath: relativeArtifactPath, sectionIndexDigest: digestSchema }).strict().optional(), deterministic: deterministicSchema.optional(), semantic: semanticSchema.optional(), review: reviewSchema.optional(), authority: revisionAuthoritySchema.optional(), roundBefore: z.object({ documentRevision: revisionIdentifier, issueRegistryDigest: revisionDigest, issueAuthority: revisionIssueAuthoritySchema }).strict().optional(), round: z.number().int().positive().optional(), issueSummary: issueSummarySchema.optional(), publication: publicationSchema.optional() }).strict().superRefine((state, context) => {
+const revisionBundleSchema = z.object({ bundleId: z.string().min(1), status: z.enum(['active', 'superseded']), round: revisionRoundSchema, baseDocumentRevision: revisionIdentifier, baseDocumentDigests: z.array(z.object({ path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS), digest: revisionDigest }).strict()).length(CANONICAL_FOUNDATION_DOCUMENTS.length), remediationDigest: revisionDigest, taskIds: z.array(revisionIdentifier).min(1), frozenTaskIds: z.array(revisionIdentifier), supersededBy: z.string().min(1).optional() }).strict()
+const foundationAuditStateSchemaRaw = z.object({ schemaVersion: z.literal(FOUNDATION_AUDIT_STATE_SCHEMA_VERSION), schemaFingerprint: z.literal(FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT), status: z.enum(['index_staged', 'extracting_facts', 'facts_staged', 'derived_committed', 'deterministic_ready', 'semantic_review', 'audit_ready', 'revision_ready', 'planning', 'revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing']), revision: z.string().min(1), documentDigests: z.record(z.string(), digestSchema), sectionIndexDigest: digestSchema, sectionIndexPath: relativeArtifactPath, manifestPath: relativeArtifactPath, tasks: z.array(taskSchema), activeBundleId: z.string().min(1).optional(), revisionBundles: z.array(revisionBundleSchema).optional(), phaseStartedAt: z.string().datetime().optional(), aggregateUsage: workflowUsageSchema.optional(), derived: z.object({ manifestPath: relativeArtifactPath, manifestDigest: revisionDigest, markerPath: relativeArtifactPath, markerDigest: revisionDigest, factStorePath: relativeArtifactPath, factStoreDigest: revisionDigest, sectionIndexPath: relativeArtifactPath, sectionIndexDigest: revisionDigest }).strict().optional(), deterministic: deterministicSchema.optional(), semantic: semanticSchema.optional(), review: reviewSchema.optional(), authority: revisionAuthoritySchema.optional(), roundBefore: z.object({ documentRevision: revisionIdentifier, issueRegistryDigest: revisionDigest, issueAuthority: revisionIssueAuthoritySchema }).strict().optional(), round: z.number().int().positive().optional(), issueSummary: issueSummarySchema.optional(), publication: publicationSchema.optional() }).strict().superRefine((state, context) => {
   const repairStatuses = ['planning', 'revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing'] as const
   const expected = [...CANONICAL_FOUNDATION_DOCUMENTS]
   const paths = Object.keys(state.documentDigests)
   if (paths.length !== expected.length || expected.some(path => !paths.includes(path))) context.addIssue({ code: 'custom', path: ['documentDigests'], message: 'foundation audit state must bind all eight canonical document digests' })
+  if (new Set(state.tasks.map(task => task.taskId)).size !== state.tasks.length) context.addIssue({ code: 'custom', path: ['tasks'], message: 'foundation task IDs must be unique' })
+  if (state.revisionBundles && new Set(state.revisionBundles.map(bundle => bundle.bundleId)).size !== state.revisionBundles.length) context.addIssue({ code: 'custom', path: ['revisionBundles'], message: 'foundation revision bundle IDs must be unique' })
+  for (const bundle of state.revisionBundles ?? []) {
+    if (new Set([...bundle.taskIds, ...bundle.frozenTaskIds]).size !== bundle.taskIds.length + bundle.frozenTaskIds.length) context.addIssue({ code: 'custom', path: ['revisionBundles'], message: 'revision bundle task references must be unique' })
+  }
   const expectedPaths = relativeFoundationAuditArtifactPaths(state.revision)
   const hasPublicationAuthority = state.authority?.issueAuthority.kind === 'publication'
   const publicationBound = (state.status === 'round_closing' || state.status === 'revision_ready') && hasPublicationAuthority
@@ -228,9 +329,28 @@ const foundationAuditStateSchemaRaw = z.object({ schemaVersion: z.literal(FOUNDA
   const expectedTaskRevision = publicationBound && state.authority?.issueAuthority.kind === 'publication'
     ? state.authority.issueAuthority.baseRevision
     : state.revision
+  const repairStatusesRequiringBundle = ['revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing', 'revision_ready']
+  let runtimeRevisionTasks: FoundationRevisionTask[] | undefined
+  if (repairStatusesRequiringBundle.includes(state.status)) {
+    if (!state.activeBundleId || !state.revisionBundles) context.addIssue({ code: 'custom', path: ['activeBundleId'], message: 'active revision substages require one durable revision bundle pointer' })
+    else if (state.revisionBundles.filter(bundle => bundle.status === 'active').length !== 1 || !state.revisionBundles.some(bundle => bundle.status === 'active' && bundle.bundleId === state.activeBundleId)) context.addIssue({ code: 'custom', path: ['revisionBundles'], message: 'revision state must have exactly one active bundle matching activeBundleId' })
+    else {
+      const active = state.revisionBundles.find(bundle => bundle.bundleId === state.activeBundleId)!
+      if (new Set([...active.taskIds, ...active.frozenTaskIds]).size !== active.taskIds.length + active.frozenTaskIds.length) context.addIssue({ code: 'custom', path: ['revisionBundles'], message: 'active bundle owned and frozen task references must be disjoint' })
+      if (active.taskIds.some(taskId => !state.tasks.some(task => task.taskId === taskId)) || active.frozenTaskIds.some(taskId => !state.tasks.some(task => task.taskId === taskId))) context.addIssue({ code: 'custom', path: ['revisionBundles'], message: 'active bundle task references must be durable task IDs' })
+    }
+    try {
+      runtimeRevisionTasks = activeFoundationRevisionTasks(state as unknown as FoundationAuditState)
+    } catch (error) {
+      context.addIssue({ code: 'custom', path: ['tasks'], message: error instanceof Error ? error.message : 'active revision task authority is invalid' })
+    }
+  }
   if (state.sectionIndexPath !== expectedSectionIndexPath || state.manifestPath !== expectedManifestPath) context.addIssue({ code: 'custom', path: ['sectionIndexPath'], message: 'foundation audit artifact paths are not bound to the state revision' })
   for (const task of state.tasks) {
-    if (task.revision !== expectedTaskRevision) context.addIssue({ code: 'custom', path: ['tasks'], message: 'foundation task revision must match its active or published base revision' })
+    if ('round' in task) {
+      const bundle = state.revisionBundles?.find(candidate => candidate.bundleId === task.bundleId)
+      if (!bundle || task.revision !== bundle.baseDocumentRevision || task.round !== bundle.round) context.addIssue({ code: 'custom', path: ['tasks'], message: 'revision task must match its own durable bundle base revision and round' })
+    } else if (task.revision !== expectedTaskRevision) context.addIssue({ code: 'custom', path: ['tasks'], message: 'foundation task revision must match its active or published base revision' })
     if (task.dispatch && (task.dispatch.taskId !== task.taskId || task.dispatch.revision !== task.revision)) context.addIssue({ code: 'custom', path: ['tasks'], message: 'foundation fact dispatch identity is not bound to its task' })
     if (task.dispatch?.request && typeof task.dispatch.request === 'object') {
       const request = task.dispatch.request as Record<string, unknown>
@@ -286,7 +406,7 @@ const foundationAuditStateSchemaRaw = z.object({ schemaVersion: z.literal(FOUNDA
   if (state.status === 'revision_ready') {
     if (!state.authority || !state.roundBefore || state.round === undefined || !state.issueSummary || !state.publication || state.authority.issueAuthority.kind !== 'publication') context.addIssue({ code: 'custom', path: ['status'], message: 'revision_ready requires committed publication authority and revision metadata' })
     if (!state.derived || state.derived.sectionIndexDigest !== state.sectionIndexDigest || state.derived.sectionIndexPath !== state.sectionIndexPath || state.derived.manifestPath !== state.manifestPath || state.derived.factStoreDigest !== state.authority?.derivedDigests.factStore) context.addIssue({ code: 'custom', path: ['derived'], message: 'revision_ready requires current derived artifact bindings' })
-    if (!state.tasks.length || state.tasks.some(task => task.kind !== 'document-revision' && task.kind !== 'impacted-facts' && task.kind !== 'semantic-recheck' || task.status !== 'completed')) context.addIssue({ code: 'custom', path: ['tasks'], message: 'revision_ready requires a non-empty collection of completed repair tasks' })
+    if (runtimeRevisionTasks && (!runtimeRevisionTasks.length || runtimeRevisionTasks.some(task => task.status !== 'completed'))) context.addIssue({ code: 'custom', path: ['tasks'], message: 'revision_ready requires a non-empty collection of completed active repair tasks' })
   } else if (repairStatuses.includes(state.status as (typeof repairStatuses)[number])) {
     if (!state.authority || !state.roundBefore || state.round === undefined || !state.issueSummary) context.addIssue({ code: 'custom', path: ['status'], message: 'foundation repair substages require revision authority metadata on the sole audit state' })
     if (state.deterministic || state.semantic || state.review || state.aggregateUsage) context.addIssue({ code: 'custom', path: ['status'], message: 'foundation repair substages cannot retain audit runtime bindings' })
@@ -298,7 +418,7 @@ const foundationAuditStateSchemaRaw = z.object({ schemaVersion: z.literal(FOUNDA
   if (publicationBound) {
     const publicationAuthority = state.authority?.issueAuthority.kind === 'publication' ? state.authority.issueAuthority : undefined
     if (!state.publication || !publicationAuthority || state.publication.resultingRevision !== state.revision || state.publication.authorityDigest !== publicationAuthority.authorityDigest || state.publication.resultingIssueRegistryDigest !== publicationAuthority.issueRegistryDigest) context.addIssue({ code: 'custom', path: ['publication'], message: 'published foundation state must bind the resulting revision and exact publication authority' })
-    if (state.round !== undefined && state.tasks.some(task => (task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck') && task.round !== state.round)) context.addIssue({ code: 'custom', path: ['tasks'], message: 'published repair tasks must match the committed revision round' })
+    if (state.round !== undefined && runtimeRevisionTasks?.some(task => task.round !== state.round)) context.addIssue({ code: 'custom', path: ['tasks'], message: 'published active repair tasks must match the committed revision round' })
   }
   if (hasPublicationAuthority && (!state.derived || state.derived.sectionIndexPath !== expectedSectionIndexPath || state.derived.manifestPath !== expectedManifestPath || state.derived.factStorePath !== `${expectedDerivedRoot}/fact-store.json` || state.derived.markerPath !== `${expectedDerivedRoot}/COMMITTED.json`)) context.addIssue({ code: 'custom', path: ['derived'], message: 'published foundation derived paths must be fixed to the current revision' })
 })

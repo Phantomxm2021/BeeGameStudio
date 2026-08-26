@@ -28,6 +28,7 @@ import type {
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
 import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
+import { foundationRuntimeTasks } from './foundation-audit-state'
 import type { FoundationAuditTask, FoundationRevisionTask } from './foundation-audit-state'
 
 export type { WorkflowEvent } from './types'
@@ -76,7 +77,9 @@ function now(): string {
 
 function foundationNeedsAction(run: DeliveryRun): boolean {
   return Boolean(
-    run.foundationAuditState?.tasks.some(task => task.status === 'needs_action'),
+    run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(
+      task => task.status === 'needs_action',
+    ),
   )
 }
 
@@ -288,6 +291,9 @@ function withDispatchUsage(
 ): DeliveryRun {
   const update = (dispatch: DispatchRecord | undefined) =>
     dispatch?.dispatchId === dispatchId ? { ...dispatch, usage } : dispatch
+  const activeTaskIds = run.foundationAuditState
+    ? new Set(foundationRuntimeTasks(run.foundationAuditState).map(task => task.taskId))
+    : new Set<string>()
   return {
     ...run,
     activeDispatch: update(run.activeDispatch),
@@ -306,7 +312,7 @@ function withDispatchUsage(
       ? {
           ...run.foundationAuditState,
           tasks: run.foundationAuditState.tasks.map(task =>
-            task.dispatch?.dispatchId === dispatchId
+            activeTaskIds.has(task.taskId) && task.dispatch?.dispatchId === dispatchId
               ? { ...task, usage, dispatch: update(task.dispatch) }
               : task,
           ),
@@ -1130,10 +1136,63 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       if (!run) return run
       if (run.foundationAuditState) {
         const tasks = run.foundationAuditState.tasks
-        const runningTasks = tasks.filter(task => task.status === 'running')
+        const staleTerminalTasks =
+          run.status !== 'running'
+            ? foundationRuntimeTasks(run.foundationAuditState).filter(
+                task => task.status === 'running' && task.dispatch?.status === 'running',
+              )
+            : []
+        if (staleTerminalTasks.length) {
+          const blockedReason =
+            run.blockedReason ??
+            'foundation workflow requires action after recovery'
+          const staleTaskIds = new Set(
+            staleTerminalTasks.map(task => task.taskId),
+          )
+          const nextState = {
+            ...run.foundationAuditState,
+            tasks: tasks.map(task => {
+              if (!staleTaskIds.has(task.taskId) || !task.dispatch)
+                return task
+              const interruptedDispatch = {
+                ...task.dispatch,
+                status: 'interrupted' as const,
+                finishedAt: now(),
+                failureReason: blockedReason,
+              }
+              return projectTaskTerminalEvidence(
+                {
+                  ...task,
+                  status: 'needs_action' as const,
+                  failureReason: blockedReason,
+                  dispatch: interruptedDispatch,
+                },
+                interruptedDispatch,
+              )
+            }),
+          }
+          const recovered = {
+            ...run,
+            status: 'needs_action' as const,
+            thinking: 'idle' as const,
+            blockedReason,
+            foundationAuditState: nextState,
+          }
+          return commitUnlocked(recovered, {
+            runId: recovered.runId,
+            type: 'foundation.recovery.needs_action',
+            phase: recovered.phase,
+            status: recovered.status,
+            revision: recovered.revision,
+            reason: blockedReason,
+          })
+        }
+        const runtimeTaskIds = new Set(foundationRuntimeTasks(run.foundationAuditState).map(task => task.taskId))
+        const runningTasks = tasks.filter(task => runtimeTaskIds.has(task.taskId) && task.status === 'running')
         if (runningTasks.length > 4)
           throw new WorkflowStoreError('foundation recovery exceeds the four-worker limit', 'conflict')
         for (const task of tasks) {
+          if (!runtimeTaskIds.has(task.taskId)) continue
           const dispatch = task.dispatch
           if (!dispatch) continue
           const request = dispatch.request
@@ -1187,7 +1246,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
                 // written its immutable receipt under the controller lock.
                 status: hasPersistedTerminal
                   ? ('running' as const)
-                  : task.attempt < 2
+                  : isFoundationRevisionTask(task) || task.attempt < 2
                     ? ('retryable' as const)
                     : ('needs_action' as const),
                 dispatch: terminal,
@@ -1261,14 +1320,29 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           : run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === dispatchId,
             )?.dispatch
-          ?? run.foundationAuditState?.tasks.find(
-            task => task.dispatch?.dispatchId === dispatchId,
-          )?.dispatch
+          ?? (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(
+              task => task.dispatch?.dispatchId === dispatchId,
+          )?.dispatch : undefined)
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'
       const acceptsStoppedTailUsage =
         run.status === 'stopped' && usageDispatch?.status === 'interrupted'
-      if (!usageDispatch || (!acceptsRunningUsage && !acceptsStoppedTailUsage))
+      // Usage is emitted by the worker stream independently from terminal
+      // admission. A terminal commit can win the storage lane before the
+      // last usage callback acquires it, so accept that dispatch's durable
+      // tail after terminal admission as well. Unknown dispatches remain a
+      // strict no-op (the caller can distinguish them from a missing run).
+      const acceptsTerminalUsage =
+        usageDispatch !== undefined &&
+        ['completed', 'failed', 'blocked', 'invalid'].includes(
+          usageDispatch.status,
+        )
+      if (
+        !usageDispatch ||
+        (!acceptsRunningUsage &&
+          !acceptsStoppedTailUsage &&
+          !acceptsTerminalUsage)
+      )
         return null
       const events = await readEventsUnlocked()
       const journalUsage = journalUsageHighWater(events)
@@ -1322,9 +1396,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           : run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === progress.dispatchId,
             )?.dispatch
-            ?? run.foundationAuditState?.tasks.find(
+            ?? (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(
               task => task.dispatch?.dispatchId === progress.dispatchId,
-            )?.dispatch
+            )?.dispatch : undefined)
         : undefined
       if (
         progress.dispatchId &&

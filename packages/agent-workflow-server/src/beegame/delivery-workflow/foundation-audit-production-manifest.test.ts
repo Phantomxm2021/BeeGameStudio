@@ -157,8 +157,7 @@ describe('service-owned deterministic production audit', () => {
     expect(issues[0]).toMatchObject({
       id: expect.stringMatching(/^AUD-[A-F0-9]{24}$/),
       type: 'contract',
-      fixDocument: 'docs/ASSET_PLAN.md',
-      fixSectionId: 'inventory',
+      remediation: { kind: 'patch', documentPath: 'docs/ASSET_PLAN.md', sectionIds: ['inventory'] },
     })
   })
 
@@ -197,8 +196,7 @@ describe('service-owned deterministic production audit', () => {
       id: expect.stringMatching(/^AUD-[A-F0-9]{24}$/),
       type: 'contract',
       severity: 'HIGH',
-      fixDocument: 'docs/ASSET_PLAN.md',
-      fixSectionId: 'inventory',
+      remediation: { kind: 'patch', documentPath: 'docs/ASSET_PLAN.md', sectionIds: ['inventory'] },
     })
   })
 
@@ -228,7 +226,7 @@ describe('service-owned deterministic production audit', () => {
       if (sourceKey === 'technical.target_fps') continue
       const mismatchIssues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: mismatch })
       expect(mismatchIssues.some(issue => issue.type === 'contract'), declaration.id).toBe(true)
-      expect(mismatchIssues.find(issue => issue.type === 'contract')?.fixDocument).toBe(declaration.source.documentPath)
+      expect(mismatchIssues.find(issue => issue.type === 'contract')?.remediation).toMatchObject({ kind: 'patch', documentPath: declaration.source.documentPath })
       expect(targetKey).toBeTruthy()
     }
   })

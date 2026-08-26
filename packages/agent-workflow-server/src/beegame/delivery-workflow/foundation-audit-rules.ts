@@ -98,8 +98,7 @@ function numericDrafts(
         source: first.source,
         expected: `all facts must be numeric and satisfy ${symbol(rule.relation)}`,
         actual: `non-numeric fact ${rule.facts[0].key}`,
-        fixDocument: first.source.documentPath,
-        fixSectionId: first.source.sectionId,
+        remediation: { kind: 'patch', documentPath: first.source.documentPath, sectionIds: [first.source.sectionId] },
         conflictIdentity: {
           relation: rule.relation,
           facts: Object.fromEntries(
@@ -128,8 +127,7 @@ function numericDrafts(
         target: entry.source,
         expected: `${rule.facts[0].key} ${symbol(rule.relation)} ${rule.facts[index].key}`,
         actual: `${display(first.value)} ${symbol(rule.relation)} ${display(entry.value)}`,
-        fixDocument: entry.source.documentPath,
-        fixSectionId: entry.source.sectionId,
+        remediation: { kind: 'patch', documentPath: entry.source.documentPath, sectionIds: [entry.source.sectionId] },
         conflictIdentity: {
           relation: rule.relation,
           facts: Object.fromEntries(
@@ -165,8 +163,7 @@ function entityDrafts(
       source: source.source,
       expected: `each referenced entity must have a fact with prefix ${rule.targetFactPrefix}`,
       actual: `missing entities: ${missing.map(String).join(', ')}`,
-      fixDocument: source.source.documentPath,
-      fixSectionId: source.source.sectionId,
+      remediation: { kind: 'patch', documentPath: source.source.documentPath, sectionIds: [source.source.sectionId] },
       conflictIdentity: {
         sourceFactKey: rule.source.key,
         sourceValue: source.value,

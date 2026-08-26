@@ -98,12 +98,63 @@ export type FoundationSemanticRecheckPacket = Readonly<{
   packetDigest: string
 }>
 
-export type FoundationSemanticRecheckResult = Readonly<{
-  issueId: string
-  packetDigest: string
-  status: 'PASS' | 'FAIL'
-  reasonCode?: string
+/** The only failure reasons admitted for targeted semantic rechecks. */
+export const FOUNDATION_SEMANTIC_FAILURE_REASON_CODES = Object.freeze([
+  'expected_not_met',
+  'actual_persists',
+  'contradictory_evidence',
+  'evidence_insufficient',
+] as const)
+
+export type FoundationSemanticFailureReasonCode = typeof FOUNDATION_SEMANTIC_FAILURE_REASON_CODES[number]
+export type FoundationSemanticScopeAssessment =
+  | 'repairable_in_scope'
+
+/** Minimal evidence a worker may report. The service resolves it to an exact SectionRef. */
+export type FoundationSemanticFailureEvidenceInput = Readonly<{
+  documentPath: FoundationDocumentPath
+  sectionId: string
+  digest: string
 }>
+
+/** Durable, non-authoritative diagnostic admitted by the service after a FAIL. */
+export type FoundationSemanticFailureDiagnostic = Readonly<{
+  unmetExpected: string
+  observedActual: string
+  evidence: readonly SectionRef[]
+  /** Service-pinned source/target dependencies used to invalidate stale PASS results. */
+  dependencySections: readonly SectionRef[]
+  failureReasonCode: FoundationSemanticFailureReasonCode
+  scopeAssessment: FoundationSemanticScopeAssessment
+}>
+
+export type FoundationSemanticFailureDiagnosticInput = Readonly<{
+  observedActual: string
+  evidence: readonly FoundationSemanticFailureEvidenceInput[]
+  failureReasonCode: FoundationSemanticFailureReasonCode
+  scopeAssessment: FoundationSemanticScopeAssessment
+}>
+
+export type FoundationSemanticRecheckServiceBinding = Readonly<{
+  taskId: string
+  issue: AuditIssue
+}>
+
+export type FoundationSemanticRecheckResult = Readonly<
+  | {
+      taskId: string
+      issueId: string
+      packetDigest: string
+      status: 'PASS'
+    }
+  | {
+      taskId: string
+      issueId: string
+      packetDigest: string
+      status: 'FAIL'
+      diagnostic: FoundationSemanticFailureDiagnostic
+    }
+>
 
 export type FoundationImpactedFactRebuild = {
   factStore: FoundationFactStore
@@ -368,15 +419,18 @@ function validateAdmittedIssue(
   const expectedKeys = [
     'actual',
     'expected',
-    'fixDocument',
-    'fixSectionId',
+    'remediation',
     'id',
     'reasonCode',
     'severity',
     'source',
     'target',
     'type',
-  ].filter(key => key === 'target' ? issue.target !== undefined : key === 'reasonCode' ? issue.reasonCode !== undefined : true).sort(compareStable)
+  ].filter(key => key === 'target'
+    ? issue.target !== undefined
+    : key === 'reasonCode'
+      ? issue.reasonCode !== undefined
+      : true).sort(compareStable)
   if (issueKeys.length !== expectedKeys.length || issueKeys.some((key, index) => key !== expectedKeys[index]))
     throw new Error('foundation admitted issue shape is invalid')
   if (
@@ -385,9 +439,10 @@ function validateAdmittedIssue(
     !VALID_ISSUE_TYPES.has(issue.type) ||
     typeof issue.expected !== 'string' || issue.expected.trim().length === 0 ||
     typeof issue.actual !== 'string' || issue.actual.trim().length === 0 ||
-    typeof issue.fixDocument !== 'string' || typeof issue.fixSectionId !== 'string' ||
-    issue.fixDocument !== documentPath ||
-    !allowedSections.has(`${documentPath}\0${issue.fixSectionId}`)
+    issue.remediation.kind !== 'patch' ||
+    issue.remediation.documentPath !== documentPath ||
+    issue.remediation.sectionIds.length === 0 ||
+    issue.remediation.sectionIds.some(sectionId => !allowedSections.has(`${documentPath}\0${sectionId}`))
   )
     throw new Error('foundation admitted issue fix target is outside the patch')
   const indexed = new Map(sectionIndex.map(section => [sectionKey(section), section]))
@@ -403,10 +458,11 @@ function issueTouchesImpact(
   impact: FoundationImpactAnalysis,
 ): boolean {
   const changed = new Set(impact.changedSections.map(sectionKey))
+  const remediation = issue.remediation
   if (
     changed.has(sectionKey(issue.source)) ||
     (issue.target !== undefined && changed.has(sectionKey(issue.target))) ||
-    changed.has(`${issue.fixDocument}\0${issue.fixSectionId}`)
+    (remediation.kind === 'patch' && remediation.sectionIds.some(sectionId => changed.has(`${remediation.documentPath}\0${sectionId}`)))
   )
     return true
 
@@ -476,18 +532,28 @@ function sectionText(input: DocumentInput, ref: SectionRef): string {
 
 function validateTargetedIssue(issue: AuditIssue): void {
   if (!issue || typeof issue !== 'object' || Array.isArray(issue)) throw new Error('targeted semantic issue is invalid')
-  const expected = ['actual', 'expected', 'fixDocument', 'fixSectionId', 'id', 'reasonCode', 'severity', 'source', 'target', 'type']
-    .filter(key => key === 'target' ? issue.target !== undefined : key === 'reasonCode' ? issue.reasonCode !== undefined : true)
+  const expected = ['actual', 'expected', 'id', 'reasonCode', 'remediation', 'severity', 'source', 'target', 'type']
+    .filter(key => key === 'target'
+      ? issue.target !== undefined
+      : key === 'reasonCode'
+        ? issue.reasonCode !== undefined
+        : true)
     .sort(compareStable)
   assertExactKeys(issue as unknown as Record<string, unknown>, expected, 'targeted semantic issue')
   if (
     issue.type !== 'semantic' || typeof issue.id !== 'string' || !issue.id.trim() ||
     typeof issue.expected !== 'string' || !issue.expected.trim() ||
     typeof issue.actual !== 'string' || !issue.actual.trim() ||
-    typeof issue.fixDocument !== 'string' || typeof issue.fixSectionId !== 'string' || !issue.fixSectionId.trim()
+    issue.remediation.kind !== 'patch' || issue.remediation.sectionIds.length === 0
   ) throw new Error('targeted semantic issue fields are invalid')
   if (issue.reasonCode !== undefined && (typeof issue.reasonCode !== 'string' || !issue.reasonCode.trim()))
     throw new Error('targeted semantic issue reasonCode is invalid')
+}
+
+function issueFixTargets(issue: AuditIssue): { documentPath: FoundationDocumentPath; sectionIds: readonly string[] } {
+  if (!issue.remediation || issue.remediation.kind !== 'patch' || issue.remediation.sectionIds.length === 0)
+    throw new Error('targeted semantic Issue remediation must name one or more patch sections')
+  return { documentPath: issue.remediation.documentPath, sectionIds: issue.remediation.sectionIds }
 }
 
 function currentTargetedSection(
@@ -520,7 +586,7 @@ export function buildFoundationSemanticRecheckPacket(input: {
   validateTargetedIssue(input.issue)
   const operationImpact = validateImpact(input.impact, [input.patchOperation])
   if (!input.patchOperation.issueIds.includes(input.issue.id)) throw new Error('targeted semantic packet issue is not bound to PatchOperation')
-  if (input.patchOperation.documentPath !== input.issue.fixDocument || input.patchOperation.sectionId !== input.issue.fixSectionId)
+  if (input.issue.remediation.kind !== 'patch' || input.patchOperation.documentPath !== input.issue.remediation.documentPath || !input.issue.remediation.sectionIds.includes(input.patchOperation.sectionId))
     throw new Error('targeted semantic packet PatchOperation does not bind the issue fix target')
   if (!Array.isArray(input.sectionIndex) || input.sectionIndex.length === 0) throw new Error('targeted semantic packet requires a full SectionIndex')
   const indexKeys = new Set<string>()
@@ -541,9 +607,12 @@ export function buildFoundationSemanticRecheckPacket(input: {
     input.issue.source,
     ...(input.issue.target ? [input.issue.target] : []),
   ]
-  const fixRef = input.sectionIndex.find(ref => ref.documentPath === input.issue.fixDocument && ref.sectionId === input.issue.fixSectionId)
-  if (!fixRef) throw new Error('targeted semantic packet fix section is not in the rebuilt SectionIndex')
-  sectionRefs.push(fixRef)
+  const fixTargets = issueFixTargets(input.issue)
+  for (const sectionId of fixTargets.sectionIds) {
+    const fixRef = input.sectionIndex.find(ref => ref.documentPath === fixTargets.documentPath && ref.sectionId === sectionId)
+    if (!fixRef) throw new Error('targeted semantic packet patch section is not in the rebuilt SectionIndex')
+    sectionRefs.push(fixRef)
+  }
   const uniqueRefs = new Map<string, SectionRef>()
   for (const ref of sectionRefs) {
     const key = sectionKey(ref)
@@ -583,6 +652,7 @@ export function buildFoundationSemanticRecheckPacket(input: {
 export function admitFoundationSemanticRecheckResult(
   packet: FoundationSemanticRecheckPacket,
   input: unknown,
+  serviceBinding: FoundationSemanticRecheckServiceBinding,
 ): FoundationSemanticRecheckResult {
   if (!packet || typeof packet !== 'object' || Array.isArray(packet)) throw new Error('targeted semantic packet is invalid')
   const packetValue = packet as unknown as Record<string, unknown>
@@ -591,18 +661,79 @@ export function admitFoundationSemanticRecheckResult(
   if (suppliedDigest !== targetedDigest(packetBody)) throw new Error('targeted semantic packet digest is invalid')
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('targeted semantic result is invalid')
   const value = input as Record<string, unknown>
-  const expected = ['issueId', 'packetDigest', 'reasonCode', 'status'].filter(key => key === 'reasonCode' ? value.reasonCode !== undefined : true)
-  assertExactKeys(value, expected, 'targeted semantic result')
-  if (value.issueId !== packet.issueId) throw new Error('targeted semantic result issue identity does not match packet')
-  if (value.packetDigest !== packet.packetDigest) throw new Error('targeted semantic result packet identity does not match packet')
-  if (value.status !== 'PASS' && value.status !== 'FAIL') throw new Error('targeted semantic result status must be PASS or FAIL')
-  if (value.reasonCode !== undefined && (typeof value.reasonCode !== 'string' || !value.reasonCode.trim())) throw new Error('targeted semantic result reasonCode is invalid')
+  if (typeof serviceBinding.taskId !== 'string' || !TASK_ID.test(serviceBinding.taskId))
+    throw new Error('targeted semantic service task identity is invalid')
+  validateTargetedIssue(serviceBinding.issue)
+  if (serviceBinding.issue.id !== packet.issueId) throw new Error('targeted semantic service Issue identity does not match packet')
+  if (serviceBinding.issue.expected !== packet.expected || serviceBinding.issue.actual !== packet.actual)
+    throw new Error('targeted semantic service Issue authority does not match packet')
+  const packetSource = packet.sections.find(item => item.ref.documentPath === serviceBinding.issue.source.documentPath && item.ref.sectionId === serviceBinding.issue.source.sectionId)
+  if (!packetSource)
+    throw new Error('targeted semantic service Issue source is outside packet authority')
+  const fixTargets = issueFixTargets(serviceBinding.issue)
+  if (fixTargets.documentPath !== packet.patchOperation.documentPath || !fixTargets.sectionIds.includes(packet.patchOperation.sectionId))
+    throw new Error('targeted semantic service Issue fix target does not match packet authority')
+
+  if (value.status === 'PASS') assertExactKeys(value, ['status'], 'targeted semantic worker PASS result')
+  else assertExactKeys(value, ['diagnostic', 'status'], 'targeted semantic worker result (structured diagnostic required)')
+  if (value.status === 'PASS') {
+    if (value.diagnostic !== undefined) throw new Error('targeted semantic PASS cannot contain a diagnostic')
+    return deepFreezeTargeted({ taskId: serviceBinding.taskId, issueId: packet.issueId, packetDigest: packet.packetDigest, status: 'PASS' })
+  }
+  if (value.status !== 'FAIL') throw new Error('targeted semantic result status must be PASS or FAIL')
+  const diagnostic = value.diagnostic
+  if (!diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic)) throw new Error('targeted semantic FAIL requires a structured diagnostic')
+  const diagnosticValue = diagnostic as Record<string, unknown>
+  assertExactKeys(diagnosticValue, ['evidence', 'failureReasonCode', 'observedActual', 'scopeAssessment'], 'targeted semantic diagnostic (worker cannot submit expected or identity)')
+  if (typeof diagnosticValue.observedActual !== 'string' || !diagnosticValue.observedActual.trim()) throw new Error('targeted semantic observedActual is required')
+  if (!FOUNDATION_SEMANTIC_FAILURE_REASON_CODES.includes(diagnosticValue.failureReasonCode as FoundationSemanticFailureReasonCode)) throw new Error('targeted semantic failureReasonCode is not stable or supported')
+  if (diagnosticValue.scopeAssessment !== 'repairable_in_scope') throw new Error('targeted semantic scopeAssessment is invalid')
+  const rawEvidence = diagnosticValue.evidence
+  if (!Array.isArray(rawEvidence) || rawEvidence.length === 0) throw new Error('targeted semantic diagnostic evidence is required')
+  const packetSections = new Map(packet.sections.map(item => [sectionKey(item.ref), item.ref]))
+  const evidenceKeys = new Set<string>()
+  const evidence: SectionRef[] = []
+  for (const item of rawEvidence) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('targeted semantic diagnostic evidence is invalid')
+    const candidate = item as Record<string, unknown>
+    assertExactKeys(candidate, ['digest', 'documentPath', 'sectionId'], 'targeted semantic diagnostic evidence')
+    if (typeof candidate.documentPath !== 'string' || typeof candidate.sectionId !== 'string' || typeof candidate.digest !== 'string' || !DIGEST.test(candidate.digest)) throw new Error('targeted semantic diagnostic evidence reference is invalid')
+    const key = `${candidate.documentPath}\0${candidate.sectionId}`
+    const ref = packetSections.get(key)
+    if (!ref) throw new Error('targeted semantic diagnostic evidence references an unassigned Section')
+    if (ref.digest !== candidate.digest) throw new Error('targeted semantic diagnostic evidence digest is stale')
+    if (evidenceKeys.has(key)) throw new Error('targeted semantic diagnostic evidence contains duplicate Sections')
+    evidenceKeys.add(key)
+    evidence.push({ ...ref })
+  }
+  const dependencySections = packet.sections
+    .filter(item => sectionKey(item.ref) === sectionKey(serviceBinding.issue.source) || (serviceBinding.issue.target !== undefined && sectionKey(item.ref) === sectionKey(serviceBinding.issue.target)))
+    .map(item => ({ ...item.ref }))
+  if (!dependencySections.length) throw new Error('targeted semantic diagnostic has no source/target dependency evidence')
   return deepFreezeTargeted({
+    taskId: serviceBinding.taskId,
     issueId: packet.issueId,
     packetDigest: packet.packetDigest,
-    status: value.status,
-    ...(value.reasonCode !== undefined ? { reasonCode: value.reasonCode as string } : {}),
+    status: 'FAIL',
+    diagnostic: {
+      unmetExpected: serviceBinding.issue.expected,
+      observedActual: diagnosticValue.observedActual as string,
+      evidence,
+      dependencySections,
+      failureReasonCode: diagnosticValue.failureReasonCode as FoundationSemanticFailureReasonCode,
+      scopeAssessment: diagnosticValue.scopeAssessment as FoundationSemanticScopeAssessment,
+    },
   })
+}
+
+/** Explicit controller integration entry point. Worker payload contains no
+ * task/packet/Issue identity; the service binding supplies all of them. */
+export function admitFoundationSemanticRecheckWorkerResult(
+  packet: FoundationSemanticRecheckPacket,
+  workerResult: unknown,
+  serviceBinding: FoundationSemanticRecheckServiceBinding,
+): FoundationSemanticRecheckResult {
+  return admitFoundationSemanticRecheckResult(packet, workerResult, serviceBinding)
 }
 
 export function digestFoundationSemanticRecheckResult(value: FoundationSemanticRecheckResult): string {
@@ -663,11 +794,10 @@ export function validateFoundationPatch(
     impact.issueIds.some(id => !issueIds.has(id))
   )
     throw new Error('foundation admitted issue coverage does not match impact.issueIds')
-  const operationIssueIds = input.patchOperations.flatMap(operation => operation.issueIds)
+  const operationIssueIds = new Set(input.patchOperations.flatMap(operation => operation.issueIds))
   if (
-    operationIssueIds.length !== impact.issueIds.length ||
-    new Set(operationIssueIds).size !== operationIssueIds.length ||
-    impact.issueIds.some(id => !operationIssueIds.includes(id))
+    operationIssueIds.size !== impact.issueIds.length ||
+    impact.issueIds.some(id => !operationIssueIds.has(id))
   )
     throw new Error('foundation PatchOperation issue coverage is not exact')
 

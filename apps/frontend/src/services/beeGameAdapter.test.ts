@@ -269,7 +269,6 @@ describe('beeGameAdapter prompt rules', () => {
       }),
     );
   });
-
   it('does not migrate browser-local project metadata into the canonical project repository', async () => {
     localStorage.setItem('beegame-adapter-projects', JSON.stringify([
       {

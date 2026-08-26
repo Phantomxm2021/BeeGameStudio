@@ -2230,9 +2230,18 @@ export class BeeGameSessionManager {
             workflowDispatchId,
           )
           if (!persisted) {
-            throw new Error(
-              'workflow run disappeared before usage was persisted',
-            )
+            // `addWorkflowUsage` also returns null for a stale dispatch after
+            // a terminal commit. Only report the strict data-loss case when
+            // the authoritative run itself is gone.
+            const current = await createRunStore(
+              record.session.cwd,
+              record.userId,
+            ).load()
+            if (!current)
+              throw new Error(
+                'workflow run disappeared before usage was persisted',
+              )
+            return
           }
           addRuntimeUsage(record.workflowUsageCommitted, delta)
         })

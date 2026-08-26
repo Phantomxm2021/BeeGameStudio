@@ -41,31 +41,29 @@ export function buildFoundationRevisionBatches(input: {
       throw new Error(`duplicate issue ID in revision input: ${issue.id}`)
     seenIssueIds.add(issue.id)
 
-    const documentPath = issue.fixDocument
-    const sectionId = issue.fixSectionId
-    if (!isCanonicalDocument(documentPath) || typeof sectionId !== 'string')
-      throw new Error(`revision issue fix target is outside canonical authority: ${issue.id}`)
-
-    const authority = input.registry.section(documentPath, sectionId)
-    if (!authority)
-      throw new Error(`revision issue fix section is unknown to the validated registry: ${documentPath}#${sectionId}`)
-    if (
-      authority.documentPath !== documentPath ||
-      authority.sectionId !== sectionId
-    )
-      throw new Error(`revision issue fix section disagrees with registry authority: ${issue.id}`)
+    const documentPath = issue.remediation.documentPath
+    const sectionIds = issue.remediation.sectionIds
+    if (!isCanonicalDocument(documentPath) || !sectionIds.length || new Set(sectionIds).size !== sectionIds.length)
+      throw new Error(`revision issue patch target is outside canonical authority: ${issue.id}`)
 
     const contract = getGameDocumentContract(documentPath)
-    if (!contract.sections.some(section => section.sectionId === sectionId))
-      throw new Error(`revision issue fix section is not canonical: ${documentPath}#${sectionId}`)
+    for (const sectionId of sectionIds) {
+      const authority = input.registry.section(documentPath, sectionId)
+      if (!authority)
+        throw new Error(`revision issue patch section is unknown to the validated registry: ${documentPath}#${sectionId}`)
+      if (authority.documentPath !== documentPath || authority.sectionId !== sectionId)
+        throw new Error(`revision issue patch section disagrees with registry authority: ${issue.id}`)
+      if (!contract.sections.some(section => section.sectionId === sectionId))
+        throw new Error(`revision issue patch section is not canonical: ${documentPath}#${sectionId}`)
+    }
 
     const current = grouped.get(documentPath)
     if (current) {
-      current.sectionIds.add(sectionId)
+      for (const sectionId of sectionIds) current.sectionIds.add(sectionId)
       current.issueIds.push(issue.id)
     } else {
       grouped.set(documentPath, {
-        sectionIds: new Set([sectionId]),
+        sectionIds: new Set(sectionIds),
         issueIds: [issue.id],
       })
     }

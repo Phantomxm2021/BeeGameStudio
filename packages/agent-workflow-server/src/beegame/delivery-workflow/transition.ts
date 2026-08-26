@@ -11,6 +11,7 @@ import type {
   FoundationAuditTask,
   FoundationRevisionTask,
 } from './foundation-audit-state'
+import { activeFoundationRevisionTasks, foundationRuntimeTasks } from './foundation-audit-state'
 import { isActiveFoundationRepairState } from './display-progress'
 
 export class WorkflowTransitionError extends Error {
@@ -115,6 +116,18 @@ function isUserStoppedFoundationRetryTask(
   )
 }
 
+function isActionableDocumentRevisionRetryTask(
+  task: FoundationRetryTask,
+  taskId: string | undefined,
+): boolean {
+  return (
+    (!taskId || task.taskId === taskId) &&
+    task.kind === 'document-revision' &&
+    task.status === 'needs_action' &&
+    (task.dispatch?.status === 'invalid' || task.dispatch?.status === 'failed')
+  )
+}
+
 function isRetryableFoundationRevisionBoundary(
   state: FoundationAuditState,
   runStatus: DeliveryRun['status'],
@@ -122,8 +135,10 @@ function isRetryableFoundationRevisionBoundary(
 ): boolean {
   if (taskId) return false
   if (runStatus !== 'needs_action') return false
-  if (state.status !== 'planning' && state.status !== 'validating') return false
-  return state.tasks.length === 0 || state.tasks.every(task => task.status === 'completed')
+  if (state.status === 'planning') return true
+  if (state.status !== 'validating') return false
+  const activeTasks = activeFoundationRevisionTasks(state)
+  return activeTasks.length > 0 && activeTasks.every(task => task.status === 'completed')
 }
 
 function fail(message: string): never {
@@ -577,18 +592,30 @@ export function transitionDeliveryRun(
               }),
             }
           : undefined
-        let revisionRevived = false
-        const nextRevisionState = revisionState
+    let revisionRevived = false
+    const nextRevisionState = revisionState && revisionState.status !== 'planning'
           ? {
               ...revisionState,
+              ...(() => {
+                const activeTaskIds = new Set(foundationRuntimeTasks(revisionState).map(task => task.taskId))
+                return {
               tasks: revisionState.tasks.map(task => {
-                if (
-                  (!isEligibleFoundationRetryTask(task, event.taskId) &&
-                    !isUserStoppedFoundationRetryTask(task, event.taskId)) ||
-                  (!['impacted-facts', 'semantic-recheck'].includes(task.kind) &&
-                    !(task.kind === 'document-revision' &&
-                      isUserStoppedFoundationRetryTask(task, event.taskId)))
+                if (!activeTaskIds.has(task.taskId)) return task
+                const actionableDocumentRetry =
+                  revisionState.status === 'revising' &&
+                  isActionableDocumentRevisionRetryTask(task, event.taskId)
+                const userStoppedRetry = isUserStoppedFoundationRetryTask(
+                  task,
+                  event.taskId,
                 )
+                const canReviveDocument =
+                  task.kind === 'document-revision' &&
+                  (actionableDocumentRetry || userStoppedRetry)
+                const canReviveRevisionWorker =
+                  ['impacted-facts', 'semantic-recheck'].includes(task.kind) &&
+                  (isEligibleFoundationRetryTask(task, event.taskId) ||
+                    userStoppedRetry)
+                if (!canReviveDocument && !canReviveRevisionWorker)
                   return task
                 revisionRevived = true
                 return {
@@ -597,6 +624,8 @@ export function transitionDeliveryRun(
                   failureReason: undefined,
                 }
               }),
+                }
+              })(),
             }
           : undefined
         const revisionBoundaryRevived = revisionState
@@ -606,10 +635,15 @@ export function transitionDeliveryRun(
               event.taskId,
             )
           : false
+        const revisionBoundaryNeedsFactReplan = Boolean(
+          revisionBoundaryRevived &&
+          revisionState?.status === 'validating' &&
+          activeFoundationRevisionTasks(revisionState).every(task => task.kind === 'document-revision'),
+        )
         const foundationStateInCurrentPhase = !!(
           auditState?.tasks.some(task => task.status === 'needs_action') ||
           (revisionState && run.status === 'needs_action') ||
-          revisionState?.tasks.some(task => task.status === 'needs_action')
+          (revisionState && revisionState.status !== 'planning' && activeFoundationRevisionTasks(revisionState).some(task => task.status === 'needs_action'))
         )
         const foundationRevived = auditRevived || revisionRevived || revisionBoundaryRevived
         const preserveFoundationActionableState =
@@ -619,6 +653,9 @@ export function transitionDeliveryRun(
           status: preserveFoundationActionableState ? run.status : 'running',
           ...(auditRevived ? { foundationAuditState: nextAuditState } : {}),
           ...(revisionRevived ? { foundationAuditState: nextRevisionState } : {}),
+          ...(revisionBoundaryNeedsFactReplan
+            ? { foundationAuditState: { ...revisionState!, status: 'rebuilding_facts' as const } }
+            : {}),
           ...(run.phase === 'DOCUMENT_DRAFTING' &&
           run.foundationDraftState.documents
             ? {

@@ -58,7 +58,7 @@ Fact Store 不是普通摘要，而是可比较、可校验的标准化事实集
 
 Fact extraction uses the current versioned closed catalog (`foundation-facts.v2`) as authority: packets carry exact owner Section text and sort document/section/key identities canonically. A fact worker's packet is its sole business input. It returns only business fields (`key`, `status`, typed `value` or `reason`); provenance is service-owned and bound from the immutable packet's catalog owner Section when the durable terminal is constructed. It may receive only language, immutable task/revision/packet identities, the strict output schema, explicit read/write denial, and the packet itself; it must not receive the Confirmed Brief, workspace context, canonical document inventory, or generic project instructions. Brief-derived constraints are projected by local code into catalog keys or immutable digests before dispatch.
 
-Local mechanical extraction runs first. Final publication merges mechanically extracted facts with admitted worker facts and their closed receipts. Present mechanical keys and every admitted worker receipt (including absent or uncertain outcomes) must account for the catalog exactly once; the published Fact Store contains present facts only, while absent/uncertain receipts remain durable audit evidence and drive deterministic or semantic issues instead of blocking derived publication. Resolved mechanical facts must not be discarded merely because no worker returned them.
+Local mechanical extraction runs first. Final publication merges mechanically extracted facts with admitted worker facts and their closed evidence. Present mechanical keys and every admitted worker result (including absent or uncertain outcomes) must account for the catalog exactly once; the published Fact Store contains present facts only, while absent/uncertain results remain durable audit evidence and drive deterministic or semantic issues instead of blocking derived publication. Resolved mechanical facts must not be discarded merely because no worker returned them.
 
 > {  
 > "players.max": 4,  
@@ -152,24 +152,46 @@ Semantic packet discipline is part of this authority: when normalized Facts alre
 
 # 7. Issue Registry
 
-> {  
-> "id": "AUD-023",  
-> "severity": "high",  
-> "type": "cross_doc_conflict",  
-> "source_doc": "GDD",  
-> "target_doc": "AssetPlan",  
-> "source_fact": "boss.count",  
-> "expected": 3,  
-> "actual": 2,  
-> "fix_doc": "AssetPlan",  
-> "fix_section": "Boss Assets"  
-> }
+```json
+{
+  "id": "AUD-023",
+  "severity": "HIGH",
+  "type": "contract",
+  "source": {
+    "documentPath": "docs/GDD.md",
+    "sectionId": "rules_systems",
+    "heading": "Gameplay Rules and Systems",
+    "startLine": 42,
+    "endLine": 68,
+    "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "target": {
+    "documentPath": "docs/ASSET_PLAN.md",
+    "sectionId": "inventory",
+    "heading": "Asset and Content Inventory",
+    "startLine": 30,
+    "endLine": 57,
+    "digest": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+  },
+  "expected": "The Asset Plan inventory declares the same boss count as the GDD.",
+  "actual": "The GDD declares 3 bosses, while the Asset Plan inventory declares 2.",
+  "remediation": {
+    "kind": "patch",
+    "documentPath": "docs/ASSET_PLAN.md",
+    "sectionIds": ["inventory"]
+  }
+}
+```
 
-严重程度：BLOCKER / HIGH / MEDIUM / LOW。所有已进入 Registry 的问题都必须自动进入修订，不因 severity 被豁免。
+严重程度：BLOCKER / HIGH / MEDIUM / LOW。Issue Registry 中每个业务问题必须且只能携带 `patch` remediation，指定同一 canonical 文档中的一个或多个完整 Section；所有 severity 均自动进入 stage 4 修订，不得豁免。Reviewer 必须依据 Source of Truth 顺序、明确硬约束与最小改动原则，直接确定能使 `expected` 成立的最佳单文档 Patch；不得暂停等待外部裁决、不得生成分支路径，也不得保留第二种 remediation 或 `fixDocument` / `fixSectionId` 兼容字段。
 
-审计问题与运行完整性失败必须分离：业务矛盾、遗漏和新发现的问题进入并发布唯一的 Issue Registry，驱动下一修订轮；已提交“完成”的终态却缺失、非法或冲突的 receipt，stale digest、越权 Section、非法 Patch、身份不匹配等完整性失败不进入 Registry，直接 fail closed 并进入 `needs_action`。发现新 Issue 不是拒绝发布本轮 Registry 的理由。未调用 terminal 或在 durable terminal 前结束属于 task attempt 失败，按下文重试边界处理。
+`patch` 只在其 `expected` 能由指定 Section 独立实现、且不需要下游重新解释或覆盖上游 Source of Truth 时允许入场。多个目标 Section 必须属于同一文档；跨文档冲突必须拆成各自拥有单文档修复 authority 的独立 Issue，分别派发对应文档的 Patch，禁止用一个跨文档修订掩盖 authority 边界。服务必须在 revision dispatch 前完成结构与 authority admission；Reviewer 必须在既定硬约束内收敛到最小改动，不能把业务问题升级为人工等待。
 
-Worker 未调用必需的 durable terminal，或在 durable terminal 之前结束，只表示该 task 的本次 attempt 失败；不得伪造 receipt、不得把缺 terminal 当作业务 PASS/ISSUE，也不得立即把整个 Foundation run 变成人工 `needs_action`。只要该 task 尚未达到其既有 attempt boundary，controller 必须按普通 failed/retryable 语义创建 fresh dispatch；attempt 耗尽后才允许该 task 与 run 进入 `needs_action`。真正的完整性失败、强确认后的 `UNDECIDABLE`、产品决策或 authority 无进展仍直接进入 `needs_action`。
+已知 gap-budget 冲突必须按现有玩法的最小权威解释修复：`FIXED_SETTLEMENT_DEW` 表示“一次间隙至少可执行一个有意义动作、但固定结算本身不足以同时补塔与升级”的取舍边界只约束该间隙新发放的固定结算 `S_w`；此前保存的余额与击杀掉落仍是玩家可即时消费或保留的技术奖励，不得被文案假定为强制波内花完。若 GDD 使用“间隙全部可用露珠”等含糊或扩大表述，必须在 GDD progression owner 中澄清；Balance 已明确按 `S_w` 实现时不得生成无进展 Patch。不得为满足该边界发明余额上限、过期、强制消费或双钱包等未获授权的新玩法。
+
+审计问题与运行完整性失败必须分离：业务矛盾、遗漏和新发现的问题进入并发布唯一的 Issue Registry，驱动下一修订轮；缺失或非法 terminal、越权 Section、非法 Patch、receipt 不完整等可由 fresh revision attempt 纠正的提交失败不进入 Registry，也不得进入人工 `needs_action`，必须 fail closed、丢弃该失败 attempt 的 staged bytes 并自动重派同一文档。只有不可恢复的 authority/integrity 冲突、当前进程无法自行恢复的外部执行前置条件缺失（例如必需模型配置、凭据或 credits 不可用）、strong confirmation 仍为 `UNDECIDABLE` 或 authority 无进展才进入 `needs_action`。短暂的 provider/receipt/callback 失败仍自动重试，不得伪装成业务决策。发现新 Issue 不是拒绝发布本轮 Registry 的理由。
+
+Worker 未调用必需的 durable terminal、在 durable terminal 之前结束、提交非法终态、修改越权 Section 或生成非法 receipt，只表示该 revision task 的本次 attempt 失败；不得伪造 evidence、不得把失败当作业务 PASS/ISSUE，也不得把整个 Foundation run 变成人工 `needs_action`。Revision worker 的唯一合法终态是 `APPLIED(changedSectionIds)`；每次重派前服务必须从本轮 canonical base 重新建立干净 staged document，并把上一失败 attempt 的结构化诊断加入新 dispatch prompt。Revision task 不设固定 attempt 次数上限，必须自动重派直到形成合法 Patch 并通过定向复核；该自动重试不改变 round、base authority、immutable Issue packet 或已冻结的其他文档。除上述 `needs_action` 条件外，短暂的 provider/receipt/callback 失败仍自动重试，不得伪装成业务决策。
 
 # 8. Source of Truth
 
@@ -188,7 +210,7 @@ GDD，但不能静默改变玩法。
 
 # 9. 修订：Batch Patch，而不是全文重写
 
-先按 Doc + Section 聚合 Issue，再一次修复同一文档的问题。
+先按 remediation 的 Doc + Section 聚合全部 `patch` Issue，再一次修复同一文档的问题。Reviewer 发现业务 Issue 后必须进入 stage 4；不同文档的冲突已拆为不同的单文档 batch，不得在此阶段等待人工介入。
 
 > 17 Issues  
 > ↓ group by Doc  
@@ -198,6 +220,8 @@ GDD，但不能静默改变玩法。
 > UI 4 issues → 1 revision call
 
 不同文档的修订并行执行，墙钟时间接近最慢的单个修订任务，而不是所有任务耗时相加。
+
+每个 immutable revision packet 必须携带完整 Issue、全部可写目标 Section、为判断冲突所必需的只读 source/target Section 与 Source of Truth 顺序；同一 round 上一失败 attempt 的结构化诊断由服务作为 retry-only dispatch prompt overlay 注入，不得改写 packet 或其 digest。对 Fact / Schema Issue，packet 还必须携带可写 Section 对应的 closed-catalog `factConstraints`，至少绑定 fact key、owner、value type/spec、presence、`extractionInstruction` 与 `sourceOfTruthDirection`；若约束要求显式映射表或其他语义结构，独立事实声明、格式调整或同义改写不算修复。只读证据不扩大写权限。Worker 必须让 `expected` 成立并消除 `actual`；不得用新增别名、兼容说明、风险登记、措辞限定或“读作同一概念”替代修复。未列入 `sectionIds` 的 risk、appendix、consistency 或其他相关 Section 必须保持 byte-identical。Revision worker 只能声明唯一合法终态 `APPLIED(changedSectionIds)`；任何其他输出均是本次 attempt failure evidence，controller 必须自动重派，不能把业务歧义、scope 争议或可恢复提交错误直接转为 `needs_action`。
 
 ## 9.1 Patch 格式
 
@@ -211,7 +235,7 @@ GDD，但不能静默改变玩法。
 
 支持 INSERT / REPLACE / DELETE。禁止默认整篇重写。
 
-修订提交时，文档 frontmatter 的 `version` 与 `updated_at` 是服务所有的元数据：服务以本轮修订前的 canonical 文档为唯一 authority，将 PATCH 版本递增一次并推进 `updated_at`，然后才从最终 staged bytes 派生 receipt、验证和发布 digest。worker 不得改变这两个字段；同一 task/round 的重试或 Submit 重放必须保持已递增的元数据不变，缺失、格式非法、非预期版本或时间未推进都必须 fail closed。
+修订提交时，文档 frontmatter 的 `version` 与 `updated_at` 是服务所有的元数据：服务以本轮修订前的 canonical 文档为唯一 authority，为本轮计算唯一候选 PATCH 版本并推进候选 `updated_at`，然后从最终 staged bytes 派生验证 digest。候选元数据在 COMMITTED 前不是 canonical authority；失败 attempt 不得改变 canonical 元数据。同一 task/round 的重试或 Submit 重放必须复用同一候选版本与时间，不得再次递增。Worker 不得改变这两个字段；缺失、格式非法、非预期版本或时间未推进都必须 fail closed。
 
 # 10. 修订后验证：验证 Patch，不重新审整份文档
 
@@ -228,6 +252,12 @@ GDD，但不能静默改变玩法。
 
 只有 Patch 引入新的语义风险或代码规则无法判定时，才触发 Targeted LLM
 Recheck。
+
+Targeted Recheck 只允许返回 `PASS | FAIL`，不得返回 Stage 3 审计使用的 `ISSUES | UNDECIDABLE`、发现新 Issue 或改写原 Issue。其 `FAIL` 必须返回结构化诊断：Patch 后观察到的 `actual`、精确 Section evidence 与稳定 reason code；未满足的原 `expected` 由服务从 admitted Issue 注入，worker 不得回传或改写。诊断只属于 attempt evidence，不得改写 Issue、confirmed brief、canonical 文档或 Source of Truth，也不得替代下一次 Patch。
+
+任何 PatchValidation 为 `FAIL | UNDECIDABLE`、Targeted Recheck 为 `FAIL`，或 revision worker 未返回唯一合法的 `APPLIED(changedSectionIds)` 时，本轮 staged authority 都不得写入 canonical、不得产生 COMMITTED、不得推进正式文档版本或 document revision。controller 在同一 round、同一 base authority 内只自动重派失败文档；已经 PASS 的 staged bytes 必须冻结，后续 attempt 不得无条件重写。每个 PASS validation 必须绑定其全部 source/target dependency digests；任一依赖因其他文档的新 attempt 变化时，该 validation 立即失效并必须针对最终 staged bundle 重跑。重验 PASS 时继续复用冻结 bytes，重验 FAIL 时才解冻该文档并纳入下一次失败文档集合。可恢复的 revision/validation failure、短暂的 provider/receipt/callback 失败不得进入 `needs_action`，仍须自动重试且不得伪装成业务决策；只有不可恢复的 authority/integrity 冲突、当前进程无法自行恢复的外部执行前置条件缺失（例如必需模型配置、凭据或 credits 不可用）、strong confirmation 仍为 `UNDECIDABLE` 或 authority 无进展时才进入 `needs_action`。
+
+只有本轮全部文档和 Issue 均验证 PASS，服务才可用 PREPARED / JOURNAL 执行可恢复的 roll-forward，并在完整 COMMITTED 后一次性向 controller 与 Dashboard 暴露新的 canonical authority。多文件 publication 是 journaled logical atomicity；中途状态不得被投影为已提交 authority。
 
 # 11. Impact Analysis
 
@@ -253,7 +283,7 @@ Recheck。
 
 | **控制项** | **建议**                                 |
 |------------|------------------------------------------|
-| LLM 输入   | 只传 Issue + 目标 Section + 必要 Facts   |
+| LLM 输入   | 只传 Issue + 可写目标 Section + 必要只读 source/target Section、Facts 与已 admitted 诊断 |
 | LLM 输出   | 强制 JSON / Patch，不允许长篇解释        |
 | Issue 处理 | Registry 中的所有 severity 均须处理       |
 | 修订调用   | 同文档合并，一文档尽量一次               |
@@ -265,23 +295,21 @@ Recheck。
 
 预算必须由“必需任务数 × 每任务输入/输出/重试边界”推导，并逐任务记录实际 token、duration 和 failure reason。不得用无法容纳全部必需 packet 的任意全局 token cap，或共享墙钟 deadline，提前终止尚未打开的任务。超时与重试在单任务边界执行；恢复不得重置、绕过或伪造这些边界。
 
-每任务的输出边界由严格结构化 Schema、任务身份/作用域、provider/native 输出约束和重试次数共同定义；不得再用一个固定 token 估算值二次拒绝已经满足业务契约的合法结果。Foundation packet worker 的最终结构化输出仅在进入服务的基础设施边界执行 2 MiB UTF-8 JSON 上限，防止异常 payload 造成资源耗尽；该上限不是审计质量、Issue 数量或业务复杂度预算，超限必须明确归类为基础设施失败。
+每任务的输出边界由严格结构化 Schema、任务身份/作用域与 provider/native 输出约束定义；重试次数仅可作为 Stage 3 fact、semantic、strong-confirmation 或 provider/native 单次 dispatch 的有界边界，不得把 attempt 次数作为 Stage 4 document-revision、impacted-facts 或 semantic-recheck 的输出或停止边界。不得再用一个固定 token 估算值二次拒绝已经满足业务契约的合法结果。Foundation packet worker 的最终结构化输出仅在进入服务的基础设施边界执行 2 MiB UTF-8 JSON 上限，防止异常 payload 造成资源耗尽；该上限不是审计质量、Issue 数量或业务复杂度预算，超限必须明确归类为基础设施失败。
 
 文档 authoring、Fact、semantic 与 revision 的合法业务输入同样不得按统一字符数、token 数或 KiB 数截断或拒绝；作用域必须由 Section、Fact、Issue、Contract 与 Impact 决定。基础设施 payload 防护可保留，但必须与业务复杂度预算分离，并以明确的基础设施错误呈现。
 
 # 14. 停止条件
 
-每轮成功验证后必须原子发布一个新的、不可变且 revision-bound 的文档 authority、derived artifacts 与 Issue Registry；下一轮只能引用该 authority。只要 Registry 非空，就必须修订其中全部 severity，并在 authority 发生变化后进入 `round + 1` 的定向增量验证；不得设置固定最大轮次或按预设轮次分配 severity 预算。只有 Registry 为空才允许 PASS/进入后续流程。
+Reviewer 发现业务 Issue 后，controller 必须立即将其纳入唯一 Issue Registry 并派发 stage 4 Patch；所有 severity 一律处理。Stage 4 完成后执行定向复核；若 Registry 仍非空，必须引用新 authority 继续下一轮 stage 4，直到 Registry 清零。不得因业务歧义、范围争议或跨文档冲突暂停流程；这些情况必须由 Reviewer 依据 Source of Truth、明确硬约束与最小改动原则拆分并完成单文档 Patch。只有 Registry 为空才允许 PASS/进入后续流程。不得设置固定最大轮次或按预设轮次分配 severity 预算。
 
-仅在完整性失败、强确认后仍为 `UNDECIDABLE` 或需要产品决策、或 authority 确实无进展时进入 `needs_action`；Issue Registry 是唯一完成与进展 authority，同一 Registry digest 在一轮修订和定向验证后仍然不变即表示无进展，即使 worker 改动了文档 bytes、生成了新 document revision，也不得用这些内容漂移掩盖无进展并继续下一轮。不得以任何 severity 豁免未清零的 Registry，也不得创建另一条候选/兼容修订轨道。
+仅在不可恢复的 authority/integrity 冲突、当前进程无法自行恢复的外部执行前置条件缺失（例如必需模型配置、凭据或 credits 不可用）、strong confirmation 仍为 `UNDECIDABLE` 或 authority 确实无进展时进入 `needs_action`；revision task 的失败 attempt、定向复核 FAIL 以及短暂的 provider/receipt/callback 失败必须留在自动闭环内，仍自动重试且不得伪装成业务决策，不能以 attempt 耗尽要求人工介入。Issue Registry 是唯一完成与进展 authority，同一 Registry digest 在一轮修订和定向验证后仍然不变即表示无进展，即使 worker 改动了文档 bytes、生成了新 document revision，也不得用这些内容漂移掩盖无进展并继续下一轮。不得以任何 severity 豁免未清零的 Registry，也不得创建另一条候选/兼容修订轨道。
 
 # 15. 最终生产 Pipeline
 
 > Idea  
 > ↓  
 > 3 Briefs  
-> ↓  
-> 用户选择 + 配置  
 > ↓  
 > Generate 8 Docs  
 > ↓  
@@ -341,6 +369,8 @@ Recheck。
 > ↓  
 > 修改代码
 
+普通用户在 DELIVERY 阶段的问答/后续 change 入口不是 Foundation Issue remediation 或产品决策分支，不得影响 reviewer→stage4 自动闭环。
+
 # 17. 预期收益
 
 | **维度**   | **优化结果**                                     |
@@ -374,15 +404,16 @@ Recheck。
 - LLM 负责语义判断，而不是承担所有审计。
 
 - 单一 durable task collection 负责 dispatch、恢复与审计记录；不得为暂停恢复、Reviewer 或 revision candidate 创建第二套状态机。
-- 原生 revision worker 每个 dispatch 使用唯一空 sandbox cwd；真实 project workspace 只能通过 service 注入的受信环境变量供 receipt tool 使用。Read/Edit 必须在 tool input validation 层精确拒绝 canonical、其他 staged path、workspace 外路径和 symlink，即使全局 permission rule 会自动 allow；普通非 revision worker 的工具行为不变。
+- 原生 revision worker 每个 dispatch 使用唯一空 sandbox cwd；真实 project workspace 只能通过 service 注入的受信环境变量供 revision tool 使用。Read/Edit 必须在 tool input validation 层精确拒绝 canonical、其他 staged path、workspace 外路径和 symlink，即使全局 permission rule 会自动 allow；普通非 revision worker 的工具行为不变。
 - 原生 revision worker 的工具面只能包含 `Read`、`Edit` 和 `SubmitFoundationRevisionResult`；不得暴露 Bash、Grep、Glob 或任何其他文件访问/旁路工具。该白名单与 Read/Edit 的输入层拒绝共同构成唯一 revision 文件访问边界。
 
 - 唯一持久化字段是 `foundationAuditState`：audit 与 revision 通过该状态内互斥的 substage/status 和同一 `tasks[]` 表达。禁止保留 `foundationRevisionState`、别名、双读/双写、旧 schema reader、迁移器或 fallback；携带旧顶层字段的 durable run 必须由 strict schema fail closed，而不是被静默接纳。
 
 - Review copy 初始化直接进入唯一可运行的 `FOUNDATION_REVIEW` 状态并由同一 controller 启动；不得先持久化虚假 `needs_action`/`implementation unavailable` 再由另一入口覆盖。
 
-- Dashboard 只投影普通任务状态、轮次与 Issue 数量；它不是审计或修订 authority，也不展示原始 Registry JSON、worker thinking、过程 prose 或原始 feedback。Foundation review 期间的 worker message 只保留在运行日志与 durable evidence 中，不进入阶段卡片。
+- Dashboard 只投影普通任务状态、轮次、Issue 数量/严重程度摘要、按任务聚合的 compact task telemetry（usage/duration）与 safe projected failure reason；它不是审计或修订 authority，也不展示 raw Registry JSON、`problem`/`actual`/`evidence`、worker prose/thinking 或 worker feedback。Foundation review 期间的 worker message 只保留在运行日志与 durable evidence 中，不进入阶段卡片。
 - 阶段显示必须将 Foundation 审计与修订分开：审计固定为显示 stage 3，修订固定为显示 stage 4。stage 4 是仅用于显示的虚拟 identity，底层仍只有 `DOCUMENT_REVIEW` 与唯一持久化 `foundationAuditState`；冻结的审计卡必须保留 stage 3，进入修订时生成 stage 4 live card，checklist drafting 不得回退到 stage 3。
+- 所有业务 Issue（包括首次审计发现的 Issue）在 Registry 发布后均直接进入 stage 4；不存在因业务歧义、范围争议、跨文档冲突或 revision attempt 失败停留在 stage 3/4 的 `needs_action` 分支。stage 4 只有在不可恢复的 authority/integrity 冲突、当前进程无法自行恢复的外部执行前置条件缺失（例如必需模型配置、凭据或 credits 不可用）、strong confirmation 仍为 `UNDECIDABLE` 或 authority 无进展时才可显示 `needs_action`；短暂的 provider/receipt/callback 失败仍自动重试，不得伪装成业务决策。
 
 - 所有终态任务都保留 usage、duration 与 failure reason，确保成本和失败可按任务追溯。
 

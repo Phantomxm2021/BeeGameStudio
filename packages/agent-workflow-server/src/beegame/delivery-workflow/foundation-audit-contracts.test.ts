@@ -111,8 +111,7 @@ describe('mandatory immutable foundation contracts', () => {
     expect(issues[0]).toMatchObject({
       source: level,
       target: gdd,
-      fixDocument: gdd.documentPath,
-      fixSectionId: gdd.sectionId,
+      remediation: { kind: 'patch', documentPath: gdd.documentPath, sectionIds: [gdd.sectionId] },
     })
   })
 

@@ -20,6 +20,7 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type DeliveryRun,
 } from './types'
+import type { AuditIssue } from './foundation-issue-registry'
 
 const DIGEST = 'a'.repeat(64)
 const REVISION = 'rev-1'
@@ -210,6 +211,16 @@ function revisionState(): FoundationAuditState {
     attempt: 0,
     failureReason: reason,
     modelTier: 'balanced' as const,
+    bundleId: 'revision-bundle-2',
+    issue: {
+      id: 'issue-0',
+      severity: 'HIGH' as const,
+      type: 'semantic' as const,
+      source: { documentPath: 'docs/GDD.md' as const, sectionId: 'vision', heading: 'Vision', startLine: 1, endLine: 1, digest: DIGEST },
+      expected: 'expected',
+      actual: 'actual',
+      remediation: { kind: 'patch' as const, documentPath: 'docs/GDD.md' as const, sectionIds: ['vision'] },
+    } satisfies AuditIssue,
   }
   const documentTask = {
     taskId: 'document-revision-0',
@@ -226,6 +237,9 @@ function revisionState(): FoundationAuditState {
     sectionIds: ['vision'],
     stagedPath: foundationRevisionStagePath(REVISION, 'docs/GDD.md'),
     baseDocumentDigest: DIGEST,
+    dependencyDigests: { 'docs/GDD.md#vision': DIGEST },
+    frozen: false,
+    bundleId: 'revision-bundle-2',
   }
   const seed = createFoundationAuditState({
     revision: REVISION,
@@ -250,6 +264,17 @@ function revisionState(): FoundationAuditState {
     status: 'semantic_recheck',
     phaseStartedAt: OLD_PHASE,
     issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
+    activeBundleId: 'revision-bundle-2',
+    revisionBundles: [{
+      bundleId: 'revision-bundle-2',
+      status: 'active' as const,
+      round: 2,
+      baseDocumentRevision: REVISION,
+      baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: DIGEST })),
+      remediationDigest: DIGEST,
+      taskIds: [semanticTask.taskId, documentTask.taskId],
+      frozenTaskIds: [],
+    }],
     tasks: [semanticTask, documentTask],
   })
 }
@@ -359,6 +384,50 @@ describe('foundation retry transitions', () => {
 
   })
 
+  test('revives a document revision at attempt 2 on ordinary retry', () => {
+    const seed = revisionState()
+    const documentTask = seed.tasks.find(task => task.kind === 'document-revision')!
+    const actionableTask = {
+      ...documentTask,
+      attempt: 2,
+      failureReason: 'revision issue coverage is not exact',
+      usage: USAGE,
+      durationMs: 123,
+      dispatch: {
+        dispatchId: 'dispatch-document-revision-0',
+        workerType: 'foundation-document-reviser' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        taskId: documentTask.taskId,
+        revision: documentTask.revision,
+        status: 'invalid' as const,
+        failureReason: 'revision issue coverage is not exact',
+        startedAt: OLD_PHASE,
+        finishedAt: OLD_PHASE,
+      },
+    }
+    const state: FoundationAuditState = {
+      ...seed,
+      status: 'revising',
+      tasks: [actionableTask],
+      revisionBundles: seed.revisionBundles?.map(bundle => ({
+        ...bundle,
+        taskIds: [documentTask.taskId],
+      })),
+    }
+    const retried = transitionDeliveryRun(revisionRun(state), { type: 'retry' })
+
+    expect(retried.status).toBe('running')
+    expect(retried.blockedReason).toBeUndefined()
+    expect(retried.foundationAuditState?.tasks).toEqual([
+      expect.objectContaining({
+        kind: 'document-revision',
+        status: 'pending',
+        attempt: 2,
+        failureReason: undefined,
+      }),
+    ])
+  })
+
   test('re-enters a validating boundary without reviving completed workers', () => {
     const before = validationBoundaryState()
     const run = revisionRun(before)
@@ -376,11 +445,31 @@ describe('foundation retry transitions', () => {
     expect(taskRetry.foundationAuditState).toEqual(before)
   })
 
+  test('replans a legacy validating boundary that never materialized impacted-fact tasks', () => {
+    const before = validationBoundaryState()
+    const documentOnly = {
+      ...before,
+      tasks: before.tasks.filter(task => task.kind === 'document-revision'),
+      revisionBundles: before.revisionBundles?.map(bundle => ({
+        ...bundle,
+        taskIds: bundle.taskIds.filter(taskId => before.tasks.some(task => task.taskId === taskId && task.kind === 'document-revision')),
+      })),
+    }
+    const retried = transitionDeliveryRun(revisionRun(documentOnly), { type: 'retry' })
+
+    expect(retried.status).toBe('running')
+    expect(retried.blockedReason).toBeUndefined()
+    expect(retried.foundationAuditState?.status).toBe('rebuilding_facts')
+    expect(retried.foundationAuditState?.tasks).toEqual(documentOnly.tasks)
+  })
+
   test('re-enters a failed planning boundary but never bypasses policy terminal states', () => {
     const planning = {
       ...revisionState(),
       status: 'planning' as const,
       tasks: [],
+      activeBundleId: undefined,
+      revisionBundles: undefined,
     }
     const retried = transitionDeliveryRun({
       ...revisionRun(planning),
@@ -390,7 +479,7 @@ describe('foundation retry transitions', () => {
     expect(retried.foundationAuditState?.status).toBe('planning')
 
     const closing = transitionDeliveryRun({
-      ...revisionRun({ ...planning, status: 'round_closing' }),
+      ...revisionRun({ ...completedRevisionState(), status: 'round_closing' }),
       blockedReason: 'foundation revision authority made no progress',
     }, { type: 'retry' })
     expect(closing.status).toBe('needs_action')

@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { parseDispatchRecord } from './schema'
 import {
   parseWorkerTerminalResult,
+  foundationSemanticRecheckTerminalSchema,
   type WorkerTerminalResult,
 } from './worker-contracts'
 import { buildWorkerPrompt } from './worker-prompts'
@@ -20,6 +21,7 @@ import type {
   WorkerDispatchRequest,
 } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
+import { foundationRuntimeTasks } from './foundation-audit-state'
 import type { FoundationAuditTask, FoundationRevisionRound } from './foundation-audit-state'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
 import { claimFoundationFactTasks, digestFoundationFactTerminal, type FoundationFactTask, type FoundationFactTaskCollection } from './foundation-fact-runtime'
@@ -94,7 +96,7 @@ function dispatchLocation(
   for (const document of run.foundationDraftState.documents ?? [])
     if (document.dispatch?.dispatchId === dispatchId)
       return { record: document.dispatch, path: document.path }
-  for (const task of run.foundationAuditState?.tasks ?? [])
+  for (const task of run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState) : [])
     if (task.dispatch?.dispatchId === dispatchId)
       return { record: task.dispatch, taskId: task.taskId }
   return undefined
@@ -113,11 +115,11 @@ function isFoundationRevisionRequest(request: WorkerDispatchRequest): boolean {
 
 function isFoundationRevisionSemanticRequest(run: DeliveryRun, request: WorkerDispatchRequest): boolean {
   return request.workerType === 'foundation-semantic-reviewer' && !!request.taskId &&
-    run.foundationAuditState?.tasks.some(task => task.taskId === request.taskId && task.kind === 'semantic-recheck') === true
+    (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState) : []).some(task => task.taskId === request.taskId && task.kind === 'semantic-recheck')
 }
 
 function reviewTask(run: DeliveryRun, taskId: string): FoundationAuditTask | undefined {
-  return run.foundationAuditState?.tasks.find(task => task.taskId === taskId)
+  return run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(task => task.taskId === taskId) : undefined
 }
 
 function reviewTaskDispatch(run: DeliveryRun, taskId: string): DispatchRecord | undefined {
@@ -125,9 +127,8 @@ function reviewTaskDispatch(run: DeliveryRun, taskId: string): DispatchRecord | 
 }
 
 function hasRunningFoundationDispatch(run: DeliveryRun): boolean {
-  return (run.foundationDraftState.documents ?? []).some(
-    document => document.dispatch?.status === 'running',
-  )
+  return (run.foundationDraftState.documents ?? []).some(document => document.dispatch?.status === 'running') ||
+    Boolean(run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(task => task.dispatch?.status === 'running'))
 }
 
 function withFoundationDispatch(
@@ -166,6 +167,13 @@ export class DispatchError extends Error {
   ) {
     super(message)
     this.name = 'DispatchError'
+  }
+}
+
+class DurableTerminalIntegrityError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DurableTerminalIntegrityError'
   }
 }
 
@@ -352,6 +360,8 @@ export function createDeliveryDispatcher(options: {
   store: RunStore
   workerPort: DeliveryWorkerPort
   credits?: DispatchCredits
+  /** Queue controller progress after a durable foundation retry boundary. */
+  onRetryable?: (runId: string, taskId: string) => Promise<void> | void
   onTerminal?: (
     record: DispatchRecord,
     result: WorkerTerminalResult,
@@ -363,6 +373,7 @@ export function createDeliveryDispatcher(options: {
   const creditSettled = new Set<string>()
   const transportCleanupStarted = new Set<string>()
   const startingDispatches = new Set<string>()
+  const retryScheduling = new Set<string>()
   const terminalReconciliations = new Set<Promise<void>>()
   let dispatchTail: Promise<void> = Promise.resolve()
 
@@ -398,6 +409,11 @@ export function createDeliveryDispatcher(options: {
     // touching the disposable transport so a stalled session close can never
     // prevent a retry from creating a fresh dispatch.
     forgetDispatch(dispatchId)
+    // The task mutation happens before release on every foundation failure
+    // path. Schedule progress from the durable projection, rather than from
+    // an in-memory worker callback, so retries survive transport failures and
+    // are serialized by the controller's own lane.
+    void scheduleRetryableFoundationTask(dispatchId).catch(() => undefined)
     if (transportCleanupStarted.has(dispatchId)) return
     transportCleanupStarted.add(dispatchId)
     const cleanupOperation = (async () => {
@@ -422,6 +438,26 @@ export function createDeliveryDispatcher(options: {
     })
   }
 
+  async function scheduleRetryableFoundationTask(dispatchId: string): Promise<void> {
+    if (!options.onRetryable) return
+    const run = await options.store.load()
+    const location = run ? dispatchLocation(run, dispatchId) : undefined
+    const task = location?.taskId
+      ? run?.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
+      : undefined
+    if (!run || run.status !== 'running' || !task || task.status !== 'retryable') return
+    if (retryScheduling.has(task.taskId)) return
+    retryScheduling.add(task.taskId)
+    try {
+      // The callback must enqueue controller progress and return immediately:
+      // releaseDispatch can run while a controller terminal handler still
+      // owns its serialization lane.
+      await options.onRetryable(run.runId, task.taskId)
+    } finally {
+      retryScheduling.delete(task.taskId)
+    }
+  }
+
   async function mutateFoundationReviewTask(
     dispatchId: string,
     eventType: string,
@@ -441,7 +477,7 @@ export function createDeliveryDispatcher(options: {
       const locked = await options.store.load(lease)
       const location = locked ? dispatchLocation(locked, dispatchId) : undefined
       const task = location?.taskId
-        ? locked?.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
+        ? locked?.foundationAuditState && foundationRuntimeTasks(locked.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
         : undefined
       if (!locked || !location?.taskId || !task || task.dispatch?.dispatchId !== dispatchId)
         throw new DispatchError('not_found', 'foundation review task dispatch lost durable authority')
@@ -469,6 +505,50 @@ export function createDeliveryDispatcher(options: {
       const nextStatus = preserveRunNeedsAction
         ? ('needs_action' as const)
         : changed.runStatus
+      const needsActionReason =
+        changed.blockedReason ??
+        preservedTask.failureReason ??
+        locked.blockedReason ??
+        'foundation review requires operator action'
+      const siblingDispatches: DispatchRecord[] = []
+      const activeTaskIds = new Set(foundationRuntimeTasks(locked.foundationAuditState!).map(candidate => candidate.taskId))
+      const normalizedTasks = locked.foundationAuditState!.tasks.map(
+        candidate => {
+          if (
+            nextStatus !== 'needs_action' ||
+            candidate.taskId === task.taskId ||
+            !activeTaskIds.has(candidate.taskId) ||
+            candidate.status !== 'running'
+          )
+            return candidate
+          const runningDispatch = candidate.dispatch?.status === 'running'
+            ? candidate.dispatch
+            : undefined
+          if (runningDispatch) {
+            const interrupted = {
+              ...runningDispatch,
+              status: 'interrupted' as const,
+              finishedAt: now(),
+              failureReason: needsActionReason,
+            }
+            siblingDispatches.push(interrupted)
+            return projectTaskTerminalEvidence(
+              {
+                ...candidate,
+                status: 'needs_action' as const,
+                failureReason: needsActionReason,
+                dispatch: interrupted,
+              },
+              interrupted,
+            )
+          }
+          return {
+            ...candidate,
+            status: 'needs_action' as const,
+            failureReason: needsActionReason,
+          }
+        },
+      )
       const projectedTask = projectTaskTerminalEvidence(
         preservedTask,
         changed.record,
@@ -489,7 +569,9 @@ export function createDeliveryDispatcher(options: {
             : {}),
         foundationAuditState: {
           ...locked.foundationAuditState!,
-          tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectedTask : candidate),
+          tasks: normalizedTasks.map(candidate =>
+            candidate.taskId === task.taskId ? projectedTask : candidate,
+          ),
         },
       }
       await options.store.commit(next, {
@@ -501,6 +583,8 @@ export function createDeliveryDispatcher(options: {
         dispatchId,
         taskId: task.taskId,
       }, undefined, lease)
+      for (const sibling of siblingDispatches)
+        releaseDispatch(sibling.dispatchId, { stopReason: needsActionReason })
       return changed.record
     } finally { await options.store.unlock(lease) }
   }
@@ -531,10 +615,16 @@ export function createDeliveryDispatcher(options: {
     const revisionSemanticRequest = isFoundationRevisionSemanticRequest(run, request)
     const semanticRequest = isFoundationSemanticRequest(request) && !revisionSemanticRequest
     const revisionRequest = isFoundationRevisionRequest(request)
-    const revisionFactRequest = factRequest && Boolean(request.taskId && run.foundationAuditState?.tasks.some(task => task.taskId === request.taskId && task.kind === 'impacted-facts'))
+    const runtimeTasks = run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState) : []
+    const revisionFactRequest = factRequest && Boolean(request.taskId && runtimeTasks.some(task => task.taskId === request.taskId && task.kind === 'impacted-facts'))
     const revisionTaskRequest = revisionRequest || revisionFactRequest || revisionSemanticRequest
     const auditRequest = semanticRequest || (factRequest && !revisionFactRequest)
     const reviewRequest = auditRequest || revisionTaskRequest
+    if (revisionTaskRequest && request.taskId && run.foundationAuditState) {
+      const requestedTask = runtimeTasks.find(task => task.taskId === request.taskId)
+      if (!requestedTask)
+        throw new DispatchError('blocked', 'foundation revision task is outside the active authority')
+    }
     const durableDispatch = reviewRequest && request.taskId
       ? reviewTaskDispatch(run, request.taskId)
       : foundationPath
@@ -543,7 +633,7 @@ export function createDeliveryDispatcher(options: {
 
     if (
       durableDispatch?.status === 'completed' &&
-      (!auditRequest || run.foundationAuditState?.tasks.some(task => task.taskId === request.taskId && task.status === 'completed')) &&
+      (!auditRequest || runtimeTasks.some(task => task.taskId === request.taskId && task.status === 'completed')) &&
       durableDispatch.phase === request.phase &&
       durableDispatch.revision === request.revision &&
       durableDispatch.taskId === request.taskId &&
@@ -569,19 +659,23 @@ export function createDeliveryDispatcher(options: {
         'duplicate',
         'a regular delivery worker is already running',
       )
-    if (!foundationPath && !factRequest && !semanticRequest && !revisionRequest && hasRunningFoundationDispatch(run))
+    if (!foundationPath && !reviewRequest && hasRunningFoundationDispatch(run)) {
       throw new DispatchError(
         'duplicate',
         'foundation document authoring batch is active',
       )
+    }
     const durableTask = request.taskId
       ? reviewRequest
-        ? run.foundationAuditState?.tasks.find(task => task.taskId === request.taskId)
+        ? runtimeTasks.find(task => task.taskId === request.taskId)
           : run.tasks.find(task => task.id === request.taskId)
       : undefined
     const attempt = durableTask && typeof durableTask.attempt === 'number'
       ? durableTask.attempt + 1
       : 1
+    const priorFailureReason = revisionRequest && durableTask && 'failureReason' in durableTask && durableTask.kind === 'document-revision'
+      ? durableTask.failureReason
+      : undefined
     const key = idempotencyKey(request, attempt)
     const existing = byKey.get(key)
     if (existing) {
@@ -597,7 +691,13 @@ export function createDeliveryDispatcher(options: {
       })
     }
     const dispatchId = randomUUID()
-    const dispatchRequest = { ...request, dispatchId }
+    const dispatchRequest = {
+      ...request,
+      dispatchId,
+      ...(priorFailureReason
+        ? { contract: { ...request.contract, priorFailureReason } }
+        : {}),
+    }
     const record = parseDispatchRecord({
       dispatchId,
       workerType: request.workerType,
@@ -623,11 +723,12 @@ export function createDeliveryDispatcher(options: {
         if (current.status !== 'running')
           throw new DispatchError('blocked', 'delivery run is not running')
         const currentFoundationPath = foundationPathFor(request)
+        const currentRuntimeTasks = current.foundationAuditState ? foundationRuntimeTasks(current.foundationAuditState) : []
         const currentFactTask = auditRequest && request.taskId
-          ? current.foundationAuditState?.tasks.find(task => task.taskId === request.taskId)
+          ? currentRuntimeTasks.find(task => task.taskId === request.taskId)
           : undefined
         const currentRevisionTask = revisionTaskRequest && request.taskId
-          ? current.foundationAuditState?.tasks.find(task => task.taskId === request.taskId)
+          ? currentRuntimeTasks.find(task => task.taskId === request.taskId)
           : undefined
         if (auditRequest) {
           if (!currentFactTask)
@@ -648,7 +749,7 @@ export function createDeliveryDispatcher(options: {
             }
             throw new DispatchError('duplicate', 'foundation fact task is not claimable')
           }
-          if ((current.foundationAuditState?.tasks.filter(task => task.status === 'running').length ?? 0) >= 4)
+          if ((current.foundationAuditState ? foundationRuntimeTasks(current.foundationAuditState).filter(task => task.status === 'running').length : 0) >= 4)
             throw new DispatchError('duplicate', 'foundation fact concurrency limit reached')
           if (currentFactTask.attempt >= 2)
             throw new DispatchError('blocked', 'foundation fact task attempt cap exceeded')
@@ -663,13 +764,8 @@ export function createDeliveryDispatcher(options: {
             throw new DispatchError('blocked', 'foundation revision task is stale')
           if (revisionSemanticRequest && currentRevisionTask.kind === 'semantic-recheck' && (request.contract.issueId !== currentRevisionTask.issueId || request.contract.modelTier !== currentRevisionTask.modelTier || currentRevisionTask.modelTier !== 'strong'))
             throw new DispatchError('blocked', 'foundation semantic revision task identity or model tier is stale')
-          if ((current.foundationAuditState?.tasks.filter(task => task.status === 'running').length ?? 0) >= 4)
+          if (currentRuntimeTasks.filter(task => task.status === 'running').length >= 4)
             throw new DispatchError('duplicate', 'foundation revision concurrency limit reached')
-          if (currentRevisionTask.attempt >= 2) {
-            const reason = 'foundation revision task attempt cap exceeded'
-            await options.store.commit({ ...current, status: 'needs_action', blockedReason: reason, foundationAuditState: { ...current.foundationAuditState!, tasks: current.foundationAuditState!.tasks.map(task => task.taskId === request.taskId ? { ...task, status: 'needs_action' as const, failureReason: reason } : task) } }, { runId: current.runId, type: 'foundation.revision.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, taskId: request.taskId, reason }, undefined, lease)
-            throw new DispatchError('blocked', reason)
-          }
         }
         let fastModelError: string | undefined
         if (factRequest && options.workerPort.assertFoundationFactFastReady) {
@@ -718,7 +814,7 @@ export function createDeliveryDispatcher(options: {
             revision: current.foundationAuditState.revision,
             phaseStartedAt: current.foundationAuditState.phaseStartedAt!,
             status: current.foundationAuditState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts',
-            tasks: current.foundationAuditState.tasks.filter(task => task.kind === 'document-facts'),
+            tasks: foundationRuntimeTasks(current.foundationAuditState).filter(task => task.kind === 'document-facts'),
             aggregateUsage: current.foundationAuditState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           }, {
             onlyTaskId: fastModelError ? undefined : request.taskId,
@@ -736,7 +832,7 @@ export function createDeliveryDispatcher(options: {
         }
         let claimedSemanticState: FoundationSemanticTaskCollection | undefined
         if (semanticRequest && current.foundationAuditState && request.taskId) {
-          const semanticTasks = current.foundationAuditState.tasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticRuntimeTask[]
+          const semanticTasks = foundationRuntimeTasks(current.foundationAuditState).filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticRuntimeTask[]
           const claimed = claimFoundationSemanticTasks({ revision: current.foundationAuditState.revision, phaseStartedAt: current.foundationAuditState.phaseStartedAt!, status: 'semantic_review', tasks: semanticTasks, aggregateUsage: current.foundationAuditState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, ...(current.foundationAuditState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: current.foundationAuditState.semantic.deepPhaseStartedAt } : {}), ...(current.foundationAuditState.semantic?.deepAggregateUsage ? { deepAggregateUsage: current.foundationAuditState.semantic.deepAggregateUsage } : {}) }, { onlyTaskId: fastModelError ? undefined : request.taskId, dispatchIdFor: () => record.dispatchId, now: record.startedAt, configuredTiers: { [request.contract.modelTier as string]: !fastModelError } })
           claimedSemanticState = claimed
           const claimedTask = claimed.tasks.find(task => task.taskId === request.taskId)
@@ -780,13 +876,7 @@ export function createDeliveryDispatcher(options: {
             'duplicate',
             'a regular delivery worker is already running',
           )
-        if (
-          !currentFoundationPath &&
-          !factRequest &&
-          !semanticRequest &&
-          !revisionRequest &&
-          hasRunningFoundationDispatch(current)
-        )
+        if (!currentFoundationPath && !reviewRequest && hasRunningFoundationDispatch(current))
           throw new DispatchError(
             'duplicate',
             'foundation document authoring batch is active',
@@ -837,7 +927,7 @@ export function createDeliveryDispatcher(options: {
       }
       if (revisionRequest && request.taskId) {
         const claimedRun = await options.store.load()
-        const claimedTask = claimedRun?.foundationAuditState?.tasks.find(task => task.taskId === request.taskId)
+        const claimedTask = claimedRun?.foundationAuditState && foundationRuntimeTasks(claimedRun.foundationAuditState).find(task => task.taskId === request.taskId)
         if (!claimedTask || claimedTask.kind !== 'document-revision' || claimedTask.status !== 'running' || claimedTask.dispatch?.dispatchId !== record.dispatchId)
           throw new DispatchError('blocked', 'foundation revision task kind mismatch: expected document-revision')
         await resetFoundationRevisionStage({
@@ -917,7 +1007,7 @@ export function createDeliveryDispatcher(options: {
       }
       const promptRequest = revisionRequest || revisionFactRequest || revisionSemanticRequest
         ? {
-            ...request,
+            ...dispatchRequest,
             contract: {
               ...request.contract,
               packet: await (revisionRequest ? loadFoundationRevisionPacket({
@@ -1026,7 +1116,7 @@ export function createDeliveryDispatcher(options: {
       throw new DispatchError('invalid_terminal', 'invalid foundation fact terminal')
     }
     const factResult = result as Extract<WorkerTerminalResult, { workerType: 'foundation-fact-extractor' }>
-    const factTask = run.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
+    const factTask = run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
     const status = factResult.status === 'completed' ? 'completed' : factResult.status === 'blocked' ? 'blocked' : 'failed'
     const measuredUsage = location.record.usage ?? usageDelta(run.usage, location.record.startingUsage)
     const durable = await mutateFoundationReviewTask(dispatchId, `dispatch.${status}`, ({ task, record }) => {
@@ -1066,7 +1156,7 @@ export function createDeliveryDispatcher(options: {
   async function completeFoundationSemanticDispatch(dispatchId: string, terminalValue: unknown): Promise<{ record: DispatchRecord; result?: WorkerTerminalResult }> {
     const run = await options.store.load(); const location = run ? dispatchLocation(run, dispatchId) : undefined
     if (!run || !location?.taskId) throw new DispatchError('not_found', 'foundation semantic dispatch is not active')
-    const task = run.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
+    const task = run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
     if (!task || (task.kind !== 'semantic' && task.kind !== 'confirmation')) throw new DispatchError('not_found', 'foundation semantic task is not active')
     const request = requests.get(dispatchId) ?? location.record.request
     let result: WorkerTerminalResult
@@ -1095,7 +1185,7 @@ export function createDeliveryDispatcher(options: {
     const run = await options.store.load()
     const location = run ? dispatchLocation(run, dispatchId) : undefined
     if (!run || !location?.taskId) throw new DispatchError('not_found', 'foundation revision dispatch is not active')
-    const task = run.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
+    const task = run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
     const request = requests.get(dispatchId) ?? location.record.request
     if (!task || !request) throw new DispatchError('not_found', 'foundation revision task authority is missing')
     if (task.kind !== 'document-revision') throw new DispatchError('blocked', 'non-document revision task reached document terminal admission')
@@ -1112,14 +1202,19 @@ export function createDeliveryDispatcher(options: {
       const packetValue = await loadFoundationRevisionPacket({ workspacePath: request.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, documentPath: task.documentPath, packetDigest: task.packetDigest })
       if (!Array.isArray(packetValue.issues) || !Array.isArray(packetValue.issueIds) || !Array.isArray(packetValue.sectionIds)) throw new Error('foundation revision packet authority is malformed')
       const batch = { documentPath: request.contract.documentPath as FoundationDocumentPath, issueIds: packetValue.issueIds as string[], sectionIds: packetValue.sectionIds as string[] }
-      const receipt = result.receipt as RevisionTaskReceipt
-      await deriveFoundationPatchOperations({ workspacePath: request.workspacePath, revision: request.revision, taskId: request.taskId, batch, issues: packetValue.issues as AuditIssue[], receipt })
-      if (receipt.baseDocumentDigest !== task.baseDocumentDigest || receipt.stagedPath !== task.stagedPath)
-        throw new Error('foundation revision receipt base or stage authority is stale')
+      if (result.declaration.status === 'APPLIED') {
+        const receipt = result.declaration.receipt as RevisionTaskReceipt
+        await deriveFoundationPatchOperations({ workspacePath: request.workspacePath, revision: request.revision, taskId: request.taskId, batch, issues: packetValue.issues as AuditIssue[], receipt })
+        if (receipt.baseDocumentDigest !== task.baseDocumentDigest || receipt.stagedPath !== task.stagedPath)
+          throw new Error('foundation revision receipt base or stage authority is stale')
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid foundation revision terminal'
       const invalid = parseDispatchRecord({ ...location.record, status: 'invalid' as const, finishedAt: now(), failureReason: reason })
-      const retryable = task.attempt < 2
+      // Document revision is an open repair loop. Strict terminal and patch
+      // validation still rejects bad work, but a failed attempt is always
+      // retryable; only the semantic/fact lanes retain their own boundaries.
+      const retryable = true
       await mutateFoundationReviewTask(dispatchId, 'dispatch.invalid', ({ task: current }) => ({
         task: { ...current, status: retryable ? 'retryable' : 'needs_action', failureReason: reason, dispatch: invalid },
         record: invalid,
@@ -1132,12 +1227,12 @@ export function createDeliveryDispatcher(options: {
     const revisionResult = result as Extract<WorkerTerminalResult, { workerType: 'foundation-document-reviser' }>
     const measuredUsage = location.record.usage ?? usageDelta(run.usage, location.record.startingUsage)
     const finishedAt = now()
-    const status = revisionResult.status === 'completed' ? 'completed' : revisionResult.status === 'blocked' ? 'blocked' : 'failed'
-    const taskStatus = status === 'completed' ? 'completed' : status === 'blocked' || task.attempt >= 2 ? 'needs_action' : 'retryable'
+    const status = 'completed' as const
+    const taskStatus = 'completed' as const
     const durationMs = Math.max(0, new Date(finishedAt).getTime() - new Date(location.record.startedAt).getTime())
     const durable = await mutateFoundationReviewTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => {
       const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt })
-      return { task: { ...current, status: taskStatus, ...(revisionResult.status === 'completed' ? { receipt: revisionResult.receipt, terminalDigest: revisionResult.receipt.terminalDigest } : {}), usage: measuredUsage, durationMs, dispatch: completed }, record: completed, ...(taskStatus === 'needs_action' ? { runStatus: 'needs_action' as const, blockedReason: revisionResult.status === 'blocked' ? 'foundation revision worker is blocked' : undefined } : {}) }
+      return { task: { ...current, status: taskStatus, receipt: revisionResult.declaration.receipt, terminalDigest: revisionResult.declaration.receipt.terminalDigest, usage: measuredUsage, durationMs, dispatch: completed }, record: completed }
     })
     try {
       await options.credits?.settle?.(request ? idempotencyKey(request, task.attempt) : dispatchId, result)
@@ -1150,13 +1245,13 @@ export function createDeliveryDispatcher(options: {
         // resume must replay/advance it rather than run the worker again.
         task: current.kind === 'document-revision' && current.status === 'completed' && current.receipt
           ? { ...current, failureReason: reason }
-          : { ...current, status: current.attempt < 2 ? 'retryable' : 'needs_action', failureReason: reason, dispatch: parseDispatchRecord({ ...record, status: 'failed', failureReason: reason }) },
+          : { ...current, status: 'retryable', failureReason: reason, dispatch: parseDispatchRecord({ ...record, status: 'failed', failureReason: reason }) },
         record: current.kind === 'document-revision' && current.status === 'completed' && current.receipt
           ? parseDispatchRecord({ ...record, status: 'completed', failureReason: reason })
           : parseDispatchRecord({ ...record, status: 'failed', failureReason: reason }),
         ...(current.kind === 'document-revision' && current.status === 'completed' && current.receipt ? {} : {
-          runStatus: current.attempt < 2 ? 'running' as const : 'needs_action' as const,
-          blockedReason: current.attempt < 2 ? undefined : reason,
+          runStatus: 'running' as const,
+          blockedReason: undefined,
         }),
       })).catch(() => undefined)
       releaseDispatch(dispatchId)
@@ -1170,18 +1265,18 @@ export function createDeliveryDispatcher(options: {
     const run = await options.store.load()
     const location = run ? dispatchLocation(run, dispatchId) : undefined
     if (!run || !location?.taskId) throw new DispatchError('not_found', 'foundation semantic revision dispatch is not active')
-    const task = run.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
+    const task = run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
     const request = requests.get(dispatchId) ?? location.record.request
     if (!task || task.kind !== 'semantic-recheck' || !request) throw new DispatchError('not_found', 'foundation semantic revision task authority is missing')
     let result: WorkerTerminalResult
     try {
-      result = parseWorkerTerminalResult(terminalValue)
+      result = foundationSemanticRecheckTerminalSchema.parse(terminalValue) as WorkerTerminalResult
       if (result.workerType !== 'foundation-semantic-reviewer' || result.runId !== request.runId || result.dispatchId !== dispatchId || result.taskId !== request.taskId || result.revision !== request.revision || result.packetDigest !== request.contract.packetDigest)
         throw new Error('foundation semantic revision terminal identity does not match dispatch contract')
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid foundation semantic revision terminal'
       const invalid = parseDispatchRecord({ ...location.record, status: 'invalid' as const, finishedAt: now(), failureReason: reason })
-      await mutateFoundationReviewTask(dispatchId, 'dispatch.invalid', ({ task: current }) => ({ task: { ...current, status: current.attempt < 2 ? 'retryable' : 'needs_action', failureReason: reason, dispatch: invalid }, record: invalid, runStatus: current.attempt < 2 ? 'running' : 'needs_action', blockedReason: current.attempt < 2 ? undefined : reason }))
+      await mutateFoundationReviewTask(dispatchId, 'dispatch.invalid', ({ task: current }) => ({ task: { ...current, status: 'retryable', failureReason: reason, dispatch: invalid }, record: invalid, runStatus: 'running', blockedReason: undefined }))
       releaseDispatch(dispatchId)
       throw new DispatchError('invalid_terminal', 'invalid foundation semantic revision terminal')
     }
@@ -1191,8 +1286,8 @@ export function createDeliveryDispatcher(options: {
     const terminalDigest = createHash('sha256').update(JSON.stringify(result)).digest('hex')
     const durable = await mutateFoundationReviewTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => {
       const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt })
-      const nextStatus = status === 'completed' ? 'running' : current.attempt < 2 ? 'retryable' : 'needs_action'
-      return { task: { ...current, status: nextStatus, ...(status === 'completed' ? { terminalDigest } : {}), usage: measuredUsage, durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(record.startedAt)), dispatch: completed }, record: completed, ...(nextStatus === 'needs_action' ? { runStatus: 'needs_action' as const, blockedReason: 'foundation semantic revision worker failed' } : {}) }
+      const nextStatus = status === 'completed' ? 'running' : 'retryable'
+      return { task: { ...current, status: nextStatus, ...(status === 'completed' ? { terminalDigest } : {}), usage: measuredUsage, durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(record.startedAt)), dispatch: completed }, record: completed }
     })
     try {
       await options.credits?.settle?.(idempotencyKey(request, task.attempt), result)
@@ -1209,7 +1304,7 @@ export function createDeliveryDispatcher(options: {
     const run = await options.store.load()
     const location = run ? dispatchLocation(run, dispatchId) : undefined
     if (!run || !location?.taskId) throw new DispatchError('not_found', 'foundation impacted fact dispatch is not active')
-    const task = run.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
+    const task = run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
     const request = requests.get(dispatchId) ?? location.record.request
     if (!task || task.kind !== 'impacted-facts' || !request) throw new DispatchError('not_found', 'foundation impacted fact task authority is missing')
     let result: WorkerTerminalResult
@@ -1221,7 +1316,7 @@ export function createDeliveryDispatcher(options: {
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid foundation impacted fact terminal'
       const invalid = parseDispatchRecord({ ...location.record, status: 'invalid' as const, finishedAt: now(), failureReason: reason })
-      await mutateFoundationReviewTask(dispatchId, 'dispatch.invalid', ({ task: current }) => ({ task: { ...current, status: current.attempt >= 2 ? 'needs_action' : 'retryable', failureReason: reason, dispatch: invalid }, record: invalid, runStatus: current.attempt >= 2 ? 'needs_action' : 'running', blockedReason: current.attempt >= 2 ? reason : undefined }))
+      await mutateFoundationReviewTask(dispatchId, 'dispatch.invalid', ({ task: current }) => ({ task: { ...current, status: 'retryable', failureReason: reason, dispatch: invalid }, record: invalid, runStatus: 'running', blockedReason: undefined }))
       releaseDispatch(dispatchId)
       throw new DispatchError('invalid_terminal', 'invalid foundation impacted fact terminal')
     }
@@ -1232,8 +1327,8 @@ export function createDeliveryDispatcher(options: {
       const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt: now() })
       // Keep the terminal checkpoint replayable until the controller has
       // validated the receipt and committed it atomically.
-      const nextStatus = status === 'completed' ? 'running' : current.attempt < 2 ? 'retryable' : 'needs_action'
-      return { task: { ...current, status: nextStatus, ...(status === 'completed' ? { terminalDigest: digestFoundationFactTerminal(result as never) } : {}), usage: measuredUsage, durationMs, dispatch: completed }, record: completed, ...(nextStatus === 'needs_action' ? { runStatus: 'needs_action' as const, blockedReason: 'foundation impacted fact worker failed' } : {}) }
+      const nextStatus = status === 'completed' ? 'running' : 'retryable'
+      return { task: { ...current, status: nextStatus, ...(status === 'completed' ? { terminalDigest: digestFoundationFactTerminal(result as never) } : {}), usage: measuredUsage, durationMs, dispatch: completed }, record: completed }
     })
     try {
       await options.credits?.settle?.(idempotencyKey(request, task.attempt), result)
@@ -1266,7 +1361,7 @@ export function createDeliveryDispatcher(options: {
     if (location.record.status !== 'running')
       throw new DispatchError('not_found', 'dispatch is not active')
     if (location.taskId) {
-      const task = run.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
+      const task = run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
       if (task?.kind === 'semantic' || task?.kind === 'confirmation') return completeFoundationSemanticDispatch(dispatchId, terminalValue)
       if (task?.kind === 'impacted-facts') return completeFoundationImpactedFactsDispatch(dispatchId, terminalValue)
       if (task?.kind === 'semantic-recheck') return completeFoundationRevisionSemanticDispatch(dispatchId, terminalValue)
@@ -1550,30 +1645,35 @@ export function createDeliveryDispatcher(options: {
       )
     let result: WorkerTerminalResult
     try {
-      result = parseWorkerTerminalResult(record.terminalResult)
       const run = await options.store.load()
       const location = run ? dispatchLocation(run, record.dispatchId) : undefined
       const task = location?.taskId
-        ? run?.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
+        ? run?.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
         : undefined
-      const factTask = task
-      if (record.workerType === 'foundation-fact-extractor' && (!factTask?.terminalDigest || digestFoundationFactTerminal(result as never) !== factTask.terminalDigest)) {
-        throw new Error('foundation fact terminal replay digest conflicts with durable dispatch')
-      }
-      if (record.workerType === 'foundation-document-reviser') {
-        const receipt = result.workerType === 'foundation-document-reviser' ? result.receipt : undefined
-        if (!task || task.kind !== 'document-revision' || !receipt || result.workerType !== 'foundation-document-reviser' || result.taskId !== task.taskId || result.revision !== task.revision || result.packetDigest !== task.packetDigest || result.round !== task.round || result.documentPath !== task.documentPath || receipt.taskId !== task.taskId || receipt.round !== task.round || receipt.documentPath !== task.documentPath || receipt.stagedPath !== task.stagedPath || receipt.baseDocumentDigest !== task.baseDocumentDigest)
-          throw new Error('foundation revision terminal replay identity conflicts with durable task')
-      }
-      if (record.workerType === 'foundation-semantic-reviewer' && result.workerType === 'foundation-semantic-reviewer' && task?.kind === 'semantic-recheck') {
-        const terminalDigest = createHash('sha256').update(JSON.stringify(result)).digest('hex')
-        if (!task.terminalDigest || terminalDigest !== task.terminalDigest || result.taskId !== task.taskId || result.revision !== task.revision || result.packetDigest !== task.packetDigest)
-          throw new Error('foundation semantic revision terminal replay identity conflicts with durable task')
+      try {
+        result = parseWorkerTerminalResult(record.terminalResult)
+        const factTask = task
+        if (record.workerType === 'foundation-fact-extractor' && (!factTask?.terminalDigest || digestFoundationFactTerminal(result as never) !== factTask.terminalDigest))
+          throw new DurableTerminalIntegrityError('foundation fact terminal replay digest conflicts with durable dispatch')
+        if (record.workerType === 'foundation-document-reviser') {
+          const declaration = result.workerType === 'foundation-document-reviser' ? result.declaration : undefined
+          const receipt = declaration?.status === 'APPLIED' ? declaration.receipt : undefined
+          if (!task || task.kind !== 'document-revision' || !declaration || result.workerType !== 'foundation-document-reviser' || result.taskId !== task.taskId || result.revision !== task.revision || result.packetDigest !== task.packetDigest || result.round !== task.round || result.documentPath !== task.documentPath || (receipt !== undefined && (receipt.taskId !== task.taskId || receipt.round !== task.round || receipt.documentPath !== task.documentPath || receipt.stagedPath !== task.stagedPath || receipt.baseDocumentDigest !== task.baseDocumentDigest)))
+            throw new DurableTerminalIntegrityError('foundation revision terminal replay identity conflicts with durable task')
+        }
+        if (record.workerType === 'foundation-semantic-reviewer' && result.workerType === 'foundation-semantic-reviewer' && task?.kind === 'semantic-recheck') {
+          const terminalDigest = createHash('sha256').update(JSON.stringify(result)).digest('hex')
+          if (!task.terminalDigest || terminalDigest !== task.terminalDigest || result.taskId !== task.taskId || result.revision !== task.revision || result.packetDigest !== task.packetDigest)
+            throw new DurableTerminalIntegrityError('foundation semantic revision terminal replay identity conflicts with durable task')
+        }
+      } catch (error) {
+        if (error instanceof DurableTerminalIntegrityError) throw error
+        throw new DurableTerminalIntegrityError(error instanceof Error ? error.message : 'durable terminal result is malformed')
       }
       const request = record.request
       const durableTask = request?.taskId
         ? location?.taskId
-          ? run?.foundationAuditState?.tasks.find(task => task.taskId === location.taskId)
+          ? run?.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(task => task.taskId === location.taskId)
           : run?.tasks.find(task => task.id === request.taskId)
         : undefined
       const attempt = durableTask && 'attempt' in durableTask ? durableTask.attempt : 1
@@ -1591,13 +1691,17 @@ export function createDeliveryDispatcher(options: {
         : undefined
       if (current && location) {
         if (location.taskId) {
-          const task = current.foundationAuditState?.tasks.find(candidate => candidate.taskId === location.taskId)
-          if (task?.kind === 'document-revision' && task.status === 'completed' && task.receipt) {
-            await options.store.commit({ ...current, status: 'needs_action', blockedReason: reason, thinking: 'idle' }, { runId: current.runId, type: 'foundation.revision.replay_handler_failed', phase: current.phase, status: 'needs_action', revision: current.revision, dispatchId: record.dispatchId, reason })
-            forgetDispatch(record.dispatchId)
-            throw error
-          }
+          const task = current.foundationAuditState && foundationRuntimeTasks(current.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
+          const integrityFailure = error instanceof DurableTerminalIntegrityError
           const failed = await mutateFoundationReviewTask(record.dispatchId, 'workflow.replay_failed', ({ task, record: lockedRecord }) => {
+            if (!integrityFailure) {
+              const retained = parseDispatchRecord({ ...lockedRecord, status: 'completed', failureReason: reason, finishedAt: lockedRecord.finishedAt ?? now() })
+              return {
+                task: { ...task, status: task.status === 'completed' ? 'completed' : 'running', failureReason: reason, dispatch: retained },
+                record: retained,
+                runStatus: 'running',
+              }
+            }
             const terminal = parseDispatchRecord({ ...lockedRecord, status: 'failed', failureReason: reason, terminalResult: undefined, finishedAt: lockedRecord.finishedAt ?? now() })
             return { task: { ...task, status: 'needs_action', failureReason: reason, dispatch: terminal }, record: terminal, runStatus: 'needs_action', blockedReason: reason }
           })
@@ -1660,7 +1764,8 @@ export function createDeliveryDispatcher(options: {
     if (location.taskId) {
       const failed = await mutateFoundationReviewTask(dispatchId, 'dispatch.failed', ({ task, record }) => {
         const terminal = parseDispatchRecord({ ...record, status: 'failed', finishedAt: now(), failureReason: reason })
-        const needsAction = isTerminalFoundationFactFailure(reason) || task.attempt >= (task.kind === 'confirmation' ? 1 : 2)
+        const stage3Task = task.kind === 'document-facts' || task.kind === 'semantic' || task.kind === 'confirmation'
+        const needsAction = stage3Task && (isTerminalFoundationFactFailure(reason) || task.attempt >= (task.kind === 'confirmation' ? 1 : 2))
         return {
           task: { ...task, status: needsAction ? 'needs_action' : 'retryable', failureReason: reason, dispatch: terminal },
           record: terminal,

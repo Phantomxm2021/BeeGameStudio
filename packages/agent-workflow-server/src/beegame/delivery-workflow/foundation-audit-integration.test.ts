@@ -97,7 +97,7 @@ describe('foundation semantic audit integration', () => {
   test('rejects admitted result unions that do not match their outcome', () => {
     const valid = semanticState()
     for (const admittedResult of [
-      { checkId: valid.tasks[0]!.checkId, packetIdentity: valid.tasks[0]!.packetDigest, outcome: 'PASS' as const, issues: [{ problem: 'p', expected: 'e', actual: 'a', sourceSectionKey: 'GDD#vision', fixSectionKey: 'GDD#vision' }] },
+      { checkId: valid.tasks[0]!.checkId, packetIdentity: valid.tasks[0]!.packetDigest, outcome: 'PASS' as const, issues: [{ problem: 'p', expected: 'e', actual: 'a', sourceSectionKey: 'GDD#vision', remediation: { kind: 'patch' as const, sectionKeys: ['GDD#vision'] } }] },
       { checkId: valid.tasks[0]!.checkId, packetIdentity: valid.tasks[0]!.packetDigest, outcome: 'ISSUES' as const },
       { checkId: valid.tasks[0]!.checkId, packetIdentity: valid.tasks[0]!.packetDigest, outcome: 'UNDECIDABLE' as const },
     ]) {

@@ -87,6 +87,31 @@ describe('workflow display tasks', () => {
     ])
   })
 
+  test('does not project a retryable worker failure as blocked user feedback', async () => {
+    const tasks = projectDocumentDisplayTasks({
+      workspacePath: await workspace(),
+      documentStep: 'FOUNDATION_REVIEW',
+      workflowStatus: 'running',
+      thinking: 'working',
+      foundationAuditState: {
+        status: 'semantic_review',
+        tasks: [{
+          kind: 'semantic',
+          taskId: 'semantic:retry',
+          checkId: 'retry',
+          attempt: 1,
+          status: 'retryable',
+          failureReason: 'Failed to provide valid structured output after 5 attempts',
+          dispatch: { status: 'failed' },
+        }],
+      } as never,
+    })
+
+    const retryable = tasks.find(task => task.id === 'semantic:retry')
+    expect(retryable).toMatchObject({ status: 'pending' })
+    expect(retryable).not.toHaveProperty('failureReason')
+  })
+
   test('projects one ordinary revision task per affected document', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
@@ -96,12 +121,14 @@ describe('workflow display tasks', () => {
       foundationAuditState: {
         status: 'revising',
         issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 },
+        activeBundleId: 'bundle-display',
+        revisionBundles: [{ bundleId: 'bundle-display', status: 'active', round: 1, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'a'.repeat(64), taskIds: ['display-gdd', 'display-art', 'display-audio', 'display-facts', 'display-semantic'], frozenTaskIds: [] }],
         tasks: [
-          { kind: 'document-revision', documentPath: 'docs/GDD.md', status: 'completed', attempt: 2 },
-          { kind: 'document-revision', documentPath: 'docs/ART_DIRECTION.md', status: 'needs_action', attempt: 1, failureReason: 'blocked' },
-          { kind: 'document-revision', documentPath: 'docs/AUDIO_DESIGN.md', status: 'pending', attempt: 0 },
-          { kind: 'impacted-facts', status: 'completed', attempt: 1 },
-          { kind: 'semantic-recheck', issueId: 'ISSUE-1', status: 'pending', attempt: 0 },
+          { kind: 'document-revision', taskId: 'display-gdd', bundleId: 'bundle-display', documentPath: 'docs/GDD.md', status: 'completed', attempt: 2 },
+          { kind: 'document-revision', taskId: 'display-art', bundleId: 'bundle-display', documentPath: 'docs/ART_DIRECTION.md', status: 'needs_action', attempt: 1, failureReason: 'blocked' },
+          { kind: 'document-revision', taskId: 'display-audio', bundleId: 'bundle-display', documentPath: 'docs/AUDIO_DESIGN.md', status: 'pending', attempt: 0 },
+          { kind: 'impacted-facts', taskId: 'display-facts', bundleId: 'bundle-display', status: 'completed', attempt: 1 },
+          { kind: 'semantic-recheck', taskId: 'display-semantic', bundleId: 'bundle-display', issueId: 'ISSUE-1', status: 'pending', attempt: 0 },
         ],
       } as never,
     })
@@ -118,8 +145,8 @@ describe('workflow display tasks', () => {
       { id: 'revision:docs/GDD.md', title: 'docs/GDD.md', operation: 'revise', status: 'completed', attempt: 2, issueSummary: { total: 4, blocker: 1, high: 1, medium: 1, low: 1 }, failureReason: undefined },
       { id: 'revision:docs/ART_DIRECTION.md', title: 'docs/ART_DIRECTION.md', operation: 'revise', status: 'failed', attempt: 1, issueSummary: undefined, failureReason: 'blocked' },
       { id: 'revision:docs/AUDIO_DESIGN.md', title: 'docs/AUDIO_DESIGN.md', operation: 'revise', status: 'pending', attempt: 0, issueSummary: undefined, failureReason: undefined },
-      { id: 'impacted-facts:unknown', title: '影响事实验证', operation: 'review', status: 'completed', attempt: 1, issueSummary: undefined, failureReason: undefined },
-      { id: 'semantic-recheck:ISSUE-1', title: '定向语义验证 · ISSUE-1', operation: 'review', status: 'pending', attempt: 0, issueSummary: undefined, failureReason: undefined },
+      { id: 'display-facts', title: '影响事实验证', operation: 'review', status: 'completed', attempt: 1, issueSummary: undefined, failureReason: undefined },
+      { id: 'display-semantic', title: '定向语义验证 · ISSUE-1', operation: 'review', status: 'pending', attempt: 0, issueSummary: undefined, failureReason: undefined },
     ])
   })
 
@@ -130,9 +157,11 @@ describe('workflow display tasks', () => {
       workflowStatus: 'needs_action',
       foundationAuditState: {
         status: 'revising',
+        activeBundleId: 'bundle-display',
+        revisionBundles: [{ bundleId: 'bundle-display', status: 'active', round: 1, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'a'.repeat(64), taskIds: ['display-gdd'], frozenTaskIds: [] }],
         tasks: [
           { kind: 'document-facts', taskId: 'facts:gdd', status: 'completed', attempt: 1 },
-          { kind: 'document-revision', documentPath: 'docs/GDD.md', status: 'needs_action', attempt: 1 },
+          { kind: 'document-revision', taskId: 'display-gdd', bundleId: 'bundle-display', documentPath: 'docs/GDD.md', status: 'needs_action', attempt: 1 },
         ],
       } as never,
     })
@@ -165,8 +194,12 @@ describe('workflow display tasks', () => {
       workflowStatus: 'stopped',
       foundationAuditState: {
         status: 'revising',
+        activeBundleId: 'bundle-display',
+        revisionBundles: [{ bundleId: 'bundle-display', status: 'active', round: 1, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'a'.repeat(64), taskIds: ['display-gdd'], frozenTaskIds: [] }],
         tasks: [{
           kind: 'document-revision',
+          taskId: 'display-gdd',
+          bundleId: 'bundle-display',
           documentPath: 'docs/GDD.md',
           status: 'retryable',
           attempt: 1,
@@ -191,6 +224,26 @@ describe('workflow display tasks', () => {
     expect(tasks.map(task => task.title)).toEqual([
       'docs/acceptance/gameplay-checklist.md',
     ])
+  })
+
+  test('does not display superseded revision evidence', async () => {
+    const tasks = projectDocumentDisplayTasks({
+      workspacePath: await workspace(),
+      documentStep: 'FOUNDATION_REVIEW',
+      foundationAuditState: {
+        status: 'revising',
+        activeBundleId: 'bundle-new',
+        revisionBundles: [
+          { bundleId: 'bundle-old', status: 'superseded', round: 1, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'a'.repeat(64), taskIds: ['old-task'], frozenTaskIds: [] },
+          { bundleId: 'bundle-new', status: 'active', round: 2, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'b'.repeat(64), taskIds: ['new-task'], frozenTaskIds: [] },
+        ],
+        tasks: [
+          { kind: 'document-revision', taskId: 'old-task', bundleId: 'bundle-old', documentPath: 'docs/GDD.md', status: 'needs_action', attempt: 1 },
+          { kind: 'document-revision', taskId: 'new-task', bundleId: 'bundle-new', documentPath: 'docs/ART_DIRECTION.md', status: 'pending', attempt: 0 },
+        ],
+      } as never,
+    })
+    expect(tasks.map(task => task.id)).toEqual(['revision:docs/ART_DIRECTION.md'])
   })
 
   test('projects fact evidence, round feedback, and severity summary without registry bodies', async () => {

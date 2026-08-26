@@ -8,23 +8,10 @@ import {
   revisionTaskReceiptTerminalDigest,
   type RevisionTaskReceipt,
 } from './delivery-workflow/foundation-revision-stage'
+import { foundationRevisionDeclarationSchema } from './delivery-workflow/worker-contracts'
 import type { FoundationDocumentPath, FoundationRevisionRound } from './delivery-workflow/types'
 
-const declarationSchema = z
-  .object({
-    changedSectionIds: z.array(z.string().min(1)).min(1),
-  })
-  .strict()
-  .superRefine((value, context) => {
-    if (
-      new Set(value.changedSectionIds).size !== value.changedSectionIds.length
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['changedSectionIds'],
-        message: 'changedSectionIds must be unique',
-      })
-  })
+const declarationSchema = foundationRevisionDeclarationSchema
 
 type BuildTool = (definition: Record<string, unknown>) => unknown
 type Declaration = z.infer<typeof declarationSchema>
@@ -78,7 +65,7 @@ export function createNativeFoundationRevisionResultTool(options: {
       return 'Submit the bounded declaration for an isolated foundation document revision; the service derives the receipt from project-local bytes.'
     },
     async prompt() {
-      return 'After completing the assigned document revision, call SubmitFoundationRevisionResult exactly once with only changedSectionIds. The service injects task identity and derives all evidence from project-local files.'
+      return 'After completing the assigned document revision, call SubmitFoundationRevisionResult exactly once with status APPLIED. The service injects task identity and derives all evidence from project-local files.'
     },
     async checkPermissions(input: Declaration) {
       return { behavior: 'allow', updatedInput: input }
@@ -146,9 +133,7 @@ export function createNativeFoundationRevisionResultTool(options: {
       await options.onReceipt?.(receipt)
       return {
         data: {
-          accepted: true,
-          changedSectionCount: receipt.changedSectionIds.length,
-          issueCount: receipt.issueIds.length,
+          status: 'APPLIED',
           receipt,
         },
       }

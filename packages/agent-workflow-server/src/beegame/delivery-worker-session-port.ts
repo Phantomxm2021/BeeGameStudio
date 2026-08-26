@@ -31,7 +31,7 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationSemanticModelPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
+import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationRevisionToolResultSchema, foundationSemanticModelPayloadSchema, foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -419,7 +419,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ...(request.workerType === 'foundation-fact-extractor'
           ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactSchemaForRequest(request) }
           : request.workerType === 'foundation-semantic-reviewer'
-            ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown> }
+            ? { workflowJsonSchema: request.workflowJsonSchema ?? (typeof request.contract.issueId === 'string' ? foundationSemanticRecheckStructuredOutputJsonSchema : foundationSemanticReviewerStructuredOutputJsonSchema) as unknown as Record<string, unknown> }
           : {}),
         ...(packetWorker
           ? { workflowProjectReadScope: 'empty' as const }
@@ -545,7 +545,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 : ''
       const revisionResultInstruction =
         request?.workerType === 'foundation-document-reviser'
-          ? 'After editing only the assigned stage, call SubmitFoundationRevisionResult exactly once with changedSectionIds only; do not return terminal JSON.'
+          ? 'After editing only the assigned stage, call SubmitFoundationRevisionResult exactly once with status APPLIED and the exact changedSectionIds; do not return terminal JSON.'
           : ''
       const assetManifestInstruction =
         request?.workerType === 'resource-planner'
@@ -1135,6 +1135,20 @@ function createDeterministicFoundationSemanticTerminal(input: {
     ? (resultEvent.payload as Record<string, unknown>).structured_output : undefined
   if (structured === undefined) return undefined
   assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
+  if (typeof input.request.contract.issueId === 'string') {
+    const payload = foundationSemanticRecheckWorkerPayloadSchema.parse(structured)
+    return foundationSemanticRecheckTerminalSchema.parse({
+      workerType: 'foundation-semantic-reviewer',
+      status: 'completed',
+      runId: input.request.runId,
+      dispatchId: input.request.dispatchId,
+      taskId: input.request.taskId,
+      revision: input.request.revision,
+      packetDigest: input.request.contract.packetDigest,
+      outcome: payload.status,
+      ...(payload.status === 'FAIL' ? { diagnostic: payload.diagnostic } : {}),
+    })
+  }
   const payload = foundationSemanticModelPayloadSchema.parse(structured)
   return foundationSemanticReviewerTerminalSchema.parse({
     workerType: 'foundation-semantic-reviewer',
@@ -1161,9 +1175,9 @@ function createDeterministicFoundationRevisionTerminal(input: {
   try { value = JSON.parse(output) } catch { throw new Error('foundation revision terminal output is malformed') }
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('foundation revision terminal output is not an object')
-  // The native tool result is the top-level object. Do not reintroduce a
-  // compatibility envelope: the durable terminal contract has one shape.
-  const receipt = (value as Record<string, unknown>).receipt
+  const candidate = value as Record<string, unknown>
+  if (Object.hasOwn(candidate, 'data')) throw new Error('foundation revision terminal output envelope is invalid')
+  const declaration = foundationRevisionToolResultSchema.parse(candidate)
   return foundationDocumentReviserTerminalSchema.parse({
     workerType: 'foundation-document-reviser',
     status: 'completed',
@@ -1174,7 +1188,7 @@ function createDeterministicFoundationRevisionTerminal(input: {
     packetDigest: input.request.contract.packetDigest,
     round: input.request.contract.round,
     documentPath: input.request.contract.documentPath,
-    receipt,
+    declaration,
   })
 }
 

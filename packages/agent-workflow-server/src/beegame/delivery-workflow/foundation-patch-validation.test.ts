@@ -153,8 +153,7 @@ function issue(id: string, source: SectionRef, type: AuditIssue['type'] = 'schem
     source,
     expected: 'expected',
     actual: 'actual',
-    fixDocument: source.documentPath,
-    fixSectionId: source.sectionId,
+    remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
   }
 }
 
@@ -470,6 +469,34 @@ describe('targeted foundation patch validation', () => {
     expect(result.semanticRecheckIssueIds).toEqual([semantic.id])
   })
 
+  test('accepts exact set coverage when one semantic issue changes multiple sections', () => {
+    const fixture = productionFixture()
+    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
+    const semantic: AuditIssue = {
+      ...issue('multi-section-semantic', rules, 'semantic'),
+      remediation: { kind: 'patch', documentPath: 'docs/GDD.md', sectionIds: ['rules_systems', 'player_actions'] },
+    }
+    const patchOperations: PatchOperation[] = [
+      { kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'rules_systems', issueIds: [semantic.id], beforeDigest: 'c'.repeat(64), afterDigest: 'd'.repeat(64) },
+      { kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'player_actions', issueIds: [semantic.id], beforeDigest: 'e'.repeat(64), afterDigest: 'f'.repeat(64) },
+    ]
+
+    const result = validateFoundationPatch({
+      validatorTaskId: 'validator-task-multi-section',
+      round: 1,
+      documentPath: 'docs/GDD.md',
+      baseDocumentDigest: '1'.repeat(64),
+      postPatchDocumentDigest: '2'.repeat(64),
+      patchOperations,
+      impact: analyzeFoundationImpact(patchOperations),
+      admittedIssues: [semantic],
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+    })
+
+    expect(result.semanticRecheckIssueIds).toEqual([semantic.id])
+  })
+
   test('rejects duplicate or out-of-scope issue and operation bindings', () => {
     const fixture = productionFixture()
     const rules = fixture.sectionIndex.find(section => section.sectionId === 'rules_systems')!
@@ -531,7 +558,7 @@ describe('semantic patch targeted recheck authority', () => {
     const issue: AuditIssue = {
       id: 'semantic-1', severity: 'HIGH', type: 'semantic', source,
       target, expected: 'coherent', actual: 'contradictory',
-      fixDocument: 'docs/GDD.md', fixSectionId: 'vision',
+      remediation: { kind: 'patch', documentPath: 'docs/GDD.md', sectionIds: ['vision'] },
     }
     const fact: FoundationFact = {
       key: 'game.players.max', value: 4, source: target,
@@ -594,12 +621,13 @@ describe('semantic patch targeted recheck authority', () => {
   test('admits only exact PASS/FAIL results bound to the packet and produces a stable result digest', () => {
     const input = snapshot()
     const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
-    const pass = admitFoundationSemanticRecheckResult(packet, { issueId: packet.issueId, packetDigest: packet.packetDigest, status: 'PASS' })
-    expect(pass).toEqual({ issueId: 'semantic-1', packetDigest: packet.packetDigest, status: 'PASS' })
+    const binding = { taskId: 'revision-task-1', issue: input.issue }
+    const pass = admitFoundationSemanticRecheckResult(packet, { status: 'PASS' }, binding)
+    expect(pass).toEqual({ taskId: binding.taskId, issueId: 'semantic-1', packetDigest: packet.packetDigest, status: 'PASS' })
     expect(digestFoundationSemanticRecheckResult(pass)).toBe(digestFoundationSemanticRecheckResult({ ...pass }))
-    expect(() => admitFoundationSemanticRecheckResult(packet, { ...pass, status: 'UNDECIDABLE' })).toThrow(/status|PASS|FAIL/i)
-    expect(() => admitFoundationSemanticRecheckResult(packet, { ...pass, issueId: 'other' })).toThrow(/identity|issue/i)
-    expect(() => admitFoundationSemanticRecheckResult(packet, { ...pass, extra: true })).toThrow(/extra|shape|key/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, { status: 'UNDECIDABLE' }, binding)).toThrow(/status|PASS|FAIL|shape/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, { status: 'PASS', issueId: 'other' }, binding)).toThrow(/extra|shape|key/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, { status: 'PASS', extra: true }, binding)).toThrow(/extra|shape|key/i)
   })
 
   test('accepts oversized targeted sections while rejecting facts or sections outside the impact/current index', () => {
@@ -613,11 +641,7 @@ describe('semantic patch targeted recheck authority', () => {
     })
     expect(largePacket.sections.find(section => section.ref.sectionId === 'vision')?.text.length).toBeGreaterThan(16 * 1024)
     expect(largePacket.packetDigest).toMatch(/^[a-f0-9]{64}$/)
-    expect(admitFoundationSemanticRecheckResult(largePacket, {
-      issueId: largePacket.issueId,
-      packetDigest: largePacket.packetDigest,
-      status: 'PASS',
-    }).packetDigest).toBe(largePacket.packetDigest)
+    expect(admitFoundationSemanticRecheckResult(largePacket, { status: 'PASS' }, { taskId: 'revision-task-1', issue: input.issue }).packetDigest).toBe(largePacket.packetDigest)
     expect(() => buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [{ ...input.fact, key: 'game.mechanics' as const }] })).toThrow(/impact|fact|scope/i)
     expect(() => buildFoundationSemanticRecheckPacket({
       ...packetInput(input),
@@ -629,5 +653,87 @@ describe('semantic patch targeted recheck authority', () => {
       patchOperation: { ...input.operation, sectionId: 'core_loop', afterDigest: input.source.digest },
       factStore: [input.fact],
     })).toThrow(/bind|target|operation|impact/i)
+  })
+
+  test('admits a structured failure diagnostic with service-owned expected and task identity', () => {
+    const input = snapshot()
+    const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
+    const section = packet.sections[0]!
+    const admitted = admitFoundationSemanticRecheckResult(packet, {
+      status: 'FAIL',
+      diagnostic: {
+        observedActual: 'the contradiction remains after the patch',
+        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
+        failureReasonCode: 'actual_persists',
+        scopeAssessment: 'repairable_in_scope',
+      },
+    }, { taskId: 'revision-task-1', issue: input.issue })
+
+    expect(admitted).toMatchObject({
+      taskId: 'revision-task-1',
+      issueId: packet.issueId,
+      packetDigest: packet.packetDigest,
+      status: 'FAIL',
+      diagnostic: {
+        unmetExpected: input.issue.expected,
+        observedActual: 'the contradiction remains after the patch',
+        failureReasonCode: 'actual_persists',
+        scopeAssessment: 'repairable_in_scope',
+      },
+    })
+    expect(admitted.status).toBe('FAIL')
+    if (admitted.status !== 'FAIL') return
+    expect(admitted.diagnostic.evidence).toEqual([section.ref])
+    expect(admitted.diagnostic.dependencySections.map(item => `${item.documentPath}#${item.sectionId}:${item.digest}`)).toEqual([
+      `${input.source.documentPath}#${input.source.sectionId}:${input.source.digest}`,
+      `${input.target.documentPath}#${input.target.sectionId}:${input.target.digest}`,
+    ])
+  })
+
+  test('rejects worker-supplied authority, unassigned evidence, missing evidence, and tampered expected', () => {
+    const input = snapshot()
+    const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
+    const section = packet.sections[0]!
+    const diagnostic = {
+      observedActual: 'the contradiction remains',
+      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
+      failureReasonCode: 'actual_persists',
+      scopeAssessment: 'repairable_in_scope',
+    } as const
+
+    expect(() => admitFoundationSemanticRecheckResult(packet, {
+      status: 'FAIL', diagnostic: { ...diagnostic, unmetExpected: 'worker authority' },
+    }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/unknown|authority|expected/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, {
+      status: 'FAIL', diagnostic: { ...diagnostic, evidence: [{ documentPath: 'docs/GDD.md', sectionId: 'not-assigned', digest: 'a'.repeat(64) }] },
+    }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/evidence|section|assigned/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, {
+      status: 'FAIL', diagnostic: { ...diagnostic, evidence: [] },
+    }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/evidence/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, {
+      status: 'FAIL', diagnostic,
+    }, { taskId: 'revision-task-1', issue: { ...input.issue, expected: 'tampered expected' } })).toThrow(/expected|authority|packet/i)
+  })
+
+  test('rejects generic semantic_issue_persists and diagnostics with tampered section digests', () => {
+    const input = snapshot()
+    const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
+    const section = packet.sections[0]!
+    const base = {
+      status: 'FAIL' as const,
+      diagnostic: {
+        observedActual: 'the contradiction remains',
+        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
+        failureReasonCode: 'actual_persists',
+        scopeAssessment: 'repairable_in_scope' as const,
+      },
+    }
+    expect(() => admitFoundationSemanticRecheckResult(packet, {
+      status: 'FAIL', reasonCode: 'semantic_issue_persists',
+    }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/diagnostic|reason|structured/i)
+    expect(() => admitFoundationSemanticRecheckResult(packet, {
+      ...base,
+      diagnostic: { ...base.diagnostic, evidence: [{ ...base.diagnostic.evidence[0], digest: 'c'.repeat(64) }] },
+    }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/digest|evidence|section/i)
   })
 })

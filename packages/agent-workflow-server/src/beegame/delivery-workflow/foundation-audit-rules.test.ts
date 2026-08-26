@@ -5,6 +5,7 @@ import {
 } from './foundation-audit-check-definitions'
 import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
+import { GAME_DOCUMENT_CONTRACTS } from './game-document-contracts'
 
 const ref = (documentPath: string, sectionId: string): SectionRef => ({
   documentPath: documentPath as SectionRef['documentPath'],
@@ -14,6 +15,21 @@ const ref = (documentPath: string, sectionId: string): SectionRef => ({
   endLine: 2,
   digest: 'b'.repeat(64),
 })
+const canonicalIndex = (sections: readonly SectionRef[]): SectionRef[] => {
+  const required = Object.values(GAME_DOCUMENT_CONTRACTS).flatMap(contract => [
+    ...contract.sections.map(section => [contract.path, section.sectionId] as const),
+    ...contract.upstreamSections.flatMap(projection => projection.sectionIds.map(sectionId => [projection.path, sectionId] as const)),
+  ])
+  const seen = new Set(sections.map(section => `${section.documentPath}#${section.sectionId}`))
+  const extras: SectionRef[] = []
+  for (const [path, sectionId] of required) {
+    const key = `${path}#${sectionId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    extras.push(ref(path, sectionId))
+  }
+  return [...sections, ...extras]
+}
 const fact = (
   key: string,
   value: FoundationFact['value'],
@@ -33,11 +49,11 @@ const fact = (
 
 describe('deterministic foundation rules', () => {
   test('targets each later conflicting numeric fact in a 3-way comparison', () => {
-    const balance = ref('docs/custom-balance.md', 'units_variables')
-    const technical = ref('docs/custom-technical.md', 'performance')
-    const level = ref('docs/custom-level.md', 'production_acceptance')
+    const balance = ref('docs/BALANCE_DESIGN.md', 'units_variables')
+    const technical = ref('docs/TECHNICAL_DESIGN.md', 'performance')
+    const level = ref('docs/LEVEL_SCENE_DESIGN.md', 'production_acceptance')
     const input: DeterministicFoundationAuditInput = {
-      sectionIndex: [balance, technical, level],
+      sectionIndex: canonicalIndex([balance, technical, level]),
       factStore: [
         fact('players.max.balance', 4, balance),
         fact('players.max.technical', 8, technical),
@@ -70,15 +86,15 @@ describe('deterministic foundation rules', () => {
       'production_acceptance',
     ])
     expect(
-      issues.every(issue => issue.fixSectionId === issue.target?.sectionId),
+      issues.every(issue => issue.remediation.kind === 'patch' && issue.remediation.sectionIds[0] === issue.target?.sectionId),
     ).toBe(true)
   })
 
   test('reports a missing later numeric fact as a schema issue at its declaration', () => {
-    const first = ref('docs/custom-first.md', 'values')
-    const later = ref('docs/custom-later.md', 'values')
+    const first = ref('docs/GDD.md', 'values')
+    const later = ref('docs/BALANCE_DESIGN.md', 'values')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [first, later],
+      sectionIndex: canonicalIndex([first, later]),
       factStore: [fact('values.first', 1, first)],
       numericRules: [
         {
@@ -95,16 +111,15 @@ describe('deterministic foundation rules', () => {
     expect(issues[0]).toMatchObject({
       type: 'schema',
       source: later,
-      fixDocument: later.documentPath,
-      fixSectionId: later.sectionId,
+      remediation: { kind: 'patch', documentPath: later.documentPath, sectionIds: [later.sectionId] },
     })
   })
 
   test('reports a nonnumeric later numeric fact as a schema issue at its declaration', () => {
-    const first = ref('docs/custom-first.md', 'values')
-    const later = ref('docs/custom-later.md', 'values')
+    const first = ref('docs/GDD.md', 'values')
+    const later = ref('docs/BALANCE_DESIGN.md', 'values')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [first, later],
+      sectionIndex: canonicalIndex([first, later]),
       factStore: [
         fact('values.first', 1, first),
         fact('values.later', 'one', later),
@@ -124,16 +139,15 @@ describe('deterministic foundation rules', () => {
     expect(issues[0]).toMatchObject({
       type: 'schema',
       source: later,
-      fixDocument: later.documentPath,
-      fixSectionId: later.sectionId,
+      remediation: { kind: 'patch', documentPath: later.documentPath, sectionIds: [later.sectionId] },
     })
   })
 
   test('suppresses numeric evaluation when the first declared fact has the wrong type', () => {
-    const first = ref('docs/custom-first.md', 'values')
-    const later = ref('docs/custom-later.md', 'values')
+    const first = ref('docs/GDD.md', 'values')
+    const later = ref('docs/BALANCE_DESIGN.md', 'values')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [first, later],
+      sectionIndex: canonicalIndex([first, later]),
       factStore: [
         fact('values.first', 'one', first),
         fact('values.later', 1, later),
@@ -154,9 +168,9 @@ describe('deterministic foundation rules', () => {
   })
 
   test('suppresses entity evaluation when its declared source has the wrong type', () => {
-    const source = ref('docs/custom-level.md', 'encounters')
+    const source = ref('docs/LEVEL_SCENE_DESIGN.md', 'encounters')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [fact('level.boss', 7, source)],
       entityRules: [
         {
@@ -171,12 +185,12 @@ describe('deterministic foundation rules', () => {
   })
 
   test('evaluates valid declarations while suppressing invalid declarations', () => {
-    const validFirst = ref('docs/custom-valid-first.md', 'values')
-    const validLater = ref('docs/custom-valid-later.md', 'values')
-    const invalidFirst = ref('docs/custom-invalid-first.md', 'values')
-    const invalidLater = ref('docs/custom-invalid-later.md', 'values')
+    const validFirst = ref('docs/GDD.md', 'values')
+    const validLater = ref('docs/BALANCE_DESIGN.md', 'values')
+    const invalidFirst = ref('docs/LEVEL_SCENE_DESIGN.md', 'values')
+    const invalidLater = ref('docs/TECHNICAL_DESIGN.md', 'values')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [validFirst, validLater, invalidFirst, invalidLater],
+      sectionIndex: canonicalIndex([validFirst, validLater, invalidFirst, invalidLater]),
       factStore: [
         fact('valid.first', 1, validFirst),
         fact('valid.later', 2, validLater),
@@ -215,9 +229,9 @@ describe('deterministic foundation rules', () => {
   })
 
   test('reports a missing entity source fact as a schema issue at its declaration', () => {
-    const source = ref('docs/custom-level.md', 'encounters')
+    const source = ref('docs/LEVEL_SCENE_DESIGN.md', 'encounters')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [],
       entityRules: [
         {
@@ -231,16 +245,15 @@ describe('deterministic foundation rules', () => {
     expect(issues[0]).toMatchObject({
       type: 'schema',
       source,
-      fixDocument: source.documentPath,
-      fixSectionId: source.sectionId,
+      remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
     })
   })
 
   test('reports missing referenced entities at the source fact section', () => {
-    const level = ref('docs/custom-level.md', 'encounters')
-    const assets = ref('docs/custom-assets.md', 'inventory')
+    const level = ref('docs/LEVEL_SCENE_DESIGN.md', 'encounters')
+    const assets = ref('docs/ASSET_PLAN.md', 'inventory')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [level, assets],
+      sectionIndex: canonicalIndex([level, assets]),
       factStore: [fact('level.boss', 'Boss_A', level)],
       entityRules: [
         {
@@ -253,8 +266,7 @@ describe('deterministic foundation rules', () => {
     expect(issues).toHaveLength(1)
     expect(issues[0]).toMatchObject({
       source: level,
-      fixDocument: level.documentPath,
-      fixSectionId: level.sectionId,
+      remediation: { kind: 'patch', documentPath: level.documentPath, sectionIds: [level.sectionId] },
     })
   })
 })

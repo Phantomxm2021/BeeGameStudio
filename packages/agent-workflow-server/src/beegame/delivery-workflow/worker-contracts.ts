@@ -196,14 +196,44 @@ export const foundationFactStructuredOutputJsonSchema = buildFoundationFactSchem
   FOUNDATION_FACT_CATALOG.map(definition => definition.key),
 )
 
+const foundationSemanticPatchRemediationSchema = z.object({
+  kind: z.literal('patch'),
+  sectionKeys: z.array(z.string().min(1)).min(1),
+}).strict()
+
+const foundationSemanticRemediationSchema = foundationSemanticPatchRemediationSchema
+
 const foundationSemanticIssueSchema = z.object({
   problem: z.string().min(1),
   expected: z.string().min(1),
   actual: z.string().min(1),
   sourceSectionKey: z.string().min(1),
-  fixSectionKey: z.string().min(1),
+  remediation: foundationSemanticRemediationSchema,
   reasonCode: z.string().min(1).optional(),
 }).strict()
+
+/** Targeted revision recheck output. Service-owned expected/identity fields are
+ * intentionally absent: the worker may only report observed evidence. */
+export const foundationSemanticFailureDiagnosticInputSchema = z.object({
+  observedActual: z.string().min(1),
+  evidence: z.array(z.object({
+    documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+    sectionId: z.string().min(1),
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict()).min(1),
+  failureReasonCode: z.enum([
+    'expected_not_met',
+    'actual_persists',
+    'contradictory_evidence',
+    'evidence_insufficient',
+  ]),
+  scopeAssessment: z.literal('repairable_in_scope'),
+}).strict()
+
+export const foundationSemanticRecheckWorkerPayloadSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('PASS') }).strict(),
+  z.object({ status: z.literal('FAIL'), diagnostic: foundationSemanticFailureDiagnosticInputSchema }).strict(),
+])
 
 const foundationSemanticPayloadSchema = z.object({
   status: z.enum(['completed', 'failed', 'blocked']),
@@ -220,7 +250,7 @@ const foundationSemanticPayloadSchema = z.object({
 
 export const foundationSemanticModelPayloadSchema = foundationSemanticPayloadSchema
 
-export const foundationSemanticReviewerTerminalSchema = z.object({
+const foundationSemanticReviewerTerminalIdentitySchema = z.object({
   workerType: z.literal('foundation-semantic-reviewer'),
   status: z.enum(['completed', 'failed', 'blocked']),
   runId: z.string().min(1),
@@ -228,22 +258,41 @@ export const foundationSemanticReviewerTerminalSchema = z.object({
   taskId: z.string().min(1),
   revision: z.string().min(1),
   packetDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  outcome: z.enum(['PASS', 'ISSUES', 'UNDECIDABLE']),
+}).strict()
+
+export const foundationSemanticReviewerTerminalSchema = foundationSemanticReviewerTerminalIdentitySchema.extend({
+  outcome: z.enum(['PASS', 'ISSUES', 'UNDECIDABLE', 'FAIL']),
   issues: z.array(foundationSemanticIssueSchema).optional(),
   reason: z.string().min(1).optional(),
+  diagnostic: foundationSemanticFailureDiagnosticInputSchema.optional(),
 }).strict().superRefine((value, context) => {
   const issues = value.issues ?? []
+  if (value.outcome === 'FAIL' && (!value.diagnostic || issues.length || value.reason !== undefined)) context.addIssue({ code: 'custom', path: ['diagnostic'], message: 'FAIL requires only a structured diagnostic' })
+  if (value.outcome === 'FAIL') return
+  if (value.diagnostic !== undefined) context.addIssue({ code: 'custom', path: ['diagnostic'], message: 'diagnostic is only valid for targeted FAIL' })
   if (value.outcome === 'PASS' && issues.length) context.addIssue({ code: 'custom', path: ['issues'], message: 'PASS cannot contain issues' })
   if (value.outcome === 'ISSUES' && !issues.length) context.addIssue({ code: 'custom', path: ['issues'], message: 'ISSUES requires issue drafts' })
   if (value.outcome === 'UNDECIDABLE' && (issues.length || !value.reason)) context.addIssue({ code: 'custom', path: ['reason'], message: 'UNDECIDABLE requires a reason and no issue drafts' })
   if (value.outcome !== 'UNDECIDABLE' && value.reason !== undefined) context.addIssue({ code: 'custom', path: ['reason'], message: 'PASS/ISSUES cannot contain reason' })
 })
 
+export const foundationSemanticRecheckTerminalSchema = foundationSemanticReviewerTerminalIdentitySchema.extend({
+  outcome: z.enum(['PASS', 'FAIL']),
+  diagnostic: foundationSemanticFailureDiagnosticInputSchema.optional(),
+}).superRefine((value, context) => {
+  if (value.outcome === 'PASS' && value.diagnostic !== undefined)
+    context.addIssue({ code: 'custom', path: ['diagnostic'], message: 'targeted PASS cannot contain a diagnostic' })
+  if (value.outcome === 'FAIL' && value.diagnostic === undefined)
+    context.addIssue({ code: 'custom', path: ['diagnostic'], message: 'targeted FAIL requires a diagnostic' })
+})
+
 export const foundationSemanticReviewerStructuredOutputJsonSchema = {
   type: 'object', additionalProperties: false,
   properties: {
     status: { enum: ['completed', 'failed', 'blocked'] }, outcome: { enum: ['PASS', 'ISSUES', 'UNDECIDABLE'] },
-    issues: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, properties: { problem: { type: 'string', minLength: 1 }, expected: { type: 'string', minLength: 1 }, actual: { type: 'string', minLength: 1 }, sourceSectionKey: { type: 'string', minLength: 1 }, fixSectionKey: { type: 'string', minLength: 1 }, reasonCode: { type: 'string', minLength: 1 } }, required: ['problem', 'expected', 'actual', 'sourceSectionKey', 'fixSectionKey'] } }, reason: { type: 'string', minLength: 1 },
+    issues: { type: 'array', minItems: 1, items: { type: 'object', additionalProperties: false, properties: { problem: { type: 'string', minLength: 1 }, expected: { type: 'string', minLength: 1 }, actual: { type: 'string', minLength: 1 }, sourceSectionKey: { type: 'string', minLength: 1 }, remediation: { oneOf: [
+      { type: 'object', additionalProperties: false, properties: { kind: { const: 'patch' }, sectionKeys: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } } }, required: ['kind', 'sectionKeys'] },
+    ] }, reasonCode: { type: 'string', minLength: 1 } }, required: ['problem', 'expected', 'actual', 'sourceSectionKey', 'remediation'] } }, reason: { type: 'string', minLength: 1 },
   },
   required: ['status', 'outcome'],
   oneOf: [
@@ -252,6 +301,50 @@ export const foundationSemanticReviewerStructuredOutputJsonSchema = {
     { properties: { outcome: { const: 'UNDECIDABLE' } }, required: ['reason'], not: { required: ['issues'] } },
   ],
 } as const
+
+export const foundationSemanticRecheckStructuredOutputJsonSchema = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    status: { enum: ['PASS', 'FAIL'] },
+    diagnostic: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        observedActual: { type: 'string', minLength: 1 },
+        evidence: {
+          type: 'array', minItems: 1,
+          items: {
+            type: 'object', additionalProperties: false,
+            properties: {
+              documentPath: { enum: [...CANONICAL_FOUNDATION_DOCUMENTS] },
+              sectionId: { type: 'string', minLength: 1 },
+              digest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            },
+            required: ['documentPath', 'sectionId', 'digest'],
+          },
+        },
+        failureReasonCode: { enum: ['expected_not_met', 'actual_persists', 'contradictory_evidence', 'evidence_insufficient'] },
+        scopeAssessment: { const: 'repairable_in_scope' },
+      },
+      required: ['observedActual', 'evidence', 'failureReasonCode', 'scopeAssessment'],
+    },
+  },
+  required: ['status'],
+  oneOf: [
+    { properties: { status: { const: 'PASS' } }, not: { required: ['diagnostic'] } },
+    { properties: { status: { const: 'FAIL' } }, required: ['diagnostic'] },
+  ],
+} as const
+
+export const foundationRevisionDeclarationSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('APPLIED'),
+    changedSectionIds: z.array(z.string().min(1)).min(1),
+  }).strict().superRefine((value, context) => {
+    if (new Set(value.changedSectionIds).size !== value.changedSectionIds.length)
+      context.addIssue({ code: 'custom', path: ['changedSectionIds'], message: 'changedSectionIds must be unique' })
+  }),
+])
+
 
 const foundationRevisionReceiptSchema = z.object({
   taskId: z.string().min(1),
@@ -265,6 +358,10 @@ const foundationRevisionReceiptSchema = z.object({
   terminalDigest: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict()
 
+export const foundationRevisionToolResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('APPLIED'), receipt: foundationRevisionReceiptSchema }).strict(),
+])
+
 export const foundationDocumentReviserTerminalSchema = z.object({
   workerType: z.literal('foundation-document-reviser'),
   status: z.enum(['completed', 'failed', 'blocked']),
@@ -275,7 +372,7 @@ export const foundationDocumentReviserTerminalSchema = z.object({
   packetDigest: z.string().regex(/^[a-f0-9]{64}$/),
   round: z.number().int().positive(),
   documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
-  receipt: foundationRevisionReceiptSchema,
+  declaration: foundationRevisionToolResultSchema,
 }).strict()
 
 export const documentAuthorTerminalSchema = z

@@ -119,6 +119,73 @@ describe('worker prompts', () => {
     }
   })
 
+  test('states the canonical semantic remediation union without the removed question track', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'foundation-semantic-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      allowedPaths: [],
+      contract: {
+        workerType: 'foundation-semantic-reviewer',
+        taskId: 'task',
+        packetDigest: 'a'.repeat(64),
+        packet: {
+          revision: 'revision',
+          keys: ['GDD.player_loop'],
+          sections: [],
+          packetDigest: 'a'.repeat(64),
+        },
+        modelTier: 'balanced',
+      },
+    })
+
+    expect(prompt).toContain('remediation must be exactly {"kind":"patch","sectionKeys":["..."]}')
+    expect(prompt).toContain('{"kind":"patch","sectionKeys":["..."]}')
+    expect(prompt).toContain('Do not wrap the result in `params` or add fields')
+    expect(prompt).toContain('All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch')
+    expect(prompt).toContain('If a conflict spans documents, split it into separate Issues with independent single-document patch authority')
+    expect(prompt).toContain('Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan')
+    expect(prompt).toContain('Choose that repair directly; never request a user choice or preserve alternatives')
+    expect(prompt).toContain('A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair')
+  })
+
+  test('gives revision semantic rechecks only the admitted Issue PASS or FAIL contract', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'foundation-semantic-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      taskId: 'task',
+      revision: 'revision',
+      allowedPaths: [],
+      contract: {
+        workerType: 'foundation-semantic-reviewer',
+        taskId: 'task',
+        issueId: 'AUD-1',
+        packetDigest: 'a'.repeat(64),
+        packet: {
+          issueId: 'AUD-1',
+          expected: 'Boot transitions to MainMenu.',
+          actual: 'The transition is absent.',
+          sections: [],
+        },
+        modelTier: 'strong',
+      },
+    })
+
+    expect(prompt).toContain('Recheck only the admitted Issue')
+    expect(prompt).toContain('PASS or FAIL')
+    expect(prompt).toContain('FAIL requires one structured diagnostic')
+    expect(prompt).not.toContain('ISSUES includes')
+    expect(prompt).not.toContain('Semantic Issue remediation')
+  })
+
   test('keeps revision workers on the packet and one absolute staged path', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
@@ -142,13 +209,28 @@ describe('worker prompts', () => {
           taskId: 'task',
           documentPath: 'docs/GDD.md',
           sections: [{ sectionId: 'section-1', content: 'IMMUTABLE_PACKET_SENTINEL' }],
+          factConstraints: [{
+            key: 'asset.covered_level_requirements',
+            owner: { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' },
+            valueType: 'string[]',
+            extractionInstruction: 'Read only labels on the left side of an explicit mapping table.',
+            sourceOfTruthDirection: 'LEVEL owns requirements; ASSET_PLAN maps them to inventory.',
+          }],
         },
         packetDigest: 'a'.repeat(64),
+        priorFailureReason: 'revision changed an unauthorized section',
         confirmedBriefContext: 'CONFIRMED_BRIEF_SENTINEL',
         canonicalArtifacts: 'CANONICAL_ARTIFACT_SENTINEL',
       },
     })
     expect(prompt).toContain('IMMUTABLE_PACKET_SENTINEL')
+    expect(prompt).toContain('packet sectionIds are the complete write authority')
+    expect(prompt).toContain('related, risk, consistency, dependency, and production-material sections')
+    expect(prompt).toContain('Automatic retry after the previous strict validation failure: revision changed an unauthorized section')
+    expect(prompt).toContain('factConstraints')
+    expect(prompt).toContain('left side of an explicit mapping table')
+    expect(prompt).toContain('do not substitute a standalone fact declaration')
+    expect(prompt).toContain('Unmarked Production Materials and audit appendices are outside the packet authority')
     expect(prompt).toContain('/workspace-secret/.beegame/audit/foundation/revision/revision/docs/GDD.md')
     expect(prompt).not.toContain('CONFIRMED_BRIEF_SENTINEL')
     expect(prompt).not.toContain('CANONICAL_ARTIFACT_SENTINEL')

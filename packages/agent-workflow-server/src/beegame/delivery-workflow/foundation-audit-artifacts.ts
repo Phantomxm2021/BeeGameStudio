@@ -18,6 +18,7 @@ import {
 import type { FoundationAuditState } from './foundation-audit-state'
 import { createFoundationFactStore, digestFactStore, type FoundationFactStore } from './foundation-fact-store'
 import type { AuditIssue } from './foundation-issue-registry'
+import { getGameDocumentContract } from './game-document-contracts'
 import {
   FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
 } from './foundation-audit-production-manifest'
@@ -622,13 +623,30 @@ function validateReviewSection(value: unknown, label: string): void {
     throw new Error(`deterministic review ${label} SectionRef is invalid`)
 }
 
+function validateReviewRemediation(value: unknown, label: string): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error(`deterministic review ${label} remediation is invalid`)
+  const remediation = value as Record<string, unknown>
+  if (remediation.kind === 'patch') {
+    if (!exactKeys(remediation, ['kind', 'documentPath', 'sectionIds']) ||
+      typeof remediation.documentPath !== 'string' ||
+      !CANONICAL_FOUNDATION_DOCUMENTS.includes(remediation.documentPath as FoundationDocumentPath) ||
+      !Array.isArray(remediation.sectionIds) || remediation.sectionIds.length === 0 ||
+      remediation.sectionIds.some(sectionId => typeof sectionId !== 'string' || !/^[a-z0-9._-]+$/.test(sectionId)) ||
+      new Set(remediation.sectionIds).size !== remediation.sectionIds.length ||
+      remediation.sectionIds.some(sectionId => !getGameDocumentContract(remediation.documentPath as FoundationDocumentPath).sections.some(section => section.sectionId === sectionId)))
+      throw new Error(`deterministic review ${label} patch remediation is invalid`)
+    return
+  }
+  throw new Error(`deterministic review ${label} remediation must be a patch`)
+}
+
 function validateReviewIssue(value: unknown, index: number, allowSemantic = false): void {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error(`deterministic review issue ${index} is invalid`)
   const issue = value as Record<string, unknown>
-  const allowed = ['id', 'severity', 'type', 'source', 'target', 'expected', 'actual', 'fixDocument', 'fixSectionId', 'reasonCode']
-  const required = ['id', 'severity', 'type', 'source', 'expected', 'actual', 'fixDocument', 'fixSectionId']
-  if (!exactKeys(issue, required.concat(issue.target !== undefined ? ['target'] : []).concat(issue.reasonCode !== undefined ? ['reasonCode'] : allowed.filter(() => false))))
+  const required = ['id', 'severity', 'type', 'source', 'expected', 'actual', 'remediation']
+  if (!exactKeys(issue, required.concat(issue.target !== undefined ? ['target'] : []).concat(issue.reasonCode !== undefined ? ['reasonCode'] : [])))
     throw new Error(`deterministic review issue ${index} has unknown or missing fields`)
   if (typeof issue.id !== 'string' || !/^AUD-[A-F0-9]{24}$/.test(issue.id))
     throw new Error(`deterministic review issue ${index} identity is invalid`)
@@ -640,8 +658,7 @@ function validateReviewIssue(value: unknown, index: number, allowSemantic = fals
     throw new Error(`deterministic review issue ${index} text is invalid`)
   validateReviewSection(issue.source, `issue ${index} source`)
   if (issue.target !== undefined) validateReviewSection(issue.target, `issue ${index} target`)
-  if (typeof issue.fixDocument !== 'string' || !CANONICAL_FOUNDATION_DOCUMENTS.includes(issue.fixDocument as FoundationDocumentPath) || typeof issue.fixSectionId !== 'string' || !/^[a-z0-9._-]+$/.test(issue.fixSectionId))
-    throw new Error(`deterministic review issue ${index} fix target is invalid`)
+  validateReviewRemediation(issue.remediation, `issue ${index}`)
   if (issue.reasonCode !== undefined && (typeof issue.reasonCode !== 'string' || !issue.reasonCode.trim()))
     throw new Error(`deterministic review issue ${index} reason code is invalid`)
 }

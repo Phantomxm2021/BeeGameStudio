@@ -19,7 +19,7 @@ import {
   startDocumentStage,
 } from './document-stage'
 import { canStartFoundationAudit } from './foundation-audit-boundary'
-import { createFoundationAuditState } from './foundation-audit-state'
+import { activeFoundationRevisionBundle, activeFoundationRevisionTasks, createFoundationAuditState, foundationRuntimeTasks } from './foundation-audit-state'
 import { deriveFoundationAuditArtifacts } from './foundation-audit-artifacts'
 import {
   completeResourceTask,
@@ -69,7 +69,7 @@ import {
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, mergeFoundationFactResults, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
 import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
@@ -100,7 +100,7 @@ import {
   type FoundationSemanticTaskCollection,
 } from './foundation-semantic-runtime'
 import { compileFoundationIssueRegistry } from './foundation-audit-check-definitions'
-import { foundationSemanticReviewerStructuredOutputJsonSchema } from './worker-contracts'
+import { foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './worker-contracts'
 import { buildFoundationRevisionBatches } from './foundation-revision-batches'
 import { evaluateFoundationRevisionRoundPolicy } from './foundation-revision-round-policy'
 import { analyzeFoundationImpact } from './foundation-impact-analysis'
@@ -110,6 +110,7 @@ import type { FoundationSemanticRecheckPacket } from './foundation-patch-validat
 import {
   buildFoundationRevisionAuthority,
   createFoundationRevisionStage,
+  resetFoundationRevisionStage,
   writeFoundationRevisionPacket,
   loadFoundationRevisionPacket,
   writeFoundationRevisionFactPacket,
@@ -141,6 +142,17 @@ function markRevisionCommitTransient(error: unknown): never {
 
 function isRevisionCommitTransient(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && (error as { foundationRevisionCommitTransient?: boolean }).foundationRevisionCommitTransient)
+}
+
+function revisionBundleDigest(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+class FoundationFactAttemptError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'FoundationFactAttemptError'
+  }
 }
 
 async function deriveFoundationAudit(
@@ -249,6 +261,14 @@ export function createDeliveryWorkflowController(input: {
   dispatcher = createDeliveryDispatcher({
     store,
     workerPort: input.workerPort,
+    onRetryable: async runId => {
+      const current = await store.load()
+      if (!current || current.runId !== runId || current.status !== 'running') return
+      // A dispatch failure may be reconciled from inside handleTerminal's
+      // serialization lane. Queue the next progress pass instead of awaiting
+      // that same lane and deadlocking terminal reconciliation.
+      void ensureProgress(current).catch(() => undefined)
+    },
     onTerminal: async (record, result, request) =>
       handleTerminal(record, result, request),
   })
@@ -359,7 +379,7 @@ export function createDeliveryWorkflowController(input: {
     const mechanical = extractNormalizedFoundationFacts({ documents, sectionIndex: artifacts.sectionIndex })
     const workerFacts: FoundationFact[] = []
     const workerReceipts: FoundationFactReceipt[] = []
-    for (const task of state.tasks.filter(task => task.kind === 'document-facts')) {
+    for (const task of foundationRuntimeTasks(state).filter(task => task.kind === 'document-facts')) {
       if (!task.receiptPath || !task.receiptDigest || !task.terminalDigest) throw new Error('foundation fact task receipt binding is incomplete')
       const receipt = await loadFoundationFactReceipt({ workspacePath: input.workspacePath, revision: state.revision, taskId: task.taskId, expectedPacketDigest: task.packetDigest, expectedTerminalDigest: task.terminalDigest, expectedReceiptPath: task.receiptPath, expectedReceiptDigest: task.receiptDigest })
       workerFacts.push(...receipt.facts)
@@ -398,7 +418,12 @@ export function createDeliveryWorkflowController(input: {
       deterministicPrefix = await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: state.revision, reviewDigest: deterministicReviewDigest })
       if (!deterministicPrefix || deterministicPrefix.revision !== state.revision || deterministicPrefix.reviewDigest !== deterministic.reviewDigest || deterministicPrefix.digests.issueRegistry !== deterministic.issueRegistryDigest || deterministicPrefix.digests.manifest !== deterministic.manifestDigest || deterministicPrefix.digests.marker !== deterministic.markerDigest || deterministicPrefix.sectionIndexDigest !== deterministic.sectionIndexDigest || deterministicPrefix.factStoreDigest !== deterministic.factStoreDigest || deterministicPrefix.sectionIndexDigest !== committed.digests.sectionIndex || deterministicPrefix.factStoreDigest !== committed.digests.factStore || deterministicPrefix.manifestDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest || deterministicPrefix.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion || deterministicPrefix.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest || deterministic.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion || deterministic.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest || !sameDocumentDigests(deterministicPrefix.documentDigests, committed.documentDigests)) throw new Error('deterministic-ready review binding is stale')
     } else {
-      const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore })
+      const documents = new Map(
+        await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path =>
+          [path, await readFile(join(input.workspacePath, path), 'utf8')] as const,
+        )),
+      )
+      const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore, documents })
       const review = await publishDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: state.revision, documentDigests: committed.documentDigests, sectionIndex, factStore, issues })
       if (review.manifestDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest || review.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion || review.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest) throw new Error('deterministic review is not bound to the controller production manifest')
       const reviewRoot = `.beegame/audit/foundation/${state.revision}/staging/review/${review.reviewDigest}`
@@ -456,13 +481,14 @@ export function createDeliveryWorkflowController(input: {
       const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision })
       const prefix = await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: state.revision, reviewDigest: state.deterministic.reviewDigest })
       if (!committed || !prefix) throw new Error('semantic finalization immutable inputs are unavailable')
-      const sourceTasks = state.tasks.filter(task => task.kind === 'semantic') as Array<{ taskId: string; checkId: string; status: string; admittedResult?: FoundationSemanticResult }>
+      const runtimeTasks = foundationRuntimeTasks(state)
+      const sourceTasks = runtimeTasks.filter(task => task.kind === 'semantic') as Array<{ taskId: string; checkId: string; status: string; admittedResult?: FoundationSemanticResult }>
       if (sourceTasks.length !== 10 || sourceTasks.some(task => !task.admittedResult || task.status !== 'completed')) throw new Error('semantic finalization requires every source result')
       const resultLedger: { checkId: string; packetIdentity: string; admittedResultDigest: string; confirmationDigest?: string }[] = []
       const semanticDrafts = []
       for (const task of sourceTasks) {
         const packet = await buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: state.revision, checkId: task.checkId, sectionIndex: committed.sectionIndex, factStore: committed.factStore, deterministicReviewDigest: prefix.reviewDigest, deterministicIssuePrefix: prefix.issues, documentDigests: committed.documentDigests })
-        const confirmation = state.tasks.find(candidate => candidate.kind === 'confirmation' && candidate.sourceTaskId === task.taskId) as { admittedResult?: FoundationSemanticResult } | undefined
+        const confirmation = runtimeTasks.find(candidate => candidate.kind === 'confirmation' && candidate.sourceTaskId === task.taskId) as { admittedResult?: FoundationSemanticResult } | undefined
         const admitted = (confirmation?.admittedResult ?? task.admittedResult) as FoundationSemanticResult
         if (admitted.outcome === 'UNDECIDABLE') throw new Error('semantic confirmation remained undecidable')
         semanticDrafts.push(...semanticResultToFoundationIssueDrafts(packet, admitted))
@@ -485,7 +511,7 @@ export function createDeliveryWorkflowController(input: {
         const now = new Date().toISOString()
         continuation = { ...locked, foundationAuditState: { ...finalState, authority, roundBefore: { documentRevision: state.revision, issueRegistryDigest: review.digests.issueRegistry, issueAuthority: authority.issueAuthority }, round: 1, status: 'planning', phaseStartedAt: now, aggregateUsage: undefined, deterministic: undefined, semantic: undefined, review: undefined, issueSummary: summarizeFoundationIssues(review.issues), tasks: [] }, status: 'running', blockedReason: undefined, thinking: 'idle' }
       }
-      await store.commit(continuation, { runId: locked.runId, type: 'foundation.audit.audit_ready', phase: locked.phase, status: 'running', revision: locked.revision, reviewDigest: review.reviewDigest }, undefined, lease)
+      await store.commit(continuation, { runId: locked.runId, type: 'foundation.audit.audit_ready', phase: locked.phase, status: continuation.status, revision: locked.revision, reviewDigest: review.reviewDigest }, undefined, lease)
     } finally { await store.unlock(lease) }
     if (continuation) await resumeUnlocked(continuation)
   }
@@ -496,16 +522,17 @@ export function createDeliveryWorkflowController(input: {
     request?: WorkerDispatchRequest,
   ): Promise<void> {
     const run = await store.load()
+    const foundationRuntimeTaskList = run?.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState) : []
     const foundationCheckpoint = run?.foundationDraftState.documents?.find(
       document => document.dispatch?.dispatchId === record.dispatchId,
     )
-    const foundationFactTask = run?.foundationAuditState?.tasks.find(
+    const foundationFactTask = foundationRuntimeTaskList.find(
       task => task.dispatch?.dispatchId === record.dispatchId,
     )
-    const foundationSemanticTask = run?.foundationAuditState?.tasks.find(
+    const foundationSemanticTask = foundationRuntimeTaskList.find(
       task => task.dispatch?.dispatchId === record.dispatchId && (task.kind === 'semantic' || task.kind === 'confirmation'),
     )
-    const foundationRevisionTask = run?.foundationAuditState?.tasks.find(
+    const foundationRevisionTask = foundationRuntimeTaskList.find(
       task => task.dispatch?.dispatchId === record.dispatchId,
     )
     if (!run || (run.activeDispatch?.dispatchId !== record.dispatchId && !foundationCheckpoint && !foundationFactTask && !foundationSemanticTask && !foundationRevisionTask))
@@ -516,7 +543,7 @@ export function createDeliveryWorkflowController(input: {
       const lease = await store.mutationLock(run.runId)
       try {
         const locked = await store.load(lease)
-        const task = locked?.foundationAuditState?.tasks.find(candidate => candidate.taskId === foundationRevisionTask.taskId)
+        const task = locked?.foundationAuditState && foundationRuntimeTasks(locked.foundationAuditState).find(candidate => candidate.taskId === foundationRevisionTask.taskId)
         if (!locked || !task || task.kind !== 'impacted-facts' || task.dispatch?.dispatchId !== record.dispatchId) return
         if (task.status === 'completed' && task.receiptPath && task.receiptDigest) {
           if (task.terminalDigest !== digestFoundationFactTerminal(result as never)) throw new Error('conflicting foundation impacted fact terminal replay')
@@ -527,11 +554,21 @@ export function createDeliveryWorkflowController(input: {
           const packet = await loadFoundationRevisionFactPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
           const documents = await revisionDocuments(locked.foundationAuditState!)
           const sectionIndex = buildFoundationSectionIndex({ documents: Object.fromEntries(documents) })
-          const validated = validateFoundationFactResults({ packet, expectedRevision: task.revision, documents, sectionIndex, results: result.results as never })
+          let validated: ReturnType<typeof validateFoundationFactResults>
+          try {
+            validated = validateFoundationFactResults({ packet, expectedRevision: task.revision, documents, sectionIndex, results: result.results as never })
+          } catch (error) {
+            throw new FoundationFactAttemptError(error instanceof Error ? error.message : 'foundation impacted fact result is invalid')
+          }
           const terminalDigest = digestFoundationFactTerminal(result as never)
           const usage = record.usage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
           const durationMs = Math.max(0, Date.parse(record.finishedAt ?? new Date().toISOString()) - Date.parse(record.startedAt))
-          const receipt = await writeFoundationFactReceipt({ workspacePath: input.workspacePath, revision: task.revision, receipt: { taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, terminalDigest, normalizedFactDigest: validated.normalizedFactDigest, receipts: validated.receipts, facts: validated.facts, usage, durationMs } })
+          let receipt: Awaited<ReturnType<typeof writeFoundationFactReceipt>>
+          try {
+            receipt = await writeFoundationFactReceipt({ workspacePath: input.workspacePath, revision: task.revision, receipt: { taskId: task.taskId, revision: task.revision, packetDigest: task.packetDigest, terminalDigest, normalizedFactDigest: validated.normalizedFactDigest, receipts: validated.receipts, facts: validated.facts, usage, durationMs } })
+          } catch (error) {
+            throw new FoundationFactAttemptError(error instanceof Error ? error.message : 'foundation impacted fact receipt could not be written')
+          }
           receiptWritten = true
           admitted = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState!, tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'completed' as const, terminalDigest, receiptPath: receipt.path, receiptDigest: receipt.digest, usage, durationMs }, record) : candidate) } }, { runId: locked.runId, type: 'foundation.revision.impacted_facts.admitted', phase: locked.phase, status: locked.status, revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, terminalDigest }, undefined, lease)
         }
@@ -540,7 +577,20 @@ export function createDeliveryWorkflowController(input: {
         if (receiptWritten) throw error
         const latest = await store.load(lease)
         if (latest?.foundationAuditState) {
-          admitted = await store.commit({
+          if (error instanceof FoundationFactAttemptError) {
+            const invalid = { ...record, status: 'invalid' as const, failureReason: reason, terminalResult: undefined, finishedAt: record.finishedAt ?? new Date().toISOString() }
+            admitted = await store.commit({
+              ...latest,
+              status: 'running',
+              blockedReason: undefined,
+              foundationAuditState: {
+                ...latest.foundationAuditState,
+                tasks: latest.foundationAuditState.tasks.map(candidate => candidate.taskId === foundationRevisionTask.taskId
+                  ? projectTaskTerminalEvidence({ ...candidate, status: 'retryable' as const, failureReason: reason }, invalid)
+                  : candidate),
+              },
+            }, { runId: latest.runId, type: 'foundation.revision.impacted_facts.admission_retryable', phase: latest.phase, status: 'running', revision: latest.revision, taskId: foundationRevisionTask.taskId, reason }, undefined, lease)
+          } else admitted = await store.commit({
             ...latest,
             status: 'needs_action',
             blockedReason: reason,
@@ -564,14 +614,14 @@ export function createDeliveryWorkflowController(input: {
       const lease = await store.mutationLock(run.runId)
       try {
         const locked = await store.load(lease)
-        const task = locked?.foundationAuditState?.tasks.find(candidate => candidate.taskId === foundationRevisionTask.taskId)
+        const task = locked?.foundationAuditState && foundationRuntimeTasks(locked.foundationAuditState).find(candidate => candidate.taskId === foundationRevisionTask.taskId)
         if (!locked || !task || task.kind !== 'semantic-recheck' || task.dispatch?.dispatchId !== record.dispatchId) return
         if (task.status === 'completed' && task.resultPath && task.resultDigest && task.terminalDigest) {
           await loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, resultDigest: task.resultDigest, resultPath: task.resultPath })
           if (locked.foundationAuditState!.status !== 'semantic_recheck') {
             admitted = locked
           } else {
-            const semanticTasks = locked.foundationAuditState!.tasks.filter(candidate => candidate.kind === 'semantic-recheck')
+            const semanticTasks = activeFoundationRevisionTasks(locked.foundationAuditState!).filter(candidate => candidate.kind === 'semantic-recheck')
             const allCompleted = semanticTasks.length > 0 && semanticTasks.every(candidate => candidate.status === 'completed' && !!candidate.resultPath && !!candidate.resultDigest && !!candidate.terminalDigest)
             if (!allCompleted) admitted = locked
             else {
@@ -579,45 +629,54 @@ export function createDeliveryWorkflowController(input: {
               let failureReason: string | undefined
               try {
                 const results = await Promise.all(semanticTasks.map(candidate => loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: candidate.revision, round: candidate.round, taskId: candidate.taskId, issueId: candidate.issueId, packetDigest: candidate.packetDigest, resultDigest: candidate.resultDigest!, resultPath: candidate.resultPath! })))
-                allDecidable = results.every(candidate => candidate.status === 'PASS' || candidate.status === 'FAIL')
+                const failures = results.filter(candidate => candidate.status === 'FAIL')
+                const allPass = results.every(candidate => candidate.status === 'PASS')
+                const actionable = failures.length > 0 && failures.every(candidate => candidate.diagnostic?.scopeAssessment === 'repairable_in_scope')
+                allDecidable = allPass || actionable
                 if (!allDecidable) failureReason = 'foundation semantic result is invalid or stale'
+                const nextFoundationStatus = allPass ? 'publishing' as const : actionable ? 'validating' as const : 'semantic_recheck' as const
+                const nextRunStatus = allPass || actionable ? 'running' as const : 'needs_action' as const
+                admitted = await store.commit({ ...locked, status: nextRunStatus, blockedReason: nextRunStatus === 'needs_action' ? failureReason : undefined, foundationAuditState: { ...locked.foundationAuditState!, status: nextFoundationStatus, phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: allPass ? 'foundation.revision.publishing' : actionable ? 'foundation.revision.semantic_failure_retry' : 'foundation.revision.semantic_recheck.failed', phase: locked.phase, status: nextRunStatus, revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, ...(failureReason ? { reason: failureReason } : {}) }, undefined, lease)
               } catch (error) {
                 failureReason = error instanceof Error ? error.message : 'foundation semantic result artifact is invalid'
               }
-              admitted = await store.commit({ ...locked, status: allDecidable ? 'running' : 'needs_action', blockedReason: allDecidable ? undefined : failureReason, foundationAuditState: { ...locked.foundationAuditState!, status: allDecidable ? 'publishing' : 'semantic_recheck', phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: allDecidable ? 'foundation.revision.publishing' : 'foundation.revision.semantic_recheck.failed', phase: locked.phase, status: allDecidable ? 'running' : 'needs_action', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, ...(failureReason ? { reason: failureReason } : {}) }, undefined, lease)
             }
           }
         } else {
           if (result.status !== 'completed') throw new Error('foundation semantic revision terminal did not complete')
           const packet = await loadFoundationRevisionSemanticPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
+          if (!task.issue) throw new Error('foundation semantic recheck task is missing admitted Issue authority')
+          if (result.outcome !== 'PASS' && result.outcome !== 'FAIL') throw new Error('foundation semantic recheck terminal outcome is invalid')
           const admittedResult = result.outcome === 'PASS'
-            ? admitFoundationSemanticRecheckResult(packet as never, { issueId: task.issueId, packetDigest: task.packetDigest, status: 'PASS' })
-            : result.outcome === 'ISSUES'
-              ? admitFoundationSemanticRecheckResult(packet as never, { issueId: task.issueId, packetDigest: task.packetDigest, status: 'FAIL', reasonCode: 'semantic_issue_persists' })
-              : undefined
-          if (!admittedResult) {
-            const reason = result.reason ?? 'foundation semantic recheck is undecidable'
-            const terminal = { ...record, failureReason: reason }
-            admitted = await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationAuditState: { ...locked.foundationAuditState!, tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'needs_action' as const }, terminal) : candidate) } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck.needs_action', phase: locked.phase, status: 'needs_action', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, reason }, undefined, lease)
-          } else {
+            ? admitFoundationSemanticRecheckResult(packet as never, { status: 'PASS' }, { taskId: task.taskId, issue: task.issue })
+            : admitFoundationSemanticRecheckResult(packet as never, { status: 'FAIL', diagnostic: result.diagnostic }, { taskId: task.taskId, issue: task.issue })
+          {
             const resultDigest = digestFoundationSemanticRecheckResult(admittedResult)
             const resultPath = await writeFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, result: admittedResult, resultDigest })
             const completedTasks = locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'completed' as const, resultPath, resultDigest, terminalDigest: candidate.terminalDigest ?? (record.terminalResult ? createHash('sha256').update(JSON.stringify(record.terminalResult)).digest('hex') : undefined) }, record) : candidate)
-            const semanticTasks = completedTasks.filter(candidate => candidate.kind === 'semantic-recheck')
+            const semanticTasks = activeFoundationRevisionTasks({ ...locked.foundationAuditState!, tasks: completedTasks }).filter(candidate => candidate.kind === 'semantic-recheck')
             const allCompleted = semanticTasks.length > 0 && semanticTasks.every(candidate => candidate.status === 'completed' && !!candidate.resultPath && !!candidate.resultDigest && !!candidate.terminalDigest)
             if (!allCompleted) {
               admitted = await store.commit({ ...locked, status: 'running', blockedReason: undefined, foundationAuditState: { ...locked.foundationAuditState!, status: 'semantic_recheck', phaseStartedAt: new Date().toISOString(), tasks: completedTasks } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck.progress', phase: locked.phase, status: 'running', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, resultDigest }, undefined, lease)
             } else {
               let allDecidable = false
               let failureReason: string | undefined
+              let semanticResults: Awaited<ReturnType<typeof loadFoundationRevisionSemanticResult>>[] = []
               try {
-                const results = await Promise.all(semanticTasks.map(candidate => loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: candidate.revision, round: candidate.round, taskId: candidate.taskId, issueId: candidate.issueId, packetDigest: candidate.packetDigest, resultDigest: candidate.resultDigest!, resultPath: candidate.resultPath! })))
-                allDecidable = results.every(candidate => candidate.status === 'PASS' || candidate.status === 'FAIL')
+                semanticResults = await Promise.all(semanticTasks.map(candidate => loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: candidate.revision, round: candidate.round, taskId: candidate.taskId, issueId: candidate.issueId, packetDigest: candidate.packetDigest, resultDigest: candidate.resultDigest!, resultPath: candidate.resultPath! })))
+                allDecidable = semanticResults.every(candidate => candidate.status === 'PASS')
                 if (!allDecidable) failureReason = 'foundation semantic result is invalid or stale'
               } catch (error) {
                 failureReason = error instanceof Error ? error.message : 'foundation semantic result artifact is invalid'
               }
-              admitted = await store.commit({ ...locked, status: allDecidable ? 'running' : 'needs_action', blockedReason: allDecidable ? undefined : failureReason, foundationAuditState: { ...locked.foundationAuditState!, status: allDecidable ? 'publishing' : 'semantic_recheck', phaseStartedAt: new Date().toISOString(), tasks: completedTasks } }, { runId: locked.runId, type: allDecidable ? 'foundation.revision.publishing' : 'foundation.revision.semantic_recheck.failed', phase: locked.phase, status: allDecidable ? 'running' : 'needs_action', revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, resultDigest, ...(failureReason ? { reason: failureReason } : {}) }, undefined, lease)
+              const failures = semanticResults.filter(candidate => candidate.status === 'FAIL')
+              const allPass = semanticResults.length > 0 && semanticResults.every(candidate => candidate.status === 'PASS')
+              const actionable = failures.length > 0 && failures.every(candidate => candidate.diagnostic?.scopeAssessment === 'repairable_in_scope')
+              allDecidable = allPass || actionable
+              if (!allDecidable) failureReason = 'foundation semantic result is invalid or stale'
+              const nextFoundationStatus = allPass ? 'publishing' as const : actionable ? 'validating' as const : 'semantic_recheck' as const
+              const nextRunStatus = allPass || actionable ? 'running' as const : 'needs_action' as const
+              admitted = await store.commit({ ...locked, status: nextRunStatus, blockedReason: nextRunStatus === 'needs_action' ? failureReason : undefined, foundationAuditState: { ...locked.foundationAuditState!, status: nextFoundationStatus, phaseStartedAt: new Date().toISOString(), tasks: completedTasks } }, { runId: locked.runId, type: allPass ? 'foundation.revision.publishing' : actionable ? 'foundation.revision.semantic_failure_retry' : 'foundation.revision.semantic_recheck.failed', phase: locked.phase, status: nextRunStatus, revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, resultDigest, ...(failureReason ? { reason: failureReason } : {}) }, undefined, lease)
             }
           }
         }
@@ -628,13 +687,19 @@ export function createDeliveryWorkflowController(input: {
     if (foundationRevisionTask && result.workerType === 'foundation-document-reviser') {
       let admitted: DeliveryRun | undefined
       if (foundationRevisionTask.status === 'running' && record.status === 'completed' && result.status === 'completed') {
-        const revisionResult = result as Extract<WorkerTerminalResult, { workerType: 'foundation-document-reviser' }>
         const lease = await store.mutationLock(run.runId)
         try {
           const locked = await store.load(lease)
-          const task = locked?.foundationAuditState?.tasks.find(candidate => candidate.taskId === foundationRevisionTask.taskId)
-          if (locked && task?.kind === 'document-revision' && task.status === 'running') {
-            admitted = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState!, tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'completed' as const, receipt: revisionResult.receipt, terminalDigest: revisionResult.receipt.terminalDigest }, record) : candidate) } }, { runId: locked.runId, type: 'foundation.revision.terminal.replayed', phase: locked.phase, status: locked.status, revision: locked.revision, dispatchId: record.dispatchId, taskId: task.taskId }, undefined, lease)
+          const task = locked?.foundationAuditState && foundationRuntimeTasks(locked.foundationAuditState).find(candidate => candidate.taskId === foundationRevisionTask.taskId)
+          // Dispatch admission owns the native APPLIED declaration and durable receipt.
+          if (locked && task?.kind === 'document-revision') {
+            const declaration = (result as Extract<WorkerTerminalResult, { workerType: 'foundation-document-reviser' }>).declaration
+            if (declaration.status === 'APPLIED' && task.status === 'running') {
+              admitted = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState!, tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projectTaskTerminalEvidence({ ...candidate, status: 'completed' as const, receipt: declaration.receipt, terminalDigest: declaration.receipt.terminalDigest }, record) : candidate) } }, { runId: locked.runId, type: 'foundation.revision.terminal.replayed', phase: locked.phase, status: locked.status, revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId }, undefined, lease)
+            } else {
+              const projected = projectTaskTerminalEvidence({ ...task, status: 'completed' as const, receipt: declaration.receipt, terminalDigest: declaration.receipt.terminalDigest }, record)
+              admitted = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState!, tasks: locked.foundationAuditState!.tasks.map(candidate => candidate.taskId === task.taskId ? projected : candidate) } }, { runId: locked.runId, type: 'foundation.revision.terminal.replayed', phase: locked.phase, status: locked.status, revision: locked.revision, taskId: task.taskId, dispatchId: record.dispatchId, terminalDigest: declaration.receipt.terminalDigest }, undefined, lease)
+            }
           }
         } finally { await store.unlock(lease) }
       }
@@ -646,7 +711,7 @@ export function createDeliveryWorkflowController(input: {
       let completedRun: DeliveryRun | undefined
       try {
         const locked = await store.load(lease)
-        const lockedTask = locked?.foundationAuditState?.tasks.find(task => task.taskId === foundationSemanticTask.taskId)
+        const lockedTask = locked?.foundationAuditState && foundationRuntimeTasks(locked.foundationAuditState).find(task => task.taskId === foundationSemanticTask.taskId)
         if (!locked || !lockedTask || (lockedTask.kind !== 'semantic' && lockedTask.kind !== 'confirmation') || lockedTask.dispatch?.dispatchId !== record.dispatchId) return
         const lockedState = locked.foundationAuditState!
         const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: lockedState.revision })
@@ -670,7 +735,7 @@ export function createDeliveryWorkflowController(input: {
         const runStatus: DeliveryRun['status'] = hasNeedsAction ? 'needs_action' : 'running'
         completedRun = await store.commit({ ...locked, foundationAuditState: finalTaskState, status: runStatus, blockedReason: hasNeedsAction ? 'semantic audit needs action' : undefined, thinking: hasNeedsAction ? 'idle' : 'working' }, { runId: locked.runId, type: admission.idempotent ? 'foundation.semantic.terminal.replayed' : 'foundation.semantic.terminal.admitted', phase: locked.phase, status: runStatus, revision: locked.revision, dispatchId: record.dispatchId, taskId: lockedTask.taskId, terminalDigest: admission.terminalDigest }, undefined, lease)
       } finally { await store.unlock(lease) }
-      if (completedRun && completedRun.status === 'running' && completedRun.foundationAuditState && foundationSemanticTasksComplete({ revision: completedRun.foundationAuditState.revision, phaseStartedAt: completedRun.foundationAuditState.phaseStartedAt!, status: 'semantic_review', tasks: completedRun.foundationAuditState.tasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticTaskCollection['tasks'], aggregateUsage: completedRun.foundationAuditState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, ...(completedRun.foundationAuditState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: completedRun.foundationAuditState.semantic.deepPhaseStartedAt } : {}), ...(completedRun.foundationAuditState.semantic?.deepAggregateUsage ? { deepAggregateUsage: completedRun.foundationAuditState.semantic.deepAggregateUsage } : {}) })) await finalizeFoundationSemanticReview(completedRun)
+      if (completedRun && completedRun.status === 'running' && completedRun.foundationAuditState && foundationSemanticTasksComplete({ revision: completedRun.foundationAuditState.revision, phaseStartedAt: completedRun.foundationAuditState.phaseStartedAt!, status: 'semantic_review', tasks: foundationRuntimeTasks(completedRun.foundationAuditState).filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticTaskCollection['tasks'], aggregateUsage: completedRun.foundationAuditState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, completion_tokens: 0, cache_creation_tokens: 0, total_tokens: 0 }, ...(completedRun.foundationAuditState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: completedRun.foundationAuditState.semantic.deepPhaseStartedAt } : {}), ...(completedRun.foundationAuditState.semantic?.deepAggregateUsage ? { deepAggregateUsage: completedRun.foundationAuditState.semantic.deepAggregateUsage } : {}) })) await finalizeFoundationSemanticReview(completedRun)
       else if (completedRun?.status === 'running') await resumeUnlocked(completedRun)
       return
     }
@@ -679,7 +744,7 @@ export function createDeliveryWorkflowController(input: {
       let factsStagedRun: DeliveryRun | undefined
       try {
         const locked = await store.load(lease)
-        const lockedTask = locked?.foundationAuditState?.tasks.find(task => task.taskId === foundationFactTask.taskId)
+        const lockedTask = locked?.foundationAuditState && foundationRuntimeTasks(locked.foundationAuditState).find(task => task.taskId === foundationFactTask.taskId)
         if (!locked || !lockedTask || !lockedTask.dispatch || lockedTask.dispatch.dispatchId !== record.dispatchId) return
         if (lockedTask.kind !== 'document-facts') throw new Error('foundation fact terminal reached a non-fact task')
         const lockedState = locked.foundationAuditState!
@@ -1417,12 +1482,19 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     const batches = buildFoundationRevisionBatches({ issues: issues.filter(issue => policy.repairIssueIds.includes(issue.id)), registry: { validated: true as const, section(documentPath: string, sectionId: string) { return committed.sectionIndex.find(section => section.documentPath === documentPath && section.sectionId === sectionId) } } })
+    const remediationDigest = revisionBundleDigest({
+      round: state.round,
+      issueRegistryDigest: state.authority!.issueAuthority.issueRegistryDigest,
+      issues: issues.filter(issue => policy.repairIssueIds.includes(issue.id)),
+    })
+    const bundleId = `${state.revision}.bundle.${state.round}.${remediationDigest.slice(0, 16)}`
     const tasks = await Promise.all(batches.map(async (batch, index) => {
-      const taskId = `${state.revision}.revision.${state.round}.${index}`
+      const taskId = `${bundleId}.task.${index}`
       const authority = await buildFoundationRevisionAuthority({ workspacePath: input.workspacePath, revision: state.revision, taskId, round: state.round!, batch, issues: issues.filter(issue => batch.issueIds.includes(issue.id)), sourceAuthorityDigest, sourceIssueRegistryDigest: state.authority!.issueAuthority.issueRegistryDigest, sourceDerivedDigests: state.authority!.derivedDigests, sourceDocumentDigests: state.authority!.documentDigests, normalizedFacts: committed.factStore })
       const packetPath = await writeFoundationRevisionPacket({ workspacePath: input.workspacePath, revision: state.revision, round: state.round!, taskId, documentPath: batch.documentPath, packet: authority.packet, packetDigest: authority.packetDigest })
       await createFoundationRevisionStage({ workspacePath: input.workspacePath, revision: state.revision, documentPath: batch.documentPath, expectedBaseDocumentDigest: authority.baseDocumentDigest })
-      return { taskId, kind: 'document-revision' as const, revision: state.revision, round: state.round!, packetPath, packetDigest: authority.packetDigest, status: 'pending' as const, attempt: 0, documentPath: batch.documentPath, issueIds: batch.issueIds, sectionIds: batch.sectionIds, stagedPath: authority.stagedPath, baseDocumentDigest: authority.baseDocumentDigest }
+      const dependencyDigests = Object.fromEntries([...new Set(issues.filter(issue => batch.issueIds.includes(issue.id)).flatMap(issue => [issue.source, ...(issue.target ? [issue.target] : [])].filter(ref => ref.documentPath === batch.documentPath).map(ref => `${ref.documentPath}#${ref.sectionId}`)))].map(key => [key, committed.sectionIndex.find(ref => `${ref.documentPath}#${ref.sectionId}` === key)?.digest]).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+      return { taskId, kind: 'document-revision' as const, revision: state.revision, round: state.round!, packetPath, packetDigest: authority.packetDigest, status: 'pending' as const, attempt: 0, documentPath: batch.documentPath, issueIds: batch.issueIds, sectionIds: batch.sectionIds, stagedPath: authority.stagedPath, baseDocumentDigest: authority.baseDocumentDigest, dependencyDigests, bundleId, frozen: false }
     }))
     const lease = await store.mutationLock(run.runId)
     let next: DeliveryRun | undefined
@@ -1430,7 +1502,9 @@ export function createDeliveryWorkflowController(input: {
       const locked = await store.load(lease)
       if (locked?.foundationAuditState?.status === 'planning') {
         try {
-          next = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'revising', tasks } }, { runId: locked.runId, type: 'foundation.revision.revising', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
+          const bundle = { bundleId, status: 'active' as const, round: state.round!, baseDocumentRevision: state.revision, baseDocumentDigests: state.authority!.documentDigests, remediationDigest, taskIds: tasks.map(task => task.taskId), frozenTaskIds: [] as string[] }
+          const previousBundles = locked.foundationAuditState.revisionBundles ?? []
+          next = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'revising', tasks, activeBundleId: bundleId, revisionBundles: [...previousBundles, bundle] } }, { runId: locked.runId, type: 'foundation.revision.revising', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
         } catch (error) { markRevisionCommitTransient(error) }
       }
     } finally { await store.unlock(lease) }
@@ -1457,7 +1531,7 @@ export function createDeliveryWorkflowController(input: {
 
   async function revisionDocuments(state: FoundationAuditState): Promise<Map<string, string>> {
     const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(input.workspacePath, path), 'utf8')] as const)))
-    for (const task of state.tasks) {
+    for (const task of activeFoundationRevisionTasks(state)) {
       if (task.kind !== 'document-revision' || task.status !== 'completed') continue
       documents.set(task.documentPath, await readFile(join(input.workspacePath, task.stagedPath), 'utf8'))
     }
@@ -1466,7 +1540,7 @@ export function createDeliveryWorkflowController(input: {
 
   async function revisionOperations(run: DeliveryRun, state: FoundationAuditState) {
     const operations = []
-    for (const task of state.tasks) {
+    for (const task of activeFoundationRevisionTasks(state)) {
       if (task.kind !== 'document-revision' || !task.receipt) continue
       const packet = await loadFoundationRevisionPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, documentPath: task.documentPath, packetDigest: task.packetDigest })
       operations.push(...await deriveFoundationPatchOperations({ workspacePath: input.workspacePath, revision: task.revision, taskId: task.taskId, batch: { documentPath: task.documentPath, issueIds: task.issueIds, sectionIds: task.sectionIds }, issues: packet.issues as AuditIssue[], receipt: task.receipt }))
@@ -1520,9 +1594,9 @@ export function createDeliveryWorkflowController(input: {
     const impact = analyzeFoundationImpact(operations)
     const rebuilt = rebuildFoundationImpactedFacts({ phase: 'plan', committedFactStore: committed.factStore, documents, sectionIndex, impact, revision: state.revision })
     const taskPackets = await Promise.all(rebuilt.packets.map(async (packet, index) => {
-      const taskId = `${state.revision}.impacted-facts.${state.round}.${index}`
+      const taskId = `${activeFoundationRevisionBundle(state).bundleId}.facts.${state.round}.${index}`
       const packetPath = await writeFoundationRevisionFactPacket({ workspacePath: input.workspacePath, revision: state.revision, round: state.round!, taskId, packet })
-      return { taskId, kind: 'impacted-facts' as const, revision: state.revision, round: state.round!, packetPath, packetDigest: packet.packetDigest, status: 'pending' as const, attempt: 0, modelTier: 'fast' as const }
+      return { taskId, kind: 'impacted-facts' as const, revision: state.revision, round: state.round!, packetPath, packetDigest: packet.packetDigest, status: 'pending' as const, attempt: 0, bundleId: activeFoundationRevisionBundle(state).bundleId, modelTier: 'fast' as const }
     }))
     const lease = await store.mutationLock(run.runId)
     let next: DeliveryRun | undefined
@@ -1530,7 +1604,7 @@ export function createDeliveryWorkflowController(input: {
       const locked = await store.load(lease)
       const current = locked?.foundationAuditState
       if (!locked || !current || current.status !== 'rebuilding_facts') return undefined
-      const existing = current.tasks.filter(task => task.kind === 'impacted-facts')
+      const existing = activeFoundationRevisionTasks(current).filter(task => task.kind === 'impacted-facts')
       if (existing.length && (existing.length !== taskPackets.length || existing.some((task, index) => task.taskId !== taskPackets[index]?.taskId || task.packetDigest !== taskPackets[index]?.packetDigest || task.packetPath !== taskPackets[index]?.packetPath))) throw new Error('foundation impacted fact task plan changed during replay')
       if (taskPackets.length === 0) {
         next = await store.commit({ ...locked, foundationAuditState: { ...current, status: 'validating', phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.validating', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
@@ -1538,7 +1612,7 @@ export function createDeliveryWorkflowController(input: {
         next = await store.commit({ ...locked, foundationAuditState: { ...current, status: 'validating', phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.validating', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
       } else if (!existing.length) {
         try {
-          next = await store.commit({ ...locked, foundationAuditState: { ...current, tasks: [...current.tasks, ...taskPackets] } }, { runId: locked.runId, type: 'foundation.revision.impacted_facts.planned', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
+          next = await store.commit({ ...locked, foundationAuditState: { ...current, tasks: [...current.tasks, ...taskPackets], revisionBundles: current.revisionBundles?.map(bundle => bundle.bundleId === current.activeBundleId ? { ...bundle, taskIds: [...new Set([...bundle.taskIds, ...taskPackets.map(task => task.taskId)])] } : bundle) } }, { runId: locked.runId, type: 'foundation.revision.impacted_facts.planned', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
         } catch (error) { markRevisionCommitTransient(error) }
       } else next = locked
     } finally { await store.unlock(lease) }
@@ -1557,7 +1631,7 @@ export function createDeliveryWorkflowController(input: {
     const operations = await revisionOperations(run, state)
     const impact = analyzeFoundationImpact(operations)
     const results: FoundationFactReceipt[] = []
-    for (const task of state.tasks) {
+    for (const task of activeFoundationRevisionTasks(state)) {
       if (task.kind !== 'impacted-facts') continue
       if (task.status !== 'completed' || !task.receiptPath || !task.receiptDigest || !task.terminalDigest) return
       const receipt = await loadFoundationFactReceipt({ workspacePath: input.workspacePath, revision: state.revision, taskId: task.taskId, expectedPacketDigest: task.packetDigest, expectedTerminalDigest: task.terminalDigest, expectedReceiptPath: task.receiptPath, expectedReceiptDigest: task.receiptDigest })
@@ -1567,7 +1641,7 @@ export function createDeliveryWorkflowController(input: {
     const validations = []
     const semanticIds = []
     const semanticCandidates: Array<{ issue: AuditIssue; operation: PatchOperation }> = []
-    for (const task of state.tasks) {
+    for (const task of activeFoundationRevisionTasks(state)) {
       if (task.kind !== 'document-revision' || !task.receipt) continue
       const packet = await loadFoundationRevisionPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, documentPath: task.documentPath, packetDigest: task.packetDigest })
       const taskOps = operations.filter(operation => operation.documentPath === task.documentPath && operation.issueIds.some(id => task.issueIds.includes(id)))
@@ -1589,23 +1663,71 @@ export function createDeliveryWorkflowController(input: {
         if (issue && operation) semanticCandidates.push({ issue, operation })
       }
     }
-    // Business FAIL findings are publication input. Only malformed or stale
-    // validation artifacts throw above and fail closed.
+    // Business FAIL findings are same-round retry input. Only malformed or
+    // stale validation artifacts throw above and fail closed.
     const semanticTasks = await Promise.all([...new Map(semanticCandidates.map(candidate => [candidate.issue.id, candidate])).values()].map(async (candidate, index) => {
       const packet = buildFoundationSemanticRecheckPacket({ issue: candidate.issue, patchOperation: candidate.operation, sectionIndex, documents: Object.fromEntries(documents), impact: analyzeFoundationImpact([candidate.operation]), factStore: rebuilt.factStore })
-      const taskId = `${state.revision}.semantic-recheck.${state.round}.${index}`
+      const semanticAttempt = activeFoundationRevisionTasks(state).filter(task => task.kind === 'semantic-recheck' && task.issueId === candidate.issue.id).length
+      const taskId = `${activeFoundationRevisionBundle(state).bundleId}.semantic.${candidate.issue.id}.${semanticAttempt}.${index}`
       const packetPath = await writeFoundationRevisionSemanticPacket({ workspacePath: input.workspacePath, revision: state.revision, round: state.round!, taskId, packet })
-      return { taskId, kind: 'semantic-recheck' as const, revision: state.revision, round: state.round!, packetPath, packetDigest: packet.packetDigest, status: 'pending' as const, attempt: 0, issueId: candidate.issue.id, modelTier: 'strong' as const }
+      return { taskId, kind: 'semantic-recheck' as const, revision: state.revision, round: state.round!, packetPath, packetDigest: packet.packetDigest, status: 'pending' as const, attempt: 0, bundleId: activeFoundationRevisionBundle(state).bundleId, issueId: candidate.issue.id, issue: candidate.issue, modelTier: 'strong' as const }
     }))
+    // A deterministic Patch FAIL is actionable feedback for the same
+    // document. It must never enter publication: preserve PASS bytes, keep
+    // the same round/base revision, and create a fresh task identity for only
+    // the failed document.
+    const failedIssueIds = new Set(validations.filter((validation: { status: string; issueId: string }) => validation.status === 'FAIL').map(validation => validation.issueId))
+    const semanticFailureTasks = activeFoundationRevisionTasks(state).filter((task): task is FoundationRevisionSemanticRecheckTask => task.kind === 'semantic-recheck' && task.resultPath !== undefined && task.resultDigest !== undefined && task.terminalDigest !== undefined)
+    const semanticFailures = await Promise.all(semanticFailureTasks.map(task => loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, resultDigest: task.resultDigest!, resultPath: task.resultPath! })))
+    for (const failure of semanticFailures.filter(result => result.status === 'FAIL')) failedIssueIds.add(failure.issueId)
+    const staleFrozenDocuments = activeFoundationRevisionTasks(state).filter((task): task is FoundationRevisionDocumentTask => {
+      if (task.kind !== 'document-revision' || !task.frozen || !task.receipt || !task.dependencyDigests) return false
+      return Object.entries(task.dependencyDigests).some(([key, expected]) => sectionIndex.find(section => `${section.documentPath}#${section.sectionId}` === key)?.digest !== expected)
+    })
+    const failedDocuments = activeFoundationRevisionTasks(state).filter((task): task is FoundationRevisionDocumentTask => task.kind === 'document-revision' && task.receipt !== undefined && (task.issueIds.some(issueId => failedIssueIds.has(issueId)) || staleFrozenDocuments.some(stale => stale.taskId === task.taskId)))
+    if (failedDocuments.length) {
+      const retryBundleId = `${activeFoundationRevisionBundle(state).bundleId}.retry.${revisionBundleDigest({ failedIssueIds: [...failedIssueIds].sort(), semanticFailures }).slice(0, 16)}`
+      const retryTasks = await Promise.all(failedDocuments.map(async task => {
+        const retryTaskId = `${retryBundleId}.task.${task.documentPath.replaceAll('/', '_')}`
+        const packet = await loadFoundationRevisionPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, documentPath: task.documentPath, packetDigest: task.packetDigest })
+        const retryIssues = (packet.issues as AuditIssue[]).filter(issue => task.issueIds.includes(issue.id))
+        const batch = { documentPath: task.documentPath, issueIds: task.issueIds, sectionIds: task.sectionIds }
+        const sourceAuthorityDigest = state.authority!.issueAuthority.kind === 'review'
+          ? state.authority!.issueAuthority.reviewDigest
+          : state.authority!.issueAuthority.authorityDigest
+        const authority = await buildFoundationRevisionAuthority({ workspacePath: input.workspacePath, revision: task.revision, taskId: retryTaskId, round: task.round, batch, issues: retryIssues, sourceAuthorityDigest, sourceIssueRegistryDigest: state.authority!.issueAuthority.issueRegistryDigest, sourceDerivedDigests: state.authority!.derivedDigests, sourceDocumentDigests: state.authority!.documentDigests, normalizedFacts: rebuilt.factStore })
+        const packetPath = await writeFoundationRevisionPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: retryTaskId, documentPath: task.documentPath, packet: authority.packet, packetDigest: authority.packetDigest })
+        await resetFoundationRevisionStage({ workspacePath: input.workspacePath, revision: task.revision, documentPath: task.documentPath, expectedBaseDocumentDigest: task.baseDocumentDigest })
+        return { ...task, taskId: retryTaskId, packetPath, packetDigest: authority.packetDigest, status: 'pending' as const, attempt: 0, dispatch: undefined, terminalDigest: undefined, usage: undefined, durationMs: undefined, failureReason: undefined, receipt: undefined, bundleId: retryBundleId, frozen: false }
+      }))
+      const retryByDocument = new Map(retryTasks.map(task => [task.documentPath, task]))
+      const frozenTaskIds = activeFoundationRevisionTasks(state).filter(task => task.kind === 'document-revision' && !retryByDocument.has(task.documentPath)).map(task => task.taskId)
+      const nextOwnedTaskIds = retryTasks.map(task => task.taskId)
+      const lease = await store.mutationLock(run.runId)
+      let retryRun: DeliveryRun | undefined
+      try {
+        const locked = await store.load(lease)
+        if (locked?.foundationAuditState?.status !== 'validating') return
+        const superseded = new Map(failedDocuments.map((task, index) => [task.taskId, retryTasks[index]!.taskId]))
+        const oldBundleId = locked.foundationAuditState.activeBundleId
+        const oldBundles = locked.foundationAuditState.revisionBundles ?? []
+        const newBundle = { bundleId: retryBundleId, status: 'active' as const, round: state.round!, baseDocumentRevision: state.revision, baseDocumentDigests: state.authority!.documentDigests, remediationDigest: revisionBundleDigest({ oldBundleId, failedIssueIds: [...failedIssueIds].sort(), semanticFailures }), taskIds: nextOwnedTaskIds, frozenTaskIds }
+        retryRun = await store.commit({ ...locked, status: 'running', blockedReason: undefined, foundationAuditState: { ...locked.foundationAuditState, status: 'revising', tasks: [...locked.foundationAuditState.tasks.map(task => frozenTaskIds.includes(task.taskId) ? { ...task, frozen: true } : superseded.has(task.taskId) ? { ...task, supersededBy: superseded.get(task.taskId), frozen: false } : task), ...retryTasks], activeBundleId: retryBundleId, revisionBundles: [...oldBundles.map(bundle => bundle.bundleId === oldBundleId ? { ...bundle, status: 'superseded' as const, supersededBy: retryBundleId } : bundle), newBundle], phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.same_round_retry', phase: locked.phase, status: 'running', revision: locked.revision, round: state.round, failedDocumentPaths: failedDocuments.map(task => task.documentPath), retryTaskIds: retryTasks.map(task => task.taskId), supersededBundleId: oldBundleId }, undefined, lease)
+      } finally { await store.unlock(lease) }
+      if (retryRun) await resumeUnlocked(retryRun)
+      return
+    }
     const lease = await store.mutationLock(run.runId)
     let next: DeliveryRun | undefined
     try {
       const locked = await store.load(lease)
       if (!locked?.foundationAuditState || locked.foundationAuditState.status !== 'validating') return
       if (semanticTasks.length) {
-        const existing = locked.foundationAuditState.tasks.filter(task => task.kind === 'semantic-recheck')
+        const existing = activeFoundationRevisionTasks(locked.foundationAuditState).filter(task => task.kind === 'semantic-recheck')
         if (existing.length && (existing.length !== semanticTasks.length || existing.some((task, index) => task.taskId !== semanticTasks[index]?.taskId || task.packetDigest !== semanticTasks[index]?.packetDigest))) throw new Error('foundation semantic recheck task plan changed during replay')
-        next = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'semantic_recheck', tasks: existing.length ? locked.foundationAuditState.tasks : [...locked.foundationAuditState.tasks, ...semanticTasks], phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
+        const planned = existing.length ? existing : semanticTasks
+        const activeTaskIds = [...new Set([...(activeFoundationRevisionBundle(locked.foundationAuditState).taskIds), ...planned.map(task => task.taskId)])]
+        next = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'semantic_recheck', tasks: existing.length ? locked.foundationAuditState.tasks : [...locked.foundationAuditState.tasks, ...semanticTasks], revisionBundles: locked.foundationAuditState.revisionBundles?.map(bundle => bundle.bundleId === locked.foundationAuditState!.activeBundleId ? { ...bundle, taskIds: activeTaskIds } : bundle), phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.semantic_recheck', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
       } else next = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'publishing', phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.publishing', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
     } finally { await store.unlock(lease) }
     if (next?.status === 'running') await resumeUnlocked(next)
@@ -1628,7 +1750,7 @@ export function createDeliveryWorkflowController(input: {
     const operations = recoveredPublication?.patchOperations ?? await revisionOperations(run, state)
     const impact = analyzeFoundationImpact(operations)
     const factResults: FoundationFactReceipt[] = []
-    for (const task of state.tasks) {
+    for (const task of activeFoundationRevisionTasks(state)) {
       if (task.kind !== 'impacted-facts') continue
       if (!task.receiptPath || !task.receiptDigest || !task.terminalDigest) throw new Error('foundation revision fact receipt binding is incomplete')
       const receipt = await loadFoundationFactReceipt({ workspacePath: input.workspacePath, revision: state.revision, taskId: task.taskId, expectedPacketDigest: task.packetDigest, expectedTerminalDigest: task.terminalDigest, expectedReceiptPath: task.receiptPath, expectedReceiptDigest: task.receiptDigest })
@@ -1672,8 +1794,7 @@ export function createDeliveryWorkflowController(input: {
     const patchValidations = []
     const batches = []
     const receipts = []
-    const admittedIssuesById = new Map<string, AuditIssue>()
-    for (const task of state.tasks) {
+    for (const task of activeFoundationRevisionTasks(state)) {
       if (task.kind !== 'document-revision' || !task.receipt) continue
       const packet = await loadFoundationRevisionPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, documentPath: task.documentPath, packetDigest: task.packetDigest })
       const taskOperations = operations.filter(operation => operation.documentPath === task.documentPath && operation.issueIds.some(id => task.issueIds.includes(id)))
@@ -1686,13 +1807,12 @@ export function createDeliveryWorkflowController(input: {
         if (!source || (issue.target && !target)) throw new Error('foundation revision issue section is not present in published SectionIndex')
         return { ...issue, source, ...(target ? { target } : {}) }
       })
-      for (const issue of admittedIssues) admittedIssuesById.set(issue.id, issue)
       const checked = validateFoundationPatch({ validatorTaskId: `${state.revision}.validator.${task.taskId}`, round: state.round!, documentPath: task.documentPath, baseDocumentDigest: task.baseDocumentDigest, postPatchDocumentDigest: task.receipt.stagedDocumentDigest, patchOperations: taskOperations, impact: taskImpact, admittedIssues, sectionIndex, factStore: rebuilt.factStore })
       patchValidations.push(...checked.patchValidations)
       batches.push({ documentPath: task.documentPath, sectionIds: task.sectionIds, issueIds: task.issueIds })
       receipts.push(task.receipt)
     }
-    const semanticRecheckResults = await Promise.all(state.tasks.filter((task): task is FoundationRevisionSemanticRecheckTask => task.kind === 'semantic-recheck').map(task => {
+    const semanticRecheckResults = await Promise.all(activeFoundationRevisionTasks(state).filter((task): task is FoundationRevisionSemanticRecheckTask => task.kind === 'semantic-recheck').map(task => {
       if (!task.resultPath || !task.resultDigest || !task.terminalDigest) throw new Error('foundation semantic result binding is incomplete')
       return loadFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, resultDigest: task.resultDigest, resultPath: task.resultPath })
     }))
@@ -1707,23 +1827,16 @@ export function createDeliveryWorkflowController(input: {
       factStore: rebuilt.factStore,
       impact,
     })
-    const failedIssueIds = new Set([
-      ...patchValidations.filter(validation => validation.status === 'FAIL').map(validation => validation.issueId),
-      ...semanticRecheckResults.filter(result => result.status === 'FAIL').map(result => result.issueId),
-    ])
     const resultingById = new Map<string, AuditIssue>()
     for (const issue of beforeIssues) {
-      if (!resolvedIssueIds.has(issue.id) || failedIssueIds.has(issue.id)) resultingById.set(issue.id, issue)
+      if (!resolvedIssueIds.has(issue.id)) resultingById.set(issue.id, issue)
     }
     for (const issue of postDeterministicIssues) {
-      if (!resolvedIssueIds.has(issue.id) || failedIssueIds.has(issue.id)) resultingById.set(issue.id, issue)
+      if (!resolvedIssueIds.has(issue.id)) resultingById.set(issue.id, issue)
     }
-    for (const issueId of semanticRecheckResults.filter(result => result.status === 'FAIL').map(result => result.issueId)) {
-      const issue = admittedIssuesById.get(issueId)
-      if (!issue) throw new Error(`foundation semantic FAIL issue is missing admitted issue authority: ${issueId}`)
-      resultingById.set(issueId, issue)
-    }
-    const publication = await publishFoundationRevision({ workspacePath: input.workspacePath, revision: state.revision, confirmedBriefDigest: run.confirmedBriefDigest, round: state.round!, batches, receipts, patchOperations: operations, patchValidations, semanticRecheckResults, resultingIssues: [...resultingById.values()] })
+    if (patchValidations.some(validation => validation.status !== 'PASS') || semanticRecheckResults.some(result => result.status !== 'PASS'))
+      throw new Error('foundation revision publication requires every active Patch and semantic validation to PASS')
+    const publication = await publishFoundationRevision({ workspacePath: input.workspacePath, revision: state.revision, confirmedBriefDigest: run.confirmedBriefDigest, round: state.round!, batches, receipts, revisionDeclarations: receipts.map(receipt => ({ status: 'APPLIED' as const, changedSectionIds: receipt.changedSectionIds })), patchOperations: operations, patchValidations, semanticRecheckResults, resultingIssues: [...resultingById.values()] })
     return commitAndClose(publication, rebuilt.factStore)
   }
 
@@ -1752,7 +1865,7 @@ export function createDeliveryWorkflowController(input: {
       const locked = await store.load(lease)
       if (!locked?.foundationAuditState || locked.foundationAuditState.status !== 'round_closing') return undefined
       if (policy.status === 'proceed') next = await store.commit({ ...locked, documentStep: 'CHECKLIST_DRAFTING', status: 'running', blockedReason: undefined, foundationAuditState: { ...locked.foundationAuditState, status: 'revision_ready' } }, { runId: locked.runId, type: 'foundation.revision.proceed', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
-      else if (policy.status === 'continue') next = await store.commit({ ...locked, status: 'running', blockedReason: undefined, foundationAuditState: { ...locked.foundationAuditState, round: policy.nextRound, status: 'planning', phaseStartedAt: new Date().toISOString(), roundBefore: { documentRevision: state.revision, issueRegistryDigest: state.authority!.issueAuthority.issueRegistryDigest, issueAuthority: state.authority!.issueAuthority }, tasks: [], publication: undefined } }, { runId: locked.runId, type: 'foundation.revision.next_round', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
+      else if (policy.status === 'continue') next = await store.commit({ ...locked, status: 'running', blockedReason: undefined, foundationAuditState: { ...locked.foundationAuditState, round: policy.nextRound, status: 'planning', phaseStartedAt: new Date().toISOString(), roundBefore: { documentRevision: state.revision, issueRegistryDigest: state.authority!.issueAuthority.issueRegistryDigest, issueAuthority: state.authority!.issueAuthority }, activeBundleId: undefined, revisionBundles: locked.foundationAuditState.revisionBundles?.map(bundle => bundle.bundleId === locked.foundationAuditState!.activeBundleId ? { ...bundle, status: 'superseded' as const } : bundle), publication: undefined } }, { runId: locked.runId, type: 'foundation.revision.next_round', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
       else if (policy.status === 'needs_action') next = await store.commit({ ...locked, status: 'needs_action', blockedReason: `foundation revision ${policy.reason}`, foundationAuditState: { ...locked.foundationAuditState } }, { runId: locked.runId, type: 'foundation.revision.needs_action', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason: policy.reason }, undefined, lease)
       else throw new Error('foundation revision round policy returned an invalid evaluate result')
     } finally { await store.unlock(lease) }
@@ -1766,8 +1879,8 @@ export function createDeliveryWorkflowController(input: {
       if (!(error instanceof DispatchError) || error.code !== 'duplicate' || !request.taskId)
         throw error
       const current = await store.load()
-      const task = current?.foundationAuditState?.tasks.find(candidate => candidate.taskId === request.taskId)
-      const sameTask = task && task.revision === request.revision && task.packetDigest === request.contract.packetDigest && (
+      const task = current?.foundationAuditState && foundationRuntimeTasks(current.foundationAuditState).find(candidate => candidate.taskId === request.taskId)
+      const sameTask = current && task && task.revision === request.revision && task.packetDigest === request.contract.packetDigest && (
         request.workerType === 'foundation-fact-extractor'
           ? task.kind === 'document-facts'
           : (task.kind === 'semantic' || task.kind === 'confirmation')
@@ -1775,7 +1888,7 @@ export function createDeliveryWorkflowController(input: {
       if (!current || !task || !sameTask) throw error
       if (task.status === 'running' && task.dispatch?.status === 'running' && task.dispatch.workerType === request.workerType)
         return
-      if ((task.status === 'pending' || task.status === 'retryable') && (current.foundationAuditState?.tasks.filter(candidate => candidate.status === 'running').length ?? 0) >= 4)
+      if ((task.status === 'pending' || task.status === 'retryable') && (current.foundationAuditState ? foundationRuntimeTasks(current.foundationAuditState).filter(candidate => candidate.status === 'running').length : 0) >= 4)
         return
       throw error
     }
@@ -1902,7 +2015,7 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     if (run.foundationAuditState) {
-      const replayableFactDispatches = run.foundationAuditState.tasks
+      const replayableFactDispatches = foundationRuntimeTasks(run.foundationAuditState)
         .filter(task => task.status !== 'completed' && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId))
         .map(task => task.dispatch!)
       if (replayableFactDispatches.length) {
@@ -1911,8 +2024,8 @@ export function createDeliveryWorkflowController(input: {
         return
       }
     }
-    if (run.foundationAuditState && ['planning', 'revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing'].includes(run.foundationAuditState.status)) {
-      const replayableRevisionDispatches = run.foundationAuditState.tasks
+    if (run.foundationAuditState && ['revising', 'rebuilding_facts', 'validating', 'semantic_recheck', 'publishing', 'round_closing'].includes(run.foundationAuditState.status)) {
+      const replayableRevisionDispatches = foundationRuntimeTasks(run.foundationAuditState)
         .filter(task => (task.status !== 'completed' || (task.kind === 'impacted-facts' && !task.receiptPath)) && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId))
         .map(task => task.dispatch!)
       if (replayableRevisionDispatches.length) {
@@ -1937,12 +2050,12 @@ export function createDeliveryWorkflowController(input: {
         }
         return
       }
-      if (revisionState.status === 'revising' && foundationRevisionTasksComplete(revisionState.tasks.filter((task): task is FoundationRevisionDocumentTask | FoundationRevisionImpactedFactsTask | FoundationRevisionSemanticRecheckTask => task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck'))) {
+      if (revisionState.status === 'revising' && foundationRevisionTasksComplete(activeFoundationRevisionTasks(revisionState).filter((task): task is FoundationRevisionDocumentTask | FoundationRevisionImpactedFactsTask | FoundationRevisionSemanticRecheckTask => task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck'))) {
         const lease = await store.mutationLock(run.runId)
         let next: DeliveryRun | undefined
         try {
           const locked = await store.load(lease)
-          if (locked?.foundationAuditState?.status === 'revising' && foundationRevisionTasksComplete(locked.foundationAuditState.tasks.filter((task): task is FoundationRevisionDocumentTask | FoundationRevisionImpactedFactsTask | FoundationRevisionSemanticRecheckTask => task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck'))) {
+          if (locked?.foundationAuditState?.status === 'revising' && foundationRevisionTasksComplete(activeFoundationRevisionTasks(locked.foundationAuditState).filter((task): task is FoundationRevisionDocumentTask | FoundationRevisionImpactedFactsTask | FoundationRevisionSemanticRecheckTask => task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck'))) {
             next = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'rebuilding_facts', phaseStartedAt: new Date().toISOString() } }, { runId: locked.runId, type: 'foundation.revision.rebuilding_facts', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
           }
         } finally { await store.unlock(lease) }
@@ -1961,7 +2074,10 @@ export function createDeliveryWorkflowController(input: {
           const lease = await store.mutationLock(run.runId)
           try {
             const locked = await store.load(lease)
-            if (locked?.foundationAuditState?.status === 'rebuilding_facts') await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationAuditState: { ...locked.foundationAuditState, status: 'validating', tasks: locked.foundationAuditState.tasks.map(task => task.status === 'completed' ? task : { ...task, status: 'needs_action' as const, failureReason: reason }) } }, { runId: locked.runId, type: 'foundation.revision.validation.failed', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason }, undefined, lease)
+            if (locked?.foundationAuditState?.status === 'rebuilding_facts') {
+              const activeTaskIds = new Set(foundationRuntimeTasks(locked.foundationAuditState).map(task => task.taskId))
+              await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationAuditState: { ...locked.foundationAuditState, tasks: locked.foundationAuditState.tasks.map(task => !activeTaskIds.has(task.taskId) || task.status === 'completed' ? task : { ...task, status: 'needs_action' as const, failureReason: reason }) } }, { runId: locked.runId, type: 'foundation.revision.fact_planning.failed', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason }, undefined, lease)
+            }
           } finally { await store.unlock(lease) }
           return
         }
@@ -1972,8 +2088,9 @@ export function createDeliveryWorkflowController(input: {
         const current = planned ?? run
         const state = current.foundationAuditState
         if (!state || state.status !== 'rebuilding_facts') return
-        const running = state.tasks.filter(task => task.kind === 'impacted-facts' && task.status === 'running').length
-        const available = state.tasks.filter((task): task is FoundationRevisionImpactedFactsTask => task.kind === 'impacted-facts' && (task.status === 'pending' || task.status === 'retryable'))
+        const runtimeTasks = foundationRuntimeTasks(state)
+        const running = runtimeTasks.filter(task => task.kind === 'impacted-facts' && task.status === 'running').length
+        const available = runtimeTasks.filter((task): task is FoundationRevisionImpactedFactsTask => task.kind === 'impacted-facts' && (task.status === 'pending' || task.status === 'retryable'))
         for (const task of available.slice(0, Math.max(0, 4 - running))) {
           const packet = await loadFoundationRevisionFactPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
           await dispatcher.dispatch({ runId: current.runId, ownerId: current.ownerId, projectId: current.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: buildFoundationFactStructuredOutputJsonSchema(packet), contract: { round: task.round, taskId: task.taskId, revision: task.revision, packetPath: task.packetPath, packet, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-fact-extractor' } })
@@ -1988,17 +2105,21 @@ export function createDeliveryWorkflowController(input: {
           const lease = await store.mutationLock(run.runId)
           try {
             const locked = await store.load(lease)
-            if (locked?.foundationAuditState?.status === 'validating') await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationAuditState: { ...locked.foundationAuditState, tasks: locked.foundationAuditState.tasks.map(task => task.status === 'completed' ? task : { ...task, status: 'needs_action' as const, failureReason: reason }) } }, { runId: locked.runId, type: 'foundation.revision.validation.failed', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason }, undefined, lease)
+            if (locked?.foundationAuditState?.status === 'validating') {
+              const activeTaskIds = new Set(foundationRuntimeTasks(locked.foundationAuditState).map(task => task.taskId))
+              await store.commit({ ...locked, status: 'needs_action', blockedReason: reason, foundationAuditState: { ...locked.foundationAuditState, tasks: locked.foundationAuditState.tasks.map(task => !activeTaskIds.has(task.taskId) || task.status === 'completed' ? task : { ...task, status: 'needs_action' as const, failureReason: reason }) } }, { runId: locked.runId, type: 'foundation.revision.validation.failed', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason }, undefined, lease)
+            }
           } finally { await store.unlock(lease) }
         }
         return
       }
       if (revisionState.status === 'semantic_recheck') {
-        const running = revisionState.tasks.filter(task => task.status === 'running').length
-        const available = revisionState.tasks.filter((task): task is FoundationRevisionSemanticRecheckTask => task.kind === 'semantic-recheck' && (task.status === 'pending' || task.status === 'retryable'))
+        const runtimeTasks = foundationRuntimeTasks(revisionState)
+        const running = runtimeTasks.filter(task => task.status === 'running').length
+        const available = runtimeTasks.filter((task): task is FoundationRevisionSemanticRecheckTask => task.kind === 'semantic-recheck' && (task.status === 'pending' || task.status === 'retryable'))
         for (const task of available.slice(0, Math.max(0, 4 - running))) {
           const packet = await loadFoundationRevisionSemanticPacket({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, packetDigest: task.packetDigest })
-          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { taskId: task.taskId, revision: task.revision, round: task.round, issueId: task.issueId, packetPath: task.packetPath, packet, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-semantic-reviewer' } })
+          await dispatcher.dispatch({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticRecheckStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { taskId: task.taskId, revision: task.revision, round: task.round, issueId: task.issueId, packetPath: task.packetPath, packet, packetDigest: task.packetDigest, modelTier: task.modelTier, workerType: 'foundation-semantic-reviewer' } })
         }
         return
       }
@@ -2019,8 +2140,9 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       if (revisionState.status !== 'revising') return
-      const running = revisionState.tasks.filter(task => task.status === 'running').length
-      const available = revisionState.tasks.filter((task): task is Extract<typeof task, { kind: 'document-revision' }> => task.kind === 'document-revision' && (task.status === 'pending' || task.status === 'retryable'))
+      const runtimeTasks = foundationRuntimeTasks(revisionState)
+      const running = runtimeTasks.filter(task => task.status === 'running').length
+      const available = runtimeTasks.filter((task): task is Extract<typeof task, { kind: 'document-revision' }> => task.kind === 'document-revision' && (task.status === 'pending' || task.status === 'retryable'))
       for (const task of available.slice(0, Math.max(0, 4 - running))) {
         await dispatcher.dispatch({
           runId: run.runId,
@@ -2034,7 +2156,7 @@ export function createDeliveryWorkflowController(input: {
           allowedPaths: [task.stagedPath],
           projectReadScope: 'allowed',
           protectedPaths: [task.documentPath],
-          contract: { round: task.round, taskId: task.taskId, revision: task.revision, documentPath: task.documentPath, issueIds: task.issueIds, sectionIds: task.sectionIds, stagedPath: task.stagedPath, baseDocumentDigest: task.baseDocumentDigest, packetPath: task.packetPath, packetDigest: task.packetDigest, workerType: 'foundation-document-reviser' },
+          contract: { round: task.round, taskId: task.taskId, revision: task.revision, documentPath: task.documentPath, issueIds: task.issueIds, sectionIds: task.sectionIds, stagedPath: task.stagedPath, baseDocumentDigest: task.baseDocumentDigest, packetPath: task.packetPath, packetDigest: task.packetDigest, workerType: 'foundation-document-reviser', ...(task.failureReason ? { priorFailureReason: task.failureReason } : {}) },
         })
       }
       return
@@ -2105,13 +2227,14 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       if (run.foundationAuditState?.status === 'semantic_review') {
-        const replayable = run.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status !== 'completed' && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId)).map(task => task.dispatch!)
+        const runtimeTasks = foundationRuntimeTasks(run.foundationAuditState)
+        const replayable = runtimeTasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status !== 'completed' && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId)).map(task => task.dispatch!)
         if (replayable.length) { for (const dispatch of replayable) await dispatcher.replayTerminal(dispatch, handleTerminalUnlocked); return }
         const semanticRuntime: FoundationSemanticTaskCollection = {
           revision: run.foundationAuditState.revision,
           phaseStartedAt: run.foundationAuditState.phaseStartedAt!,
           status: 'semantic_review',
-          tasks: run.foundationAuditState.tasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticTaskCollection['tasks'],
+          tasks: runtimeTasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticTaskCollection['tasks'],
           aggregateUsage: run.foundationAuditState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           ...(run.foundationAuditState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: run.foundationAuditState.semantic.deepPhaseStartedAt } : {}),
           ...(run.foundationAuditState.semantic?.deepAggregateUsage ? { deepAggregateUsage: run.foundationAuditState.semantic.deepAggregateUsage } : {}),
@@ -2120,8 +2243,8 @@ export function createDeliveryWorkflowController(input: {
           await finalizeFoundationSemanticReview(run)
           return
         }
-        const available = run.foundationAuditState.tasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; checkId: string; revision: string; packetDigest: string; modelTier: 'fast' | 'balanced' | 'strong' }>
-        const running = run.foundationAuditState.tasks.filter(task => task.status === 'running').length
+        const available = runtimeTasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; checkId: string; revision: string; packetDigest: string; modelTier: 'fast' | 'balanced' | 'strong' }>
+        const running = runtimeTasks.filter(task => task.status === 'running').length
         if (running >= FOUNDATION_SEMANTIC_MAX_RUNNING || !available.length) return
         const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision })
         const prefix = run.foundationAuditState.deterministic ? await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision, reviewDigest: run.foundationAuditState.deterministic.reviewDigest }) : undefined
@@ -2134,8 +2257,9 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       if (run.foundationAuditState?.status === 'extracting_facts') {
-        const available = run.foundationAuditState.tasks.filter(task => task.kind === 'document-facts' && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; revision: string; packetDigest: string; modelTier: 'fast' }>
-        const running = run.foundationAuditState.tasks.filter(task => task.status === 'running').length
+        const runtimeTasks = foundationRuntimeTasks(run.foundationAuditState)
+        const available = runtimeTasks.filter(task => task.kind === 'document-facts' && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; revision: string; packetDigest: string; modelTier: 'fast' }>
+        const running = runtimeTasks.filter(task => task.status === 'running').length
         if (running >= 4 || available.length === 0) return
         for (const task of available.slice(0, 4 - running)) {
           const packetPath = join(input.workspacePath, `.beegame/audit/foundation/${run.foundationAuditState.revision}/staging/packets/${task.taskId}.json`)

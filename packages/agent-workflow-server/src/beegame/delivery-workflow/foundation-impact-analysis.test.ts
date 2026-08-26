@@ -113,14 +113,19 @@ describe('foundation revision impact analysis', () => {
     ])).toThrow(/digest/i)
   })
 
-  test('rejects empty or repeated issue coverage and inconsistent issue targets', () => {
+  test('rejects empty coverage but deduplicates one admitted issue spanning multiple changed sections', () => {
     expect(() => analyzeFoundationImpact([
       operation('docs/GDD.md', 'vision', []),
     ])).toThrow(/issue/i)
-    expect(() => analyzeFoundationImpact([
+    const result = analyzeFoundationImpact([
       operation('docs/GDD.md', 'vision', ['AUD-1']),
       operation('docs/GDD.md', 'player_actions', ['AUD-1']),
-    ])).toThrow(/issue|target|coverage/i)
+    ])
+    expect(result.changedSections).toEqual([
+      { documentPath: 'docs/GDD.md', sectionId: 'player_actions' },
+      { documentPath: 'docs/GDD.md', sectionId: 'vision' },
+    ])
+    expect(result.issueIds).toEqual(['AUD-1'])
   })
 
   test('does not accept caller-supplied graph, rules, or contracts', () => {

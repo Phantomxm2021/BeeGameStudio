@@ -22,6 +22,7 @@ import {
   type AuditIssueDraft,
   type AuditSeverity,
   type AuditIssueType,
+  type AuditIssueRemediation,
 } from './foundation-issue-registry'
 
 export type FoundationFactType =
@@ -491,8 +492,7 @@ function schemaDrafts(
         source,
         expected: `required fact ${definition.key} must exist with type ${definition.expectedType}`,
         actual: `missing fact ${definition.key}`,
-        fixDocument: source.documentPath,
-        fixSectionId: source.sectionId,
+        remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
         conflictIdentity: {
           key: definition.key,
           expectedType: definition.expectedType,
@@ -519,8 +519,7 @@ function schemaDrafts(
       source: declaredSource,
       expected: `fact ${definition.key} must have type ${definition.expectedType}`,
       actual: `fact ${definition.key} has type ${actualType}`,
-      fixDocument: declaredSource.documentPath,
-      fixSectionId: declaredSource.sectionId,
+      remediation: { kind: 'patch', documentPath: declaredSource.documentPath, sectionIds: [declaredSource.sectionId] },
       conflictIdentity: {
         key: definition.key,
         expectedType: definition.expectedType,
@@ -537,8 +536,7 @@ const DRAFT_KEYS = [
   'checkId',
   'conflictIdentity',
   'expected',
-  'fixDocument',
-  'fixSectionId',
+  'remediation',
   'reasonCode',
   'severity',
   'source',
@@ -596,6 +594,37 @@ function exactIssueSection(
   return resolved
 }
 
+function validateRemediation(
+  value: unknown,
+  context: FoundationAuditContext,
+): AuditIssueRemediation {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('audit issue remediation must be an object')
+  const candidate = value as Record<string, unknown>
+  if (candidate.kind === 'patch') {
+    exactKeys(candidate, ['documentPath', 'kind', 'sectionIds'], 'patch remediation')
+    if (
+      typeof candidate.documentPath !== 'string' ||
+      !CANONICAL_FOUNDATION_DOCUMENTS.includes(candidate.documentPath as FoundationDocumentPath)
+    ) throw new Error('patch remediation documentPath is not canonical')
+    if (
+      !Array.isArray(candidate.sectionIds) || candidate.sectionIds.length === 0 ||
+      candidate.sectionIds.some(sectionId => typeof sectionId !== 'string' || !/^[a-z0-9._-]+$/.test(sectionId)) ||
+      new Set(candidate.sectionIds).size !== candidate.sectionIds.length
+    ) throw new Error('patch remediation sectionIds must be non-empty and unique')
+    for (const sectionId of candidate.sectionIds) {
+      if (!context.section(candidate.documentPath, sectionId as string))
+        throw new Error(`patch remediation section is not validated: ${candidate.documentPath}#${String(sectionId)}`)
+    }
+    return {
+      kind: 'patch',
+      documentPath: candidate.documentPath as FoundationDocumentPath,
+      sectionIds: [...candidate.sectionIds] as string[],
+    }
+  }
+  throw new Error('audit issue remediation kind is invalid; only patch remediation is supported')
+}
+
 function validateIssueDraft(
   draft: unknown,
   context: FoundationAuditContext,
@@ -647,13 +676,7 @@ function validateIssueDraft(
     candidate.target === undefined
       ? undefined
       : exactIssueSection(context, candidate.target, 'target')
-  if (
-    typeof candidate.fixDocument !== 'string' ||
-    typeof candidate.fixSectionId !== 'string'
-  )
-    throw new Error('audit issue fix identity is invalid')
-  const fix = context.section(candidate.fixDocument, candidate.fixSectionId)
-  if (!fix) throw new Error('audit issue fix is not the validated SectionRef')
+    const remediation = validateRemediation(candidate.remediation, context)
   return {
     checkId,
     severity: candidate.severity as AuditSeverity,
@@ -662,8 +685,7 @@ function validateIssueDraft(
     ...(target ? { target } : {}),
     expected: candidate.expected,
     actual: candidate.actual,
-    fixDocument: fix.documentPath as FoundationDocumentPath,
-    fixSectionId: fix.sectionId,
+    remediation,
     ...(candidate.reasonCode !== undefined
       ? { reasonCode: candidate.reasonCode }
       : {}),
@@ -691,6 +713,7 @@ function compileIssueRegistry(
       source: identitySection(draft.source),
       target: identitySection(draft.target),
       conflict: draft.conflictIdentity,
+      remediation: draft.remediation,
     })
     if (identities.has(identity))
       throw new Error('duplicate audit issue identity')
@@ -706,8 +729,7 @@ function compileIssueRegistry(
       ...(draft.target ? { target: { ...draft.target } } : {}),
       expected: draft.expected,
       actual: draft.actual,
-      fixDocument: draft.fixDocument,
-      fixSectionId: draft.fixSectionId,
+      remediation: draft.remediation,
       ...(draft.reasonCode ? { reasonCode: draft.reasonCode } : {}),
     })
   }

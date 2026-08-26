@@ -27,6 +27,10 @@ import {
 import { getGameDocumentContract } from './game-document-contracts'
 import type { FoundationImpactAnalysis } from './foundation-impact-analysis'
 import type { FoundationDocumentPath } from './types'
+import {
+  collectFoundationProjectDeterministicDrafts,
+  type FoundationProjectDeterministicInput,
+} from './foundation-project-deterministic-rules'
 
 export type FoundationAuditProductionManifest = {
   version: 'foundation-deterministic.v1'
@@ -190,8 +194,7 @@ function catalogValueIssueDrafts(
       source: fact.source,
       expected: `fact ${fact.key} must satisfy its catalog value constraints`,
       actual: `fact ${fact.key} has invalid value ${JSON.stringify(fact.value)}`,
-      fixDocument: fact.source.documentPath,
-      fixSectionId: fact.source.sectionId,
+      remediation: { kind: 'patch', documentPath: fact.source.documentPath, sectionIds: [fact.source.sectionId] },
       conflictIdentity: {
         key: fact.key,
         expectedType: definition.valueType,
@@ -222,11 +225,12 @@ function validContractFacts(
 export function runProductionDeterministicFoundationAudit(input: {
   sectionIndex: readonly SectionRef[]
   factStore: readonly FoundationFact[]
+  documents?: FoundationProjectDeterministicInput['documents']
 }): AuditIssue[] {
   if (!input || typeof input !== 'object' || !Array.isArray(input.sectionIndex) || !Array.isArray(input.factStore))
     throw new Error('production deterministic audit input is invalid')
   const candidate = input as Record<string, unknown>
-  if (Object.keys(candidate).some(key => !['sectionIndex', 'factStore'].includes(key)))
+  if (Object.keys(candidate).some(key => !['sectionIndex', 'factStore', 'documents'].includes(key)))
     throw new Error('caller production audit rules are not accepted')
   const auditInput: DeterministicFoundationAuditInput = {
     sectionIndex: input.sectionIndex,
@@ -252,7 +256,19 @@ export function runProductionDeterministicFoundationAudit(input: {
       drafts: catalogValueIssueDrafts(input.factStore),
     }),
   )
-  return [...deterministicIssues, ...valueIssues].sort((left, right) => left.id.localeCompare(right.id))
+  const projectIssues = input.documents
+    ? applyFoundationFixAuthority(
+      compileFoundationIssueRegistry({
+        sectionIndex: input.sectionIndex,
+        factStore: input.factStore,
+        drafts: collectFoundationProjectDeterministicDrafts({
+          documents: input.documents,
+          sectionIndex: input.sectionIndex,
+        }),
+      }),
+    )
+    : []
+  return [...deterministicIssues, ...valueIssues, ...projectIssues].sort((left, right) => left.id.localeCompare(right.id))
 }
 
 function assertImpactIdentities(impact: FoundationImpactAnalysis): {

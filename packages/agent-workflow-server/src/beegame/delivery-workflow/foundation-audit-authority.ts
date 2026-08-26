@@ -102,6 +102,7 @@ export function applyFoundationFixAuthority(
   issues: readonly AuditIssue[],
 ): AuditIssue[] {
   return issues.map(issue => {
+    if (issue.remediation.kind !== 'patch') return issue
     const target = resolveFoundationFixTarget({
       source: issue.source,
       target: issue.target,
@@ -111,8 +112,11 @@ export function applyFoundationFixAuthority(
     })
     return {
       ...issue,
-      fixDocument: target.documentPath,
-      fixSectionId: target.sectionId,
+      remediation: {
+        kind: 'patch' as const,
+        documentPath: target.documentPath,
+        sectionIds: [target.sectionId],
+      },
     }
   })
 }

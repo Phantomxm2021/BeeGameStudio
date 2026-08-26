@@ -63,10 +63,13 @@ export function projectDeliveryProgress(
   workflow: Record<string, unknown>,
 ): DeliveryProgress | undefined {
   if (!DELIVERY_PHASES.includes(workflow.phase as never)) return undefined
+  const activeFoundationRepair = isActiveFoundationRepairState(
+    workflow.foundationAuditState,
+  )
   const stageId =
     workflow.phase === 'DOCUMENT_REVIEW' &&
     (workflow.documentStep === 'CHECKLIST_DRAFTING' ||
-      isActiveFoundationRepairState(workflow.foundationAuditState))
+      activeFoundationRepair)
       ? FOUNDATION_REVISION_STAGE
       : (workflow.phase as DeliveryProgressStage)
   const substage: DeliveryProgressSubstage | undefined =
@@ -78,7 +81,9 @@ export function projectDeliveryProgress(
           : 'INITIAL_REVIEW'
         : workflow.documentStep === 'CHECKLIST_DRAFTING'
           ? 'CHECKLIST_DRAFTING'
-          : undefined
+          : activeFoundationRepair
+            ? 'REPAIRING'
+            : undefined
   return {
     stageId,
     phaseIndex: DELIVERY_PROGRESS_STAGES.indexOf(stageId) + 1,

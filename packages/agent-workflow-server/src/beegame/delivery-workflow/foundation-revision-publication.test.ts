@@ -25,6 +25,7 @@ import {
   loadCommittedFoundationRevisionAuthority,
   publishFoundationRevision,
   recoverFoundationRevision,
+  type FoundationPublicationSemanticRecheckResult,
 } from './foundation-revision-publication'
 
 const workspaces: string[] = []
@@ -76,7 +77,7 @@ async function fixture(paths: readonly FoundationDocumentPath[] = [documentPath]
       workspacePath: workspace,
       revision,
       batch: { documentPath: path, sectionIds: receipt.changedSectionIds, issueIds: receipt.issueIds },
-      issues: [{ id: issueId, fixDocument: path, fixSectionId: receipt.changedSectionIds[0] }] as never,
+      issues: [revisionIssue(issueId, path, receipt.changedSectionIds[0]!)],
       receipt,
     })
     stages.push({ receipt, operations, batch: { documentPath: path, sectionIds: receipt.changedSectionIds, issueIds: receipt.issueIds } })
@@ -101,7 +102,21 @@ function validation(path: FoundationDocumentPath, receipt: RevisionTaskReceipt, 
 }
 
 function semanticResult(issueId: string, status: 'PASS' | 'FAIL' = 'PASS'): FoundationSemanticRecheckResult {
-  return { issueId, packetDigest: sha256(`packet:${issueId}`), status }
+  return status === 'PASS'
+    ? { taskId: `task-${issueId}`, issueId, packetDigest: sha256(`packet:${issueId}`), status }
+    : { taskId: `task-${issueId}`, issueId, packetDigest: sha256(`packet:${issueId}`), status, diagnostic: { unmetExpected: 'expected', observedActual: 'actual', evidence: [], dependencySections: [], failureReasonCode: 'expected_not_met', scopeAssessment: 'repairable_in_scope' } }
+}
+
+function revisionIssue(id: string, path: FoundationDocumentPath, sectionId: string): AuditIssue {
+  return {
+    id,
+    severity: 'HIGH',
+    type: 'rule',
+    source: { documentPath: path, sectionId, heading: sectionId, startLine: 1, endLine: 2, digest: sha256(`source:${id}`) },
+    expected: 'expected',
+    actual: 'actual',
+    remediation: { kind: 'patch', documentPath: path, sectionIds: [sectionId] },
+  }
 }
 
 function resultingIssue(id: string, severity: AuditIssue['severity'] = 'HIGH'): AuditIssue {
@@ -112,12 +127,11 @@ function resultingIssue(id: string, severity: AuditIssue['severity'] = 'HIGH'): 
     source: { documentPath, sectionId: 'core_loop', heading: 'Core Loop', startLine: 1, endLine: 2, digest: sha256(`source:${id}`) },
     expected: 'expected',
     actual: 'actual',
-    fixDocument: documentPath,
-    fixSectionId: 'core_loop',
+    remediation: { kind: 'patch', documentPath, sectionIds: ['core_loop'] },
   }
 }
 
-function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options: { validations?: PatchValidation[]; semantic?: FoundationSemanticRecheckResult[]; resultingIssues?: AuditIssue[] } = {}) {
+function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options: { validations?: PatchValidation[]; semantic?: FoundationPublicationSemanticRecheckResult[]; resultingIssues?: AuditIssue[] } = {}) {
   const validations = options.validations ?? fixtureValue.stages.map(stage => validation(stage.receipt.documentPath, stage.receipt, stage.operations, stage.receipt.issueIds[0]!))
   return {
     workspacePath: fixtureValue.workspace,
@@ -126,6 +140,7 @@ function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options
     round: 1 as const,
     batches: fixtureValue.stages.map(stage => stage.batch),
     receipts: fixtureValue.stages.map(stage => stage.receipt),
+    revisionDeclarations: fixtureValue.stages.map(stage => ({ status: 'APPLIED' as const, changedSectionIds: [...stage.receipt.changedSectionIds] })),
     patchOperations: fixtureValue.stages.flatMap(stage => stage.operations),
     patchValidations: validations,
     semanticRecheckResults: options.semantic ?? [],
@@ -145,6 +160,63 @@ describe('foundation revision publication', () => {
     expect(await readFile(join(value.workspace, foundationRevisionCommittedPath(revision)), 'utf8')).toContain('"status": "committed"')
     const committed = JSON.parse(await readFile(join(value.workspace, foundationRevisionCommittedPath(revision)), 'utf8'))
     expect(Object.keys(committed.documentDigests).sort()).toEqual([...CANONICAL_FOUNDATION_DOCUMENTS].sort())
+  })
+
+  test('publishes one admitted issue whose patch spans multiple sections', async () => {
+    const value = await fixture()
+    const stage = value.stages[0]!
+    const contract = getGameDocumentContract(documentPath)
+    const firstSectionId = contract.sections[0]!.sectionId
+    const secondSectionId = contract.sections[1]!.sectionId
+    const stagedPath = join(value.workspace, stage.receipt.stagedPath)
+    const staged = (await readFile(stagedPath, 'utf8'))
+      .replace(`original ${secondSectionId}`, `revised ${secondSectionId}`)
+    await writeFile(stagedPath, staged)
+    const { terminalDigest: _oldTerminalDigest, ...baseReceipt } = stage.receipt
+    const receiptWithoutTerminal = {
+      ...baseReceipt,
+      stagedDocumentDigest: sha256(staged),
+      changedSectionIds: [firstSectionId, secondSectionId],
+    }
+    const receipt = {
+      ...receiptWithoutTerminal,
+      terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal),
+    }
+    const issue = revisionIssue(stage.receipt.issueIds[0]!, documentPath, firstSectionId)
+    issue.remediation = {
+      kind: 'patch',
+      documentPath,
+      sectionIds: [firstSectionId, secondSectionId],
+    }
+    const operations = await deriveFoundationPatchOperations({
+      workspacePath: value.workspace,
+      revision,
+      batch: {
+        documentPath,
+        sectionIds: receipt.changedSectionIds,
+        issueIds: receipt.issueIds,
+      },
+      issues: [issue],
+      receipt,
+    })
+
+    await expect(publishFoundationRevision({
+      workspacePath: value.workspace,
+      revision,
+      confirmedBriefDigest,
+      round: 1,
+      batches: [{
+        documentPath,
+        sectionIds: receipt.changedSectionIds,
+        issueIds: receipt.issueIds,
+      }],
+      receipts: [receipt],
+      revisionDeclarations: [{ status: 'APPLIED', changedSectionIds: receipt.changedSectionIds }],
+      patchOperations: operations,
+      patchValidations: [validation(documentPath, receipt, operations, receipt.issueIds[0]!)],
+      semanticRecheckResults: [],
+      resultingIssues: [],
+    })).resolves.toMatchObject({ status: 'committed' })
   })
 
   test('publishes the final service-owned metadata bytes and digest', async () => {
@@ -177,13 +249,14 @@ describe('foundation revision publication', () => {
       workspacePath: value.workspace,
       revision,
       batch: stage.batch,
-      issues: [{ id: 'AUD-1', fixDocument: documentPath, fixSectionId: stage.receipt.changedSectionIds[0] }] as never,
+      issues: [revisionIssue('AUD-1', documentPath, stage.receipt.changedSectionIds[0]!)],
       receipt,
     })
     const input = publishInput(value, {
       validations: [validation(documentPath, receipt, operations, 'AUD-1')],
     })
     input.receipts = [receipt]
+    input.revisionDeclarations = [{ status: 'APPLIED', changedSectionIds: [...receipt.changedSectionIds] }]
     input.patchOperations = operations
     await expect(publishFoundationRevision(input)).rejects.toThrow(/metadata/i)
   })
@@ -269,6 +342,55 @@ describe('foundation revision publication', () => {
     await expect(publishFoundationRevision(publishInput(value, { validations: [], semantic: [semanticResult(stage.receipt.issueIds[0]!)] }))).resolves.toMatchObject({ status: 'committed' })
   })
 
+  test('does not create PREPARED or publish canonical bytes when PatchValidation fails', async () => {
+    const value = await fixture()
+    const before = await readFile(join(value.workspace, documentPath), 'utf8')
+    const stage = value.stages[0]!
+    const failed = validation(stage.receipt.documentPath, stage.receipt, stage.operations, stage.receipt.issueIds[0]!, 'FAIL')
+
+    await expect(publishFoundationRevision(publishInput(value, {
+      validations: [failed],
+      resultingIssues: [resultingIssue('AUD-1')],
+    }))).rejects.toThrow(/cannot publish|FAIL|validation/i)
+
+    expect(await readFile(join(value.workspace, documentPath), 'utf8')).toBe(before)
+    await expect(readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  test('publication schema rejects UNDECIDABLE targeted semantic rechecks before PREPARED', async () => {
+    const value = await fixture()
+    const before = await readFile(join(value.workspace, documentPath), 'utf8')
+    const stage = value.stages[0]!
+
+    await expect(publishFoundationRevision(publishInput(value, {
+      validations: [],
+      semantic: [{ ...semanticResult(stage.receipt.issueIds[0]!), status: 'UNDECIDABLE' } as unknown as FoundationPublicationSemanticRecheckResult],
+      resultingIssues: [resultingIssue('AUD-1')],
+    }))).rejects.toThrow(/semantic recheck status is invalid/i)
+
+    expect(await readFile(join(value.workspace, documentPath), 'utf8')).toBe(before)
+    await expect(readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  test('requires one APPLIED declaration for every active document receipt', async () => {
+    const value = await fixture()
+    await expect(publishFoundationRevision({
+      ...publishInput(value),
+      revisionDeclarations: [],
+    })).rejects.toThrow(/declaration|coverage|APPLIED/i)
+    await expect(readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  test('rejects an APPLIED declaration whose receipt disagrees with the active batch', async () => {
+    const value = await fixture()
+    const stage = value.stages[0]!
+    await expect(publishFoundationRevision({
+      ...publishInput(value),
+      revisionDeclarations: [{ status: 'APPLIED', changedSectionIds: ['rules_systems'] }],
+    })).rejects.toThrow(/declaration|receipt|batch|section/i)
+    await expect(readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   test('rejects a stale receipt before PREPARED', async () => {
     const receipt = await fixture()
     const receiptStage = receipt.stages[0]!
@@ -301,13 +423,17 @@ describe('foundation revision publication', () => {
       changedSectionIds: [getGameDocumentContract(secondPath).sections[0]!.sectionId], stagedPath: secondStage.stagedPath,
     }
     const secondReceipt = { ...secondReceiptWithoutTerminal, terminalDigest: revisionTaskReceiptTerminalDigest(secondReceiptWithoutTerminal) }
-    const secondOperations = await deriveFoundationPatchOperations({ workspacePath: value.workspace, revision, batch: { documentPath: secondPath, sectionIds: secondReceipt.changedSectionIds, issueIds: [secondIssue] }, issues: [{ id: secondIssue, fixDocument: secondPath, fixSectionId: secondReceipt.changedSectionIds[0] }] as never, receipt: secondReceipt })
+    const secondOperations = await deriveFoundationPatchOperations({ workspacePath: value.workspace, revision, batch: { documentPath: secondPath, sectionIds: secondReceipt.changedSectionIds, issueIds: [secondIssue] }, issues: [revisionIssue(secondIssue, secondPath, secondReceipt.changedSectionIds[0]!)], receipt: secondReceipt })
     const first = value
     const input = {
       workspacePath: value.workspace, revision, round: 1 as const,
       confirmedBriefDigest,
       batches: [first.stages[0]!.batch, { documentPath: secondPath, sectionIds: secondReceipt.changedSectionIds, issueIds: [secondIssue] }],
       receipts: [first.stages[0]!.receipt, secondReceipt],
+      revisionDeclarations: [
+        { status: 'APPLIED' as const, changedSectionIds: [...first.stages[0]!.receipt.changedSectionIds] },
+        { status: 'APPLIED' as const, changedSectionIds: [...secondReceipt.changedSectionIds] },
+      ],
       patchOperations: [...first.stages[0]!.operations, ...secondOperations],
       patchValidations: [validation(documentPath, first.stages[0]!.receipt, first.stages[0]!.operations, 'AUD-1'), validation(secondPath, secondReceipt, secondOperations, secondIssue)],
       semanticRecheckResults: [],
@@ -339,11 +465,11 @@ describe('foundation revision publication', () => {
     await expect(publishFoundationRevision(altered)).rejects.toThrow(/authority|coverage|issue/i)
   })
 
-  test('allows resulting overlap only for a corresponding FAIL and rejects PASS or missing FAIL overlap', async () => {
+  test('rejects failed authority before resulting Registry validation', async () => {
     const failed = await fixture()
     const failedStage = failed.stages[0]!
     const failedValidation = validation(failedStage.receipt.documentPath, failedStage.receipt, failedStage.operations, failedStage.receipt.issueIds[0]!, 'FAIL')
-    await expect(publishFoundationRevision(publishInput(failed, { validations: [failedValidation], resultingIssues: [resultingIssue('AUD-1')] }))).resolves.toMatchObject({ status: 'committed' })
+    await expect(publishFoundationRevision(publishInput(failed, { validations: [failedValidation], resultingIssues: [resultingIssue('AUD-1')] }))).rejects.toThrow(/cannot publish|FAIL/i)
 
     const pass = await fixture()
     await expect(publishFoundationRevision(publishInput(pass, { resultingIssues: [resultingIssue('AUD-1')] }))).rejects.toThrow(/overlap|PASS|issue/i)

@@ -76,6 +76,7 @@ function createTool(workspacePath: string, onReceipt?: (receipt: RevisionTaskRec
 }
 
 const declaration = {
+  status: 'APPLIED',
   changedSectionIds: [...changedSectionIds],
 } as const
 
@@ -88,7 +89,7 @@ test('accepts only the bounded declaration and derives the full receipt from loc
 
   expect(tool.inputSchema.safeParse(declaration).success).toBe(true)
   await expect(tool.call(declaration)).resolves.toMatchObject({
-    data: { accepted: true, changedSectionCount: 1, issueCount: 1, receipt: expect.any(Object) },
+    data: { status: 'APPLIED', receipt: expect.any(Object) },
   })
   const finalStaged = await readFile(join(workspace, stage.stagedPath))
   const canonical = await readFile(join(workspace, documentPath))
@@ -128,7 +129,7 @@ test('chains real Read and Edit on the isolated stage before native submission',
   await fileEdit.call({ file_path: filePath, old_string: 'changed vision', new_string: 'revised vision' }, toolContext, undefined, parentMessage)
   expect(await readFile(filePath, 'utf8')).toContain('revised vision')
   const tool = createTool(workspace)
-  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { accepted: true, changedSectionCount: 1 } })
+  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { status: 'APPLIED' } })
 })
 
 test('rejects caller-supplied path and digest evidence before it can enter the receipt', async () => {
@@ -173,12 +174,12 @@ test('commits service-owned metadata once and keeps replay idempotent', async ()
   )
   const tool = createTool(workspace)
 
-  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { accepted: true } })
+  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { status: 'APPLIED' } })
   const first = await readFile(stageAbsolute, 'utf8')
   expect(first).toContain('version: 1.0.1')
   expect(first).toContain('updated_at: 2026-08-12T17:00:00.001Z')
 
-  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { accepted: true } })
+  await expect(tool.call(declaration)).resolves.toMatchObject({ data: { status: 'APPLIED' } })
   await expect(readFile(stageAbsolute, 'utf8')).resolves.toBe(first)
 })
 

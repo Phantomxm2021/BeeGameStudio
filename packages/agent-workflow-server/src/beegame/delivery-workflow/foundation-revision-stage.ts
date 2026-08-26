@@ -7,6 +7,7 @@ import { buildFoundationSectionIndex } from './foundation-section-index'
 import type { RevisionBatch } from './foundation-revision-batches'
 import type { AuditIssue } from './foundation-issue-registry'
 import { foundationFactPacketDigest, type FoundationFactPacket } from './foundation-fact-extraction'
+import { FOUNDATION_FACT_CATALOG } from './foundation-fact-definitions'
 import { digestFoundationSemanticRecheckResult, type FoundationSemanticRecheckResult } from './foundation-patch-validation'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -340,12 +341,45 @@ function assertSemanticResultIdentity(input: {
 }): string {
   const expectedPath = foundationRevisionSemanticResultPath(input.revision, input.round, input.taskId)
   if (input.resultPath !== undefined && input.resultPath !== expectedPath) throw new Error('foundation semantic result path is stale')
-  const expectedKeys = input.result.reasonCode === undefined ? ['issueId', 'packetDigest', 'status'] : ['issueId', 'packetDigest', 'reasonCode', 'status']
+  const hasDiagnostic = input.result.status === 'FAIL'
+  const expectedKeys = [
+    'issueId',
+    'packetDigest',
+    'status',
+    'taskId',
+    ...(hasDiagnostic ? ['diagnostic'] : []),
+  ]
   const actualKeys = Object.keys(input.result).sort()
   if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys.slice().sort()[index])) throw new Error('foundation semantic result shape is invalid')
   if (input.result.issueId !== input.issueId || input.result.packetDigest !== input.packetDigest) throw new Error('foundation semantic result identity is stale')
+  if (input.result.taskId !== input.taskId) throw new Error('foundation semantic result task identity is stale')
   if (input.result.status !== 'PASS' && input.result.status !== 'FAIL') throw new Error('foundation semantic result status is invalid')
-  if (input.result.reasonCode !== undefined && (!input.result.reasonCode || typeof input.result.reasonCode !== 'string')) throw new Error('foundation semantic result reasonCode is invalid')
+  if (input.result.status === 'FAIL' && !hasDiagnostic) throw new Error('foundation semantic FAIL requires a structured diagnostic before digest validation')
+  if (input.result.status === 'PASS' && hasDiagnostic) throw new Error('foundation semantic PASS cannot contain a diagnostic')
+  if (input.result.status === 'FAIL') {
+    const diagnostic = input.result.diagnostic
+    const diagnosticKeys = Object.keys(diagnostic).sort()
+    if (JSON.stringify(diagnosticKeys) !== JSON.stringify(['dependencySections', 'evidence', 'failureReasonCode', 'observedActual', 'scopeAssessment', 'unmetExpected'])) throw new Error('foundation semantic diagnostic shape is invalid')
+    if (!diagnostic.unmetExpected.trim() || !diagnostic.observedActual.trim()) throw new Error('foundation semantic diagnostic text is invalid')
+    if (!['expected_not_met', 'actual_persists', 'contradictory_evidence', 'evidence_insufficient'].includes(diagnostic.failureReasonCode)) throw new Error('foundation semantic diagnostic failureReasonCode is invalid')
+    if (diagnostic.scopeAssessment !== 'repairable_in_scope') throw new Error('foundation semantic diagnostic scopeAssessment is invalid')
+    const assertSections = (sections: readonly unknown[], label: string): void => {
+      if (!Array.isArray(sections) || sections.length === 0) throw new Error(`foundation semantic diagnostic ${label} is required`)
+      const seen = new Set<string>()
+      for (const raw of sections) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`foundation semantic diagnostic ${label} is invalid`)
+        const section = raw as Record<string, unknown>
+        if (JSON.stringify(Object.keys(section).sort()) !== JSON.stringify(['digest', 'documentPath', 'endLine', 'heading', 'sectionId', 'startLine'])) throw new Error(`foundation semantic diagnostic ${label} shape is invalid`)
+        assertCanonicalDocument(String(section.documentPath))
+        if (typeof section.sectionId !== 'string' || !section.sectionId || typeof section.heading !== 'string' || !section.heading || typeof section.startLine !== 'number' || !Number.isInteger(section.startLine) || typeof section.endLine !== 'number' || !Number.isInteger(section.endLine) || section.startLine < 1 || section.endLine < section.startLine || typeof section.digest !== 'string' || !DIGEST.test(section.digest)) throw new Error(`foundation semantic diagnostic ${label} reference is invalid`)
+        const identity = `${section.documentPath}\0${section.sectionId}`
+        if (seen.has(identity)) throw new Error(`foundation semantic diagnostic ${label} contains duplicates`)
+        seen.add(identity)
+      }
+    }
+    assertSections(diagnostic.evidence, 'evidence')
+    assertSections(diagnostic.dependencySections, 'dependencySections')
+  }
   if (digestFoundationSemanticRecheckResult(input.result) !== input.resultDigest) throw new Error('foundation semantic result digest is stale')
   return expectedPath
 }
@@ -530,11 +564,16 @@ export async function buildFoundationRevisionAuthority(input: {
   const slices = sectionSlices(input.batch.documentPath, markdown)
   const requiredSectionIds = new Set<string>(input.batch.sectionIds)
   const issueRefs = new Set(
-    input.issues.flatMap(issue => [
-      `${issue.source.documentPath}\0${issue.source.sectionId}`,
-      ...(issue.target ? [`${issue.target.documentPath}\0${issue.target.sectionId}`] : []),
-      `${issue.fixDocument}\0${issue.fixSectionId}`,
-    ]),
+    input.issues.flatMap(issue => {
+      const remediation = issue.remediation
+      return [
+        `${issue.source.documentPath}\0${issue.source.sectionId}`,
+        ...(issue.target ? [`${issue.target.documentPath}\0${issue.target.sectionId}`] : []),
+        ...(remediation.kind === 'patch'
+          ? remediation.sectionIds.map(sectionId => `${remediation.documentPath}\0${sectionId}`)
+          : []),
+      ]
+    }),
   )
   const selectedSections = slices.filter(section =>
     requiredSectionIds.has(section.sectionId) ||
@@ -545,6 +584,21 @@ export async function buildFoundationRevisionAuthority(input: {
     const source = (fact as { source?: { documentPath?: string; sectionId?: string } }).source
     return source && issueRefs.has(`${source.documentPath}\0${source.sectionId}`)
   })
+  const factConstraints = FOUNDATION_FACT_CATALOG
+    .filter(definition =>
+      definition.owner.documentPath === input.batch.documentPath &&
+      requiredSectionIds.has(definition.owner.sectionId),
+    )
+    .map(definition => ({
+      key: definition.key,
+      owner: definition.owner,
+      valueType: definition.valueType,
+      valueSpec: definition.valueSpec,
+      presence: definition.presence,
+      extractionInstruction: definition.extractionInstruction,
+      sourceOfTruthDirection: definition.sourceOfTruthDirection,
+    }))
+    .sort((left, right) => left.key.localeCompare(right.key))
   const packet: Record<string, unknown> = {
     schema: 'beegame-foundation-revision-packet-v1',
     revision: input.revision,
@@ -558,6 +612,7 @@ export async function buildFoundationRevisionAuthority(input: {
     issues: input.issues,
     sections: selectedSections,
     normalizedFacts: selectedFacts,
+    factConstraints,
     immutableDigests: {
       sourceAuthorityDigest: input.sourceAuthorityDigest,
       sourceIssueRegistryDigest: input.sourceIssueRegistryDigest,
@@ -780,17 +835,17 @@ function issueAuthority(
       throw new Error('revision admitted issue IDs must be unique')
     if (!batchIds.has(issue.id))
       throw new Error('revision admitted issue IDs disagree with the batch')
-    if (issue.fixDocument !== batch.documentPath)
+    if (issue.remediation.kind !== 'patch' || issue.remediation.documentPath !== batch.documentPath)
       throw new Error('revision issue fix document is outside the batch')
-    if (
-      !contractSections.has(issue.fixSectionId) ||
-      !batch.sectionIds.includes(issue.fixSectionId)
-    )
-      throw new Error('revision issue fix section is outside the batch')
+    for (const sectionId of issue.remediation.sectionIds)
+      if (!contractSections.has(sectionId) || !batch.sectionIds.includes(sectionId))
+        throw new Error('revision issue fix section is outside the batch')
     seen.add(issue.id)
-    const sectionIssues = grouped.get(issue.fixSectionId) ?? []
-    sectionIssues.push(issue.id)
-    grouped.set(issue.fixSectionId, sectionIssues)
+    for (const sectionId of issue.remediation.sectionIds) {
+      const sectionIssues = grouped.get(sectionId) ?? []
+      sectionIssues.push(issue.id)
+      grouped.set(sectionId, sectionIssues)
+    }
   }
   if (seen.size !== batchIds.size)
     throw new Error('revision admitted issue coverage is incomplete')
@@ -928,10 +983,11 @@ export async function deriveFoundationPatchOperations(input: {
         : {}),
     } satisfies PatchOperation
   })
-  for (const issue of input.issues)
-    if (!changedIds.includes(issue.fixSectionId))
+  for (const issue of input.issues) {
+    if (issue.remediation.kind !== 'patch' || issue.remediation.sectionIds.some(sectionId => !changedIds.includes(sectionId)))
       throw new Error('revision admitted issue target was not changed')
-  const boundIssueIds = operations.flatMap(operation => operation.issueIds)
+  }
+  const boundIssueIds = [...new Set(operations.flatMap(operation => operation.issueIds))]
   const expectedIssueIds = [...input.batch.issueIds].sort(compareStable)
   const actualIssueIds = [...boundIssueIds].sort(compareStable)
   if (

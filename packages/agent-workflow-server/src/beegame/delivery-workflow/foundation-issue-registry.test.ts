@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { runDeterministicFoundationAudit } from './foundation-audit-check-definitions'
 import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
+import { GAME_DOCUMENT_CONTRACTS } from './game-document-contracts'
 
 const ref = (documentPath: string, sectionId: string): SectionRef => ({
   documentPath: documentPath as SectionRef['documentPath'],
@@ -11,6 +12,21 @@ const ref = (documentPath: string, sectionId: string): SectionRef => ({
   endLine: 2,
   digest: 'd'.repeat(64),
 })
+const canonicalIndex = (sections: readonly SectionRef[]): SectionRef[] => {
+  const required = Object.values(GAME_DOCUMENT_CONTRACTS).flatMap(contract => [
+    ...contract.sections.map(section => [contract.path, section.sectionId] as const),
+    ...contract.upstreamSections.flatMap(projection => projection.sectionIds.map(sectionId => [projection.path, sectionId] as const)),
+  ])
+  const seen = new Set(sections.map(section => `${section.documentPath}#${section.sectionId}`))
+  const extras: SectionRef[] = []
+  for (const [path, sectionId] of required) {
+    const key = `${path}#${sectionId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    extras.push(ref(path, sectionId))
+  }
+  return [...sections, ...extras]
+}
 const fact = (
   key: string,
   value: FoundationFact['value'],
@@ -30,9 +46,9 @@ const fact = (
 
 describe('foundation issue registry admission', () => {
   test('derives IDs without caller IDs and keeps them stable across display/severity/fix changes', () => {
-    const source = ref('docs/custom.md', 'settings')
+    const source = ref('docs/GDD.md', 'settings')
     const first = runDeterministicFoundationAudit({
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [],
       schema: {
         requiredFacts: [
@@ -41,7 +57,7 @@ describe('foundation issue registry admission', () => {
       },
     })[0]!
     const second = runDeterministicFoundationAudit({
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [],
       schema: {
         requiredFacts: [
@@ -59,9 +75,9 @@ describe('foundation issue registry admission', () => {
   })
 
   test('keeps distinct conflicts distinct and exact repeated runs deterministic', () => {
-    const source = ref('docs/custom.md', 'settings')
+    const source = ref('docs/GDD.md', 'settings')
     const input = {
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [fact('custom.a', 1, source), fact('custom.b', 2, source)],
       numericRules: [
         {
@@ -82,9 +98,9 @@ describe('foundation issue registry admission', () => {
   })
 
   test('normalizes surrounding check identity whitespace before hashing', () => {
-    const source = ref('docs/custom.md', 'settings')
+    const source = ref('docs/GDD.md', 'settings')
     const base = runDeterministicFoundationAudit({
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [fact('custom.a', 1, source), fact('custom.b', 2, source)],
       numericRules: [
         {
@@ -98,7 +114,7 @@ describe('foundation issue registry admission', () => {
       ],
     })
     const padded = runDeterministicFoundationAudit({
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [fact('custom.a', 1, source), fact('custom.b', 2, source)],
       numericRules: [
         {
@@ -115,10 +131,10 @@ describe('foundation issue registry admission', () => {
   })
 
   test('does not admit a caller-supplied issue ID surface', () => {
-    const source = ref('docs/custom.md', 'settings')
+    const source = ref('docs/GDD.md', 'settings')
     expect(() =>
       runDeterministicFoundationAudit({
-        sectionIndex: [source],
+        sectionIndex: canonicalIndex([source]),
         factStore: [],
         schema: {
           requiredFacts: [
@@ -134,7 +150,7 @@ describe('foundation issue registry admission', () => {
     ).toThrow('id')
     expect(() =>
       runDeterministicFoundationAudit({
-        sectionIndex: [source],
+        sectionIndex: canonicalIndex([source]),
         factStore: [],
         schema: {
           requiredFacts: [

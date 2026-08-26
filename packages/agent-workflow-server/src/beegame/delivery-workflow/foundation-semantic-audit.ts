@@ -296,9 +296,16 @@ export type FoundationSemanticIssueDraft = Readonly<{
   expected: string
   actual: string
   sourceSectionKey: string
-  fixSectionKey: string
+  remediation: FoundationSemanticRemediation
   reasonCode?: string
 }>
+
+export type FoundationSemanticPatchRemediation = Readonly<{
+  kind: 'patch'
+  sectionKeys: readonly string[]
+}>
+
+export type FoundationSemanticRemediation = FoundationSemanticPatchRemediation
 
 export type FoundationSemanticResult = Readonly<{
   checkId: string
@@ -315,12 +322,20 @@ export function digestFoundationSemanticResult(value: FoundationSemanticResult):
 function strictIssue(value: unknown, packetSections: ReadonlySet<string>): FoundationSemanticIssueDraft {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('semantic issue draft is invalid')
   const candidate = value as Record<string, unknown>
-  const allowed = ['actual', 'expected', 'fixSectionKey', 'problem', 'reasonCode', 'sourceSectionKey']
+  const allowed = ['actual', 'expected', 'problem', 'reasonCode', 'sourceSectionKey', 'remediation']
   if (Object.keys(candidate).some(key => !allowed.includes(key)) || Object.keys(candidate).some(key => candidate[key] === undefined)) throw new Error('semantic issue draft contains an ID or redundant/unknown field')
-  for (const key of ['problem', 'expected', 'actual', 'fixSectionKey', 'sourceSectionKey']) if (typeof candidate[key] !== 'string' || !candidate[key].trim()) throw new Error(`semantic issue ${key} is required`)
-  if (!packetSections.has(candidate.sourceSectionKey as string) || !packetSections.has(candidate.fixSectionKey as string)) throw new Error('semantic issue section is outside assigned packet')
+  for (const key of ['problem', 'expected', 'actual', 'sourceSectionKey']) if (typeof candidate[key] !== 'string' || !candidate[key].trim()) throw new Error(`semantic issue ${key} is required`)
+  if (!packetSections.has(candidate.sourceSectionKey as string)) throw new Error('semantic issue source section is outside assigned packet')
+  const remediation = candidate.remediation
+  if (!remediation || typeof remediation !== 'object' || Array.isArray(remediation)) throw new Error('semantic issue remediation is invalid')
+  const remediationValue = remediation as Record<string, unknown>
+  if (remediationValue.kind === 'patch') {
+    if (Object.keys(remediationValue).sort().join('\0') !== 'kind\0sectionKeys' || !Array.isArray(remediationValue.sectionKeys) || remediationValue.sectionKeys.length === 0 || remediationValue.sectionKeys.some(item => typeof item !== 'string' || !packetSections.has(item)) || new Set(remediationValue.sectionKeys).size !== remediationValue.sectionKeys.length) throw new Error('semantic patch remediation section scope is invalid')
+    const docs = new Set((remediationValue.sectionKeys as string[]).map(key => key.split('#')[0]))
+    if (docs.size !== 1) throw new Error('semantic patch remediation must target one document')
+  } else throw new Error('semantic issue remediation kind is invalid; only patch is supported')
   if (candidate.reasonCode !== undefined && (typeof candidate.reasonCode !== 'string' || !candidate.reasonCode.trim())) throw new Error('semantic issue reason is invalid')
-  return Object.freeze({ problem: candidate.problem as string, expected: candidate.expected as string, actual: candidate.actual as string, sourceSectionKey: candidate.sourceSectionKey as string, fixSectionKey: candidate.fixSectionKey as string, ...(candidate.reasonCode ? { reasonCode: candidate.reasonCode as string } : {}) })
+  return Object.freeze({ problem: candidate.problem as string, expected: candidate.expected as string, actual: candidate.actual as string, sourceSectionKey: candidate.sourceSectionKey as string, remediation: remediation as FoundationSemanticRemediation, ...(candidate.reasonCode ? { reasonCode: candidate.reasonCode as string } : {}) })
 }
 
 export function admitFoundationSemanticResult(packet: FoundationSemanticPacket, input: unknown): FoundationSemanticResult {
@@ -377,7 +392,11 @@ export function semanticResultToFoundationIssueDrafts(
   const declaration = expectedByCheck.get(packet.checkId)!
   return result.issues!.map(issue => {
     const source = resolvePacketSection(packet, issue.sourceSectionKey)
-    const fix = resolvePacketSection(packet, issue.fixSectionKey)
+    const remediation = {
+      kind: 'patch' as const,
+      documentPath: resolvePacketSection(packet, issue.remediation.sectionKeys[0]!).documentPath,
+      sectionIds: issue.remediation.sectionKeys.map(sectionKey => resolvePacketSection(packet, sectionKey).sectionId),
+    }
     return {
       checkId: packet.checkId,
       severity: declaration.severity,
@@ -385,14 +404,13 @@ export function semanticResultToFoundationIssueDrafts(
       source,
       expected: issue.expected,
       actual: issue.actual,
-      fixDocument: fix.documentPath,
-      fixSectionId: fix.sectionId,
+      remediation,
       ...(issue.reasonCode ? { reasonCode: issue.reasonCode } : {}),
       conflictIdentity: {
         packetIdentity: packet.identity,
         problem: issue.problem,
         source: sectionRefIdentity(source),
-        fix: sectionRefIdentity(fix),
+        remediation,
       },
     }
   })

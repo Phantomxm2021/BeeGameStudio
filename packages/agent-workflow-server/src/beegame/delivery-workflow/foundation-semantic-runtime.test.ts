@@ -114,7 +114,7 @@ describe('foundation semantic runtime', () => {
       expected: '每个检查都应输出稳定、可重放且绑定当前语义包的结论。',
       actual: '当前输出在多语言问题描述中包含额外细节，导致固定预算边界被触发。',
       sourceSectionKey: 'GDD#core_loop',
-      fixSectionKey: 'GDD#core_loop',
+      remediation: { kind: 'patch', sectionKeys: ['GDD#core_loop'] },
     })
     const terminal = { workerType: 'foundation-semantic-reviewer' as const, status: 'completed' as const, runId: 'run', dispatchId: 'dispatch', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'ISSUES' as const, issues: [issue('!'), issue('')] }
     const collection = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: ten() })
@@ -135,7 +135,7 @@ describe('foundation semantic runtime', () => {
       expected: '规则应能从权威章节和已确认事实中被唯一推导。',
       actual: '当前章节给出的数值和解释存在冲突，无法直接形成可执行结论。',
       sourceSectionKey: 'GDD#progression',
-      fixSectionKey: 'BALANCE#economy',
+      remediation: { kind: 'patch', sectionKeys: ['BALANCE#economy'] },
     })
     const terminal = { workerType: 'foundation-semantic-reviewer' as const, status: 'completed' as const, runId: 'run', dispatchId: 'dispatch', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'ISSUES' as const, issues: [1, 2, 3, 4].map(issue) }
     const collection = createFoundationSemanticTaskCollection({ revision: 'rev', phaseStartedAt: new Date(0).toISOString(), tasks: ten() })

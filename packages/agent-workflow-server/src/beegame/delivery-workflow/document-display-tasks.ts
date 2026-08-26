@@ -8,6 +8,7 @@ import {
   type ResourceProductionTask,
   type DocumentWorkflowStep,
 } from './types'
+import { foundationRuntimeTasks } from './foundation-audit-state'
 import type { FoundationAuditState, FoundationIssueSummary, FoundationRevisionTask, FoundationRevisionRound } from './foundation-audit-state'
 import type { WorkflowUsage } from './types'
 import { isActiveFoundationRepairState } from './display-progress'
@@ -155,7 +156,9 @@ function projectFoundationAuditTask(input: {
     operation: 'review',
     ...(task.usage ? { usage: task.usage } : {}),
     ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
-    ...(task.failureReason ? { failureReason: task.failureReason } : {}),
+    ...(task.failureReason && (status === 'failed' || status === 'stopped')
+      ? { failureReason: task.failureReason }
+      : {}),
   }
 }
 
@@ -164,7 +167,7 @@ function projectFoundationRevisionTasks(
 ): DocumentDisplayTask[] {
   const state = input.foundationAuditState
   if (!state) return []
-  const revisionTasks = state.tasks.filter((task): task is FoundationRevisionTask => task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck')
+  const revisionTasks = foundationRuntimeTasks(state).filter((task): task is FoundationRevisionTask => task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck')
   return revisionTasks.map((task, index) => {
     const status = revisionTaskDisplayStatus(task, input.workflowStatus)
     const base = {
@@ -181,7 +184,9 @@ function projectFoundationRevisionTasks(
       ...(index === 0 && state.issueSummary ? { issueSummary: state.issueSummary } : {}),
       ...(task.usage ? { usage: task.usage } : {}),
       ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
-      ...(task.failureReason ? { failureReason: task.failureReason } : {}),
+      ...(task.failureReason && (status === 'failed' || status === 'stopped')
+        ? { failureReason: task.failureReason }
+        : {}),
     }
     return base
   })
@@ -207,10 +212,13 @@ function revisionTaskDisplayStatus(
 export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
+  if (
+    isActiveFoundationRepairState(input.foundationAuditState) &&
+    input.documentStep !== 'CHECKLIST_DRAFTING'
+  )
+    return projectFoundationRevisionTasks(input)
   if (input.documentStep === 'FOUNDATION_REVIEW')
-    return isActiveFoundationRepairState(input.foundationAuditState)
-      ? projectFoundationRevisionTasks(input)
-      : projectFoundationAuditTasks(input)
+    return projectFoundationAuditTasks(input)
   const workspace = resolve(input.workspacePath)
   const canonicalReviewArtifacts = [
     ...CANONICAL_PROJECT_DOCUMENTS,

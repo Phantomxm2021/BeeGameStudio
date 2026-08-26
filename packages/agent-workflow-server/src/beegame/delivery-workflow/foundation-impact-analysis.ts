@@ -203,7 +203,7 @@ export function analyzeFoundationImpact(
 
   const authority = validateServiceAuthority()
   const changedSections = new Map<string, FoundationSectionIdentity>()
-  const issueTargets = new Map<string, string>()
+  const issueIds = new Set<string>()
   for (const rawOperation of operations) {
     const operation = validateOperation(rawOperation)
     const section = canonicalSection(operation.documentPath, operation.sectionId)
@@ -211,16 +211,9 @@ export function analyzeFoundationImpact(
     if (changedSections.has(sectionKey))
       throw new Error(`foundation impact contains duplicate PatchOperation identity: ${sectionKey}`)
     changedSections.set(sectionKey, section)
-    for (const issueId of operation.issueIds) {
-      const previousTarget = issueTargets.get(issueId)
-      if (previousTarget !== undefined)
-        throw new Error(
-          `foundation impact issue coverage repeats issue or changes target: ${issueId}`,
-        )
-      issueTargets.set(issueId, sectionKey)
-    }
+    for (const issueId of operation.issueIds) issueIds.add(issueId)
   }
-  if (issueTargets.size === 0)
+  if (issueIds.size === 0)
     throw new Error('foundation impact issue coverage is empty')
 
   const changed = [...changedSections.values()].sort((left, right) =>
@@ -249,6 +242,6 @@ export function analyzeFoundationImpact(
     factKeys: Object.freeze([...factKeys].sort(compareStable)),
     contractIds: Object.freeze([...contractIds].sort(compareStable)),
     checkIds: Object.freeze([...checkIds].sort(compareStable)),
-    issueIds: Object.freeze([...issueTargets.keys()].sort(compareStable)),
+    issueIds: Object.freeze([...issueIds].sort(compareStable)),
   })
 }

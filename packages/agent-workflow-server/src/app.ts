@@ -197,8 +197,14 @@ import type {
   ResourceProductionTask,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
-import type { FoundationAuditState } from './beegame/delivery-workflow/foundation-audit-state'
-import { projectDeliveryProgress } from './beegame/delivery-workflow/display-progress'
+import { summarizeFoundationIssues, type FoundationAuditState } from './beegame/delivery-workflow/foundation-audit-state'
+import { loadCommittedFoundationDerivedArtifacts, loadFoundationSemanticReview } from './beegame/delivery-workflow/foundation-audit-artifacts'
+import { loadCommittedFoundationRevisionAuthority } from './beegame/delivery-workflow/foundation-revision-publication'
+import {
+  FOUNDATION_REVISION_STAGE,
+  isActiveFoundationRepairState,
+  projectDeliveryProgress,
+} from './beegame/delivery-workflow/display-progress'
 import {
   isWorkflowStageCardSnapshot,
   projectWorkflowStageCardHistory,
@@ -2879,12 +2885,10 @@ export function createAgentWorkflowApp(
               event => event.runId === run.runId,
             )
           : []
-      return c.json({
-        workflow: run
-          ? workflowViewForDisplay(run, undefined, workspacePath)
-          : null,
-        events,
-      })
+      const workflow = run
+        ? await createAgentWorkflowDisplayProjection({ run, workspacePath })
+        : null
+      return c.json({ workflow, events })
     } catch (err) {
       return tracedRouteError(c, 'project.workflow.read', err)
     }
@@ -5270,6 +5274,19 @@ async function ensureBeeGameProjectSession(input: {
   }
 }
 
+export async function createAgentWorkflowDisplayProjection(input: {
+  run: JsonObject
+  workspacePath: string
+  usage?: JsonObject
+}): Promise<JsonObject> {
+  let workflow = workflowViewForDisplay(
+    input.run,
+    input.usage,
+    input.workspacePath,
+  )
+  return workflow
+}
+
 async function getBeeGameProjectRuntimeState(input: {
   request: Request
   user: BeeGameUserContext
@@ -5322,7 +5339,11 @@ async function getBeeGameProjectRuntimeState(input: {
       next_action: workflowRuntime.nextAction,
       ...(usage ? { context: { token_budget: usage } } : {}),
       workflow: workflow
-        ? workflowViewForDisplay(workflow, usage, input.project.root_path)
+        ? await createAgentWorkflowDisplayProjection({
+            run: workflow,
+            usage,
+            workspacePath: input.project.root_path!,
+          })
         : null,
     }
   }
@@ -5396,11 +5417,11 @@ async function getBeeGameProjectRuntimeState(input: {
       )
     : undefined
   const workflow = workflowSnapshot
-    ? workflowViewForDisplay(
-        workflowSnapshot,
-        workflowUsage,
-        sessionRef.workspacePath,
-      )
+    ? await createAgentWorkflowDisplayProjection({
+        run: workflowSnapshot,
+        usage: workflowUsage,
+        workspacePath: sessionRef.workspacePath,
+      })
     : null
   const context = deriveBeeGameContextVisibility(events, snapshot) ?? {}
   if (workflowUsage && workflowUsage.total_tokens > 0) {
@@ -6059,10 +6080,26 @@ function workflowViewForDisplay(
   const messageKey = workflowMessageKey(workflow)
   const nextAction = workflowNextAction(workflow)
   const tasks = Array.isArray(workflow.tasks) ? workflow.tasks : []
+  const activeFoundationRepair =
+    workflow.phase === 'DOCUMENT_REVIEW' &&
+    isActiveFoundationRepairState(workflow.foundationAuditState)
+  const foundationAuditReady =
+    workflow.phase === 'DOCUMENT_REVIEW' &&
+    isObject(workflow.foundationAuditState) &&
+    workflow.foundationAuditState.status === 'audit_ready'
+  // Revision keeps the FOUNDATION_REVIEW document authority until checklist
+  // drafting begins. Older durable snapshots can omit this cursor, so derive
+  // it from the existing audit state for display only.
+  const displayDocumentStep =
+    typeof workflow.documentStep === 'string'
+      ? workflow.documentStep
+      : activeFoundationRepair || foundationAuditReady
+        ? 'FOUNDATION_REVIEW'
+        : undefined
   const currentMessage = projectWorkflowCurrentMessage({
     value: workflow.currentMessage,
     phase: workflow.phase,
-    documentStep: workflow.documentStep,
+    documentStep: displayDocumentStep,
   })
   const blockedReason = workflowDisplayReason(workflow)
   const atomicDisplayTasks = tasks.flatMap(task => {
@@ -6128,8 +6165,8 @@ function workflowViewForDisplay(
                 })
               : undefined,
           documentStep:
-            typeof workflow.documentStep === 'string'
-              ? (workflow.documentStep as Parameters<
+            typeof displayDocumentStep === 'string'
+              ? (displayDocumentStep as Parameters<
                   typeof projectDocumentDisplayTasks
                 >[0]['documentStep'])
               : undefined,
@@ -6192,8 +6229,8 @@ function workflowViewForDisplay(
     status: workflowStatus(workflow) || 'unknown',
     phase: typeof workflow.phase === 'string' ? workflow.phase : 'unknown',
     ...(progress ?? {}),
-    ...(typeof workflow.documentStep === 'string'
-      ? { documentStep: workflow.documentStep }
+    ...(typeof displayDocumentStep === 'string'
+      ? { documentStep: displayDocumentStep }
       : {}),
     tasks: displayTasks,
     evidence,
@@ -6323,13 +6360,61 @@ export function workflowStageSnapshotsForDisplay(
 ): JsonObject[] | undefined {
   if (!Array.isArray(workflow.stageSnapshots)) return undefined
   const currentProgress = projectDeliveryProgress(workflow)
-  const reached = workflow.stageSnapshots.filter(
+  let reached = workflow.stageSnapshots.filter(
     (value): value is WorkflowStageCardSnapshot =>
       isWorkflowStageCardSnapshot(value) &&
       currentProgress !== undefined &&
       value.phaseIndex <= currentProgress.phaseIndex,
   )
   if (reached.length === 0) return undefined
+  const activeFoundationRepair =
+    workflow.phase === 'DOCUMENT_REVIEW' &&
+    isActiveFoundationRepairState(workflow.foundationAuditState)
+  if (
+    activeFoundationRepair &&
+    currentProgress?.stageId === FOUNDATION_REVISION_STAGE
+  ) {
+    const liveIndex = reached.findIndex(
+      snapshot =>
+        snapshot.stageId === currentProgress.stageId &&
+        snapshot.phaseIndex === currentProgress.phaseIndex,
+    )
+    const staleStage4Index = reached.findIndex(
+      snapshot => snapshot.phaseIndex === currentProgress.phaseIndex,
+    )
+    const index = liveIndex >= 0 ? liveIndex : staleStage4Index
+    const timestamp =
+      typeof workflow.updatedAt === 'string'
+        ? workflow.updatedAt
+        : new Date().toISOString()
+    const liveSnapshot = {
+      ...(index >= 0 ? reached[index] : {}),
+      stageId: FOUNDATION_REVISION_STAGE,
+      phaseIndex: currentProgress.phaseIndex,
+      phaseCount: currentProgress.phaseCount,
+      status: (workflowStatus(workflow) || 'failed') as WorkflowStageCardSnapshot['status'],
+      currentPhase: 'DOCUMENT_REVIEW' as const,
+      substage: 'REPAIRING' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      tasks: liveTasks as WorkflowStageCardSnapshot['tasks'],
+      completedTaskCount: liveTasks.filter(task => task.status === 'completed').length,
+      totalTaskCount: liveTasks.length,
+      createdAt:
+        index >= 0 && typeof reached[index]?.createdAt === 'string'
+          ? reached[index].createdAt
+          : timestamp,
+      updatedAt: timestamp,
+      elapsedMs:
+        index >= 0 && nonnegativeFiniteNumber(reached[index]?.elapsedMs)
+          ? reached[index].elapsedMs
+          : 0,
+    }
+    // A worker update is durable evidence, but is not stage-card copy.
+    delete liveSnapshot.message
+    delete liveSnapshot.thinking
+    if (index >= 0) reached[index] = liveSnapshot
+    else reached = [...reached, liveSnapshot]
+  }
   return reached.map((snapshot, index) => {
     const isLive =
       currentProgress !== undefined &&

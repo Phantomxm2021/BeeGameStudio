@@ -34,7 +34,7 @@ function ref(documentPath: SectionRef['documentPath'], sectionId: string, bytes 
 }
 
 function deterministicIssue(id: string, source: SectionRef, actual = 'mismatch', type: AuditIssue['type'] = 'rule'): AuditIssue {
-  return { id, severity: 'HIGH', type, source, expected: 'expected', actual, fixDocument: source.documentPath, fixSectionId: source.sectionId }
+  return { id, severity: 'HIGH', type, source, expected: 'expected', actual, remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] } }
 }
 
 function fullSnapshot() {
@@ -163,9 +163,9 @@ describe('foundation semantic audit authority', () => {
   test('uses exactly one canonical model sectionKey representation', () => {
     const packet = buildFoundationSemanticPacket(fullSnapshot())
     const base = { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'ISSUES' as const }
-    const issue = { problem: 'break', expected: 'coherent', actual: 'contradictory', fixSectionKey: 'GDD#core_loop', sourceSectionKey: 'GDD#core_loop' }
+    const issue = { problem: 'break', expected: 'coherent', actual: 'contradictory', remediation: { kind: 'patch', sectionKeys: ['GDD#core_loop'] }, sourceSectionKey: 'GDD#core_loop' }
     expect(admitFoundationSemanticResult(packet, { ...base, issues: [issue] }).issues).toHaveLength(1)
-    expect(() => admitFoundationSemanticResult(packet, { ...base, issues: [{ ...issue, fixSectionKey: 'docs/GDD.md#core_loop' }] })).toThrow(/section/i)
+    expect(() => admitFoundationSemanticResult(packet, { ...base, issues: [{ ...issue, remediation: { kind: 'patch', sectionKeys: ['docs/GDD.md#core_loop'] } }] })).toThrow(/section/i)
     expect(() => admitFoundationSemanticResult(packet, { ...base, issues: [{ ...issue, id: 'AUD-caller' }] })).toThrow(/ID|unknown/i)
   })
 
@@ -175,7 +175,7 @@ describe('foundation semantic audit authority', () => {
     expect(admitFoundationSemanticResult(packet, pass).outcome).toBe('PASS')
     expect(admitFoundationSemanticResult(packet, { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'UNDECIDABLE', reason: 'missing evidence' }).outcome).toBe('UNDECIDABLE')
     expect(() => admitFoundationSemanticResult(packet, { ...pass, outcome: 'ISSUES', issues: [] })).toThrow(/issue/i)
-    const large = { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'ISSUES' as const, issues: [{ problem: 'x'.repeat(9000), expected: 'e', actual: 'a', fixSectionKey: 'GDD#core_loop', sourceSectionKey: 'GDD#core_loop' }] }
+    const large = { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'ISSUES' as const, issues: [{ problem: 'x'.repeat(9000), expected: 'e', actual: 'a', remediation: { kind: 'patch', sectionKeys: ['GDD#core_loop'] }, sourceSectionKey: 'GDD#core_loop' }] }
     expect(admitFoundationSemanticResult(packet, large).outcome).toBe('ISSUES')
   })
 
@@ -188,7 +188,7 @@ describe('foundation semantic audit authority', () => {
     expect(request.context).toEqual({ fresh: true, resume: false, sessionId: null })
     expect(() => createDeepConfirmationRequest(packet, { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'PASS', issues: [] })).toThrow(/strong|BLOCKER|undecidable/i)
     expect(() => createDeepConfirmationRequest(packet, undecidable, request)).toThrow(/once|at most/i)
-    const result = admitFoundationSemanticResult(packet, { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'ISSUES', issues: [{ problem: 'break', expected: 'coherent', actual: 'contradictory', fixSectionKey: 'GDD#core_loop', sourceSectionKey: 'GDD#core_loop' }] })
+    const result = admitFoundationSemanticResult(packet, { checkId: packet.checkId, packetIdentity: packet.identity, outcome: 'ISSUES', issues: [{ problem: 'break', expected: 'coherent', actual: 'contradictory', remediation: { kind: 'patch', sectionKeys: ['GDD#core_loop'] }, sourceSectionKey: 'GDD#core_loop' }] })
     const drafts = semanticResultToFoundationIssueDrafts(packet, result)
     expect(drafts).toHaveLength(1)
     expect(drafts[0]).not.toHaveProperty('id')

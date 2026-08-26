@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { SectionRef } from './foundation-section-index'
 import type { AuditIssue, IssueRegistryContext } from './foundation-issue-registry'
+import type { FoundationDocumentPath } from './types'
 import { buildFoundationRevisionBatches } from './foundation-revision-batches'
 
 const section = (
@@ -18,10 +19,10 @@ const section = (
 
 const issue = (
   id: string,
-  fixDocument: string,
-  fixSectionId: string,
+  remediationDocument: string,
+  remediationSectionId: string,
 ): AuditIssue => {
-  const source = section(fixDocument, fixSectionId)
+  const source = section(remediationDocument, remediationSectionId)
   return {
     id,
     severity: 'HIGH',
@@ -29,8 +30,7 @@ const issue = (
     source,
     expected: 'expected',
     actual: 'actual',
-    fixDocument: fixDocument as AuditIssue['fixDocument'],
-    fixSectionId,
+    remediation: { kind: 'patch', documentPath: remediationDocument as FoundationDocumentPath, sectionIds: [remediationSectionId] },
   }
 }
 

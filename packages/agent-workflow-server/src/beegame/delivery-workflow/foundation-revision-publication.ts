@@ -56,6 +56,11 @@ export type FoundationRevisionPrepared = {
   authorityDigest: string
 }
 
+export type FoundationPublicationSemanticRecheckResult = FoundationSemanticRecheckResult
+
+export type FoundationRevisionDeclaration =
+  | { status: 'APPLIED'; changedSectionIds: string[] }
+
 export type FoundationRevisionPublicationResult = {
   status: 'committed'
   baseRevision: string
@@ -105,9 +110,10 @@ export type FoundationRevisionPublicationInput = {
   round: FoundationRevisionRound
   batches: readonly RevisionBatch[]
   receipts: readonly RevisionTaskReceipt[]
+  revisionDeclarations: readonly FoundationRevisionDeclaration[]
   patchOperations: readonly PatchOperation[]
   patchValidations: readonly PatchValidation[]
-  semanticRecheckResults: readonly FoundationSemanticRecheckResult[]
+  semanticRecheckResults: readonly FoundationPublicationSemanticRecheckResult[]
   resultingIssues: readonly AuditIssue[]
   onPathPublished?: (documentPath: FoundationDocumentPath) => Promise<void> | void
 }
@@ -193,6 +199,12 @@ function frozenResultingIssues(value: readonly AuditIssue[]): readonly AuditIssu
 
 function sameSet(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && new Set(left).size === left.length && new Set(right).size === right.length && left.every(item => right.includes(item))
+}
+
+function sameIssueCoverage(left: readonly string[], right: readonly string[]): boolean {
+  const leftSet = new Set(left)
+  const rightSet = new Set(right)
+  return leftSet.size === rightSet.size && [...leftSet].every(item => rightSet.has(item))
 }
 
 function resolveProjectPath(workspacePath: string, projectPath: string): string {
@@ -337,7 +349,7 @@ async function validateDocumentBytes(input: { workspacePath: string; revision: s
     if (operation.kind !== expectedKind) throw new Error('PatchOperation kind does not match canonical Markdown')
   }
   if (seenSections.size !== changed.size || [...changed].some(sectionId => !seenSections.has(sectionId))) throw new Error('PatchOperation coverage does not match changed sections')
-  if (!sameSet(operationIssueIds, input.receipt.issueIds)) throw new Error('PatchOperation issue coverage does not match receipt authority')
+  if (!sameIssueCoverage(operationIssueIds, input.receipt.issueIds)) throw new Error('PatchOperation issue coverage does not match receipt authority')
 }
 
 function validateValidation(value: unknown): PatchValidation {
@@ -356,14 +368,42 @@ function validateValidation(value: unknown): PatchValidation {
   return value as unknown as PatchValidation
 }
 
-function validateSemanticResult(value: unknown): FoundationSemanticRecheckResult {
+function validateSemanticResult(value: unknown): FoundationPublicationSemanticRecheckResult {
   assertObject(value, 'semantic recheck result')
-  const expected = ['issueId', 'packetDigest', 'reasonCode', 'status'].filter(key => key === 'reasonCode' ? value.reasonCode !== undefined : true)
+  const expected = ['issueId', 'packetDigest', 'status', 'taskId', ...(value.status === 'FAIL' ? ['diagnostic'] : [])]
   assertExactKeys(value, expected, 'semantic recheck result')
-  if (typeof value.issueId !== 'string' || !value.issueId) throw new Error('semantic recheck issueId is invalid')
+  if (typeof value.taskId !== 'string' || !TASK.test(value.taskId) || typeof value.issueId !== 'string' || !value.issueId) throw new Error('semantic recheck identity is invalid')
   assertDigest(value.packetDigest, 'semantic recheck packetDigest')
   if (value.status !== 'PASS' && value.status !== 'FAIL') throw new Error('semantic recheck status is invalid')
-  return value as unknown as FoundationSemanticRecheckResult
+  if (value.status === 'FAIL') assertObject(value.diagnostic, 'semantic recheck diagnostic')
+  return value as unknown as FoundationPublicationSemanticRecheckResult
+}
+
+function validateRevisionDeclaration(value: unknown): FoundationRevisionDeclaration {
+  assertObject(value, 'revision declaration')
+  if (value.status === 'APPLIED') {
+    assertExactKeys(value, ['changedSectionIds', 'status'], 'revision declaration')
+    return { status: 'APPLIED', changedSectionIds: strings(value.changedSectionIds, 'revision declaration changedSectionIds') }
+  }
+  throw new Error('revision declaration status is invalid')
+}
+
+export function assertFoundationRevisionPublishableEvidence(
+  input: Pick<FoundationRevisionPublicationInput, 'revisionDeclarations'>,
+  validations: readonly PatchValidation[],
+  semanticResults: readonly FoundationPublicationSemanticRecheckResult[],
+): void {
+  if (!Array.isArray(input.revisionDeclarations) || input.revisionDeclarations.length === 0)
+    throw new Error('foundation revision cannot publish: active document declarations are missing')
+  const declarations = input.revisionDeclarations.map(validateRevisionDeclaration)
+  const failedValidation = validations.find(validation => validation.status !== 'PASS')
+  if (failedValidation) {
+    throw new Error(`foundation revision cannot publish: PatchValidation ${failedValidation.status} for ${failedValidation.issueId}`)
+  }
+  const nonPassSemantic = semanticResults.find(result => result.status !== 'PASS')
+  if (nonPassSemantic) {
+    throw new Error(`foundation revision cannot publish: semantic recheck ${nonPassSemantic.status} for ${nonPassSemantic.issueId}`)
+  }
 }
 
 function digestList(value: readonly unknown[]): string { return sha256(stable(value)) }
@@ -373,9 +413,13 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
   if (!Array.isArray(input.batches) || input.batches.length === 0 || !Array.isArray(input.receipts) || input.receipts.length === 0) throw new Error('foundation revision publication requires revision batches and receipts')
   const batches = input.batches.map(validateBatch)
   const receipts = input.receipts.map(value => validateReceipt(value, input.revision))
+  if (!Array.isArray(input.revisionDeclarations)) throw new Error('foundation revision publication requires active document declarations')
+  const declarations = input.revisionDeclarations.map(validateRevisionDeclaration)
   const operations = input.patchOperations.map(validateOperation)
   const validations = input.patchValidations.map(validateValidation)
   const semanticResults = input.semanticRecheckResults.map(validateSemanticResult)
+  assertFoundationRevisionPublishableEvidence({ revisionDeclarations: declarations }, validations, semanticResults)
+  if (declarations.length !== batches.length || declarations.length !== receipts.length) throw new Error('revision declaration coverage does not match active batches and receipts')
   const resultingIssues = validateResultingIssues(input.resultingIssues)
   const batchByPath = new Map<FoundationDocumentPath, RevisionBatch>()
   for (const batch of batches) {
@@ -391,14 +435,14 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
     receiptByPath.set(receipt.documentPath, receipt)
   }
   if (receiptByPath.size !== batchByPath.size) throw new Error('revision batch coverage is incomplete')
+  for (const [index, declaration] of declarations.entries()) {
+    const receipt = receipts[index]
+    if (!receipt || declaration.status !== 'APPLIED' || !sameSet(declaration.changedSectionIds, receipt.changedSectionIds)) throw new Error('revision declaration changedSectionIds disagree with active receipt')
+  }
   const allIssueIds = batches.flatMap(batch => batch.issueIds)
   if (new Set(allIssueIds).size !== allIssueIds.length) throw new Error('revision issue coverage contains duplicate IDs')
   const resolvedIssueIds = new Set(allIssueIds)
   const resultingIssueIds = new Set(resultingIssues.map(issue => issue.id))
-  const failedIssueIds = new Set([
-    ...validations.filter(validation => validation.status === 'FAIL').map(validation => validation.issueId),
-    ...semanticResults.filter(result => result.status === 'FAIL').map(result => result.issueId),
-  ])
   const groupedOperations = new Map<FoundationDocumentPath, PatchOperation[]>()
   for (const operation of operations) groupedOperations.set(operation.documentPath, [...(groupedOperations.get(operation.documentPath) ?? []), operation])
   const groupedValidations = new Map<FoundationDocumentPath, PatchValidation[]>()
@@ -414,7 +458,7 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
     const documentOperations = groupedOperations.get(batch.documentPath) ?? []
     if (documentOperations.length === 0 || documentOperations.some(operation => !batch.sectionIds.includes(operation.sectionId))) throw new Error('revision has extra or unassigned PatchOperations')
     const operationIssueIds = documentOperations.flatMap(operation => operation.issueIds)
-    if (!sameSet(operationIssueIds, receipt.issueIds)) throw new Error('revision PatchOperation issue coverage is incomplete')
+    if (!sameIssueCoverage(operationIssueIds, receipt.issueIds)) throw new Error('revision PatchOperation issue coverage is incomplete')
     await validateDocumentBytes({ workspacePath: input.workspacePath, revision: input.revision, receipt, operations: documentOperations, initial: true })
     const operationDigest = foundationPatchOperationsDigest(documentOperations)
     const documentValidations = groupedValidations.get(batch.documentPath) ?? []
@@ -433,11 +477,7 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
     documents.push({ documentPath: batch.documentPath, round: receipt.round, taskId: receipt.taskId, issueIds: [...receipt.issueIds], changedSectionIds: [...receipt.changedSectionIds], baseDocumentDigest: receipt.baseDocumentDigest, stagedDocumentDigest: receipt.stagedDocumentDigest, stagedPath: receipt.stagedPath, terminalDigest: receipt.terminalDigest, receiptDigest: receiptDigest(receipt), operationDigest, validationDigest, semanticResultDigest, resultDigest, patchOperations: [...documentOperations].sort(compareOperations) })
   }
   for (const issueId of allIssueIds) if (!accounted.has(issueId)) throw new Error(`revision issue ${issueId} is missing validated result coverage`)
-  for (const issueId of resolvedIssueIds) {
-    const resulting = resultingIssueIds.has(issueId)
-    const failed = failedIssueIds.has(issueId)
-    if (resulting !== failed) throw new Error(failed ? `FAIL PatchValidation or semantic result is missing resulting issue: ${issueId}` : `resulting AuditIssue overlaps a PASS revision issue: ${issueId}`)
-  }
+  for (const issueId of resolvedIssueIds) if (resultingIssueIds.has(issueId)) throw new Error(`resulting AuditIssue overlaps a PASS revision issue: ${issueId}`)
   if (operations.some(operation => !receiptByPath.has(operation.documentPath))) throw new Error('revision has an unassigned document PatchOperation')
   documents.sort((a, b) => a.documentPath.localeCompare(b.documentPath))
   assertDigest(input.confirmedBriefDigest, 'confirmedBriefDigest')
@@ -464,7 +504,7 @@ function validatePrepared(value: unknown): FoundationRevisionPrepared {
     if (!Array.isArray(raw.patchOperations)) throw new Error('PREPARED patchOperations must be an array')
     const patchOperations = raw.patchOperations.map(validateOperation)
     if (foundationPatchOperationsDigest(patchOperations) !== raw.operationDigest) throw new Error('PREPARED operation digest mismatch')
-    if (!sameSet(patchOperations.flatMap(operation => operation.issueIds), receipt.issueIds)) throw new Error('PREPARED issue coverage is incomplete')
+    if (!sameIssueCoverage(patchOperations.flatMap(operation => operation.issueIds), receipt.issueIds)) throw new Error('PREPARED issue coverage is incomplete')
     if (raw.resultDigest !== sha256(stable({ validationDigest: raw.validationDigest, semanticResultDigest: raw.semanticResultDigest }))) throw new Error('PREPARED result digest mismatch')
     return { documentPath: receipt.documentPath, round: receipt.round, taskId: receipt.taskId, issueIds: receipt.issueIds, changedSectionIds: receipt.changedSectionIds, baseDocumentDigest: receipt.baseDocumentDigest, stagedDocumentDigest: receipt.stagedDocumentDigest, stagedPath: receipt.stagedPath, terminalDigest: receipt.terminalDigest, receiptDigest: raw.receiptDigest as string, operationDigest: raw.operationDigest as string, validationDigest: raw.validationDigest as string, semanticResultDigest: raw.semanticResultDigest as string, resultDigest: raw.resultDigest as string, patchOperations }
   })
@@ -479,7 +519,7 @@ async function readPrepared(workspacePath: string, revision: string): Promise<Fo
 }
 
 function assertReplayMatches(input: FoundationRevisionPublicationInput, prepared: FoundationRevisionPrepared): void {
-  if (input.round !== prepared.round || input.confirmedBriefDigest !== prepared.confirmedBriefDigest || input.batches.length !== prepared.documents.length || input.receipts.length !== prepared.documents.length) throw new Error('publication input does not match PREPARED authority')
+  if (input.round !== prepared.round || input.confirmedBriefDigest !== prepared.confirmedBriefDigest || input.batches.length !== prepared.documents.length || input.receipts.length !== prepared.documents.length || !Array.isArray(input.revisionDeclarations) || input.revisionDeclarations.length !== prepared.documents.length) throw new Error('publication input does not match PREPARED authority')
   const docs = new Map(prepared.documents.map(document => [document.documentPath, document]))
   const batches = input.batches.map(validateBatch)
   for (const batch of batches) {
@@ -491,11 +531,20 @@ function assertReplayMatches(input: FoundationRevisionPublicationInput, prepared
     const preparedDocument = docs.get(receipt.documentPath)
     if (!preparedDocument || receiptDigest(receipt) !== preparedDocument.receiptDigest || receipt.taskId !== preparedDocument.taskId || receipt.terminalDigest !== preparedDocument.terminalDigest) throw new Error('publication receipt does not match PREPARED authority')
   }
+  const declarations = input.revisionDeclarations.map(validateRevisionDeclaration)
+  assertFoundationRevisionPublishableEvidence({ revisionDeclarations: declarations }, input.patchValidations, input.semanticRecheckResults)
+  for (const [index, declaration] of declarations.entries()) {
+    const receipt = receipts[index]
+    if (declaration.status !== 'APPLIED' || !receipt || !sameSet(declaration.changedSectionIds, receipt.changedSectionIds)) throw new Error('publication declaration changedSectionIds do not match receipt authority')
+    const preparedDocument = receipt ? docs.get(receipt.documentPath) : undefined
+    if (!preparedDocument || receiptDigest(receipt) !== preparedDocument.receiptDigest) throw new Error('publication declaration receipt does not match PREPARED authority')
+  }
   const operations = input.patchOperations.map(validateOperation).sort(compareOperations)
   const preparedOperations = prepared.documents.flatMap(document => document.patchOperations).sort(compareOperations)
   if (stable(operations) !== stable(preparedOperations)) throw new Error('publication PatchOperations do not match PREPARED authority')
   const validations = input.patchValidations.map(validateValidation)
   const semanticResults = input.semanticRecheckResults.map(validateSemanticResult)
+  assertFoundationRevisionPublishableEvidence({ revisionDeclarations: declarations }, validations, semanticResults)
   const resultingIssues = validateResultingIssues(input.resultingIssues)
   if (digestList(resultingIssues) !== prepared.resultingIssueRegistryDigest || stable(resultingIssues) !== stable(prepared.resultingIssues)) throw new Error('publication resulting issue authority does not match PREPARED')
   for (const document of prepared.documents) {

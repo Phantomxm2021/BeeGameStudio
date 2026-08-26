@@ -82,7 +82,7 @@ test('builds a revision packet without duplicate issue evidence', async () => {
     endLine: 11,
     digest: 'b'.repeat(64),
   }
-  const issue = {
+  const issue: AuditIssue = {
     id: 'AUD-1',
     severity: 'HIGH' as const,
     type: 'semantic' as const,
@@ -90,8 +90,7 @@ test('builds a revision packet without duplicate issue evidence', async () => {
     target,
     expected: 'expected',
     actual: 'actual',
-    fixDocument: documentPath,
-    fixSectionId: 'rules_systems',
+    remediation: { kind: 'patch', documentPath, sectionIds: ['rules_systems'] },
   }
   const authority = await buildFoundationRevisionAuthority({
     workspacePath: workspace,
@@ -109,6 +108,15 @@ test('builds a revision packet without duplicate issue evidence', async () => {
 
   expect(authority.packet.sections).toHaveLength(3)
   expect(authority.packet.normalizedFacts).toHaveLength(1)
+  expect(authority.packet.factConstraints).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      key: 'game.boss.count',
+      owner: { documentPath, sectionId: 'rules_systems' },
+      valueType: 'number',
+      extractionInstruction: expect.any(String),
+      sourceOfTruthDirection: expect.any(String),
+    }),
+  ]))
   const packetIssues = authority.packet.issues as Array<Record<string, unknown>>
   expect(packetIssues).toEqual([expect.objectContaining({ id: 'AUD-1', actual: 'actual' })])
   expect(packetIssues[0]).not.toHaveProperty('problem')
@@ -123,7 +131,7 @@ test('accepts a legal complex revision packet above the old 24KiB business cap',
   const sections = buildFoundationSectionIndex({ documents: { [documentPath]: await readFile(canonicalPath, 'utf8') } })
   const source = sections.find(section => section.sectionId === 'vision')!
   const target = sections.find(section => section.sectionId === 'progression')!
-  const issue = {
+  const issue: AuditIssue = {
     id: 'AUD-large-revision-packet',
     severity: 'HIGH' as const,
     type: 'semantic' as const,
@@ -131,8 +139,7 @@ test('accepts a legal complex revision packet above the old 24KiB business cap',
     target,
     expected: 'expected',
     actual: 'detailed admitted issue context '.repeat(1500),
-    fixDocument: documentPath,
-    fixSectionId: 'rules_systems',
+    remediation: { kind: 'patch', documentPath, sectionIds: ['rules_systems'] },
   }
 
   const authority = await buildFoundationRevisionAuthority({
@@ -189,7 +196,7 @@ test('persists semantic result artifacts immutably and binds issue, packet, resu
   expect(typeof api.loadFoundationRevisionSemanticResult).toBe('function')
   if (!api.writeFoundationRevisionSemanticResult || !api.loadFoundationRevisionSemanticResult) return
   const packetDigest = 'a'.repeat(64)
-  const result = { issueId: 'AUD-semantic-1', packetDigest, status: 'PASS' }
+  const result = { taskId: 'revision-recheck-1', issueId: 'AUD-semantic-1', packetDigest, status: 'PASS' as const }
   const resultDigest = digestFoundationSemanticRecheckResult(result as never)
   const input = { workspacePath: workspace, revision, round: 1 as const, taskId: 'revision-recheck-1', issueId: result.issueId, packetDigest, result, resultDigest }
   const resultPath = await api.writeFoundationRevisionSemanticResult(input)
@@ -207,7 +214,26 @@ test('persists semantic result artifacts immutably and binds issue, packet, resu
   const originalBytes = await readFile(join(workspace, resultPath))
   await writeFile(join(workspace, resultPath), `${originalBytes}tampered`)
   await expect(api.loadFoundationRevisionSemanticResult({ ...input, resultPath })).rejects.toThrow(/digest|stale|tamper/i)
-  await expect(api.writeFoundationRevisionSemanticResult({ ...input, result: { ...result, status: 'FAIL' }, resultDigest: 'b'.repeat(64) })).rejects.toThrow(/different|conflict|digest/i)
+  await expect(api.writeFoundationRevisionSemanticResult({ ...input, result: { ...result, status: 'FAIL' }, resultDigest: 'b'.repeat(64) })).rejects.toThrow(/shape|different|conflict|digest/i)
+})
+
+test('persists service-admitted structured failure diagnostics with dependency digests', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const section = { documentPath, sectionId: 'vision', heading: 'Vision', startLine: 3, endLine: 5, digest: 'a'.repeat(64) }
+  const packetDigest = 'a'.repeat(64)
+  const result = {
+    taskId: 'revision-recheck-1', issueId: 'AUD-semantic-1', packetDigest, status: 'FAIL' as const,
+    diagnostic: {
+      unmetExpected: 'coherent', observedActual: 'contradictory',
+      evidence: [section], dependencySections: [section],
+      failureReasonCode: 'actual_persists' as const, scopeAssessment: 'repairable_in_scope' as const,
+    },
+  }
+  const resultDigest = digestFoundationSemanticRecheckResult(result as never)
+  const input = { workspacePath: workspace, revision, round: 1 as const, taskId: result.taskId, issueId: result.issueId, packetDigest, result, resultDigest }
+  const resultPath = await revisionStage.writeFoundationRevisionSemanticResult(input as never)
+  await expect(revisionStage.loadFoundationRevisionSemanticResult({ ...input, resultPath })).resolves.toEqual(result)
+  await expect(revisionStage.writeFoundationRevisionSemanticResult({ ...input, result: { ...result, diagnostic: { ...result.diagnostic, unmetExpected: 'tampered' } }, resultDigest } as never)).rejects.toThrow(/digest|different|conflict/i)
 })
 
 function canonicalDocument(): string {
@@ -447,23 +473,22 @@ test('rejects extra keys, duplicate IDs, marker destruction and whole-document d
   ).rejects.toThrow(/section|marker|contract/i)
 })
 
-function admittedIssue(id: string, fixSectionId: string): AuditIssue {
+function admittedIssue(id: string, remediationSectionId: string): AuditIssue {
   return {
     id,
     severity: 'HIGH',
     type: 'rule',
     source: {
       documentPath,
-      sectionId: fixSectionId,
-      heading: fixSectionId,
+      sectionId: remediationSectionId,
+      heading: remediationSectionId,
       startLine: 1,
       endLine: 1,
       digest: 'a'.repeat(64),
     },
     expected: 'expected',
     actual: 'actual',
-    fixDocument: documentPath,
-    fixSectionId,
+    remediation: { kind: 'patch', documentPath, sectionIds: [remediationSectionId] },
   }
 }
 
@@ -538,6 +563,46 @@ test('binds distinct section operations to admitted fix targets regardless issue
       issueIds: operation.issueIds,
     })),
   )
+})
+
+test('treats one admitted issue bound to multiple changed sections as exact issue coverage', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  const staged = (await readFile(join(workspace, stage.stagedPath), 'utf8'))
+    .replace('original vision', 'revised vision')
+    .replace('original core_loop', 'revised core loop')
+  await writeFile(join(workspace, stage.stagedPath), staged)
+  const issue = admittedIssue('AUD-MULTI', 'vision')
+  issue.remediation = {
+    kind: 'patch',
+    documentPath,
+    sectionIds: ['vision', 'core_loop'],
+  }
+  const operations = await deriveFoundationPatchOperations({
+    workspacePath: workspace,
+    revision,
+    batch: {
+      documentPath,
+      sectionIds: ['vision', 'core_loop'],
+      issueIds: [issue.id],
+    },
+    issues: [issue],
+    receipt: receiptFor({
+      issueIds: [issue.id],
+      changedSectionIds: ['vision', 'core_loop'],
+      baseDocumentDigest: stage.baseDocumentDigest,
+      stagedDocumentDigest: stageDigest(staged),
+      stagedPath: stage.stagedPath,
+    }),
+  })
+  expect(operations).toEqual([
+    expect.objectContaining({ sectionId: 'vision', issueIds: [issue.id] }),
+    expect.objectContaining({ sectionId: 'core_loop', issueIds: [issue.id] }),
+  ])
 })
 
 test('keeps issues targeting one section together and rejects changed sections without authority', async () => {

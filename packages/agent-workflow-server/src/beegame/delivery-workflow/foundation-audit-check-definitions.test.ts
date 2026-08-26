@@ -5,6 +5,7 @@ import {
 } from './foundation-audit-check-definitions'
 import type { FoundationFact } from './foundation-fact-store'
 import type { SectionRef } from './foundation-section-index'
+import { GAME_DOCUMENT_CONTRACTS } from './game-document-contracts'
 
 const ref = (
   documentPath: string,
@@ -18,6 +19,21 @@ const ref = (
   endLine: line + 1,
   digest: 'a'.repeat(64),
 })
+const canonicalIndex = (sections: readonly SectionRef[]): SectionRef[] => {
+  const required = Object.values(GAME_DOCUMENT_CONTRACTS).flatMap(contract => [
+    ...contract.sections.map(section => [contract.path, section.sectionId] as const),
+    ...contract.upstreamSections.flatMap(projection => projection.sectionIds.map(sectionId => [projection.path, sectionId] as const)),
+  ])
+  const seen = new Set(sections.map(section => `${section.documentPath}#${section.sectionId}`))
+  const extras: SectionRef[] = []
+  for (const [path, sectionId] of required) {
+    const key = `${path}#${sectionId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    extras.push(ref(path, sectionId))
+  }
+  return [...sections, ...extras]
+}
 
 const fact = (
   key: string,
@@ -38,9 +54,9 @@ const fact = (
 
 describe('deterministic foundation audit compiler', () => {
   test('reports a missing required fact at its declared exact section', () => {
-    const source = ref('docs/custom.md', 'settings')
+    const source = ref('docs/GDD.md', 'settings')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [],
       schema: {
         requiredFacts: [
@@ -51,15 +67,14 @@ describe('deterministic foundation audit compiler', () => {
     expect(issues).toHaveLength(1)
     expect(issues[0]).toMatchObject({
       type: 'schema',
-      fixDocument: source.documentPath,
-      fixSectionId: source.sectionId,
+      remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
     })
   })
 
   test('reports a wrong fact type and accepts no worker or dispatch port', () => {
-    const source = ref('docs/custom.md', 'settings')
+    const source = ref('docs/GDD.md', 'settings')
     const issues = runDeterministicFoundationAudit({
-      sectionIndex: [source],
+      sectionIndex: canonicalIndex([source]),
       factStore: [fact('custom.settings', 42, source)],
       schema: {
         factTypes: [{ key: 'custom.settings', source, expectedType: 'string' }],
@@ -73,10 +88,10 @@ describe('deterministic foundation audit compiler', () => {
   })
 
   test('returns zero issues for a validated passing input', () => {
-    const source = ref('docs/custom.md', 'settings')
+    const source = ref('docs/GDD.md', 'settings')
     expect(
       runDeterministicFoundationAudit({
-        sectionIndex: [source],
+        sectionIndex: canonicalIndex([source]),
         factStore: [fact('custom.settings', 'ok', source)],
       }),
     ).toEqual([])
@@ -88,20 +103,20 @@ describe('deterministic foundation audit compiler', () => {
         factStore: [],
       } as unknown as DeterministicFoundationAuditInput),
     ).toThrow('section index')
-    const malformed = { ...ref('docs/custom.md', 'settings'), startLine: 0 }
+    const malformed = { ...ref('docs/GDD.md', 'settings'), startLine: 0 }
     expect(() =>
       runDeterministicFoundationAudit({
-        sectionIndex: [malformed],
+        sectionIndex: canonicalIndex([malformed]),
         factStore: [],
       }),
     ).toThrow('SectionRef')
   })
 
   test('rejects duplicate facts and a fact source that is not the indexed SectionRef', () => {
-    const source = ref('docs/custom.md', 'settings')
+    const source = ref('docs/GDD.md', 'settings')
     expect(() =>
       runDeterministicFoundationAudit({
-        sectionIndex: [source],
+        sectionIndex: canonicalIndex([source]),
         factStore: [
           fact('custom.settings', 'first', source),
           fact('custom.settings', 'second', source),
@@ -110,7 +125,7 @@ describe('deterministic foundation audit compiler', () => {
     ).toThrow('duplicate fact key')
     expect(() =>
       runDeterministicFoundationAudit({
-        sectionIndex: [source],
+        sectionIndex: canonicalIndex([source]),
         factStore: [
           fact('custom.settings', 'wrong', { ...source, heading: 'Other' }),
         ],

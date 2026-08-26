@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  activeFoundationRevisionBundle,
+  activeFoundationRevisionTasks,
   foundationAuditStateSchema,
+  foundationRuntimeTasks,
   parseFoundationAuditState,
 } from './foundation-audit-state'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
@@ -8,8 +11,8 @@ import type { FoundationFactTask } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
-    schemaVersion: 8 as const,
-    schemaFingerprint: 'foundation-audit-state-v8' as const,
+    schemaVersion: 9 as const,
+    schemaFingerprint: 'foundation-audit-state-v9' as const,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(
@@ -45,8 +48,8 @@ describe('foundationAuditState schema', () => {
   test('rejects the prior audit-state schema without a compatibility reader', () => {
     expect(() => parseFoundationAuditState({
       ...valid,
-      schemaVersion: 4,
-      schemaFingerprint: 'foundation-audit-state-v4',
+      schemaVersion: 8,
+      schemaFingerprint: 'foundation-audit-state-v8',
     })).toThrow(/schemaVersion|schemaFingerprint/)
   })
 
@@ -107,9 +110,12 @@ describe('foundationAuditState schema', () => {
       },
       roundBefore: { documentRevision: 'revision-1', issueRegistryDigest: digest, issueAuthority: { kind: 'publication' as const, baseRevision: 'revision-1', authorityDigest: digest, issueRegistryDigest: digest } },
       round: 1 as const,
+      activeBundleId: 'bundle-1',
+      revisionBundles: [{ bundleId: 'bundle-1', status: 'active' as const, round: 1, baseDocumentRevision: 'revision-1', baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), remediationDigest: digest, taskIds: ['revision-1.impacted-facts.1.0'], frozenTaskIds: [] }],
       issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
       tasks: [{
         taskId: 'revision-1.impacted-facts.1.0', kind: 'impacted-facts' as const, revision: 'revision-1', round: 1 as const,
+        bundleId: 'bundle-1',
         packetPath: '.beegame/audit/foundation/revision-1/round-1/tasks/revision-1.impacted-facts.1.0/packet.json', packetDigest: digest,
         modelTier: 'fast' as const, status: 'completed' as const, attempt: 1, terminalDigest: digest,
         receiptPath: '.beegame/audit/foundation/revision-1/round-1/tasks/revision-1.impacted-facts.1.0/receipt.json', receiptDigest: digest,
@@ -149,5 +155,36 @@ describe('foundationAuditState schema', () => {
     for (const status of ['derived_committed', 'deterministic_ready'] as const) {
       expect(parseFoundationAuditState({ ...valid, status, phaseStartedAt: '2026-08-24T00:00:00.000Z', derived, ...(status === 'derived_committed' ? {} : { deterministic }) })).toMatchObject({ status, derived })
     }
+  })
+
+  test('selects exactly one active bundle and excludes superseded evidence from runtime tasks', () => {
+    const state = {
+      status: 'revising' as const,
+      activeBundleId: 'bundle-new',
+      revisionBundles: [
+        { bundleId: 'bundle-old', status: 'superseded' as const, round: 1, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'a'.repeat(64), taskIds: ['old-task'], frozenTaskIds: [] },
+        { bundleId: 'bundle-new', status: 'active' as const, round: 2, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'b'.repeat(64), taskIds: ['new-task'], frozenTaskIds: [] },
+      ],
+      tasks: [
+        { taskId: 'old-task', kind: 'impacted-facts' as const, revision: 'revision-1', round: 1, bundleId: 'bundle-old', packetPath: 'old', packetDigest: 'c'.repeat(64), modelTier: 'fast' as const, status: 'needs_action' as const, attempt: 1 },
+        { taskId: 'new-task', kind: 'impacted-facts' as const, revision: 'revision-1', round: 2, bundleId: 'bundle-new', packetPath: 'new', packetDigest: 'd'.repeat(64), modelTier: 'fast' as const, status: 'pending' as const, attempt: 0 },
+      ],
+    } as any
+
+    expect(activeFoundationRevisionBundle(state).bundleId).toBe('bundle-new')
+    expect(activeFoundationRevisionTasks(state).map(task => task.taskId)).toEqual(['new-task'])
+    expect(foundationRuntimeTasks(state).map(task => task.taskId)).toEqual(['new-task'])
+    expect(() => activeFoundationRevisionBundle({ activeBundleId: 'missing', revisionBundles: state.revisionBundles } as never)).toThrow(/ambiguous|missing|stale/i)
+    expect(() => activeFoundationRevisionTasks({ ...state, tasks: [state.tasks[1], state.tasks[1]] })).toThrow(/duplicated/i)
+  })
+
+  test('rejects duplicate durable task and bundle identities', () => {
+    expect(() => parseFoundationAuditState({
+      ...valid,
+      revisionBundles: [
+        { bundleId: 'bundle-duplicate', status: 'superseded' as const, round: 1, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'a'.repeat(64), taskIds: ['task-1'], frozenTaskIds: [] },
+        { bundleId: 'bundle-duplicate', status: 'superseded' as const, round: 1, baseDocumentRevision: 'revision-1', baseDocumentDigests: [], remediationDigest: 'b'.repeat(64), taskIds: ['task-2'], frozenTaskIds: [] },
+      ],
+    })).toThrow(/bundle IDs must be unique/i)
   })
 })

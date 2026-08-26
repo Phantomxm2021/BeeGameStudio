@@ -31,6 +31,7 @@ import {
   projectExactResumeRun,
   proveExactRawActiveUnitId,
 } from './recovery-projector'
+import { foundationRuntimeTasks } from './foundation-audit-state'
 import type { FoundationAuditTask } from './foundation-audit-state'
 import { reconcileAuthoredDocumentReceipt } from '../authored-document-receipt'
 import {
@@ -111,6 +112,17 @@ function sameStrings(
   return (
     left.length === right.length &&
     left.every((value, index) => value === right[index])
+  )
+}
+
+function hasStaleFoundationWorkers(run: DeliveryRun): boolean {
+  return Boolean(
+      run.status !== 'running' &&
+      run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(
+          task =>
+          task.status === 'running' &&
+          task.dispatch?.status === 'running',
+      ),
   )
 }
 
@@ -596,11 +608,27 @@ export async function recoverAndResumeRun(input: {
       const source = await input.store.inspectWorkflowSnapshot()
       assertRecoveryAuthority({ ...input, inspection: source })
       if (source.currentRun) {
+        let currentRun = source.currentRun
+        if (hasStaleFoundationWorkers(currentRun)) {
+          try {
+            await input.stopWorkspaceWorkers(
+              'recovering stale foundation workers from a terminal delivery run',
+            )
+          } catch (error) {
+            throw new WorkflowRecoveryTransactionError(
+              'stale workflow workers could not be stopped',
+              'recovery_worker_stop_failed',
+              { cause: error },
+            )
+          }
+          currentRun =
+            (await input.store.reconcile(async () => false)) ?? currentRun
+        }
         return {
-          run: source.currentRun,
+          run: currentRun,
           resume:
-            source.currentRun.status !== 'completed' &&
-            source.currentRun.activeDispatch?.status !== 'running',
+            currentRun.status !== 'completed' &&
+            currentRun.activeDispatch?.status !== 'running',
         }
       }
       try {
@@ -845,9 +873,9 @@ async function acquireAndLoad(input: {
       ...(current.activeDispatch?.status === 'running'
         ? [current.activeDispatch]
         : []),
-      ...(current.foundationAuditState?.tasks
+      ...(current.foundationAuditState ? foundationRuntimeTasks(current.foundationAuditState) : [])
         .filter(task => task.status === 'running' && task.dispatch)
-        .map(task => task.dispatch!) ?? []),
+        .map(task => task.dispatch!),
     ]
     if (!runningDispatches.length) return false
     if (!input.sessionIsOpen) return true
@@ -875,7 +903,7 @@ export async function resumeRun(input: {
 }): Promise<DeliveryRun> {
   const acquired = await acquireAndLoad(input)
   try {
-    const foundationFactRunning = acquired.run.foundationAuditState?.tasks.some(
+    const foundationFactRunning = acquired.run.foundationAuditState !== undefined && foundationRuntimeTasks(acquired.run.foundationAuditState).some(
       task => task.status === 'running' && task.dispatch?.status === 'running',
     )
     if (
@@ -1016,9 +1044,12 @@ export async function stopRun(input: {
   for (const document of acquired.run.foundationDraftState.documents ?? [])
     if (document.dispatch?.status === 'running')
       dispatchIds.add(document.dispatch.dispatchId)
-  for (const task of acquired.run.foundationAuditState?.tasks ?? [])
+  for (const task of acquired.run.foundationAuditState ? foundationRuntimeTasks(acquired.run.foundationAuditState) : [])
     if (task.dispatch?.status === 'running')
       dispatchIds.add(task.dispatch.dispatchId)
+  const activeTaskIds = acquired.run.foundationAuditState
+    ? new Set(foundationRuntimeTasks(acquired.run.foundationAuditState).map(task => task.taskId))
+    : new Set<string>()
   try {
     const stopped = transitionDeliveryRun(acquired.run, {
       type: 'stop',
@@ -1058,7 +1089,7 @@ export async function stopRun(input: {
             foundationAuditState: {
               ...stopped.foundationAuditState,
               tasks: stopped.foundationAuditState.tasks.map(task =>
-                task.dispatch?.status === 'running'
+                activeTaskIds.has(task.taskId) && task.dispatch?.status === 'running'
                   ? (() => {
                       const terminal = interruptedDispatch(task.dispatch!)
                       return projectTaskTerminalEvidence(

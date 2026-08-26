@@ -1,5 +1,6 @@
 import {
   DELIVERY_PROGRESS_STAGES,
+  isActiveFoundationRepairState,
   projectDeliveryProgress,
   type DeliveryProgressStage,
   type DeliveryProgressSubstage,
@@ -341,6 +342,13 @@ function documentTasks(
   run: DeliveryRun,
   workspacePath: string,
 ): DocumentDisplayTask[] {
+  const documentStep =
+    run.documentStep ??
+    (run.phase === 'DOCUMENT_REVIEW' &&
+    (isActiveFoundationRepairState(run.foundationAuditState) ||
+      run.foundationAuditState?.status === 'audit_ready')
+      ? 'FOUNDATION_REVIEW'
+      : undefined)
   const input: Parameters<typeof projectDocumentDisplayTasks>[0] = {
     workspacePath,
     currentItemId: run.currentItemId,
@@ -349,7 +357,7 @@ function documentTasks(
       path: document.path,
       status: document.status,
     })),
-    documentStep: run.documentStep as DocumentWorkflowStep | undefined,
+    documentStep: documentStep as DocumentWorkflowStep | undefined,
     workflowStatus: run.status,
     thinking: workflowThinking(run),
     foundationAuditState: run.foundationAuditState,
@@ -498,8 +506,15 @@ export function projectCurrentStageCard(input: {
       ? normalizeDisplayTasks(resourceTasks(run, input.workspacePath))
       : atomicTasks(run)
   const elapsed = elapsedTiming(run, input.timing)
+  const documentStep =
+    run.documentStep ??
+    (run.phase === 'DOCUMENT_REVIEW' &&
+    (isActiveFoundationRepairState(run.foundationAuditState) ||
+      run.foundationAuditState?.status === 'audit_ready')
+      ? 'FOUNDATION_REVIEW'
+      : undefined)
   const message = run.status === 'running'
-    ? projectWorkflowCurrentMessage({ value: run.currentMessage, phase: run.phase, documentStep: run.documentStep })
+    ? projectWorkflowCurrentMessage({ value: run.currentMessage, phase: run.phase, documentStep })
     : ''
   const blockedReason = stringValue(
     run.blockedReason ?? run.activeDispatch?.failureReason,
@@ -517,7 +532,7 @@ export function projectCurrentStageCard(input: {
     status: workflowStatus(run),
     currentPhase: run.phase,
     ...(progress.substage ? { substage: progress.substage } : {}),
-    ...(run.documentStep ? { documentStep: run.documentStep } : {}),
+    ...(documentStep ? { documentStep } : {}),
     thinking: workflowThinking(run),
     ...(run.activeDispatch?.workerType
       ? { worker: run.activeDispatch.workerType }

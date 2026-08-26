@@ -42,7 +42,7 @@ describe('foundation audit artifacts', () => {
     try {
       const digest = 'a'.repeat(64)
       const ledger = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => ({ checkId: check.checkId, packetIdentity: digest, admittedResultDigest: digest }))
-      const issue = { id: 'AUD-AAAAAAAAAAAAAAAAAAAAAAAA', severity: 'HIGH' as const, type: 'semantic' as const, source: { documentPath: 'docs/GDD.md' as const, sectionId: 'vision', heading: 'Vision', startLine: 1, endLine: 1, digest }, expected: 'expected', actual: 'actual', fixDocument: 'docs/GDD.md' as const, fixSectionId: 'vision' }
+      const issue = { id: 'AUD-AAAAAAAAAAAAAAAAAAAAAAAA', severity: 'HIGH' as const, type: 'semantic' as const, source: { documentPath: 'docs/GDD.md' as const, sectionId: 'vision', heading: 'Vision', startLine: 1, endLine: 1, digest }, expected: 'expected', actual: 'actual', remediation: { kind: 'patch' as const, documentPath: 'docs/GDD.md' as const, sectionIds: ['vision'] } }
       const published = await publishFoundationSemanticReview({ workspacePath, revision: 'rev', documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), sectionIndexDigest: digest, factStoreDigest: digest, deterministicReviewDigest: digest, semanticManifest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST, semanticResultDigests: ledger, issues: [issue] })
       const issuePath = join(workspacePath, '.beegame/audit/foundation/rev/review', published.reviewDigest, 'issue-registry.json')
       const markerPath = join(workspacePath, '.beegame/audit/foundation/rev/review', published.reviewDigest, 'COMMITTED.json')
