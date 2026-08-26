@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { parseWorkerTerminalResult, foundationSemanticReviewerTerminalSchema, foundationSemanticFailureDiagnosticInputSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema } from './worker-contracts'
+import Ajv from 'ajv'
+import { parseWorkerTerminalResult, foundationSemanticReviewerTerminalSchema, foundationSemanticFailureDiagnosticInputSchema, foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema } from './worker-contracts'
 
 describe('foundation semantic reviewer terminal contract', () => {
   const base = { workerType: 'foundation-semantic-reviewer' as const, status: 'completed' as const, runId: 'run', dispatchId: 'dispatch', taskId: 'task', revision: 'rev', packetDigest: 'a'.repeat(64) }
@@ -20,9 +21,21 @@ describe('foundation semantic reviewer terminal contract', () => {
         observedActual: 'actual persists',
         evidence: [evidence],
         failureReasonCode: 'actual_persists',
-        scopeAssessment: 'repairable_in_scope',
       },
     })).toMatchObject({ status: 'FAIL' })
+    const validate = new Ajv().compile(foundationSemanticRecheckStructuredOutputJsonSchema)
+    expect(validate({ status: 'FAIL', diagnostic: {
+      observedActual: 'actual persists', evidence: [evidence], failureReasonCode: 'actual_persists',
+    } })).toBe(true)
+    expect(validate({ status: 'FAIL', diagnostic: {
+      observedActual: 'actual persists', evidence: [evidence], failureReasonCode: 'actual_persists', scopeAssessment: 'repairable_in_scope',
+    } })).toBe(false)
+    expect(() => foundationSemanticRecheckWorkerPayloadSchema.parse({
+      status: 'FAIL',
+      diagnostic: {
+        observedActual: 'actual persists', evidence: [evidence], failureReasonCode: 'actual_persists', scopeAssessment: 'repairable_in_scope',
+      },
+    })).toThrow(/unknown|unrecognized/i)
     expect(foundationSemanticReviewerTerminalSchema.parse({
       ...base,
       outcome: 'FAIL',

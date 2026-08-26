@@ -2245,7 +2245,7 @@ export function createDeliveryWorkflowController(input: {
           await finalizeFoundationSemanticReview(run)
           return
         }
-        const available = runtimeTasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; checkId: string; revision: string; packetDigest: string; modelTier: 'fast' | 'balanced' | 'strong' }>
+        const available = runtimeTasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; checkId: string; revision: string; packetDigest: string; modelTier: 'fast' | 'balanced' | 'strong'; kind: 'semantic' | 'confirmation'; sourceTaskId?: string }>
         const running = runtimeTasks.filter(task => task.status === 'running').length
         if (running >= FOUNDATION_SEMANTIC_MAX_RUNNING || !available.length) return
         const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision })
@@ -2254,7 +2254,7 @@ export function createDeliveryWorkflowController(input: {
         for (const task of available.slice(0, FOUNDATION_SEMANTIC_MAX_RUNNING - running)) {
           const packet = await buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision, checkId: task.checkId, sectionIndex: committed.sectionIndex, factStore: committed.factStore, deterministicReviewDigest: prefix.reviewDigest, deterministicIssuePrefix: prefix.issues, documentDigests: committed.documentDigests })
           if (packet.identity !== task.packetDigest) throw new Error('semantic retry packet differs from immutable task packet')
-          await dispatchFoundationAuditTask({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-semantic-reviewer', checkId: task.checkId } })
+          await dispatchFoundationAuditTask({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, revision: task.revision, workerType: 'foundation-semantic-reviewer', checkId: task.checkId, kind: task.kind, ...(task.kind === 'confirmation' ? { sourceTaskId: task.sourceTaskId } : {}) } })
         }
         return
       }
@@ -2266,7 +2266,7 @@ export function createDeliveryWorkflowController(input: {
         for (const task of available.slice(0, 4 - running)) {
           const packetPath = join(input.workspacePath, `.beegame/audit/foundation/${run.foundationAuditState.revision}/staging/packets/${task.taskId}.json`)
           const packet = JSON.parse(await readFile(packetPath, 'utf8')) as Record<string, unknown>
-          await dispatchFoundationAuditTask({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: buildFoundationFactStructuredOutputJsonSchema(packet as FoundationFactPacket), contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, workerType: 'foundation-fact-extractor' } })
+          await dispatchFoundationAuditTask({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: buildFoundationFactStructuredOutputJsonSchema(packet as FoundationFactPacket), contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, revision: task.revision, workerType: 'foundation-fact-extractor' } })
         }
         return
       }

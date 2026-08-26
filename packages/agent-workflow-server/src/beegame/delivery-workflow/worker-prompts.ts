@@ -7,7 +7,10 @@ import {
 import { foundationFactDefinition } from './foundation-fact-definitions'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
-  'Treat each section as the final decision record, not a derivation transcript. Finish every required section and production material within the response; compact repetition rather than omit or truncate required content. Production materials are canonical compact views of owned decisions and must not repeat section narrative. Use no more than one worked example per formula or system boundary unless distinct contract-required cases prove different behavior. Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.'
+  'Treat each section as the final decision record, not a derivation transcript. Complete every required section and production material; omit only equivalent repetition, never required content. Keep rationale to the minimum needed for a production decision.'
+
+const FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION =
+  'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Define each authoritative fact once and prefer production-dense tables or matrices when they add implementation authority. Do not restate the confirmed brief, upstream authority or another section; reference stable authority. Downstream documents may specialize only already-authorized behavior and must not redefine upstream rules.'
 
 const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
   'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority; each Issue sourceSectionKey, expected, and actual must match its single-document authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
@@ -19,10 +22,6 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   if (packetWorker) return buildPacketWorkerPrompt(request)
   if (request.workerType === 'foundation-document-reviser')
     return buildFoundationRevisionWorkerPrompt(request)
-  const initialFoundationAuthor =
-    request.workerType === 'document-author' &&
-    request.contract.documentSet === 'foundation' &&
-    request.contract.authoringMode === 'initial'
   const streamedFoundationAuthor =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
@@ -81,21 +80,23 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
         : CANONICAL_PROJECT_ARTIFACTS)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
-    initialFoundationAuthor ? undefined : `Phase: ${request.phase}`,
-    `Run: ${request.runId}`,
-    initialFoundationAuthor ? undefined : `Revision: ${request.revision}`,
-    initialFoundationAuthor
+    streamedFoundationAuthor ? undefined : `Phase: ${request.phase}`,
+    streamedFoundationAuthor ? undefined : `Run: ${request.runId}`,
+    streamedFoundationAuthor ? undefined : `Revision: ${request.revision}`,
+    streamedFoundationAuthor
       ? undefined
       : `Workspace root: ${request.workspacePath}`,
-    `${pathScopeLabel}: ${pathScope}`,
-    `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
+    streamedFoundationAuthor ? undefined : `${pathScopeLabel}: ${pathScope}`,
+    streamedFoundationAuthor
+      ? undefined
+      : `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
     'The durable confirmed brief context and its digest are the product authority for this run.',
     'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
     workerInstruction(request),
     priorFailureReason
       ? `Automatic retry after the previous document-author failure: ${priorFailureReason}. Correct that failure in the assigned canonical Markdown document before ending the turn.`
       : undefined,
-    initialFoundationAuthor
+    streamedFoundationAuthor
       ? undefined
       : 'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
     streamedFoundationAuthor
@@ -133,9 +134,6 @@ function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
   const contract = formatPacketContract(request)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
-    `Revision: ${request.revision}`,
-    `Task: ${String(request.contract.taskId ?? request.taskId ?? '')}`,
-    `Packet digest: ${String(request.contract.packetDigest ?? '')}`,
     'The packet is the sole input for this task. It is immutable service-owned authority.',
     'Do not read project files, call Read, Grep or Glob, inspect the workspace, use native tools, write files, mutate the platform, or add context from any other source.',
     'Return only the strict structured result for the assigned packet; do not return Markdown, prose explanations, or additional fields.',
@@ -154,6 +152,8 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
     'packet',
     'checkId',
     'modelTier',
+    'kind',
+    'sourceTaskId',
   ] as const
   return JSON.stringify(Object.fromEntries(
     allowedKeys.flatMap(key => Object.hasOwn(request.contract, key) ? [[key, request.contract[key]]] : []),
@@ -177,6 +177,7 @@ function formatContract(request: WorkerDispatchRequest): string {
     delete contractWithoutDuplicatedBrief.maxNativeWriteContentChars
     delete contractWithoutDuplicatedBrief.nativeWriteLimit
     delete contractWithoutDuplicatedBrief.upstreamDocumentPaths
+    delete contractWithoutDuplicatedBrief.priorFailureReason
     const completeDocumentContract =
       contractWithoutDuplicatedBrief.completeDocumentContract
     if (
@@ -270,17 +271,19 @@ function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'foundation-fact-extractor':
       return [
-        'Extract only the declared fact keys from the exact packet sections. The packet is the sole input; do not read project files, call Read, Grep or Glob, write files, mutate the platform, or emit issues.',
+        'Extract only the declared fact keys from the exact packet sections.',
         ...factExtractionInstructions(request),
-        'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed; the service binds immutable provenance from each catalog owner section into the durable terminal. Do not return evidence, section prose, or values not declared by the packet.',
+        'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed. Do not return evidence, section prose, or values not declared by the packet.',
       ].join(' ')
     case 'foundation-semantic-reviewer':
+      if (request.contract.kind === 'confirmation')
+        return 'This is a strong independent confirmation of the completed source task. Re-evaluate only the same immutable packet and the same check, and return your own supported PASS, ISSUES, or UNDECIDABLE outcome. Do not inherit or preserve the source outcome. Do not expand scope, create a second audit track, introduce a new check, or read any other context.'
       if (typeof request.contract.issueId === 'string')
         return 'Recheck only the admitted Issue expected against the packet current evidence. Return only PASS or FAIL in the supplied StructuredOutput schema. PASS means the exact expected is now true and the admitted actual is removed. FAIL requires one structured diagnostic grounded in packet evidence; do not discover, split, rewrite, or remediate Issues.'
       return [
-        'Review only the exact semantic packet sections, normalized facts, and deterministic references. Do not read project files, call Read, Grep or Glob, write files, mutate the platform, or expand context.',
+        'Review only the exact semantic packet sections, normalized facts, and deterministic references.',
         FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT,
-        'Return only PASS, ISSUES, or UNDECIDABLE in the supplied StructuredOutput schema. Issue drafts must use only assigned section keys and contain no IDs. Do not return Markdown, prose explanations, or additional fields.',
+        'Issue drafts must use only assigned section keys and contain no IDs.',
       ].join(' ')
     case 'foundation-document-reviser':
       return [
@@ -290,16 +293,16 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'document-author':
       return [
         request.contract.documentSet === 'checklist'
-          ? "Author the approved gameplay checklist directly at docs/acceptance/gameplay-checklist.md using Bee Game Studio's normal workflow."
+          ? ''
           : request.contract.authoringMode === 'initial' ||
               request.contract.authoringMode === 'parallel-draft'
-            ? 'Return exactly one complete raw Markdown body as the visible response. Do not call tools, do not return JSON, do not use a code fence, and do not add text before or after the document.'
+            ? ''
             : 'Unsupported Foundation document authoring mode.',
         request.contract.documentSet === 'checklist'
           ? [
               'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
               'Every acceptance task must be one Markdown checkbox line with a stable ID, observable behavior and evidence expectation. Cover core player paths, critical numeric boundaries, level/scene states, UI/audio feedback, visible resource outcomes and failure/recovery paths from the approved authority.',
-              'Group the approved scenarios before authoring. Target 24-40 checkbox tasks for an ordinary first delivery; exceed 40 only for additional independently observable approved scenarios, and never exceed 64 checkbox tasks. Group wave, enemy, input, resource, cue and table-row variants when they share one setup, action and observable outcome; do not create one task per document sentence or variant. One task may cite multiple approved facts while remaining independently pass/fail.',
+              'Group the approved scenarios before authoring. Create one checkbox task for each independently observable approved scenario. Merge only equivalent wave, enemy, input, resource, cue or table-row variants when they share one setup, action and observable outcome; do not create one task per document sentence or variant. A task may cite multiple approved facts while remaining independently pass/fail.',
               'Use the canonical form `- [ ] <stable-id> <observable check and evidence expectation>`; tables may add context but cannot replace checkbox tasks.',
               'Do not modify foundation documents, resources, the asset manifest or implementation files.',
             ].join(' ')
@@ -307,17 +310,17 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             ? [
                 `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation.`,
                 'Use only the available committed upstream authority named by the contract. Record genuinely unavailable upstream decisions as explicit assumptions in the existing dependency and risk sections; do not invent a second document track.',
+                FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
                 DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
                 'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
               ].join(' ')
             : request.contract.authoringMode === 'initial'
               ? [
-                  `This is one complete human development discipline assignment. Return exactly the complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
+                  `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation. This is one complete human development discipline assignment. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
                   'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. The first non-blank line must be the single # document title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter or beegame protocol comments. BGS injects document_id, version and updated_at deterministically. BGS injects all beegame protocol comments after the turn. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
-                  'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing.',
-                  'Define each authoritative fact once. Prefer production-dense tables and matrices over repeated narrative; every section must add implementation authority. Do not restate the confirmed brief, upstream text or another section; reference stable authority. Keep rationale to the minimum needed for a production decision.',
+                  FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
                   DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                  'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. A downstream owner may specialize only already-authorized behavior. Do not author .beegame metadata. Do not claim verified license status without concrete evidence.',
+                  'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. Do not author .beegame metadata. Do not claim verified license status without concrete evidence.',
                   'BGS performs mechanical contract validation after the turn and the dedicated Review stage owns independent audit; do not launch or wait for an independent review or audit.',
                   ...(request.contract.foundationDocumentPath ===
                   'docs/ASSET_PLAN.md'
@@ -405,11 +408,11 @@ function factExtractionInstructions(request: WorkerDispatchRequest): string[] {
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'foundation-fact-extractor':
-      return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, and value; omit evidence and reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, and reason; omit evidence and value. The service binds immutable provenance from the packet owner section into the durable terminal. Do not call project tools, return terminal JSON as prose, or add completion text.'
+      return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, and value; omit evidence and reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, and reason; omit evidence and value. The service binds immutable provenance from the packet owner section into the durable terminal.'
     case 'foundation-semantic-reviewer':
       if (typeof request.contract.issueId === 'string')
-        return 'Return exactly one native StructuredOutput value conforming to the targeted semantic recheck schema. Use PASS without diagnostic, or FAIL with exactly one structured diagnostic containing observedActual, evidence, failureReasonCode, and scopeAssessment. Do not return ISSUES, UNDECIDABLE, Markdown, or explanatory text.'
-      return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use exactly one outcome shape: PASS omits issues and reason; ISSUES includes a non-empty issues array and omits reason; UNDECIDABLE includes reason and omits issues. Do not return Markdown or explanatory text.'
+        return 'Return exactly one native StructuredOutput value conforming to the targeted semantic recheck schema. Use PASS without diagnostic, or FAIL with exactly one structured diagnostic containing observedActual, evidence, and failureReasonCode. Do not return ISSUES or UNDECIDABLE; the service determines scope assessment.'
+      return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use exactly one outcome shape: PASS omits issues and reason; ISSUES includes a non-empty issues array and omits reason; UNDECIDABLE includes reason and omits issues.'
     case 'foundation-document-reviser':
       return 'Complete the assigned staged Markdown revision so every admitted expected is true and every admitted actual is removed. Call SubmitFoundationRevisionResult exactly once with APPLIED plus the exact changedSectionIds; do not submit task, round, document or Issue identity, and do not end with prose completion text.'
     case 'document-author':

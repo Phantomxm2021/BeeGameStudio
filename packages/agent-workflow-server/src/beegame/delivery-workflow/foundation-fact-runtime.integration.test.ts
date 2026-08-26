@@ -1691,7 +1691,7 @@ describe('foundation fact runtime controller integration', () => {
   })
 
   test('requires same-packet strong confirmation and stops on a second UNDECIDABLE', async () => {
-    const { workspacePath, controller } = await preparedController()
+    const { workspacePath, controller, requests } = await preparedController()
     try {
       await finishFacts(controller)
       let current = await controller.store.load()
@@ -1712,6 +1712,18 @@ describe('foundation fact runtime controller integration', () => {
       expect(confirmation.checkId).toBe(source.checkId)
       expect(confirmation.modelTier).toBe('strong')
       expect(confirmation.status).toBe('running')
+      const confirmationRequest = requests.find(request => request.taskId === confirmation.taskId)
+      expect(confirmationRequest?.contract).toMatchObject({
+        kind: 'confirmation',
+        sourceTaskId: source.taskId,
+        taskId: confirmation.taskId,
+        revision: source.revision,
+        packetDigest: source.packetDigest,
+        packet: expect.objectContaining({
+          revision: source.revision,
+          identity: source.packetDigest,
+        }),
+      })
       await completeSemantic(controller, confirmation.taskId, 'UNDECIDABLE')
       current = await controller.store.load()
       expect(current!.status).toBe('needs_action')

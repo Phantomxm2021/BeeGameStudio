@@ -2,6 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { buildWorkerPrompt } from './worker-prompts'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+
+function countOccurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1
+}
 
 describe('worker prompts', () => {
   test('keeps the initial foundation author contract focused on the assigned document', () => {
@@ -34,9 +39,11 @@ describe('worker prompts', () => {
     expect(prompt).toContain('contract.systemDeliveryContract')
     expect(prompt).toContain('assets/asset-manifest.json')
     expect(prompt).not.toContain('48,000 UTF-8 bytes')
-    expect(prompt).toContain(
-      'Canonical artifacts: docs/GDD.md, docs/LEVEL_SCENE_DESIGN.md, docs/BALANCE_DESIGN.md, docs/TECHNICAL_DESIGN.md',
-    )
+    expect(prompt).not.toContain('Workspace root:')
+    expect(prompt).not.toContain('Writable paths:')
+    expect(prompt).not.toContain('Canonical artifacts:')
+    expect(prompt).not.toContain('Run: run')
+    expect(prompt).not.toContain('Revision: revision')
   })
 
   test('declares a closed H2 heading protocol for initial and parallel foundation authors', () => {
@@ -84,6 +91,91 @@ describe('worker prompts', () => {
     }
   })
 
+  test('aligns shared foundation authority instructions across all initial and parallel authors', () => {
+    const expectedSharedInstructions = [
+      'Use exactly one fact owner:',
+      'Define each authoritative fact once',
+      'Do not restate the confirmed brief, upstream authority or another section',
+      'Downstream documents may specialize only already-authorized behavior and must not redefine upstream rules',
+    ]
+
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
+        const prompt = buildWorkerPrompt({
+          runId: 'run',
+          ownerId: 'owner',
+          projectId: 'project',
+          workspacePath: '/workspace',
+          workerType: 'document-author',
+          phase: 'DOCUMENT_DRAFTING',
+          revision: 'revision',
+          allowedPaths: [foundationDocumentPath],
+          contract: {
+            documentSet: 'foundation',
+            authoringMode,
+            foundationDocumentPath,
+            completeDocumentContract: getGameDocumentContract(
+              foundationDocumentPath,
+            ),
+          },
+        })
+
+        for (const instruction of expectedSharedInstructions)
+          expect(prompt).toContain(instruction)
+        expect(prompt).not.toContain('Workspace root:')
+        expect(prompt).not.toContain('Writable paths:')
+        expect(prompt).not.toContain('Canonical artifacts:')
+        expect(prompt).not.toContain('Run: run')
+        expect(prompt).not.toContain('Revision: revision')
+      }
+    }
+  })
+
+  test('derives checklist cardinality from observable scenarios without fixed business caps', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision',
+      allowedPaths: ['docs/acceptance/gameplay-checklist.md'],
+      contract: { documentSet: 'checklist' },
+    })
+
+    expect(prompt).toContain('one checkbox task for each independently observable approved scenario')
+    expect(prompt).toContain('Merge only equivalent wave, enemy, input, resource, cue or table-row variants')
+    expect(countOccurrences(prompt, 'Author only docs/acceptance/gameplay-checklist.md')).toBe(1)
+    expect(prompt).not.toContain('24-40 checkbox tasks')
+    expect(prompt).not.toContain('never exceed 64 checkbox tasks')
+  })
+
+  test('keeps output policy authority in the contract while avoiding repeated prose policy', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        documentSet: 'foundation',
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/GDD.md',
+        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+      },
+    })
+
+    expect(prompt).toContain('"outputPolicy":{"sectionStyle":"final_owned_decisions"')
+    expect(prompt).toContain('Complete every required section and production material')
+    expect(prompt).not.toContain('Production materials are canonical compact views of owned decisions and must not repeat section narrative.')
+    expect(prompt).not.toContain('Use no more than one worked example per formula or system boundary')
+    expect(prompt).not.toContain('Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.')
+  })
+
   test('does not ask foundation models to echo service-owned terminal identity', () => {
     for (const workerType of ['foundation-fact-extractor', 'foundation-semantic-reviewer'] as const) {
       const prompt = buildWorkerPrompt({
@@ -98,6 +190,7 @@ describe('worker prompts', () => {
         contract: {
           workerType,
           taskId: 'task',
+          revision: 'revision',
           packetDigest: 'a'.repeat(64),
           modelTier: workerType === 'foundation-fact-extractor' ? 'fast' : 'balanced',
         },
@@ -147,6 +240,13 @@ describe('worker prompts', () => {
       expect(prompt).not.toContain('native tools, reasoning')
       expect(prompt).toContain('packet is the sole input')
       expect(prompt).toContain('Immutable packet contract')
+      expect(countOccurrences(prompt, 'The packet is the sole input')).toBe(1)
+      expect(countOccurrences(prompt, 'Do not read project files')).toBe(1)
+      expect(countOccurrences(prompt, 'Return only the strict structured result')).toBe(1)
+      expect(prompt).toContain('"workerType":"' + workerType + '"')
+      expect(prompt).toContain('"taskId":"task"')
+      expect(prompt).toContain('"revision":"revision"')
+      expect(prompt).toContain(`"packetDigest":"${'a'.repeat(64)}"`)
       if (workerType === 'foundation-fact-extractor') {
         expect(prompt).toContain('asset.covered_level_requirements')
         expect(prompt).toContain('present requires key, status, and value; omit evidence and reason')
@@ -155,13 +255,82 @@ describe('worker prompts', () => {
         expect(prompt).toContain('service binds immutable provenance')
         expect(prompt).toContain('left side of an explicit AssetPlan inventory mapping table')
         expect(prompt).toContain('never copy, transform, or infer values from asset.inventory_ids')
+        expect(countOccurrences(prompt, 'service binds immutable provenance')).toBe(1)
+        expect(countOccurrences(prompt, 'Do not call project tools')).toBe(0)
       } else {
         expect(prompt).toContain('GDD.player_loop')
         expect(prompt).toContain('PASS omits issues and reason')
         expect(prompt).toContain('ISSUES includes a non-empty issues array and omits reason')
         expect(prompt).toContain('UNDECIDABLE includes reason and omits issues')
+        expect(countOccurrences(prompt, 'return Markdown')).toBe(1)
+        expect(countOccurrences(prompt, 'additional fields')).toBe(1)
       }
     }
+  })
+
+  test('projects confirmation identity and same-admitted-outcome scope into the packet contract', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'foundation-semantic-reviewer',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      allowedPaths: [],
+      contract: {
+        workerType: 'foundation-semantic-reviewer',
+        taskId: 'confirmation-task',
+        sourceTaskId: 'semantic-task',
+        kind: 'confirmation',
+        packetDigest: 'a'.repeat(64),
+        packet: {
+          revision: 'revision',
+          keys: ['GDD.player_loop'],
+          sections: [],
+          packetDigest: 'a'.repeat(64),
+        },
+        modelTier: 'strong',
+      },
+    })
+
+    expect(prompt).toContain('strong independent confirmation')
+    expect(prompt).toContain('same immutable packet')
+    expect(prompt).toContain('same check')
+    expect(prompt).toContain('your own supported PASS, ISSUES, or UNDECIDABLE outcome')
+    expect(prompt).toContain('Do not inherit or preserve the source outcome')
+    expect(prompt).toContain('Do not expand scope')
+    expect(prompt).toContain('second audit track')
+    expect(prompt).toContain('"kind":"confirmation"')
+    expect(prompt).toContain('"sourceTaskId":"semantic-task"')
+  })
+
+  test('keeps one worker title and retains identity only in the packet JSON', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'foundation-fact-extractor',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      allowedPaths: [],
+      contract: {
+        workerType: 'foundation-fact-extractor',
+        taskId: 'task',
+        revision: 'revision',
+        packetDigest: 'a'.repeat(64),
+        modelTier: 'fast',
+      },
+    })
+
+    expect(countOccurrences(prompt, 'BeeGame delivery worker: foundation-fact-extractor')).toBe(1)
+    expect(prompt).not.toContain('\nRevision: revision')
+    expect(prompt).not.toContain('\nTask: task')
+    expect(prompt).not.toContain('\nPacket digest: ')
+    expect(prompt).toContain('"taskId":"task"')
+    expect(prompt).toContain('"revision":"revision"')
+    expect(prompt).toContain(`"packetDigest":"${'a'.repeat(64)}"`)
   })
 
   test('states the canonical semantic remediation union without the removed question track', () => {

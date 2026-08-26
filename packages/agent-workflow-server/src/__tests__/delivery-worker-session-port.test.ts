@@ -36,6 +36,10 @@ import {
   foundationSemanticReviewerStructuredOutputJsonSchema,
 } from '../beegame/delivery-workflow/worker-contracts'
 
+function countOccurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1
+}
+
 describe('delivery worker session credentials', () => {
   test('builds a packet-specific closed schema for typed present facts', () => {
     const schema = buildFoundationFactStructuredOutputJsonSchema({
@@ -341,7 +345,6 @@ describe('delivery worker session credentials', () => {
       observedActual: 'The Boot to MainMenu transition row remains absent.',
       evidence: [{ documentPath: 'docs/GDD.md' as const, sectionId: 'flow', digest: 'b'.repeat(64) }],
       failureReasonCode: 'expected_not_met' as const,
-      scopeAssessment: 'repairable_in_scope' as const,
     }
     const starts: Array<Record<string, unknown>> = []
     const sessions = {
@@ -352,7 +355,7 @@ describe('delivery worker session credentials', () => {
           type: 'result' as const,
           text: 'Structured output accepted',
           createdAt: new Date(),
-          payload: { type: 'result', subtype: 'success', structured_output: { status: 'FAIL', diagnostic } },
+      payload: { type: 'result', subtype: 'success', structured_output: { status: 'FAIL', diagnostic } },
         }]
       },
     } as unknown as BeeGameSessionManager
@@ -389,7 +392,7 @@ describe('delivery worker session credentials', () => {
       revision: 'revision-semantic-recheck',
       packetDigest: 'a'.repeat(64),
       outcome: 'FAIL',
-      diagnostic,
+      diagnostic: { ...diagnostic, scopeAssessment: 'repairable_in_scope' },
     })
     expect(starts[0]?.workflowJsonSchema).toEqual(foundationSemanticRecheckStructuredOutputJsonSchema)
   })
@@ -1099,6 +1102,141 @@ describe('delivery worker session credentials', () => {
         'Continuous bounded document sequence',
       )
       expect(submittedPrompt).not.toContain('original complete document prompt')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('assembles the final initial author prompt without repeated assignment or authority text', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-prompt-dedup-'))
+    let submittedPrompt = ''
+    const sessions = {
+      start() {
+        return { id: 'session-document-prompt-dedup' }
+      },
+      updateAuthToken() {},
+      async sendWithDisplay(_sessionId: string, prompt: string) {
+        submittedPrompt = prompt
+      },
+    } as unknown as BeeGameSessionManager
+    const request: WorkerDispatchRequest = {
+      dispatchId: 'dispatch-document-prompt-dedup',
+      runId: 'run-document-prompt-dedup',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath,
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        authoringMode: 'initial',
+        documentSet: 'foundation',
+        foundationDocumentPath: 'docs/GDD.md',
+        upstreamDocumentPaths: [],
+        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+      },
+    }
+    try {
+      const port = createBeeGameDeliveryWorkerPort({
+        sessions,
+        userId: 'user-1',
+        confirmedBriefContext: '{"kind":"confirmed_build_brief"}',
+      })
+      await port.start(request)
+      await port.submit(request.dispatchId!, buildWorkerPrompt(request))
+
+      expect(countOccurrences(submittedPrompt, 'Return exactly one complete raw Markdown body')).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'Do not call tools')).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'completeDocumentContract')).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'confirmed_build_brief')).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'This document has no upstream document dependency.')).toBe(0)
+      expect(countOccurrences(submittedPrompt, 'The assigned target is docs/GDD.md.')).toBe(1)
+      for (const material of getGameDocumentContract('docs/GDD.md').productionMaterials)
+        expect(countOccurrences(submittedPrompt, material.materialId)).toBe(1)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps retry failure evidence once across every foundation author mode and document', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-prompt-retry-dedup-'))
+    let submittedPrompt = ''
+    let sessionCount = 0
+    const sessions = {
+      start() {
+        sessionCount += 1
+        return { id: `session-document-prompt-retry-dedup-${sessionCount}` }
+      },
+      updateAuthToken() {},
+      async sendWithDisplay(_sessionId: string, prompt: string) {
+        submittedPrompt = prompt
+      },
+    } as unknown as BeeGameSessionManager
+    const reason = 'UNIQUE_DOCUMENT_FAILURE_EVIDENCE'
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+        const contract = getGameDocumentContract(path)
+        await writeFile(
+          join(workspacePath, path),
+          [
+            `# ${contract.discipline}`,
+            ...contract.sections.flatMap(section => [
+              `<!-- beegame-section:${section.sectionId} -->`,
+              `## ${section.title}`,
+              `Authority content for ${section.sectionId}.`,
+            ]),
+            '<!-- beegame-production-materials -->',
+            '## Production Materials',
+          ].join('\n'),
+        )
+      }
+
+      for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+        for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+          const contract = getGameDocumentContract(path)
+          const dispatchId = `dispatch-document-prompt-retry-${authoringMode}-${path.replaceAll('/', '-').replaceAll('.', '-')}`
+          const request: WorkerDispatchRequest = {
+            dispatchId,
+            runId: 'run-document-prompt-retry-dedup',
+            ownerId: 'user-1',
+            projectId: 'project-1',
+            workspacePath,
+            workerType: 'document-author',
+            phase: 'DOCUMENT_DRAFTING',
+            revision: 'revision-1',
+            allowedPaths: [path],
+            contract: {
+              authoringMode,
+              documentSet: 'foundation',
+              foundationDocumentPath: path,
+              completeDocumentContract: contract,
+              priorFailureReason: reason,
+              ...(authoringMode === 'initial'
+                ? { upstreamDocumentPaths: contract.upstreamSections.map(source => source.path) }
+                : { availableUpstreamPaths: [] }),
+            },
+          }
+
+          const port = createBeeGameDeliveryWorkerPort({
+            sessions,
+            userId: 'user-1',
+            confirmedBriefContext: '{"kind":"confirmed_build_brief"}',
+          })
+          await port.start(request)
+          await port.submit(dispatchId, buildWorkerPrompt(request))
+
+          expect(countOccurrences(submittedPrompt, reason)).toBe(1)
+          expect(submittedPrompt).not.toContain('"priorFailureReason"')
+          if (authoringMode === 'parallel-draft')
+            expect(submittedPrompt).not.toContain('this initial stream')
+          if (path === 'docs/GDD.md')
+            expect(submittedPrompt).not.toContain(
+              'Use the confirmed brief and document contract directly.',
+            )
+        }
+      }
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

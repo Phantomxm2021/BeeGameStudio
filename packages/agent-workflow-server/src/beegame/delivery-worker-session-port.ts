@@ -306,11 +306,11 @@ export async function buildDocumentAuthorAuthorityBlock(
           canonicalFoundationAuthorityProjectionBytes(projection).trimEnd(),
           `--- END FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
         ].join('\n')
-      : `This fact-owner document has no upstream document dependency. Use the confirmed brief and document contract directly.`,
+      : undefined,
     targetExists
-      ? `An existing ${targetPath} is present, but this initial stream must return a complete replacement Markdown body from current authority.`
+      ? `An existing ${targetPath} is present, but this stream must return a complete replacement Markdown body from current authority.`
       : `The assigned target is ${targetPath}.`,
-  ].join('\n\n')
+  ].filter(Boolean).join('\n\n')
 }
 
 async function durableWriteProjection(
@@ -508,9 +508,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const languageInstruction = input.language
         ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
         : ''
-      const initialDocumentPrompt = request
-        ? await initialFoundationDocumentTurnPrompt(request)
-        : undefined
       const documentAuthorAuthorityBlock =
         documentAuthorityBlocks.get(dispatchId) ||
         (request
@@ -559,7 +556,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         (packetWorker || revisionWorker) && request && request.contract.packet
           ? buildWorkerPrompt(request)
           : prompt,
-        initialDocumentPrompt,
         ...(packetWorker || revisionWorker
           ? []
           : [
@@ -893,32 +889,6 @@ function isStreamedFoundationAuthoringTurn(
   )
 }
 
-async function initialFoundationDocumentTurnPrompt(
-  request: WorkerDispatchRequest,
-): Promise<string | undefined> {
-  if (!isFoundationDocumentAuthoringTurn(request)) return undefined
-  const path = request.contract.foundationDocumentPath as never
-  let targetExists = true
-  try {
-    await access(resolve(request.workspacePath, path))
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') targetExists = false
-    else throw error
-  }
-  const dispatchId = request.dispatchId
-  if (typeof dispatchId !== 'string' || !dispatchId)
-    throw new Error('foundation authority index requires a dispatch identity')
-  return [
-    `Return exactly one complete raw Markdown body for ${path} as the visible response. Do not call tools, do not wrap it in JSON or a code fence, and do not add a completion explanation.`,
-    getGameDocumentContract(path).upstreamSections.length
-      ? `The exact selected upstream authority is included above with its contracted section bodies, source ranges, and digests. Use that projection directly without rereading whole upstream documents.`
-      : 'This document has no upstream document dependency.',
-    targetExists
-      ? `Replace the existing document body completely in this response from current authority.`
-      : `Produce the complete document body in this response.`,
-  ].join('\n\n')
-}
-
 async function persistFoundationAuthorityIndex(
   request: WorkerDispatchRequest,
 ): Promise<FoundationAuthorityProjection> {
@@ -1146,7 +1116,9 @@ function createDeterministicFoundationSemanticTerminal(input: {
       revision: input.request.revision,
       packetDigest: input.request.contract.packetDigest,
       outcome: payload.status,
-      ...(payload.status === 'FAIL' ? { diagnostic: payload.diagnostic } : {}),
+      ...(payload.status === 'FAIL'
+        ? { diagnostic: { ...payload.diagnostic, scopeAssessment: 'repairable_in_scope' as const } }
+        : {}),
     })
   }
   const payload = foundationSemanticModelPayloadSchema.parse(structured)

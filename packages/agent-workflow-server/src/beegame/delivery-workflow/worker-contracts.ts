@@ -227,6 +227,11 @@ export const foundationSemanticFailureDiagnosticInputSchema = z.object({
     'contradictory_evidence',
     'evidence_insufficient',
   ]),
+}).strict()
+
+/** Durable diagnostic shape. The scope decision is service-owned and is
+ * injected after the worker's evidence has been admitted. */
+export const foundationSemanticFailureDiagnosticSchema = foundationSemanticFailureDiagnosticInputSchema.extend({
   scopeAssessment: z.literal('repairable_in_scope'),
 }).strict()
 
@@ -264,7 +269,7 @@ export const foundationSemanticReviewerTerminalSchema = foundationSemanticReview
   outcome: z.enum(['PASS', 'ISSUES', 'UNDECIDABLE', 'FAIL']),
   issues: z.array(foundationSemanticIssueSchema).optional(),
   reason: z.string().min(1).optional(),
-  diagnostic: foundationSemanticFailureDiagnosticInputSchema.optional(),
+  diagnostic: foundationSemanticFailureDiagnosticSchema.optional(),
 }).strict().superRefine((value, context) => {
   const issues = value.issues ?? []
   if (value.outcome === 'FAIL' && (!value.diagnostic || issues.length || value.reason !== undefined)) context.addIssue({ code: 'custom', path: ['diagnostic'], message: 'FAIL requires only a structured diagnostic' })
@@ -278,7 +283,7 @@ export const foundationSemanticReviewerTerminalSchema = foundationSemanticReview
 
 export const foundationSemanticRecheckTerminalSchema = foundationSemanticReviewerTerminalIdentitySchema.extend({
   outcome: z.enum(['PASS', 'FAIL']),
-  diagnostic: foundationSemanticFailureDiagnosticInputSchema.optional(),
+  diagnostic: foundationSemanticFailureDiagnosticSchema.optional(),
 }).superRefine((value, context) => {
   if (value.outcome === 'PASS' && value.diagnostic !== undefined)
     context.addIssue({ code: 'custom', path: ['diagnostic'], message: 'targeted PASS cannot contain a diagnostic' })
@@ -323,9 +328,8 @@ export const foundationSemanticRecheckStructuredOutputJsonSchema = {
           },
         },
         failureReasonCode: { enum: ['expected_not_met', 'actual_persists', 'contradictory_evidence', 'evidence_insufficient'] },
-        scopeAssessment: { const: 'repairable_in_scope' },
       },
-      required: ['observedActual', 'evidence', 'failureReasonCode', 'scopeAssessment'],
+      required: ['observedActual', 'evidence', 'failureReasonCode'],
     },
   },
   required: ['status'],

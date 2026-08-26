@@ -561,22 +561,39 @@ export async function buildFoundationRevisionAuthority(input: {
   const canonicalPath = resolveProjectPath(input.workspacePath, input.batch.documentPath)
   const markdown = (await readFile(canonicalPath)).toString('utf8')
   const baseDocumentDigest = sha256(markdown)
-  const slices = sectionSlices(input.batch.documentPath, markdown)
   const requiredSectionIds = new Set<string>(input.batch.sectionIds)
-  const issueRefs = new Set(
-    input.issues.flatMap(issue => {
-      const remediation = issue.remediation
-      return [
-        `${issue.source.documentPath}\0${issue.source.sectionId}`,
-        ...(issue.target ? [`${issue.target.documentPath}\0${issue.target.sectionId}`] : []),
-        ...(remediation.kind === 'patch'
-          ? remediation.sectionIds.map(sectionId => `${remediation.documentPath}\0${sectionId}`)
-          : []),
-      ]
-    }),
+  const issueRefs = new Set<string>()
+  const evidenceDocumentPaths = new Set<FoundationDocumentPath>([
+    input.batch.documentPath,
+  ])
+  for (const issue of input.issues) {
+    issueRefs.add(`${issue.source.documentPath}\0${issue.source.sectionId}`)
+    evidenceDocumentPaths.add(issue.source.documentPath)
+    if (issue.target) {
+      issueRefs.add(`${issue.target.documentPath}\0${issue.target.sectionId}`)
+      evidenceDocumentPaths.add(issue.target.documentPath)
+    }
+    const remediation = issue.remediation
+    if (remediation.kind === 'patch') {
+      evidenceDocumentPaths.add(remediation.documentPath)
+      for (const sectionId of remediation.sectionIds)
+        issueRefs.add(`${remediation.documentPath}\0${sectionId}`)
+    }
+  }
+  const evidenceDocuments = await Promise.all(
+    [...evidenceDocumentPaths].map(async documentPath => [
+      documentPath,
+      documentPath === input.batch.documentPath
+        ? markdown
+        : (await readFile(resolveProjectPath(input.workspacePath, documentPath))).toString('utf8'),
+    ] as const),
+  )
+  const slices = evidenceDocuments.flatMap(([documentPath, document]) =>
+    sectionSlices(documentPath, document),
   )
   const selectedSections = slices.filter(section =>
-    requiredSectionIds.has(section.sectionId) ||
+    (section.documentPath === input.batch.documentPath &&
+      requiredSectionIds.has(section.sectionId)) ||
     issueRefs.has(`${section.documentPath}\0${section.sectionId}`),
   )
   const selectedFacts = input.normalizedFacts.filter(fact => {

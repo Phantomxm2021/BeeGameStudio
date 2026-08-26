@@ -8,6 +8,7 @@ import { buildFoundationSectionIndex } from './foundation-section-index'
 import * as revisionStage from './foundation-revision-stage'
 import {
   createFoundationRevisionStage,
+  foundationRevisionStagePath,
   buildFoundationRevisionAuthority,
   deriveFoundationPatchOperations,
   foundationRevisionPacketDigest,
@@ -19,7 +20,7 @@ import {
 } from './foundation-revision-stage'
 import { digestFoundationSemanticRecheckResult } from './foundation-patch-validation'
 import type { AuditIssue } from './foundation-issue-registry'
-import type { FoundationRevisionRound } from './types'
+import type { FoundationDocumentPath, FoundationRevisionRound } from './types'
 
 const workspaces: string[] = []
 afterEach(async () =>
@@ -121,6 +122,74 @@ test('builds a revision packet without duplicate issue evidence', async () => {
   expect(packetIssues).toEqual([expect.objectContaining({ id: 'AUD-1', actual: 'actual' })])
   expect(packetIssues[0]).not.toHaveProperty('problem')
   expect(packetIssues[0]).not.toHaveProperty('evidenceRefs')
+})
+
+test('includes complete cross-document source and target sections without widening write scope', async () => {
+  const workspace = await workspaceWithCanonicalDocuments([
+    documentPath,
+    'docs/LEVEL_SCENE_DESIGN.md',
+  ])
+  const documents = Object.fromEntries(
+    await Promise.all(
+      [documentPath, 'docs/LEVEL_SCENE_DESIGN.md'].map(async path => [
+        path,
+        await readFile(join(workspace, path), 'utf8'),
+      ]),
+    ),
+  )
+  const source = buildFoundationSectionIndex({ documents }).find(
+    section => section.documentPath === documentPath && section.sectionId === 'core_loop',
+  )!
+  const target = buildFoundationSectionIndex({ documents }).find(
+    section => section.documentPath === 'docs/LEVEL_SCENE_DESIGN.md' && section.sectionId === 'pacing_beats',
+  )!
+  const issue: AuditIssue = {
+    id: 'AUD-cross-document',
+    severity: 'HIGH',
+    type: 'semantic',
+    source,
+    target,
+    expected: 'expected cross-document consistency',
+    actual: 'actual cross-document mismatch',
+    remediation: { kind: 'patch', documentPath, sectionIds: ['rules_systems'] },
+  }
+
+  const authority = await buildFoundationRevisionAuthority({
+    workspacePath: workspace,
+    revision,
+    taskId: 'revision-task-cross-document',
+    round: 1,
+    batch: { documentPath, sectionIds: ['rules_systems'], issueIds: [issue.id] },
+    issues: [issue],
+    sourceAuthorityDigest: 'c'.repeat(64),
+    sourceIssueRegistryDigest: 'd'.repeat(64),
+    sourceDerivedDigests: { sectionIndex: 'e'.repeat(64), factStore: 'f'.repeat(64), manifest: '0'.repeat(64) },
+    sourceDocumentDigests: [
+      { path: documentPath, digest: '1'.repeat(64) },
+      { path: 'docs/LEVEL_SCENE_DESIGN.md', digest: '2'.repeat(64) },
+    ],
+    normalizedFacts: [],
+  })
+
+  const sections = authority.packet.sections as Array<Record<string, unknown>>
+  expect(sections).toHaveLength(3)
+  expect(sections).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      documentPath: source.documentPath,
+      sectionId: source.sectionId,
+      text: expect.stringContaining('original core_loop'),
+    }),
+    expect.objectContaining({
+      documentPath: target.documentPath,
+      sectionId: target.sectionId,
+      text: expect.stringContaining('original pacing_beats'),
+    }),
+  ]))
+  expect(authority.packet.documentPath).toBe(documentPath)
+  expect(authority.packet.sectionIds).toEqual(['rules_systems'])
+  expect(authority.stagedPath).toBe(
+    foundationRevisionStagePath(revision, documentPath),
+  )
 })
 
 test('accepts a legal complex revision packet above the old 24KiB business cap', async () => {
@@ -237,8 +306,13 @@ test('persists service-admitted structured failure diagnostics with dependency d
 })
 
 function canonicalDocument(): string {
-  const contract = getGameDocumentContract(documentPath)
-  return `# GDD\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\n${section.sectionId === 'progression' ? '' : `original ${section.sectionId}`}\n`).join('\n')}`
+  return canonicalDocumentFor(documentPath)
+}
+
+function canonicalDocumentFor(path: FoundationDocumentPath): string {
+  const contract = getGameDocumentContract(path)
+  const title = path === documentPath ? 'GDD' : path
+  return `# ${title}\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\n${section.sectionId === 'progression' ? '' : `original ${section.sectionId}`}\n`).join('\n')}`
 }
 
 async function workspaceWithCanonicalDocument() {
@@ -246,6 +320,14 @@ async function workspaceWithCanonicalDocument() {
   workspaces.push(workspace)
   await mkdirFor(join(workspace, 'docs'))
   await writeFile(join(workspace, documentPath), canonicalDocument())
+  return workspace
+}
+
+async function workspaceWithCanonicalDocuments(paths: readonly FoundationDocumentPath[]) {
+  const workspace = await mkdtemp(join(tmpdir(), 'beegame-revision-stage-'))
+  workspaces.push(workspace)
+  await mkdirFor(join(workspace, 'docs'))
+  await Promise.all(paths.map(path => writeFile(join(workspace, path), canonicalDocumentFor(path))))
   return workspace
 }
 
