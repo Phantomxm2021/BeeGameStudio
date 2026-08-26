@@ -132,7 +132,6 @@ export type FoundationSemanticFailureDiagnosticInput = Readonly<{
   observedActual: string
   evidence: readonly FoundationSemanticFailureEvidenceInput[]
   failureReasonCode: FoundationSemanticFailureReasonCode
-  scopeAssessment: FoundationSemanticScopeAssessment
 }>
 
 export type FoundationSemanticRecheckServiceBinding = Readonly<{
@@ -684,10 +683,9 @@ export function admitFoundationSemanticRecheckResult(
   const diagnostic = value.diagnostic
   if (!diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic)) throw new Error('targeted semantic FAIL requires a structured diagnostic')
   const diagnosticValue = diagnostic as Record<string, unknown>
-  assertExactKeys(diagnosticValue, ['evidence', 'failureReasonCode', 'observedActual', 'scopeAssessment'], 'targeted semantic diagnostic (worker cannot submit expected or identity)')
+  assertExactKeys(diagnosticValue, ['evidence', 'failureReasonCode', 'observedActual'], 'targeted semantic diagnostic (worker cannot submit expected or identity)')
   if (typeof diagnosticValue.observedActual !== 'string' || !diagnosticValue.observedActual.trim()) throw new Error('targeted semantic observedActual is required')
   if (!FOUNDATION_SEMANTIC_FAILURE_REASON_CODES.includes(diagnosticValue.failureReasonCode as FoundationSemanticFailureReasonCode)) throw new Error('targeted semantic failureReasonCode is not stable or supported')
-  if (diagnosticValue.scopeAssessment !== 'repairable_in_scope') throw new Error('targeted semantic scopeAssessment is invalid')
   const rawEvidence = diagnosticValue.evidence
   if (!Array.isArray(rawEvidence) || rawEvidence.length === 0) throw new Error('targeted semantic diagnostic evidence is required')
   const packetSections = new Map(packet.sections.map(item => [sectionKey(item.ref), item.ref]))
@@ -721,7 +719,7 @@ export function admitFoundationSemanticRecheckResult(
       evidence,
       dependencySections,
       failureReasonCode: diagnosticValue.failureReasonCode as FoundationSemanticFailureReasonCode,
-      scopeAssessment: diagnosticValue.scopeAssessment as FoundationSemanticScopeAssessment,
+      scopeAssessment: 'repairable_in_scope',
     },
   })
 }

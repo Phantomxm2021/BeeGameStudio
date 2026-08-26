@@ -665,7 +665,6 @@ describe('semantic patch targeted recheck authority', () => {
         observedActual: 'the contradiction remains after the patch',
         evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
         failureReasonCode: 'actual_persists',
-        scopeAssessment: 'repairable_in_scope',
       },
     }, { taskId: 'revision-task-1', issue: input.issue })
 
@@ -690,6 +689,23 @@ describe('semantic patch targeted recheck authority', () => {
     ])
   })
 
+  test('service injects the durable scope assessment and rejects worker-supplied scope', () => {
+    const input = snapshot()
+    const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
+    const section = packet.sections[0]!
+    const diagnostic = {
+      observedActual: 'the contradiction remains',
+      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
+      failureReasonCode: 'actual_persists' as const,
+    }
+    const admitted = admitFoundationSemanticRecheckResult(packet, { status: 'FAIL', diagnostic }, { taskId: 'revision-task-1', issue: input.issue })
+    expect(admitted.status).toBe('FAIL')
+    if (admitted.status === 'FAIL') expect(admitted.diagnostic.scopeAssessment).toBe('repairable_in_scope')
+    expect(() => admitFoundationSemanticRecheckResult(packet, {
+      status: 'FAIL', diagnostic: { ...diagnostic, scopeAssessment: 'repairable_in_scope' },
+    }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/scope|unknown|shape|key/i)
+  })
+
   test('rejects worker-supplied authority, unassigned evidence, missing evidence, and tampered expected', () => {
     const input = snapshot()
     const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
@@ -698,7 +714,6 @@ describe('semantic patch targeted recheck authority', () => {
       observedActual: 'the contradiction remains',
       evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
       failureReasonCode: 'actual_persists',
-      scopeAssessment: 'repairable_in_scope',
     } as const
 
     expect(() => admitFoundationSemanticRecheckResult(packet, {
@@ -725,7 +740,6 @@ describe('semantic patch targeted recheck authority', () => {
         observedActual: 'the contradiction remains',
         evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
         failureReasonCode: 'actual_persists',
-        scopeAssessment: 'repairable_in_scope' as const,
       },
     }
     expect(() => admitFoundationSemanticRecheckResult(packet, {

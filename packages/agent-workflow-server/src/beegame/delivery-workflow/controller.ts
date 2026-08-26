@@ -649,7 +649,18 @@ export function createDeliveryWorkflowController(input: {
           if (result.outcome !== 'PASS' && result.outcome !== 'FAIL') throw new Error('foundation semantic recheck terminal outcome is invalid')
           const admittedResult = result.outcome === 'PASS'
             ? admitFoundationSemanticRecheckResult(packet as never, { status: 'PASS' }, { taskId: task.taskId, issue: task.issue })
-            : admitFoundationSemanticRecheckResult(packet as never, { status: 'FAIL', diagnostic: result.diagnostic }, { taskId: task.taskId, issue: task.issue })
+            : (() => {
+              const diagnostic = result.diagnostic
+              if (!diagnostic) throw new Error('foundation semantic FAIL terminal is missing diagnostic')
+              return admitFoundationSemanticRecheckResult(packet as never, {
+                status: 'FAIL',
+                diagnostic: {
+                  observedActual: diagnostic.observedActual,
+                  evidence: diagnostic.evidence,
+                  failureReasonCode: diagnostic.failureReasonCode,
+                },
+              }, { taskId: task.taskId, issue: task.issue })
+            })()
           {
             const resultDigest = digestFoundationSemanticRecheckResult(admittedResult)
             const resultPath = await writeFoundationRevisionSemanticResult({ workspacePath: input.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, issueId: task.issueId, packetDigest: task.packetDigest, result: admittedResult, resultDigest })
