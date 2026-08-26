@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 const sourceRoot = dirname(fileURLToPath(import.meta.url))
 
 describe('single-lane document runtime source boundary', () => {
-  test('contains no server document renderer, payload protocol, sidecar, or alternate writer', async () => {
+  test('contains no removed document transport, compatibility protocol, or alternate writer', async () => {
     const sources = await productionSources(sourceRoot)
     const forbidden = [
       'renderCompleteGameDocument',
@@ -19,6 +19,9 @@ describe('single-lane document runtime source boundary', () => {
       'document_parts',
       'foundation-authority-sidecar',
       'workspaceText',
+      'workflowMarkdownStreamContract',
+      'normalizeCompleteGameDocumentProtocol',
+      'foundation-markdown-stream',
     ]
     const violations = sources.flatMap(source =>
       forbidden

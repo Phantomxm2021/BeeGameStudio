@@ -17,7 +17,10 @@ import {
   type WorkerDispatchRequest,
 } from '../beegame/delivery-workflow/types'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
-import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
+import {
+  authorPayloadFromTestSubmission,
+  renderTestCompleteGameDocument,
+} from './complete-game-document-fixture'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import { recordFoundationDispatch } from '../beegame/delivery-workflow/foundation-authoring-batch'
 
@@ -173,6 +176,7 @@ describe('idea to complete game documents', () => {
           workspacePath,
           dispatchId: item.dispatch.dispatchId,
           targetPath: item.path,
+          authoredPayload: authorPayloadFromTestSubmission(completeSubmission(item.path)),
         })
         const finishedAt = new Date().toISOString()
         run = await completeDocumentDraft({

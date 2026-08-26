@@ -13,6 +13,7 @@ import {
 } from './types'
 import { commitAuthoredFoundationDocument } from '../authored-document-receipt'
 import {
+  authorPayloadFromTestSubmission,
   completeTestSubmission,
   renderTestCompleteGameDocument,
 } from '../../__tests__/complete-game-document-fixture'
@@ -50,6 +51,7 @@ describe('recovery projector foundation audit boundary', () => {
           workspacePath,
           dispatchId,
           targetPath: path,
+          authoredPayload: authorPayloadFromTestSubmission(completeTestSubmission(path)),
         })
         units.push({
           eventSchemaVersion: 1,

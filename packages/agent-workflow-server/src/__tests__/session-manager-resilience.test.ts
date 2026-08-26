@@ -22,11 +22,6 @@ import { SupabaseRuntimeEnvRequestError } from '../supabase-runtime-env-client'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
-import {
-  completeTestSubmission,
-  renderTestCompleteGameDocument,
-} from './complete-game-document-fixture'
-import { readAuthoredDocumentReceipt } from '../beegame/authored-document-receipt'
 import { createModelConfig, resetModelConfigs } from '@bee-game-studio/agent-workflow'
 
 const waitForIdle = async (
@@ -197,77 +192,6 @@ describe('BeeGame session runtime resilience', () => {
     await manager.disposeWorkflowWorker(second.id)
     for (const sandbox of sandboxes)
       await expect(stat(sandbox)).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  test('commits a foundation Markdown stream before completing the turn', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-markdown-stream-turn-'))
-    const workspacePath = join(root, 'workspace')
-    await mkdir(workspacePath, { recursive: true })
-    const markdown = renderTestCompleteGameDocument(
-      'docs/GDD.md',
-      completeTestSubmission('docs/GDD.md'),
-    )
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async ({ onMessage }) => {
-          onMessage({
-            type: 'stream_event',
-            event: {
-              type: 'content_block_start',
-              index: 0,
-              content_block: { type: 'text', text: '' },
-            },
-          } as DashboardSDKMessage)
-          onMessage({
-            type: 'stream_event',
-            event: {
-              type: 'content_block_delta',
-              index: 0,
-              delta: { type: 'text_delta', text: markdown },
-            },
-          } as DashboardSDKMessage)
-          onMessage({
-            type: 'stream_event',
-            event: { type: 'content_block_stop', index: 0 },
-          } as DashboardSDKMessage)
-          onMessage({
-            type: 'result',
-            subtype: 'success',
-            is_error: false,
-            result: markdown,
-          } as DashboardSDKMessage)
-        },
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-1',
-      workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'document-author',
-      workflowMarkdownStreamContract: {
-        workspacePath,
-        runId: 'run-1',
-        dispatchId: 'dispatch-1',
-        targetPath: 'docs/GDD.md',
-        maxBytes: 512_000,
-        updatedAt: '2026-08-15T01:00:00.000+08:00',
-      },
-    })
-
-    await manager.send(session.id, 'return Markdown')
-    await waitForIdle(manager, session.id)
-
-    expect(
-      (await readAuthoredDocumentReceipt(workspacePath, 'dispatch-1'))?.status,
-    ).toBe('committed')
-    expect(
-      manager.events(session.id).some(event => event.type === 'turn.completed'),
-    ).toBe(true)
-    await manager.dispose()
   })
 
   test('treats canonical resource mutations as durable progress', () => {

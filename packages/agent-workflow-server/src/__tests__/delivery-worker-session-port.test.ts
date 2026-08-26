@@ -35,6 +35,11 @@ import {
   foundationSemanticRecheckStructuredOutputJsonSchema,
   foundationSemanticReviewerStructuredOutputJsonSchema,
 } from '../beegame/delivery-workflow/worker-contracts'
+import {
+  authorPayloadFromTestSubmission,
+  completeTestSubmission,
+} from './complete-game-document-fixture'
+import { readAuthoredDocumentReceipt } from '../beegame/authored-document-receipt'
 
 function countOccurrences(value: string, needle: string): number {
   return value.split(needle).length - 1
@@ -971,7 +976,7 @@ describe('delivery worker session credentials', () => {
     expect(starts[0].workflowProtectedPaths).toBeUndefined()
   })
 
-  test('does not inject a custom document commit contract during initial authoring', async () => {
+  test('rejects the removed canonical Markdown author lane', async () => {
     const starts: Array<Record<string, unknown>> = []
     const sessions = {
       start(input: Record<string, unknown>) {
@@ -990,27 +995,13 @@ describe('delivery worker session credentials', () => {
       phase: 'DOCUMENT_DRAFTING' as const,
       revision: 'revision-1',
     }
-    await port.start({
+    await expect(port.start({
       ...base,
       dispatchId: 'dispatch-gdd',
       allowedPaths: ['docs/GDD.md'],
-      contract: {
-        authoringMode: 'initial',
-        foundationDocumentPath: 'docs/GDD.md',
-      },
-    })
-    await port.start({
-      ...base,
-      dispatchId: 'dispatch-level',
-      allowedPaths: ['docs/LEVEL_SCENE_DESIGN.md'],
-      contract: {
-        authoringMode: 'initial',
-        foundationDocumentPath: 'docs/LEVEL_SCENE_DESIGN.md',
-      },
-    })
-
-    expect(starts[0]?.workflowCanonicalDocumentCommitContract).toBeUndefined()
-    expect(starts[1]?.workflowCanonicalDocumentCommitContract).toBeUndefined()
+      contract: { authoringMode: 'initial', foundationDocumentPath: 'docs/GDD.md' },
+    })).rejects.toThrow(/sole structured author contract/)
+    expect(starts).toHaveLength(0)
   })
 
   test('does not expose stale target content or native file instructions', async () => {
@@ -1033,6 +1024,7 @@ describe('delivery worker session credentials', () => {
         allowedPaths: ['docs/GDD.md'],
         contract: {
           authoringMode: 'initial',
+          documentSet: 'foundation',
           foundationDocumentPath: 'docs/GDD.md',
           upstreamDocumentPaths: [],
         },
@@ -1078,6 +1070,7 @@ describe('delivery worker session credentials', () => {
         foundationDocumentPath: 'docs/GDD.md',
         upstreamDocumentPaths: [],
         completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+        expectedOriginalDigest: null,
       },
     }
     try {
@@ -1095,9 +1088,9 @@ describe('delivery worker session credentials', () => {
       expect(submittedPrompt).not.toContain('complete when the turn ends')
       expect(submittedPrompt).not.toContain('file-operation sequence')
       expect(submittedPrompt).toContain(
-        'Return exactly one complete raw Markdown body for docs/GDD.md',
+        'Return exactly one StructuredOutput object for docs/GDD.md',
       )
-      expect(submittedPrompt).toContain('Do not call tools')
+      expect(submittedPrompt).toContain('strict_structured_block_payload')
       expect(submittedPrompt).not.toContain(
         'Continuous bounded document sequence',
       )
@@ -1135,6 +1128,7 @@ describe('delivery worker session credentials', () => {
         foundationDocumentPath: 'docs/GDD.md',
         upstreamDocumentPaths: [],
         completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+        expectedOriginalDigest: null,
       },
     }
     try {
@@ -1146,12 +1140,12 @@ describe('delivery worker session credentials', () => {
       await port.start(request)
       await port.submit(request.dispatchId!, buildWorkerPrompt(request))
 
-      expect(countOccurrences(submittedPrompt, 'Return exactly one complete raw Markdown body')).toBe(1)
-      expect(countOccurrences(submittedPrompt, 'Do not call tools')).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'Return exactly one StructuredOutput object')).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'Return exactly one complete raw Markdown body')).toBe(0)
       expect(countOccurrences(submittedPrompt, 'completeDocumentContract')).toBe(1)
       expect(countOccurrences(submittedPrompt, 'confirmed_build_brief')).toBe(1)
       expect(countOccurrences(submittedPrompt, 'This document has no upstream document dependency.')).toBe(0)
-      expect(countOccurrences(submittedPrompt, 'The assigned target is docs/GDD.md.')).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'The assigned target is docs/GDD.md.')).toBe(0)
       for (const material of getGameDocumentContract('docs/GDD.md').productionMaterials)
         expect(countOccurrences(submittedPrompt, material.materialId)).toBe(1)
     } finally {
@@ -1212,6 +1206,9 @@ describe('delivery worker session credentials', () => {
               documentSet: 'foundation',
               foundationDocumentPath: path,
               completeDocumentContract: contract,
+              expectedOriginalDigest: createHash('sha256')
+                .update(await readFile(join(workspacePath, path)))
+                .digest('hex'),
               priorFailureReason: reason,
               ...(authoringMode === 'initial'
                 ? { upstreamDocumentPaths: contract.upstreamSections.map(source => source.path) }
@@ -1264,7 +1261,7 @@ describe('delivery worker session credentials', () => {
             ? {
                 revision: 'revision-packet',
                 keys: ['audio.event_ids'],
-                sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }],
+                sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64), text: 'Audio event authority.' }],
                 packetDigest: 'a'.repeat(64),
               }
             : { revision: 'revision-packet', keys: ['GDD.player_loop'], sections: [], packetDigest: 'a'.repeat(64) },
@@ -1281,7 +1278,7 @@ describe('delivery worker session credentials', () => {
       await port.submit(request.dispatchId!, 'CONFIRMED_BRIEF_SENTINEL /workspace-secret')
       expect(submittedPrompt).not.toContain('CONFIRMED_BRIEF_SENTINEL')
       expect(submittedPrompt).not.toContain('/workspace-secret')
-      expect(submittedPrompt).toContain('Immutable packet contract')
+      expect(submittedPrompt).toContain('Model packet contract')
       expect(display).not.toHaveProperty('confirmedBriefContext')
     }
   })
@@ -1539,7 +1536,75 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('derives the document terminal from a normal Claude result and assigned file', async () => {
+  test('commits a foundation StructuredOutput payload and returns only a compact terminal', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-structured-author-'))
+    const starts: Array<Record<string, unknown>> = []
+    const payload = authorPayloadFromTestSubmission(
+      completeTestSubmission('docs/GDD.md'),
+    )
+    const sessions = {
+      start(input: Record<string, unknown>) {
+        starts.push(input)
+        return { id: 'session-structured-author' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [{
+          id: 'structured-document-result',
+          type: 'result' as const,
+          text: 'Structured output accepted.',
+          createdAt: new Date(),
+          payload: {
+            type: 'result',
+            subtype: 'success',
+            structured_output: payload,
+          },
+        }]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      await port.start({
+        dispatchId: 'dispatch-structured-author',
+        runId: 'run-1',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        revision: 'revision-1',
+        allowedPaths: ['docs/GDD.md'],
+        contract: {
+          authoringMode: 'initial',
+          documentSet: 'foundation',
+          foundationDocumentPath: 'docs/GDD.md',
+          completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
+          expectedOriginalDigest: null,
+          upstreamDocumentPaths: [],
+        },
+      })
+
+      const terminal = await port.waitForTerminal?.('dispatch-structured-author')
+      expect(starts[0]?.workflowJsonSchema).toBeDefined()
+      expect(terminal).toEqual({
+        workerType: 'document-author',
+        status: 'completed',
+        writtenPaths: ['docs/GDD.md'],
+        resolvedFindingIds: [],
+      })
+      expect(JSON.stringify(terminal)).not.toContain('executiveSummary')
+      expect(await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).toContain(
+        '<!-- beegame-section:vision -->\n## Vision and Product Promise',
+      )
+      await expect(
+        readAuthoredDocumentReceipt(workspacePath, 'dispatch-structured-author'),
+      ).resolves.toMatchObject({ status: 'committed', targetPath: 'docs/GDD.md' })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('derives a non-foundation document terminal from its assigned file', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'beegame-canonical-author-'),
     )
@@ -1570,24 +1635,23 @@ describe('delivery worker session credentials', () => {
         workerType: 'document-author',
         phase: 'DOCUMENT_DRAFTING',
         revision: 'revision-1',
-        allowedPaths: ['docs/GDD.md'],
+        allowedPaths: ['docs/acceptance/gameplay-checklist.md'],
         contract: {
           authoringMode: 'initial',
-          foundationDocumentPath: 'docs/GDD.md',
-          upstreamDocumentPaths: [],
+          documentSet: 'checklist',
         },
       })
-      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await mkdir(join(workspacePath, 'docs/acceptance'), { recursive: true })
       await writeFile(
-        join(workspacePath, 'docs/GDD.md'),
-        '# Game Design\n\nCanonical rules.\n',
+        join(workspacePath, 'docs/acceptance/gameplay-checklist.md'),
+        '# Gameplay Checklist\n\n- [ ] playable-loop observable evidence\n',
       )
       await expect(
         port.waitForTerminal?.('dispatch-canonical-author'),
       ).resolves.toEqual({
         workerType: 'document-author',
         status: 'completed',
-        writtenPaths: ['docs/GDD.md'],
+        writtenPaths: ['docs/acceptance/gameplay-checklist.md'],
         resolvedFindingIds: [],
       })
     } finally {
@@ -1626,16 +1690,17 @@ describe('delivery worker session credentials', () => {
         workerType: 'document-author',
         phase: 'DOCUMENT_DRAFTING',
         revision: 'revision-1',
-        allowedPaths: ['docs/GDD.md'],
+        allowedPaths: ['docs/acceptance/gameplay-checklist.md'],
         contract: {
           authoringMode: 'initial',
-          foundationDocumentPath: 'docs/GDD.md',
-          upstreamDocumentPaths: [],
+          documentSet: 'checklist',
         },
       })
       await expect(
         port.waitForTerminal?.('dispatch-missing-author'),
-      ).rejects.toThrow('document author output is missing: docs/GDD.md')
+      ).rejects.toThrow(
+        'document author canonical output is missing: docs/acceptance/gameplay-checklist.md',
+      )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -1683,11 +1748,10 @@ describe('delivery worker session credentials', () => {
       workerType: 'document-author',
       phase: 'DOCUMENT_DRAFTING',
       revision: 'revision-1',
-      allowedPaths: ['docs/GDD.md'],
+      allowedPaths: ['docs/acceptance/gameplay-checklist.md'],
       contract: {
         authoringMode: 'initial',
-        foundationDocumentPath: 'docs/GDD.md',
-        upstreamDocumentPaths: [],
+        documentSet: 'checklist',
       },
     }
 

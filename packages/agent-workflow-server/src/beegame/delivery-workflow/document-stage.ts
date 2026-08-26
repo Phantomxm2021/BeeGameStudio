@@ -1,8 +1,8 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import {
   commitRemediatedDocumentMetadata,
-  commitAuthoredFoundationDocument,
   readAuthoredDocumentReceipt,
 } from '../authored-document-receipt'
 import { validateCompleteGameDocumentMarkdown } from '../complete-game-document'
@@ -39,6 +39,20 @@ type Dispatcher = {
 }
 
 const CHECKLIST_PATH = 'docs/acceptance/gameplay-checklist.md'
+
+function expectedDocumentDigest(
+  workspacePath: string,
+  path: FoundationDocumentPath,
+): string | null {
+  try {
+    return createHash('sha256')
+      .update(readFileSync(join(workspacePath, path)))
+      .digest('hex')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}
 
 async function defaultAudit(
   workspacePath: string,
@@ -191,6 +205,10 @@ export async function startDocumentStage(input: {
               authoringMode: 'parallel-draft',
               foundationDocumentPath: path,
               completeDocumentContract: getGameDocumentContract(path),
+              expectedOriginalDigest: expectedDocumentDigest(
+                input.workspacePath,
+                path,
+              ),
               availableUpstreamPaths: getGameDocumentContract(
                 path,
               ).upstreamSections.map(section => section.path),
@@ -243,6 +261,10 @@ export async function startDocumentStage(input: {
       authoringMode: 'initial',
       foundationDocumentPath: initialPath,
       completeDocumentContract: getGameDocumentContract(initialPath),
+      expectedOriginalDigest: expectedDocumentDigest(
+        input.workspacePath,
+        initialPath,
+      ),
       upstreamDocumentPaths: [
         ...INITIAL_FOUNDATION_UPSTREAM_PATHS[initialPath],
       ],
@@ -416,32 +438,14 @@ async function completeInitialFoundationDocumentDraft(input: {
     path.split('\\').join('/'),
   )
   const dispatchId = input.run.activeDispatch?.dispatchId
-  let commitReceipt = dispatchId
+  const commitReceipt = dispatchId
     ? await readAuthoredDocumentReceipt(input.workspacePath, dispatchId)
     : undefined
-  let authoredCommitIssue: string | undefined
-  if (!commitReceipt && dispatchId) {
-    try {
-      commitReceipt = await commitAuthoredFoundationDocument({
-        workspacePath: input.workspacePath,
-        dispatchId,
-        targetPath: expectedPath,
-      })
-    } catch (error) {
-      authoredCommitIssue =
-        error instanceof Error
-          ? error.message
-          : 'authored document validation failed'
-    }
-  }
   const hasCommittedDocument =
     commitReceipt !== undefined &&
     commitReceipt.status === 'committed' &&
     commitReceipt.targetPath === expectedPath &&
     Boolean(commitReceipt.finalDigest)
-  const canonicalizationIssues = authoredCommitIssue
-    ? [`${expectedPath}: ${authoredCommitIssue}`]
-    : []
   const metadata = readDocumentMetadata(input.workspacePath, expectedPath)
   const version = metadata ? parseSemanticVersion(metadata.version) : undefined
   const issues = [
@@ -458,7 +462,6 @@ async function completeInitialFoundationDocumentDraft(input: {
     )
       ? ['initial document author returned an unsafe document path']
       : []),
-    ...canonicalizationIssues,
     ...(!metadata ||
     !version ||
     !Number.isFinite(Date.parse(metadata.updatedAt))
@@ -580,7 +583,7 @@ async function completeParallelFoundationDraft(input: {
     ...(!receipt ||
     receipt.status !== 'committed' ||
     receipt.targetPath !== canonicalPath
-      ? [`${canonicalPath}: committed Markdown stream receipt is missing`]
+      ? [`${canonicalPath}: committed canonical document receipt is missing`]
       : []),
     ...(!exactStringSet(normalizedWrittenPaths, [canonicalPath])
       ? [`parallel document author must write exactly ${canonicalPath}`]

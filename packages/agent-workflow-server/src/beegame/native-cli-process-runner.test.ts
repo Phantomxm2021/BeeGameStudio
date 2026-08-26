@@ -12,7 +12,6 @@ const fixturePath = fileURLToPath(
 
 function startRuntime(
   options: {
-    markdownStream?: boolean
     workflowJsonSchema?: Record<string, unknown>
   } = {},
 ) {
@@ -30,17 +29,6 @@ function startRuntime(
     sessionId: 'session-1',
     cwd: process.cwd(),
     env: {},
-    ...(options.markdownStream
-      ? {
-          workflowMarkdownStreamContract: {
-            workspacePath: process.cwd(),
-            runId: 'run-1',
-            dispatchId: 'dispatch-1',
-            targetPath: 'docs/GDD.md' as const,
-            maxBytes: 512_000,
-          },
-        }
-      : {}),
     ...(options.workflowJsonSchema
       ? { workflowJsonSchema: options.workflowJsonSchema }
       : {}),
@@ -150,26 +138,6 @@ describe('native CLI process runner', () => {
     expect(
       command.some(argument => argument.startsWith('--allowedTools=')),
     ).toBe(false)
-  })
-
-  test('disables native tools only for a foundation Markdown stream turn', () => {
-    const command = nativeRuntimeCommand({
-      sessionId: 'beegame_stream_author',
-      cwd: process.cwd(),
-      env: {},
-      workflowWorker: true,
-      workflowWorkerType: 'document-author',
-      workflowMarkdownStreamContract: {
-        workspacePath: process.cwd(),
-        runId: 'run-1',
-        dispatchId: 'dispatch-1',
-        targetPath: 'docs/GDD.md',
-        maxBytes: 512_000,
-      },
-    })
-
-    expect(command).toContain('--tools')
-    expect(command[command.indexOf('--tools') + 1]).toBe('')
   })
 
   test('exposes only Read, Edit and the native terminal tool to a revision worker', () => {
@@ -342,34 +310,6 @@ describe('native CLI process runner', () => {
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).rejects.toThrow('exited without a terminal result')
-  })
-
-  test('rejects a thinking-only provider result for a Markdown stream turn', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    await expect(
-      runtime.submit({
-        prompt: 'incomplete-success',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(
-      'native model response ended without visible Markdown',
-    )
-    runtime.dispose?.()
-  })
-
-  test('accepts visible Markdown when provider stop metadata is missing', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    await expect(
-      runtime.submit({
-        prompt: 'visible-markdown-without-stop-reason',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).resolves.toBeUndefined()
-    runtime.dispose?.()
   })
 
   test('routes native permission requests through the BGS authority callback', async () => {

@@ -6,27 +6,17 @@ import { createAgentWorkflowApp } from '../app'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
-import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from './complete-game-document-fixture'
 
 const roots: string[] = []
 
 function completeFoundationDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
 ): string {
-  const contract = getGameDocumentContract(path)
-  return [
-    `# ${contract.discipline}`,
-    '',
-    ...contract.sections.flatMap(section => [
-      `<!-- beegame-section:${section.sectionId} -->`,
-      `## ${section.title}`,
-      `Accepted source authority for ${section.sectionId}.`,
-      '',
-    ]),
-    '<!-- beegame-production-materials -->',
-    '## Production Materials',
-    ...contract.productionMaterials.map(material => `- ${material}`),
-  ].join('\n')
+  return renderTestCompleteGameDocument(path, completeTestSubmission(path))
 }
 
 async function fixture() {

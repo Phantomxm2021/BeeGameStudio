@@ -56,7 +56,10 @@ import {
   commitAuthoredFoundationDocument,
 } from '../beegame/authored-document-receipt'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
-import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
+import {
+  authorPayloadFromTestSubmission,
+  renderTestCompleteGameDocument,
+} from './complete-game-document-fixture'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
   registerBeeGameAuthoredResources,
@@ -157,9 +160,7 @@ function matrixCompleteDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
 ) {
   const contract = getGameDocumentContract(path)
-  return withTestDocumentMetadata(
-    path,
-    renderTestCompleteGameDocument(path, {
+  return {
       title: contract.discipline,
       executiveSummary: 'Synthetic complete recovery authority.',
       sections: contract.sections.map(section => ({
@@ -202,25 +203,20 @@ function matrixCompleteDocument(
         risks: [],
         openDecisions: [],
       },
-    }),
-  )
+    }
 }
 
 async function commitMatrixFoundationDocument(input: {
   workspacePath: string
   dispatchId: string
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
-  body?: string
 }): Promise<void> {
-  await mkdir(join(input.workspacePath, 'docs'), { recursive: true })
-  await writeFile(
-    join(input.workspacePath, input.path),
-    input.body ?? matrixCompleteDocument(input.path),
-  )
+  const submission = matrixCompleteDocument(input.path)
   await commitAuthoredFoundationDocument({
     workspacePath: input.workspacePath,
     dispatchId: input.dispatchId,
     targetPath: input.path,
+    authoredPayload: authorPayloadFromTestSubmission(submission),
   })
 }
 

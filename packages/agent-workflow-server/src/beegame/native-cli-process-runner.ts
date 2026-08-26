@@ -64,12 +64,11 @@ export function nativeRuntimeCommand(
     ...(input.workflowJsonSchema
       ? ['--json-schema', JSON.stringify(input.workflowJsonSchema)]
       : []),
-    // StructuredOutput fact turns receive the packet as their sole input;
-    // disable the native built-in inventory while retaining --json-schema as
-    // the one terminal lane. Markdown streams keep their existing boundary.
+    // Structured-output turns receive their sole terminal lane from the
+    // service-owned schema; disable native built-in tools for those turns.
     ...(input.workflowWorkerType === 'foundation-document-reviser'
       ? ['--tools', 'Read', 'Edit', 'SubmitFoundationRevisionResult']
-      : input.workflowJsonSchema || input.workflowMarkdownStreamContract
+      : input.workflowJsonSchema
         ? ['--tools', '']
         : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
@@ -260,18 +259,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     this.activeTurn = null
     if (isErrorResult(message)) {
       const error = new Error(nativeErrorDetail(message))
-      this.observability.finishTurn({ outcome: 'error', error })
-      await this.observability.flush()
-      turn.reject(error)
-      return
-    }
-    if (
-      this.sessionInput.workflowMarkdownStreamContract &&
-      isMissingVisibleMarkdownResult(message)
-    ) {
-      const error = new Error(
-        'Bee Game Studio native model response ended without visible Markdown',
-      )
       this.observability.finishTurn({ outcome: 'error', error })
       await this.observability.flush()
       turn.reject(error)
@@ -515,12 +502,6 @@ async function* ndjsonLines(
 function isErrorResult(message: Record<string, unknown>): boolean {
   return message.is_error === true ||
     (typeof message.subtype === 'string' && message.subtype !== 'success')
-}
-
-function isMissingVisibleMarkdownResult(
-  message: Record<string, unknown>,
-): boolean {
-  return stringField(message, 'result').trim().length === 0
 }
 
 function nativeErrorDetail(message: Record<string, unknown>): string {
