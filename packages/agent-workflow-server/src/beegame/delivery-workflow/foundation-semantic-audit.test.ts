@@ -16,15 +16,15 @@ import {
 
 const expected = [
   ['SEM.gameplay_level_viability', ['GDD#core_loop', 'LEVEL#pacing_beats'], ['game.mechanics', 'level.required_entities'], '核心循环、遭遇、节奏与反制是否可玩且不互相否定', 'HIGH', 'balanced'],
-  ['SEM.progression_balance_coherence', ['GDD#progression', 'BALANCE#economy', 'BALANCE#progression_curves'], ['game.resources', 'balance.variable_ids'], '进度、资源流与成长曲线是否形成可闭合体验', 'HIGH', 'balanced'],
-  ['SEM.state_runtime_recovery', ['GDD#states_flow', 'TECHNICAL#runtime_state', 'TECHNICAL#save_load'], ['game.states'], '状态、失败恢复与持久化语义是否可实现且一致', 'HIGH', 'balanced'],
-  ['SEM.platform_performance_feasibility', ['TECHNICAL#performance', 'TECHNICAL#risks', 'LEVEL#production_acceptance'], ['game.platform', 'technical.target_fps', 'level.complexity_budget'], '目标平台、关卡复杂度与性能预算是否现实', 'HIGH', 'balanced'],
-  ['SEM.interaction_ui_coherence', ['GDD#player_actions', 'UI#input', 'UI#feedback_errors'], ['game.mechanics', 'ui.supported_actions'], '玩家动作、输入、反馈与错误恢复是否连贯', 'HIGH', 'balanced'],
-  ['SEM.camera_visual_readability', ['LEVEL#camera_readability', 'ART#composition_readability', 'ART#camera_presentation'], ['art.style_constraints'], '镜头、构图、对比与玩法可读性是否一致', 'MEDIUM', 'fast'],
-  ['SEM.content_asset_feasibility', ['ART#asset_specifications', 'ASSET#formats_budgets', 'ART#visual_pillars', 'ASSET#dependencies'], ['level.required_assets', 'asset.inventory_ids', 'asset.art_constraint_refs', 'asset.formats'], '内容需求、资产质量与交付预算是否可执行', 'HIGH', 'balanced'],
-  ['SEM.audio_state_feedback', ['GDD#states_flow', 'AUDIO#event_taxonomy', 'AUDIO#music'], ['game.states', 'audio.event_ids'], '关键状态、事件与音频反馈是否覆盖且不冲突', 'MEDIUM', 'fast'],
-  ['SEM.multimodal_accessibility', ['GDD#accessibility_localization', 'UI#accessibility', 'ART#color_lighting', 'AUDIO#ui_feedback'], [], '视觉、输入与非视觉替代是否共同满足可访问性', 'HIGH', 'balanced'],
-  ['SEM.completion_recovery_coherence', ['GDD#states_flow', 'GDD#challenge_recovery', 'LEVEL#objectives_routes', 'LEVEL#spawn_checkpoint'], ['game.states', 'game.win_conditions', 'game.loss_conditions'], '胜负、目标、失败、检查点与重试是否形成闭环', 'HIGH', 'balanced'],
+  ['SEM.progression_balance_coherence', ['GDD#progression', 'LEVEL#content_matrix', 'BALANCE#executive_summary', 'BALANCE#units_variables', 'BALANCE#entity_parameters', 'BALANCE#formulas', 'BALANCE#economy', 'BALANCE#progression_curves', 'BALANCE#challenge_model', 'BALANCE#rewards_value', 'BALANCE#bounds_exploits', 'BALANCE#tuning_validation', 'BALANCE#material.variable-parameter-table', 'BALANCE#material.formula-boundary-table', 'BALANCE#material.economy-flow-diagram', 'BALANCE#material.tuning-validation-matrix'], ['game.resources', 'balance.variable_ids'], '逐波数量、公式、经济、摘要与派生表是否可重算并形成一致的进度与成长体验', 'HIGH', 'balanced'],
+  ['SEM.state_runtime_recovery', ['GDD#states_flow', 'TECHNICAL#runtime_state', 'TECHNICAL#save_load', 'GDD#material.game-state-flow', 'UI#screen_inventory', 'UI#feedback_errors'], ['game.states'], '状态、失败恢复、持久化与重开确认是否在运行时、界面和派生状态流中一致', 'HIGH', 'balanced'],
+  ['SEM.platform_performance_feasibility', ['TECHNICAL#performance', 'TECHNICAL#risks', 'TECHNICAL#executive_summary', 'LEVEL#production_acceptance'], ['game.platform', 'technical.target_fps', 'level.complexity_budget'], '目标平台、关卡复杂度与性能预算是否现实，且不得把已有上游 authority 描述为 unavailable', 'HIGH', 'balanced'],
+  ['SEM.interaction_ui_coherence', ['GDD#player_actions', 'UI#input', 'UI#feedback_errors', 'UI#experience_architecture', 'UI#player_journeys', 'UI#prototype_acceptance'], ['game.mechanics', 'ui.supported_actions'], '玩家动作、滚动与交互路径、输入、反馈和错误恢复是否在架构、流程与验收中连贯', 'HIGH', 'balanced'],
+  ['SEM.camera_visual_readability', ['LEVEL#camera_readability', 'LEVEL#world_structure', 'LEVEL#objectives_routes', 'ART#composition_readability', 'ART#camera_presentation', 'ART#color_lighting', 'UI#experience_architecture', 'UI#hud', 'UI#prototype_acceptance', 'UI#material.wireframe-board', 'ART#material.visual-pillar-board', 'ART#material.palette-board', 'ART#material.silhouette-scale-board'], ['art.style_constraints'], '坐标、路径与格位可计算，viewport、安全区、断点、区域和 overlay 几何在 Level、UI 与 Art 布局之间一致且可读', 'MEDIUM', 'fast'],
+  ['SEM.content_asset_feasibility', ['ART#animation', 'ART#vfx', 'ART#asset_specifications', 'ASSET#executive_summary', 'ASSET#inventory', 'ASSET#dependencies', 'ASSET#formats_budgets', 'ASSET#validation', 'ASSET#material.asset-inventory-table', 'ASSET#material.milestone-maturity-table'], ['level.required_assets', 'asset.inventory_ids', 'asset.art_constraint_refs', 'asset.formats'], '资产类型与实例、帧数/图元/物理文件和预算总计可重算且与上游一致，不得保留 stale unavailable 假设', 'HIGH', 'balanced'],
+  ['SEM.audio_state_feedback', ['GDD#states_flow', 'AUDIO#event_taxonomy', 'AUDIO#music', 'AUDIO#production', 'AUDIO#executive_summary', 'AUDIO#material.event-cue-matrix', 'AUDIO#material.music-state-diagram', 'AUDIO#material.bus-ducking-diagram'], ['game.states', 'audio.event_ids'], 'PAUSED、失焦、静音及其他关键状态在音频正文、摘要、事件/音乐/总线派生视图中行为一致，并拒绝 stale unavailable 上游假设', 'MEDIUM', 'fast'],
+  ['SEM.multimodal_accessibility', ['GDD#accessibility_localization', 'UI#accessibility', 'ART#color_lighting', 'AUDIO#ui_feedback', 'UI#material.focus-accessibility-matrix', 'ART#material.palette-board', 'ART#material.silhouette-scale-board'], [], '视觉、输入、焦点与非视觉替代在正文及派生可访问性视图中共同满足可访问性', 'HIGH', 'balanced'],
+  ['SEM.completion_recovery_coherence', ['GDD#states_flow', 'GDD#challenge_recovery', 'LEVEL#objectives_routes', 'LEVEL#spawn_checkpoint', 'GDD#material.game-state-flow', 'UI#player_journeys', 'UI#screen_inventory', 'UI#feedback_errors'], ['game.states', 'game.win_conditions', 'game.loss_conditions'], '胜负、目标、失败、检查点、重试与重开确认在状态流、玩家旅程、界面状态和反馈中形成闭环', 'HIGH', 'balanced'],
 ] as const
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -69,20 +69,50 @@ describe('foundation semantic audit authority', () => {
     const refs = [
       ref('docs/TECHNICAL_DESIGN.md', 'performance'),
       ref('docs/TECHNICAL_DESIGN.md', 'risks'),
+      ref('docs/TECHNICAL_DESIGN.md', 'executive_summary'),
       ref('docs/LEVEL_SCENE_DESIGN.md', 'production_acceptance'),
+      ref('docs/ART_DIRECTION.md', 'animation'),
+      ref('docs/ART_DIRECTION.md', 'vfx'),
       ref('docs/ART_DIRECTION.md', 'asset_specifications'),
+      ref('docs/ASSET_PLAN.md', 'executive_summary'),
+      ref('docs/ASSET_PLAN.md', 'inventory'),
       ref('docs/ASSET_PLAN.md', 'formats_budgets'),
-      ref('docs/ART_DIRECTION.md', 'visual_pillars'),
       ref('docs/ASSET_PLAN.md', 'dependencies'),
+      ref('docs/ASSET_PLAN.md', 'validation'),
+      ref('docs/ASSET_PLAN.md', 'material.asset-inventory-table'),
+      ref('docs/ASSET_PLAN.md', 'material.milestone-maturity-table'),
     ]
     const sectionBytes = new Map(refs.map(item => [`${item.documentPath}#${item.sectionId}`, `${item.sectionId} bytes`]))
     const base = { revision: 'rev-1', sectionIndex: refs, sectionBytes, factStore: [], deterministicIssuePrefix: [], deterministicReviewDigest: 'd'.repeat(64) }
     expect(buildFoundationSemanticPacket({ ...base, checkId: 'SEM.platform_performance_feasibility' }).sections.map(item => item.sectionKey)).toEqual([
-      'TECHNICAL#performance', 'TECHNICAL#risks', 'LEVEL#production_acceptance',
+      'TECHNICAL#performance', 'TECHNICAL#risks', 'TECHNICAL#executive_summary', 'LEVEL#production_acceptance',
     ])
     expect(buildFoundationSemanticPacket({ ...base, checkId: 'SEM.content_asset_feasibility' }).sections.map(item => item.sectionKey)).toEqual([
-      'ART#asset_specifications', 'ASSET#formats_budgets', 'ART#visual_pillars', 'ASSET#dependencies',
+      'ART#animation', 'ART#vfx', 'ART#asset_specifications', 'ASSET#executive_summary', 'ASSET#inventory', 'ASSET#dependencies', 'ASSET#formats_budgets', 'ASSET#validation', 'ASSET#material.asset-inventory-table', 'ASSET#material.milestone-maturity-table',
     ])
+  })
+
+  test('selects declared derived blocks while excluding unrelated summaries and materials', () => {
+    const refs = [
+      ref('docs/GDD.md', 'progression'),
+      ref('docs/LEVEL_SCENE_DESIGN.md', 'content_matrix'),
+      ref('docs/BALANCE_DESIGN.md', 'executive_summary'),
+      ...['units_variables', 'entity_parameters', 'formulas', 'economy', 'progression_curves', 'challenge_model', 'rewards_value', 'bounds_exploits', 'tuning_validation'].map(sectionId => ref('docs/BALANCE_DESIGN.md', sectionId)),
+      ...['variable-parameter-table', 'formula-boundary-table', 'economy-flow-diagram', 'tuning-validation-matrix'].map(materialId => ref('docs/BALANCE_DESIGN.md', `material.${materialId}`)),
+      ref('docs/BALANCE_DESIGN.md', 'material.unrelated'),
+    ]
+    const sectionBytes = new Map(refs.map(item => [`${item.documentPath}#${item.sectionId}`, `${item.sectionId} bytes`]))
+    const packet = buildFoundationSemanticPacket({
+      revision: 'rev-1',
+      checkId: 'SEM.progression_balance_coherence',
+      sectionIndex: refs,
+      sectionBytes,
+      factStore: [],
+      deterministicIssuePrefix: [],
+      deterministicReviewDigest: 'd'.repeat(64),
+    })
+    expect(packet.sections.map(item => item.sectionKey)).toEqual([...expected[1]![1]])
+    expect(packet.sections.map(item => item.sectionKey)).not.toContain('BALANCE#material.unrelated')
   })
 
   test('accepts only an identical service manifest and rejects objective, digest, order, or any declaration mutation', () => {

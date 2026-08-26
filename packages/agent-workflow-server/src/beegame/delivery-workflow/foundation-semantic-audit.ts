@@ -11,7 +11,7 @@ import {
   digestFactStore,
   type FoundationFact,
 } from './foundation-fact-store'
-import { digestSectionIndex, type SectionRef } from './foundation-section-index'
+import { canonicalFoundationBlockIds, digestSectionIndex, type SectionRef } from './foundation-section-index'
 import type { AuditIssue, AuditIssueDraft } from './foundation-issue-registry'
 import type { FoundationDocumentPath } from './types'
 
@@ -77,15 +77,15 @@ const check = (
 /** The only semantic authority. This is intentionally exactly ten checks. */
 export const FOUNDATION_SEMANTIC_CHECKS = Object.freeze([
   check('SEM.gameplay_level_viability', [section('GDD', 'core_loop'), section('LEVEL', 'pacing_beats')], ['game.mechanics', 'level.required_entities'], '核心循环、遭遇、节奏与反制是否可玩且不互相否定', 'HIGH', 'balanced'),
-  check('SEM.progression_balance_coherence', [section('GDD', 'progression'), section('BALANCE', 'economy'), section('BALANCE', 'progression_curves')], ['game.resources', 'balance.variable_ids'], '进度、资源流与成长曲线是否形成可闭合体验', 'HIGH', 'balanced'),
-  check('SEM.state_runtime_recovery', [section('GDD', 'states_flow'), section('TECHNICAL', 'runtime_state'), section('TECHNICAL', 'save_load')], ['game.states'], '状态、失败恢复与持久化语义是否可实现且一致', 'HIGH', 'balanced'),
-  check('SEM.platform_performance_feasibility', [section('TECHNICAL', 'performance'), section('TECHNICAL', 'risks'), section('LEVEL', 'production_acceptance')], ['game.platform', 'technical.target_fps', 'level.complexity_budget'], '目标平台、关卡复杂度与性能预算是否现实', 'HIGH', 'balanced'),
-  check('SEM.interaction_ui_coherence', [section('GDD', 'player_actions'), section('UI', 'input'), section('UI', 'feedback_errors')], ['game.mechanics', 'ui.supported_actions'], '玩家动作、输入、反馈与错误恢复是否连贯', 'HIGH', 'balanced'),
-  check('SEM.camera_visual_readability', [section('LEVEL', 'camera_readability'), section('ART', 'composition_readability'), section('ART', 'camera_presentation')], ['art.style_constraints'], '镜头、构图、对比与玩法可读性是否一致', 'MEDIUM', 'fast'),
-  check('SEM.content_asset_feasibility', [section('ART', 'asset_specifications'), section('ASSET', 'formats_budgets'), section('ART', 'visual_pillars'), section('ASSET', 'dependencies')], ['level.required_assets', 'asset.inventory_ids', 'asset.art_constraint_refs', 'asset.formats'], '内容需求、资产质量与交付预算是否可执行', 'HIGH', 'balanced'),
-  check('SEM.audio_state_feedback', [section('GDD', 'states_flow'), section('AUDIO', 'event_taxonomy'), section('AUDIO', 'music')], ['game.states', 'audio.event_ids'], '关键状态、事件与音频反馈是否覆盖且不冲突', 'MEDIUM', 'fast'),
-  check('SEM.multimodal_accessibility', [section('GDD', 'accessibility_localization'), section('UI', 'accessibility'), section('ART', 'color_lighting'), section('AUDIO', 'ui_feedback')], [], '视觉、输入与非视觉替代是否共同满足可访问性', 'HIGH', 'balanced'),
-  check('SEM.completion_recovery_coherence', [section('GDD', 'states_flow'), section('GDD', 'challenge_recovery'), section('LEVEL', 'objectives_routes'), section('LEVEL', 'spawn_checkpoint')], ['game.states', 'game.win_conditions', 'game.loss_conditions'], '胜负、目标、失败、检查点与重试是否形成闭环', 'HIGH', 'balanced'),
+  check('SEM.progression_balance_coherence', [section('GDD', 'progression'), section('LEVEL', 'content_matrix'), section('BALANCE', 'executive_summary'), section('BALANCE', 'units_variables'), section('BALANCE', 'entity_parameters'), section('BALANCE', 'formulas'), section('BALANCE', 'economy'), section('BALANCE', 'progression_curves'), section('BALANCE', 'challenge_model'), section('BALANCE', 'rewards_value'), section('BALANCE', 'bounds_exploits'), section('BALANCE', 'tuning_validation'), section('BALANCE', 'material.variable-parameter-table'), section('BALANCE', 'material.formula-boundary-table'), section('BALANCE', 'material.economy-flow-diagram'), section('BALANCE', 'material.tuning-validation-matrix')], ['game.resources', 'balance.variable_ids'], '逐波数量、公式、经济、摘要与派生表是否可重算并形成一致的进度与成长体验', 'HIGH', 'balanced'),
+  check('SEM.state_runtime_recovery', [section('GDD', 'states_flow'), section('TECHNICAL', 'runtime_state'), section('TECHNICAL', 'save_load'), section('GDD', 'material.game-state-flow'), section('UI', 'screen_inventory'), section('UI', 'feedback_errors')], ['game.states'], '状态、失败恢复、持久化与重开确认是否在运行时、界面和派生状态流中一致', 'HIGH', 'balanced'),
+  check('SEM.platform_performance_feasibility', [section('TECHNICAL', 'performance'), section('TECHNICAL', 'risks'), section('TECHNICAL', 'executive_summary'), section('LEVEL', 'production_acceptance')], ['game.platform', 'technical.target_fps', 'level.complexity_budget'], '目标平台、关卡复杂度与性能预算是否现实，且不得把已有上游 authority 描述为 unavailable', 'HIGH', 'balanced'),
+  check('SEM.interaction_ui_coherence', [section('GDD', 'player_actions'), section('UI', 'input'), section('UI', 'feedback_errors'), section('UI', 'experience_architecture'), section('UI', 'player_journeys'), section('UI', 'prototype_acceptance')], ['game.mechanics', 'ui.supported_actions'], '玩家动作、滚动与交互路径、输入、反馈和错误恢复是否在架构、流程与验收中连贯', 'HIGH', 'balanced'),
+  check('SEM.camera_visual_readability', [section('LEVEL', 'camera_readability'), section('LEVEL', 'world_structure'), section('LEVEL', 'objectives_routes'), section('ART', 'composition_readability'), section('ART', 'camera_presentation'), section('ART', 'color_lighting'), section('UI', 'experience_architecture'), section('UI', 'hud'), section('UI', 'prototype_acceptance'), section('UI', 'material.wireframe-board'), section('ART', 'material.visual-pillar-board'), section('ART', 'material.palette-board'), section('ART', 'material.silhouette-scale-board')], ['art.style_constraints'], '坐标、路径与格位可计算，viewport、安全区、断点、区域和 overlay 几何在 Level、UI 与 Art 布局之间一致且可读', 'MEDIUM', 'fast'),
+  check('SEM.content_asset_feasibility', [section('ART', 'animation'), section('ART', 'vfx'), section('ART', 'asset_specifications'), section('ASSET', 'executive_summary'), section('ASSET', 'inventory'), section('ASSET', 'dependencies'), section('ASSET', 'formats_budgets'), section('ASSET', 'validation'), section('ASSET', 'material.asset-inventory-table'), section('ASSET', 'material.milestone-maturity-table')], ['level.required_assets', 'asset.inventory_ids', 'asset.art_constraint_refs', 'asset.formats'], '资产类型与实例、帧数/图元/物理文件和预算总计可重算且与上游一致，不得保留 stale unavailable 假设', 'HIGH', 'balanced'),
+  check('SEM.audio_state_feedback', [section('GDD', 'states_flow'), section('AUDIO', 'event_taxonomy'), section('AUDIO', 'music'), section('AUDIO', 'production'), section('AUDIO', 'executive_summary'), section('AUDIO', 'material.event-cue-matrix'), section('AUDIO', 'material.music-state-diagram'), section('AUDIO', 'material.bus-ducking-diagram')], ['game.states', 'audio.event_ids'], 'PAUSED、失焦、静音及其他关键状态在音频正文、摘要、事件/音乐/总线派生视图中行为一致，并拒绝 stale unavailable 上游假设', 'MEDIUM', 'fast'),
+  check('SEM.multimodal_accessibility', [section('GDD', 'accessibility_localization'), section('UI', 'accessibility'), section('ART', 'color_lighting'), section('AUDIO', 'ui_feedback'), section('UI', 'material.focus-accessibility-matrix'), section('ART', 'material.palette-board'), section('ART', 'material.silhouette-scale-board')], [], '视觉、输入、焦点与非视觉替代在正文及派生可访问性视图中共同满足可访问性', 'HIGH', 'balanced'),
+  check('SEM.completion_recovery_coherence', [section('GDD', 'states_flow'), section('GDD', 'challenge_recovery'), section('LEVEL', 'objectives_routes'), section('LEVEL', 'spawn_checkpoint'), section('GDD', 'material.game-state-flow'), section('UI', 'player_journeys'), section('UI', 'screen_inventory'), section('UI', 'feedback_errors')], ['game.states', 'game.win_conditions', 'game.loss_conditions'], '胜负、目标、失败、检查点、重试与重开确认在状态流、玩家旅程、界面状态和反馈中形成闭环', 'HIGH', 'balanced'),
 ] as const)
 
 export type FoundationSemanticManifest = Readonly<{
@@ -154,10 +154,9 @@ function validateDeclaration(checkValue: FoundationSemanticCheck, index: number)
   for (const rawItem of checkValue.sections) {
     const item = rawItem as FoundationSemanticSection
     const path = documentPathById[item.documentId]
-    let contract: ReturnType<typeof getGameDocumentContract>
-    try { contract = getGameDocumentContract(path) } catch { throw new Error(`semantic check section is not immutable: ${sectionKey(item)}`) }
-    if (!contract.sections.some(candidate => candidate.sectionId === item.sectionId))
-      throw new Error(`semantic check section is not in immutable contract: ${sectionKey(item)}`)
+    try { getGameDocumentContract(path) } catch { throw new Error(`semantic check block is not canonical: ${sectionKey(item)}`) }
+    if (!canonicalFoundationBlockIds(path).includes(item.sectionId))
+      throw new Error(`semantic check block is not a canonical block: ${sectionKey(item)}`)
   }
   for (const key of checkValue.factKeys) {
     if (!foundationFactDefinition(key)) throw new Error(`semantic check fact is not in closed catalog: ${key}`)
