@@ -5,6 +5,7 @@ import type { FoundationDocumentPath } from './delivery-workflow/types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
 import {
   canonicalFoundationAuthorityProjectionBytes,
+  modelFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
 } from './foundation-authority-projection'
 
@@ -229,5 +230,30 @@ describe('foundation authority projection', () => {
         ),
       ),
     ).toBe(true)
+  })
+
+  test('keeps transport verification metadata out of the model-facing projection', () => {
+    const result = projectFoundationAuthority({
+      targetPath: 'docs/UI_UX_SPEC.md',
+      ...sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']),
+    })
+    const modelBytes = modelFoundationAuthorityProjectionBytes(result)
+    const model = JSON.parse(modelBytes) as Record<string, unknown>
+
+    expect(model.targetPath).toBe('docs/UI_UX_SPEC.md')
+    expect(model).not.toHaveProperty('byteLength')
+    expect(model).not.toHaveProperty('rangeCount')
+    expect(model).not.toHaveProperty('projectedLineCount')
+    for (const source of model.sources as Array<Record<string, unknown>>) {
+      expect(source).not.toHaveProperty('digest')
+      for (const section of source.sections as Array<Record<string, unknown>>) {
+        expect(section).toHaveProperty('sectionId')
+        expect(section).toHaveProperty('content')
+        expect(section).not.toHaveProperty('startLine')
+        expect(section).not.toHaveProperty('lineCount')
+        expect(section).not.toHaveProperty('digest')
+      }
+    }
+    expect(modelBytes).toContain('Owned source content for')
   })
 })

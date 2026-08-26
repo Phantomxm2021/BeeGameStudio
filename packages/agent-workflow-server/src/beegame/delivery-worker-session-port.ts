@@ -56,6 +56,7 @@ import {
 import type { FoundationFactPacket } from './delivery-workflow/foundation-fact-extraction'
 import {
   canonicalFoundationAuthorityProjectionBytes,
+  modelFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
   type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
@@ -214,7 +215,7 @@ export async function buildDocumentAuthorAuthorityBlock(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
     return [
-      `The workflow service projected the approved Foundation documents below. Author only the observable gameplay checklist derived from this authority, write it directly at ${targetPath}, and end the turn normally.`,
+      `The workflow service projected the approved Foundation documents below. Use this authority to complete the assigned checklist at ${targetPath}, then end the turn normally.`,
       ...(existingTarget
         ? [
             `--- BEGIN CANONICAL CHECKLIST BASELINE: ${targetPath} ---\n${existingTarget}\n--- END CANONICAL CHECKLIST BASELINE: ${targetPath} ---`,
@@ -303,7 +304,7 @@ export async function buildDocumentAuthorAuthorityBlock(
       ? [
           'BGS projected the complete selected upstream authority below without summarization or rewriting. Use it as the upstream authority for this assignment.',
           `--- BEGIN FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
-          canonicalFoundationAuthorityProjectionBytes(projection).trimEnd(),
+          modelFoundationAuthorityProjectionBytes(projection).trimEnd(),
           `--- END FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
         ].join('\n')
       : undefined,

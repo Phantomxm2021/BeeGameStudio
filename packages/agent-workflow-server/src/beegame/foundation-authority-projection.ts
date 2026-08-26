@@ -41,6 +41,26 @@ export function canonicalFoundationAuthorityProjectionBytes(
   return `${JSON.stringify(projectionPayload(projection), null, 2)}\n`
 }
 
+/**
+ * The model needs the selected authority text and its stable semantic labels,
+ * not the line/digest/size bookkeeping used to validate the durable artifact.
+ */
+export function modelFoundationAuthorityProjectionBytes(
+  projection: FoundationAuthorityProjection,
+): string {
+  return `${JSON.stringify({
+    targetPath: projection.targetPath,
+    targetSectionIds: projection.targetSectionIds,
+    sources: projection.sources.map(source => ({
+      path: source.path,
+      sections: source.sections.map(section => ({
+        sectionId: section.sectionId,
+        content: section.content,
+      })),
+    })),
+  }, null, 2)}\n`
+}
+
 export function projectFoundationAuthority(input: {
   targetPath: FoundationDocumentPath
   targetSectionIds?: readonly string[]

@@ -306,7 +306,7 @@ describe('worker prompts', () => {
             revision: 'revision',
             keys: workerType === 'foundation-fact-extractor'
               ? ['asset.covered_level_requirements']
-              : ['GDD.player_loop'],
+              : [],
             sections: [],
             packetDigest: 'a'.repeat(64),
           },
@@ -322,14 +322,14 @@ describe('worker prompts', () => {
       expect(prompt).not.toContain('Canonical artifacts: sentinel')
       expect(prompt).not.toContain('native tools, reasoning')
       expect(prompt).toContain('packet is the sole input')
-      expect(prompt).toContain('Immutable packet contract')
+      expect(prompt).toContain('Model packet contract')
       expect(countOccurrences(prompt, 'The packet is the sole input')).toBe(1)
       expect(countOccurrences(prompt, 'Do not read project files')).toBe(1)
       expect(countOccurrences(prompt, 'Return only the strict structured result')).toBe(1)
       expect(prompt).toContain('"workerType":"' + workerType + '"')
-      expect(prompt).toContain('"taskId":"task"')
-      expect(prompt).toContain('"revision":"revision"')
-      expect(prompt).toContain(`"packetDigest":"${'a'.repeat(64)}"`)
+      expect(prompt).not.toContain('"taskId":"task"')
+      expect(prompt).not.toContain('"revision":"revision"')
+      expect(prompt).not.toContain(`"packetDigest":"${'a'.repeat(64)}"`)
       if (workerType === 'foundation-fact-extractor') {
         expect(prompt).toContain('asset.covered_level_requirements')
         expect(prompt).toContain('present requires key, status, and value; omit evidence and reason')
@@ -341,7 +341,6 @@ describe('worker prompts', () => {
         expect(countOccurrences(prompt, 'service binds immutable provenance')).toBe(1)
         expect(countOccurrences(prompt, 'Do not call project tools')).toBe(0)
       } else {
-        expect(prompt).toContain('GDD.player_loop')
         expect(prompt).toContain('PASS omits issues and reason')
         expect(prompt).toContain('ISSUES includes a non-empty issues array and omits reason')
         expect(prompt).toContain('UNDECIDABLE includes reason and omits issues')
@@ -385,10 +384,10 @@ describe('worker prompts', () => {
     expect(prompt).toContain('Do not expand scope')
     expect(prompt).toContain('second audit track')
     expect(prompt).toContain('"kind":"confirmation"')
-    expect(prompt).toContain('"sourceTaskId":"semantic-task"')
+    expect(prompt).not.toContain('sourceTaskId')
   })
 
-  test('keeps one worker title and retains identity only in the packet JSON', () => {
+  test('keeps one worker title without service identity metadata', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -411,9 +410,9 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('\nRevision: revision')
     expect(prompt).not.toContain('\nTask: task')
     expect(prompt).not.toContain('\nPacket digest: ')
-    expect(prompt).toContain('"taskId":"task"')
-    expect(prompt).toContain('"revision":"revision"')
-    expect(prompt).toContain(`"packetDigest":"${'a'.repeat(64)}"`)
+    expect(prompt).not.toContain('"taskId":"task"')
+    expect(prompt).not.toContain('"revision":"revision"')
+    expect(prompt).not.toContain(`"packetDigest":"${'a'.repeat(64)}"`)
   })
 
   test('states the canonical semantic remediation union without the removed question track', () => {
@@ -470,7 +469,8 @@ describe('worker prompts', () => {
           issueId: 'AUD-1',
           expected: 'Boot transitions to MainMenu.',
           actual: 'The transition is absent.',
-          sections: [],
+          sections: [{ ref: { documentPath: 'docs/GDD.md', sectionId: 'states_flow', heading: 'States', startLine: 1, endLine: 3, digest: 'b'.repeat(64) }, text: 'STATE_SECTION_SENTINEL' }],
+          patchOperation: { kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'states_flow', beforeDigest: 'c'.repeat(64), afterDigest: 'd'.repeat(64) },
         },
         modelTier: 'strong',
       },
@@ -479,6 +479,12 @@ describe('worker prompts', () => {
     expect(prompt).toContain('Recheck only the admitted Issue')
     expect(prompt).toContain('PASS or FAIL')
     expect(prompt).toContain('FAIL requires one structured diagnostic')
+    expect(prompt).toContain('Boot transitions to MainMenu.')
+    expect(prompt).toContain('The transition is absent.')
+    expect(prompt).toContain('STATE_SECTION_SENTINEL')
+    expect(prompt).toContain('"kind":"REPLACE"')
+    expect(prompt).not.toContain('beforeDigest')
+    expect(prompt).not.toContain('afterDigest')
     expect(prompt).not.toContain('ISSUES includes')
     expect(prompt).not.toContain('Semantic Issue remediation')
   })
@@ -505,7 +511,10 @@ describe('worker prompts', () => {
         packet: {
           taskId: 'task',
           documentPath: 'docs/GDD.md',
-          sections: [{ sectionId: 'section-1', content: 'IMMUTABLE_PACKET_SENTINEL' }],
+          issueIds: ['issue-1'],
+          sectionIds: ['section-1'],
+          issues: [{ id: 'issue-1', severity: 'HIGH', type: 'semantic', source: { documentPath: 'docs/GDD.md', sectionId: 'section-1', heading: 'Section', startLine: 1, endLine: 2, digest: 'b'.repeat(64) }, expected: 'expected condition', actual: 'actual condition', remediation: { kind: 'patch', documentPath: 'docs/GDD.md', sectionIds: ['section-1'] } }],
+          sections: [{ documentPath: 'docs/GDD.md', sectionId: 'section-1', heading: 'Section', startLine: 1, endLine: 2, digest: 'b'.repeat(64), text: 'IMMUTABLE_PACKET_SENTINEL' }],
           factConstraints: [{
             key: 'asset.covered_level_requirements',
             owner: { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' },
@@ -521,6 +530,10 @@ describe('worker prompts', () => {
       },
     })
     expect(prompt).toContain('IMMUTABLE_PACKET_SENTINEL')
+    expect(prompt).toContain('issue-1')
+    expect(prompt).toContain('expected condition')
+    expect(prompt).toContain('actual condition')
+    expect(prompt).toContain('"sectionIds":["section-1"]')
     expect(prompt).toContain('packet sectionIds are the complete write authority')
     expect(prompt).toContain('related, risk, consistency, dependency, and production-material sections')
     expect(prompt).toContain('Automatic retry after the previous strict validation failure: revision changed an unauthorized section')
@@ -533,6 +546,53 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('CANONICAL_ARTIFACT_SENTINEL')
     expect(prompt).not.toContain('Workspace root:')
     expect(prompt).not.toContain('Canonical artifacts:')
+    expect(prompt).not.toContain('"baseDocumentDigest"')
+    expect(prompt).not.toContain('"immutableDigests"')
+    expect(prompt).not.toContain('"startLine"')
+    expect(prompt).not.toContain('"endLine"')
+    expect(prompt).not.toContain('"digest"')
+  })
+
+  test('projects packet workers to business evidence instead of service metadata', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', revision: 'revision', allowedPaths: [],
+      contract: {
+        workerType: 'foundation-semantic-reviewer', taskId: 'task', revision: 'revision', packetDigest: 'a'.repeat(64), modelTier: 'balanced',
+        packet: {
+          revision: 'revision', checkId: 'SEM.test', manifestDigest: 'b'.repeat(64), fullSectionIndexDigest: 'c'.repeat(64), fullFactStoreDigest: 'd'.repeat(64), deterministicReviewDigest: 'e'.repeat(64), selectedDeterministicPrefixDigest: 'f'.repeat(64), identity: 'g'.repeat(64), bytes: 999, context: { fresh: true, resume: false, sessionId: null },
+          sections: [{ sectionKey: 'GDD#loop', ref: { documentPath: 'docs/GDD.md', sectionId: 'loop', startLine: 3, endLine: 8, digest: 'h'.repeat(64) }, bytes: 'FULL_SECTION_SENTINEL' }],
+          facts: [{ key: 'game.loop', value: 'loop', source: { documentPath: 'docs/GDD.md', sectionId: 'loop', startLine: 3, endLine: 8, digest: 'i'.repeat(64) }, evidence: { documentPath: 'docs/GDD.md', sectionId: 'loop', startLine: 4, endLine: 4, digest: 'j'.repeat(64) } }],
+          deterministicIssuePrefix: [],
+        },
+      },
+    })
+
+    expect(prompt).toContain('FULL_SECTION_SENTINEL')
+    expect(prompt).toContain('"checkId":"SEM.test"')
+    for (const marker of ['manifestDigest', 'fullSectionIndexDigest', 'fullFactStoreDigest', 'deterministicReviewDigest', 'selectedDeterministicPrefixDigest', 'identity', 'bytes', '"context"', 'startLine', 'endLine', 'digest', 'packetDigest'])
+      expect(prompt).not.toContain(marker)
+    expect(prompt).toContain('"documentPath":"docs/GDD.md"')
+    expect(prompt).toContain('"sectionId":"loop"')
+  })
+
+  test('fails closed when packet evidence cannot be projected', () => {
+    expect(() => buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', revision: 'revision', allowedPaths: [],
+      contract: {
+        packet: { sections: [{ sectionKey: 'GDD#loop', bytes: 'missing-ref' }], facts: [], deterministicIssuePrefix: [] },
+      },
+    })).toThrow(/model-facing semantic section item 0 is invalid/)
+
+    expect(() => buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', revision: 'revision', allowedPaths: ['docs/GDD.md'],
+      contract: {
+        stagedPath: 'docs/GDD.md',
+        packet: { documentPath: 'docs/GDD.md', sectionIds: ['loop'], issues: [{ id: 'issue', expected: 'e', actual: 'a' }], sections: [], normalizedFacts: [] },
+      },
+    })).toThrow(/model-facing revision issue item 0 is invalid/)
   })
 
   test('passes shared resource label rules to fact workers', () => {

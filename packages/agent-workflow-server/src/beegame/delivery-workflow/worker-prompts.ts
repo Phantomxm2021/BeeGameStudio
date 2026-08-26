@@ -121,7 +121,7 @@ function buildFoundationRevisionWorkerPrompt(
     ? request.contract.priorFailureReason
     : undefined
   return [
-    `Immutable revision packet: ${JSON.stringify(packet)}`,
+    `Revision evidence: ${JSON.stringify(projectRevisionPacketForModel(packet as Record<string, unknown>))}`,
     `Assigned staged path: ${absoluteStagedPath}`,
     'The packet sectionIds are the complete write authority: only those sections may change. Every other section—including related, risk, consistency, dependency, and production-material sections—must remain byte-identical; do not edit them to keep prose synchronized. Read and edit only the assigned staged path. Unmarked Production Materials and audit appendices are outside the packet authority; do not edit them even when they appear related to an admitted Issue. Make every admitted Issue expected true and remove its actual. For fact/schema repairs, packet.factConstraints is binding authority: satisfy its extractionInstruction and sourceOfTruthDirection. If an extractionInstruction requires an explicit mapping table or other semantic structure, do not substitute a standalone fact declaration, formatting-only change, alias, compatibility prose, risk registration, wording qualification, or downstream reinterpretation. Call SubmitFoundationRevisionResult exactly once with status APPLIED and only the exact changedSectionIds; the service injects task, round, document, Issue and base-authority identity. Do not return terminal JSON or prose completion text.',
     ...(priorFailureReason
@@ -139,25 +139,158 @@ function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
     'Return only the strict structured result for the assigned packet; do not return Markdown, prose explanations, or additional fields.',
     workerInstruction(request),
     terminalInstruction(request),
-    `Immutable packet contract: ${contract}`,
+    `Model packet contract: ${contract}`,
   ].join('\n')
 }
 
 function formatPacketContract(request: WorkerDispatchRequest): string {
-  const allowedKeys = [
-    'workerType',
-    'taskId',
-    'revision',
-    'packetDigest',
-    'packet',
-    'checkId',
-    'modelTier',
-    'kind',
-    'sourceTaskId',
-  ] as const
-  return JSON.stringify(Object.fromEntries(
-    allowedKeys.flatMap(key => Object.hasOwn(request.contract, key) ? [[key, request.contract[key]]] : []),
-  ))
+  const packet = request.contract.packet
+  const projected = packet && typeof packet === 'object' && !Array.isArray(packet)
+    ? projectPacketForModel(request.workerType, packet as Record<string, unknown>)
+    : undefined
+  const contract: Record<string, unknown> = {
+    workerType: request.workerType,
+    ...(typeof request.contract.kind === 'string' ? { kind: request.contract.kind } : {}),
+    ...(typeof request.contract.checkId === 'string' ? { checkId: request.contract.checkId } : {}),
+    ...(projected ? { packet: projected } : {}),
+  }
+  return JSON.stringify(contract)
+}
+
+function semanticRef(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const ref = value as Record<string, unknown>
+  if (typeof ref.documentPath !== 'string' || typeof ref.sectionId !== 'string')
+    return undefined
+  return {
+    documentPath: ref.documentPath,
+    sectionId: ref.sectionId,
+    ...(typeof ref.heading === 'string' ? { heading: ref.heading } : {}),
+  }
+}
+
+function modelSection(value: unknown, contentKey: 'text' | 'bytes'): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const section = value as Record<string, unknown>
+  const ref = semanticRef(section.ref ?? section)
+  const content = section[contentKey]
+  if (!ref || typeof content !== 'string') return undefined
+  return {
+    ...ref,
+    ...(typeof section.sectionKey === 'string' ? { sectionKey: section.sectionKey } : {}),
+    content,
+  }
+}
+
+function projectItems<T>(
+  values: unknown[],
+  project: (value: unknown) => T | undefined,
+  label: string,
+): T[] {
+  return values.map((value, index) => {
+    const projected = project(value)
+    if (projected === undefined)
+      throw new Error(`model-facing ${label} item ${index} is invalid`)
+    return projected
+  })
+}
+
+function modelFact(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const fact = value as Record<string, unknown>
+  const source = semanticRef(fact.source)
+  if (typeof fact.key !== 'string' || source === undefined || !('value' in fact)) return undefined
+  return { key: fact.key, value: fact.value, source }
+}
+
+function modelIssue(value: unknown, includeId: boolean): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const issue = value as Record<string, unknown>
+  const source = semanticRef(issue.source)
+  const remediation = issue.remediation
+  if (
+    (includeId && typeof issue.id !== 'string') ||
+    typeof issue.expected !== 'string' ||
+    typeof issue.actual !== 'string' ||
+    source === undefined ||
+    !remediation || typeof remediation !== 'object' || Array.isArray(remediation)
+  ) return undefined
+  const fix = remediation as Record<string, unknown>
+  const target = issue.target === undefined ? undefined : semanticRef(issue.target)
+  if (fix.kind !== 'patch' || typeof fix.documentPath !== 'string' || !Array.isArray(fix.sectionIds) || fix.sectionIds.some(sectionId => typeof sectionId !== 'string') || (issue.target !== undefined && target === undefined)) return undefined
+  return {
+    ...(includeId ? { id: issue.id } : {}),
+    ...(typeof issue.severity === 'string' ? { severity: issue.severity } : {}),
+    ...(typeof issue.type === 'string' ? { type: issue.type } : {}),
+    source,
+    ...(target ? { target } : {}),
+    expected: issue.expected,
+    actual: issue.actual,
+    remediation: {
+      kind: 'patch',
+      documentPath: fix.documentPath,
+      sectionIds: fix.sectionIds,
+    },
+    ...(typeof issue.reasonCode === 'string' ? { reasonCode: issue.reasonCode } : {}),
+  }
+}
+
+function projectPacketForModel(
+  workerType: WorkerDispatchRequest['workerType'],
+  packet: Record<string, unknown>,
+): Record<string, unknown> {
+  if (workerType === 'foundation-fact-extractor') {
+    return {
+      keys: Array.isArray(packet.keys) ? packet.keys : [],
+      sections: Array.isArray(packet.sections)
+        ? projectItems(packet.sections, section => modelSection(section, 'text'), 'fact section')
+        : [],
+    }
+  }
+  if (workerType === 'foundation-semantic-reviewer') {
+    const projected: Record<string, unknown> = {
+      ...(typeof packet.checkId === 'string' ? { checkId: packet.checkId } : {}),
+      sections: Array.isArray(packet.sections)
+        ? projectItems(packet.sections, section => modelSection(section, 'bytes') ?? modelSection(section, 'text'), 'semantic section')
+        : [],
+      facts: Array.isArray(packet.facts)
+        ? projectItems(packet.facts, modelFact, 'semantic fact')
+        : [],
+      deterministicIssuePrefix: Array.isArray(packet.deterministicIssuePrefix)
+        ? projectItems(packet.deterministicIssuePrefix, issue => modelIssue(issue, false), 'deterministic issue')
+        : [],
+    }
+    if (typeof packet.expected === 'string') projected.expected = packet.expected
+    if (typeof packet.actual === 'string') projected.actual = packet.actual
+    if (packet.patchOperation && typeof packet.patchOperation === 'object' && !Array.isArray(packet.patchOperation)) {
+      const operation = packet.patchOperation as Record<string, unknown>
+      projected.patchOperation = {
+        ...(typeof operation.kind === 'string' ? { kind: operation.kind } : {}),
+        ...(typeof operation.documentPath === 'string' ? { documentPath: operation.documentPath } : {}),
+        ...(typeof operation.sectionId === 'string' ? { sectionId: operation.sectionId } : {}),
+      }
+    }
+    return projected
+  }
+  return packet
+}
+
+function projectRevisionPacketForModel(packet: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...(typeof packet.documentPath === 'string' ? { documentPath: packet.documentPath } : {}),
+    ...(Array.isArray(packet.issueIds) ? { issueIds: packet.issueIds } : {}),
+    ...(Array.isArray(packet.sectionIds) ? { sectionIds: packet.sectionIds } : {}),
+    issues: Array.isArray(packet.issues)
+      ? projectItems(packet.issues, issue => modelIssue(issue, true), 'revision issue')
+      : [],
+    sections: Array.isArray(packet.sections)
+      ? projectItems(packet.sections, section => modelSection(section, 'text'), 'revision section')
+      : [],
+    normalizedFacts: Array.isArray(packet.normalizedFacts)
+      ? projectItems(packet.normalizedFacts, modelFact, 'revision fact')
+      : [],
+    ...(Array.isArray(packet.factConstraints) ? { factConstraints: packet.factConstraints } : {}),
+  }
 }
 
 function formatContract(request: WorkerDispatchRequest): string {

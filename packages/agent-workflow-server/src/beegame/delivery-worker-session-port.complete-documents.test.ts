@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   buildDocumentAuthorAuthorityBlock,
+  createBeeGameDeliveryWorkerPort,
 } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
@@ -36,6 +37,38 @@ async function writeAuthoritySource(
 }
 
 describe('delivery worker complete document boundary', () => {
+  test('submits the dispatch-built revision projection instead of rebuilding from the start request', async () => {
+    const prompts: string[] = []
+    const sessions = {
+      start: () => ({ id: 'revision-session' }),
+      updateAuthToken: () => undefined,
+      sendWithDisplay: async (_sessionId: string, prompt: string) => {
+        prompts.push(prompt)
+      },
+    }
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions: sessions as never,
+      userId: 'user',
+    })
+    await port.start({
+      dispatchId: 'revision-dispatch',
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'foundation-document-reviser',
+      phase: 'DOCUMENT_REVIEW',
+      revision: 'revision',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        workerType: 'foundation-document-reviser',
+        stagedPath: 'docs/GDD.md',
+      },
+    })
+    await port.submit('revision-dispatch', 'DISPATCH_BUILT_REVISION_PROJECTION')
+    expect(prompts).toEqual(['DISPATCH_BUILT_REVISION_PROJECTION'])
+  })
+
   test('persists only the exact selected upstream authority as complete input', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'focused-authority-'))
     try {
@@ -114,6 +147,9 @@ describe('delivery worker complete document boundary', () => {
       expect(projected).not.toHaveProperty('records')
       expect(projected.sources[0].sections[0]).not.toHaveProperty('contentLines')
       expect(block).toContain('Authority content for')
+      expect(block).not.toContain('"startLine"')
+      expect(block).not.toContain('"lineCount"')
+      expect(block).not.toContain('"digest"')
       expect(block).not.toContain('Confirmed authority for')
       expect(block).not.toContain('Unprojected production material payload.')
       expect(block).not.toContain('STALE TARGET BODY')
