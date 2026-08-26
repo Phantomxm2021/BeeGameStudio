@@ -980,6 +980,78 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   }, 15_000)
 
+  test('does not re-dispatch live semantic siblings when their status endpoint lags', async () => {
+    const completeDocuments = Object.fromEntries(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, completeDocument(path)])) as Partial<Record<(typeof CANONICAL_FOUNDATION_DOCUMENTS)[number], string>>
+    const initialSemanticDispatchIds = new Set<string>()
+    let firstInitialSemanticDispatchId: string | undefined
+    let resolveInitialSemanticWave!: () => void
+    const initialSemanticWave = new Promise<void>(resolve => { resolveInitialSemanticWave = resolve })
+    const failedOriginalDispatchIds = new Set<string>()
+    let successfulSemanticTerminals = 0
+    const { workspacePath, controller, requests } = await preparedController((started, capturedRequests) => {
+      const byDispatch = new Map<string, WorkerDispatchRequest>()
+      return {
+        async start(request) {
+          started.add(request.dispatchId!)
+          capturedRequests.push(request)
+          byDispatch.set(request.dispatchId!, request)
+          if (request.workerType === 'foundation-semantic-reviewer' && request.dispatchId && initialSemanticDispatchIds.size < 4) {
+            firstInitialSemanticDispatchId ??= request.dispatchId
+            initialSemanticDispatchIds.add(request.dispatchId)
+            if (initialSemanticDispatchIds.size === 4) resolveInitialSemanticWave()
+          }
+          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+        },
+        async submit() {},
+        async stop() {},
+        async close() {},
+        async status(dispatchId) {
+          return { dispatchId, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: byDispatch.get(dispatchId)?.taskId ?? 'unknown', revision: byDispatch.get(dispatchId)?.revision ?? 'rev-1', status: 'interrupted', startedAt: new Date().toISOString() }
+        },
+        async waitForTerminal(dispatchId) {
+          const request = byDispatch.get(dispatchId)
+          if (request?.workerType !== 'foundation-semantic-reviewer') return new Promise<never>(() => {})
+          if (!request.taskId) throw new Error(`missing semantic request ${dispatchId}`)
+          if (initialSemanticDispatchIds.has(dispatchId)) {
+            await initialSemanticWave
+            if (dispatchId === firstInitialSemanticDispatchId) {
+              failedOriginalDispatchIds.add(dispatchId)
+              throw new Error('Failed to provide valid structured output after 5 attempts')
+            }
+            await new Promise(resolve => setTimeout(resolve, 100))
+          }
+          successfulSemanticTerminals += 1
+          return {
+            workerType: 'foundation-semantic-reviewer' as const,
+            status: 'completed' as const,
+            runId: request.runId,
+            dispatchId,
+            taskId: request.taskId,
+            revision: request.revision,
+            packetDigest: request.contract.packetDigest as string,
+            outcome: 'PASS' as const,
+          }
+        },
+      }
+    }, true, completeDocuments)
+    try {
+      for (let attempt = 0; attempt < 300; attempt += 1) {
+        const current = await controller.store.load()
+        const semanticTasks = current?.foundationAuditState?.tasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') ?? []
+        if (semanticTasks.length === 10 && semanticTasks.every(task => task.status === 'completed')) break
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      const current = await controller.store.load()
+      const semanticTasks = current?.foundationAuditState?.tasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') ?? []
+      expect(initialSemanticDispatchIds).toHaveLength(4)
+      expect(failedOriginalDispatchIds).toHaveLength(1)
+      expect(requests.filter(request => request.workerType === 'foundation-semantic-reviewer')).toHaveLength(11)
+      expect(semanticTasks).toHaveLength(10)
+      expect(semanticTasks.every(task => task.status === 'completed')).toBe(true)
+      expect(successfulSemanticTerminals).toBeGreaterThanOrEqual(10)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  }, 15_000)
+
   test('resumes from completed semantic terminals and idempotently finalizes after publication crash', async () => {
     const { workspacePath, controller } = await preparedController()
     try {

@@ -261,9 +261,20 @@ export function createDeliveryWorkflowController(input: {
   dispatcher = createDeliveryDispatcher({
     store,
     workerPort: input.workerPort,
-    onRetryable: async runId => {
+    onRetryable: async (runId, taskId) => {
       const current = await store.load()
       if (!current || current.runId !== runId || current.status !== 'running') return
+      const task = current.foundationAuditState
+        ? foundationRuntimeTasks(current.foundationAuditState).find(candidate => candidate.taskId === taskId)
+        : undefined
+      if (task) {
+        if (task.status !== 'retryable') return
+        // A retry already has durable Foundation task authority. Do not
+        // reconcile live sibling sessions while their terminal supervisors
+        // are still active; a lagging status endpoint would duplicate them.
+        void resume(current).catch(() => undefined)
+        return
+      }
       // A dispatch failure may be reconciled from inside handleTerminal's
       // serialization lane. Queue the next progress pass instead of awaiting
       // that same lane and deadlocking terminal reconciliation.
