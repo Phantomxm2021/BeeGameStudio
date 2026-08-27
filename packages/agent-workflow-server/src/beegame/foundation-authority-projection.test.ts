@@ -306,6 +306,58 @@ describe('foundation authority projection', () => {
     expect(() => parseFoundationAuthorityProjectionBytes(JSON.stringify(invalid))).toThrow()
   })
 
+  test('projects selected section symbols and material symbols only so its bytes parse immediately', () => {
+    const targetPath = 'docs/BALANCE_DESIGN.md'
+    const gdd = sourceDocument('docs/GDD.md')
+      .replace(
+        '## Production Materials\nSource materials are intentionally outside the authority projection.',
+        [
+          '## Production Materials',
+          ...getGameDocumentContract('docs/GDD.md').productionMaterials.flatMap(material => [
+            `<!-- beegame-material:${material.materialId} -->`,
+            `### ${material.title}`,
+            '',
+          ]),
+        ].join('\n'),
+      )
+      .replace(
+        'Owned source content for vision.',
+        'Declaration: state.unselected\nOwned source content for vision.',
+      )
+      .replace(
+        'Owned source content for core_loop.',
+        'Declaration: state.selected\nOwned source content for core_loop.',
+      )
+      .replace(
+        '<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\n',
+        '<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\nDeclaration: material.selected\n',
+      )
+    const result = projectFoundationAuthority({
+      targetPath,
+      availableUpstreamPaths: ['docs/GDD.md'],
+      documents: new Map([['docs/GDD.md', gdd]]),
+    })
+
+    expect(result.symbols).toContainEqual({
+      id: 'state.selected',
+      documentPath: 'docs/GDD.md',
+      sectionId: 'core_loop',
+    })
+    expect(result.symbols).not.toContainEqual({
+      id: 'state.unselected',
+      documentPath: 'docs/GDD.md',
+      sectionId: 'vision',
+    })
+    expect(result.symbols).toContainEqual({
+      id: 'material.selected',
+      documentPath: 'docs/GDD.md',
+      sectionId: 'material.core-loop-diagram',
+    })
+    expect(() => parseFoundationAuthorityProjectionBytes(
+      canonicalFoundationAuthorityProjectionBytes(result),
+    )).not.toThrow()
+  })
+
   test('rejects duplicate committed semantic symbols while projecting upstream authority', () => {
     const gdd = sourceDocument('docs/GDD.md').replace(
       'Owned source content for states_flow.',

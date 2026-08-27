@@ -377,12 +377,17 @@ const CJK_ID = /[\u3400-\u9fff\u{20000}-\u{2ffff}]/u
 const PLACEHOLDER_ID = /^(?:placeholder|tbd|todo|unknown)(?:[._-].*)?$/i
 const REFERENCE_SYNTAX = /\b(?:owner\s+)?(?:reference|ref)\s*[:=]\s*([^\n]+)/gi
 const DECLARATION_SYNTAX = /\b(?:owner\s+)?(?:declaration|declare)\s*[:=]\s*([^\n]+)/gi
+const MERMAID_FENCE = /```mermaid[^\n]*\n([\s\S]*?)```/gi
 const DECLARATION_COLUMN = /^(?:ID|Key|Identifier|Stable ID)$/
 const REFERENCE_COLUMN = /^(?:Reference ID|Owner ID|Inventory ID|(?:Owner|Asset|Path|Section|Material|Formula|Acceptance|Stable) Ref)$/
 const VALUE_COLUMN = /^(?:Value|Range|Formula|Result|Bound|Threshold|Interval|Expression)$/i
 
 function unquoteId(value: string): string {
   return value.trim().replace(/^`|`$/g, '').replace(/^['"]|['"]$/g, '').trim()
+}
+
+function isCanonicalReferenceToken(value: string): boolean {
+  return SEMANTIC_ID.test(value) || LOCAL_OWNER_KEY.test(value)
 }
 
 function tableRows(body: string): Array<{ headers: string[]; cells: string[]; line: number }> {
@@ -453,17 +458,21 @@ function explicitIds(block: CompleteDocumentBlock): {
       const value = unquoteId(row.cells[0] ?? '')
       if ((declarationColumn || referenceColumn) && (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)))
         throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${block.startLine + row.line - 1}`)
+      if (referenceColumn && !isCanonicalReferenceToken(value))
+        throw new Error(`reference-column cell must contain exactly one canonical ID/reference token: ${block.id}:line ${block.startLine + row.line - 1}`)
       add(value, block.startLine + row.line - 1, declarationColumn && allowDeclarations)
       if ((declarationColumn && allowDeclarations || referenceColumn) && (SEMANTIC_ID.test(value) || LOCAL_OWNER_KEY.test(value)))
         factRows.push({ id: value, kind: declarationColumn ? 'declaration' : 'reference', cells: row.cells.slice(1), headers: row.headers.slice(1), line: block.startLine + row.line - 1 })
-      for (const [cellIndex, cell] of row.cells.slice(1).entries()) {
-        const explicit = unquoteId(cell)
-        if (REFERENCE_COLUMN.test(row.headers[cellIndex + 1] ?? '')) {
-          if (CJK_ID.test(explicit) || PLACEHOLDER_ID.test(explicit))
-            throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${block.startLine + row.line - 1}`)
-          add(explicit, block.startLine + row.line - 1, false)
-        }
-      }
+    }
+    for (const [cellIndex, cell] of row.cells.entries()) {
+      if (!REFERENCE_COLUMN.test(row.headers[cellIndex] ?? '') || (cellIndex === 0 && referenceColumn))
+        continue
+      const explicit = unquoteId(cell)
+      if (CJK_ID.test(explicit) || PLACEHOLDER_ID.test(explicit))
+        throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${block.startLine + row.line - 1}`)
+      if (!isCanonicalReferenceToken(explicit))
+        throw new Error(`reference-column cell must contain exactly one canonical ID/reference token: ${block.id}:line ${block.startLine + row.line - 1}`)
+      add(explicit, block.startLine + row.line - 1, false)
     }
   }
   for (const match of block.body.matchAll(REFERENCE_SYNTAX)) {
@@ -493,6 +502,14 @@ function explicitIds(block: CompleteDocumentBlock): {
       }
     }
   }
+  for (const match of block.body.matchAll(MERMAID_FENCE)) {
+    const mermaidBody = match[1] ?? ''
+    const bodyOffset = (match.index ?? 0) + match[0]!.indexOf(mermaidBody)
+    for (const token of mermaidBody.matchAll(/\b[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+\b/g)) {
+      const line = block.startLine + block.body.slice(0, bodyOffset + (token.index ?? 0)).split('\n').length - 1
+      add(token[0]!, line, false)
+    }
+  }
   return { semantic, semanticDeclarations, semanticReferences, aliases, localDeclarations, localReferences, factRows }
 }
 
@@ -515,8 +532,12 @@ function assertOwnerScopedAuthority(
     ids.aliases.forEach(alias => allAliases.add(alias))
     ids.semanticDeclarations.forEach(id => {
       const prior = semanticDeclarations.get(id)
-      if (prior && prior.block !== block.id)
-        throw new Error(`semantic ID is declared by multiple owners: ${id}`)
+      if (prior)
+        throw new Error(
+          prior.block === block.id
+            ? `semantic ID is declared more than once: ${id}`
+            : `semantic ID is declared by multiple owners: ${id}`,
+        )
       semanticDeclarations.set(id, { block: block.id, line: block.startLine })
     })
     for (const declaration of ids.localDeclarations) {

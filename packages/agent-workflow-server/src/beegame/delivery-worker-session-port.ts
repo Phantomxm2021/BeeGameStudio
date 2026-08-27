@@ -374,6 +374,56 @@ export function createBeeGameDeliveryWorkerPort(input: {
     typeof input.sessions.events === 'function'
       ? input.sessions.events(sessionId)
       : []
+  const correctFoundationValidationFailure = async (
+    request: WorkerDispatchRequest,
+    sessionId: string,
+    failureText: string,
+    eventOffset: number,
+    observedEventCount: number,
+  ): Promise<boolean> => {
+    const diagnostics = await foundationValidationDiagnosticsFor(
+      request,
+      failureText,
+    )
+    if (!diagnostics) return false
+    const dispatchId = request.dispatchId
+    if (!dispatchId) return false
+    const previous = validationDiagnostics.get(dispatchId)
+    if (previous && !foundationValidationProgressed(previous, diagnostics)) {
+      const error = new Error(
+        `authority-no-progress: ${diagnostics.targetPath} validation diagnostics and document bytes are unchanged`,
+      )
+      error.name = 'WorkerNeedsActionError'
+      throw error
+    }
+    validationDiagnostics.set(dispatchId, diagnostics)
+    // Advance the event boundary before sending the replacement turn so the
+    // failure that triggered this correction cannot be consumed again.
+    eventOffsets.set(dispatchId, eventOffset + observedEventCount)
+    const authToken = await input.getAuthToken?.()
+    input.sessions.updateAuthToken(sessionId, authToken)
+    try {
+      await input.sessions.sendWithDisplay(
+        sessionId,
+        buildFoundationDocumentCorrectionPrompt(diagnostics),
+        {
+          taskType: 'edit_turn',
+          displayKind: 'workflow_worker',
+          ...(authToken ? { authToken } : {}),
+          ...(input.language ? { language: input.language } : {}),
+        },
+      )
+      if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+        await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+    } catch (error) {
+      const unavailable = new Error(
+        `foundation document author session unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      unavailable.name = 'WorkerNeedsActionError'
+      throw unavailable
+    }
+    return true
+  }
   const disposeWorkflowSession = async (sessionId: string) => {
     if (typeof input.sessions.disposeWorkflowWorker === 'function')
       await input.sessions.disposeWorkflowWorker(sessionId)
@@ -754,6 +804,45 @@ export function createBeeGameDeliveryWorkerPort(input: {
               event.type === 'turn.empty',
           )
         if (result) {
+          let terminalEvents = events
+          if (
+            result.type === 'result' &&
+            request &&
+            isStreamedFoundationAuthoringTurn(request)
+          ) {
+            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+            terminalEvents = sessionEvents(sessionId).slice(eventOffset)
+          }
+          const drainedFailure = [...terminalEvents]
+            .reverse()
+            .find(event => event.type === 'turn.failed')
+          const validationFailureText = drainedFailure?.text ??
+            (result.type !== 'result' ? result.text : undefined)
+          if (
+            request &&
+            isStreamedFoundationAuthoringTurn(request) &&
+            validationFailureText
+          ) {
+            if (await correctFoundationValidationFailure(
+              request,
+              sessionId,
+              validationFailureText,
+              eventOffset,
+              terminalEvents.length,
+            )) {
+              closedTurnDrained = false
+              continue
+            }
+          }
+          if (drainedFailure) {
+            const error = new Error(
+              drainedFailure.text || 'document author stream commit failed',
+            )
+            if (error.message.startsWith('foundation_transport_needs_action:'))
+              error.name = 'WorkerNeedsActionError'
+            throw error
+          }
           if (result.type === 'result' || result.type === 'turn.empty') {
             const missingTerminal = request
               ? missingStructuredTerminalError(request, events)
@@ -762,52 +851,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
           }
           if (result.type !== 'result')
           {
-            if (request && isStreamedFoundationAuthoringTurn(request)) {
-              const diagnostics = await foundationValidationDiagnosticsFor(
-                request,
-                result.text,
-              )
-              if (diagnostics) {
-                const previous = validationDiagnostics.get(dispatchId)
-                if (previous && !foundationValidationProgressed(previous, diagnostics)) {
-                  const error = new Error(
-                    `authority-no-progress: ${diagnostics.targetPath} validation diagnostics and document bytes are unchanged`,
-                  )
-                  error.name = 'WorkerNeedsActionError'
-                  throw error
-                }
-                validationDiagnostics.set(dispatchId, diagnostics)
-                // sendWithDisplay starts the native turn asynchronously. Move
-                // the event boundary before sending so the failed turn that
-                // triggered this correction cannot be consumed again while
-                // the replacement turn is still running.
-                eventOffsets.set(dispatchId, eventOffset + events.length)
-                const authToken = await input.getAuthToken?.()
-                input.sessions.updateAuthToken(sessionId, authToken)
-                try {
-                  await input.sessions.sendWithDisplay(
-                    sessionId,
-                    buildFoundationDocumentCorrectionPrompt(diagnostics),
-                    {
-                      taskType: 'edit_turn',
-                      displayKind: 'workflow_worker',
-                      ...(authToken ? { authToken } : {}),
-                      ...(input.language ? { language: input.language } : {}),
-                    },
-                  )
-                  if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-                    await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-                } catch (error) {
-                  const unavailable = new Error(
-                    `foundation document author session unavailable: ${error instanceof Error ? error.message : String(error)}`,
-                  )
-                  unavailable.name = 'WorkerNeedsActionError'
-                  throw unavailable
-                }
-                closedTurnDrained = false
-                continue
-              }
-            }
             const error = new Error(
               result.text || 'worker turn did not produce a terminal result',
             )
@@ -834,21 +877,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
             if (!targetPath)
               throw new Error('document author target is missing')
             if (isStreamedFoundationAuthoringTurn(request)) {
-              if (
-                typeof input.sessions.waitForWorkflowWorkerIdle === 'function'
-              )
-                await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-              const drainedFailure = [
-                ...sessionEvents(sessionId).slice(
-                  eventOffsets.get(dispatchId) ?? 0,
-                ),
-              ]
-                .reverse()
-                .find(event => event.type === 'turn.failed')
-              if (drainedFailure)
-                throw new Error(
-                  drainedFailure.text || 'document author stream commit failed',
-                )
               const receipt = await readAuthoredDocumentReceipt(
                 request.workspacePath,
                 dispatchId,

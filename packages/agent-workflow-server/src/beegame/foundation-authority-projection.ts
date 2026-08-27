@@ -190,7 +190,14 @@ export function projectFoundationAuthority(input: {
     if (markdown === undefined)
       throw new Error(`canonical upstream document is missing: ${source.path}`)
     const sourceContract = getGameDocumentContract(source.path)
-    symbols.push(...collectCompleteGameDocumentAuthoritySymbols(source.path, markdown))
+    const selectedSectionIds = new Set(source.sectionIds)
+    const materialSectionIds = new Set(
+      sourceContract.productionMaterials.map(material => `material.${material.materialId}`),
+    )
+    symbols.push(
+      ...collectCompleteGameDocumentAuthoritySymbols(source.path, markdown)
+        .filter(symbol => selectedSectionIds.has(symbol.sectionId) || materialSectionIds.has(symbol.sectionId)),
+    )
     const lines = markdown.split('\n')
     const sectionMarkerLines = lines.flatMap((line, index) =>
       line.trim().startsWith('<!-- beegame-section:') ? [index] : [],

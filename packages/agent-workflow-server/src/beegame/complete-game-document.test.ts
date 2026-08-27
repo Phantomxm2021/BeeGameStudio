@@ -458,6 +458,28 @@ describe('native complete game document validation', () => {
     )).toThrow(/alias|byte-for-byte|owner-local/i)
   })
 
+  test('requires exactly one canonical token in every reference-column cell', () => {
+    const path = 'docs/ART_DIRECTION.md'
+    const base = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const proseReference = replaceMaterialBody(
+      base,
+      'visual-language-board',
+      '| Field | Owner Ref |\n| --- | --- |\n| palette | see upstream |',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, proseReference)).toThrow(
+      /canonical.*reference|reference.*token|owner-scoped ID/i,
+    )
+
+    const multipleReferences = replaceMaterialBody(
+      base,
+      'visual-language-board',
+      '| Field | Owner Ref |\n| --- | --- |\n| palette | state.a, state.b |',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, multipleReferences)).toThrow(
+      /canonical.*reference|reference.*token|owner-scoped ID/i,
+    )
+  })
+
   test('rejects semantic ID aliases and placeholder/CJK IDs', () => {
     const technical = 'docs/TECHNICAL_DESIGN.md'
     const technicalBase = renderTestCompleteGameDocument(
@@ -541,6 +563,66 @@ describe('native complete game document validation', () => {
       '| ID | Loudness | Acceptance |\n| --- | --- | --- |\n| `LU-01` | -14 LUFS | `acceptance.audio.loudness` |',
     )
     expect(validateCompleteGameDocumentMarkdown(audio, audioMarkdown)).toBe(audioMarkdown)
+  })
+
+  test('requires explicit semantic declarations for Mermaid dotted labels and references', () => {
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const base = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const undeclaredLabel = replaceMaterialBody(
+      base,
+      'world-structure-diagram',
+      '```mermaid\ngraph TD\n  COMMS[node.comms] --> PWR[route.choice]\n```',
+    )
+    expect(() => assertCompleteGameDocumentCrossDocumentReferences(path, undeclaredLabel, {
+      targetPath: path,
+      sources: [],
+      symbols: [],
+    })).toThrow(/undefined cross-document semantic ID/i)
+
+    const declared = replaceMaterialBody(
+      base,
+      'world-structure-diagram',
+      'Declaration: node.comms, route.choice\n```mermaid\ngraph TD\n  COMMS[node.comms] --> PWR[route.choice]\n```',
+    )
+    expect(() => assertCompleteGameDocumentCrossDocumentReferences(path, declared, {
+      targetPath: path,
+      sources: [],
+      symbols: [],
+    })).not.toThrow()
+
+    const bogusUpstreamReference = replaceMaterialBody(
+      base,
+      'world-structure-diagram',
+      '```mermaid\ngraph TD\n  COMMS[state.missing] --> PWR[Power]\n```',
+    )
+    expect(() => assertCompleteGameDocumentCrossDocumentReferences(path, bogusUpstreamReference, {
+      targetPath: path,
+      sources: [],
+      symbols: [],
+    })).toThrow(/undefined cross-document semantic ID.*state\.missing/i)
+
+    const summaryReference = base.replace(
+      'This complete production document establishes actionable authority for the implementation team.',
+      'Reference: state.missing.',
+    )
+    expect(() => assertCompleteGameDocumentCrossDocumentReferences(path, summaryReference, {
+      targetPath: path,
+      sources: [],
+      symbols: [],
+    })).toThrow(/undefined cross-document semantic ID.*state\.missing/i)
+  })
+
+  test('rejects repeated semantic declarations within one owner block', () => {
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const markdown = replaceSectionBody(
+      renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+      'world_structure',
+      'Declaration: state.flow\nDeclaration: state.flow',
+    )
+
+    expect(() => validateCompleteGameDocumentMarkdown(path, markdown)).toThrow(
+      /semantic ID is declared more than once/i,
+    )
   })
 
   test('treats Asset sibling inventory keys as references, not declarations', () => {

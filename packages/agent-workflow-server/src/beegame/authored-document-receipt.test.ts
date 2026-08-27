@@ -367,8 +367,8 @@ describe('native authored document receipts', () => {
       const upstream = completeFoundationDocument('docs/GDD.md')
       await writeFile(join(workspacePath, 'docs/GDD.md'), upstream)
       const selfReference = completeFoundationDocument('docs/LEVEL_SCENE_DESIGN.md').replace(
-        '<!-- beegame-audit-appendix -->',
-        'Owner declaration: `level.route`. Owner reference: `level.route`.\n\n<!-- beegame-audit-appendix -->',
+        '## World and Scene Structure\n\n',
+        '## World and Scene Structure\n\nOwner declaration: `LEVEL-ROUTE`. Owner reference: `LEVEL-ROUTE`.\n\n',
       )
       await writeFile(join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'), selfReference)
       await writeProjectionForTarget(
