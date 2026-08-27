@@ -5,11 +5,14 @@ import {
 } from '../__tests__/complete-game-document-fixture'
 import {
   assertMaterialFormat,
+  type CompleteGameDocumentOwnerSymbol,
   isCompleteGameDocumentMarkdownStructure,
   normalizeCompleteGameDocumentProtocol,
   validateCompleteGameDocumentMarkdown,
+  validateCompleteGameDocumentMarkdownWithWorkspaceAuthority,
 } from './complete-game-document'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
+import { projectFoundationAuthority } from './foundation-authority-projection'
 
 function replaceMaterialBody(
   markdown: string,
@@ -22,6 +25,20 @@ function replaceMaterialBody(
   const bodyEnd = markdown.indexOf('\n<!-- beegame-', bodyStart)
   if (start < 0 || bodyStart < 2 || bodyEnd < 0)
     throw new Error(`test material fixture is missing: ${materialId}`)
+  return `${markdown.slice(0, bodyStart)}${body}\n${markdown.slice(bodyEnd + 1)}`
+}
+
+function replaceSectionBody(
+  markdown: string,
+  sectionId: string,
+  body: string,
+): string {
+  const marker = `<!-- beegame-section:${sectionId} -->`
+  const start = markdown.indexOf(marker)
+  const bodyStart = markdown.indexOf('\n\n', start) + 2
+  const bodyEnd = markdown.indexOf('\n<!-- beegame-', bodyStart)
+  if (start < 0 || bodyStart < 2 || bodyEnd < 0)
+    throw new Error(`test section fixture is missing: ${sectionId}`)
   return `${markdown.slice(0, bodyStart)}${body}\n${markdown.slice(bodyEnd + 1)}`
 }
 
@@ -322,5 +339,136 @@ describe('native complete game document validation', () => {
       })),
     })
     expect(() => validateCompleteGameDocumentMarkdown(path, duplicated)).toThrow(/repeats/i)
+  })
+
+  test('rejects undefined owner-local keys and aliases in explicit references', () => {
+    const path = 'docs/LEVEL_SCENE_DESIGN.md'
+    const base = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const declared = replaceMaterialBody(
+      base,
+      'pacing-beat-table',
+      '| ID | Beat |\n| --- | --- |\n| `BEAT-01` | opening |',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(
+      path,
+      replaceSectionBody(declared, 'pacing_beats', 'Owner reference: `BEAT-99` from the owner table.'),
+    )).toThrow(/owner-local|undefined|owner key/i)
+    expect(() => validateCompleteGameDocumentMarkdown(
+      path,
+      replaceSectionBody(declared, 'pacing_beats', 'Owner reference: `beat-01` from the owner table.'),
+    )).toThrow(/alias|byte-for-byte|owner-local/i)
+  })
+
+  test('rejects semantic ID aliases and placeholder/CJK IDs', () => {
+    const technical = 'docs/TECHNICAL_DESIGN.md'
+    const technicalBase = renderTestCompleteGameDocument(
+      technical,
+      completeTestSubmission(technical),
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(
+      technical,
+      replaceSectionBody(
+        technicalBase,
+        'input_interaction',
+        'Owner reference: `action.attack` and `ACTION_ATTACK`.',
+      ),
+    )).toThrow(/alias|semantic ID|canonical/i)
+
+    const level = 'docs/LEVEL_SCENE_DESIGN.md'
+    const levelBase = renderTestCompleteGameDocument(level, completeTestSubmission(level))
+    expect(() => validateCompleteGameDocumentMarkdown(
+      level,
+      replaceMaterialBody(
+        levelBase,
+        'pacing-beat-table',
+        '| ID | Beat |\n| --- | --- |\n| `占位` | opening |',
+      ),
+    )).toThrow(/ID|placeholder|CJK|owner/i)
+  })
+
+  test('rejects copied Balance bounds only outside the numeric owner material', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const base = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    for (const literal of ['[0,1]', '0.1', 'clamp(V_P_FLOOR,V_P_CEIL)', 'clamp(1,5)', '0–3', '≤1']) {
+      const owner = replaceMaterialBody(
+        base,
+        'variable-parameter-table',
+        `| ID | Unit | Value | Range |\n| --- | --- | --- | --- |\n| \`var.fuel\` | FU | ${literal} | ${literal} |`,
+      )
+      expect(() => validateCompleteGameDocumentMarkdown(
+        path,
+        replaceSectionBody(owner, 'formulas', `Owner reference: \`var.fuel\` = ${literal}.`),
+      ), literal).toThrow(/Balance|copied|owner|numeric|formula/i)
+    }
+    const owner = replaceMaterialBody(
+      base,
+      'variable-parameter-table',
+      '| ID | Unit | Value | Range |\n| --- | --- | --- | --- |\n| `var.fuel` | FU | 0.1 | [0,1] |',
+    )
+    expect(validateCompleteGameDocumentMarkdown(path, owner)).toBe(owner)
+  })
+
+  test('accepts owner-scoped numeric literals and explicit formula/acceptance IDs', () => {
+    const level = 'docs/LEVEL_SCENE_DESIGN.md'
+    const levelMarkdown = replaceSectionBody(
+      renderTestCompleteGameDocument(level, completeTestSubmission(level)),
+      'world_structure',
+      'Coordinates (0, 0) and a 16:9 responsive viewport are canonical here.',
+    )
+    expect(validateCompleteGameDocumentMarkdown(level, levelMarkdown)).toBe(levelMarkdown)
+
+    const audio = 'docs/AUDIO_DESIGN.md'
+    const audioMarkdown = replaceMaterialBody(
+      renderTestCompleteGameDocument(audio, completeTestSubmission(audio)),
+      'loudness-delivery-table',
+      '| ID | Loudness | Acceptance |\n| --- | --- | --- |\n| `LU-01` | -14 LUFS | `acceptance.audio.loudness` |',
+    )
+    expect(validateCompleteGameDocumentMarkdown(audio, audioMarkdown)).toBe(audioMarkdown)
+  })
+
+  test('resolves explicit cross-document IDs only through committed projection and symbols', () => {
+    const upstreamPath = 'docs/GDD.md'
+    const targetPath = 'docs/LEVEL_SCENE_DESIGN.md'
+    const upstream = renderTestCompleteGameDocument(upstreamPath, completeTestSubmission(upstreamPath))
+    const projection = projectFoundationAuthority({
+      targetPath,
+      availableUpstreamPaths: [upstreamPath],
+      documents: new Map([[upstreamPath, upstream]]),
+    })
+    const target = replaceSectionBody(
+      renderTestCompleteGameDocument(targetPath, completeTestSubmission(targetPath)),
+      'world_structure',
+      'Owner reference: `state.flow`.',
+    )
+    const authority = {
+      projection,
+      ownerSymbols: new Map<string, CompleteGameDocumentOwnerSymbol>([
+        ['state.flow', { documentPath: upstreamPath, sectionId: 'states_flow' }],
+      ]),
+    }
+    expect(validateCompleteGameDocumentMarkdownWithWorkspaceAuthority(targetPath, target, authority)).toBe(target)
+    expect(() => validateCompleteGameDocumentMarkdownWithWorkspaceAuthority(targetPath, target.replace('state.flow', 'state.missing'), authority)).toThrow(/undefined|semantic ID/i)
+  })
+
+  test('rejects future Asset IDs from Audio and Art workspace admission', () => {
+    const targetPath = 'docs/ART_DIRECTION.md'
+    const upstreamPath = 'docs/GDD.md'
+    const upstream = renderTestCompleteGameDocument(upstreamPath, completeTestSubmission(upstreamPath))
+    const projection = projectFoundationAuthority({
+      targetPath,
+      availableUpstreamPaths: [upstreamPath],
+      documents: new Map([[upstreamPath, upstream]]),
+    })
+    const target = replaceSectionBody(
+      renderTestCompleteGameDocument(targetPath, completeTestSubmission(targetPath)),
+      'visual_pillars',
+      'Owner reference: `asset.inventory.gem`.',
+    )
+    expect(() => validateCompleteGameDocumentMarkdownWithWorkspaceAuthority(targetPath, target, {
+      projection,
+      ownerSymbols: new Map<string, CompleteGameDocumentOwnerSymbol>([
+        ['asset.inventory.gem', { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }],
+      ]),
+    })).toThrow(/future Asset|Asset inventory/i)
   })
 })

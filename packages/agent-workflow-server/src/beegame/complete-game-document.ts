@@ -4,6 +4,7 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
+import type { FoundationAuthorityProjection } from './foundation-authority-projection'
 
 const MARKDOWN_DOCUMENT_REFERENCE =
   /docs\/[A-Za-z0-9_/-]+(?:\.[A-Za-z0-9_-]+)*/g
@@ -21,6 +22,12 @@ function normalizedHeading(text: string): string {
 }
 
 type AuthoredHeading = { level: number; text: string; lineIndex: number }
+
+type CompleteDocumentBlock = {
+  id: string
+  body: string
+  startLine: number
+}
 
 function authoredHeadingScan(markdown: string): {
   headings: AuthoredHeading[]
@@ -48,7 +55,7 @@ function authoredHeadings(markdown: string): Array<{ level: number; text: string
 }
 
 function validateSectionHeadingStructure(
-  sections: readonly { sectionId: string; body: string }[],
+  sections: readonly { id: string; body: string }[],
 ): void {
   for (const section of sections) {
     const seen = new Set<string>()
@@ -56,11 +63,11 @@ function validateSectionHeadingStructure(
     for (const heading of authoredHeadings(section.body)) {
       if (heading.level < 3 || heading.level > 4)
         throw new Error(
-          `section heading level is invalid: ${section.sectionId}:H${heading.level}`,
+          `section heading level is invalid: ${section.id}:H${heading.level}`,
         )
       if (heading.level > priorLevel + 1)
         throw new Error(
-          `section heading level is skipped: ${section.sectionId}:H${heading.level}`,
+          `section heading level is skipped: ${section.id}:H${heading.level}`,
         )
       const normalized = normalizedHeading(heading.text)
       if (seen.has(normalized))
@@ -209,6 +216,167 @@ function nextNonBlankLine(
   return undefined
 }
 
+const LOCAL_OWNER_KEY = /^(?:[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)+|[A-Z]{1,4}\d+)$/
+const LOCAL_OWNER_KEY_ALIAS = /^(?:[a-z][a-z0-9]*(?:[-_][a-z0-9]+)+|[a-z]{1,4}\d+)$/
+const SEMANTIC_ID = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/
+const SEMANTIC_ID_ALIAS = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
+const CJK_ID = /[\u3400-\u9fff\u{20000}-\u{2ffff}]/u
+const PLACEHOLDER_ID = /^(?:placeholder|tbd|todo|unknown)(?:[._-].*)?$/i
+const REFERENCE_SYNTAX = /\b(?:owner\s+)?(?:reference|ref)\s*[:=]\s*([^\n]+)/gi
+const ID_COLUMN = /^(?:id|key|identifier|stable(?:\s+|-)?id)$/i
+const VALUE_COLUMN = /(?:value|range|formula|result|bound|threshold|interval|expression)/i
+
+function unquoteId(value: string): string {
+  return value.trim().replace(/^`|`$/g, '').replace(/^['"]|['"]$/g, '').trim()
+}
+
+function tableRows(body: string): Array<{ headers: string[]; cells: string[]; line: number }> {
+  const lines = body.split('\n')
+  const rows: Array<{ headers: string[]; cells: string[]; line: number }> = []
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!.trim()
+    if (!line.startsWith('|') || !line.endsWith('|')) continue
+    const headers = line.split('|').slice(1, -1).map(cell => cell.trim())
+    const separator = lines[index + 1]?.trim()
+    if (!separator?.startsWith('|') || !separator.endsWith('|') || !separator.includes('---')) continue
+    for (let rowIndex = index + 2; rowIndex < lines.length; rowIndex += 1) {
+      const row = lines[rowIndex]!.trim()
+      if (!row.startsWith('|') || !row.endsWith('|')) break
+      rows.push({
+        headers,
+        cells: row.split('|').slice(1, -1).map(cell => cell.trim()),
+        line: rowIndex + 1,
+      })
+    }
+  }
+  return rows
+}
+
+type StructuredFactRow = {
+  id: string
+  cells: string[]
+  headers: string[]
+  line: number
+}
+
+function explicitIds(block: CompleteDocumentBlock): {
+  semantic: string[]
+  aliases: string[]
+  localDeclarations: Array<{ value: string; line: number }>
+  localReferences: Array<{ value: string; line: number }>
+  factRows: StructuredFactRow[]
+} {
+  const allowDeclarations = block.id.startsWith('material.')
+  const semantic: string[] = []
+  const aliases: string[] = []
+  const localDeclarations: Array<{ value: string; line: number }> = []
+  const localReferences: Array<{ value: string; line: number }> = []
+  const factRows: StructuredFactRow[] = []
+  const add = (raw: string, line: number, declaration: boolean) => {
+    const value = unquoteId(raw)
+    if (SEMANTIC_ID.test(value)) semantic.push(value)
+    else if (SEMANTIC_ID_ALIAS.test(value)) aliases.push(value)
+    else if (declaration && LOCAL_OWNER_KEY.test(value))
+      localDeclarations.push({ value, line })
+    else if (!declaration && (LOCAL_OWNER_KEY.test(value) || LOCAL_OWNER_KEY_ALIAS.test(value)))
+      localReferences.push({ value, line })
+  }
+  for (const row of tableRows(block.body)) {
+    const firstHeader = row.headers[0]?.toLowerCase() ?? ''
+    const idColumn = ID_COLUMN.test(firstHeader)
+    if (idColumn) {
+      const value = unquoteId(row.cells[0] ?? '')
+      if (allowDeclarations && (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)))
+        throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${block.startLine + row.line - 1}`)
+      add(value, block.startLine + row.line - 1, allowDeclarations)
+      if (SEMANTIC_ID.test(value) || LOCAL_OWNER_KEY.test(value))
+        factRows.push({ id: value, cells: row.cells.slice(1), headers: row.headers.slice(1), line: block.startLine + row.line - 1 })
+      for (const [cellIndex, cell] of row.cells.slice(1).entries()) {
+        const explicit = unquoteId(cell)
+        if (SEMANTIC_ID.test(explicit) || SEMANTIC_ID_ALIAS.test(explicit))
+          add(explicit, block.startLine + row.line - 1, false)
+        else if (/(?:reference|ref|owner)/i.test(row.headers[cellIndex + 1] ?? ''))
+          add(explicit, block.startLine + row.line - 1, false)
+      }
+      if (!allowDeclarations)
+        for (const cell of row.cells.slice(1)) add(cell, block.startLine + row.line - 1, false)
+    }
+  }
+  for (const match of block.body.matchAll(REFERENCE_SYNTAX)) {
+    const line = block.startLine + block.body.slice(0, match.index ?? 0).split('\n').length - 1
+    // Reference syntax is the only prose form admitted as an owner-local
+    // reference. Ordinary code spans and narrative text remain Reviewer input.
+    for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g))
+      add(token[1] ?? token[0], line, false)
+  }
+  return { semantic, aliases, localDeclarations, localReferences, factRows }
+}
+
+function assertOwnerScopedAuthority(
+  path: FoundationDocumentPath,
+  sections: readonly CompleteDocumentBlock[],
+  materials: readonly CompleteDocumentBlock[],
+): void {
+  const blocks = [...sections, ...materials]
+  const allSemantic = new Set<string>()
+  const allAliases = new Set<string>()
+  const declarations = new Map<string, { block: string; line: number }>()
+  const references: Array<{ value: string; block: string; line: number }> = []
+  const ownerFacts = new Map<string, { block: string; values: string[] }>()
+  const blockFacts = new Map<string, StructuredFactRow[]>()
+  for (const block of blocks) {
+    const ids = explicitIds(block)
+    ids.semantic.forEach(id => allSemantic.add(id))
+    ids.aliases.forEach(alias => allAliases.add(alias))
+    for (const declaration of ids.localDeclarations) {
+      const prior = declarations.get(declaration.value)
+      if (prior && prior.block !== block.id)
+        throw new Error(`owner-local ID is declared by multiple owners: ${declaration.value}`)
+      declarations.set(declaration.value, { block: block.id, line: declaration.line })
+    }
+    references.push(...ids.localReferences.map(reference => ({ ...reference, block: block.id })))
+    blockFacts.set(block.id, ids.factRows)
+    if (block.id === 'material.variable-parameter-table' && path === 'docs/BALANCE_DESIGN.md')
+      for (const row of ids.factRows) {
+        if (ownerFacts.has(row.id))
+          throw new Error(`Balance owner fact ID is duplicated: ${row.id}`)
+        ownerFacts.set(row.id, { block: block.id, values: row.cells.filter((cell, index) => VALUE_COLUMN.test(row.headers[index] ?? '')).map(unquoteId).filter(Boolean) })
+      }
+  }
+  for (const semantic of allSemantic) {
+    const alias = semantic.replaceAll('.', '_').toUpperCase()
+    if (allAliases.has(alias))
+      throw new Error(`semantic ID alias must match canonical spelling: ${path}:${semantic}/${alias}`)
+  }
+  for (const reference of references) {
+    if (declarations.has(reference.value)) continue
+    const canonical = reference.value.replaceAll('_', '-').toUpperCase()
+    const alias = [...declarations.keys()].find(key => key.replaceAll('_', '-').toUpperCase() === canonical)
+    if (alias)
+      throw new Error(`owner-local ID alias must be byte-for-byte: ${reference.block}:line ${reference.line}: ${reference.value}`)
+    throw new Error(`owner-local ID is undefined: ${reference.block}:line ${reference.line}: ${reference.value}`)
+  }
+
+  if (path === 'docs/BALANCE_DESIGN.md') {
+    for (const block of blocks.filter(block => block.id !== 'material.variable-parameter-table')) {
+      for (const row of blockFacts.get(block.id) ?? []) {
+        const owner = ownerFacts.get(row.id)
+        if (!owner) continue
+        const values = row.cells.filter((cell, index) => VALUE_COLUMN.test(row.headers[index] ?? '')).map(unquoteId).filter(Boolean)
+        if (values.some(value => owner.values.includes(value)))
+          throw new Error(`Balance non-owner block duplicates owner fact ${row.id}: ${block.id}:line ${row.line}`)
+      }
+      for (const match of block.body.matchAll(REFERENCE_SYNTAX)) {
+        const text = match[1]!
+        for (const [id, owner] of ownerFacts) {
+          if (text.includes(id) && owner.values.some(value => text.includes(value)))
+            throw new Error(`Balance non-owner block duplicates owner fact ${id}: ${block.id}`)
+        }
+      }
+    }
+  }
+}
+
 /**
  * Bee Game Studio owns protocol comments, while the native author owns every
  * human-readable heading and body. Normalize only the service comments after
@@ -340,6 +508,26 @@ export function validateCompleteGameDocumentMarkdown(
   const documentEnd = auditIndex >= 0 ? auditIndex : lines.length
   const sectionIndexes = sectionMarkers.map(marker => lines.indexOf(marker))
   const materialIndexes = materialMarkers.map(marker => lines.indexOf(marker))
+  const sectionBodies = contract.sections.map((section, index): CompleteDocumentBlock => {
+    const start = sectionIndexes[index]!
+    const end = sectionIndexes[index + 1] ?? productionIndex
+    const heading = nextNonBlankLine(lines, start)
+    return {
+      id: section.sectionId,
+      body: lines.slice((heading?.index ?? start) + 1, end).join('\n'),
+      startLine: (heading?.index ?? start) + 2,
+    }
+  })
+  const materialBodies = contract.productionMaterials.map((material, index): CompleteDocumentBlock => {
+    const start = materialIndexes[index]!
+    const end = materialIndexes[index + 1] ?? documentEnd
+    const heading = nextNonBlankLine(lines, start)
+    return {
+      id: `material.${material.materialId}`,
+      body: lines.slice((heading?.index ?? start) + 1, end).join('\n').trim(),
+      startLine: (heading?.index ?? start) + 2,
+    }
+  })
   const orderedIndexes = [
     summaryIndex,
     ...sectionIndexes,
@@ -375,17 +563,7 @@ export function validateCompleteGameDocumentMarkdown(
       throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
     assertNonEmptyRange(lines, heading.index, end, `section:${section.sectionId}`)
   })
-  validateSectionHeadingStructure(
-    contract.sections.map((section, index) => {
-      const start = sectionIndexes[index]!
-      const end = sectionIndexes[index + 1] ?? productionIndex
-      const heading = nextNonBlankLine(lines, start)
-      return {
-        sectionId: section.sectionId,
-        body: lines.slice((heading?.index ?? start) + 1, end).join('\n'),
-      }
-    }),
-  )
+  validateSectionHeadingStructure(sectionBodies)
 
   if (nextNonBlankLine(lines, productionIndex)?.value !== '## Production Materials')
     throw new Error('complete game document production materials heading is invalid')
@@ -396,13 +574,15 @@ export function validateCompleteGameDocumentMarkdown(
     const heading = nextNonBlankLine(lines, start)
     if (heading?.value !== `### ${material.title}`)
       throw new Error(`production material title is invalid: ${material.materialId}`)
-    const materialBody = lines.slice(heading.index + 1, end).join('\n').trim()
+    const materialBody = materialBodies[index]!.body
     assertMaterialFormat(
       material.format,
       materialBody,
       material.materialId,
     )
   })
+
+  assertOwnerScopedAuthority(path, sectionBodies, materialBodies)
 
   if (auditIndex >= 0) {
     if (nextNonBlankLine(lines, auditIndex)?.value !== '## Audit Appendix')
@@ -430,4 +610,78 @@ export function validateCompleteGameDocumentMarkdown(
       )
   }
   return `${body}\n`
+}
+
+export type CompleteGameDocumentOwnerSymbol = Readonly<{
+  documentPath: FoundationDocumentPath
+  sectionId: string
+}>
+
+export type CompleteGameDocumentWorkspaceAuthority = Readonly<{
+  projection: FoundationAuthorityProjection
+  ownerSymbols: ReadonlyMap<string, CompleteGameDocumentOwnerSymbol> | Readonly<Record<string, CompleteGameDocumentOwnerSymbol>>
+}>
+
+/**
+ * Workspace-aware admission layered on the sole Markdown validator. The
+ * projection and symbol table are committed inputs; prose that does not use
+ * an explicit ID column or reference syntax remains outside this mechanical
+ * gate and is left to Reviewer.
+ */
+export function validateCompleteGameDocumentMarkdownWithWorkspaceAuthority(
+  path: FoundationDocumentPath,
+  value: unknown,
+  authority: CompleteGameDocumentWorkspaceAuthority,
+): string {
+  const canonical = validateCompleteGameDocumentMarkdown(path, value)
+  const contract = getGameDocumentContract(path)
+  if (authority.projection.targetPath !== path)
+    throw new Error(`committed upstream projection target does not match document: ${path}`)
+  const contractedUpstream = new Set(contract.upstreamSections.map(source => source.path))
+  if (authority.projection.sources.some(source => !contractedUpstream.has(source.path)))
+    throw new Error(`committed upstream projection contains an undeclared source: ${path}`)
+  const lines = canonical.split('\n')
+  const sectionMarkers = contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->`)
+  const materialMarkers = contract.productionMaterials.map(material => `<!-- beegame-material:${material.materialId} -->`)
+  const blocks = [
+    ...contract.sections.map((section, index): CompleteDocumentBlock => {
+      const start = lines.indexOf(sectionMarkers[index]!)
+      const end = lines.indexOf(sectionMarkers[index + 1] ?? '<!-- beegame-production-materials -->')
+      const heading = nextNonBlankLine(lines, start)
+      return { id: section.sectionId, body: lines.slice((heading?.index ?? start) + 1, end).join('\n'), startLine: (heading?.index ?? start) + 2 }
+    }),
+    ...contract.productionMaterials.map((material, index): CompleteDocumentBlock => {
+      const start = lines.indexOf(materialMarkers[index]!)
+      const end = lines.indexOf(materialMarkers[index + 1] ?? '<!-- beegame-audit-appendix -->')
+      const heading = nextNonBlankLine(lines, start)
+      return { id: `material.${material.materialId}`, body: lines.slice((heading?.index ?? start) + 1, end < 0 ? lines.length : end).join('\n'), startLine: (heading?.index ?? start) + 2 }
+    }),
+  ]
+  const symbols = authority.ownerSymbols instanceof Map
+    ? authority.ownerSymbols
+    : new Map(Object.entries(authority.ownerSymbols))
+  const ownIds = new Set<string>()
+  const references = new Set<string>()
+  for (const block of blocks) {
+    const ids = explicitIds(block)
+    ids.factRows.forEach(row => ownIds.add(row.id))
+    ids.semantic.forEach(id => references.add(id))
+  }
+  const projected = new Map<string, Set<string>>()
+  for (const source of authority.projection.sources) {
+    projected.set(source.path, new Set(source.sections.map(section => section.sectionId)))
+  }
+  for (const id of references) {
+    if (ownIds.has(id)) continue
+    if ((path === 'docs/AUDIO_DESIGN.md' || path === 'docs/ART_DIRECTION.md') && id.startsWith('asset.'))
+      throw new Error(`future Asset inventory ID is not available to ${path}: ${id}`)
+    const owner = symbols.get(id)
+    if (!owner)
+      throw new Error(`undefined cross-document semantic ID: ${path}:${id}`)
+    if (owner.documentPath === path) continue
+    const sections = projected.get(owner.documentPath)
+    if (!sections || !sections.has(owner.sectionId))
+      throw new Error(`cross-document semantic ID is outside committed upstream projection: ${path}:${id}`)
+  }
+  return canonical
 }
