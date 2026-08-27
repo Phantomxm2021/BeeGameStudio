@@ -5,6 +5,7 @@ import {
 } from '../__tests__/complete-game-document-fixture'
 import {
   assertMaterialFormat,
+  assertCompleteGameDocumentCrossDocumentReferences,
   collectCompleteGameDocumentAuthoritySymbols,
   isCompleteGameDocumentMarkdownStructure,
   normalizeCompleteGameDocumentProtocol,
@@ -252,6 +253,69 @@ describe('native complete game document validation', () => {
     ).toThrow(/format/i)
   })
 
+  test('rejects unclosed fences and inline code with material and line diagnostics', () => {
+    const path = 'docs/GDD.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const malformed = replaceMaterialBody(
+      markdown,
+      'core-loop-diagram',
+      '```mermaid\ngraph TD\nA --> B',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, malformed)).toThrow(
+      /core-loop-diagram.*line/i,
+    )
+
+    const inline = replaceMaterialBody(
+      markdown,
+      'core-loop-diagram',
+      'A broken `inline code span',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, inline)).toThrow(
+      /core-loop-diagram.*line/i,
+    )
+  })
+
+  test('rejects concatenated material markers and deleted material markers deterministically', () => {
+    const path = 'docs/GDD.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const first = '<!-- beegame-material:core-loop-diagram -->'
+    const second = '<!-- beegame-material:game-state-flow -->'
+    expect(() => validateCompleteGameDocumentMarkdown(
+      path,
+      markdown.replace(first, `${first}${second}`),
+    )).toThrow(/material.*marker.*line/i)
+    expect(() => validateCompleteGameDocumentMarkdown(
+      path,
+      markdown.replace(`${first}\n`, ''),
+    )).toThrow(/core-loop-diagram.*marker/i)
+  })
+
+  test('rejects uneven Markdown table pipes with the owning material line', () => {
+    const path = 'docs/ART_DIRECTION.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const malformed = replaceMaterialBody(
+      markdown,
+      'visual-language-board',
+      '| Field | Value |\n| --- | --- |\n| authority | complete | stray |',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, malformed)).toThrow(
+      /visual-language-board.*line/i,
+    )
+  })
+
+  test('rejects a malformed Mermaid fence with the owning material line', () => {
+    const path = 'docs/GDD.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const malformed = replaceMaterialBody(
+      markdown,
+      'core-loop-diagram',
+      '```mermaid\ngraph TD\nA --> B\n~~~',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, malformed)).toThrow(
+      /core-loop-diagram.*line|mermaid.*line/i,
+    )
+  })
+
   test('rejects production tables whose rows do not match the header width', () => {
     const path = 'docs/ART_DIRECTION.md'
     const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
@@ -459,6 +523,23 @@ describe('native complete game document validation', () => {
       { id: 'asset.hero', documentPath: path, sectionId: 'material.asset-inventory-table' },
     ])
     expect(validateCompleteGameDocumentMarkdown(path, sibling)).toBe(sibling)
+  })
+
+  test('does not classify unavailable or unresolved prose as freshness state', () => {
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    expect(() => assertCompleteGameDocumentCrossDocumentReferences(
+      path,
+      markdown.replace(
+        'Production-ready World and Scene Structure authority',
+        'The word unavailable is narrative prose; unresolved is also narrative prose.',
+      ),
+      {
+        targetPath: path,
+        sources: [{ path: 'docs/GDD.md', sections: [] }],
+        symbols: [],
+      },
+    )).not.toThrow()
   })
 
 })

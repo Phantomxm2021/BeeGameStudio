@@ -117,4 +117,16 @@ describe('parallel foundation authoring batch', () => {
     expect(readyDraftPaths(failed)).toEqual([])
   })
 
+  test('uses committed status only and ignores prose or digest-shaped metadata', () => {
+    const state = beginParallelFoundationAuthoring(['docs/GDD.md'])
+    state.documents![1] = {
+      ...state.documents![1]!,
+      status: 'pending',
+      failureReason: 'upstream unavailable and unresolved',
+      upstreamDigests: { 'docs/GDD.md': 'stale' },
+    }
+
+    expect(readyDraftPaths(state)).toEqual(['docs/LEVEL_SCENE_DESIGN.md'])
+  })
+
 })

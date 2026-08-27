@@ -90,11 +90,45 @@ function assertExactOrder(
     throw new Error(`${label} must exactly match the canonical order for ${path}`)
 }
 
+function assertProtocolMarkerIntegrity(
+  lines: readonly string[],
+  sectionMarkers: readonly string[],
+  materialMarkers: readonly string[],
+): void {
+  const expected = new Set([...sectionMarkers, ...materialMarkers])
+  for (const [index, line] of lines.entries()) {
+    const trimmed = line.trim()
+    if (
+      trimmed.includes('<!-- beegame-section:') ||
+      trimmed.includes('<!-- beegame-material:')
+    ) {
+      if (!expected.has(trimmed)) {
+        const materialId = /<!-- beegame-material:([^\s>]+)[^>]*-->/.exec(trimmed)?.[1]
+        const label = materialId ? `material ${materialId}` : 'protocol'
+        throw new Error(
+          `complete game document ${label} marker is malformed:line ${index + 1}`,
+        )
+      }
+    }
+  }
+  const present = new Set(lines.map(line => line.trim()))
+  for (const marker of materialMarkers) {
+    if (!present.has(marker)) {
+      const materialId = marker.slice('<!-- beegame-material:'.length, -' -->'.length)
+      throw new Error(
+        `complete game document production materials ${materialId} marker is missing`,
+      )
+    }
+  }
+}
+
 export function assertMaterialFormat(
   format: 'markdown_table' | 'mermaid' | 'inline_svg' | 'evidence_register',
   body: string,
   materialId: string,
+  startLine = 1,
 ): void {
+  assertMarkdownIntegrity(body, materialId, startLine)
   const lines = body.split('\n').map(line => line.trim())
   const tableBlocks = lines.reduce<string[][]>((blocks, line) => {
     if (!line.startsWith('|') || !line.endsWith('|')) return [...blocks, []]
@@ -124,7 +158,107 @@ export function assertMaterialFormat(
         : (body.includes('<svg ') || body.includes('<svg>')) &&
           body.includes('</svg>')
   if (!valid)
-    throw new Error(`production material format is invalid: ${materialId}:${format}`)
+    throw new Error(
+      `production material format is invalid: ${materialId}:${format}:line ${startLine}`,
+    )
+}
+
+type OpenMarkdownFence = {
+  marker: string
+  line: number
+  language: string
+}
+
+function markdownFence(line: string): { marker: string; rest: string } | undefined {
+  const match = /^\s*(`{3,}|~{3,})(.*)$/.exec(line)
+  return match ? { marker: match[1]!, rest: match[2]! } : undefined
+}
+
+function assertMarkdownFenceAndInlineIntegrity(
+  body: string,
+  blockId: string,
+  startLine: number,
+): void {
+  let open: OpenMarkdownFence | undefined
+  for (const [index, rawLine] of body.split('\n').entries()) {
+    const candidate = markdownFence(rawLine)
+    if (candidate) {
+      if (!open) {
+        open = {
+          marker: candidate.marker,
+          line: index,
+          language: candidate.rest.trim().split(/\s+/, 1)[0] ?? '',
+        }
+      } else if (
+        candidate.marker[0] === open.marker[0] &&
+        candidate.marker.length >= open.marker.length &&
+        candidate.rest.trim() === ''
+      ) {
+        open = undefined
+      }
+      continue
+    }
+    if (open) continue
+    let backticks = 0
+    for (let character = 0; character < rawLine.length; character += 1) {
+      if (
+        rawLine[character] === '`' &&
+        (character === 0 || rawLine[character - 1] !== '\\')
+      )
+        backticks += 1
+    }
+    if (backticks % 2 !== 0)
+      throw new Error(
+        `Markdown inline code span is unclosed: ${blockId}:line ${startLine + index}`,
+      )
+  }
+}
+
+function markdownTablePipeWidth(line: string): number {
+  let width = 0
+  for (let index = 0; index < line.length; index += 1) {
+    if (line[index] === '|' && line[index - 1] !== '\\') width += 1
+  }
+  return width
+}
+
+function assertMarkdownTableIntegrity(
+  body: string,
+  blockId: string,
+  startLine: number,
+): void {
+  let candidate: Array<{ line: string; index: number }> = []
+  const flush = () => {
+    if (!candidate.length) return
+    const widths = candidate.map(item => markdownTablePipeWidth(item.line))
+    const malformed = candidate.some(item => {
+      const line = item.line.trim()
+      return !line.startsWith('|') || !line.endsWith('|')
+    }) || widths.some(width => width !== widths[0])
+    if (malformed)
+      throw new Error(
+        `Markdown table pipes are uneven: ${blockId}:line ${startLine + candidate[0]!.index}`,
+      )
+    candidate = []
+  }
+  for (const [index, rawLine] of body.split('\n').entries()) {
+    const line = rawLine.trim()
+    if (line.startsWith('|') || line.endsWith('|')) {
+      candidate.push({ line, index })
+      continue
+    }
+    flush()
+  }
+  flush()
+}
+
+function assertMarkdownIntegrity(
+  body: string,
+  blockId: string,
+  startLine: number,
+): void {
+  assertMarkdownFenceAndInlineIntegrity(body, blockId, startLine)
+  assertMarkdownTableIntegrity(body, blockId, startLine)
 }
 
 /** Structural-only admission used before a native Markdown result is forwarded. */
@@ -649,6 +783,7 @@ export function validateCompleteGameDocumentMarkdown(
   const materialMarkers = contract.productionMaterials.map(
     material => `<!-- beegame-material:${material.materialId} -->`,
   )
+  assertProtocolMarkerIntegrity(lines, sectionMarkers, materialMarkers)
   assertExactOrder(
     lines.filter(line => line.startsWith('<!-- beegame-section:')),
     sectionMarkers,
@@ -722,8 +857,12 @@ export function validateCompleteGameDocumentMarkdown(
       material.format,
       materialBody,
       material.materialId,
+      materialBodies[index]!.startLine,
     )
   })
+
+  for (const section of sectionBodies)
+    assertMarkdownIntegrity(section.body, section.id, section.startLine)
 
   assertOwnerScopedAuthority(path, sectionBodies, materialBodies)
 
