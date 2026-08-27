@@ -324,7 +324,7 @@ describe('worker prompts', () => {
         })
         expect(prompt).toContain('Use two ID classes: cross-document semantic IDs use lower-case ASCII dotted namespaces')
         expect(prompt).toContain('each segment starts with an ASCII letter and may contain lowercase ASCII letters, digits, hyphens or underscores internally, so parse the full dotted token and never accept a partial prefix')
-        expect(prompt).toContain('Valid semantic ID examples include `action.assign-crew`, `param.gen.fuel_consumption`, `material.game-state-flow` and `material.variable-parameter-table`')
+        expect(prompt).toContain('Valid semantic ID examples include `action.assign-crew`, `param.gen.fuel_consumption` and `material.variable-parameter-table`')
         expect(prompt).toContain('owner-local keys use uppercase kebab/snake or uppercase letter-digit forms and must be copied byte-for-byte')
         expect(prompt).toContain('Mermaid dotted labels and graph tokens do not declare IDs automatically')
         expect(prompt).toContain('Each exact reference-column cell must contain exactly one canonical ID/reference token: never prose, path commentary, multiple IDs or N/A text')
