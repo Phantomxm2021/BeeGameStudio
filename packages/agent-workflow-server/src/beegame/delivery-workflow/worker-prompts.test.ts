@@ -122,6 +122,7 @@ describe('worker prompts', () => {
       'downstream documents may specialize already-authorized behavior but must not redefine upstream rules',
     ]
 
+    let sharedAuthorityInstruction: string | undefined
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
       for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
         const prompt = buildWorkerPrompt({
@@ -145,6 +146,13 @@ describe('worker prompts', () => {
 
         for (const instruction of expectedSharedInstructions)
           expect(prompt).toContain(instruction)
+        const authorityStart = prompt.indexOf('Use exactly one fact owner across the eight documents:')
+        const authorityEnd = prompt.indexOf('must not redefine upstream rules.', authorityStart) + 'must not redefine upstream rules.'.length
+        const authorityInstruction = prompt.slice(authorityStart, authorityEnd)
+        expect(authorityInstruction).toContain('For upstream document facts, use only the contract-declared committed upstream projection and symbol table as authority.')
+        if (sharedAuthorityInstruction === undefined)
+          sharedAuthorityInstruction = authorityInstruction
+        else expect(authorityInstruction).toBe(sharedAuthorityInstruction)
         expect(prompt).not.toContain('Workspace root:')
         expect(prompt).not.toContain('Writable paths:')
         expect(prompt).not.toContain('Canonical artifacts:')
@@ -296,7 +304,8 @@ describe('worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('Use only the contract-declared committed upstream projection and symbol table as authority')
+    expect(prompt).toContain('For upstream document facts, use only the contract-declared committed upstream projection and symbol table as authority.')
+    expect(prompt).toContain('Do not infer structured freshness from free prose; Reviewer handles free semantic wording that cannot be mechanically classified.')
     expect(prompt).not.toContain('unavailable upstream')
     expect(prompt).not.toContain('classify freshness')
   })
