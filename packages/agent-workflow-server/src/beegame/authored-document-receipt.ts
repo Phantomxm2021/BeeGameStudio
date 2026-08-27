@@ -152,7 +152,6 @@ async function assertCommittedFoundationAuthority(input: {
   canonical: string
 }): Promise<void> {
   const contract = getGameDocumentContract(input.targetPath)
-  if (!contract.upstreamSections.length) return
   const projectionPath = resolve(
     input.workspacePath,
     foundationProjectionRelativePath(input.dispatchId),
@@ -167,6 +166,12 @@ async function assertCommittedFoundationAuthority(input: {
     projection.sources.some((source, index) => source.path !== expectedPaths[index])
   )
     throw new Error(`committed upstream projection does not match document contract: ${input.targetPath}`)
+  if (projection.sources.some((source, index) => {
+    const expectedSections = contract.upstreamSections[index]!.sectionIds
+    return source.sections.length !== expectedSections.length ||
+      source.sections.some((section, sectionIndex) => section.sectionId !== expectedSections[sectionIndex])
+  }))
+    throw new Error(`committed upstream projection does not match document contract sections: ${input.targetPath}`)
   for (const source of projection.sources) {
     const current = await readFile(resolve(input.workspacePath, source.path), 'utf8')
     if (digest(current) !== source.digest)

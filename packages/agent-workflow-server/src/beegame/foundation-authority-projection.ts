@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod/v4'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import type { FoundationDocumentPath } from './delivery-workflow/types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from './delivery-workflow/types'
 import {
   collectCompleteGameDocumentAuthoritySymbols,
   type CompleteGameDocumentAuthoritySymbol,
@@ -57,8 +60,9 @@ export function parseFoundationAuthorityProjectionBytes(
   raw: string,
 ): FoundationAuthorityProjection {
   const parsed: unknown = JSON.parse(raw)
+  const pathSchema = z.enum(CANONICAL_FOUNDATION_DOCUMENTS)
   const sourceSchema = z.object({
-    path: z.string(),
+    path: pathSchema,
     sections: z.array(z.object({
       sectionId: z.string(),
       startLine: z.number().int().positive(),
@@ -69,16 +73,21 @@ export function parseFoundationAuthorityProjectionBytes(
     digest: z.string().regex(/^[a-f0-9]{64}$/),
   }).strict()
   const schema = z.object({
-    targetPath: z.string(),
+    targetPath: pathSchema,
     targetSectionIds: z.array(z.string()),
     sources: z.array(sourceSchema),
     symbols: z.array(z.object({
       id: z.string().regex(/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/),
-      documentPath: z.string(),
+      documentPath: pathSchema,
       sectionId: z.string(),
     }).strict()),
   }).strict()
   const stored = schema.parse(parsed)
+  const targetContract = getGameDocumentContract(stored.targetPath)
+  if (stored.targetSectionIds.some(sectionId =>
+    !targetContract.sections.some(section => section.sectionId === sectionId),
+  ))
+    throw new Error('committed upstream projection contains an invalid target section')
   const value = {
     ...stored,
     byteLength: new TextEncoder().encode(raw).byteLength,
@@ -87,8 +96,34 @@ export function parseFoundationAuthorityProjectionBytes(
   } as FoundationAuthorityProjection
   if (new Set(value.sources.map(source => source.path)).size !== value.sources.length)
     throw new Error('committed upstream projection contains duplicate sources')
+  for (const source of value.sources) {
+    const upstream = targetContract.upstreamSections.find(candidate => candidate.path === source.path)
+    if (!upstream)
+      throw new Error(`committed upstream projection contains an undeclared source: ${source.path}`)
+    if (new Set(source.sections.map(section => section.sectionId)).size !== source.sections.length)
+      throw new Error(`committed upstream projection contains duplicate sections: ${source.path}`)
+    if (source.sections.some(section => !upstream.sectionIds.includes(section.sectionId)))
+      throw new Error(`committed upstream projection contains an undeclared section: ${source.path}`)
+    if (source.sections.some(section =>
+      createHash('sha256').update(section.content).digest('hex') !== section.digest,
+    ))
+      throw new Error(`committed upstream projection contains an invalid section digest: ${source.path}`)
+  }
   if (new Set(value.symbols.map(symbol => symbol.id)).size !== value.symbols.length)
     throw new Error('committed upstream projection contains duplicate symbols')
+  const sourcesByPath = new Map(value.sources.map(source => [source.path, source]))
+  for (const symbol of value.symbols) {
+    const source = sourcesByPath.get(symbol.documentPath)
+    if (!source)
+      throw new Error(`committed upstream projection symbol has no source: ${symbol.id}`)
+    const sourceContract = getGameDocumentContract(symbol.documentPath)
+    const isSection = sourceContract.sections.some(section => section.sectionId === symbol.sectionId)
+    const isMaterial = sourceContract.productionMaterials.some(material => `material.${material.materialId}` === symbol.sectionId)
+    if (!isSection && !isMaterial)
+      throw new Error(`committed upstream projection symbol has an invalid section: ${symbol.id}`)
+    if (isSection && !source.sections.some(section => section.sectionId === symbol.sectionId))
+      throw new Error(`committed upstream projection symbol section is not selected: ${symbol.id}`)
+  }
   if (canonicalFoundationAuthorityProjectionBytes(value) !== raw)
     throw new Error('committed upstream projection bytes are not canonical')
   return value

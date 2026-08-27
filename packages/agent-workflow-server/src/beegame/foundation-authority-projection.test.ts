@@ -6,6 +6,7 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   modelFoundationAuthorityProjectionBytes,
+  parseFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
 } from './foundation-authority-projection'
 
@@ -280,5 +281,28 @@ describe('foundation authority projection', () => {
     })
 
     expect(result.sources).toEqual([])
+  })
+
+  test('parses only canonical contract paths and permits material symbols outside selected section text', () => {
+    const result = projectFoundationAuthority({
+      targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
+      availableUpstreamPaths: ['docs/GDD.md'],
+      ...sources(['docs/GDD.md']),
+    })
+    const withMaterialSymbol = {
+      ...result,
+      symbols: [{
+        id: 'state.flow',
+        documentPath: 'docs/GDD.md' as const,
+        sectionId: 'material.game-state-flow',
+      }],
+    }
+    expect(parseFoundationAuthorityProjectionBytes(
+      canonicalFoundationAuthorityProjectionBytes(withMaterialSymbol),
+    ).symbols).toEqual(withMaterialSymbol.symbols)
+
+    const invalid = JSON.parse(canonicalFoundationAuthorityProjectionBytes(result)) as Record<string, unknown>
+    invalid.targetPath = 'docs/not-a-foundation.md'
+    expect(() => parseFoundationAuthorityProjectionBytes(JSON.stringify(invalid))).toThrow()
   })
 })

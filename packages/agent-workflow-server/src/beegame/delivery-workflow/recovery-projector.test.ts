@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { inspectWorkflowSnapshot } from './run-store'
@@ -21,6 +21,34 @@ import { computeDocumentRevision, computeWorkspaceRevision } from './revision'
 import { createHash } from 'node:crypto'
 import { deriveFoundationAuditArtifacts } from './foundation-audit-artifacts'
 import { createFoundationAuditState } from './foundation-audit-state'
+import { getGameDocumentContract } from './game-document-contracts'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  foundationProjectionRelativePath,
+  projectFoundationAuthority,
+} from '../foundation-authority-projection'
+
+async function writeCommittedProjection(
+  workspacePath: string,
+  dispatchId: string,
+  targetPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): Promise<void> {
+  const contract = getGameDocumentContract(targetPath)
+  const documents = new Map(await Promise.all(
+    contract.upstreamSections.map(async source => [
+      source.path,
+      await readFile(join(workspacePath, source.path), 'utf8'),
+    ] as const),
+  ))
+  const projection = projectFoundationAuthority({
+    targetPath,
+    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    documents,
+  })
+  const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
+  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
+  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
+}
 
 describe('recovery projector foundation audit boundary', () => {
   test('reconstructs and preserves the sole index-staged audit state after recovery', async () => {
@@ -46,6 +74,7 @@ describe('recovery projector foundation audit boundary', () => {
             renderTestCompleteGameDocument(path, completeTestSubmission(path)),
           ),
         )
+        await writeCommittedProjection(workspacePath, dispatchId, path)
         const receipt = await commitAuthoredFoundationDocument({
           workspacePath,
           dispatchId,

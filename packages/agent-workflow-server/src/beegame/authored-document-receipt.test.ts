@@ -10,6 +10,7 @@ import {
 } from './authored-document-receipt'
 import { completeTestSubmission, renderTestCompleteGameDocument } from '../__tests__/complete-game-document-fixture'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import type { FoundationDocumentPath } from './delivery-workflow/types'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
@@ -63,6 +64,42 @@ function completeDocument(path: 'docs/GDD.md'): string {
   return body
 }
 
+function completeFoundationDocument(path: FoundationDocumentPath): string {
+  return renderTestCompleteGameDocument(path, completeTestSubmission(path))
+}
+
+async function writeProjectionForTarget(
+  workspacePath: string,
+  dispatchId: string,
+  targetPath: FoundationDocumentPath,
+  documents: ReadonlyMap<FoundationDocumentPath, string>,
+): Promise<void> {
+  const contract = getGameDocumentContract(targetPath)
+  const projection = projectFoundationAuthority({
+    targetPath,
+    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    documents,
+  })
+  const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
+  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
+  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
+}
+
+async function writeCommittedProjection(
+  workspacePath: string,
+  dispatchId: string,
+  targetPath: 'docs/GDD.md',
+): Promise<void> {
+  const projection = projectFoundationAuthority({
+    targetPath,
+    availableUpstreamPaths: [],
+    documents: new Map(),
+  })
+  const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
+  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
+  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
+}
+
 describe('native authored document receipts', () => {
   test('commits and replays a document written with native file tools', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'authored-document-'))
@@ -71,6 +108,7 @@ describe('native authored document receipts', () => {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       const authored = completeDocument(targetPath)
       await writeFile(join(workspacePath, targetPath), authored)
+      await writeCommittedProjection(workspacePath, 'native-gdd', targetPath)
 
       const first = await commitAuthoredFoundationDocument({
         workspacePath,
@@ -145,6 +183,7 @@ describe('native authored document receipts', () => {
         join(workspacePath, 'docs/GDD.md'),
         completeDocument('docs/GDD.md'),
       )
+      await writeCommittedProjection(workspacePath, 'native-reconcile', 'docs/GDD.md')
       const receipt = await commitAuthoredFoundationDocument({
         workspacePath,
         dispatchId: 'native-reconcile',
@@ -207,8 +246,8 @@ describe('native authored document receipts', () => {
       const targetPath = 'docs/LEVEL_SCENE_DESIGN.md' as const
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       const upstream = completeDocument(upstreamPath).replace(
-        '## Game States and Flow\n\nAuthoritative production requirements',
-        '## Game States and Flow\n\nOwner declaration: `state.flow`. Authoritative production requirements',
+        '### Game State Flow\n\n```mermaid',
+        '### Game State Flow\n\nOwner declaration: `state.flow`.\n\n```mermaid',
       )
       await writeFile(join(workspacePath, upstreamPath), upstream)
       const target = renderTestCompleteGameDocument(targetPath, completeTestSubmission(targetPath)).replace(
@@ -231,6 +270,20 @@ describe('native authored document receipts', () => {
         updatedAt: '2026-08-13T01:00:00.000+08:00',
       })).resolves.toMatchObject({ status: 'committed', targetPath })
 
+      const mismatched = JSON.parse(canonicalFoundationAuthorityProjectionBytes(projection)) as Record<string, unknown>
+      mismatched.targetPath = 'docs/GDD.md'
+      await writeFile(
+        join(workspacePath, foundationProjectionRelativePath('authority-mismatch')),
+        `${JSON.stringify(mismatched, null, 2)}\n`,
+      )
+      await expect(commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId: 'authority-mismatch',
+        targetPath,
+        authoredBody: target,
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
+      })).rejects.toThrow(/projection|contract|target/i)
+
       await writeFile(join(workspacePath, 'docs/GDD.md'), `${upstream}\nchanged`)
       await expect(commitAuthoredFoundationDocument({
         workspacePath,
@@ -241,6 +294,52 @@ describe('native authored document receipts', () => {
       })).rejects.toThrow(/projection|stale|missing/i)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects undefined cross-document references and future Asset IDs at the commit boundary', async () => {
+    const cases = [
+      {
+        targetPath: 'docs/LEVEL_SCENE_DESIGN.md' as const,
+        reference: 'state.undefined',
+        upstreamPaths: ['docs/GDD.md'] as const,
+      },
+      {
+        targetPath: 'docs/AUDIO_DESIGN.md' as const,
+        reference: 'asset.futurecue',
+        upstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/UI_UX_SPEC.md'] as const,
+      },
+      {
+        targetPath: 'docs/ART_DIRECTION.md' as const,
+        reference: 'asset.futurevisual',
+        upstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'] as const,
+      },
+    ]
+    for (const [index, current] of cases.entries()) {
+      const workspacePath = await mkdtemp(join(tmpdir(), `authored-cross-ref-${index}-`))
+      try {
+        await mkdir(join(workspacePath, 'docs'), { recursive: true })
+        const documents = new Map<FoundationDocumentPath, string>()
+        for (const upstreamPath of current.upstreamPaths) {
+          const markdown = completeFoundationDocument(upstreamPath)
+          documents.set(upstreamPath, markdown)
+          await writeFile(join(workspacePath, upstreamPath), markdown)
+        }
+        const target = completeFoundationDocument(current.targetPath).replace(
+          '<!-- beegame-audit-appendix -->',
+          `Owner reference: \`${current.reference}\`.\n\n<!-- beegame-audit-appendix -->`,
+        )
+        await writeFile(join(workspacePath, current.targetPath), target)
+        await writeProjectionForTarget(workspacePath, `cross-ref-${index}`, current.targetPath, documents)
+        await expect(commitAuthoredFoundationDocument({
+          workspacePath,
+          dispatchId: `cross-ref-${index}`,
+          targetPath: current.targetPath,
+          updatedAt: '2026-08-13T01:00:00.000+08:00',
+        })).rejects.toThrow(/undefined|future Asset|semantic ID/i)
+      } finally {
+        await rm(workspacePath, { recursive: true, force: true })
+      }
     }
   })
 })

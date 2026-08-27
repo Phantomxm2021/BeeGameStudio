@@ -223,8 +223,9 @@ const CJK_ID = /[\u3400-\u9fff\u{20000}-\u{2ffff}]/u
 const PLACEHOLDER_ID = /^(?:placeholder|tbd|todo|unknown)(?:[._-].*)?$/i
 const REFERENCE_SYNTAX = /\b(?:owner\s+)?(?:reference|ref)\s*[:=]\s*([^\n]+)/gi
 const DECLARATION_SYNTAX = /\b(?:owner\s+)?(?:declaration|declare)\s*[:=]\s*([^\n]+)/gi
-const ID_COLUMN = /^(?:id|key|identifier|stable(?:\s+|-)?id)$/i
-const VALUE_COLUMN = /(?:value|range|formula|result|bound|threshold|interval|expression)/i
+const DECLARATION_COLUMN = /^(?:ID|Key|Identifier|Stable ID)$/
+const REFERENCE_COLUMN = /^(?:Reference ID|Owner ID|Inventory ID|(?:Owner|Asset|Path|Section|Material|Formula|Acceptance|Stable) Ref)$/
+const VALUE_COLUMN = /^(?:Value|Range|Formula|Result|Bound|Threshold|Interval|Expression)$/i
 
 function unquoteId(value: string): string {
   return value.trim().replace(/^`|`$/g, '').replace(/^['"]|['"]$/g, '').trim()
@@ -254,6 +255,7 @@ function tableRows(body: string): Array<{ headers: string[]; cells: string[]; li
 
 type StructuredFactRow = {
   id: string
+  kind: 'declaration' | 'reference'
   cells: string[]
   headers: string[]
   line: number
@@ -287,23 +289,24 @@ function explicitIds(block: CompleteDocumentBlock): {
       localReferences.push({ value, line })
   }
   for (const row of tableRows(block.body)) {
-    const firstHeader = row.headers[0]?.toLowerCase() ?? ''
-    const idColumn = ID_COLUMN.test(firstHeader)
+    const declarationColumn = DECLARATION_COLUMN.test(row.headers[0] ?? '')
+    const referenceColumn = REFERENCE_COLUMN.test(row.headers[0] ?? '')
+    const idColumn = declarationColumn || referenceColumn
     if (idColumn) {
       const value = unquoteId(row.cells[0] ?? '')
-      if (allowDeclarations && (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)))
+      if (declarationColumn && allowDeclarations && (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)))
         throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${block.startLine + row.line - 1}`)
-      add(value, block.startLine + row.line - 1, allowDeclarations)
-      if (SEMANTIC_ID.test(value) || LOCAL_OWNER_KEY.test(value))
-        factRows.push({ id: value, cells: row.cells.slice(1), headers: row.headers.slice(1), line: block.startLine + row.line - 1 })
+      add(value, block.startLine + row.line - 1, declarationColumn && allowDeclarations)
+      if ((declarationColumn && allowDeclarations || referenceColumn) && (SEMANTIC_ID.test(value) || LOCAL_OWNER_KEY.test(value)))
+        factRows.push({ id: value, kind: declarationColumn ? 'declaration' : 'reference', cells: row.cells.slice(1), headers: row.headers.slice(1), line: block.startLine + row.line - 1 })
       for (const [cellIndex, cell] of row.cells.slice(1).entries()) {
         const explicit = unquoteId(cell)
         if (SEMANTIC_ID.test(explicit) || SEMANTIC_ID_ALIAS.test(explicit))
           add(explicit, block.startLine + row.line - 1, false)
-        else if (/(?:reference|ref|owner)/i.test(row.headers[cellIndex + 1] ?? ''))
+        else if (REFERENCE_COLUMN.test(row.headers[cellIndex + 1] ?? ''))
           add(explicit, block.startLine + row.line - 1, false)
       }
-      if (!allowDeclarations)
+      if (referenceColumn || !allowDeclarations)
         for (const cell of row.cells.slice(1)) add(cell, block.startLine + row.line - 1, false)
     }
   }
@@ -321,6 +324,10 @@ function explicitIds(block: CompleteDocumentBlock): {
       if (SEMANTIC_ID.test(value)) {
         semantic.push(value)
         semanticDeclarations.push(value)
+      } else if (LOCAL_OWNER_KEY.test(value)) {
+        localDeclarations.push({ value, line })
+      } else if (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)) {
+        throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${line}`)
       }
     }
   }
@@ -353,6 +360,7 @@ function assertOwnerScopedAuthority(
     blockFacts.set(block.id, ids.factRows)
     if (block.id === 'material.variable-parameter-table' && path === 'docs/BALANCE_DESIGN.md')
       for (const row of ids.factRows) {
+        if (row.kind !== 'declaration') continue
         if (ownerFacts.has(row.id))
           throw new Error(`Balance owner fact ID is duplicated: ${row.id}`)
         ownerFacts.set(row.id, { block: block.id, values: row.cells.filter((cell, index) => VALUE_COLUMN.test(row.headers[index] ?? '')).map(unquoteId).filter(Boolean) })
@@ -435,6 +443,7 @@ export function collectCompleteGameDocumentAuthoritySymbols(
   return completeDocumentBlocks(path, markdown.split('\n')).flatMap(block => {
     const ids = explicitIds(block)
     const tableSymbols = ids.factRows
+      .filter(row => row.kind === 'declaration')
       .filter(row => SEMANTIC_ID.test(row.id))
       .map(row => row.id)
     const declarationSymbols = ids.semanticDeclarations.filter(id => !tableSymbols.includes(id))
@@ -483,7 +492,16 @@ export function assertCompleteGameDocumentCrossDocumentReferences(
     if (!owner)
       throw new Error(`undefined cross-document semantic ID: ${path}:${id}`)
     const source = projection.sources.find(candidate => candidate.path === owner.documentPath)
-    if (!source || !source.sections.some(section => section.sectionId === owner.sectionId))
+    if (!source)
+      throw new Error(`cross-document semantic ID is outside committed upstream projection: ${path}:${id}`)
+    const sourceContract = getGameDocumentContract(source.path)
+    const materialSectionId = sourceContract.productionMaterials.some(
+      material => `material.${material.materialId}` === owner.sectionId,
+    )
+    const declaredSection = sourceContract.sections.some(
+      section => section.sectionId === owner.sectionId,
+    )
+    if (!materialSectionId && (!declaredSection || !source.sections.some(section => section.sectionId === owner.sectionId)))
       throw new Error(`cross-document semantic ID is outside committed upstream projection: ${path}:${id}`)
   }
 }

@@ -5,6 +5,7 @@ import {
 } from '../__tests__/complete-game-document-fixture'
 import {
   assertMaterialFormat,
+  collectCompleteGameDocumentAuthoritySymbols,
   isCompleteGameDocumentMarkdownStructure,
   normalizeCompleteGameDocumentProtocol,
   validateCompleteGameDocumentMarkdown,
@@ -403,6 +404,12 @@ describe('native complete game document validation', () => {
       '| ID | Unit | Value | Range |\n| --- | --- | --- | --- |\n| `var.fuel` | FU | 0.1 | [0,1] |',
     )
     expect(validateCompleteGameDocumentMarkdown(path, owner)).toBe(owner)
+    const copiedTable = replaceSectionBody(
+      owner,
+      'formulas',
+      '| Reference ID | Value |\n| --- | --- |\n| `var.fuel` | 0.1 |',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, copiedTable)).toThrow(/Balance|copied|owner|numeric|formula/i)
   })
 
   test('accepts owner-scoped numeric literals and explicit formula/acceptance IDs', () => {
@@ -421,6 +428,25 @@ describe('native complete game document validation', () => {
       '| ID | Loudness | Acceptance |\n| --- | --- | --- |\n| `LU-01` | -14 LUFS | `acceptance.audio.loudness` |',
     )
     expect(validateCompleteGameDocumentMarkdown(audio, audioMarkdown)).toBe(audioMarkdown)
+  })
+
+  test('treats Asset sibling inventory keys as references, not declarations', () => {
+    const path = 'docs/ASSET_PLAN.md' as const
+    const base = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const inventory = replaceMaterialBody(
+      base,
+      'asset-inventory-table',
+      '| ID | Requirement |\n| --- | --- |\n| `asset.hero` | player character |',
+    )
+    const sibling = replaceMaterialBody(
+      inventory,
+      'responsibility-matrix',
+      '| Inventory ID | Creator |\n| --- | --- |\n| `asset.hero` | Art |',
+    )
+    expect(collectCompleteGameDocumentAuthoritySymbols(path, sibling)).toEqual([
+      { id: 'asset.hero', documentPath: path, sectionId: 'material.asset-inventory-table' },
+    ])
+    expect(validateCompleteGameDocumentMarkdown(path, sibling)).toBe(sibling)
   })
 
 })

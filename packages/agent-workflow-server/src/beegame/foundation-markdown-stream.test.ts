@@ -7,6 +7,11 @@ import {
   createFoundationMarkdownStreamSink,
   foundationMarkdownPendingPath,
 } from './foundation-markdown-stream'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  foundationProjectionRelativePath,
+  projectFoundationAuthority,
+} from './foundation-authority-projection'
 
 const targetPath = 'docs/GDD.md' as const
 
@@ -45,6 +50,17 @@ function successfulMessages(markdown: string): Record<string, unknown>[] {
   ]
 }
 
+async function writeEmptyGddProjection(workspacePath: string, dispatchId: string): Promise<void> {
+  const projection = projectFoundationAuthority({
+    targetPath,
+    availableUpstreamPaths: [],
+    documents: new Map(),
+  })
+  const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
+  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
+  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
+}
+
 describe('foundation Markdown stream sink', () => {
   test('publishes ordered text blocks produced by a native max-token continuation', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-continuation-'))
@@ -62,6 +78,7 @@ describe('foundation Markdown stream sink', () => {
         maxBytes: 512_000,
         updatedAt: '2026-08-15T01:00:00.000+08:00',
       })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-continuation')
 
       for (const message of [
         streamEvent({ type: 'message_start', message: { id: 'message-1' } }),
@@ -135,6 +152,7 @@ describe('foundation Markdown stream sink', () => {
         targetPath,
         maxBytes: 512_000,
       })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-line-replay')
 
       for (const message of [
         streamEvent({ type: 'message_start', message: { id: 'message-1' } }),
@@ -196,6 +214,7 @@ describe('foundation Markdown stream sink', () => {
         maxBytes: 512_000,
         updatedAt: '2026-08-15T01:00:00.000+08:00',
       })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-1')
 
       for (const message of successfulMessages(markdown)) sink.observe(message)
       const receipt = await sink.commit()

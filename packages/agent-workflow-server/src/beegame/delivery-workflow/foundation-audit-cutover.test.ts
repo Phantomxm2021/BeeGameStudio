@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeliveryWorkflowController } from './controller'
@@ -18,6 +18,34 @@ import {
   renderTestCompleteGameDocument,
 } from '../../__tests__/complete-game-document-fixture'
 import { withTestDocumentMetadata } from '../../__tests__/delivery-workflow-test-helpers'
+import { getGameDocumentContract } from './game-document-contracts'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  foundationProjectionRelativePath,
+  projectFoundationAuthority,
+} from '../foundation-authority-projection'
+
+async function writeCommittedProjection(
+  workspacePath: string,
+  dispatchId: string,
+  targetPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): Promise<void> {
+  const contract = getGameDocumentContract(targetPath)
+  const documents = new Map(await Promise.all(
+    contract.upstreamSections.map(async source => [
+      source.path,
+      await readFile(join(workspacePath, source.path), 'utf8'),
+    ] as const),
+  ))
+  const projection = projectFoundationAuthority({
+    targetPath,
+    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    documents,
+  })
+  const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
+  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
+  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
+}
 
 function runWithEightCommittedDocs(): DeliveryRun {
   const paths = [
@@ -104,6 +132,7 @@ describe('foundation audit cutover', () => {
           ),
         )
       const dispatchId = 'eighth-author-terminal'
+      await writeCommittedProjection(workspacePath, dispatchId, finalPath)
       await commitAuthoredFoundationDocument({
         workspacePath,
         dispatchId,
