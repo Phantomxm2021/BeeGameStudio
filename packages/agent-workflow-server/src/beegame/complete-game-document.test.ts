@@ -174,10 +174,79 @@ describe('native complete game document validation', () => {
     expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
   })
 
+  test('derives wildcard references from owner tokens in prose and compound inline expressions', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const submission = completeTestSubmission(path)
+    const withOwnerReferences = {
+      ...submission,
+      sections: submission.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              body: `${section.body}
+
+Owner facts: V-DSL-INIT, V-DSL-CAP, and V_HAZ_MIN are canonical concrete owners.
+Owner expression: \`P_LOCAL_TANK_GEN = V-DSL-INIT + V-DSL-CAP\`.`,
+            }
+          : section,
+      ),
+    }
+    const markdown = replaceMaterialBody(
+      renderTestCompleteGameDocument(path, withOwnerReferences),
+      'formula-boundary-table',
+      '| Reference | Owner |\n| --- | --- |\n| variable group | `V-DSL-*` |\n| hazard group | `V_HAZ_*` |\n| parameter | `P_LOCAL_TANK_GEN` |',
+    )
+
+    expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
+  })
+
+  test('accepts owner-defined IDs matching real Balance material reference shapes', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const wildcardReferences = [
+      'V-DSL-*', 'V-LOCAL-*', 'V-STO-*', 'V-TMP-*', 'V-LMUL-*',
+      'V-SKL-*', 'V-EMG-*', 'V-HAZ-*', 'V-EXP-*', 'V-STW-*',
+      'V-PAD-CAP-*', 'V-RTF-*', 'V-WNF-*',
+    ]
+    const exactReferences = [
+      'V-COMM-BLIND', 'V-TMP-DEAD', 'F_FUEL_DRAW', 'P_LOCAL_TANK_GEN',
+      'P_LOCAL_TANK_HEAT', 'CAP_GEN_KW', 'P_BLD_KW', 'CAP_HEAT_HU',
+      'P_BLD_HU', 'P_TEMP_RECOVER', 'P_TEMP_DROP_BASE', 'P_TEMP_DROP_TRANSIT',
+      'K_LABOR', 'K_SKILL', 'K_WORKSHOP', 'K_HARDEN', 'P_ROAD_SNOW_SHARE',
+    ]
+    const concreteOwnerIds = wildcardReferences
+      .map(reference => reference.replace(/\*$/, 'BASE'))
+      .concat(exactReferences)
+    const submission = completeTestSubmission(path)
+    const withOwnerReferences = {
+      ...submission,
+      sections: submission.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              body: `${section.body}\n\nOwner declarations: ${concreteOwnerIds.join(' ')}.\nCompound owner expression: \`P_LOCAL_TANK_GEN = V-DSL-BASE + V-DSL-CAP\`.`,
+            }
+          : section,
+      ),
+    }
+    const references = [...wildcardReferences, ...exactReferences]
+    const body = [
+      '| Reference | Owner |',
+      '| --- | --- |',
+      ...references.map(reference => `| reference | \`${reference}\` |`),
+    ].join('\n')
+    const markdown = replaceMaterialBody(
+      renderTestCompleteGameDocument(path, withOwnerReferences),
+      'formula-boundary-table',
+      body,
+    )
+
+    expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
+  })
+
   test('rejects undeclared symbolic IDs', () => {
     const path = 'docs/BALANCE_DESIGN.md'
     const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
-    for (const reference of ['P_UNDECLARED_*', 'V_UNDECLARED', 'F99', 'SC_404']) {
+    for (const reference of ['P_UNDECLARED_*', 'V_UNDECLARED', 'F99', 'SC_404', 'V-DSL-UNDECLARED-*']) {
       const rejected = replaceMaterialBody(
         markdown,
         'formula-boundary-table',

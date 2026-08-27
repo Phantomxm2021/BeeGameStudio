@@ -94,7 +94,7 @@ function assertMaterialFormat(
 const BALANCE_INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g
 const BALANCE_SYMBOLIC_REFERENCE_PATTERN = '(?:[A-Z]\\d+[A-Z]?|[A-Z][A-Z0-9]*(?:[_-][A-Z0-9*]+)+)'
 const BALANCE_SYMBOLIC_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_SYMBOLIC_REFERENCE_PATTERN}(?![A-Za-z0-9_*])`
-const BALANCE_FACT_REFERENCE = new RegExp(`^${BALANCE_SYMBOLIC_REFERENCE_PATTERN}$`)
+const BALANCE_SYMBOLIC_REFERENCE = new RegExp(BALANCE_SYMBOLIC_REFERENCE_TOKEN, 'g')
 const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
 const BALANCE_FORMULA_CALL = /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^()\n]*\)/
 const BALANCE_SYMBOLIC_EXPRESSION = new RegExp(
@@ -110,10 +110,15 @@ function collectBalanceOwnerReferences(
   body: string,
   references: Set<string>,
 ): void {
-  for (const match of body.matchAll(BALANCE_INLINE_CODE)) {
-    const code = match[1]!.trim()
-    if (BALANCE_FACT_REFERENCE.test(code)) references.add(code)
+  BALANCE_SYMBOLIC_REFERENCE.lastIndex = 0
+  for (const match of body.matchAll(BALANCE_SYMBOLIC_REFERENCE)) {
+    const reference = match[0]!
+    references.add(reference)
+    const parts = reference.split(/([_-])/)
+    for (let index = 1; index < parts.length - 1; index += 2)
+      references.add(`${parts.slice(0, index + 1).join('')}*`)
   }
+  BALANCE_SYMBOLIC_REFERENCE.lastIndex = 0
 }
 
 function assertBalanceReferenceOnlyMaterial(
