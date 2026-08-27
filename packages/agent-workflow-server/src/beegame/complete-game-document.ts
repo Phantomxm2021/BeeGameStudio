@@ -91,12 +91,8 @@ function assertMaterialFormat(
     throw new Error(`production material format is invalid: ${materialId}:${format}`)
 }
 
-const BALANCE_REFERENCE_PATTERN = '(?:F\\d+[A-Z]?|(?:V|SC|AC|INV|CONV|EC|EX|RK|PF|RV)_(?:[A-Z0-9]+(?:_[A-Z0-9]+)*(?:_\\*)?|\\*))'
-const BALANCE_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_REFERENCE_PATTERN}(?![A-Za-z0-9_*])`
-const BALANCE_REFERENCE = new RegExp(BALANCE_REFERENCE_TOKEN, 'g')
-const BALANCE_REFERENCE_ONLY = new RegExp(`^${BALANCE_REFERENCE_PATTERN}$`)
 const BALANCE_INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g
-const BALANCE_SYMBOLIC_REFERENCE_PATTERN = '(?:[A-Z]\\d+|[A-Z][A-Z0-9]*(?:[_-][A-Z0-9*]+)+)'
+const BALANCE_SYMBOLIC_REFERENCE_PATTERN = '(?:[A-Z]\\d+[A-Z]?|[A-Z][A-Z0-9]*(?:[_-][A-Z0-9*]+)+)'
 const BALANCE_SYMBOLIC_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_SYMBOLIC_REFERENCE_PATTERN}(?![A-Za-z0-9_*])`
 const BALANCE_FACT_REFERENCE = new RegExp(`^${BALANCE_SYMBOLIC_REFERENCE_PATTERN}$`)
 const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
@@ -126,17 +122,16 @@ function assertBalanceReferenceOnlyMaterial(
   materialTitle: string,
   structuralReferences: ReadonlySet<string>,
 ): void {
+  const allowedReferences = new Set([
+    ...structuralReferences,
+    materialId,
+    materialTitle,
+  ])
   for (const match of body.matchAll(BALANCE_INLINE_CODE)) {
     const code = match[1]!.trim()
-    if (
-      code === materialId ||
-      code === materialTitle ||
-      structuralReferences.has(code)
-    )
+    if (allowedReferences.has(code))
       continue
-    BALANCE_REFERENCE.lastIndex = 0
-    if (!BALANCE_REFERENCE_ONLY.test(code))
-      throw new Error(`Balance reference-only material contains non-reference inline code: ${materialId}`)
+    throw new Error(`Balance reference-only material contains non-reference inline code: ${materialId}`)
   }
 
   if (BALANCE_FORMULA_CALL.test(body))
@@ -158,10 +153,7 @@ function assertBalanceReferenceOnlyMaterial(
     `(?<![A-Za-z0-9_])(?:${structuralReferencePattern})(?![A-Za-z0-9_*])`,
     'g',
   )
-  const withoutReferences = body
-    .replace(BALANCE_REFERENCE, ' ')
-    .replace(structuralReferenceToken, ' ')
-  BALANCE_REFERENCE.lastIndex = 0
+  const withoutReferences = body.replace(structuralReferenceToken, ' ')
   if (BALANCE_NUMERIC_LITERAL.test(withoutReferences))
     throw new Error(`Balance reference-only material contains a copied numeric literal: ${materialId}`)
 }

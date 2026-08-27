@@ -149,7 +149,7 @@ describe('native complete game document validation', () => {
         index === 0
           ? {
               ...section,
-              body: `${section.body}\n\nOwner IDs: \`P_GEN_KW_PER_L\`, \`K_GEN_LEVEL\`, \`CAP_GEN_KW\`, \`B1\`, \`T6\`, \`A3\`, \`B-02\`, and \`SS-05\`.`,
+              body: `${section.body}\n\nOwner IDs: \`P_GEN_KW_PER_L\`, \`K_GEN_LEVEL\`, \`CAP_GEN_KW\`, \`B1\`, \`T6\`, \`A3\`, \`B-02\`, \`SS-05\`, \`V_P_FLOOR\`, \`V_HAZ_*\`, \`V_FLT_*\`, \`F01\`, \`F03A\`, \`SC_01\`, \`AC_01\`, \`INV_ICON\`, \`CONV_UNIT\`, \`EC_INCOME\`, \`EX_STRESS\`, \`RK_ABORT\`, \`PF_START\`, and \`RV_RETRY\`.`,
             }
           : section,
       ),
@@ -176,15 +176,17 @@ describe('native complete game document validation', () => {
 
   test('rejects undeclared symbolic IDs', () => {
     const path = 'docs/BALANCE_DESIGN.md'
-    const markdown = replaceMaterialBody(
-      renderTestCompleteGameDocument(path, completeTestSubmission(path)),
-      'formula-boundary-table',
-      '| Field | Value |\n| --- | --- |\n| expression | `P_UNDECLARED_*` |',
-    )
-
-    expect(() => validateCompleteGameDocumentMarkdown(path, markdown)).toThrow(
-      /Balance reference-only material/i,
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    for (const reference of ['P_UNDECLARED_*', 'V_UNDECLARED', 'F99', 'SC_404']) {
+      const rejected = replaceMaterialBody(
+        markdown,
+        'formula-boundary-table',
+        `| Field | Value |\n| --- | --- |\n| expression | \`${reference}\` |`,
+      )
+      expect(() => validateCompleteGameDocumentMarkdown(path, rejected)).toThrow(
+        /Balance reference-only material/i,
+      )
+    }
   })
 
   test('accepts a complete document above the compact authoring target', () => {
