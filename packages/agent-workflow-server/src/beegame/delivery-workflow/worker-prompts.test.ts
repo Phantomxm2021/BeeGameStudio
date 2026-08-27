@@ -44,6 +44,7 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('Canonical artifacts:')
     expect(prompt).not.toContain('Run: run')
     expect(prompt).not.toContain('Revision: revision')
+    expect(prompt).not.toContain('availableUpstreamPaths')
   })
 
   test('passes only the canonical Foundation path namespace and one merge rule to both authoring modes', () => {
@@ -115,10 +116,10 @@ describe('worker prompts', () => {
 
   test('aligns shared foundation authority instructions across all initial and parallel authors', () => {
     const expectedSharedInstructions = [
-      'Use exactly one fact owner:',
-      'Define each authoritative fact once',
-      'Do not restate the confirmed brief, upstream authority or another section',
-      'Downstream documents may specialize only already-authorized behavior and must not redefine upstream rules',
+      'Use exactly one fact owner across the eight documents:',
+      'Define each fact once',
+      'Do not restate the confirmed brief or upstream authority',
+      'downstream documents may specialize already-authorized behavior but must not redefine upstream rules',
     ]
 
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
@@ -153,7 +154,7 @@ describe('worker prompts', () => {
     }
   })
 
-  test('applies adaptive density and document authority rules to every foundation author', () => {
+  test('applies adaptive density and owner-only authority rules to every foundation author', () => {
     const sharedRules = [
       'Judge quality by distinct implementable decisions and traceability, not document length',
       'Use the minimum sufficient headings, tables, rows, diagrams and examples',
@@ -163,7 +164,7 @@ describe('worker prompts', () => {
       'Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate',
       'Record a genuinely N/A item once with its reason and impact; never invent a system',
       'Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets',
-      'Use one representation per fact: Owner materials are the authoritative representation for their facts, while Reference-only materials contain stable owner references and must not copy mutable literals or formulas',
+      'Every material is an owner representation for its declared facts and contains the single canonical representation',
     ]
     const rules = {
       'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
@@ -192,8 +193,13 @@ describe('worker prompts', () => {
         expect(countOccurrences(prompt, rules[foundationDocumentPath])).toBe(1)
         expect(prompt).toContain('complete raw Markdown body')
         expect(prompt).toContain('Do not call tools, return JSON')
-        expect(prompt).toContain('Executive Summary indexes authority; each material follows its own authorityMode and authorityRule')
-        expect(prompt).not.toContain('Summary and Materials only index stable owner references')
+        expect(prompt).toContain('The Executive Summary indexes authority, while each material owns the facts declared by its serialized authority rule')
+        expect(prompt).not.toContain('authorityMode')
+        expect(prompt).not.toContain('reference-only')
+        expect(prompt).not.toContain('reference_only')
+        expect(prompt).not.toContain('derived view')
+        expect(prompt).not.toContain('parallel-author')
+        expect(prompt).not.toContain('All Production Materials are derived')
         expect(countOccurrences(prompt, 'Record a genuinely N/A item once with its reason and impact')).toBe(1)
         expect(prompt).toContain('Before returning, silently perform this internal closure check')
         expect(prompt).toContain('every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once')
@@ -207,7 +213,7 @@ describe('worker prompts', () => {
     }
   })
 
-  test('requires each material authority mode to govern copied facts', () => {
+  test('requires each material to contain one canonical owner representation', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -227,14 +233,16 @@ describe('worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('Executive Summary is an authority index')
-    expect(prompt).toContain('Owner materials are the authoritative representation for their facts')
-    expect(prompt).toContain('Reference-only materials contain stable owner references and must not copy mutable literals or formulas')
-    expect(prompt).toContain('Reference-only materials contain only source-derived stable owner IDs, canonical owner section/material references, and structural relationships that connect those references')
-    expect(prompt).toContain('timing, steps, order, ranks, counts, or any other owner fact')
-    expect(prompt).toContain('In reference-only Mermaid materials, node identifiers and labels must directly reuse source-derived canonical owner IDs')
-    expect(prompt).toContain('must not rewrite, abbreviate or alias')
-    expect(prompt).not.toContain('Production Materials are derived compact views.')
+    expect(prompt).toContain('The Executive Summary indexes authority')
+    expect(prompt).toContain('Every material is an owner representation for its declared facts and contains the single canonical representation')
+    expect(prompt).toContain('one complete raw Markdown body')
+    expect(prompt).toContain('one representation per fact')
+    expect(prompt).not.toContain('authorityMode')
+    expect(prompt).not.toContain('reference-only')
+    expect(prompt).not.toContain('reference_only')
+    expect(prompt).not.toContain('derived view')
+    expect(prompt).not.toContain('parallel-author')
+    expect(prompt).not.toContain('All Production Materials are derived')
   })
 
   test('serializes each material authority once for both raw-Markdown author modes', () => {
@@ -252,11 +260,13 @@ describe('worker prompts', () => {
         })
 
         expect(prompt).toContain('complete raw Markdown body')
-        expect(prompt).toContain('Owner materials are the authoritative representation for their facts')
-        expect(prompt).toContain('Reference-only materials contain stable owner references and must not copy mutable literals or formulas')
-        expect(prompt).toContain('Use one representation per fact')
+        expect(prompt).toContain('Every material is an owner representation for its declared facts and contains the single canonical representation')
+        expect(prompt).toContain('use one representation per fact')
         expect(prompt).toContain('Record a genuinely N/A item once with its reason and impact')
-        expect(prompt).not.toContain('Production Materials are derived compact views.')
+        expect(prompt).not.toContain('authorityMode')
+        expect(prompt).not.toContain('reference-only')
+        expect(prompt).not.toContain('reference_only')
+        expect(prompt).not.toContain('derived view')
         for (const material of contract.productionMaterials) {
           expect(countOccurrences(prompt, material.authorityRule)).toBe(1)
           expect(countOccurrences(prompt, `"authorityRule":"${material.authorityRule}"`)).toBe(1)
@@ -265,7 +275,7 @@ describe('worker prompts', () => {
     }
   })
 
-  test('does not preserve an upstream-unavailable branch when the path is present', () => {
+  test('uses the same committed projection instruction regardless of upstream paths', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -286,37 +296,34 @@ describe('worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain(
-      'When an upstream path is present, use its committed authority; do not describe it as unavailable',
-    )
-    expect(prompt).not.toContain(
-      'Record genuinely unavailable upstream decisions as explicit assumptions',
-    )
+    expect(prompt).toContain('Use only the contract-declared committed upstream projection and symbol table as authority')
+    expect(prompt).not.toContain('unavailable upstream')
+    expect(prompt).not.toContain('classify freshness')
   })
 
-  test('records unavailable upstream decisions only when no upstream path is present', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
-      allowedPaths: ['docs/BALANCE_DESIGN.md'],
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'parallel-draft',
-        foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
-        completeDocumentContract: getGameDocumentContract(
-          'docs/BALANCE_DESIGN.md',
-        ),
-      },
-    })
-
-    expect(prompt).toContain(
-      'Record genuinely unavailable upstream decisions as explicit assumptions',
-    )
+  test('requires canonical IDs and one-way semantic resource mapping', () => {
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
+        const prompt = buildWorkerPrompt({
+          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+          allowedPaths: [foundationDocumentPath],
+          contract: {
+            documentSet: 'foundation', authoringMode, foundationDocumentPath,
+            completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
+          },
+        })
+        expect(prompt).toContain('Use two ID classes: cross-document semantic IDs use lower-case ASCII dotted namespaces')
+        expect(prompt).toContain('owner-local keys use the owner’s canonical form and must be copied byte-for-byte')
+        expect(prompt).toContain('Do not use aliases, placeholders or CJK IDs')
+        expect(prompt).toContain('Audio and Art declare semantic requirements and constraints only; do not name future Asset inventory IDs')
+        expect(prompt).toContain('Asset Plan maps those requirements one-way to its own inventory IDs')
+        expect(prompt).not.toContain('authorityMode')
+        expect(prompt).not.toContain('reference-only')
+        expect(prompt).not.toContain('reference_only')
+        expect(prompt).not.toContain('derived view')
+      }
+    }
   })
 
   test('derives checklist cardinality from observable scenarios without fixed business caps', () => {
