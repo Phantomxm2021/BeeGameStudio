@@ -208,7 +208,7 @@ describe('native complete game document validation', () => {
     markdown = replaceMaterialBody(
       markdown,
       'economy-flow-diagram',
-      'Reference-only flow.\n\n```mermaid\ngraph TD\nS1[stock.fuel_init] -->|formula.gen_output / stock.fuel_init| F1[bound.power_max]\n```',
+      'Reference-only flow.\n\n```mermaid\ngraph TD\nstock.fuel_init -->|formula.gen_output / stock.fuel_init| bound.power_max\n```',
     )
 
     expect(normalizeCompleteGameDocumentProtocol(path, markdown)).toBe(markdown)
@@ -231,6 +231,31 @@ describe('native complete game document validation', () => {
         /Balance reference-only material/i,
       )
     }
+  })
+
+  test('rejects Mermaid node aliases that rewrite canonical owner IDs', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const submission = completeTestSubmission(path)
+    const withOwnerReferences = {
+      ...submission,
+      sections: submission.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              body: `${section.body}\n\nOwner formula: F-02 is the canonical source-derived owner ID.`,
+            }
+          : section,
+      ),
+    }
+    const markdown = replaceMaterialBody(
+      renderTestCompleteGameDocument(path, withOwnerReferences),
+      'economy-flow-diagram',
+      'Reference-only flow.\n\n```mermaid\nflowchart LR\nF02[F-02] --> NEXT\n```',
+    )
+
+    expect(() => normalizeCompleteGameDocumentProtocol(path, markdown)).toThrow(
+      /undeclared Mermaid node alias/i,
+    )
   })
 
   test('accepts prose and stable owner references in Balance reference-only materials', () => {

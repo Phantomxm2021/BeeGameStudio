@@ -186,6 +186,15 @@ describe('complete game document contracts', () => {
     }
   })
 
+  test('requires Balance economy Mermaid identities to remain canonical owner IDs', () => {
+    const economy = getGameDocumentContract('docs/BALANCE_DESIGN.md').productionMaterials
+      .find(material => material.materialId === 'economy-flow-diagram')
+
+    expect(economy?.authorityRule).toContain('Mermaid node identifiers and labels')
+    expect(economy?.authorityRule).toContain('source-derived canonical owner IDs')
+    expect(economy?.authorityRule).toContain('must not rewrite, abbreviate or alias')
+  })
+
   test('removes the obsolete global derived-view output policy fields', () => {
     for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
       expect(contract.outputPolicy).not.toHaveProperty('productionMaterialStyle')

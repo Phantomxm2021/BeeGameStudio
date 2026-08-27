@@ -232,6 +232,8 @@ describe('worker prompts', () => {
     expect(prompt).toContain('Reference-only materials contain stable owner references and must not copy mutable literals or formulas')
     expect(prompt).toContain('Reference-only materials contain only source-derived stable owner IDs, canonical owner section/material references, and structural relationships that connect those references')
     expect(prompt).toContain('timing, steps, order, ranks, counts, or any other owner fact')
+    expect(prompt).toContain('Mermaid node identifiers and labels must directly reuse source-derived canonical owner IDs')
+    expect(prompt).toContain('must not rewrite, abbreviate or alias')
     expect(prompt).not.toContain('Production Materials are derived compact views.')
   })
 

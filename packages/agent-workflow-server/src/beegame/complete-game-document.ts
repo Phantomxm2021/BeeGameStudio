@@ -97,6 +97,7 @@ const BALANCE_SYMBOLIC_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_SYMBOLIC_RE
 const BALANCE_SYMBOLIC_REFERENCE = new RegExp(BALANCE_SYMBOLIC_REFERENCE_TOKEN, 'g')
 const BALANCE_MERMAID_FENCE = /```mermaid[^\n]*\n([\s\S]*?)```/g
 const BALANCE_MERMAID_EDGE_LABEL = /(?:[-=.~]+>)\|([^|\n]+)\|/g
+const BALANCE_MERMAID_NODE_DECLARATION = /(^|\s)([A-Za-z][A-Za-z0-9_.-]*)\s*\[([^\]\n]*)\]/gm
 const BALANCE_MERMAID_NODE_REFERENCE = /(^|\s)([A-Z]\d+)(?=\s*(?:\[|[-=.~]+>|$))/gm
 const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
 const BALANCE_FORMULA_CALL = /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^()\n]*\)/
@@ -150,6 +151,24 @@ function stripAllowedMermaidReferenceLists(
   })
 }
 
+function assertNoMermaidOwnerAliases(
+  body: string,
+  materialId: string,
+  allowedReferences: ReadonlySet<string>,
+): void {
+  BALANCE_MERMAID_FENCE.lastIndex = 0
+  body.replace(BALANCE_MERMAID_FENCE, (_fence: string, mermaidBody: string) => {
+    BALANCE_MERMAID_NODE_DECLARATION.lastIndex = 0
+    for (const match of mermaidBody.matchAll(BALANCE_MERMAID_NODE_DECLARATION)) {
+      const nodeId = match[2]!.trim()
+      const label = match[3]!.trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, '$1$2')
+      if (!allowedReferences.has(nodeId) && allowedReferences.has(label))
+        throw new Error(`Balance reference-only material contains undeclared Mermaid node alias: ${materialId}`)
+    }
+    return _fence
+  })
+}
+
 function assertBalanceReferenceOnlyMaterial(
   body: string,
   materialId: string,
@@ -161,6 +180,7 @@ function assertBalanceReferenceOnlyMaterial(
     materialId,
     materialTitle,
   ])
+  assertNoMermaidOwnerAliases(body, materialId, allowedReferences)
   for (const match of body.matchAll(BALANCE_INLINE_CODE)) {
     const code = match[1]!.trim()
     if (allowedReferences.has(code))
