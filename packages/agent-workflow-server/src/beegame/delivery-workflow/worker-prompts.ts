@@ -467,7 +467,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                     ]),
                 FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
                 DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn. Do not output a check report; silently perform the internal closure check appended after the contract.',
+                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn.',
               ].join(' ')
             : request.contract.authoringMode === 'initial'
               ? [
