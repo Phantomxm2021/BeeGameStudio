@@ -84,6 +84,20 @@ describe('native complete game document validation', () => {
     }
   })
 
+  test('rejects non-canonical Foundation references in prose and code fences', () => {
+    const path = 'docs/GDD.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    expect(() => validateCompleteGameDocumentMarkdown(path, `${markdown}\nSee docs/UIUX_DESIGN.md.`)).toThrow(/canonical|document reference/i)
+    expect(() => validateCompleteGameDocumentMarkdown(path, markdown.replace('```mermaid', '```mermaid\n%% docs/UIUX_DESIGN.md'))).toThrow(/canonical|document reference/i)
+  })
+
+  test('accepts canonical Foundation references and non-document asset paths', () => {
+    const path = 'docs/GDD.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const referenced = markdown.replace('Concrete production authority', 'See docs/BALANCE_DESIGN.md and assets/example.png.\n\nConcrete production authority')
+    expect(validateCompleteGameDocumentMarkdown(path, referenced)).toBe(referenced)
+  })
+
   test('accepts a complete document above the compact authoring target', () => {
     const path = 'docs/LEVEL_SCENE_DESIGN.md'
     const submission = completeTestSubmission(path)

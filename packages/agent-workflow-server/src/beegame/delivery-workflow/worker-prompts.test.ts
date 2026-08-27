@@ -46,6 +46,26 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('Revision: revision')
   })
 
+  test('passes only the canonical Foundation path namespace and one merge rule to both authoring modes', () => {
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      const prompt = buildWorkerPrompt({
+        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+        allowedPaths: ['docs/UI_UX_SPEC.md'],
+        contract: {
+          documentSet: 'foundation', authoringMode, foundationDocumentPath: 'docs/UI_UX_SPEC.md',
+          completeDocumentContract: getGameDocumentContract('docs/UI_UX_SPEC.md'),
+        },
+      })
+      expect(prompt).toContain(`Canonical Foundation documents: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}`)
+      expect(prompt).toContain('Markdown cross-document references may use only these exact canonical Foundation paths')
+      const rule = getGameDocumentContract('docs/UI_UX_SPEC.md').mergeReferenceRule
+      expect(prompt).toContain(rule)
+      expect(countOccurrences(prompt, rule)).toBe(1)
+      expect(prompt).not.toContain('docs/UIUX_DESIGN.md')
+    }
+  })
+
   test('declares a closed H2 heading protocol for initial and parallel foundation authors', () => {
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
       const prompt = buildWorkerPrompt({
@@ -148,9 +168,9 @@ describe('worker prompts', () => {
       'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
       'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
       'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
-      'docs/ART_DIRECTION.md': 'Own visual rules and consume Level/UI geometry; SVG boards are compact, distinct and inspectable visual evidence, not duplicate prose or geometry numbers.',
+      'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
       'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
-      'docs/AUDIO_DESIGN.md': 'The event-cue matrix owns mappings; prose covers policy and exceptions without copying the asset inventory.',
+      'docs/AUDIO_DESIGN.md': 'Audio owns event-to-cue behavior and technical acceptance; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
       'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
     } as const
 

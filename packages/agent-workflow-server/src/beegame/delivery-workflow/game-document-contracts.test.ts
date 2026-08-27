@@ -108,15 +108,43 @@ describe('complete game document contracts', () => {
     ])
   })
 
+  test('declares one executable merge/reference rule for every foundation document', () => {
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      const rule = getGameDocumentContract(path).mergeReferenceRule
+      expect(rule.trim()).toContain('Merge')
+      expect(rule.trim()).toContain('reference-only')
+      expect(rule.trim().length).toBeGreaterThan(40)
+    }
+  })
+
+  test('assigns production resource facts only to Asset Plan', () => {
+    const art = getGameDocumentContract('docs/ART_DIRECTION.md')
+    const audio = getGameDocumentContract('docs/AUDIO_DESIGN.md')
+    expect(art.sections.find(section => section.sectionId === 'pipeline_risks')?.purpose).toContain('reference Asset Plan')
+    expect(audio.sections.find(section => section.sectionId === 'production')?.purpose).toContain('Asset Plan owns')
+    expect(art.sections.find(section => section.sectionId === 'asset_specifications')?.purpose).toContain('Asset Plan')
+    expect(audio.sections.find(section => section.sectionId === 'production')?.purpose).toContain('Asset Plan')
+  })
+
+  test('requires balance derived materials to reference owner variables and formulas', () => {
+    const balance = getGameDocumentContract('docs/BALANCE_DESIGN.md')
+    for (const materialId of ['formula-boundary-table', 'economy-flow-diagram', 'tuning-validation-matrix']) {
+      const purpose = balance.productionMaterials.find(item => item.materialId === materialId)?.purpose
+      expect(purpose?.toLowerCase()).toContain('reference-only')
+      expect(purpose?.toLowerCase()).toContain('variables')
+      expect(purpose?.toLowerCase()).toContain('formulas')
+    }
+  })
+
   test('declares one concise authority rule for each foundation document', () => {
     const expected = {
       'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
       'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
       'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
       'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
-      'docs/ART_DIRECTION.md': 'Own visual rules and consume Level/UI geometry; SVG boards are compact, distinct and inspectable visual evidence, not duplicate prose or geometry numbers.',
+      'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
       'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
-      'docs/AUDIO_DESIGN.md': 'The event-cue matrix owns mappings; prose covers policy and exceptions without copying the asset inventory.',
+      'docs/AUDIO_DESIGN.md': 'Audio owns event-to-cue behavior and technical acceptance; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
       'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
     } as const
 

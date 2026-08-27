@@ -60,6 +60,12 @@
 
 authoring contract 只把实际存在且已提交的 upstream path 当作可用 authority；path 存在时必须直接使用，不能保留“upstream unavailable”分支。只有 contract 明确没有可用 path 时，才能在既有 dependency/risk Section 中记录未决上游决定；不得因此创建第二条文档轨道。
 
+Canonical Foundation 文档路径只使用服务端 `CANONICAL_FOUNDATION_DOCUMENTS`：`docs/GDD.md`、`docs/LEVEL_SCENE_DESIGN.md`、`docs/BALANCE_DESIGN.md`、`docs/TECHNICAL_DESIGN.md`、`docs/ART_DIRECTION.md`、`docs/UI_UX_SPEC.md`、`docs/AUDIO_DESIGN.md`、`docs/ASSET_PLAN.md`。Markdown 跨文档引用只能使用上述精确路径；机械门同时检查正文和代码围栏中的 `docs/*.md`，非 canonical Foundation 路径一律 fail closed。普通 `assets/` 或其他非 `docs/*.md` 路径不属于这项检查。
+
+职责边界固定为：Art 只拥有视觉语言与视觉验收条件，Audio 只拥有 event-to-cue 行为、音频技术交付约束与验收条件；Art/Audio 的资源 ID、数量、状态、source/license、责任与 milestone/schedule 只能引用 Asset Plan。Asset Plan 是这些生产事实及其 inventory ID 的唯一 owner，所有相邻材料按 inventory ID reference-only。Balance 的 Units/Variables 与 Formulas 是数值及公式唯一 owner；formula-boundary、economy-flow、tuning-validation 等派生材料只能引用变量、公式、场景 ID，不得复制 literal 数值、结果、总计或完整公式。八份文档的 contract 各自携带一条 merge/reference rule，明确相邻概念的单一 owner representation 与必须 reference-only 的 section/material；initial 和 parallel-draft author 均以该服务端规则为准。
+
+上述规则是职责与引用约束，不是业务输出数量、字数、token、时间、heading、table、row、diagram 或 example 的固定上限或目标；合法内容不得因任意业务尺寸阈值被截断。
+
 ## 3.1 Fact Store
 
 Fact Store 不是普通摘要，而是可比较、可校验的标准化事实集合。

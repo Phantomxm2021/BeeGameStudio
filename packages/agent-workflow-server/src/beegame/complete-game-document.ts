@@ -1,6 +1,19 @@
 import { z } from 'zod/v4'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import type { FoundationDocumentPath } from './delivery-workflow/types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from './delivery-workflow/types'
+
+const MARKDOWN_DOCUMENT_REFERENCE = /docs\/[A-Za-z0-9._/-]+\.md/g
+
+function assertCanonicalMarkdownReferences(markdown: string): void {
+  const canonical = new Set(CANONICAL_FOUNDATION_DOCUMENTS)
+  for (const reference of markdown.matchAll(MARKDOWN_DOCUMENT_REFERENCE)) {
+    if (!canonical.has(reference[0] as FoundationDocumentPath))
+      throw new Error(`complete game document contains non-canonical document reference: ${reference[0]}`)
+  }
+}
 
 function normalizedHeading(text: string): string {
   return text.normalize('NFKC').trim().replaceAll(/\s+/g, ' ').toLowerCase()
@@ -135,6 +148,7 @@ export function normalizeCompleteGameDocumentProtocol(
   value: unknown,
 ): string {
   const body = z.string().trim().min(1).parse(value)
+  assertCanonicalMarkdownReferences(body)
   const contract = getGameDocumentContract(path)
   const markerByHeading = new Map<string, string>([
     ['## Executive Summary', '<!-- beegame-executive-summary -->'],
@@ -215,6 +229,7 @@ export function validateCompleteGameDocumentMarkdown(
   value: unknown,
 ): string {
   const body = z.string().trim().min(1).parse(value)
+  assertCanonicalMarkdownReferences(body)
   const contract = getGameDocumentContract(path)
   const lines = body.split('\n').map(line => line.trimEnd())
   if (!lines[0]?.startsWith('# ') || lines[0].startsWith('## '))

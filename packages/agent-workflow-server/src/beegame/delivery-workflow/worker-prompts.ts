@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import {
   CANONICAL_PROJECT_ARTIFACTS,
   CANONICAL_PROJECT_DOCUMENTS,
+  CANONICAL_FOUNDATION_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
 import { foundationFactDefinition } from './foundation-fact-definitions'
@@ -92,6 +93,12 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       : `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
     'The durable confirmed brief context and its digest are the product authority for this run.',
     'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
+    streamedFoundationAuthor
+      ? `Canonical Foundation documents: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}`
+      : undefined,
+    streamedFoundationAuthor
+      ? 'Markdown cross-document references may use only these exact canonical Foundation paths named above; any other docs/*.md reference is invalid, including inside code fences.'
+      : undefined,
     workerInstruction(request),
     priorFailureReason
       ? `Automatic retry after the previous document-author failure: ${priorFailureReason}. Correct that failure in the assigned canonical Markdown document before ending the turn.`

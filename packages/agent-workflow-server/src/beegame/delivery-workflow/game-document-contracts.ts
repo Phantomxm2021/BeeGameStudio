@@ -70,6 +70,7 @@ export type GameDocumentContract = {
   sections: readonly GameDocumentSectionContract[]
   outputPolicy: GameDocumentOutputPolicy
   documentAuthorityRule: string
+  mergeReferenceRule: string
 }
 
 export const GAME_DOCUMENT_OUTPUT_POLICY: GameDocumentOutputPolicy =
@@ -123,9 +124,9 @@ const PRODUCTION_MATERIALS = {
   ],
   'docs/BALANCE_DESIGN.md': [
     material('variable-parameter-table', 'Variable and Parameter Table', 'markdown_table', 'Canonical owner table for units, variables, values, ranges and source references.'),
-    material('formula-boundary-table', 'Formula and Boundary Table', 'markdown_table', 'Recomputable formula evidence for ordering, clamping, rounding and boundary acceptance.'),
-    material('economy-flow-diagram', 'Economy Flow Diagram', 'mermaid', 'Compact flow evidence referencing economy and progression_curves; do not copy numeric results.'),
-    material('tuning-validation-matrix', 'Tuning Validation Matrix', 'markdown_table', 'Computable scenarios and acceptance evidence referencing owned variables and formulas.'),
+    material('formula-boundary-table', 'Formula and Boundary Table', 'markdown_table', 'Reference-only boundary view keyed to owner variables and formula IDs; do not copy literal values, results, totals or complete formulas.'),
+    material('economy-flow-diagram', 'Economy Flow Diagram', 'mermaid', 'Reference-only flow view keyed to owner variables and formulas; do not copy literal values, results, totals or complete formulas.'),
+    material('tuning-validation-matrix', 'Tuning Validation Matrix', 'markdown_table', 'Reference-only scenario view keyed to owner variables and formulas; do not copy literal values, results, totals or complete formulas.'),
   ],
   'docs/TECHNICAL_DESIGN.md': [
     material('architecture-diagram', 'Architecture Diagram', 'mermaid', 'Compact runtime boundary evidence referencing architecture decisions.'),
@@ -151,12 +152,12 @@ const PRODUCTION_MATERIALS = {
     material('music-state-diagram', 'Music State Diagram', 'mermaid', 'Compact state evidence referencing music decisions and event-cue mappings.'),
     material('bus-ducking-diagram', 'Bus and Ducking Diagram', 'mermaid', 'Compact mix evidence referencing mix policy and event-cue mappings.'),
     material('loudness-delivery-table', 'Loudness and Delivery Table', 'markdown_table', 'Computable loudness and delivery acceptance evidence referencing implementation.'),
-    material('sound-reference-register', 'Sound Reference Register', 'evidence_register', 'Traceable source/licensing evidence for cues; do not duplicate asset inventory.'),
+    material('sound-reference-register', 'Sound Reference Register', 'evidence_register', 'Reference-only pointers to Asset Plan inventory IDs for source/licensing evidence; do not own or duplicate asset inventory.'),
   ],
   'docs/ASSET_PLAN.md': [
     material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Canonical inventory owner for semantic IDs, type, instance and file, quantities, status and unique detail.'),
     material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Computable ownership evidence referencing inventory IDs and status authority.'),
-    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Compact integration evidence referencing dependency and ownership decisions.'),
+    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Compact integration evidence keyed by inventory IDs and referencing dependency and ownership decisions.'),
     material('license-register', 'License Register', 'evidence_register', 'Traceable source/licensing evidence keyed by inventory IDs.'),
     material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Computable milestone evidence keyed by inventory IDs and status.'),
   ],
@@ -167,10 +168,21 @@ export const FOUNDATION_DOCUMENT_AUTHORITY_RULES = Object.freeze({
   'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
   'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
   'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
-  'docs/ART_DIRECTION.md': 'Own visual rules and consume Level/UI geometry; SVG boards are compact, distinct and inspectable visual evidence, not duplicate prose or geometry numbers.',
+  'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
   'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
-  'docs/AUDIO_DESIGN.md': 'The event-cue matrix owns mappings; prose covers policy and exceptions without copying the asset inventory.',
+  'docs/AUDIO_DESIGN.md': 'Audio owns event-to-cue behavior and technical acceptance; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
   'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
+} satisfies Record<FoundationDocumentPath, string>)
+
+const FOUNDATION_DOCUMENT_MERGE_REFERENCE_RULES = Object.freeze({
+  'docs/GDD.md': 'Merge loop, state and gameplay outcomes into their single owner sections; Executive Summary and Production Materials are reference-only indexes of those owners.',
+  'docs/LEVEL_SCENE_DESIGN.md': 'Merge spatial topology, placement and traversal literals into one coordinate/layout owner; route, pacing and scene materials are reference-only views of owner sections.',
+  'docs/BALANCE_DESIGN.md': 'Merge mutable values into Units/Variables and formulas into Formula owners; Executive Summary and all derived materials are reference-only references to variable, formula and scenario IDs, never copying literal values, results, totals or complete formulas.',
+  'docs/TECHNICAL_DESIGN.md': 'Merge runtime and data boundary decisions into their owner sections; diagrams and tables are reference-only views and must not restate gameplay or content facts.',
+  'docs/ART_DIRECTION.md': 'Merge visual language and visual acceptance conditions into Art owners; production responsibility, source, license and schedule facts are Asset Plan references, and boards are reference-only views.',
+  'docs/UI_UX_SPEC.md': 'Merge responsive geometry/layout and screen-state ownership into their single sections; flows, wireframes and matrices are reference-only views of those owners.',
+  'docs/AUDIO_DESIGN.md': 'Merge event-to-cue behavior and technical audio constraints into Audio owners; resource IDs, source, license and schedule facts are Asset Plan references, and derived materials are reference-only.',
+  'docs/ASSET_PLAN.md': 'Merge each resource ID with its quantity, status, responsibility, source/license and milestone facts in the inventory owner; adjacent materials are reference-only views keyed by inventory ID.',
 } satisfies Record<FoundationDocumentPath, string>)
 
 const UPSTREAM_SECTIONS = {
@@ -228,6 +240,7 @@ const contract = (
     sections: Object.freeze([...sections]),
     outputPolicy: GAME_DOCUMENT_OUTPUT_POLICY,
     documentAuthorityRule: FOUNDATION_DOCUMENT_AUTHORITY_RULES[path],
+    mergeReferenceRule: FOUNDATION_DOCUMENT_MERGE_REFERENCE_RULES[path],
   })
 
 export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
@@ -316,8 +329,8 @@ export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
       section('animation', 'Animation Language', 'Define motion principles, state coverage, timing intent, transitions and technical constraints.', 'animation_and_vfx'),
       section('vfx', 'Visual Effects and Feedback', 'Define effect hierarchy, event coverage, clarity, intensity and performance boundaries.', 'animation_and_vfx', 'ui_and_interaction'),
       section('camera_presentation', 'Camera and Presentation', 'Define framing, motion and presentation states while consuming Level and UI geometry; do not invent layout dimensions.', 'art_and_visual_language', 'level_and_world'),
-      section('asset_specifications', 'Art Asset Specifications', 'Define asset categories, quality bars, budgets, variants, handoff and acceptance evidence.', 'asset_and_content_production', 'quality_and_acceptance'),
-      section('pipeline_risks', 'Art Pipeline, Schedule and Risks', 'Define ownership, dependencies, milestones, outsourcing/licensing boundaries and production risks.', 'production_planning', 'risks_and_dependencies'),
+      section('asset_specifications', 'Art Asset Specifications', 'Define visual constraints, quality bars, variants, handoff inputs and visual acceptance evidence; Asset Plan owns resource IDs, production responsibility, source, licensing and schedule.', 'quality_and_acceptance'),
+      section('pipeline_risks', 'Art Pipeline Risks', 'Define art-specific feasibility risks and visual handoff constraints; reference Asset Plan for resource responsibility, source, licensing and milestones.', 'risks_and_dependencies'),
     ],
   ),
   'docs/UI_UX_SPEC.md': contract(
@@ -351,7 +364,7 @@ export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
       section('voice', 'Voice and Dialogue Applicability', 'Define voice scope, dialogue pipeline, localization and fallback behavior when applicable.', 'audio_and_music', 'narrative_and_content', 'accessibility_and_localization'),
       section('mix', 'Mix, Buses and Dynamic Rules', 'Define buses, priorities, ducking, loudness, dynamic range and critical cue protection with explicit mute state mappings.', 'audio_and_music', 'performance_and_reliability'),
       section('implementation', 'Audio Data and Technical Budgets', 'Define formats, memory/streaming budgets, naming, event integration and diagnostics.', 'audio_and_music', 'technical_architecture', 'performance_and_reliability'),
-      section('production', 'Audio Production and Acceptance', 'Define asset list, recording/source strategy, licensing, milestones, ownership and acceptance evidence; never mark available upstream as unavailable.', 'asset_and_content_production', 'production_planning', 'quality_and_acceptance', 'risks_and_dependencies'),
+      section('production', 'Audio Production and Acceptance', 'Define event-to-cue implementation constraints and audio acceptance evidence; Asset Plan owns resource IDs, source, licensing, responsibility and milestones. never mark available upstream as unavailable.', 'quality_and_acceptance', 'risks_and_dependencies'),
     ],
   ),
   'docs/ASSET_PLAN.md': contract(
