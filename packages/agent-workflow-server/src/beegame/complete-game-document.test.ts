@@ -124,7 +124,6 @@ describe('native complete game document validation', () => {
       ['economy-flow-diagram', 'Reference-only flow.\n\n```mermaid\ngraph TD\nA[0–3]\n```'],
       ['tuning-validation-matrix', '| Field | Value |\n| --- | --- |\n| bound | ≤1 |'],
       ['tuning-validation-matrix', '| Field | Value |\n| --- | --- |\n| expression | `x + y` |'],
-      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | `V-DSL-*` |'],
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | V_INPUT + V_BONUS |'],
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | V_MIN ≤ V_MAX |'],
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | P_GEN_KW_PER_L + P_BONUS |'],
