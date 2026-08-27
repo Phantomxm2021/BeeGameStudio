@@ -305,4 +305,23 @@ describe('foundation authority projection', () => {
     invalid.targetPath = 'docs/not-a-foundation.md'
     expect(() => parseFoundationAuthorityProjectionBytes(JSON.stringify(invalid))).toThrow()
   })
+
+  test('rejects duplicate committed semantic symbols while projecting upstream authority', () => {
+    const gdd = sourceDocument('docs/GDD.md').replace(
+      'Owned source content for states_flow.',
+      'Owner declaration: `state.same`.\nOwned source content for states_flow.',
+    )
+    const level = sourceDocument('docs/LEVEL_SCENE_DESIGN.md').replace(
+      'Owned source content for world_structure.',
+      'Owner declaration: `state.same`.\nOwned source content for world_structure.',
+    )
+    expect(() => projectFoundationAuthority({
+      targetPath: 'docs/BALANCE_DESIGN.md',
+      availableUpstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+      documents: new Map([
+        ['docs/GDD.md', gdd],
+        ['docs/LEVEL_SCENE_DESIGN.md', level],
+      ]),
+    })).toThrow(/duplicate semantic symbols/i)
+  })
 })

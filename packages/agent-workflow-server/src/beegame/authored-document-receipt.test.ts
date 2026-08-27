@@ -246,8 +246,8 @@ describe('native authored document receipts', () => {
       const targetPath = 'docs/LEVEL_SCENE_DESIGN.md' as const
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       const upstream = completeDocument(upstreamPath).replace(
-        '### Game State Flow\n\n```mermaid',
-        '### Game State Flow\n\nOwner declaration: `state.flow`.\n\n```mermaid',
+        '## Game States and Flow\n\n',
+        '## Game States and Flow\n\n| ID | Value |\n| --- | --- |\n| `state.flow` | canonical |\n\n',
       )
       await writeFile(join(workspacePath, upstreamPath), upstream)
       const target = renderTestCompleteGameDocument(targetPath, completeTestSubmission(targetPath)).replace(
@@ -284,6 +284,10 @@ describe('native authored document receipts', () => {
         updatedAt: '2026-08-13T01:00:00.000+08:00',
       })).rejects.toThrow(/projection|contract|target/i)
 
+      await writeFile(
+        join(workspacePath, foundationProjectionRelativePath('authority-stale')),
+        canonicalFoundationAuthorityProjectionBytes(projection),
+      )
       await writeFile(join(workspacePath, 'docs/GDD.md'), `${upstream}\nchanged`)
       await expect(commitAuthoredFoundationDocument({
         workspacePath,
@@ -291,7 +295,15 @@ describe('native authored document receipts', () => {
         targetPath,
         authoredBody: target,
         updatedAt: '2026-08-13T01:00:00.000+08:00',
-      })).rejects.toThrow(/projection|stale|missing/i)
+      })).rejects.toThrow(/stale|current committed authority/i)
+
+      await expect(commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId: 'authority-missing',
+        targetPath,
+        authoredBody: target,
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
+      })).rejects.toThrow(/ENOENT|missing|projection/i)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -303,6 +315,7 @@ describe('native authored document receipts', () => {
         targetPath: 'docs/LEVEL_SCENE_DESIGN.md' as const,
         reference: 'state.undefined',
         upstreamPaths: ['docs/GDD.md'] as const,
+        tableReference: true,
       },
       {
         targetPath: 'docs/AUDIO_DESIGN.md' as const,
@@ -325,10 +338,16 @@ describe('native authored document receipts', () => {
           documents.set(upstreamPath, markdown)
           await writeFile(join(workspacePath, upstreamPath), markdown)
         }
-        const target = completeFoundationDocument(current.targetPath).replace(
-          '<!-- beegame-audit-appendix -->',
-          `Owner reference: \`${current.reference}\`.\n\n<!-- beegame-audit-appendix -->`,
-        )
+        let target = completeFoundationDocument(current.targetPath)
+        target = current.tableReference
+          ? target.replace(
+              '| Field | Value |',
+              `| Reference ID | Value |\n| --- | --- |\n| \`${current.reference}\` | copied |\n\n| Field | Value |`,
+            )
+          : target.replace(
+              '<!-- beegame-audit-appendix -->',
+              `Owner reference: \`${current.reference}\`.\n\n<!-- beegame-audit-appendix -->`,
+            )
         await writeFile(join(workspacePath, current.targetPath), target)
         await writeProjectionForTarget(workspacePath, `cross-ref-${index}`, current.targetPath, documents)
         await expect(commitAuthoredFoundationDocument({
@@ -340,6 +359,57 @@ describe('native authored document receipts', () => {
       } finally {
         await rm(workspacePath, { recursive: true, force: true })
       }
+    }
+
+    const workspacePath = await mkdtemp(join(tmpdir(), 'authored-self-ref-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const upstream = completeFoundationDocument('docs/GDD.md')
+      await writeFile(join(workspacePath, 'docs/GDD.md'), upstream)
+      const selfReference = completeFoundationDocument('docs/LEVEL_SCENE_DESIGN.md').replace(
+        '<!-- beegame-audit-appendix -->',
+        'Owner declaration: `level.route`. Owner reference: `level.route`.\n\n<!-- beegame-audit-appendix -->',
+      )
+      await writeFile(join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'), selfReference)
+      await writeProjectionForTarget(
+        workspacePath,
+        'self-ref-pass',
+        'docs/LEVEL_SCENE_DESIGN.md',
+        new Map([['docs/GDD.md', upstream]]),
+      )
+      await expect(commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId: 'self-ref-pass',
+        targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
+      })).resolves.toMatchObject({ status: 'committed' })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+
+    const duplicateWorkspace = await mkdtemp(join(tmpdir(), 'authored-duplicate-semantic-'))
+    try {
+      await mkdir(join(duplicateWorkspace, 'docs'), { recursive: true })
+      const upstream = completeFoundationDocument('docs/GDD.md')
+      await writeFile(join(duplicateWorkspace, 'docs/GDD.md'), upstream)
+      const duplicate = completeFoundationDocument('docs/LEVEL_SCENE_DESIGN.md')
+        .replace('## World and Scene Structure\n\n', '## World and Scene Structure\n\nOwner declaration: `level.route`.\n\n')
+        .replace('## Objectives, Routes and Player Choices\n\n', '## Objectives, Routes and Player Choices\n\nOwner declaration: `level.route`.\n\n')
+      await writeFile(join(duplicateWorkspace, 'docs/LEVEL_SCENE_DESIGN.md'), duplicate)
+      await writeProjectionForTarget(
+        duplicateWorkspace,
+        'duplicate-semantic',
+        'docs/LEVEL_SCENE_DESIGN.md',
+        new Map([['docs/GDD.md', upstream]]),
+      )
+      await expect(commitAuthoredFoundationDocument({
+        workspacePath: duplicateWorkspace,
+        dispatchId: 'duplicate-semantic',
+        targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
+      })).rejects.toThrow(/declared by multiple owners|semantic ID/i)
+    } finally {
+      await rm(duplicateWorkspace, { recursive: true, force: true })
     }
   })
 })

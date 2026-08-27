@@ -371,6 +371,14 @@ describe('native complete game document validation', () => {
         'Owner reference: `action.attack` and `ACTION_ATTACK`.',
       ),
     )).toThrow(/alias|semantic ID|canonical/i)
+    expect(() => validateCompleteGameDocumentMarkdown(
+      technical,
+      replaceSectionBody(technicalBase, 'input_interaction', 'Owner reference: `ACTION_ATTACK`.'),
+    )).toThrow(/alias|semantic ID|canonical/i)
+    expect(validateCompleteGameDocumentMarkdown(
+      technical,
+      replaceSectionBody(technicalBase, 'input_interaction', 'Owner reference: `action.jump`，用于跳跃.'),
+    )).toBe(replaceSectionBody(technicalBase, 'input_interaction', 'Owner reference: `action.jump`，用于跳跃.'))
 
     const level = 'docs/LEVEL_SCENE_DESIGN.md'
     const levelBase = renderTestCompleteGameDocument(level, completeTestSubmission(level))
@@ -382,6 +390,10 @@ describe('native complete game document validation', () => {
         '| ID | Beat |\n| --- | --- |\n| `占位` | opening |',
       ),
     )).toThrow(/ID|placeholder|CJK|owner/i)
+    expect(() => validateCompleteGameDocumentMarkdown(
+      technical,
+      replaceSectionBody(technicalBase, 'input_interaction', 'Owner reference: `placeholder`.'),
+    )).toThrow(/ID|placeholder|owner/i)
   })
 
   test('rejects copied Balance bounds only outside the numeric owner material', () => {

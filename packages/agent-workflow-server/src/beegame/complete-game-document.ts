@@ -264,14 +264,16 @@ type StructuredFactRow = {
 function explicitIds(block: CompleteDocumentBlock): {
   semantic: string[]
   semanticDeclarations: string[]
+  semanticReferences: string[]
   aliases: string[]
   localDeclarations: Array<{ value: string; line: number }>
   localReferences: Array<{ value: string; line: number }>
   factRows: StructuredFactRow[]
 } {
-  const allowDeclarations = block.id.startsWith('material.')
+  const allowDeclarations = true
   const semantic: string[] = []
   const semanticDeclarations: string[] = []
+  const semanticReferences: string[] = []
   const aliases: string[] = []
   const localDeclarations: Array<{ value: string; line: number }> = []
   const localReferences: Array<{ value: string; line: number }> = []
@@ -281,6 +283,7 @@ function explicitIds(block: CompleteDocumentBlock): {
     if (SEMANTIC_ID.test(value)) {
       semantic.push(value)
       if (declaration) semanticDeclarations.push(value)
+      else semanticReferences.push(value)
     }
     else if (SEMANTIC_ID_ALIAS.test(value)) aliases.push(value)
     else if (declaration && LOCAL_OWNER_KEY.test(value))
@@ -294,28 +297,31 @@ function explicitIds(block: CompleteDocumentBlock): {
     const idColumn = declarationColumn || referenceColumn
     if (idColumn) {
       const value = unquoteId(row.cells[0] ?? '')
-      if (declarationColumn && allowDeclarations && (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)))
+      if ((declarationColumn || referenceColumn) && (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)))
         throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${block.startLine + row.line - 1}`)
       add(value, block.startLine + row.line - 1, declarationColumn && allowDeclarations)
       if ((declarationColumn && allowDeclarations || referenceColumn) && (SEMANTIC_ID.test(value) || LOCAL_OWNER_KEY.test(value)))
         factRows.push({ id: value, kind: declarationColumn ? 'declaration' : 'reference', cells: row.cells.slice(1), headers: row.headers.slice(1), line: block.startLine + row.line - 1 })
       for (const [cellIndex, cell] of row.cells.slice(1).entries()) {
         const explicit = unquoteId(cell)
-        if (SEMANTIC_ID.test(explicit) || SEMANTIC_ID_ALIAS.test(explicit))
+        if (REFERENCE_COLUMN.test(row.headers[cellIndex + 1] ?? '')) {
+          if (CJK_ID.test(explicit) || PLACEHOLDER_ID.test(explicit))
+            throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${block.startLine + row.line - 1}`)
           add(explicit, block.startLine + row.line - 1, false)
-        else if (REFERENCE_COLUMN.test(row.headers[cellIndex + 1] ?? ''))
-          add(explicit, block.startLine + row.line - 1, false)
+        }
       }
-      if (referenceColumn || !allowDeclarations)
-        for (const cell of row.cells.slice(1)) add(cell, block.startLine + row.line - 1, false)
     }
   }
   for (const match of block.body.matchAll(REFERENCE_SYNTAX)) {
     const line = block.startLine + block.body.slice(0, match.index ?? 0).split('\n').length - 1
     // Reference syntax is the only prose form admitted as an owner-local
     // reference. Ordinary code spans and narrative text remain Reviewer input.
-    for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g))
-      add(token[1] ?? token[0], line, false)
+    for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g)) {
+      const value = unquoteId(token[1] ?? token[0])
+      if (PLACEHOLDER_ID.test(value) || (token[1] !== undefined && CJK_ID.test(value)))
+        throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${line}`)
+      add(value, line, false)
+    }
   }
   for (const match of block.body.matchAll(DECLARATION_SYNTAX)) {
     const line = block.startLine + block.body.slice(0, match.index ?? 0).split('\n').length - 1
@@ -324,14 +330,16 @@ function explicitIds(block: CompleteDocumentBlock): {
       if (SEMANTIC_ID.test(value)) {
         semantic.push(value)
         semanticDeclarations.push(value)
+      } else if (SEMANTIC_ID_ALIAS.test(value)) {
+        aliases.push(value)
       } else if (LOCAL_OWNER_KEY.test(value)) {
         localDeclarations.push({ value, line })
-      } else if (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)) {
+      } else if (PLACEHOLDER_ID.test(value) || (token[1] !== undefined && CJK_ID.test(value))) {
         throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${line}`)
       }
     }
   }
-  return { semantic, semanticDeclarations, aliases, localDeclarations, localReferences, factRows }
+  return { semantic, semanticDeclarations, semanticReferences, aliases, localDeclarations, localReferences, factRows }
 }
 
 function assertOwnerScopedAuthority(
@@ -342,6 +350,7 @@ function assertOwnerScopedAuthority(
   const blocks = [...sections, ...materials]
   const allSemantic = new Set<string>()
   const allAliases = new Set<string>()
+  const semanticDeclarations = new Map<string, { block: string; line: number }>()
   const declarations = new Map<string, { block: string; line: number }>()
   const references: Array<{ value: string; block: string; line: number }> = []
   const ownerFacts = new Map<string, { block: string; values: string[] }>()
@@ -350,6 +359,12 @@ function assertOwnerScopedAuthority(
     const ids = explicitIds(block)
     ids.semantic.forEach(id => allSemantic.add(id))
     ids.aliases.forEach(alias => allAliases.add(alias))
+    ids.semanticDeclarations.forEach(id => {
+      const prior = semanticDeclarations.get(id)
+      if (prior && prior.block !== block.id)
+        throw new Error(`semantic ID is declared by multiple owners: ${id}`)
+      semanticDeclarations.set(id, { block: block.id, line: block.startLine })
+    })
     for (const declaration of ids.localDeclarations) {
       const prior = declarations.get(declaration.value)
       if (prior && prior.block !== block.id)
@@ -371,6 +386,8 @@ function assertOwnerScopedAuthority(
     if (allAliases.has(alias))
       throw new Error(`semantic ID alias must match canonical spelling: ${path}:${semantic}/${alias}`)
   }
+  if (allAliases.size)
+    throw new Error(`semantic ID alias is not canonical: ${path}:${[...allAliases][0]}`)
   for (const reference of references) {
     if (declarations.has(reference.value)) continue
     const canonical = reference.value.replaceAll('_', '-').toUpperCase()
@@ -455,11 +472,16 @@ export function collectCompleteGameDocumentAuthoritySymbols(
   })
 }
 
-/** Collects cross-document IDs only from explicit Reference/ref syntax. */
+/** Collects cross-document IDs from explicit Reference/ref syntax and exact reference columns. */
 export function collectCompleteGameDocumentAuthorityReferences(
+  path: FoundationDocumentPath,
   markdown: string,
 ): readonly string[] {
   const references: string[] = []
+  for (const block of completeDocumentBlocks(path, markdown.split('\n'))) {
+    const ids = explicitIds(block)
+    references.push(...ids.semanticReferences)
+  }
   for (const match of markdown.matchAll(REFERENCE_SYNTAX)) {
     for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g)) {
       const value = unquoteId(token[1] ?? token[0])
@@ -467,6 +489,13 @@ export function collectCompleteGameDocumentAuthorityReferences(
     }
   }
   return [...new Set(references)]
+}
+
+function collectCompleteGameDocumentAuthorityDeclarations(
+  path: FoundationDocumentPath,
+  markdown: string,
+): readonly string[] {
+  return completeDocumentBlocks(path, markdown.split('\n')).flatMap(block => explicitIds(block).semanticDeclarations)
 }
 
 export function assertCompleteGameDocumentCrossDocumentReferences(
@@ -485,7 +514,9 @@ export function assertCompleteGameDocumentCrossDocumentReferences(
   if (projection.sources.some(source => !contracted.has(source.path)))
     throw new Error(`committed upstream projection contains an undeclared source: ${path}`)
   const symbols = new Map(projection.symbols.map(symbol => [symbol.id, symbol]))
-  for (const id of collectCompleteGameDocumentAuthorityReferences(markdown)) {
+  const ownDeclarations = new Set(collectCompleteGameDocumentAuthorityDeclarations(path, markdown))
+  for (const id of collectCompleteGameDocumentAuthorityReferences(path, markdown)) {
+    if (ownDeclarations.has(id)) continue
     if ((path === 'docs/AUDIO_DESIGN.md' || path === 'docs/ART_DIRECTION.md') && id.startsWith('asset.'))
       throw new Error(`future Asset inventory ID is not available to ${path}: ${id}`)
     const owner = symbols.get(id)

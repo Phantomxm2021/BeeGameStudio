@@ -239,6 +239,8 @@ export function projectFoundationAuthority(input: {
     )
   }
 
+  if (new Set(symbols.map(symbol => symbol.id)).size !== symbols.length)
+    throw new Error('upstream authority contains duplicate semantic symbols')
   const frozenSources = Object.freeze([...sources])
   const payload = projectionPayload({
     targetPath: input.targetPath,

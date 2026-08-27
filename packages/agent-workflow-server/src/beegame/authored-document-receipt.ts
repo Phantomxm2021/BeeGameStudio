@@ -7,8 +7,10 @@ import {
   normalizeCompleteGameDocumentProtocol,
 } from './complete-game-document'
 import {
+  canonicalFoundationAuthorityProjectionBytes,
   foundationProjectionRelativePath,
   parseFoundationAuthorityProjectionBytes,
+  projectFoundationAuthority,
 } from './foundation-authority-projection'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import {
@@ -156,27 +158,24 @@ async function assertCommittedFoundationAuthority(input: {
     input.workspacePath,
     foundationProjectionRelativePath(input.dispatchId),
   )
-  const projection = parseFoundationAuthorityProjectionBytes(
-    await readFile(projectionPath, 'utf8'),
-  )
+  const rawProjection = await readFile(projectionPath, 'utf8')
   const expectedPaths = contract.upstreamSections.map(source => source.path)
-  if (
-    projection.targetPath !== input.targetPath ||
-    projection.sources.length !== expectedPaths.length ||
-    projection.sources.some((source, index) => source.path !== expectedPaths[index])
+  const documents = new Map(await Promise.all(
+    expectedPaths.map(async path => [
+      path,
+      await readFile(resolve(input.workspacePath, path), 'utf8'),
+    ] as const),
+  ))
+  const expectedProjection = projectFoundationAuthority({
+    targetPath: input.targetPath,
+    availableUpstreamPaths: expectedPaths,
+    documents,
+  })
+  if (canonicalFoundationAuthorityProjectionBytes(expectedProjection) !== rawProjection)
+    throw new Error(`committed upstream projection does not match current committed authority: ${input.targetPath}`)
+  const projection = parseFoundationAuthorityProjectionBytes(
+    rawProjection,
   )
-    throw new Error(`committed upstream projection does not match document contract: ${input.targetPath}`)
-  if (projection.sources.some((source, index) => {
-    const expectedSections = contract.upstreamSections[index]!.sectionIds
-    return source.sections.length !== expectedSections.length ||
-      source.sections.some((section, sectionIndex) => section.sectionId !== expectedSections[sectionIndex])
-  }))
-    throw new Error(`committed upstream projection does not match document contract sections: ${input.targetPath}`)
-  for (const source of projection.sources) {
-    const current = await readFile(resolve(input.workspacePath, source.path), 'utf8')
-    if (digest(current) !== source.digest)
-      throw new Error(`committed upstream projection is stale: ${source.path}`)
-  }
   assertCompleteGameDocumentCrossDocumentReferences(
     input.targetPath,
     input.canonical,
