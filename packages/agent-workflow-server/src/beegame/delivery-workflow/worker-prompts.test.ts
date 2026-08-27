@@ -48,21 +48,23 @@ describe('worker prompts', () => {
 
   test('passes only the canonical Foundation path namespace and one merge rule to both authoring modes', () => {
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
-      const prompt = buildWorkerPrompt({
-        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
-        allowedPaths: ['docs/UI_UX_SPEC.md'],
-        contract: {
-          documentSet: 'foundation', authoringMode, foundationDocumentPath: 'docs/UI_UX_SPEC.md',
-          completeDocumentContract: getGameDocumentContract('docs/UI_UX_SPEC.md'),
-        },
-      })
-      expect(prompt).toContain(`Canonical Foundation documents: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}`)
-      expect(prompt).toContain('Markdown cross-document references may use only these exact canonical Foundation paths')
-      const rule = getGameDocumentContract('docs/UI_UX_SPEC.md').mergeReferenceRule
-      expect(prompt).toContain(rule)
-      expect(countOccurrences(prompt, rule)).toBe(1)
-      expect(prompt).not.toContain('docs/UIUX_DESIGN.md')
+      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
+        const prompt = buildWorkerPrompt({
+          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+          allowedPaths: [foundationDocumentPath],
+          contract: {
+            documentSet: 'foundation', authoringMode, foundationDocumentPath,
+            completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
+          },
+        })
+        expect(prompt).toContain(`Canonical Foundation documents: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}`)
+        expect(prompt).toContain('Markdown cross-document references may use only these exact canonical Foundation paths')
+        const rule = getGameDocumentContract(foundationDocumentPath).mergeReferenceRule
+        expect(prompt).toContain(rule)
+        expect(countOccurrences(prompt, rule)).toBe(1)
+        expect(prompt).not.toContain('docs/UIUX_DESIGN.md')
+      }
     }
   })
 

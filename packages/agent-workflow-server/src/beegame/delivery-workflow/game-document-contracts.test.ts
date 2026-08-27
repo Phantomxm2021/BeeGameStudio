@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  CANONICAL_PROJECT_DOCUMENTS,
+} from './types'
 import {
   GAME_DOCUMENT_CONTRACTS,
   GAME_DOCUMENT_RESPONSIBILITIES,
@@ -7,6 +10,13 @@ import {
 } from './game-document-contracts'
 
 describe('complete game document contracts', () => {
+  test('composes project documents from the Foundation namespace plus checklist', () => {
+    expect(CANONICAL_PROJECT_DOCUMENTS).toEqual([
+      ...CANONICAL_FOUNDATION_DOCUMENTS,
+      'docs/acceptance/gameplay-checklist.md',
+    ])
+  })
+
   test('defines an ordered production contract for every Foundation document', () => {
     expect(Object.keys(GAME_DOCUMENT_CONTRACTS)).toEqual([
       ...CANONICAL_FOUNDATION_DOCUMENTS,
@@ -231,7 +241,7 @@ describe('complete game document contracts', () => {
     expect(audioPurpose('music')).toContain('state mappings')
     expect(audioPurpose('mix')).toContain('mute')
     expect(audioPurpose('mix')).toContain('ducking')
-    expect(audioPurpose('production')).toContain('never mark available upstream as unavailable')
+    expect(audioPurpose('production')).toContain('Never mark available upstream as unavailable')
 
     const asset = getGameDocumentContract('docs/ASSET_PLAN.md')
     const assetPurpose = (sectionId: string) =>

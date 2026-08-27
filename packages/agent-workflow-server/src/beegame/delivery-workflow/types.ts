@@ -8,7 +8,7 @@ export type {
   FoundationRevisionTask,
 } from './foundation-audit-state'
 
-export const CANONICAL_PROJECT_DOCUMENTS = [
+export const CANONICAL_FOUNDATION_DOCUMENTS = [
   'docs/GDD.md',
   'docs/LEVEL_SCENE_DESIGN.md',
   'docs/BALANCE_DESIGN.md',
@@ -17,6 +17,10 @@ export const CANONICAL_PROJECT_DOCUMENTS = [
   'docs/UI_UX_SPEC.md',
   'docs/AUDIO_DESIGN.md',
   'docs/ASSET_PLAN.md',
+] as const
+
+export const CANONICAL_PROJECT_DOCUMENTS = [
+  ...CANONICAL_FOUNDATION_DOCUMENTS,
   'docs/acceptance/gameplay-checklist.md',
 ] as const
 
@@ -34,17 +38,6 @@ export const CANONICAL_PROJECT_DOCUMENT_IDS = {
   (typeof CANONICAL_PROJECT_DOCUMENTS)[number],
   string
 >
-
-export const CANONICAL_FOUNDATION_DOCUMENTS = [
-  'docs/GDD.md',
-  'docs/LEVEL_SCENE_DESIGN.md',
-  'docs/BALANCE_DESIGN.md',
-  'docs/TECHNICAL_DESIGN.md',
-  'docs/ART_DIRECTION.md',
-  'docs/UI_UX_SPEC.md',
-  'docs/AUDIO_DESIGN.md',
-  'docs/ASSET_PLAN.md',
-] as const
 
 export type FoundationDocumentPath =
   (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]

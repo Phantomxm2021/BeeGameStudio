@@ -364,7 +364,7 @@ export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
       section('voice', 'Voice and Dialogue Applicability', 'Define voice scope, dialogue pipeline, localization and fallback behavior when applicable.', 'audio_and_music', 'narrative_and_content', 'accessibility_and_localization'),
       section('mix', 'Mix, Buses and Dynamic Rules', 'Define buses, priorities, ducking, loudness, dynamic range and critical cue protection with explicit mute state mappings.', 'audio_and_music', 'performance_and_reliability'),
       section('implementation', 'Audio Data and Technical Budgets', 'Define formats, memory/streaming budgets, naming, event integration and diagnostics.', 'audio_and_music', 'technical_architecture', 'performance_and_reliability'),
-      section('production', 'Audio Production and Acceptance', 'Define event-to-cue implementation constraints and audio acceptance evidence; Asset Plan owns resource IDs, source, licensing, responsibility and milestones. never mark available upstream as unavailable.', 'quality_and_acceptance', 'risks_and_dependencies'),
+      section('production', 'Audio Production and Acceptance', 'Define event-to-cue implementation constraints and audio acceptance evidence; Asset Plan owns resource IDs, source, licensing, responsibility and milestones. Never mark available upstream as unavailable.', 'quality_and_acceptance', 'risks_and_dependencies'),
     ],
   ),
   'docs/ASSET_PLAN.md': contract(
