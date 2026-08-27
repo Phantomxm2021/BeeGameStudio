@@ -173,7 +173,7 @@ describe('worker prompts', () => {
       'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
       'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
       'docs/AUDIO_DESIGN.md': 'Audio owns event-to-cue behavior and technical acceptance; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
-      'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
+      'docs/ASSET_PLAN.md': 'Asset materials share inventory IDs as their common key while each owns a distinct fact domain: inventory identity and semantic requirement mappings, responsibility, dependency/integration, source/licensing evidence, or milestone/maturity status.',
     } as const
 
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {

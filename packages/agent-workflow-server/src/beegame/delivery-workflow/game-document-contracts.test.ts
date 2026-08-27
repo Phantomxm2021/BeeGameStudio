@@ -180,6 +180,8 @@ describe('complete game document contracts', () => {
       expect(contract.outputPolicy).not.toHaveProperty('derivedViewAuthority')
       expect(JSON.stringify(contract)).not.toContain('reference_only')
       expect(JSON.stringify(contract)).not.toContain('derivedViewAuthority')
+      expect(JSON.stringify(contract)).not.toContain('derived views')
+      expect(JSON.stringify(contract)).not.toContain('derived view')
     }
   })
 
@@ -252,7 +254,7 @@ describe('complete game document contracts', () => {
       'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
       'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
       'docs/AUDIO_DESIGN.md': 'Audio owns event-to-cue behavior and technical acceptance; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
-      'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
+      'docs/ASSET_PLAN.md': 'Asset materials share inventory IDs as their common key while each owns a distinct fact domain: inventory identity and semantic requirement mappings, responsibility, dependency/integration, source/licensing evidence, or milestone/maturity status.',
     } as const
 
     for (const [path, rule] of Object.entries(expected)) {
@@ -345,6 +347,34 @@ describe('complete game document contracts', () => {
     expect(
       asset.productionMaterials.find(item => item.materialId === 'asset-inventory-table')?.purpose,
     ).toContain('type, instance and file')
+  })
+
+  test('keeps Asset material authority domains disjoint on their shared inventory key', () => {
+    const assetMaterials = Object.fromEntries(
+      getGameDocumentContract('docs/ASSET_PLAN.md').productionMaterials.map(material => [
+        material.materialId,
+        material.authorityRule,
+      ]),
+    )
+
+    expect(assetMaterials['asset-inventory-table']).toContain('resource identity')
+    expect(assetMaterials['asset-inventory-table']).toContain('inventory IDs')
+    expect(assetMaterials['asset-inventory-table']).not.toContain('responsibility')
+    expect(assetMaterials['asset-inventory-table']).not.toContain('sourcing')
+    expect(assetMaterials['asset-inventory-table']).not.toContain('licensing')
+    expect(assetMaterials['asset-inventory-table']).not.toContain('milestone')
+    expect(assetMaterials['responsibility-matrix']).toContain('creator')
+    expect(assetMaterials['responsibility-matrix']).toContain('inventory IDs')
+    expect(assetMaterials['responsibility-matrix']).not.toContain('license')
+    expect(assetMaterials['dependency-integration-diagram']).toContain('dependency')
+    expect(assetMaterials['dependency-integration-diagram']).toContain('inventory IDs')
+    expect(assetMaterials['dependency-integration-diagram']).not.toContain('responsibility')
+    expect(assetMaterials['license-register']).toContain('license')
+    expect(assetMaterials['license-register']).toContain('inventory IDs')
+    expect(assetMaterials['license-register']).not.toContain('milestone')
+    expect(assetMaterials['milestone-maturity-table']).toContain('capacity')
+    expect(assetMaterials['milestone-maturity-table']).toContain('inventory IDs')
+    expect(assetMaterials['milestone-maturity-table']).not.toContain('licensing')
   })
 
 })

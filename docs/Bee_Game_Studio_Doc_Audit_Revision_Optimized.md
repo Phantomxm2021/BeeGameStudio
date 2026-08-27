@@ -52,7 +52,7 @@
 > `.beegame/audit/foundation/<revision>/derived/section-index.json`
 > `.beegame/audit/foundation/<revision>/derived/COMMITTED.json`
 
-## 3.0 人类文档 authority 与材料视图
+## 3.0 人类文档 authority 与 owner materials
 
 每份 canonical 文档的 `Executive Summary` 只是 authority index：它只能索引本文件拥有的最终决定与稳定 Section/Material 引用，不能创建第二份事实或独立的可变总数。每个 `Production Material` 都是其列明事实类型的唯一 canonical owner representation，并按 contract 声明 `authorityRule`；材料之间不得复制可变事实、维护独立总计或互相覆盖。每个可变事实只能有一个 canonical owner。
 
@@ -60,7 +60,7 @@
 
 Balance 的 owner 分界不可推断：`variable-parameter-table` 是全部数值型 `var.*` 与 `param.*` ID、单位、值和范围的唯一 owner；`Units, Variables and Conventions` 与 `Entity and Ability Parameters` Section 只拥有语义、身份和关系，不得复制数值定义。Fact Store 的 `balance.variable_ids` owner identity 同步绑定 `material.variable-parameter-table`。
 
-跨材料稳定 ID 只有一种语法：lower-case ASCII dotted namespace（例如 `param.gen.fuel_consumption`）。中文只能作为 label，禁止 CJK ID、`<placeholder>`、alias、fallback 或兼容 ID；Production Materials 引用的每个 ID 必须先在其声明的 owner source 中精确定义。Balance 的公式 ID 只在 `formulas` Section 定义，其他 Section 只引用该 ID。canonical material 引用只使用 `material.<materialId>`（例如 `material.variable-parameter-table`），不得使用 raw material ID 或显示标题作为并行 authority。
+跨文档 semantic ID 使用 lower-case ASCII dotted namespace（例如 `param.gen.fuel_consumption`）；owner-local keys（例如 `N01`、`BEAT-01`、`VB-01`、`SR-01`）可以保留其 canonical pattern，但必须由 owner 定义并 byte-for-byte 引用。两类 ID 都禁止 alias、placeholder 或 CJK ID；Production Materials 引用的每个 ID 必须先在其声明的 owner source 中精确定义。Balance 的公式 ID 只在 `formulas` Section 定义，其他 Section 只引用该 ID。canonical material 引用只使用 `material.<materialId>`（例如 `material.variable-parameter-table`），不得使用 raw material ID 或显示标题作为并行 authority。
 
 单一 fact owner 同样适用于同一文档内部：可变波次、金额、比例、时长、数量、尺寸和阈值只能在一个 owner Section 中定义。其他 Section 需要该事实时引用稳定 owner Section/决策标识，不得再次保存同一 literal；正文不得在表格之外重新叙述表内同一组事实。Stage 3 只能在 normalized Fact、owner Section 与对应 block 能明确证明重复时发布 Issue，禁止用词频或裸数字频率推断业务重复。
 
@@ -77,7 +77,7 @@ Canonical Foundation 文档路径只使用服务端 `CANONICAL_FOUNDATION_DOCUME
 5. **Art** 拥有一张 compact `visual-language-board` 与 `animation-vfx-state-table` 的视觉/动画验收事实，不拥有资源 ID、数量、source/license、责任或 schedule。Art 在 Asset 尚不存在时先暴露语义视觉需求与约束，Asset Plan 后续只能单向将这些需求映射到自己的 resource IDs。Art 只有一个 Visual Language Board，并以 compact Markdown table 作为唯一格式；删除 Art inline SVG 轨，禁止并行 board。UI `wireframe-board` 继续以 inline SVG 拥有响应式几何证据。
 6. **UI** 拥有 interaction、input、navigation、screen/state 和 responsive layout mappings；其他文档只引用 UI 的稳定 action、screen、region 与 accessibility ID。
 7. **Audio** 拥有 event-to-cue、music state、bus/ducking、loudness/delivery mappings 与验收，不拥有资源生产事实。Audio 在 Asset 尚不存在时先暴露语义 event/cue 需求与约束，Asset Plan 后续只能单向将这些需求映射到自己的 resource IDs；资源 ID、数量、source/license、责任和 schedule 委托 Asset。
-8. **Asset Plan** 单独拥有全部 resource-production facts；五个 Asset owner materials 各自以 inventory ID 键控 distinct inventory/row/mapping/evidence fact types，其他文档和 Audio/Art materials 只能引用这些 ID。
+8. **Asset Plan** 拥有资源生产事实的各自 owner domain；五个 Asset owner materials 以 inventory ID 为共同 key，分别拥有 inventory identity/semantic requirement mapping、responsibility、dependency/integration、source/licensing evidence、milestone/maturity facts。Audio/Art 先拥有语义需求 ID 与约束，Asset 后续只能将这些需求单向映射到自己的 inventory IDs；上游文档不得预声明或依赖未来 inventory IDs。
 
 Quality 与 performance 按 correctness、可实现性和 measured comparison 评估，而不是固定 business caps；上述规则不构成 token、字数、时间、heading、table、row、diagram、example 或业务规模的固定上限/目标。八份文档的 contract 各自携带一条 merge/reference rule；每个 material 必须遵循其 `authorityRule` 与 single canonical owner representation rule；initial 和 parallel-draft author 均以该服务端规则为准。
 

@@ -152,11 +152,11 @@ const PRODUCTION_MATERIALS = {
     material('loudness-delivery-table', 'Loudness and Delivery Table', 'markdown_table', 'Canonical computable loudness and delivery acceptance rows owning implementation constraints.', 'Own canonical Audio loudness, dynamic-range and delivery acceptance rows; corresponding prose references this table and Asset Plan owns resource facts.'),
   ],
   'docs/ASSET_PLAN.md': [
-    material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Canonical inventory owner for semantic IDs, type, instance and file, quantities, status and unique detail.', 'Own resource IDs, type, instance, file, quantities, status, responsibility, sourcing, licensing and milestone facts; all other Asset materials reference inventory IDs.'),
-    material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Canonical computable ownership rows owning creator, approver, consumer, handoff and status mappings keyed by inventory IDs.', 'Own canonical Asset responsibility, creator, approver, consumer, handoff and status mappings keyed by inventory IDs; corresponding prose references this matrix.'),
-    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Canonical integration evidence owning dependency and integration-order mappings keyed by inventory IDs.', 'Own canonical Asset dependency and integration-order mappings keyed by inventory IDs; corresponding prose references this diagram.'),
-    material('license-register', 'License Register', 'evidence_register', 'Canonical traceable source/licensing evidence owning records keyed by inventory IDs.', 'Own canonical Asset source, originality, attribution, restriction and license evidence keyed by inventory IDs; corresponding prose references this register.'),
-    material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Canonical computable milestone and maturity rows owning schedule and status keyed by inventory IDs.', 'Own canonical Asset milestone, capacity, schedule and maturity rows keyed by inventory IDs; corresponding prose references this table.'),
+    material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Canonical inventory owner for semantic IDs, type, instance and file, quantities and unique detail.', 'Own resource identity, semantic requirement mappings, type, instance, file, quantity and unique detail keyed by inventory IDs; sibling materials use inventory IDs as their shared key.'),
+    material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Canonical computable ownership rows owning creator, approver, consumer and handoff mappings keyed by inventory IDs.', 'Own creator, approver, consumer and handoff mappings keyed by inventory IDs.'),
+    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Canonical integration evidence owning dependency and integration-order mappings keyed by inventory IDs.', 'Own dependency and integration-order mappings keyed by inventory IDs.'),
+    material('license-register', 'License Register', 'evidence_register', 'Canonical traceable source/licensing evidence owning records keyed by inventory IDs.', 'Own source, originality, attribution, restriction and license evidence keyed by inventory IDs.'),
+    material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Canonical computable milestone and maturity rows owning capacity, schedule, maturity and status keyed by inventory IDs.', 'Own capacity, schedule, maturity and status rows keyed by inventory IDs.'),
   ],
 } satisfies Record<FoundationDocumentPath, readonly GameDocumentProductionMaterialContract[]>
 
@@ -168,7 +168,7 @@ export const FOUNDATION_DOCUMENT_AUTHORITY_RULES = Object.freeze({
   'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
   'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
   'docs/AUDIO_DESIGN.md': 'Audio owns event-to-cue behavior and technical acceptance; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
-  'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
+  'docs/ASSET_PLAN.md': 'Asset materials share inventory IDs as their common key while each owns a distinct fact domain: inventory identity and semantic requirement mappings, responsibility, dependency/integration, source/licensing evidence, or milestone/maturity status.',
 } satisfies Record<FoundationDocumentPath, string>)
 
 const FOUNDATION_DOCUMENT_MERGE_REFERENCE_RULES = Object.freeze({
@@ -179,7 +179,7 @@ const FOUNDATION_DOCUMENT_MERGE_REFERENCE_RULES = Object.freeze({
   'docs/ART_DIRECTION.md': 'Merge visual language and visual acceptance conditions into Art owners; omit repeated prose and geometry, and delegate resource responsibility, source, license and schedule facts to Asset Plan.',
   'docs/UI_UX_SPEC.md': 'Merge responsive geometry/layout and screen-state ownership into their canonical sections and materials; omit equivalent repetition while keeping material evidence aligned to stable owners.',
   'docs/AUDIO_DESIGN.md': 'Merge event-to-cue behavior and technical audio constraints into Audio owners and materials; omit repeated mappings and resource facts, and delegate resource IDs, source, license and schedule facts to Asset Plan.',
-  'docs/ASSET_PLAN.md': 'Merge each resource ID with its quantity, status, responsibility, source/license and milestone facts into the inventory authority; omit duplicate resource facts from prose and keep every material keyed to that canonical inventory.',
+  'docs/ASSET_PLAN.md': 'Merge Asset materials by their shared inventory ID: inventory owns resource identity, semantic requirement mappings, type, instance, file, quantity and unique detail; sibling materials separately own responsibility, dependency/integration, source/licensing, and milestone/maturity facts. Keep the shared key stable without transferring sibling facts into inventory.',
 } satisfies Record<FoundationDocumentPath, string>)
 
 const UPSTREAM_SECTIONS = {
@@ -284,7 +284,7 @@ export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
     [
       section('units_variables', 'Units, Variables and Conventions', 'Define units, unit semantics, variable semantics, precision rules and comparison conventions from explicit owner inputs; numeric `var.*` and `param.*` entries are stored only in the variable-parameter-table, which is their sole owner.', 'balance_and_math'),
       section('entity_parameters', 'Entity and Ability Parameters', 'Define entity and action parameter identities (`param.*`), parameter semantics, semantic roles and relationships only; numeric parameter entries are stored only in the variable-parameter-table, which is their sole owner, while Fact Store identity remains this section.', 'balance_and_math', 'gameplay_systems'),
-      section('formulas', 'Authoritative Formulas', 'Define authoritative formulas, ordering, clamping, rounding and boundaries with recomputable worked results and totals; derived views reference formulas and do not store independent totals.', 'balance_and_math'),
+      section('formulas', 'Authoritative Formulas', 'Define authoritative formulas, ordering, clamping, rounding and boundaries with recomputable worked results and totals; other sections and materials reference formula IDs and do not store independent results or totals.', 'balance_and_math'),
       section('economy', 'Economy Sources, Sinks and Constraints', 'Define resource flows, costs, rewards, affordability and deadlock prevention, making recomputable results and totals derive from owner inputs without independent derived totals.', 'progression_and_economy', 'balance_and_math'),
       section('progression_curves', 'Progression and Capability Curves', 'Define growth, unlock, power and content progression, making recomputable results and totals derive from owner inputs rather than independent derived totals.', 'progression_and_economy', 'balance_and_math'),
       section('challenge_model', 'Challenge and Pressure Model', 'Define difficulty inputs, opposition scaling, pacing pressure and recovery capacity, making recomputable results and totals derive from owner inputs rather than independent derived totals.', 'balance_and_math', 'player_experience'),
