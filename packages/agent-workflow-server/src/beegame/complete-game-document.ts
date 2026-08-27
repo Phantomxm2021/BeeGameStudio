@@ -19,10 +19,15 @@ function normalizedHeading(text: string): string {
   return text.normalize('NFKC').trim().replaceAll(/\s+/g, ' ').toLowerCase()
 }
 
-function authoredHeadings(markdown: string): Array<{ level: number; text: string }> {
-  const headings: Array<{ level: number; text: string }> = []
+type AuthoredHeading = { level: number; text: string; lineIndex: number }
+
+function authoredHeadingScan(markdown: string): {
+  headings: AuthoredHeading[]
+  fenceOpen: boolean
+} {
+  const headings: AuthoredHeading[] = []
   let fence: string | undefined
-  for (const rawLine of markdown.split('\n')) {
+  for (const [lineIndex, rawLine] of markdown.split('\n').entries()) {
     const line = rawLine.trimStart()
     if (line.startsWith('```') || line.startsWith('~~~')) {
       const marker = line.slice(0, 3)
@@ -31,9 +36,14 @@ function authoredHeadings(markdown: string): Array<{ level: number; text: string
     }
     if (fence) continue
     const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line)
-    if (match) headings.push({ level: match[1]!.length, text: match[2]! })
+    if (match)
+      headings.push({ level: match[1]!.length, text: match[2]!, lineIndex })
   }
-  return headings
+  return { headings, fenceOpen: fence !== undefined }
+}
+
+function authoredHeadings(markdown: string): Array<{ level: number; text: string }> {
+  return authoredHeadingScan(markdown).headings.map(({ level, text }) => ({ level, text }))
 }
 
 function validateSectionHeadingStructure(
@@ -89,6 +99,67 @@ export function assertMaterialFormat(
           body.includes('</svg>')
   if (!valid)
     throw new Error(`production material format is invalid: ${materialId}:${format}`)
+}
+
+/** Structural-only admission used before a native Markdown result is forwarded. */
+export function isCompleteGameDocumentMarkdownStructure(
+  path: FoundationDocumentPath,
+  value: string,
+): boolean {
+  const body = value.trim()
+  if (!body) return false
+  const scan = authoredHeadingScan(body)
+  if (scan.fenceOpen) return false
+  const contract = getGameDocumentContract(path)
+  if (!contract) return false
+  const expectedH2 = [
+    'Executive Summary',
+    ...contract.sections.map(section => section.title),
+    'Production Materials',
+  ]
+  const expectedH3 = contract.productionMaterials.map(material => material.title)
+  const actualH2 = scan.headings
+    .filter(heading => heading.level === 2)
+    .map(heading => heading.text)
+  const actualH3 = scan.headings
+    .filter(heading => heading.level === 3)
+    .map(heading => heading.text)
+  if (
+    !exactSequence(actualH2, expectedH2) ||
+    !exactSequence(actualH3, expectedH3)
+  )
+    return false
+  const productionHeading = scan.headings.find(
+    heading => heading.level === 2 && heading.text === 'Production Materials',
+  )
+  const materialHeadings = scan.headings.filter(heading => heading.level === 3)
+  if (
+    !productionHeading ||
+    materialHeadings.some(heading => heading.lineIndex <= productionHeading.lineIndex)
+  )
+    return false
+  const lines = body.split('\n')
+  try {
+    for (const [index, material] of contract.productionMaterials.entries()) {
+      const heading = materialHeadings[index]
+      if (!heading) return false
+      const nextHeading = materialHeadings[index + 1]
+      const materialBody = lines
+        .slice(heading.lineIndex + 1, nextHeading?.lineIndex ?? lines.length)
+        .join('\n')
+      assertMaterialFormat(material.format, materialBody, material.materialId)
+    }
+  } catch {
+    return false
+  }
+  return true
+}
+
+function exactSequence(actual: readonly string[], expected: readonly string[]): boolean {
+  return (
+    actual.length === expected.length &&
+    expected.every((heading, index) => actual[index] === heading)
+  )
 }
 
 const BALANCE_INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g

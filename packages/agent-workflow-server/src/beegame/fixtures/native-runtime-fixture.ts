@@ -3,7 +3,7 @@ export {}
 const decoder = new TextDecoder()
 let buffer = ''
 let userMessageCount = 0
-let markdownRecoveryMode: 'normal' | 'never' = 'normal'
+let markdownRecoveryMode: 'normal' | 'never' | 'end_turn' = 'normal'
 
 const completeGddMarkdown = [
   '# Visible Markdown',
@@ -100,19 +100,22 @@ for await (const chunk of Bun.stdin.stream()) {
     if (
       content === 'truncated-markdown' ||
       content === 'truncated-markdown-forever' ||
+      content === 'truncated-markdown-end-turn' ||
       (userMessageCount > 1 &&
         typeof content === 'string' &&
         content.includes('Continue the same raw Markdown response'))
     ) {
       if (content === 'truncated-markdown-forever')
         markdownRecoveryMode = 'never'
+      if (content === 'truncated-markdown-end-turn')
+        markdownRecoveryMode = 'end_turn'
       const recovered = userMessageCount > 1
       const recoveredMarkdown = recovered && markdownRecoveryMode === 'normal'
         ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Vision and Product Promise'))
         : '# Partial document\n## Executive Summary\nHalf sentence'
       emitMarkdownResponse(
         recoveredMarkdown,
-        recovered && markdownRecoveryMode === 'normal' ? 'end_turn' : '',
+        recovered && markdownRecoveryMode !== 'never' ? 'end_turn' : '',
         userMessageCount,
       )
       continue

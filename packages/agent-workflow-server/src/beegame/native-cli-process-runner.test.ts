@@ -416,6 +416,23 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
+  test('does not forward an end-turn result when the recovered Markdown remains truncated', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+    const messages: Record<string, unknown>[] = []
+
+    await expect(
+      runtime.submit({
+        prompt: 'truncated-markdown-end-turn',
+        signal: new AbortController().signal,
+        onMessage: message => messages.push(message),
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow('foundation_transport_needs_action')
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(0)
+    expect(messages.filter(message => message.type === 'assistant')).toHaveLength(2)
+    runtime.dispose?.()
+  })
+
   test('routes native permission requests through the BGS authority callback', async () => {
     const runtime = await startRuntime()
     const requests: unknown[] = []

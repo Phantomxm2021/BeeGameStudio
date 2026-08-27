@@ -14,8 +14,7 @@ import {
   createRuntimeObservability,
   type RuntimeObservability,
 } from './runtime-observability'
-import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import { assertMaterialFormat } from './complete-game-document'
+import { isCompleteGameDocumentMarkdownStructure } from './complete-game-document'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stdin: {
@@ -250,10 +249,13 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     this.observability.observeMessage(message)
     if (this.sessionInput.workflowMarkdownStreamContract) {
       const streamedText = streamedMarkdownText(message)
-      if (streamedText) {
+      if (message.type === 'stream_event') {
         turn.markdownStreamDeltaSeen = true
         turn.markdownOutput += streamedText
-      } else if (message.type === 'assistant' && !turn.markdownStreamDeltaSeen) {
+      } else if (
+        message.type === 'assistant' &&
+        (!turn.markdownStreamDeltaSeen || !turn.markdownOutput)
+      ) {
         turn.markdownOutput += assistantMarkdownText(message)
       } else if (message.type === 'result' && !turn.markdownOutput) {
         turn.markdownOutput = stringField(message, 'result')
@@ -262,16 +264,38 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     if (
       message.type === 'result' &&
       this.sessionInput.workflowMarkdownStreamContract &&
-      !isErrorResult(message) &&
-      !isMissingVisibleMarkdownResult(message) &&
-      isMissingProviderStopReason(message) &&
-      !isMechanicallyClosedMarkdown(
-        turn.markdownOutput,
-        this.sessionInput.workflowMarkdownStreamContract.targetPath,
-      )
+      !isErrorResult(message)
     ) {
-      await this.recoverIncompleteMarkdownTurn(turn)
-      return
+      if (isMissingVisibleMarkdownResult(message)) {
+        await this.rejectMarkdownTurn(
+          turn,
+          new Error(
+            'Bee Game Studio native model response ended without visible Markdown',
+          ),
+        )
+        return
+      }
+      if (
+        !isCompleteGameDocumentMarkdownStructure(
+          this.sessionInput.workflowMarkdownStreamContract.targetPath,
+          turn.markdownOutput,
+        )
+      ) {
+        if (
+          isMissingProviderStopReason(message) &&
+          turn.markdownProtocolRecoveryCount === 0
+        ) {
+          await this.recoverIncompleteMarkdownTurn(turn)
+        } else {
+          await this.rejectMarkdownTurn(
+            turn,
+            new Error(
+              'foundation_transport_needs_action: Bee Game Studio native Markdown response ended before its structural closure',
+            ),
+          )
+        }
+        return
+      }
     }
     turn.input.onMessage(message as DashboardSDKMessage)
     this.captureStructuredOutputCall(message)
@@ -301,33 +325,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       turn.reject(error)
       return
     }
-    if (
-      this.sessionInput.workflowMarkdownStreamContract &&
-      isMissingVisibleMarkdownResult(message)
-    ) {
-      const error = new Error(
-        'Bee Game Studio native model response ended without visible Markdown',
-      )
-      this.observability.finishTurn({ outcome: 'error', error })
-      await this.observability.flush()
-      turn.reject(error)
-      return
-    }
-    if (
-      this.sessionInput.workflowMarkdownStreamContract &&
-      !isMechanicallyClosedMarkdown(
-        turn.markdownOutput,
-        this.sessionInput.workflowMarkdownStreamContract.targetPath,
-      )
-    ) {
-      const error = new Error(
-        'Bee Game Studio native Markdown response ended before its structural closure',
-      )
-      this.observability.finishTurn({ outcome: 'error', error })
-      await this.observability.flush()
-      turn.reject(error)
-      return
-    }
     this.observability.finishTurn({ outcome: 'success' })
     await this.observability.flush()
     turn.resolve()
@@ -337,13 +334,12 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
   ): Promise<void> {
     if (turn.markdownProtocolRecoveryCount > 0) {
-      this.activeTurn = null
-      const error = new Error(
-        'foundation_transport_needs_action: Bee Game Studio native provider ended a Markdown turn without a completion reason',
+      await this.rejectMarkdownTurn(
+        turn,
+        new Error(
+          'foundation_transport_needs_action: Bee Game Studio native provider ended a Markdown turn without a completion reason',
+        ),
       )
-      this.observability.finishTurn({ outcome: 'error', error })
-      await this.observability.flush()
-      turn.reject(error)
       return
     }
     turn.markdownProtocolRecoveryCount += 1
@@ -362,6 +358,16 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         ],
       },
     })
+  }
+
+  private async rejectMarkdownTurn(
+    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
+    error: Error,
+  ): Promise<void> {
+    this.activeTurn = null
+    this.observability.finishTurn({ outcome: 'error', error })
+    await this.observability.flush()
+    turn.reject(error)
   }
 
   private captureStructuredOutputCall(message: Record<string, unknown>): void {
@@ -632,81 +638,6 @@ function assistantMarkdownText(message: Record<string, unknown>): string {
     .filter(block => block.type === 'text')
     .map(block => stringField(block, 'text'))
     .join('')
-}
-
-function isMechanicallyClosedMarkdown(
-  markdown: string,
-  targetPath: Parameters<typeof getGameDocumentContract>[0],
-): boolean {
-  const headings = authoredMarkdownHeadings(markdown)
-  if (headings.fenceOpen) return false
-  const contract = getGameDocumentContract(targetPath)
-  const expectedH2 = [
-    'Executive Summary',
-    ...contract.sections.map(section => section.title),
-    'Production Materials',
-  ]
-  const expectedH3 = contract.productionMaterials.map(material => material.title)
-  const actualH2 = headings
-    .headings.filter(heading => heading.level === 2)
-    .map(heading => heading.text)
-  const actualH3 = headings
-    .headings.filter(heading => heading.level === 3)
-    .map(heading => heading.text)
-  if (!exactSequence(actualH2, expectedH2) || !exactSequence(actualH3, expectedH3))
-    return false
-  const lines = markdown.split('\n')
-  const productionHeading = headings.headings.find(
-    heading => heading.level === 2 && heading.text === 'Production Materials',
-  )
-  const materialHeadings = headings.headings.filter(heading => heading.level === 3)
-  if (
-    !productionHeading ||
-    materialHeadings.some(heading => heading.lineIndex <= productionHeading.lineIndex)
-  )
-    return false
-  try {
-    for (const [index, material] of contract.productionMaterials.entries()) {
-      const heading = materialHeadings[index]
-      if (!heading) return false
-      const nextHeading = materialHeadings[index + 1]
-      const body = lines.slice(heading.lineIndex + 1, nextHeading?.lineIndex ?? lines.length).join('\n')
-      assertMaterialFormat(material.format, body, material.materialId)
-    }
-  } catch {
-    return false
-  }
-  return true
-}
-
-function authoredMarkdownHeadings(
-  markdown: string,
-): {
-  headings: Array<{ level: number; text: string; lineIndex: number }>
-  fenceOpen: boolean
-} {
-  const headings: Array<{ level: number; text: string; lineIndex: number }> = []
-  let fence: string | undefined
-  for (const [lineIndex, rawLine] of markdown.split('\n').entries()) {
-    const line = rawLine.trimStart()
-    if (line.startsWith('```') || line.startsWith('~~~')) {
-      const marker = line.slice(0, 3)
-      fence = fence === undefined ? marker : fence === marker ? undefined : fence
-      continue
-    }
-    if (fence) continue
-    const match = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line)
-    if (match)
-      headings.push({ level: match[1]!.length, text: match[2]!, lineIndex })
-  }
-  return { headings, fenceOpen: fence !== undefined }
-}
-
-function exactSequence(actual: readonly string[], expected: readonly string[]): boolean {
-  return (
-    actual.length === expected.length &&
-    expected.every((heading, index) => actual[index] === heading)
-  )
 }
 
 function nativeErrorDetail(message: Record<string, unknown>): string {
