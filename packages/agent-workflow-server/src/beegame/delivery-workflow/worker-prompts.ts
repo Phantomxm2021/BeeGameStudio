@@ -13,6 +13,9 @@ const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
 const FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION =
   'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Define each authoritative fact once and prefer production-dense tables or matrices when they add implementation authority. Use one representation per fact: Owner materials are the authoritative representation for their facts, while Reference-only materials contain stable owner references and must not copy mutable literals or formulas. Within this document, define each mutable fact in one owner section or representation. Executive Summary indexes authority; each material follows its own authorityMode and authorityRule: owner materials own canonical facts, while reference-only materials index stable owner references and omit equivalent repetition. Do not restate the confirmed brief, upstream authority or another section; reference stable authority. Downstream documents may specialize only already-authorized behavior and must not redefine upstream rules. Executive Summary is an authority index, not an independent fact owner. Follow each material authorityMode and authorityRule in the serialized contract.'
 
+const FOUNDATION_AUTHOR_CLOSURE_CHECK =
+  'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once; retain every required heading for N/A content and state its reason and impact. Return only the complete raw Markdown body.'
+
 const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
   'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority; each Issue sourceSectionKey, expected, and actual must match its single-document authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
 
@@ -111,6 +114,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       : 'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
     formatContract(request),
+    streamedFoundationAuthor ? FOUNDATION_AUTHOR_CLOSURE_CHECK : undefined,
   ].join('\n')
 }
 
@@ -463,7 +467,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                     ]),
                 FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
                 DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
+                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn. Do not output a check report; silently perform the internal closure check appended after the contract.',
               ].join(' ')
             : request.contract.authoringMode === 'initial'
               ? [

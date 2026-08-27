@@ -88,7 +88,7 @@ describe('worker prompts', () => {
           ),
         },
       })
-      const contract = JSON.parse(prompt.split('\n').at(-1)!) as {
+      const contract = JSON.parse(prompt.split('\n').find(line => line.startsWith('{'))!) as {
         completeDocumentContract: {
           mechanicalMarkdownProtocol: {
             closedHeadingSet: string[]
@@ -195,6 +195,12 @@ describe('worker prompts', () => {
         expect(prompt).toContain('Executive Summary indexes authority; each material follows its own authorityMode and authorityRule')
         expect(prompt).not.toContain('Summary and Materials only index stable owner references')
         expect(countOccurrences(prompt, 'Record a genuinely N/A item once with its reason and impact')).toBe(1)
+        expect(prompt).toContain('Before returning, silently perform this internal closure check')
+        expect(prompt).toContain('every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once')
+        expect(prompt).toContain('every productionMaterials.entries H3 appears in order and exactly once')
+        expect(prompt).toContain('retain every required heading for N/A content and state its reason and impact')
+        expect(prompt).toContain('do not output a check report')
+        expect(prompt).not.toContain('do not add a redundant final verification')
         expect(prompt).not.toContain('strict_structured_block_payload')
         expect(prompt).not.toContain('native StructuredOutput object')
       }
