@@ -371,7 +371,13 @@ function nextNonBlankLine(
 
 const LOCAL_OWNER_KEY = /^(?:[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)+|[A-Z]{1,4}\d+)$/
 const LOCAL_OWNER_KEY_ALIAS = /^(?:[a-z][a-z0-9]*(?:[-_][a-z0-9]+)+|[a-z]{1,4}\d+)$/
-const SEMANTIC_ID = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/
+const CANONICAL_SEMANTIC_SEGMENT = '[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*'
+const CANONICAL_SEMANTIC_ID = `${CANONICAL_SEMANTIC_SEGMENT}(?:\\.${CANONICAL_SEMANTIC_SEGMENT})+`
+const SEMANTIC_ID = new RegExp(`^${CANONICAL_SEMANTIC_ID}$`)
+const SEMANTIC_ID_SCANNER = new RegExp(
+  `(?<![A-Za-z0-9._/-])${CANONICAL_SEMANTIC_ID}(?![A-Za-z0-9_/-]|\\.{2}|\\.[A-Za-z0-9_-])`,
+  'g',
+)
 const SEMANTIC_ID_ALIAS = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 const CJK_ID = /[\u3400-\u9fff\u{20000}-\u{2ffff}]/u
 const PLACEHOLDER_ID = /^(?:placeholder|tbd|todo|unknown)(?:[._-].*)?$/i
@@ -381,6 +387,7 @@ const MERMAID_FENCE = /```mermaid[^\n]*\n([\s\S]*?)```/gi
 const DECLARATION_COLUMN = /^(?:ID|Key|Identifier|Stable ID)$/
 const REFERENCE_COLUMN = /^(?:Reference ID|Owner ID|Inventory ID|(?:Owner|Asset|Path|Section|Material|Formula|Acceptance|Stable) Ref)$/
 const VALUE_COLUMN = /^(?:Value|Range|Formula|Result|Bound|Threshold|Interval|Expression)$/i
+const AUTHORITY_TOKEN = /`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.\/-]*\b/g
 
 function unquoteId(value: string): string {
   return value.trim().replace(/^`|`$/g, '').replace(/^['"]|['"]$/g, '').trim()
@@ -388,6 +395,13 @@ function unquoteId(value: string): string {
 
 function isCanonicalReferenceToken(value: string): boolean {
   return SEMANTIC_ID.test(value) || LOCAL_OWNER_KEY.test(value)
+}
+
+function scanCanonicalSemanticIds(value: string): Array<{ value: string; index: number }> {
+  return [...value.matchAll(SEMANTIC_ID_SCANNER)].map(match => ({
+    value: match[0]!,
+    index: match.index ?? 0,
+  }))
 }
 
 function tableRows(body: string): Array<{ headers: string[]; cells: string[]; line: number }> {
@@ -458,6 +472,8 @@ function explicitIds(block: CompleteDocumentBlock): {
       const value = unquoteId(row.cells[0] ?? '')
       if ((declarationColumn || referenceColumn) && (CJK_ID.test(value) || PLACEHOLDER_ID.test(value)))
         throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${block.startLine + row.line - 1}`)
+      if (declarationColumn && !isCanonicalReferenceToken(value))
+        throw new Error(`declaration-column cell must contain exactly one canonical ID: ${block.id}:line ${block.startLine + row.line - 1}`)
       if (referenceColumn && !isCanonicalReferenceToken(value))
         throw new Error(`reference-column cell must contain exactly one canonical ID/reference token: ${block.id}:line ${block.startLine + row.line - 1}`)
       add(value, block.startLine + row.line - 1, declarationColumn && allowDeclarations)
@@ -479,7 +495,7 @@ function explicitIds(block: CompleteDocumentBlock): {
     const line = block.startLine + block.body.slice(0, match.index ?? 0).split('\n').length - 1
     // Reference syntax is the only prose form admitted as an owner-local
     // reference. Ordinary code spans and narrative text remain Reviewer input.
-    for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g)) {
+    for (const token of match[1]!.matchAll(AUTHORITY_TOKEN)) {
       const value = unquoteId(token[1] ?? token[0])
       if (PLACEHOLDER_ID.test(value) || (token[1] !== undefined && CJK_ID.test(value)))
         throw new Error(`owner-scoped ID is invalid: ${block.id}:line ${line}`)
@@ -488,7 +504,7 @@ function explicitIds(block: CompleteDocumentBlock): {
   }
   for (const match of block.body.matchAll(DECLARATION_SYNTAX)) {
     const line = block.startLine + block.body.slice(0, match.index ?? 0).split('\n').length - 1
-    for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g)) {
+    for (const token of match[1]!.matchAll(AUTHORITY_TOKEN)) {
       const value = unquoteId(token[1] ?? token[0])
       if (SEMANTIC_ID.test(value)) {
         semantic.push(value)
@@ -505,9 +521,9 @@ function explicitIds(block: CompleteDocumentBlock): {
   for (const match of block.body.matchAll(MERMAID_FENCE)) {
     const mermaidBody = match[1] ?? ''
     const bodyOffset = (match.index ?? 0) + match[0]!.indexOf(mermaidBody)
-    for (const token of mermaidBody.matchAll(/\b[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+\b/g)) {
-      const line = block.startLine + block.body.slice(0, bodyOffset + (token.index ?? 0)).split('\n').length - 1
-      add(token[0]!, line, false)
+    for (const token of scanCanonicalSemanticIds(mermaidBody)) {
+      const line = block.startLine + block.body.slice(0, bodyOffset + token.index).split('\n').length - 1
+      add(token.value, line, false)
     }
   }
   return { semantic, semanticDeclarations, semanticReferences, aliases, localDeclarations, localReferences, factRows }
@@ -658,10 +674,7 @@ export function collectCompleteGameDocumentAuthorityReferences(
     references.push(...ids.semanticReferences)
   }
   for (const match of markdown.matchAll(REFERENCE_SYNTAX)) {
-    for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g)) {
-      const value = unquoteId(token[1] ?? token[0])
-      if (SEMANTIC_ID.test(value)) references.push(value)
-    }
+    references.push(...scanCanonicalSemanticIds(match[1]!).map(token => token.value))
   }
   return [...new Set(references)]
 }

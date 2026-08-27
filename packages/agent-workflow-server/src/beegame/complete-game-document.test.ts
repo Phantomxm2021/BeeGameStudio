@@ -6,6 +6,7 @@ import {
 import {
   assertMaterialFormat,
   assertCompleteGameDocumentCrossDocumentReferences,
+  collectCompleteGameDocumentAuthorityReferences,
   collectCompleteGameDocumentAuthoritySymbols,
   isCompleteGameDocumentMarkdownStructure,
   normalizeCompleteGameDocumentProtocol,
@@ -610,6 +611,49 @@ describe('native complete game document validation', () => {
       sources: [],
       symbols: [],
     })).toThrow(/undefined cross-document semantic ID.*state\.missing/i)
+  })
+
+  test('accepts canonical semantic IDs with hyphen and underscore segments without partial matches', () => {
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const base = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const exact = replaceMaterialBody(
+      base,
+      'world-structure-diagram',
+      'Declaration: action.assign-crew, param.gen.fuel_consumption, material.game-state-flow, material.variable-parameter-table\n```mermaid\ngraph TD\n  ACTION[action.assign-crew] --> FLOW[material.game-state-flow]\n```',
+    )
+
+    expect(() => validateCompleteGameDocumentMarkdown(path, exact)).not.toThrow()
+    expect(() => assertCompleteGameDocumentCrossDocumentReferences(path, exact, {
+      targetPath: path,
+      sources: [],
+      symbols: [],
+    })).not.toThrow()
+  })
+
+  test('rejects an invalid semantic token in an exact declaration column instead of ignoring it', () => {
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const markdown = replaceMaterialBody(
+      renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+      'pacing-beat-table',
+      '| ID | Beat |\n| --- | --- |\n| `action.assign/crew` | opening |',
+    )
+
+    expect(() => validateCompleteGameDocumentMarkdown(path, markdown)).toThrow(
+      /canonical|semantic ID|owner-scoped ID/i,
+    )
+  })
+
+  test('does not partially classify malformed Mermaid semantic tokens', () => {
+    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const malformed = replaceMaterialBody(
+      renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+      'world-structure-diagram',
+      '```mermaid\ngraph TD\n  ACTION[action.assign/crew] --> PWR[Power]\n```',
+    )
+
+    expect(collectCompleteGameDocumentAuthorityReferences(path, malformed)).not.toContain(
+      'action.assign',
+    )
   })
 
   test('rejects repeated semantic declarations within one owner block', () => {
