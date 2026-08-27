@@ -69,6 +69,7 @@ export type GameDocumentContract = {
   upstreamSections: readonly GameDocumentUpstreamProjection[]
   sections: readonly GameDocumentSectionContract[]
   outputPolicy: GameDocumentOutputPolicy
+  documentAuthorityRule: string
 }
 
 export const GAME_DOCUMENT_OUTPUT_POLICY: GameDocumentOutputPolicy =
@@ -111,56 +112,66 @@ const upstream = (
 
 const PRODUCTION_MATERIALS = {
   'docs/GDD.md': [
-    material('product-gameplay-overview', 'Product and Gameplay Overview', 'markdown_table', 'Summarize the playable promise, audience, scope, loops and completion definition.'),
-    material('core-loop-diagram', 'Core Loop Diagram', 'mermaid', 'Show the moment, session and long-term loop relationships.'),
-    material('game-state-flow', 'Game State Flow', 'mermaid', 'Show playable, menu, completion, failure and recovery transitions.'),
+    material('core-loop-diagram', 'Core Loop Diagram', 'mermaid', 'Compact, inspectable loop evidence that references core_loop decisions; do not restate section prose.'),
+    material('game-state-flow', 'Game State Flow', 'mermaid', 'Compact, inspectable state-transition evidence that references states_flow decisions; do not restate section prose.'),
   ],
   'docs/LEVEL_SCENE_DESIGN.md': [
-    material('world-structure-diagram', 'World Structure Diagram', 'mermaid', 'Show the spatial hierarchy and traversal boundaries.'),
-    material('route-choice-diagram', 'Route and Choice Diagram', 'mermaid', 'Show objectives, route alternatives and convergence.'),
-    material('pacing-beat-table', 'Pacing Beat Table', 'markdown_table', 'Map authored beats to intensity, recovery and required content.'),
-    material('scene-transition-diagram', 'Scene Transition Diagram', 'mermaid', 'Show scene lifecycle, spawn, checkpoint and recovery transitions.'),
+    material('world-structure-diagram', 'World Structure Diagram', 'mermaid', 'Compact topology evidence referencing world_structure; coordinate and traversal literals have one owner.'),
+    material('route-choice-diagram', 'Route and Choice Diagram', 'mermaid', 'Compact route evidence referencing objectives_routes; do not duplicate layout literals.'),
+    material('pacing-beat-table', 'Pacing Beat Table', 'markdown_table', 'Computable beat evidence referencing pacing_beats and authored content IDs.'),
+    material('scene-transition-diagram', 'Scene Transition Diagram', 'mermaid', 'Compact lifecycle evidence referencing scene_states and spawn_checkpoint decisions.'),
   ],
   'docs/BALANCE_DESIGN.md': [
-    material('variable-parameter-table', 'Variable and Parameter Table', 'markdown_table', 'Provide the canonical units, defaults, ranges and owners.'),
-    material('formula-boundary-table', 'Formula and Boundary Table', 'markdown_table', 'Connect formulas to ordering, clamping and worked boundary cases.'),
-    material('economy-flow-diagram', 'Economy Flow Diagram', 'mermaid', 'Show sources, sinks, conversions and progression gates.'),
-    material('tuning-validation-matrix', 'Tuning Validation Matrix', 'markdown_table', 'Define scenarios, sensitivity inputs and acceptance intervals.'),
+    material('variable-parameter-table', 'Variable and Parameter Table', 'markdown_table', 'Canonical owner table for units, variables, values, ranges and source references.'),
+    material('formula-boundary-table', 'Formula and Boundary Table', 'markdown_table', 'Recomputable formula evidence for ordering, clamping, rounding and boundary acceptance.'),
+    material('economy-flow-diagram', 'Economy Flow Diagram', 'mermaid', 'Compact flow evidence referencing economy and progression_curves; do not copy numeric results.'),
+    material('tuning-validation-matrix', 'Tuning Validation Matrix', 'markdown_table', 'Computable scenarios and acceptance evidence referencing owned variables and formulas.'),
   ],
   'docs/TECHNICAL_DESIGN.md': [
-    material('architecture-diagram', 'Architecture Diagram', 'mermaid', 'Show components, responsibilities and dependency direction.'),
-    material('data-flow-diagram', 'Data Flow Diagram', 'mermaid', 'Show content, runtime, persistence and presentation data flow.'),
-    material('runtime-lifecycle-diagram', 'Runtime Lifecycle Diagram', 'mermaid', 'Show state ownership and lifecycle transitions.'),
-    material('save-recovery-table', 'Save and Recovery Table', 'markdown_table', 'Define persistence triggers, corruption handling and recovery evidence.'),
+    material('architecture-diagram', 'Architecture Diagram', 'mermaid', 'Compact runtime boundary evidence referencing architecture decisions.'),
+    material('data-flow-diagram', 'Data Flow Diagram', 'mermaid', 'Compact content/data boundary evidence referencing data_content and persistence owners.'),
+    material('runtime-lifecycle-diagram', 'Runtime Lifecycle Diagram', 'mermaid', 'Inspectable lifecycle evidence referencing runtime_state; do not restate gameplay rules.'),
+    material('save-recovery-table', 'Save and Recovery Table', 'markdown_table', 'Computable persistence and recovery acceptance evidence referencing save_load.'),
   ],
   'docs/ART_DIRECTION.md': [
-    material('visual-pillar-board', 'Visual Pillar Board', 'inline_svg', 'Make the visual hierarchy and prohibited directions inspectable as unique visual acceptance evidence; do not duplicate owned facts.'),
-    material('palette-board', 'Palette Board', 'inline_svg', 'Show semantic palette roles, contrast and accessibility variants as unique visual acceptance evidence; do not duplicate owned facts.'),
-    material('silhouette-scale-board', 'Silhouette and Scale Board', 'inline_svg', 'Show entity differentiation, proportions and gameplay scale as unique visual acceptance evidence; do not duplicate owned facts.'),
-    material('animation-vfx-state-table', 'Animation and VFX State Table', 'markdown_table', 'Map authored states and events to motion and effect requirements.'),
+    material('visual-pillar-board', 'Visual Pillar Board', 'inline_svg', 'Compact, distinct SVG evidence for visual hierarchy and prohibited directions as unique visual acceptance evidence; reference visual_pillars, not prose.'),
+    material('palette-board', 'Palette Board', 'inline_svg', 'Compact, distinct SVG evidence for palette roles and contrast as unique visual acceptance evidence; reference color_lighting, not geometry numbers.'),
+    material('silhouette-scale-board', 'Silhouette and Scale Board', 'inline_svg', 'Compact, distinct SVG evidence for visual differentiation as unique visual acceptance evidence; consume Level/UI geometry without copying it.'),
+    material('animation-vfx-state-table', 'Animation and VFX State Table', 'markdown_table', 'Inspectable state/event evidence referencing animation and vfx decisions.'),
   ],
   'docs/UI_UX_SPEC.md': [
-    material('information-architecture-diagram', 'Information Architecture Diagram', 'mermaid', 'Show navigation, layers and entry points.'),
-    material('player-flow-diagram', 'Player Flow Diagram', 'mermaid', 'Show complete player journeys and recovery paths.'),
-    material('screen-state-table', 'Screen and State Table', 'markdown_table', 'Map screens, overlays and empty, loading and error states.'),
-    material('wireframe-board', 'Wireframe Board', 'inline_svg', 'Show representative layout, HUD and modal spatial relationships.'),
-    material('focus-accessibility-matrix', 'Focus and Accessibility Matrix', 'markdown_table', 'Map input, focus, scaling and non-visual alternatives.'),
+    material('information-architecture-diagram', 'Information Architecture Diagram', 'mermaid', 'Compact navigation evidence referencing experience_architecture.'),
+    material('player-flow-diagram', 'Player Flow Diagram', 'mermaid', 'Compact journey evidence referencing player_journeys and feedback_errors.'),
+    material('screen-state-table', 'Screen and State Table', 'markdown_table', 'Canonical screen/state evidence owned by screen_inventory.'),
+    material('wireframe-board', 'Wireframe Board', 'inline_svg', 'Compact layout evidence referencing the canonical responsive geometry/layout source.'),
+    material('focus-accessibility-matrix', 'Focus and Accessibility Matrix', 'markdown_table', 'Computable focus and accessibility evidence referencing input and accessibility decisions.'),
   ],
   'docs/AUDIO_DESIGN.md': [
-    material('event-cue-matrix', 'Event to Cue Matrix', 'markdown_table', 'Map stable gameplay and interface events to cue behavior.'),
-    material('music-state-diagram', 'Music State Diagram', 'mermaid', 'Show music states, transitions and intensity.'),
-    material('bus-ducking-diagram', 'Bus and Ducking Diagram', 'mermaid', 'Show mix buses, priorities and ducking relationships.'),
-    material('loudness-delivery-table', 'Loudness and Delivery Table', 'markdown_table', 'Define loudness, format, streaming and acceptance requirements.'),
-    material('sound-reference-register', 'Sound Reference Register', 'evidence_register', 'Record traceable references, intent and licensing boundaries.'),
+    material('event-cue-matrix', 'Event to Cue Matrix', 'markdown_table', 'Canonical mapping owner for stable events, cues, priorities and exceptions.'),
+    material('music-state-diagram', 'Music State Diagram', 'mermaid', 'Compact state evidence referencing music decisions and event-cue mappings.'),
+    material('bus-ducking-diagram', 'Bus and Ducking Diagram', 'mermaid', 'Compact mix evidence referencing mix policy and event-cue mappings.'),
+    material('loudness-delivery-table', 'Loudness and Delivery Table', 'markdown_table', 'Computable loudness and delivery acceptance evidence referencing implementation.'),
+    material('sound-reference-register', 'Sound Reference Register', 'evidence_register', 'Traceable source/licensing evidence for cues; do not duplicate asset inventory.'),
   ],
   'docs/ASSET_PLAN.md': [
-    material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Provide the complete semantic bill of materials, distinguishing type, instance and file and keeping totals recomputed from unique detail.'),
-    material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Assign creation, approval, consumption and status authority.'),
-    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Show blocking dependencies and integration order.'),
-    material('license-register', 'License Register', 'evidence_register', 'Record source, evidence, attribution, restrictions and replacement rights.'),
-    material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Map deliverables to batches, status and acceptance.'),
+    material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Canonical inventory owner for semantic IDs, type, instance and file, quantities, status and unique detail.'),
+    material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Computable ownership evidence referencing inventory IDs and status authority.'),
+    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Compact integration evidence referencing dependency and ownership decisions.'),
+    material('license-register', 'License Register', 'evidence_register', 'Traceable source/licensing evidence keyed by inventory IDs.'),
+    material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Computable milestone evidence keyed by inventory IDs and status.'),
   ],
 } satisfies Record<FoundationDocumentPath, readonly GameDocumentProductionMaterialContract[]>
+
+export const FOUNDATION_DOCUMENT_AUTHORITY_RULES = Object.freeze({
+  'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
+  'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
+  'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
+  'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
+  'docs/ART_DIRECTION.md': 'Own visual rules and consume Level/UI geometry; SVG boards are compact, distinct and inspectable visual evidence, not duplicate prose or geometry numbers.',
+  'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
+  'docs/AUDIO_DESIGN.md': 'The event-cue matrix owns mappings; prose covers policy and exceptions without copying the asset inventory.',
+  'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
+} satisfies Record<FoundationDocumentPath, string>)
 
 const UPSTREAM_SECTIONS = {
   'docs/GDD.md': [],
@@ -216,6 +227,7 @@ const contract = (
     upstreamSections: Object.freeze([...UPSTREAM_SECTIONS[path]]),
     sections: Object.freeze([...sections]),
     outputPolicy: GAME_DOCUMENT_OUTPUT_POLICY,
+    documentAuthorityRule: FOUNDATION_DOCUMENT_AUTHORITY_RULES[path],
   })
 
 export const GAME_DOCUMENT_CONTRACTS = Object.freeze({

@@ -131,6 +131,51 @@ describe('worker prompts', () => {
     }
   })
 
+  test('applies adaptive density and document authority rules to every foundation author', () => {
+    const sharedRules = [
+      'Judge quality by distinct implementable decisions and traceability, not document length',
+      'Use the minimum sufficient headings, tables, rows, diagrams and examples',
+      'Do not expand a contract purpose phrase by phrase into H3 headings',
+      'Represent each decision in one authoritative prose, table or diagram representation',
+      'Do not narrate tables or diagrams',
+      'Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate',
+      'Record a genuinely N/A item once with its reason and impact; never invent a system',
+      'Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets',
+      'Within this document, define each mutable fact in one owner section or representation; Summary and Materials only index or derive stable owner references and never copy mutable facts or independently maintained totals into derived views',
+    ]
+    const rules = {
+      'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
+      'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
+      'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
+      'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
+      'docs/ART_DIRECTION.md': 'Own visual rules and consume Level/UI geometry; SVG boards are compact, distinct and inspectable visual evidence, not duplicate prose or geometry numbers.',
+      'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
+      'docs/AUDIO_DESIGN.md': 'The event-cue matrix owns mappings; prose covers policy and exceptions without copying the asset inventory.',
+      'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
+    } as const
+
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
+        const prompt = buildWorkerPrompt({
+          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+          allowedPaths: [foundationDocumentPath],
+          contract: {
+            documentSet: 'foundation', authoringMode, foundationDocumentPath,
+            completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
+          },
+        })
+        for (const rule of sharedRules) expect(prompt).toContain(rule)
+        expect(prompt).toContain(rules[foundationDocumentPath])
+        expect(countOccurrences(prompt, rules[foundationDocumentPath])).toBe(1)
+        expect(prompt).toContain('complete raw Markdown body')
+        expect(prompt).toContain('Do not call tools, return JSON')
+        expect(prompt).not.toContain('strict_structured_block_payload')
+        expect(prompt).not.toContain('native StructuredOutput object')
+      }
+    }
+  })
+
   test('requires derived views to reference owners instead of copying mutable facts', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
@@ -153,11 +198,9 @@ describe('worker prompts', () => {
 
     expect(prompt).toContain('Executive Summary is an authority index')
     expect(prompt).toContain(
-      'Production Materials are derived compact views with owner references',
+      'Summary and Materials only index or derive stable owner references and never copy mutable facts or independently maintained totals into derived views',
     )
-    expect(prompt).toContain(
-      'Do not copy mutable facts or independently maintained totals into derived views',
-    )
+    expect(prompt).toContain('Production Materials are derived compact views.')
   })
 
   test('does not preserve an upstream-unavailable branch when the path is present', () => {

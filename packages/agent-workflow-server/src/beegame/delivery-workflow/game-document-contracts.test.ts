@@ -96,6 +96,35 @@ describe('complete game document contracts', () => {
     ).toBe('evidence_register')
   })
 
+  test('keeps the GDD production material set focused on unique authorities', () => {
+    const gdd = getGameDocumentContract('docs/GDD.md')
+    expect(gdd.productionMaterials.map(item => item.materialId)).toEqual([
+      'core-loop-diagram',
+      'game-state-flow',
+    ])
+    expect(gdd.productionMaterials.map(item => item.purpose)).toEqual([
+      'Compact, inspectable loop evidence that references core_loop decisions; do not restate section prose.',
+      'Compact, inspectable state-transition evidence that references states_flow decisions; do not restate section prose.',
+    ])
+  })
+
+  test('declares one concise authority rule for each foundation document', () => {
+    const expected = {
+      'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
+      'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
+      'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
+      'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
+      'docs/ART_DIRECTION.md': 'Own visual rules and consume Level/UI geometry; SVG boards are compact, distinct and inspectable visual evidence, not duplicate prose or geometry numbers.',
+      'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
+      'docs/AUDIO_DESIGN.md': 'The event-cue matrix owns mappings; prose covers policy and exceptions without copying the asset inventory.',
+      'docs/ASSET_PLAN.md': 'The inventory uniquely owns semantic IDs, quantity and status; other materials reference IDs without repeating Art/UI/Audio specifications.',
+    } as const
+
+    for (const [path, rule] of Object.entries(expected)) {
+      expect((getGameDocumentContract(path as keyof typeof expected) as unknown as Record<string, unknown>).documentAuthorityRule).toBe(rule)
+    }
+  })
+
   test('makes every section and production material decision-dense by contract', () => {
     for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
       expect(contract.outputPolicy).toEqual({
