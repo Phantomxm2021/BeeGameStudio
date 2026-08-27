@@ -96,21 +96,44 @@ const BALANCE_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_REFERENCE_PATTERN}(?
 const BALANCE_REFERENCE = new RegExp(BALANCE_REFERENCE_TOKEN, 'g')
 const BALANCE_REFERENCE_ONLY = new RegExp(`^${BALANCE_REFERENCE_PATTERN}$`)
 const BALANCE_INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g
+const BALANCE_SYMBOLIC_REFERENCE_PATTERN = '(?:[A-Z]\\d+|[A-Z][A-Z0-9]*(?:[_-][A-Z0-9*]+)+)'
+const BALANCE_SYMBOLIC_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_SYMBOLIC_REFERENCE_PATTERN}(?![A-Za-z0-9_*])`
+const BALANCE_FACT_REFERENCE = new RegExp(`^${BALANCE_SYMBOLIC_REFERENCE_PATTERN}$`)
 const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
 const BALANCE_FORMULA_CALL = /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^()\n]*\)/
-const BALANCE_REFERENCE_EXPRESSION = new RegExp(
-  `${BALANCE_REFERENCE_TOKEN}\\s*(?:[+*/×÷=<>≤≥]|!=|==|<=|>=)\\s*${BALANCE_REFERENCE_TOKEN}`,
+const BALANCE_SYMBOLIC_EXPRESSION = new RegExp(
+  `${BALANCE_SYMBOLIC_REFERENCE_TOKEN}\\s*(?:[+*/×÷=<>≤≥]|!=|==|<=|>=)\\s*${BALANCE_SYMBOLIC_REFERENCE_TOKEN}`,
 )
 const BALANCE_NUMERIC_LITERAL = /(?<![A-Za-z_])(?:\d+(?:\.\d+)?|\.\d+)(?:\s*%)?(?![A-Za-z_])/u
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function collectBalanceOwnerReferences(
+  body: string,
+  references: Set<string>,
+): void {
+  for (const match of body.matchAll(BALANCE_INLINE_CODE)) {
+    const code = match[1]!.trim()
+    if (BALANCE_FACT_REFERENCE.test(code)) references.add(code)
+  }
+}
 
 function assertBalanceReferenceOnlyMaterial(
   body: string,
   materialId: string,
   materialTitle: string,
+  structuralReferences: ReadonlySet<string>,
 ): void {
   for (const match of body.matchAll(BALANCE_INLINE_CODE)) {
     const code = match[1]!.trim()
-    if (code === materialId || code === materialTitle) continue
+    if (
+      code === materialId ||
+      code === materialTitle ||
+      structuralReferences.has(code)
+    )
+      continue
     BALANCE_REFERENCE.lastIndex = 0
     if (!BALANCE_REFERENCE_ONLY.test(code))
       throw new Error(`Balance reference-only material contains non-reference inline code: ${materialId}`)
@@ -118,12 +141,26 @@ function assertBalanceReferenceOnlyMaterial(
 
   if (BALANCE_FORMULA_CALL.test(body))
     throw new Error(`Balance reference-only material contains a complete formula expression: ${materialId}`)
-  if (BALANCE_REFERENCE_EXPRESSION.test(body))
+  if (BALANCE_SYMBOLIC_EXPRESSION.test(body))
     throw new Error(`Balance reference-only material contains a complete formula expression: ${materialId}`)
   if (BALANCE_RANGE.test(body))
     throw new Error(`Balance reference-only material contains a copied range: ${materialId}`)
 
-  const withoutReferences = body.replace(BALANCE_REFERENCE, ' ')
+  const structuralReferencePattern = [...new Set([
+    ...structuralReferences,
+    materialId,
+    materialTitle,
+  ])]
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp)
+    .join('|')
+  const structuralReferenceToken = new RegExp(
+    `(?<![A-Za-z0-9_])(?:${structuralReferencePattern})(?![A-Za-z0-9_*])`,
+    'g',
+  )
+  const withoutReferences = body
+    .replace(BALANCE_REFERENCE, ' ')
+    .replace(structuralReferenceToken, ' ')
   BALANCE_REFERENCE.lastIndex = 0
   if (BALANCE_NUMERIC_LITERAL.test(withoutReferences))
     throw new Error(`Balance reference-only material contains a copied numeric literal: ${materialId}`)
@@ -307,6 +344,19 @@ export function validateCompleteGameDocumentMarkdown(
   const documentEnd = auditIndex >= 0 ? auditIndex : lines.length
   const sectionIndexes = sectionMarkers.map(marker => lines.indexOf(marker))
   const materialIndexes = materialMarkers.map(marker => lines.indexOf(marker))
+  const balanceStructuralReferences =
+    path === 'docs/BALANCE_DESIGN.md'
+      ? new Set<string>([
+          ...CANONICAL_FOUNDATION_DOCUMENTS,
+          ...contract.sections.flatMap(section => [
+            section.title,
+            `## ${section.title}`,
+          ]),
+          ...contract.productionMaterials
+            .filter(material => material.authorityMode === 'owner')
+            .flatMap(material => [material.materialId, material.title]),
+        ])
+      : undefined
   const orderedIndexes = [
     summaryIndex,
     ...sectionIndexes,
@@ -341,6 +391,11 @@ export function validateCompleteGameDocumentMarkdown(
     if (heading?.value !== `## ${section.title}`)
       throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
     assertNonEmptyRange(lines, heading.index, end, `section:${section.sectionId}`)
+    if (balanceStructuralReferences)
+      collectBalanceOwnerReferences(
+        lines.slice(heading.index + 1, end).join('\n'),
+        balanceStructuralReferences,
+      )
   })
   validateSectionHeadingStructure(
     contract.sections.map((section, index) => {
@@ -369,7 +424,14 @@ export function validateCompleteGameDocumentMarkdown(
       material.materialId,
     )
     if (path === 'docs/BALANCE_DESIGN.md' && material.authorityMode === 'reference_only')
-      assertBalanceReferenceOnlyMaterial(materialBody, material.materialId, material.title)
+      assertBalanceReferenceOnlyMaterial(
+        materialBody,
+        material.materialId,
+        material.title,
+        balanceStructuralReferences!,
+      )
+    if (balanceStructuralReferences && material.authorityMode === 'owner')
+      collectBalanceOwnerReferences(materialBody, balanceStructuralReferences)
   })
 
   if (auditIndex >= 0) {

@@ -124,8 +124,11 @@ describe('native complete game document validation', () => {
       ['economy-flow-diagram', 'Reference-only flow.\n\n```mermaid\ngraph TD\nA[0–3]\n```'],
       ['tuning-validation-matrix', '| Field | Value |\n| --- | --- |\n| bound | ≤1 |'],
       ['tuning-validation-matrix', '| Field | Value |\n| --- | --- |\n| expression | `x + y` |'],
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | `V-DSL-*` |'],
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | V_INPUT + V_BONUS |'],
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | V_MIN ≤ V_MAX |'],
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | P_GEN_KW_PER_L + P_BONUS |'],
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | K_GEN_LEVEL <= CAP_GEN_KW |'],
     ] as const
 
     for (const [materialId, body] of rejected) {
@@ -140,11 +143,23 @@ describe('native complete game document validation', () => {
 
   test('accepts prose and stable owner references in Balance reference-only materials', () => {
     const path = 'docs/BALANCE_DESIGN.md'
-    let markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const submission = completeTestSubmission(path)
+    const withOwnerReferences = {
+      ...submission,
+      sections: submission.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              body: `${section.body}\n\nOwner IDs: \`P_GEN_KW_PER_L\`, \`K_GEN_LEVEL\`, \`CAP_GEN_KW\`, \`B1\`, \`T6\`, \`A3\`, \`B-02\`, and \`SS-05\`.`,
+            }
+          : section,
+      ),
+    }
+    let markdown = renderTestCompleteGameDocument(path, withOwnerReferences)
     markdown = replaceMaterialBody(
       markdown,
       'formula-boundary-table',
-      'Reference-only prose indexes `formula-boundary-table`, `V_P_FLOOR`, `V_HAZ_*`, `F01`, `F03A`, `SC_01`, and `AC_01` owners.\n\n| Reference | Owner |\n| --- | --- |\n| variable | `V_P_FLOOR` |\n| formula | `F03A` |',
+      'Reference-only prose indexes `formula-boundary-table`, `docs/GDD.md`, `## Authoritative Formulas`, `## Entity and Ability Parameters`, `P_GEN_KW_PER_L`, `K_GEN_LEVEL`, `CAP_GEN_KW`, `B1`, `T6`, `A3`, `B-02`, `SS-05`, `V_P_FLOOR`, `V_HAZ_*`, `F01`, `F03A`, `SC_01`, and `AC_01` owners.\n\n| Reference | Owner |\n| --- | --- |\n| variable | `V_P_FLOOR` |\n| formula | `F03A` |',
     )
     markdown = replaceMaterialBody(
       markdown,
@@ -158,6 +173,19 @@ describe('native complete game document validation', () => {
     )
 
     expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
+  })
+
+  test('rejects undeclared symbolic IDs', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const markdown = replaceMaterialBody(
+      renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+      'formula-boundary-table',
+      '| Field | Value |\n| --- | --- |\n| expression | `P_UNDECLARED_*` |',
+    )
+
+    expect(() => validateCompleteGameDocumentMarkdown(path, markdown)).toThrow(
+      /Balance reference-only material/i,
+    )
   })
 
   test('accepts a complete document above the compact authoring target', () => {
