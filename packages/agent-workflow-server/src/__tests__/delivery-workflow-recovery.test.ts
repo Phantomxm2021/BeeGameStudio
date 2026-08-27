@@ -69,6 +69,11 @@ import {
 import { createFoundationAuditState, parseFoundationAuditState } from '../beegame/delivery-workflow/foundation-audit-state'
 import { foundationRevisionPacketDigest, foundationRevisionPacketPath, foundationRevisionStagePath, writeFoundationRevisionPacket } from '../beegame/delivery-workflow/foundation-revision-stage'
 import { FOUNDATION_AUDIT_PRODUCTION_MANIFEST } from '../beegame/delivery-workflow/foundation-audit-production-manifest'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  foundationProjectionRelativePath,
+  projectFoundationAuthority,
+} from '../beegame/foundation-authority-projection'
 
 const RECOVERY_OWNER_ID = 'recovery-owner'
 
@@ -217,6 +222,21 @@ async function commitMatrixFoundationDocument(input: {
     join(input.workspacePath, input.path),
     input.body ?? matrixCompleteDocument(input.path),
   )
+  const contract = getGameDocumentContract(input.path)
+  const documents = new Map(await Promise.all(
+    contract.upstreamSections.map(async source => [
+      source.path,
+      await readFile(join(input.workspacePath, source.path), 'utf8'),
+    ] as const),
+  ))
+  const projection = projectFoundationAuthority({
+    targetPath: input.path,
+    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    documents,
+  })
+  const projectionPath = join(input.workspacePath, foundationProjectionRelativePath(input.dispatchId))
+  await mkdir(join(input.workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
+  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
   await commitAuthoredFoundationDocument({
     workspacePath: input.workspacePath,
     dispatchId: input.dispatchId,

@@ -27,6 +27,11 @@ import {
   renderTestCompleteGameDocument,
 } from './complete-game-document-fixture'
 import { readAuthoredDocumentReceipt } from '../beegame/authored-document-receipt'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  foundationProjectionRelativePath,
+  projectFoundationAuthority,
+} from '../beegame/foundation-authority-projection'
 import { createModelConfig, resetModelConfigs } from '@bee-game-studio/agent-workflow'
 
 const waitForIdle = async (
@@ -206,6 +211,23 @@ describe('BeeGame session runtime resilience', () => {
     const markdown = renderTestCompleteGameDocument(
       'docs/GDD.md',
       completeTestSubmission('docs/GDD.md'),
+    )
+    const projectionPath = join(
+      workspacePath,
+      foundationProjectionRelativePath('dispatch-1'),
+    )
+    await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), {
+      recursive: true,
+    })
+    await writeFile(
+      projectionPath,
+      canonicalFoundationAuthorityProjectionBytes(
+        projectFoundationAuthority({
+          targetPath: 'docs/GDD.md',
+          availableUpstreamPaths: [],
+          documents: new Map(),
+        }),
+      ),
     )
     const runner: BeeGameSessionRunner = {
       start: async () => ({
