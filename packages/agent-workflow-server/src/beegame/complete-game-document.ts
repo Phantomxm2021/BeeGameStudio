@@ -73,7 +73,7 @@ function assertExactOrder(
     throw new Error(`${label} must exactly match the canonical order for ${path}`)
 }
 
-function assertMaterialFormat(
+export function assertMaterialFormat(
   format: 'markdown_table' | 'mermaid' | 'inline_svg' | 'evidence_register',
   body: string,
   materialId: string,

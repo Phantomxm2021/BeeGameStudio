@@ -1641,6 +1641,54 @@ describe('delivery worker session credentials', () => {
     }
   })
 
+  test('classifies exhausted foundation transport recovery as worker needs action', async () => {
+    const sessions = {
+      start() {
+        return { id: 'session-foundation-transport-failure' }
+      },
+      updateAuthToken() {},
+      events() {
+        return [
+          {
+            id: 'foundation-transport-failure',
+            type: 'turn.failed' as const,
+            text: 'foundation_transport_needs_action: provider completion reason missing',
+            createdAt: new Date(),
+          },
+        ]
+      },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+
+    await port.start({
+      dispatchId: 'dispatch-foundation-transport-failure',
+      runId: 'run-1',
+      ownerId: 'user-1',
+      projectId: 'project-1',
+      workspacePath: '/tmp/project-1',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision-1',
+      allowedPaths: ['docs/GDD.md'],
+      contract: {
+        authoringMode: 'initial',
+        foundationDocumentPath: 'docs/GDD.md',
+        upstreamDocumentPaths: [],
+      },
+    })
+
+    let error: Error | undefined
+    try {
+      await port.waitForTerminal?.('dispatch-foundation-transport-failure')
+    } catch (value) {
+      error = value as Error
+    }
+    expect(error).toMatchObject({
+      name: 'WorkerNeedsActionError',
+      message: 'foundation_transport_needs_action: provider completion reason missing',
+    })
+  })
+
   test('resolves the current auth token for every worker start and submit', async () => {
     const starts: Array<{ authToken?: string }> = []
     const updates: Array<{ sessionId: string; authToken?: string }> = []

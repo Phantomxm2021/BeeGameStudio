@@ -747,9 +747,14 @@ export function createBeeGameDeliveryWorkerPort(input: {
             if (missingTerminal) throw missingTerminal
           }
           if (result.type !== 'result')
-            throw new Error(
+          {
+            const error = new Error(
               result.text || 'worker turn did not produce a terminal result',
             )
+            if (error.message.startsWith('foundation_transport_needs_action:'))
+              error.name = 'WorkerNeedsActionError'
+            throw error
+          }
           if (request?.workerType === 'resource-planner') {
             return createDeterministicResourcePlannerTerminal({
               request,

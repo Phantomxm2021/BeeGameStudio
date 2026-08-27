@@ -359,16 +359,60 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
-  test('accepts visible Markdown when provider stop metadata is missing', async () => {
+  test('accepts a mechanically closed Markdown body when provider stop metadata is missing', async () => {
     const runtime = await startRuntime({ markdownStream: true })
+    const messages: Record<string, unknown>[] = []
     await expect(
       runtime.submit({
-        prompt: 'visible-markdown-without-stop-reason',
+        prompt: 'complete-markdown-without-stop-reason',
+        signal: new AbortController().signal,
+        onMessage: message => messages.push(message),
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).resolves.toBeUndefined()
+    expect(messages.at(-1)).toMatchObject({
+      type: 'result',
+      subtype: 'success',
+      stop_reason: '',
+      received_user_count: 1,
+    })
+    expect(messages).toHaveLength(3)
+    runtime.dispose?.()
+  })
+
+  test('recovers a truncated Markdown result in the same native turn and session', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+    const messages: Record<string, unknown>[] = []
+
+    await runtime.submit({
+      prompt: 'truncated-markdown',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
+    expect(messages.at(-1)).toMatchObject({
+      type: 'result',
+      subtype: 'success',
+      stop_reason: 'end_turn',
+      received_user_count: 2,
+    })
+    expect(messages.at(-1)?.result).toContain('## Vision and Product Promise')
+    runtime.dispose?.()
+  })
+
+  test('classifies an unrecovered Markdown truncation as non-retryable transport failure', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+
+    await expect(
+      runtime.submit({
+        prompt: 'truncated-markdown-forever',
         signal: new AbortController().signal,
         onMessage: () => undefined,
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
-    ).resolves.toBeUndefined()
+    ).rejects.toThrow('foundation_transport_needs_action')
     runtime.dispose?.()
   })
 
