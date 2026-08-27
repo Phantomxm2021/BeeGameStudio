@@ -693,9 +693,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
       // Recovery policy belongs to the dispatcher. A transport-level fixed
       // deadline would fail a worker that is still making durable progress.
       while (true) {
-        const events = sessionEvents(sessionId).slice(
-          eventOffsets.get(dispatchId) ?? 0,
-        )
+        const eventOffset = eventOffsets.get(dispatchId) ?? 0
+        const events = sessionEvents(sessionId).slice(eventOffset)
         const request = requests.get(dispatchId)
         if (request?.workerType === 'resource-curator') {
           const receipt = await readCurrentCommittedResourceInventoryReceipt(
@@ -778,18 +777,33 @@ export function createBeeGameDeliveryWorkerPort(input: {
                   throw error
                 }
                 validationDiagnostics.set(dispatchId, diagnostics)
+                // sendWithDisplay starts the native turn asynchronously. Move
+                // the event boundary before sending so the failed turn that
+                // triggered this correction cannot be consumed again while
+                // the replacement turn is still running.
+                eventOffsets.set(dispatchId, eventOffset + events.length)
                 const authToken = await input.getAuthToken?.()
                 input.sessions.updateAuthToken(sessionId, authToken)
-                await input.sessions.sendWithDisplay(
-                  sessionId,
-                  buildFoundationDocumentCorrectionPrompt(diagnostics),
-                  {
-                    taskType: 'edit_turn',
-                    displayKind: 'workflow_worker',
-                    ...(authToken ? { authToken } : {}),
-                    ...(input.language ? { language: input.language } : {}),
-                  },
-                )
+                try {
+                  await input.sessions.sendWithDisplay(
+                    sessionId,
+                    buildFoundationDocumentCorrectionPrompt(diagnostics),
+                    {
+                      taskType: 'edit_turn',
+                      displayKind: 'workflow_worker',
+                      ...(authToken ? { authToken } : {}),
+                      ...(input.language ? { language: input.language } : {}),
+                    },
+                  )
+                  if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+                    await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+                } catch (error) {
+                  const unavailable = new Error(
+                    `foundation document author session unavailable: ${error instanceof Error ? error.message : String(error)}`,
+                  )
+                  unavailable.name = 'WorkerNeedsActionError'
+                  throw unavailable
+                }
                 closedTurnDrained = false
                 continue
               }
