@@ -56,13 +56,6 @@ export type FoundationDocumentCheckpoint = {
   failureReason?: string
 }
 
-export type FoundationValidationDiagnostics = {
-  targetPath: FoundationDocumentPath
-  documentDigest: string
-  violationSetDigest: string
-  violations: string[]
-}
-
 export type FoundationDraftState = {
   /** Completed initial-authoring checkpoints in canonical dependency order. */
   completedPaths: FoundationDocumentPath[]

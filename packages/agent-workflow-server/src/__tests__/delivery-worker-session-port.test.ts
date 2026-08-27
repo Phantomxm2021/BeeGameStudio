@@ -25,18 +25,6 @@ import {
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
-import { foundationMarkdownPendingPath } from '../beegame/foundation-markdown-stream'
-import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
-import {
-  canonicalFoundationAuthorityProjectionBytes,
-  foundationProjectionRelativePath,
-  projectFoundationAuthority,
-} from '../beegame/foundation-authority-projection'
-import {
-  completeTestSubmission,
-  renderTestCompleteGameDocument,
-} from './complete-game-document-fixture'
-import { buildFoundationValidationDiagnostics } from '../beegame/delivery-workflow/foundation-authoring-batch'
 import { createFoundationRevisionStage, foundationRevisionPacketPath, revisionTaskReceiptTerminalDigest } from '../beegame/delivery-workflow/foundation-revision-stage'
 import {
   buildFoundationFactStructuredOutputJsonSchema,
@@ -1652,12 +1640,13 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('routes a post-idle turn failure through same-author correction when result wins the first snapshot', async () => {
+  test('fails closed with the original validation diagnostics when a post-idle turn fails', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-author-result-race-'))
     const dispatchId = 'dispatch-author-result-race'
     const runId = 'run-author-result-race'
     const targetPath = 'docs/GDD.md' as const
     const prompts: string[] = []
+    let starts = 0
     const events: Array<Record<string, unknown>> = [{
       id: 1,
       type: 'result',
@@ -1666,7 +1655,7 @@ describe('delivery worker session credentials', () => {
     }]
     let idleCalls = 0
     const sessions = {
-      start() { return { id: 'session-author-result-race' } },
+      start() { starts += 1; return { id: 'session-author-result-race' } },
       updateAuthToken() {},
       events() { return events },
       isWorkflowWorkerOpen() { return true },
@@ -1680,43 +1669,9 @@ describe('delivery worker session credentials', () => {
             createdAt: new Date(),
           })
       },
-      async sendWithDisplay(_sessionId: string, prompt: string) {
-        prompts.push(prompt)
-        const valid = renderTestCompleteGameDocument(
-          targetPath,
-          completeTestSubmission(targetPath),
-        )
-        await mkdir(join(workspacePath, 'docs'), { recursive: true })
-        await writeFile(join(workspacePath, targetPath), valid, 'utf8')
-        await commitAuthoredFoundationDocument({
-          workspacePath,
-          dispatchId,
-          targetPath,
-          authoredBody: valid,
-          updatedAt: '2026-08-28T01:00:00.000+08:00',
-        })
-        events.push({
-          id: 3,
-          type: 'result',
-          text: 'corrected document accepted',
-          createdAt: new Date(),
-        })
-      },
+      async sendWithDisplay() { prompts.push('unexpected second turn') },
     } as unknown as BeeGameSessionManager
-    const projection = projectFoundationAuthority({
-      targetPath,
-      availableUpstreamPaths: [],
-      documents: new Map(),
-    })
     try {
-      await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
-      await writeFile(
-        join(workspacePath, foundationProjectionRelativePath(dispatchId)),
-        canonicalFoundationAuthorityProjectionBytes(projection),
-      )
-      const pendingPath = foundationMarkdownPendingPath(workspacePath, runId, dispatchId)
-      await mkdir(dirname(pendingPath), { recursive: true })
-      await writeFile(pendingPath, 'malformed body\n', 'utf8')
       const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
       await port.start({
         dispatchId,
@@ -1737,317 +1692,14 @@ describe('delivery worker session credentials', () => {
         },
       })
 
-      await expect(port.waitForTerminal?.(dispatchId)).resolves.toMatchObject({
-        workerType: 'document-author',
-        status: 'completed',
-        writtenPaths: [targetPath],
-      })
-      expect(idleCalls).toBe(3)
-      expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toContain('"targetPath":"docs/GDD.md"')
-      expect(events.filter(event => event.type === 'turn.failed')).toHaveLength(1)
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
-  test('revalidates and commits changed Markdown on the same live author session after async turn events', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-same-author-live-'))
-    const prompts: string[] = []
-    const starts: unknown[] = []
-    const sends: string[] = []
-    const idleCalls: string[] = []
-    const dispatchId = 'dispatch-same-author-live'
-    const runId = 'run-same-author-live'
-    const targetPath = 'docs/GDD.md' as const
-    const events: Array<Record<string, unknown>> = [{
-      id: 1,
-      sessionId: 'session-same-author-live',
-      type: 'turn.failed',
-      text: 'complete game document requires one document title',
-      createdAt: new Date(),
-    }]
-    let sendCount = 0
-    const sessions = {
-      start(input: unknown) {
-        starts.push(input)
-        return { id: 'session-same-author-live' }
-      },
-      get() { return undefined },
-      updateAuthToken() {},
-      events() { return events },
-      isWorkflowWorkerOpen() { return true },
-      async waitForWorkflowWorkerIdle() {
-        // The native send returns before its turn completes. Events are
-        // appended below to model the later stream completion.
-        idleCalls.push(`after-send-${sendCount}`)
-      },
-      async sendWithDisplay(_sessionId: string, prompt: string) {
-        sends.push(_sessionId)
-        prompts.push(prompt)
-        sendCount += 1
-        if (sendCount === 1) {
-          void (async () => {
-            await writeFile(
-              foundationMarkdownPendingPath(workspacePath, runId, dispatchId),
-              'changed malformed body\r\n',
-              'utf8',
-            )
-            events.push({
-              id: 2,
-              sessionId: 'session-same-author-live',
-              type: 'turn.started',
-              text: 'correction started',
-              createdAt: new Date(),
-            })
-            setTimeout(() => events.push({
-              id: 3,
-              sessionId: 'session-same-author-live',
-              type: 'turn.failed',
-              text: 'complete game document requires one document title',
-              createdAt: new Date(),
-            }), 10)
-          })()
-          return
-        }
-        void (async () => {
-          const valid = renderTestCompleteGameDocument(
-            targetPath,
-            completeTestSubmission(targetPath),
-          )
-          await mkdir(join(workspacePath, 'docs'), { recursive: true })
-          await writeFile(join(workspacePath, targetPath), valid, 'utf8')
-          await commitAuthoredFoundationDocument({
-            workspacePath,
-            dispatchId,
-            targetPath,
-            authoredBody: valid,
-            updatedAt: '2026-08-28T01:00:00.000+08:00',
-          })
-          events.push({
-            id: 4,
-            sessionId: 'session-same-author-live',
-            type: 'turn.started',
-            text: 'final correction started',
-            createdAt: new Date(),
-          })
-          setTimeout(() => events.push({
-            id: 5,
-            sessionId: 'session-same-author-live',
-            type: 'result',
-            text: 'document accepted',
-            createdAt: new Date(),
-          }), 10)
-        })()
-      },
-    } as unknown as BeeGameSessionManager
-    const projection = projectFoundationAuthority({
-      targetPath,
-      availableUpstreamPaths: [],
-      documents: new Map(),
-    })
-    try {
-      await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
-      await writeFile(
-        join(workspacePath, foundationProjectionRelativePath(dispatchId)),
-        canonicalFoundationAuthorityProjectionBytes(projection),
-      )
-      await mkdir(dirname(foundationMarkdownPendingPath(workspacePath, runId, dispatchId)), { recursive: true })
-      await writeFile(
-        foundationMarkdownPendingPath(workspacePath, runId, dispatchId),
-        'malformed body\r\n',
-        'utf8',
-      )
-      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
-      const request: WorkerDispatchRequest = {
-        dispatchId,
-        runId,
-        ownerId: 'user-1',
-        projectId: 'project-1',
-        workspacePath,
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
-        taskId: targetPath,
-        revision: 'revision-1',
-        allowedPaths: [targetPath],
-        contract: {
-          authoringMode: 'initial',
-          documentSet: 'foundation',
-          foundationDocumentPath: targetPath,
-          availableUpstreamPaths: [],
-        },
-      }
-      const started = await port.start(request)
-      const terminal = await port.waitForTerminal?.(dispatchId)
-      const status = await port.status(dispatchId)
-      const receipt = JSON.parse(await readFile(join(workspacePath, '.beegame/workflow/document-commits', `${dispatchId}.json`), 'utf8')) as { status: string; dispatchId: string; targetPath: string }
-      const firstDiagnostics = JSON.parse(
-        prompts[0].split('Structured validation diagnostics: ')[1].split('\n', 1)[0],
-      )
-      const secondDiagnostics = JSON.parse(
-        prompts[1].split('Structured validation diagnostics: ')[1].split('\n', 1)[0],
-      )
-      const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
-      const projectionBytes = await readFile(projectionPath, 'utf8')
-      expect(terminal).toMatchObject({
-        workerType: 'document-author',
-        status: 'completed',
-        writtenPaths: [targetPath],
-      })
-      expect(starts).toHaveLength(1)
-      expect(started).toEqual({ sessionId: 'session-same-author-live', dispatchId })
-      expect((starts[0] as { workflowRunId: string }).workflowRunId).toBe(runId)
-      expect((starts[0] as { workflowDispatchId: string }).workflowDispatchId).toBe(dispatchId)
-      expect((starts[0] as { workflowAllowedPaths: string[] }).workflowAllowedPaths).toEqual([targetPath])
-      expect(status).toMatchObject({ dispatchId, taskId: targetPath })
-      expect(sends).toEqual(['session-same-author-live', 'session-same-author-live'])
-      expect(idleCalls.slice(0, 2)).toEqual(['after-send-1', 'after-send-2'])
-      expect(prompts).toHaveLength(2)
-      expect(firstDiagnostics).toEqual(buildFoundationValidationDiagnostics({
-        targetPath,
-        markdown: 'malformed body\n',
-        violations: ['complete game document canonical heading must appear exactly once: ## Executive Summary'],
-      }))
-      expect(secondDiagnostics).toEqual(buildFoundationValidationDiagnostics({
-        targetPath,
-        markdown: 'changed malformed body\r\n',
-        violations: ['complete game document canonical heading must appear exactly once: ## Executive Summary'],
-      }))
-      expect(prompts[1]).not.toEqual(prompts[0])
-      expect(receipt).toMatchObject({ status: 'committed', dispatchId, targetPath })
-      expect(await readFile(projectionPath, 'utf8')).toBe(projectionBytes)
-      expect(events.filter(event => event.type === 'result')).toHaveLength(1)
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
-  test('corrects a streamed validation failure in the same live author session and fails closed on no progress', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-same-author-'))
-    const prompts: string[] = []
-    let starts = 0
-    const events: Array<Record<string, unknown>> = [{
-      id: 1,
-      type: 'turn.failed',
-      text: 'complete game document requires one document title',
-      createdAt: new Date(),
-    }]
-    const sessions = {
-      start() {
-        starts += 1
-        return { id: 'session-same-author' }
-      },
-      updateAuthToken() {},
-      async sendWithDisplay(_sessionId: string, prompt: string) {
-        prompts.push(prompt)
-        events.push({
-          id: 2,
-          type: 'turn.failed',
-          text: 'complete game document requires one document title',
-          createdAt: new Date(),
-        })
-      },
-      events() {
-        return events
-      },
-      isWorkflowWorkerOpen() { return true },
-    } as unknown as BeeGameSessionManager
-    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
-    try {
-      const request: WorkerDispatchRequest = {
-        dispatchId: 'dispatch-same-author',
-        runId: 'run-same-author',
-        ownerId: 'user-1',
-        projectId: 'project-1',
-        workspacePath,
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
-        taskId: 'docs/GDD.md',
-        revision: 'revision-1',
-        allowedPaths: ['docs/GDD.md'],
-        contract: {
-          authoringMode: 'initial',
-          documentSet: 'foundation',
-          foundationDocumentPath: 'docs/GDD.md',
-          availableUpstreamPaths: [],
-        },
-      }
-      await port.start(request)
-      const pendingPath = foundationMarkdownPendingPath(
-        workspacePath,
-        request.runId,
-        request.dispatchId!,
-      )
-      await mkdir(dirname(pendingPath), { recursive: true })
-      await writeFile(pendingPath, 'malformed body\r\n', 'utf8')
-
-      await expect(port.waitForTerminal?.(request.dispatchId!)).rejects.toMatchObject({
-        name: 'WorkerNeedsActionError',
-        message: expect.stringContaining('authority-no-progress'),
-      })
-      expect(starts).toBe(1)
-      expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toContain('"targetPath":"docs/GDD.md"')
-      expect(prompts[0]).toContain('"violations"')
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
-  test('fails closed when the live author session disappears during correction', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-author-session-gone-'))
-    const dispatchId = 'dispatch-author-session-gone'
-    const runId = 'run-author-session-gone'
-    const events = [{
-      id: 1,
-      type: 'turn.failed' as const,
-      text: 'complete game document requires one document title',
-      createdAt: new Date(),
-    }]
-    let starts = 0
-    let sends = 0
-    const sessions = {
-      start() {
-        starts += 1
-        return { id: 'session-author-session-gone' }
-      },
-      updateAuthToken() {},
-      events() { return events },
-      isWorkflowWorkerOpen() { return true },
-      async sendWithDisplay() {
-        sends += 1
-        throw new Error('Session not found')
-      },
-    } as unknown as BeeGameSessionManager
-    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
-    try {
-      await port.start({
-        dispatchId,
-        runId,
-        ownerId: 'user-1',
-        projectId: 'project-1',
-        workspacePath,
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
-        taskId: 'docs/GDD.md',
-        revision: 'revision-1',
-        allowedPaths: ['docs/GDD.md'],
-        contract: {
-          authoringMode: 'initial',
-          documentSet: 'foundation',
-          foundationDocumentPath: 'docs/GDD.md',
-          availableUpstreamPaths: [],
-        },
-      })
-      const pendingPath = foundationMarkdownPendingPath(workspacePath, runId, dispatchId)
-      await mkdir(dirname(pendingPath), { recursive: true })
-      await writeFile(pendingPath, 'malformed body\n', 'utf8')
       await expect(port.waitForTerminal?.(dispatchId)).rejects.toMatchObject({
         name: 'WorkerNeedsActionError',
-        message: 'foundation document author session unavailable: Session not found',
+        message: expect.stringContaining('complete game document requires one document title'),
       })
       expect(starts).toBe(1)
-      expect(sends).toBe(1)
+      expect(idleCalls).toBe(1)
+      expect(prompts).toHaveLength(0)
+      expect(events.filter(event => event.type === 'turn.failed')).toHaveLength(1)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

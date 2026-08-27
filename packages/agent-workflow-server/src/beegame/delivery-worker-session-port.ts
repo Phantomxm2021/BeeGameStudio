@@ -18,7 +18,6 @@ import {
   type DeliveryWorkerPort,
   type DispatchRecord,
   type FoundationDocumentPath,
-  type FoundationValidationDiagnostics,
   type WorkerDispatchRequest,
 } from './delivery-workflow/types'
 import { atomicTaskPlannerTerminalSchema } from './delivery-workflow/worker-contracts'
@@ -48,16 +47,7 @@ import {
 } from './native-resource-content-tool'
 import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import {
-  buildFoundationDocumentCorrectionPrompt,
-  buildWorkerPrompt,
-} from './delivery-workflow/worker-prompts'
-import {
-  buildFoundationValidationDiagnostics,
-  foundationValidationProgressed,
-} from './delivery-workflow/foundation-authoring-batch'
-import { normalizeCompleteGameDocumentProtocol } from './complete-game-document'
-import { foundationMarkdownPendingPath } from './foundation-markdown-stream'
+import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
 import {
   foundationFactDefinition,
   isFoundationFactKey,
@@ -365,65 +355,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
     string,
     FoundationAuthorityProjection
   >()
-  const validationDiagnostics = new Map<
-    string,
-    FoundationValidationDiagnostics
-  >()
   const eventOffsets = new Map<string, number>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
       ? input.sessions.events(sessionId)
       : []
-  const correctFoundationValidationFailure = async (
-    request: WorkerDispatchRequest,
-    sessionId: string,
-    failureText: string,
-    eventOffset: number,
-    observedEventCount: number,
-  ): Promise<boolean> => {
-    const diagnostics = await foundationValidationDiagnosticsFor(
-      request,
-      failureText,
-    )
-    if (!diagnostics) return false
-    const dispatchId = request.dispatchId
-    if (!dispatchId) return false
-    const previous = validationDiagnostics.get(dispatchId)
-    if (previous && !foundationValidationProgressed(previous, diagnostics)) {
-      const error = new Error(
-        `authority-no-progress: ${diagnostics.targetPath} validation diagnostics and document bytes are unchanged`,
-      )
-      error.name = 'WorkerNeedsActionError'
-      throw error
-    }
-    validationDiagnostics.set(dispatchId, diagnostics)
-    // Advance the event boundary before sending the replacement turn so the
-    // failure that triggered this correction cannot be consumed again.
-    eventOffsets.set(dispatchId, eventOffset + observedEventCount)
-    const authToken = await input.getAuthToken?.()
-    input.sessions.updateAuthToken(sessionId, authToken)
-    try {
-      await input.sessions.sendWithDisplay(
-        sessionId,
-        buildFoundationDocumentCorrectionPrompt(diagnostics),
-        {
-          taskType: 'edit_turn',
-          displayKind: 'workflow_worker',
-          ...(authToken ? { authToken } : {}),
-          ...(input.language ? { language: input.language } : {}),
-        },
-      )
-      if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-        await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-    } catch (error) {
-      const unavailable = new Error(
-        `foundation document author session unavailable: ${error instanceof Error ? error.message : String(error)}`,
-      )
-      unavailable.name = 'WorkerNeedsActionError'
-      throw unavailable
-    }
-    return true
-  }
   const disposeWorkflowSession = async (sessionId: string) => {
     if (typeof input.sessions.disposeWorkflowWorker === 'function')
       await input.sessions.disposeWorkflowWorker(sessionId)
@@ -543,7 +479,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
       requests.set(dispatchId, { ...request, dispatchId })
       documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
       eventOffsets.set(dispatchId, 0)
-      validationDiagnostics.delete(dispatchId)
       records.set(dispatchId, {
         dispatchId,
         workerType: request.workerType,
@@ -688,7 +623,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         documentAuthorityBlocks.delete(dispatchId)
         documentAuthorityProjections.delete(dispatchId)
         eventOffsets.delete(dispatchId)
-        validationDiagnostics.delete(dispatchId)
       }
     },
     async status(dispatchId) {
@@ -817,29 +751,14 @@ export function createBeeGameDeliveryWorkerPort(input: {
           const drainedFailure = [...terminalEvents]
             .reverse()
             .find(event => event.type === 'turn.failed')
-          const validationFailureText = drainedFailure?.text ??
-            (result.type !== 'result' ? result.text : undefined)
-          if (
-            request &&
-            isStreamedFoundationAuthoringTurn(request) &&
-            validationFailureText
-          ) {
-            if (await correctFoundationValidationFailure(
-              request,
-              sessionId,
-              validationFailureText,
-              eventOffset,
-              terminalEvents.length,
-            )) {
-              closedTurnDrained = false
-              continue
-            }
-          }
           if (drainedFailure) {
             const error = new Error(
               drainedFailure.text || 'document author stream commit failed',
             )
-            if (error.message.startsWith('foundation_transport_needs_action:'))
+            if (
+              error.message.startsWith('foundation_transport_needs_action:') ||
+              (request && isStreamedFoundationAuthoringTurn(request))
+            )
               error.name = 'WorkerNeedsActionError'
             throw error
           }
@@ -981,48 +900,6 @@ function isStreamedFoundationAuthoringTurn(
     (request.contract.authoringMode === 'initial' ||
       request.contract.authoringMode === 'parallel-draft')
   )
-}
-
-async function foundationValidationDiagnosticsFor(
-  request: WorkerDispatchRequest,
-  failureText: string,
-): Promise<FoundationValidationDiagnostics | undefined> {
-  if (!isStreamedFoundationAuthoringTurn(request)) return undefined
-  if (
-    failureText.startsWith('foundation Markdown stream ') ||
-    failureText.startsWith('foundation_transport_needs_action:')
-  )
-    return undefined
-  const dispatchId = request.dispatchId
-  if (!dispatchId) return undefined
-  let markdown: string
-  try {
-    markdown = await readFile(
-      foundationMarkdownPendingPath(request.workspacePath, request.runId, dispatchId),
-      'utf8',
-    )
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-    throw error
-  }
-  if (!markdown.trim()) return undefined
-  const violations = new Set<string>()
-  try {
-    normalizeCompleteGameDocumentProtocol(
-      request.contract.foundationDocumentPath as FoundationDocumentPath,
-      markdown,
-    )
-  } catch (error) {
-    if (error instanceof Error && error.message.trim()) violations.add(error.message)
-  }
-  if (!violations.size && failureText.trim())
-    violations.add(failureText.trim())
-  if (!violations.size) return undefined
-  return buildFoundationValidationDiagnostics({
-    targetPath: request.contract.foundationDocumentPath as FoundationDocumentPath,
-    markdown,
-    violations: [...violations],
-  })
 }
 
 async function persistFoundationAuthorityIndex(

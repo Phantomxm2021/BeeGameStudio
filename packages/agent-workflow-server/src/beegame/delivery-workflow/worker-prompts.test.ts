@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildFoundationDocumentCorrectionPrompt, buildWorkerPrompt } from './worker-prompts'
+import { buildWorkerPrompt } from './worker-prompts'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
@@ -9,19 +9,6 @@ function countOccurrences(value: string, needle: string): number {
 }
 
 describe('worker prompts', () => {
-  test('sends only deterministic validation diagnostics for same-author correction', () => {
-    const diagnostics = {
-      targetPath: 'docs/GDD.md' as const,
-      documentDigest: 'a'.repeat(64),
-      violationSetDigest: 'b'.repeat(64),
-      violations: ['missing heading'],
-    }
-    const prompt = buildFoundationDocumentCorrectionPrompt(diagnostics)
-    expect(prompt).toContain(JSON.stringify(diagnostics))
-    expect(prompt).not.toContain('priorFailureReason')
-    expect(prompt).not.toContain('new dispatch')
-  })
-
   test('keeps the initial foundation author contract focused on the assigned document', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
