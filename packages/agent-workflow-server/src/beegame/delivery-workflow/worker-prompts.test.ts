@@ -230,6 +230,8 @@ describe('worker prompts', () => {
     expect(prompt).toContain('Executive Summary is an authority index')
     expect(prompt).toContain('Owner materials are the authoritative representation for their facts')
     expect(prompt).toContain('Reference-only materials contain stable owner references and must not copy mutable literals or formulas')
+    expect(prompt).toContain('Reference-only materials contain only source-derived stable owner IDs, canonical owner section/material references, and structural relationships that connect those references')
+    expect(prompt).toContain('timing, steps, order, ranks, counts, or any other owner fact')
     expect(prompt).not.toContain('Production Materials are derived compact views.')
   })
 

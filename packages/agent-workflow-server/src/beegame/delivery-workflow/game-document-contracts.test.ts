@@ -168,6 +168,24 @@ describe('complete game document contracts', () => {
     ])
   })
 
+  test('keeps Balance reference-only materials as structural owner-reference views', () => {
+    const materials = getGameDocumentContract('docs/BALANCE_DESIGN.md').productionMaterials
+      .filter(material => material.authorityMode === 'reference_only')
+
+    expect(materials).toHaveLength(3)
+    for (const material of materials) {
+      expect(material.purpose).toContain('source-derived owner IDs')
+      expect(material.authorityRule).toContain('structural relationships')
+      expect(material.authorityRule).toContain('timing')
+      expect(material.authorityRule).toContain('steps')
+      expect(material.authorityRule).toContain('order')
+      expect(material.authorityRule).toContain('ranks')
+      expect(material.authorityRule).toContain('counts')
+      expect(material.authorityRule).toContain('other owner facts')
+      expect(material.authorityRule).toContain('table columns')
+    }
+  })
+
   test('removes the obsolete global derived-view output policy fields', () => {
     for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
       expect(contract.outputPolicy).not.toHaveProperty('productionMaterialStyle')

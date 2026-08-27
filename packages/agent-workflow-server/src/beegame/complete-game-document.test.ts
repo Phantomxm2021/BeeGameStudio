@@ -142,6 +142,49 @@ describe('native complete game document validation', () => {
     }
   })
 
+  test('normalization rejects reference-only timing and rank prose but accepts owner references', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const submission = completeTestSubmission(path)
+    const withOwnerReferences = {
+      ...submission,
+      sections: submission.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              body: `${section.body}\n\nOwner IDs: F01, SC-CREW-4, and T3.`,
+            }
+          : section,
+      ),
+    }
+    const markdown = renderTestCompleteGameDocument(path, withOwnerReferences)
+    const rejected = [
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| settlement | 结算第 1 步 |'],
+      ['tuning-validation-matrix', '| Field | Value |\n| --- | --- |\n| sensitivity | 灵敏度排序第 1 项 |'],
+    ] as const
+
+    for (const [materialId, body] of rejected) {
+      expect(() =>
+        normalizeCompleteGameDocumentProtocol(
+          path,
+          replaceMaterialBody(markdown, materialId, body),
+        ),
+      ).toThrow(/Balance reference-only material/i)
+    }
+
+    const ownerReferencesOnly = replaceMaterialBody(
+      replaceMaterialBody(
+        markdown,
+        'formula-boundary-table',
+        '| Field | Value |\n| --- | --- |\n| owner | `F01` |',
+      ),
+      'tuning-validation-matrix',
+      '| Field | Value |\n| --- | --- |\n| scenario | `SC-CREW-4` |\n| beat | `T3` |',
+    )
+    expect(normalizeCompleteGameDocumentProtocol(path, ownerReferencesOnly)).toBe(
+      ownerReferencesOnly,
+    )
+  })
+
   test('accepts prose and stable owner references in Balance reference-only materials', () => {
     const path = 'docs/BALANCE_DESIGN.md'
     const submission = completeTestSubmission(path)
