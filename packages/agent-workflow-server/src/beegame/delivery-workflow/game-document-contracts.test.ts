@@ -106,6 +106,75 @@ describe('complete game document contracts', () => {
     ).toBe('evidence_register')
   })
 
+  test('assigns the approved owner and reference-only authority to every material', () => {
+    const expected = {
+      'docs/GDD.md': {
+        'core-loop-diagram': 'reference_only',
+        'game-state-flow': 'reference_only',
+      },
+      'docs/LEVEL_SCENE_DESIGN.md': {
+        'world-structure-diagram': 'owner',
+        'route-choice-diagram': 'owner',
+        'pacing-beat-table': 'owner',
+        'scene-transition-diagram': 'reference_only',
+      },
+      'docs/BALANCE_DESIGN.md': {
+        'variable-parameter-table': 'owner',
+        'formula-boundary-table': 'reference_only',
+        'economy-flow-diagram': 'reference_only',
+        'tuning-validation-matrix': 'reference_only',
+      },
+      'docs/TECHNICAL_DESIGN.md': {
+        'architecture-diagram': 'reference_only',
+        'data-flow-diagram': 'reference_only',
+        'runtime-lifecycle-diagram': 'reference_only',
+        'save-recovery-table': 'owner',
+      },
+      'docs/ART_DIRECTION.md': {
+        'visual-language-board': 'owner',
+        'animation-vfx-state-table': 'owner',
+      },
+      'docs/UI_UX_SPEC.md': {
+        'information-architecture-diagram': 'owner',
+        'player-flow-diagram': 'owner',
+        'screen-state-table': 'owner',
+        'wireframe-board': 'owner',
+        'focus-accessibility-matrix': 'owner',
+      },
+      'docs/AUDIO_DESIGN.md': {
+        'event-cue-matrix': 'owner',
+        'music-state-diagram': 'owner',
+        'bus-ducking-diagram': 'owner',
+        'loudness-delivery-table': 'owner',
+        'sound-reference-register': 'reference_only',
+      },
+      'docs/ASSET_PLAN.md': {
+        'asset-inventory-table': 'owner',
+        'responsibility-matrix': 'owner',
+        'dependency-integration-diagram': 'owner',
+        'license-register': 'owner',
+        'milestone-maturity-table': 'owner',
+      },
+    } as const
+
+    for (const [path, materialAuthority] of Object.entries(expected)) {
+      const materials = getGameDocumentContract(path as keyof typeof expected).productionMaterials
+      expect(Object.fromEntries(materials.map(material => [material.materialId, material.authorityMode]))).toEqual(materialAuthority)
+      expect(materials.every(material => material.authorityRule.trim().length > 0)).toBe(true)
+    }
+    expect(getGameDocumentContract('docs/ART_DIRECTION.md').productionMaterials.map(material => material.materialId)).toEqual([
+      'visual-language-board',
+      'animation-vfx-state-table',
+    ])
+  })
+
+  test('removes the obsolete global derived-view output policy fields', () => {
+    for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
+      expect(contract.outputPolicy).not.toHaveProperty('productionMaterialStyle')
+      expect(contract.outputPolicy).not.toHaveProperty('derivedViewAuthority')
+    }
+  })
+
   test('keeps the GDD production material set focused on unique authorities', () => {
     const gdd = getGameDocumentContract('docs/GDD.md')
     expect(gdd.productionMaterials.map(item => item.materialId)).toEqual([
@@ -168,8 +237,6 @@ describe('complete game document contracts', () => {
       expect(contract.outputPolicy).toEqual({
         sectionStyle: 'final_owned_decisions',
         executiveSummaryStyle: 'authority_index',
-        productionMaterialStyle: 'derived_compact_views',
-        derivedViewAuthority: 'owner_references_only',
         mutableFactPolicy: 'single_owner_no_copied_totals',
         workedExamples: 'one_per_distinct_boundary',
         acceptanceScenarios: 'materially_distinct_only',
@@ -224,11 +291,7 @@ describe('complete game document contracts', () => {
       expect(purpose).toContain('Level and UI geometry')
       expect(purpose).toContain('not invent layout dimensions')
     }
-    for (const materialId of [
-      'visual-pillar-board',
-      'palette-board',
-      'silhouette-scale-board',
-    ]) {
+    for (const materialId of ['visual-language-board']) {
       const purpose = art.productionMaterials.find(item => item.materialId === materialId)?.purpose
       expect(purpose).toContain('unique visual acceptance evidence')
     }

@@ -163,7 +163,7 @@ describe('worker prompts', () => {
       'Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate',
       'Record a genuinely N/A item once with its reason and impact; never invent a system',
       'Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets',
-      'Within this document, define each mutable fact in one owner section or representation; Summary and Materials only index or derive stable owner references and never copy mutable facts or independently maintained totals into derived views',
+      'Use one representation per fact: Owner materials are the authoritative representation for their facts, while Reference-only materials contain stable owner references and must not copy mutable literals or formulas',
     ]
     const rules = {
       'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
@@ -198,7 +198,7 @@ describe('worker prompts', () => {
     }
   })
 
-  test('requires derived views to reference owners instead of copying mutable facts', () => {
+  test('requires each material authority mode to govern copied facts', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -219,10 +219,37 @@ describe('worker prompts', () => {
     })
 
     expect(prompt).toContain('Executive Summary is an authority index')
-    expect(prompt).toContain(
-      'Summary and Materials only index or derive stable owner references and never copy mutable facts or independently maintained totals into derived views',
-    )
-    expect(prompt).toContain('Production Materials are derived compact views.')
+    expect(prompt).toContain('Owner materials are the authoritative representation for their facts')
+    expect(prompt).toContain('Reference-only materials contain stable owner references and must not copy mutable literals or formulas')
+    expect(prompt).not.toContain('Production Materials are derived compact views.')
+  })
+
+  test('serializes each material authority once for both raw-Markdown author modes', () => {
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
+        const contract = getGameDocumentContract(foundationDocumentPath)
+        const prompt = buildWorkerPrompt({
+          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+          allowedPaths: [foundationDocumentPath],
+          contract: {
+            documentSet: 'foundation', authoringMode, foundationDocumentPath,
+            completeDocumentContract: contract,
+          },
+        })
+
+        expect(prompt).toContain('complete raw Markdown body')
+        expect(prompt).toContain('Owner materials are the authoritative representation for their facts')
+        expect(prompt).toContain('Reference-only materials contain stable owner references and must not copy mutable literals or formulas')
+        expect(prompt).toContain('Use one representation per fact')
+        expect(prompt).toContain('Record a genuinely N/A item once with its reason and impact')
+        expect(prompt).not.toContain('Production Materials are derived compact views.')
+        for (const material of contract.productionMaterials) {
+          expect(countOccurrences(prompt, material.authorityRule)).toBe(1)
+          expect(countOccurrences(prompt, `"authorityMode":"${material.authorityMode}","authorityRule":"${material.authorityRule}"`)).toBe(1)
+        }
+      }
+    }
   })
 
   test('does not preserve an upstream-unavailable branch when the path is present', () => {
