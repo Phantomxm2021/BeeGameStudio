@@ -5,6 +5,7 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
+import { CANONICAL_SEMANTIC_ID } from './canonical-semantic-id'
 import {
   collectCompleteGameDocumentAuthoritySymbols,
   type CompleteGameDocumentAuthoritySymbol,
@@ -77,7 +78,7 @@ export function parseFoundationAuthorityProjectionBytes(
     targetSectionIds: z.array(z.string()),
     sources: z.array(sourceSchema),
     symbols: z.array(z.object({
-      id: z.string().regex(/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/),
+      id: z.string().regex(CANONICAL_SEMANTIC_ID),
       documentPath: pathSchema,
       sectionId: z.string(),
     }).strict()),

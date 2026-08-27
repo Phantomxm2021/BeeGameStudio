@@ -1,6 +1,10 @@
 import { z } from 'zod/v4'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import {
+  CANONICAL_SEMANTIC_ID as SEMANTIC_ID,
+  scanCanonicalSemanticIds,
+} from './canonical-semantic-id'
+import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
@@ -371,13 +375,6 @@ function nextNonBlankLine(
 
 const LOCAL_OWNER_KEY = /^(?:[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)+|[A-Z]{1,4}\d+)$/
 const LOCAL_OWNER_KEY_ALIAS = /^(?:[a-z][a-z0-9]*(?:[-_][a-z0-9]+)+|[a-z]{1,4}\d+)$/
-const CANONICAL_SEMANTIC_SEGMENT = '[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*'
-const CANONICAL_SEMANTIC_ID = `${CANONICAL_SEMANTIC_SEGMENT}(?:\\.${CANONICAL_SEMANTIC_SEGMENT})+`
-const SEMANTIC_ID = new RegExp(`^${CANONICAL_SEMANTIC_ID}$`)
-const SEMANTIC_ID_SCANNER = new RegExp(
-  `(?<![A-Za-z0-9._/-])${CANONICAL_SEMANTIC_ID}(?![A-Za-z0-9_/-]|\\.{2}|\\.[A-Za-z0-9_-])`,
-  'g',
-)
 const SEMANTIC_ID_ALIAS = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 const CJK_ID = /[\u3400-\u9fff\u{20000}-\u{2ffff}]/u
 const PLACEHOLDER_ID = /^(?:placeholder|tbd|todo|unknown)(?:[._-].*)?$/i
@@ -395,13 +392,6 @@ function unquoteId(value: string): string {
 
 function isCanonicalReferenceToken(value: string): boolean {
   return SEMANTIC_ID.test(value) || LOCAL_OWNER_KEY.test(value)
-}
-
-function scanCanonicalSemanticIds(value: string): Array<{ value: string; index: number }> {
-  return [...value.matchAll(SEMANTIC_ID_SCANNER)].map(match => ({
-    value: match[0]!,
-    index: match.index ?? 0,
-  }))
 }
 
 function tableRows(body: string): Array<{ headers: string[]; cells: string[]; line: number }> {

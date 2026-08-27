@@ -358,6 +358,44 @@ describe('foundation authority projection', () => {
     )).not.toThrow()
   })
 
+  test('round-trips canonical hyphenated and underscored GDD symbols into the Level projection', () => {
+    const gdd = sourceDocument('docs/GDD.md')
+      .replace(
+        '## Production Materials\nSource materials are intentionally outside the authority projection.',
+        [
+          '## Production Materials',
+          ...getGameDocumentContract('docs/GDD.md').productionMaterials.flatMap(material => [
+            `<!-- beegame-material:${material.materialId} -->`,
+            `### ${material.title}`,
+            '',
+          ]),
+        ].join('\n'),
+      )
+      .replace(
+        'Owned source content for core_loop.',
+        'Declaration: action.assign-crew, param.gen.fuel_consumption\nOwned source content for core_loop.',
+      )
+      .replace(
+        '<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\n',
+        '<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\nDeclaration: material.game-state-flow, material.variable-parameter-table\n',
+      )
+    const result = projectFoundationAuthority({
+      targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
+      availableUpstreamPaths: ['docs/GDD.md'],
+      documents: new Map([['docs/GDD.md', gdd]]),
+    })
+
+    expect(result.symbols.map(symbol => symbol.id)).toEqual(expect.arrayContaining([
+      'action.assign-crew',
+      'param.gen.fuel_consumption',
+      'material.game-state-flow',
+      'material.variable-parameter-table',
+    ]))
+    expect(() => parseFoundationAuthorityProjectionBytes(
+      canonicalFoundationAuthorityProjectionBytes(result),
+    )).not.toThrow()
+  })
+
   test('rejects duplicate committed semantic symbols while projecting upstream authority', () => {
     const gdd = sourceDocument('docs/GDD.md').replace(
       'Owned source content for states_flow.',
