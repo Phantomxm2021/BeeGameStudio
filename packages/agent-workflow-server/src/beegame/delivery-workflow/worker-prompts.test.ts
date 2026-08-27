@@ -259,7 +259,7 @@ describe('worker prompts', () => {
         expect(prompt).not.toContain('Production Materials are derived compact views.')
         for (const material of contract.productionMaterials) {
           expect(countOccurrences(prompt, material.authorityRule)).toBe(1)
-          expect(countOccurrences(prompt, `"authorityMode":"${material.authorityMode}","authorityRule":"${material.authorityRule}"`)).toBe(1)
+          expect(countOccurrences(prompt, `"authorityRule":"${material.authorityRule}"`)).toBe(1)
         }
       }
     }

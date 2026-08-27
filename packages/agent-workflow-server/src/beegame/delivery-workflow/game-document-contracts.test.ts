@@ -95,36 +95,30 @@ describe('complete game document contracts', () => {
       }
     }
     expect(
-      getGameDocumentContract('docs/AUDIO_DESIGN.md').productionMaterials.find(
-        item => item.materialId === 'sound-reference-register',
-      )?.format,
-    ).toBe('evidence_register')
-    expect(
       getGameDocumentContract('docs/ASSET_PLAN.md').productionMaterials.find(
         item => item.materialId === 'license-register',
       )?.format,
     ).toBe('evidence_register')
   })
 
-  test('assigns the approved owner and reference-only authority to every material', () => {
+  test('exposes the closed owner-only material catalog in canonical order', () => {
     const expected = {
       'docs/GDD.md': {
-        'core-loop-diagram': 'reference_only',
-        'game-state-flow': 'reference_only',
+        'core-loop-diagram': 'owner',
+        'game-state-flow': 'owner',
       },
       'docs/LEVEL_SCENE_DESIGN.md': {
         'world-structure-diagram': 'owner',
         'route-choice-diagram': 'owner',
         'pacing-beat-table': 'owner',
-        'scene-transition-diagram': 'reference_only',
       },
       'docs/BALANCE_DESIGN.md': {
         'variable-parameter-table': 'owner',
       },
       'docs/TECHNICAL_DESIGN.md': {
-        'architecture-diagram': 'reference_only',
-        'data-flow-diagram': 'reference_only',
-        'runtime-lifecycle-diagram': 'reference_only',
+        'architecture-diagram': 'owner',
+        'data-flow-diagram': 'owner',
+        'runtime-lifecycle-diagram': 'owner',
         'save-recovery-table': 'owner',
       },
       'docs/ART_DIRECTION.md': {
@@ -143,7 +137,6 @@ describe('complete game document contracts', () => {
         'music-state-diagram': 'owner',
         'bus-ducking-diagram': 'owner',
         'loudness-delivery-table': 'owner',
-        'sound-reference-register': 'reference_only',
       },
       'docs/ASSET_PLAN.md': {
         'asset-inventory-table': 'owner',
@@ -156,8 +149,12 @@ describe('complete game document contracts', () => {
 
     for (const [path, materialAuthority] of Object.entries(expected)) {
       const materials = getGameDocumentContract(path as keyof typeof expected).productionMaterials
-      expect(Object.fromEntries(materials.map(material => [material.materialId, material.authorityMode]))).toEqual(materialAuthority)
+      expect(Object.fromEntries(materials.map(material => [material.materialId, 'owner']))).toEqual(materialAuthority)
+      expect(materials.map(material => material.materialId)).toEqual(Object.keys(materialAuthority))
       expect(materials.every(material => material.authorityRule.trim().length > 0)).toBe(true)
+      expect(materials.every(material => material.authorityRule.startsWith('Own '))).toBe(true)
+      expect(materials.every(material => !Object.hasOwn(material, 'authorityMode'))).toBe(true)
+      expect(JSON.stringify(materials)).not.toContain('reference_only')
     }
     expect(getGameDocumentContract('docs/ART_DIRECTION.md').productionMaterials.map(material => material.materialId)).toEqual([
       'visual-language-board',
@@ -181,6 +178,8 @@ describe('complete game document contracts', () => {
     for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
       expect(contract.outputPolicy).not.toHaveProperty('productionMaterialStyle')
       expect(contract.outputPolicy).not.toHaveProperty('derivedViewAuthority')
+      expect(JSON.stringify(contract)).not.toContain('reference_only')
+      expect(JSON.stringify(contract)).not.toContain('derivedViewAuthority')
     }
   })
 
@@ -191,8 +190,8 @@ describe('complete game document contracts', () => {
       'game-state-flow',
     ])
     expect(gdd.productionMaterials.map(item => item.purpose)).toEqual([
-      'Compact, inspectable loop evidence that references core_loop decisions; do not restate section prose.',
-      'Compact, inspectable state-transition evidence that references states_flow decisions; do not restate section prose.',
+      'Compact, inspectable loop evidence owning core_loop decisions and their entry, exit and reward conditions.',
+      'Compact, inspectable state-transition evidence owning states_flow decisions and recovery paths.',
     ])
   })
 
@@ -202,9 +201,7 @@ describe('complete game document contracts', () => {
       const rule = contract.mergeReferenceRule
       expect(rule.trim()).toContain('Merge')
       expect(rule.trim().length).toBeGreaterThan(40)
-      if (contract.productionMaterials.some(material => material.authorityMode === 'reference_only'))
-        expect(rule.trim()).toContain('reference-only')
-      else expect(rule.trim()).not.toContain('reference-only')
+      expect(rule.trim()).not.toContain('reference-only')
     }
   })
 

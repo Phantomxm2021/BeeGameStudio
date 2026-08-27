@@ -43,7 +43,6 @@ export type GameDocumentProductionMaterialContract = {
   title: string
   purpose: string
   format: 'markdown_table' | 'mermaid' | 'inline_svg' | 'evidence_register'
-  authorityMode: 'owner' | 'reference_only'
   authorityRule: string
 }
 
@@ -100,7 +99,6 @@ const material = (
   title: string,
   format: GameDocumentProductionMaterialContract['format'],
   purpose: string,
-  authorityMode: GameDocumentProductionMaterialContract['authorityMode'],
   authorityRule: string,
 ): GameDocumentProductionMaterialContract =>
   Object.freeze({
@@ -108,7 +106,6 @@ const material = (
     title,
     format,
     purpose,
-    authorityMode,
     authorityRule,
   })
 
@@ -120,48 +117,46 @@ const upstream = (
 
 const PRODUCTION_MATERIALS = {
   'docs/GDD.md': [
-    material('core-loop-diagram', 'Core Loop Diagram', 'mermaid', 'Compact, inspectable loop evidence that references core_loop decisions; do not restate section prose.', 'reference_only', 'Reference the GDD core_loop owner; merge loop decisions into that section and omit duplicated rules or outcomes here.'),
-    material('game-state-flow', 'Game State Flow', 'mermaid', 'Compact, inspectable state-transition evidence that references states_flow decisions; do not restate section prose.', 'reference_only', 'Reference the GDD states_flow owner; merge state transitions into that section and omit duplicated transition rules here.'),
+    material('core-loop-diagram', 'Core Loop Diagram', 'mermaid', 'Compact, inspectable loop evidence owning core_loop decisions and their entry, exit and reward conditions.', 'Own the canonical GDD core loop decisions and their entry, exit and reward conditions; corresponding prose references this diagram.'),
+    material('game-state-flow', 'Game State Flow', 'mermaid', 'Compact, inspectable state-transition evidence owning states_flow decisions and recovery paths.', 'Own the canonical GDD state transitions, pause, completion, failure and recovery paths; corresponding prose references this diagram.'),
   ],
   'docs/LEVEL_SCENE_DESIGN.md': [
-    material('world-structure-diagram', 'World Structure Diagram', 'mermaid', 'Canonical topology evidence owning world_structure coordinate, path, grid, trigger and off-screen literals.', 'owner', 'Own canonical Level topology, coordinate, path, grid, trigger and off-screen literals; corresponding prose and other materials reference this diagram.'),
-    material('route-choice-diagram', 'Route and Choice Diagram', 'mermaid', 'Canonical route evidence owning objectives_routes path, slot, trigger and choice mappings.', 'owner', 'Own canonical Level route, choice, path, slot, trigger and mutual-exclusion mappings; corresponding prose and other materials reference this diagram.'),
-    material('pacing-beat-table', 'Pacing Beat Table', 'markdown_table', 'Canonical computable beat rows owning pacing_beats cadence, intensity, recovery and authored content IDs.', 'owner', 'Own canonical Level pacing beat rows, cadence, intensity and recovery windows; corresponding prose and other materials reference these rows and authored content IDs.'),
-    material('scene-transition-diagram', 'Scene Transition Diagram', 'mermaid', 'Compact lifecycle evidence referencing scene_states and spawn_checkpoint decisions.', 'reference_only', 'Reference the Level scene_states and spawn_checkpoint owners; merge lifecycle rules there and omit duplicated transitions here.'),
+    material('world-structure-diagram', 'World Structure Diagram', 'mermaid', 'Canonical topology evidence owning world_structure coordinate, path, grid, trigger and off-screen literals.', 'Own canonical Level topology, coordinate, path, grid, trigger and off-screen literals; corresponding prose and other materials reference this diagram.'),
+    material('route-choice-diagram', 'Route and Choice Diagram', 'mermaid', 'Canonical route evidence owning objectives_routes path, slot, trigger and choice mappings.', 'Own canonical Level route, choice, path, slot, trigger and mutual-exclusion mappings; corresponding prose and other materials reference this diagram.'),
+    material('pacing-beat-table', 'Pacing Beat Table', 'markdown_table', 'Canonical computable beat rows owning pacing_beats cadence, intensity, recovery and authored content IDs.', 'Own canonical Level pacing beat rows, cadence, intensity and recovery windows; corresponding prose and other materials reference these rows and authored content IDs.'),
   ],
   'docs/BALANCE_DESIGN.md': [
-    material('variable-parameter-table', 'Variable and Parameter Table', 'markdown_table', 'Canonical owner table for all numeric variable and parameter IDs (`var.*` and `param.*`), their units, values and ranges and source references; Section prose owns only semantics and relationships.', 'owner', 'Own all numeric `var.*` and `param.*` IDs, units, values, ranges and source references in Balance. `units_variables` and `entity_parameters` must not duplicate numeric values or ranges; they retain only semantic and relationship context.'),
+    material('variable-parameter-table', 'Variable and Parameter Table', 'markdown_table', 'Canonical owner table for all numeric variable and parameter IDs (`var.*` and `param.*`), their units, values and ranges and source references; Section prose owns only semantics and relationships.', 'Own all numeric `var.*` and `param.*` IDs, units, values, ranges and source references in Balance. `units_variables` and `entity_parameters` must not duplicate numeric values or ranges; they retain only semantic and relationship context.'),
   ],
   'docs/TECHNICAL_DESIGN.md': [
-    material('architecture-diagram', 'Architecture Diagram', 'mermaid', 'Compact runtime boundary evidence referencing architecture decisions.', 'reference_only', 'Reference the Technical architecture owner; merge runtime boundaries into that section and omit duplicated component decisions here.'),
-    material('data-flow-diagram', 'Data Flow Diagram', 'mermaid', 'Compact content/data boundary evidence referencing data_content and persistence owners.', 'reference_only', 'Reference Technical data_content and persistence owners; merge schemas and data boundaries there and omit duplicated content facts here.'),
-    material('runtime-lifecycle-diagram', 'Runtime Lifecycle Diagram', 'mermaid', 'Inspectable lifecycle evidence referencing runtime_state; do not restate gameplay rules.', 'reference_only', 'Reference the Technical runtime_state owner; merge lifecycle decisions into that section and omit duplicated gameplay rules here.'),
-    material('save-recovery-table', 'Save and Recovery Table', 'markdown_table', 'Canonical computable persistence and recovery acceptance rows owning save_load decisions.', 'owner', 'Own canonical Technical persistence, migration, corruption and recovery acceptance rows; corresponding prose and other materials reference this table.'),
+    material('architecture-diagram', 'Architecture Diagram', 'mermaid', 'Compact runtime boundary evidence owning Technical architecture decisions.', 'Own canonical Technical runtime boundaries, components and responsibilities; corresponding prose references this diagram.'),
+    material('data-flow-diagram', 'Data Flow Diagram', 'mermaid', 'Compact content/data boundary evidence owning Technical data_content and persistence decisions.', 'Own canonical Technical content, data and persistence boundaries and their mappings; corresponding prose references this diagram.'),
+    material('runtime-lifecycle-diagram', 'Runtime Lifecycle Diagram', 'mermaid', 'Inspectable lifecycle evidence owning Technical runtime_state decisions.', 'Own canonical Technical runtime lifecycle, state transitions and recovery boundaries; corresponding prose references this diagram.'),
+    material('save-recovery-table', 'Save and Recovery Table', 'markdown_table', 'Canonical computable persistence and recovery acceptance rows owning save_load decisions.', 'Own canonical Technical persistence, migration, corruption and recovery acceptance rows; corresponding prose and other materials reference this table.'),
   ],
   'docs/ART_DIRECTION.md': [
-    material('visual-language-board', 'Visual Language Board', 'markdown_table', 'One compact visual-language board combining hierarchy, palette, silhouette and prohibited-direction evidence as unique visual acceptance evidence; reference visual_pillars and color_lighting, consume Level/UI geometry, and do not restate prose.', 'owner', 'Own the compact visual language and visual acceptance evidence; reference Level/UI geometry and omit Asset Plan resource, sourcing, licensing and schedule facts.'),
-    material('animation-vfx-state-table', 'Animation and VFX State Table', 'markdown_table', 'Canonical inspectable state/event rows owning animation and VFX decisions.', 'owner', 'Own canonical Art animation and VFX state/event mappings, timing intent and acceptance evidence; corresponding prose references this table.'),
+    material('visual-language-board', 'Visual Language Board', 'markdown_table', 'One compact visual-language board combining hierarchy, palette, silhouette and prohibited-direction evidence as unique visual acceptance evidence; reference visual_pillars and color_lighting, consume Level/UI geometry, and do not restate prose.', 'Own the compact visual language and visual acceptance evidence, including semantic requirements before Asset exists; reference Level/UI geometry, then let Asset Plan map these requirements one-way to its own resource IDs and omit Asset resource, sourcing, licensing and schedule facts here.'),
+    material('animation-vfx-state-table', 'Animation and VFX State Table', 'markdown_table', 'Canonical inspectable state/event rows owning animation and VFX decisions.', 'Own canonical Art animation and VFX state/event mappings, timing intent and acceptance evidence; corresponding prose references this table.'),
   ],
   'docs/UI_UX_SPEC.md': [
-    material('information-architecture-diagram', 'Information Architecture Diagram', 'mermaid', 'Canonical navigation evidence owning experience_architecture hierarchy and entry-point mappings.', 'owner', 'Own canonical UI navigation, hierarchy and entry-point mappings; corresponding prose and other materials reference this diagram.'),
-    material('player-flow-diagram', 'Player Flow Diagram', 'mermaid', 'Canonical journey evidence owning player_journeys and feedback_errors task-flow mappings.', 'owner', 'Own canonical UI onboarding, play, progression, configuration and recovery journey mappings; corresponding prose and other materials reference this diagram.'),
-    material('screen-state-table', 'Screen and State Table', 'markdown_table', 'Canonical screen/state evidence owned by screen_inventory.', 'owner', 'Own the canonical UI screen and interface state inventory; all other UI materials reference these screen and state IDs.'),
-    material('wireframe-board', 'Wireframe Board', 'inline_svg', 'Canonical layout evidence owning responsive geometry, minimum regions and screen presentation.', 'owner', 'Own canonical UI responsive layout, region and screen geometry literals; corresponding prose and other materials reference this board.'),
-    material('focus-accessibility-matrix', 'Focus and Accessibility Matrix', 'markdown_table', 'Canonical focus and accessibility evidence owning input, remapping and inclusive-use mappings.', 'owner', 'Own canonical UI focus, input, remapping and accessibility mappings; corresponding prose and other materials reference this matrix.'),
+    material('information-architecture-diagram', 'Information Architecture Diagram', 'mermaid', 'Canonical navigation evidence owning experience_architecture hierarchy and entry-point mappings.', 'Own canonical UI navigation, hierarchy and entry-point mappings; corresponding prose and other materials reference this diagram.'),
+    material('player-flow-diagram', 'Player Flow Diagram', 'mermaid', 'Canonical journey evidence owning player_journeys and feedback_errors task-flow mappings.', 'Own canonical UI onboarding, play, progression, configuration and recovery journey mappings; corresponding prose and other materials reference this diagram.'),
+    material('screen-state-table', 'Screen and State Table', 'markdown_table', 'Canonical screen/state evidence owned by screen_inventory.', 'Own the canonical UI screen and interface state inventory; all other UI materials reference these screen and state IDs.'),
+    material('wireframe-board', 'Wireframe Board', 'inline_svg', 'Canonical layout evidence owning responsive geometry, minimum regions and screen presentation.', 'Own canonical UI responsive layout, region and screen geometry literals; corresponding prose and other materials reference this board.'),
+    material('focus-accessibility-matrix', 'Focus and Accessibility Matrix', 'markdown_table', 'Canonical focus and accessibility evidence owning input, remapping and inclusive-use mappings.', 'Own canonical UI focus, input, remapping and accessibility mappings; corresponding prose and other materials reference this matrix.'),
   ],
   'docs/AUDIO_DESIGN.md': [
-    material('event-cue-matrix', 'Event to Cue Matrix', 'markdown_table', 'Canonical mapping owner for stable events, cues, priorities and exceptions.', 'owner', 'Own canonical Audio event-to-cue mappings, priorities and exceptions; all other Audio materials reference these event and cue IDs.'),
-    material('music-state-diagram', 'Music State Diagram', 'mermaid', 'Canonical state evidence owning music decisions, transitions and event-cue mappings.', 'owner', 'Own canonical Audio music state and transition mappings, including pause, focus-loss and restoration behavior; corresponding prose references this diagram.'),
-    material('bus-ducking-diagram', 'Bus and Ducking Diagram', 'mermaid', 'Canonical mix evidence owning bus, priority and ducking policy mappings.', 'owner', 'Own canonical Audio bus, priority and ducking mappings with critical-cue protection; corresponding prose references this diagram.'),
-    material('loudness-delivery-table', 'Loudness and Delivery Table', 'markdown_table', 'Canonical computable loudness and delivery acceptance rows owning implementation constraints.', 'owner', 'Own canonical Audio loudness, dynamic-range and delivery acceptance rows; corresponding prose references this table and Asset Plan owns resource facts.'),
-    material('sound-reference-register', 'Sound Reference Register', 'evidence_register', 'Reference-only pointers to Asset Plan inventory IDs for source/licensing evidence; do not own or duplicate asset inventory.', 'reference_only', 'Reference Asset Plan inventory IDs for source and licensing evidence; merge resource facts into Asset Plan and omit duplicated inventory here.'),
+    material('event-cue-matrix', 'Event to Cue Matrix', 'markdown_table', 'Canonical mapping owner for stable events, cues, priorities and exceptions.', 'Own canonical Audio event-to-cue mappings, priorities and exceptions, including semantic requirements before Asset exists; all other Audio materials reference these event and cue IDs, then Asset Plan maps the requirements one-way to its own resource IDs.'),
+    material('music-state-diagram', 'Music State Diagram', 'mermaid', 'Canonical state evidence owning music decisions, transitions and event-cue mappings.', 'Own canonical Audio music state and transition mappings, including pause, focus-loss and restoration behavior; corresponding prose references this diagram.'),
+    material('bus-ducking-diagram', 'Bus and Ducking Diagram', 'mermaid', 'Canonical mix evidence owning bus, priority and ducking policy mappings.', 'Own canonical Audio bus, priority and ducking mappings with critical-cue protection; corresponding prose references this diagram.'),
+    material('loudness-delivery-table', 'Loudness and Delivery Table', 'markdown_table', 'Canonical computable loudness and delivery acceptance rows owning implementation constraints.', 'Own canonical Audio loudness, dynamic-range and delivery acceptance rows; corresponding prose references this table and Asset Plan owns resource facts.'),
   ],
   'docs/ASSET_PLAN.md': [
-    material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Canonical inventory owner for semantic IDs, type, instance and file, quantities, status and unique detail.', 'owner', 'Own resource IDs, type, instance, file, quantities, status, responsibility, sourcing, licensing and milestone facts; all other Asset materials reference inventory IDs.'),
-    material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Canonical computable ownership rows owning creator, approver, consumer, handoff and status mappings keyed by inventory IDs.', 'owner', 'Own canonical Asset responsibility, creator, approver, consumer, handoff and status mappings keyed by inventory IDs; corresponding prose references this matrix.'),
-    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Canonical integration evidence owning dependency and integration-order mappings keyed by inventory IDs.', 'owner', 'Own canonical Asset dependency and integration-order mappings keyed by inventory IDs; corresponding prose references this diagram.'),
-    material('license-register', 'License Register', 'evidence_register', 'Canonical traceable source/licensing evidence owning records keyed by inventory IDs.', 'owner', 'Own canonical Asset source, originality, attribution, restriction and license evidence keyed by inventory IDs; corresponding prose references this register.'),
-    material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Canonical computable milestone and maturity rows owning schedule and status keyed by inventory IDs.', 'owner', 'Own canonical Asset milestone, capacity, schedule and maturity rows keyed by inventory IDs; corresponding prose references this table.'),
+    material('asset-inventory-table', 'Asset Inventory Table', 'markdown_table', 'Canonical inventory owner for semantic IDs, type, instance and file, quantities, status and unique detail.', 'Own resource IDs, type, instance, file, quantities, status, responsibility, sourcing, licensing and milestone facts; all other Asset materials reference inventory IDs.'),
+    material('responsibility-matrix', 'Responsibility Matrix', 'markdown_table', 'Canonical computable ownership rows owning creator, approver, consumer, handoff and status mappings keyed by inventory IDs.', 'Own canonical Asset responsibility, creator, approver, consumer, handoff and status mappings keyed by inventory IDs; corresponding prose references this matrix.'),
+    material('dependency-integration-diagram', 'Dependency and Integration Diagram', 'mermaid', 'Canonical integration evidence owning dependency and integration-order mappings keyed by inventory IDs.', 'Own canonical Asset dependency and integration-order mappings keyed by inventory IDs; corresponding prose references this diagram.'),
+    material('license-register', 'License Register', 'evidence_register', 'Canonical traceable source/licensing evidence owning records keyed by inventory IDs.', 'Own canonical Asset source, originality, attribution, restriction and license evidence keyed by inventory IDs; corresponding prose references this register.'),
+    material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Canonical computable milestone and maturity rows owning schedule and status keyed by inventory IDs.', 'Own canonical Asset milestone, capacity, schedule and maturity rows keyed by inventory IDs; corresponding prose references this table.'),
   ],
 } satisfies Record<FoundationDocumentPath, readonly GameDocumentProductionMaterialContract[]>
 
@@ -177,13 +172,13 @@ export const FOUNDATION_DOCUMENT_AUTHORITY_RULES = Object.freeze({
 } satisfies Record<FoundationDocumentPath, string>)
 
 const FOUNDATION_DOCUMENT_MERGE_REFERENCE_RULES = Object.freeze({
-  'docs/GDD.md': 'Merge loop, state and gameplay outcomes into their single owner sections; omit equivalent repetition from Executive Summary and Production Materials, which remain reference-only authority indexes.',
-  'docs/LEVEL_SCENE_DESIGN.md': 'Merge spatial topology, placement and traversal literals into one canonical coordinate/layout source; omit duplicated literals from prose and materials, keep reference-only views stable, and delegate non-spatial facts to their owning discipline.',
+  'docs/GDD.md': 'Merge loop, state and gameplay outcomes into their single owner sections and owner materials; omit equivalent repetition from the Executive Summary authority index.',
+  'docs/LEVEL_SCENE_DESIGN.md': 'Merge spatial topology, placement and traversal literals into the canonical owner sections and materials; omit duplicated literals from prose and delegate non-spatial facts to their owning discipline.',
   'docs/BALANCE_DESIGN.md': 'Merge every numeric `var.*` and `param.*` ID, unit, value and range into the single variable-parameter owner representation; keep Units/Variables and Entity/Ability Parameters to semantics and relationships, and keep formulas, economy, progression and tuning facts in their owning sections.',
-  'docs/TECHNICAL_DESIGN.md': 'Merge runtime and data boundary decisions into their owner sections; omit repeated gameplay or content facts from diagrams and tables, retaining only reference-only evidence and technical persistence acceptance.',
+  'docs/TECHNICAL_DESIGN.md': 'Merge runtime and data boundary decisions into their owner sections and materials; omit repeated gameplay or content facts from diagrams and tables while retaining technical persistence acceptance.',
   'docs/ART_DIRECTION.md': 'Merge visual language and visual acceptance conditions into Art owners; omit repeated prose and geometry, and delegate resource responsibility, source, license and schedule facts to Asset Plan.',
-  'docs/UI_UX_SPEC.md': 'Merge responsive geometry/layout and screen-state ownership into their canonical sections; omit equivalent repetition while keeping material evidence aligned to stable owners.',
-  'docs/AUDIO_DESIGN.md': 'Merge event-to-cue behavior and technical audio constraints into Audio owners; omit repeated mappings and resource facts, keep reference-only evidence as stable pointers, and delegate resource IDs, source, license and schedule facts to Asset Plan.',
+  'docs/UI_UX_SPEC.md': 'Merge responsive geometry/layout and screen-state ownership into their canonical sections and materials; omit equivalent repetition while keeping material evidence aligned to stable owners.',
+  'docs/AUDIO_DESIGN.md': 'Merge event-to-cue behavior and technical audio constraints into Audio owners and materials; omit repeated mappings and resource facts, and delegate resource IDs, source, license and schedule facts to Asset Plan.',
   'docs/ASSET_PLAN.md': 'Merge each resource ID with its quantity, status, responsibility, source/license and milestone facts into the inventory authority; omit duplicate resource facts from prose and keep every material keyed to that canonical inventory.',
 } satisfies Record<FoundationDocumentPath, string>)
 
