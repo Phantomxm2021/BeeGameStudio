@@ -100,7 +100,7 @@ const BALANCE_MERMAID_EDGE_LABEL = /(?:[-=.~]+>)\|([^|\n]+)\|/g
 const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
 const BALANCE_FORMULA_CALL = /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^()\n]*\)/
 const BALANCE_SYMBOLIC_EXPRESSION = new RegExp(
-  `${BALANCE_SYMBOLIC_REFERENCE_TOKEN}\\s*(?:[+*/×÷−=<>≤≥]|!=|==|<=|>=)\\s*${BALANCE_SYMBOLIC_REFERENCE_TOKEN}`,
+  `${BALANCE_SYMBOLIC_REFERENCE_TOKEN}\\s*(?:[+*/×÷−=<>≤≥^]|!=|==|<=|>=)\\s*${BALANCE_SYMBOLIC_REFERENCE_TOKEN}|${BALANCE_SYMBOLIC_REFERENCE_TOKEN}\\s+-\\s+${BALANCE_SYMBOLIC_REFERENCE_TOKEN}`,
 )
 const BALANCE_NUMERIC_LITERAL = /(?<![A-Za-z_])(?:\d+(?:\.\d+)?|\.\d+)(?:\s*%)?(?![A-Za-z_])/u
 

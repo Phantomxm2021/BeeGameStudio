@@ -127,6 +127,8 @@ describe('native complete game document validation', () => {
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | V_INPUT + V_BONUS |'],
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | V_MIN ≤ V_MAX |'],
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | P_GEN_KW_PER_L + P_BONUS |'],
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | P_GEN_KW_PER_L - P_BONUS |'],
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | P_GEN_KW_PER_L ^ P_BONUS |'],
       ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | K_GEN_LEVEL <= CAP_GEN_KW |'],
     ] as const
 
