@@ -9,6 +9,8 @@ const completeGddMarkdown = [
   '# Visible Markdown',
   '## Executive Summary',
   '## Vision and Product Promise',
+  '### Vision subheading',
+  'Section detail.',
   '## Player Experience and Design Pillars',
   '## Core and Session Loops',
   '## Player Actions and Controls',

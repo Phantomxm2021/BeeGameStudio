@@ -121,22 +121,16 @@ export function isCompleteGameDocumentMarkdownStructure(
   const actualH2 = scan.headings
     .filter(heading => heading.level === 2)
     .map(heading => heading.text)
-  const actualH3 = scan.headings
-    .filter(heading => heading.level === 3)
-    .map(heading => heading.text)
-  if (
-    !exactSequence(actualH2, expectedH2) ||
-    !exactSequence(actualH3, expectedH3)
-  )
-    return false
   const productionHeading = scan.headings.find(
     heading => heading.level === 2 && heading.text === 'Production Materials',
   )
-  const materialHeadings = scan.headings.filter(heading => heading.level === 3)
-  if (
-    !productionHeading ||
-    materialHeadings.some(heading => heading.lineIndex <= productionHeading.lineIndex)
+  if (!productionHeading || !exactSequence(actualH2, expectedH2))
+    return false
+  const materialHeadings = scan.headings.filter(
+    heading => heading.level === 3 && heading.lineIndex > productionHeading.lineIndex,
   )
+  const actualH3 = materialHeadings.map(heading => heading.text)
+  if (!exactSequence(actualH3, expectedH3))
     return false
   const lines = body.split('\n')
   try {
