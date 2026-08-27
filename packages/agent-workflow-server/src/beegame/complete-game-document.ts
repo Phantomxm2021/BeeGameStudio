@@ -95,6 +95,8 @@ const BALANCE_INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g
 const BALANCE_SYMBOLIC_REFERENCE_PATTERN = '(?:[A-Z]\\d+[A-Z]?|[A-Z][A-Z0-9]*(?:[_-][A-Z0-9*]+)+)'
 const BALANCE_SYMBOLIC_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_SYMBOLIC_REFERENCE_PATTERN}(?![A-Za-z0-9_*])`
 const BALANCE_SYMBOLIC_REFERENCE = new RegExp(BALANCE_SYMBOLIC_REFERENCE_TOKEN, 'g')
+const BALANCE_MERMAID_FENCE = /```mermaid[^\n]*\n([\s\S]*?)```/g
+const BALANCE_MERMAID_EDGE_LABEL = /(?:[-=.~]+>)\|([^|\n]+)\|/g
 const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
 const BALANCE_FORMULA_CALL = /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^()\n]*\)/
 const BALANCE_SYMBOLIC_EXPRESSION = new RegExp(
@@ -121,6 +123,27 @@ function collectBalanceOwnerReferences(
   BALANCE_SYMBOLIC_REFERENCE.lastIndex = 0
 }
 
+function stripAllowedMermaidReferenceLists(
+  body: string,
+  allowedReferences: ReadonlySet<string>,
+): string {
+  BALANCE_MERMAID_FENCE.lastIndex = 0
+  return body.replace(BALANCE_MERMAID_FENCE, (fence: string) => {
+    BALANCE_MERMAID_EDGE_LABEL.lastIndex = 0
+    return fence.replace(BALANCE_MERMAID_EDGE_LABEL, (label: string, references: string) => {
+      const listedReferences = references
+        .trim()
+        .split(/\s*(?:\/|,|、)\s*/)
+      if (
+        listedReferences.length > 0 &&
+        listedReferences.every((reference: string) => allowedReferences.has(reference))
+      )
+        return label.replace(references, ' '.repeat(references.length))
+      return label
+    })
+  })
+}
+
 function assertBalanceReferenceOnlyMaterial(
   body: string,
   materialId: string,
@@ -139,9 +162,10 @@ function assertBalanceReferenceOnlyMaterial(
     throw new Error(`Balance reference-only material contains non-reference inline code: ${materialId}`)
   }
 
-  if (BALANCE_FORMULA_CALL.test(body))
+  const formulaScanBody = stripAllowedMermaidReferenceLists(body, allowedReferences)
+  if (BALANCE_FORMULA_CALL.test(formulaScanBody))
     throw new Error(`Balance reference-only material contains a complete formula expression: ${materialId}`)
-  if (BALANCE_SYMBOLIC_EXPRESSION.test(body))
+  if (BALANCE_SYMBOLIC_EXPRESSION.test(formulaScanBody))
     throw new Error(`Balance reference-only material contains a complete formula expression: ${materialId}`)
   if (BALANCE_RANGE.test(body))
     throw new Error(`Balance reference-only material contains a copied range: ${materialId}`)

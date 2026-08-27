@@ -243,6 +243,47 @@ Owner expression: \`P_LOCAL_TANK_GEN = V-DSL-INIT + V-DSL-CAP\`.`,
     expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
   })
 
+  test('allows only source-derived reference lists in Mermaid edge labels', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const submission = completeTestSubmission(path)
+    const withOwnerReferences = {
+      ...submission,
+      sections: submission.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              body: `${section.body}\n\nOwner facts: K_HARDEN, P_RS2_LEAD, P_REPAIR_PU, and P_DUCT_REPAIR_PU are canonical owners.`,
+            }
+          : section,
+      ),
+    }
+    const markdown = renderTestCompleteGameDocument(path, withOwnerReferences)
+    const allowedLabel = replaceMaterialBody(
+      markdown,
+      'economy-flow-diagram',
+      'Reference-only flow.\n\n```mermaid\ngraph TD\nRS -->|K_HARDEN / P_RS2_LEAD| PARTS\nPARTS -->|P_REPAIR_PU / P_DUCT_REPAIR_PU| REPAIR\n```',
+    )
+    expect(validateCompleteGameDocumentMarkdown(path, allowedLabel)).toBe(allowedLabel)
+
+    const undeclaredLabel = replaceMaterialBody(
+      markdown,
+      'economy-flow-diagram',
+      'Reference-only flow.\n\n```mermaid\ngraph TD\nRS -->|K_HARDEN / P_NOT_OWNER| PARTS\n```',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, undeclaredLabel)).toThrow(
+      /Balance reference-only material/i,
+    )
+
+    const proseExpression = replaceMaterialBody(
+      markdown,
+      'formula-boundary-table',
+      '| Field | Value |\n| --- | --- |\n| expression | K_HARDEN / P_RS2_LEAD |',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, proseExpression)).toThrow(
+      /Balance reference-only material/i,
+    )
+  })
+
   test('rejects undeclared symbolic IDs', () => {
     const path = 'docs/BALANCE_DESIGN.md'
     const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
