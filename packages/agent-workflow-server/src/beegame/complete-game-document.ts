@@ -91,6 +91,39 @@ function assertMaterialFormat(
     throw new Error(`production material format is invalid: ${materialId}:${format}`)
 }
 
+const BALANCE_REFERENCE_PATTERN = '(?:F\\d+[A-Z]?|(?:V|SC|AC|INV|CONV|EC|EX|RK|PF|RV)_(?:[A-Z0-9]+(?:_[A-Z0-9]+)*(?:_\\*)?|\\*))'
+const BALANCE_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_REFERENCE_PATTERN}(?![A-Za-z0-9_*])`
+const BALANCE_REFERENCE = new RegExp(BALANCE_REFERENCE_TOKEN, 'g')
+const BALANCE_REFERENCE_ONLY = new RegExp(`^${BALANCE_REFERENCE_PATTERN}$`)
+const BALANCE_INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g
+const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
+const BALANCE_FORMULA_CALL = /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^()\n]*\)/
+const BALANCE_REFERENCE_EXPRESSION = new RegExp(
+  `${BALANCE_REFERENCE_TOKEN}\\s*(?:[+*/×÷=<>≤≥]|!=|==|<=|>=)\\s*${BALANCE_REFERENCE_TOKEN}`,
+)
+const BALANCE_NUMERIC_LITERAL = /(?<![A-Za-z_])(?:\d+(?:\.\d+)?|\.\d+)(?:\s*%)?(?![A-Za-z_])/u
+
+function assertBalanceReferenceOnlyMaterial(body: string, materialId: string): void {
+  for (const match of body.matchAll(BALANCE_INLINE_CODE)) {
+    const code = match[1]!.trim()
+    BALANCE_REFERENCE.lastIndex = 0
+    if (!BALANCE_REFERENCE_ONLY.test(code))
+      throw new Error(`Balance reference-only material contains non-reference inline code: ${materialId}`)
+  }
+
+  if (BALANCE_FORMULA_CALL.test(body))
+    throw new Error(`Balance reference-only material contains a complete formula expression: ${materialId}`)
+  if (BALANCE_REFERENCE_EXPRESSION.test(body))
+    throw new Error(`Balance reference-only material contains a complete formula expression: ${materialId}`)
+  if (BALANCE_RANGE.test(body))
+    throw new Error(`Balance reference-only material contains a copied range: ${materialId}`)
+
+  const withoutReferences = body.replace(BALANCE_REFERENCE, ' ')
+  BALANCE_REFERENCE.lastIndex = 0
+  if (BALANCE_NUMERIC_LITERAL.test(withoutReferences))
+    throw new Error(`Balance reference-only material contains a copied numeric literal: ${materialId}`)
+}
+
 function substantiveContentBlocks(lines: readonly string[]): string[] {
   const blocks: string[] = []
   let current: string[] = []
@@ -324,11 +357,14 @@ export function validateCompleteGameDocumentMarkdown(
     const heading = nextNonBlankLine(lines, start)
     if (heading?.value !== `### ${material.title}`)
       throw new Error(`production material title is invalid: ${material.materialId}`)
+    const materialBody = lines.slice(heading.index + 1, end).join('\n').trim()
     assertMaterialFormat(
       material.format,
-      lines.slice(heading.index + 1, end).join('\n').trim(),
+      materialBody,
       material.materialId,
     )
+    if (path === 'docs/BALANCE_DESIGN.md' && material.authorityMode === 'reference_only')
+      assertBalanceReferenceOnlyMaterial(materialBody, material.materialId)
   })
 
   if (auditIndex >= 0) {

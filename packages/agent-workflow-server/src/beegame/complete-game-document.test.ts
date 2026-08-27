@@ -9,6 +9,20 @@ import {
 } from './complete-game-document'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
 
+function replaceMaterialBody(
+  markdown: string,
+  materialId: string,
+  body: string,
+): string {
+  const marker = `<!-- beegame-material:${materialId} -->`
+  const start = markdown.indexOf(marker)
+  const bodyStart = markdown.indexOf('\n\n', start) + 2
+  const bodyEnd = markdown.indexOf('\n<!-- beegame-', bodyStart)
+  if (start < 0 || bodyStart < 2 || bodyEnd < 0)
+    throw new Error(`test material fixture is missing: ${materialId}`)
+  return `${markdown.slice(0, bodyStart)}${body}\n${markdown.slice(bodyEnd + 1)}`
+}
+
 describe('native complete game document validation', () => {
   test('injects service-owned protocol markers into marker-free canonical Markdown', () => {
     const path = 'docs/ASSET_PLAN.md'
@@ -96,6 +110,54 @@ describe('native complete game document validation', () => {
     const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const referenced = markdown.replace('Concrete production authority', 'See docs/BALANCE_DESIGN.md and assets/example.png.\n\nConcrete production authority')
     expect(validateCompleteGameDocumentMarkdown(path, referenced)).toBe(referenced)
+  })
+
+  test('rejects copied Balance literals, ranges, formulas, and non-reference inline code', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const rejected = [
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| boundary | [0,1] |'],
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| rate | 0.1 |'],
+      ['economy-flow-diagram', 'Reference-only flow.\n\n```mermaid\ngraph TD\nA[clamp(V_P_FLOOR,V_P_CEIL)]\n```'],
+      ['economy-flow-diagram', 'Reference-only flow.\n\n```mermaid\ngraph TD\nA[clamp(1,5)]\n```'],
+      ['economy-flow-diagram', 'Reference-only flow.\n\n```mermaid\ngraph TD\nA[clamp (V_P_FLOOR,V_P_CEIL)]\n```'],
+      ['economy-flow-diagram', 'Reference-only flow.\n\n```mermaid\ngraph TD\nA[0–3]\n```'],
+      ['tuning-validation-matrix', '| Field | Value |\n| --- | --- |\n| bound | ≤1 |'],
+      ['tuning-validation-matrix', '| Field | Value |\n| --- | --- |\n| expression | `x + y` |'],
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | V_INPUT + V_BONUS |'],
+      ['formula-boundary-table', '| Field | Value |\n| --- | --- |\n| expression | V_MIN ≤ V_MAX |'],
+    ] as const
+
+    for (const [materialId, body] of rejected) {
+      expect(() =>
+        validateCompleteGameDocumentMarkdown(
+          path,
+          replaceMaterialBody(markdown, materialId, body),
+        ),
+      ).toThrow(/Balance reference-only material/i)
+    }
+  })
+
+  test('accepts prose and stable owner references in Balance reference-only materials', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    let markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    markdown = replaceMaterialBody(
+      markdown,
+      'formula-boundary-table',
+      'Reference-only prose indexes `V_P_FLOOR`, `V_HAZ_*`, `F01`, `F03A`, `SC_01`, and `AC_01` owners.\n\n| Reference | Owner |\n| --- | --- |\n| variable | `V_P_FLOOR` |\n| formula | `F03A` |',
+    )
+    markdown = replaceMaterialBody(
+      markdown,
+      'economy-flow-diagram',
+      'Reference-only flow indexes variable groups, formula, scenario, and acceptance owners.\n\n```mermaid\ngraph TD\nV_FLT_* --> F01\nSC_01 --> AC_01\n```',
+    )
+    markdown = replaceMaterialBody(
+      markdown,
+      'tuning-validation-matrix',
+      'Reference-only prose indexes `INV_ICON`, `CONV_UNIT`, `EC_INCOME`, `EX_STRESS`, `RK_ABORT`, `PF_START`, and `RV_RETRY`.\n\n| Reference | Owner |\n| --- | --- |\n| scenario | `SC_01` |\n| acceptance | `AC_01` |',
+    )
+
+    expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
   })
 
   test('accepts a complete document above the compact authoring target', () => {
