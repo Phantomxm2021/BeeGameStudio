@@ -20,6 +20,11 @@ import { getGameDocumentContract } from '../beegame/delivery-workflow/game-docum
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import { recordFoundationDispatch } from '../beegame/delivery-workflow/foundation-authoring-batch'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  foundationProjectionRelativePath,
+  projectFoundationAuthority,
+} from '../beegame/foundation-authority-projection'
 
 function completeSubmission(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
@@ -71,6 +76,32 @@ function completeSubmission(
       openDecisions: [],
     },
   }
+}
+
+async function writeCommittedProjection(
+  workspacePath: string,
+  dispatchId: string,
+  targetPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): Promise<void> {
+  const contract = getGameDocumentContract(targetPath)
+  const documents = new Map(await Promise.all(
+    contract.upstreamSections.map(async source => [
+      source.path,
+      await readFile(join(workspacePath, source.path), 'utf8'),
+    ] as const),
+  ))
+  const projection = projectFoundationAuthority({
+    targetPath,
+    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    documents,
+  })
+  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), {
+    recursive: true,
+  })
+  await writeFile(
+    join(workspacePath, foundationProjectionRelativePath(dispatchId)),
+    canonicalFoundationAuthorityProjectionBytes(projection),
+  )
 }
 
 describe('idea to complete game documents', () => {
@@ -168,6 +199,11 @@ describe('idea to complete game documents', () => {
               completeSubmission(item.path),
             ),
           ),
+        )
+        await writeCommittedProjection(
+          workspacePath,
+          item.dispatch.dispatchId,
+          item.path,
         )
         await commitAuthoredFoundationDocument({
           workspacePath,

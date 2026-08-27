@@ -28,6 +28,11 @@ import { encryptSecret } from '../security/secret-crypto'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  foundationProjectionRelativePath,
+  projectFoundationAuthority,
+} from '../beegame/foundation-authority-projection'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import {
@@ -100,6 +105,32 @@ function completeTestFoundationDocument(
       openDecisions: [],
     },
   })
+}
+
+async function writeCommittedProjection(
+  workspacePath: string,
+  dispatchId: string,
+  targetPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+): Promise<void> {
+  const contract = getGameDocumentContract(targetPath)
+  const documents = new Map(await Promise.all(
+    contract.upstreamSections.map(async source => [
+      source.path,
+      await readFile(join(workspacePath, source.path), 'utf8'),
+    ] as const),
+  ))
+  const projection = projectFoundationAuthority({
+    targetPath,
+    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    documents,
+  })
+  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), {
+    recursive: true,
+  })
+  await writeFile(
+    join(workspacePath, foundationProjectionRelativePath(dispatchId)),
+    canonicalFoundationAuthorityProjectionBytes(projection),
+  )
 }
 
 beforeEach(async () => {
@@ -906,6 +937,7 @@ describe('delivery workflow session continuation', () => {
           completeTestFoundationDocument(acceptedPath),
         ),
       )
+      await writeCommittedProjection(workspace, acceptedDispatchId, acceptedPath)
       await commitAuthoredFoundationDocument({
         workspacePath: workspace,
         dispatchId: acceptedDispatchId,
