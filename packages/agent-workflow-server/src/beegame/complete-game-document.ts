@@ -92,11 +92,12 @@ function assertMaterialFormat(
 }
 
 const BALANCE_INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g
-const BALANCE_SYMBOLIC_REFERENCE_PATTERN = '(?:[A-Z]\\d+[A-Z]?|[A-Z][A-Z0-9]*(?:[_-][A-Z0-9*]+)+)'
+const BALANCE_SYMBOLIC_REFERENCE_PATTERN = '(?:[A-Z]\\d+[A-Z]?|[A-Z][A-Z0-9]*(?:[_-][A-Z0-9*]+)+|[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*\\.(?:[a-z][a-z0-9_]*|\\*))'
 const BALANCE_SYMBOLIC_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_SYMBOLIC_REFERENCE_PATTERN}(?![A-Za-z0-9_*])`
 const BALANCE_SYMBOLIC_REFERENCE = new RegExp(BALANCE_SYMBOLIC_REFERENCE_TOKEN, 'g')
 const BALANCE_MERMAID_FENCE = /```mermaid[^\n]*\n([\s\S]*?)```/g
 const BALANCE_MERMAID_EDGE_LABEL = /(?:[-=.~]+>)\|([^|\n]+)\|/g
+const BALANCE_MERMAID_NODE_REFERENCE = /(^|\s)([A-Z]\d+)(?=\s*(?:\[|[-=.~]+>|$))/gm
 const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
 const BALANCE_FORMULA_CALL = /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^()\n]*\)/
 const BALANCE_SYMBOLIC_EXPRESSION = new RegExp(
@@ -119,6 +120,9 @@ function collectBalanceOwnerReferences(
     const parts = reference.split(/([_-])/)
     for (let index = 1; index < parts.length - 1; index += 2)
       references.add(`${parts.slice(0, index + 1).join('')}*`)
+    const dottedParts = reference.split('.')
+    for (let index = 1; index < dottedParts.length; index += 1)
+      references.add(`${dottedParts.slice(0, index).join('.')}.*`)
   }
   BALANCE_SYMBOLIC_REFERENCE.lastIndex = 0
 }
@@ -130,7 +134,7 @@ function stripAllowedMermaidReferenceLists(
   BALANCE_MERMAID_FENCE.lastIndex = 0
   return body.replace(BALANCE_MERMAID_FENCE, (fence: string) => {
     BALANCE_MERMAID_EDGE_LABEL.lastIndex = 0
-    return fence.replace(BALANCE_MERMAID_EDGE_LABEL, (label: string, references: string) => {
+    const withoutReferenceLists = fence.replace(BALANCE_MERMAID_EDGE_LABEL, (label: string, references: string) => {
       const listedReferences = references
         .trim()
         .split(/\s*(?:\/|,|、)\s*/)
@@ -141,6 +145,8 @@ function stripAllowedMermaidReferenceLists(
         return label.replace(references, ' '.repeat(references.length))
       return label
     })
+    BALANCE_MERMAID_NODE_REFERENCE.lastIndex = 0
+    return withoutReferenceLists.replace(BALANCE_MERMAID_NODE_REFERENCE, '$1 ')
   })
 }
 
@@ -182,7 +188,8 @@ function assertBalanceReferenceOnlyMaterial(
     `(?<![A-Za-z0-9_])(?:${structuralReferencePattern})(?![A-Za-z0-9_*])`,
     'g',
   )
-  const withoutReferences = body.replace(structuralReferenceToken, ' ')
+  const withoutReferences = stripAllowedMermaidReferenceLists(body, allowedReferences)
+    .replace(structuralReferenceToken, ' ')
   if (BALANCE_NUMERIC_LITERAL.test(withoutReferences))
     throw new Error(`Balance reference-only material contains a copied numeric literal: ${materialId}`)
 }

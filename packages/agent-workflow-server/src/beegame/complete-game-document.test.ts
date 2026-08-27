@@ -185,6 +185,54 @@ describe('native complete game document validation', () => {
     )
   })
 
+  test('normalization accepts exact-shape lowercase dotted Balance owner references', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const submission = completeTestSubmission(path)
+    const withOwnerReferences = {
+      ...submission,
+      sections: submission.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              body: `${section.body}\n\nOwner expression: formula.gen_output = stock.fuel_init + bound.power_max.`,
+            }
+          : section,
+      ),
+    }
+    let markdown = renderTestCompleteGameDocument(path, withOwnerReferences)
+    markdown = replaceMaterialBody(
+      markdown,
+      'formula-boundary-table',
+      '| Formula | Inputs | Bound | Owner |\n| --- | --- | --- | --- |\n| `formula.gen_output` | `stock.fuel_init` | `bound.power_max` | `## Authoritative Formulas` |\n| `formula.*` | `formula.gen_output` | `bound.power_max` | `## Authoritative Formulas` |',
+    )
+    markdown = replaceMaterialBody(
+      markdown,
+      'economy-flow-diagram',
+      'Reference-only flow.\n\n```mermaid\ngraph TD\nS1[stock.fuel_init] -->|formula.gen_output / stock.fuel_init| F1[bound.power_max]\n```',
+    )
+
+    expect(normalizeCompleteGameDocumentProtocol(path, markdown)).toBe(markdown)
+  })
+
+  test('rejects arithmetic between lowercase dotted Balance owner references', () => {
+    const path = 'docs/BALANCE_DESIGN.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    for (const expression of [
+      'formula.gen_output + stock.fuel_init',
+      'stock.fuel_init / bound.power_max',
+      'formula.gen_output <= bound.power_max',
+    ]) {
+      const rejected = replaceMaterialBody(
+        markdown,
+        'formula-boundary-table',
+        `| Field | Value |\n| --- | --- |\n| expression | ${expression} |`,
+      )
+      expect(() => normalizeCompleteGameDocumentProtocol(path, rejected)).toThrow(
+        /Balance reference-only material/i,
+      )
+    }
+  })
+
   test('accepts prose and stable owner references in Balance reference-only materials', () => {
     const path = 'docs/BALANCE_DESIGN.md'
     const submission = completeTestSubmission(path)
@@ -332,7 +380,7 @@ Owner expression: \`P_LOCAL_TANK_GEN = V-DSL-INIT + V-DSL-CAP\`.`,
   test('rejects undeclared symbolic IDs', () => {
     const path = 'docs/BALANCE_DESIGN.md'
     const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
-    for (const reference of ['P_UNDECLARED_*', 'V_UNDECLARED', 'F99', 'SC_404', 'V-DSL-UNDECLARED-*']) {
+    for (const reference of ['P_UNDECLARED_*', 'V_UNDECLARED', 'F99', 'SC_404', 'V-DSL-UNDECLARED-*', 'formula.unowned', 'formula.unowned.*']) {
       const rejected = replaceMaterialBody(
         markdown,
         'formula-boundary-table',
