@@ -68,7 +68,7 @@ Canonical Foundation 文档路径只使用服务端 `CANONICAL_FOUNDATION_DOCUME
 
 1. **GDD** 拥有行为、状态和玩法规则；数值细节委托 Balance，交互与布局细节委托 UI，GDD 不建立第二份参数或布局表。
 2. **Level** 只拥有空间事实（坐标、拓扑、路径、格位、触发器、场景空间与节奏位置）；经济、运行时、视觉、交互和资源事实委托各自 owner。
-3. **Balance** 拥有变量、参数、数值、范围和公式；其他 Section/material 只引用这些 owner 及其变量、公式、场景和验收 ID。Balance reference-only material 的 syntax gate 禁止 numeric literals、percentages/ranges、complete calls/expressions；inline code 只能是稳定且获准的 owner reference，包括 wildcard variable groups（例如 `V_HAZ_*`、`V_FLT_*`）。因此 prose、table 和 diagram 都不得复制 literal、结果、总计或完整公式。
+3. **Balance** 拥有变量、参数、数值、范围和公式；其他 Section/material 只引用这些 owner 及其变量、公式、场景和验收 ID。Balance reference-only material 的 syntax gate 禁止 numeric literals、percentages/ranges、complete calls/expressions；inline code 只能是稳定且获准的 owner reference。该 gate 的允许集合由服务端从同一 canonical Balance 文档中 exact owner Sections 与 owner materials 的实际稳定 fact IDs 推导，并加入 exact canonical document paths 与 contract Section/material identities；它不是固定 prefix allowlist，不接受 aliases、fallback 或 compatibility track。Trailing wildcard groups 只有在由具体 owner IDs 机械推导时才允许。Mermaid edge-label reference lists 只有在使用显式 separator（`/`、`,` 或 `、`）且每个 token 都解析到同一个 derived owner set 时才可通过；相同的 arithmetic/comparison syntax 若不在这类 structural list 中仍然禁止。因此 prose、table 和 diagram 都不得复制 literal、结果、总计或完整公式。
 4. **Technical** 只拥有 runtime/data boundaries、持久化与恢复的技术事实；不得重新拥有玩法、内容或资源生产事实。
 5. **Art** 拥有一张 compact `visual-language-board` 与 `animation-vfx-state-table` 的视觉/动画验收事实，不拥有资源 ID、数量、source/license、责任或 schedule。Art 只有一个 Visual Language Board；SVG 不是 intrinsically required，visual acceptance evidence 才是要求；需要时允许 compact inline SVG，禁止三张并行 board。
 6. **UI** 拥有 interaction、input、navigation、screen/state 和 responsive layout mappings；其他文档只引用 UI 的稳定 action、screen、region 与 accessibility ID。
