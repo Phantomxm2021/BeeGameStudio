@@ -25,6 +25,7 @@ import {
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
+import { foundationMarkdownPendingPath } from '../beegame/foundation-markdown-stream'
 import { createFoundationRevisionStage, foundationRevisionPacketPath, revisionTaskReceiptTerminalDigest } from '../beegame/delivery-workflow/foundation-revision-stage'
 import {
   buildFoundationFactStructuredOutputJsonSchema,
@@ -1635,6 +1636,71 @@ describe('delivery worker session credentials', () => {
       await expect(
         port.waitForTerminal?.('dispatch-missing-author'),
       ).rejects.toThrow('document author output is missing: docs/GDD.md')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('corrects a streamed validation failure in the same live author session and fails closed on no progress', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-same-author-'))
+    const prompts: string[] = []
+    let starts = 0
+    const sessions = {
+      start() {
+        starts += 1
+        return { id: 'session-same-author' }
+      },
+      updateAuthToken() {},
+      async sendWithDisplay(_sessionId: string, prompt: string) {
+        prompts.push(prompt)
+      },
+      events() {
+        return [{
+          id: 'same-author-failure',
+          type: 'turn.failed' as const,
+          text: 'complete game document requires one document title',
+          createdAt: new Date(),
+        }]
+      },
+      isWorkflowWorkerOpen() { return true },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    try {
+      const request: WorkerDispatchRequest = {
+        dispatchId: 'dispatch-same-author',
+        runId: 'run-same-author',
+        ownerId: 'user-1',
+        projectId: 'project-1',
+        workspacePath,
+        workerType: 'document-author',
+        phase: 'DOCUMENT_DRAFTING',
+        taskId: 'docs/GDD.md',
+        revision: 'revision-1',
+        allowedPaths: ['docs/GDD.md'],
+        contract: {
+          authoringMode: 'initial',
+          documentSet: 'foundation',
+          foundationDocumentPath: 'docs/GDD.md',
+          availableUpstreamPaths: [],
+        },
+      }
+      await port.start(request)
+      const pendingPath = foundationMarkdownPendingPath(
+        workspacePath,
+        request.runId,
+        request.dispatchId!,
+      )
+      await mkdir(dirname(pendingPath), { recursive: true })
+      await writeFile(pendingPath, 'malformed body\r\n', 'utf8')
+
+      await expect(port.waitForTerminal?.(request.dispatchId!)).rejects.toMatchObject({
+        name: 'WorkerNeedsActionError',
+        message: expect.stringContaining('authority-no-progress'),
+      })
+      expect(starts).toBe(1)
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain('"targetPath":"docs/GDD.md"')
+      expect(prompts[0]).toContain('"violations"')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

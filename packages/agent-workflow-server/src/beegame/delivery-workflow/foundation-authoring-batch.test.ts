@@ -6,6 +6,8 @@ import {
   recordFoundationCommit,
   recordFoundationDispatch,
   recordFoundationFailure,
+  buildFoundationValidationDiagnostics,
+  foundationValidationProgressed,
 } from './foundation-authoring-batch'
 import type { FoundationDocumentPath, FoundationDraftState } from './types'
 
@@ -28,6 +30,38 @@ function dispatchAndCommit(
 }
 
 describe('parallel foundation authoring batch', () => {
+  test('builds stable sorted validation diagnostics and only treats digest changes as progress', () => {
+    const first = buildFoundationValidationDiagnostics({
+      targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
+      markdown: '  bad\r\nbody  ',
+      violations: ['z violation', 'a violation', 'z violation'],
+    })
+    expect(first).toEqual({
+      targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
+      documentDigest: expect.any(String),
+      violationSetDigest: expect.any(String),
+      violations: ['a violation', 'z violation'],
+    })
+    expect(first.documentDigest).toBe(
+      buildFoundationValidationDiagnostics({
+        targetPath: first.targetPath,
+        markdown: 'bad\nbody',
+        violations: first.violations,
+      }).documentDigest,
+    )
+    expect(foundationValidationProgressed(first, { ...first })).toBe(false)
+    expect(
+      foundationValidationProgressed(
+        first,
+        buildFoundationValidationDiagnostics({
+          targetPath: first.targetPath,
+          markdown: 'bad\nbody',
+          violations: ['a violation'],
+        }),
+      ),
+    ).toBe(true)
+  })
+
   test('releases documents only when every contracted upstream is committed', () => {
     let state = beginParallelFoundationAuthoring(['docs/GDD.md'])
     expect(readyDraftPaths(state)).toEqual(['docs/LEVEL_SCENE_DESIGN.md'])

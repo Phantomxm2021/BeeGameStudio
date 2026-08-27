@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { getGameDocumentContract } from './game-document-contracts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -6,7 +7,34 @@ import {
   type FoundationDocumentCheckpoint,
   type FoundationDocumentPath,
   type FoundationDraftState,
+  type FoundationValidationDiagnostics,
 } from './types'
+
+export function buildFoundationValidationDiagnostics(input: {
+  targetPath: FoundationDocumentPath
+  markdown: string
+  violations: readonly string[]
+}): FoundationValidationDiagnostics {
+  const normalizedMarkdown = input.markdown
+    .replaceAll('\r\n', '\n')
+    .replaceAll('\r', '\n')
+    .trim()
+  const violations = [...new Set(input.violations.map(value => value.trim()).filter(Boolean))].sort()
+  return {
+    targetPath: input.targetPath,
+    documentDigest: createHash('sha256').update(normalizedMarkdown).digest('hex'),
+    violationSetDigest: createHash('sha256').update(JSON.stringify(violations)).digest('hex'),
+    violations,
+  }
+}
+
+export function foundationValidationProgressed(
+  previous: FoundationValidationDiagnostics,
+  next: FoundationValidationDiagnostics,
+): boolean {
+  return previous.documentDigest !== next.documentDigest ||
+    previous.violationSetDigest !== next.violationSetDigest
+}
 
 // The selected provider stopped delivering SSE events when all seven native
 // authors started together during Chrome acceptance. Keep authoring parallel,

@@ -3,6 +3,7 @@ import {
   CANONICAL_PROJECT_ARTIFACTS,
   CANONICAL_PROJECT_DOCUMENTS,
   CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationValidationDiagnostics,
   type WorkerDispatchRequest,
 } from './types'
 import { foundationFactDefinition } from './foundation-fact-definitions'
@@ -18,6 +19,16 @@ const FOUNDATION_AUTHOR_CLOSURE_CHECK =
 
 const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
   'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority; each Issue sourceSectionKey, expected, and actual must match its single-document authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
+
+export function buildFoundationDocumentCorrectionPrompt(
+  diagnostics: FoundationValidationDiagnostics,
+): string {
+  return [
+    'The previous complete Markdown response failed deterministic validation.',
+    `Structured validation diagnostics: ${JSON.stringify(diagnostics)}`,
+    `Rewrite the same assigned document at ${diagnostics.targetPath}. Preserve the existing authoring scope and upstream authority. Return only one complete raw Markdown body.`,
+  ].join('\n')
+}
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const packetWorker =
