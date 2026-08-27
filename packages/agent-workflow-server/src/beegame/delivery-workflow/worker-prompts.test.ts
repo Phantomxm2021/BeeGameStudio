@@ -192,6 +192,9 @@ describe('worker prompts', () => {
         expect(countOccurrences(prompt, rules[foundationDocumentPath])).toBe(1)
         expect(prompt).toContain('complete raw Markdown body')
         expect(prompt).toContain('Do not call tools, return JSON')
+        expect(prompt).toContain('Executive Summary indexes authority; each material follows its own authorityMode and authorityRule')
+        expect(prompt).not.toContain('Summary and Materials only index stable owner references')
+        expect(countOccurrences(prompt, 'Record a genuinely N/A item once with its reason and impact')).toBe(1)
         expect(prompt).not.toContain('strict_structured_block_payload')
         expect(prompt).not.toContain('native StructuredOutput object')
       }

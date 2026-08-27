@@ -196,6 +196,13 @@ describe('complete game document contracts', () => {
     }
   })
 
+  test('keeps merge rules document-level instead of duplicating material authority', () => {
+    for (const contract of Object.values(GAME_DOCUMENT_CONTRACTS)) {
+      for (const material of contract.productionMaterials)
+        expect(contract.mergeReferenceRule).not.toContain(material.materialId)
+    }
+  })
+
   test('assigns production resource facts only to Asset Plan', () => {
     const art = getGameDocumentContract('docs/ART_DIRECTION.md')
     const audio = getGameDocumentContract('docs/AUDIO_DESIGN.md')
