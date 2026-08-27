@@ -14,7 +14,6 @@ import {
   type WorkerDispatchRequest,
 } from './types'
 import {
-  authorPayloadFromTestSubmission,
   completeTestSubmission,
   renderTestCompleteGameDocument,
 } from '../../__tests__/complete-game-document-fixture'
@@ -109,7 +108,6 @@ describe('foundation audit cutover', () => {
         workspacePath,
         dispatchId,
         targetPath: finalPath,
-        authoredPayload: authorPayloadFromTestSubmission(completeTestSubmission(finalPath)),
       })
       const run = runWithEightCommittedDocs()
       const request = {

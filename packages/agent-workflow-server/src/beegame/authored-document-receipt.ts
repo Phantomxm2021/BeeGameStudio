@@ -3,9 +3,8 @@ import { mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promise
 import { dirname, join, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
-  assembleFoundationDocumentMarkdown,
-} from './foundation-document-author-payload'
-import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
+  normalizeCompleteGameDocumentProtocol,
+} from './complete-game-document'
 import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
@@ -39,17 +38,17 @@ export type AuthoredDocumentReceipt = {
 }
 
 /**
- * Record a complete structured author payload. The payload is the only human
- * document authority; this function validates it, assembles the deterministic
- * Markdown frame, injects service-owned metadata, writes a machine audit
- * sidecar, and commits the resulting bytes.
+ * Record the result of a complete Markdown file written through Bee Game
+ * Studio's native file tools. The authored body is the only human document
+ * authority; this function validates it, injects deterministic service-owned
+ * metadata, writes a machine audit sidecar, and commits the resulting bytes.
  */
 export async function commitAuthoredFoundationDocument(input: {
   workspacePath: string
   dispatchId: string
   targetPath: FoundationDocumentPath
   updatedAt?: string
-  authoredPayload: unknown
+  authoredBody?: string
   expectedOriginalDigest?: string | null
 }): Promise<AuthoredDocumentReceipt> {
   const documentId = CANONICAL_PROJECT_DOCUMENT_IDS[input.targetPath]
@@ -75,11 +74,12 @@ export async function commitAuthoredFoundationDocument(input: {
     if (currentDigest !== input.expectedOriginalDigest)
       throw new Error('authored document target changed during generation')
   }
+  const authored = input.authoredBody ?? await readFile(target, 'utf8')
   const updatedAt = input.updatedAt ?? new Date().toISOString()
   z.string().datetime({ offset: true }).parse(updatedAt)
   const canonical = canonicalizeAuthoredDocument(
     input.targetPath,
-    input.authoredPayload,
+    authored,
     updatedAt,
   )
   await durableWrite(target, canonical)
@@ -317,10 +317,14 @@ export async function reconcileAuthoredDocumentReceipt(input: {
   if (target === undefined || digest(target) !== receipt.finalDigest)
     return undefined
   try {
-    validateCommittedFoundationDocument(
-      receipt.targetPath as FoundationDocumentPath,
-      target,
+    if (
+      canonicalizeAuthoredDocument(
+        receipt.targetPath as FoundationDocumentPath,
+        target,
+        receipt.updatedAt,
+      ) !== target
     )
+      return undefined
   } catch {
     return undefined
   }
@@ -334,22 +338,6 @@ export async function reconcileAuthoredDocumentReceipt(input: {
     `${JSON.stringify(committed, null, 2)}\n`,
   )
   return committed
-}
-
-function validateCommittedFoundationDocument(
-  path: FoundationDocumentPath,
-  markdown: string,
-): void {
-  const lines = markdown.split('\n')
-  if (lines[0]?.trim() !== '---') throw new Error('front matter is missing')
-  const closingIndex = lines.findIndex(
-    (line, index) => index > 0 && line.trim() === '---',
-  )
-  if (closingIndex < 1) throw new Error('front matter is invalid')
-  validateCompleteGameDocumentMarkdown(
-    path,
-    lines.slice(closingIndex + 1).join('\n').trim(),
-  )
 }
 
 function authoredDocumentReceiptPath(
@@ -513,11 +501,16 @@ export function normalizeServiceOwnedDocumentMetadata(markdown: string): string 
 
 function canonicalizeAuthoredDocument(
   path: FoundationDocumentPath,
-  payload: unknown,
+  markdown: string,
   updatedAt: string,
 ): string {
   const expectedDocumentId = CANONICAL_PROJECT_DOCUMENT_IDS[path]
-  const validatedBody = assembleFoundationDocumentMarkdown(path, payload)
+  const lines = markdown.split('\n')
+  const body =
+    lines[0] === '---' && lines[4] === '---'
+      ? lines.slice(5).join('\n')
+      : markdown
+  const validatedBody = normalizeCompleteGameDocumentProtocol(path, body)
   return [
     '---',
     `document_id: ${expectedDocumentId}`,

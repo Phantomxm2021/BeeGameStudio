@@ -56,8 +56,6 @@
 
 每份 canonical 文档的 `Executive Summary` 只是 authority index：它只能索引本文件拥有的最终决定与稳定 Section/Material 引用，不能创建第二份事实或独立的可变总数。`Production Materials` 是由所属 Section 决定派生的 compact views；每个视图必须引用其 owner Section/事实，不得复制可变事实、维护独立总计或以视图内容覆盖 owner。每个可变事实只能有一个 canonical owner。
 
-canonical 文档的机械结构由服务单独拥有：frontmatter、协议 marker、contract H2/H3 标题及其顺序都必须由当前 `GameDocumentContract` 确定性组装，不能要求 author 复制、拼写或排序这些结构。author 只提交一个严格的 block-body payload：人类标题，以及按 `executive_summary`、Section ID 与 `material.<materialId>` 精确绑定的完整正文。payload 必须恰好覆盖当前 contract 的全部 block ID，不接受缺失、额外、重复或旧版 full-Markdown stream；服务组装后仍执行同一 strict complete-document validation 并原子提交唯一 canonical Markdown。这一边界只消除机械协议失败，不替 author 补写、猜测或改写业务内容，也不形成兼容/双轨路径。
-
 单一 fact owner 同样适用于同一文档内部：可变波次、金额、比例、时长、数量、尺寸和阈值只能在一个 owner Section 中定义。其他 Section 需要该事实时引用稳定 owner Section/决策标识，不得再次保存同一 literal；正文不得在表格之外重新叙述表内同一组事实。Stage 3 只能在 normalized Fact、owner Section 与派生 block 能明确证明重复时发布 Issue，禁止用词频或裸数字频率推断业务重复。
 
 authoring contract 只把实际存在且已提交的 upstream path 当作可用 authority；path 存在时必须直接使用，不能保留“upstream unavailable”分支。只有 contract 明确没有可用 path 时，才能在既有 dependency/risk Section 中记录未决上游决定；不得因此创建第二条文档轨道。
@@ -424,7 +422,6 @@ Reviewer 发现业务 Issue 后，controller 必须立即将其纳入唯一 Issu
 - Review copy 初始化直接进入唯一可运行的 `FOUNDATION_REVIEW` 状态并由同一 controller 启动；不得先持久化虚假 `needs_action`/`implementation unavailable` 再由另一入口覆盖。
 
 - Stage 2 初始 Foundation document-author 的机械/结构校验失败、非法 terminal，以及短暂的 provider/receipt/callback/会话中断均属于失败 attempt；必须保留诊断并自动重派同一文档，不设固定 attempt 上限，不得进入人工 `needs_action`。只有不可恢复的 authority/integrity 冲突或当前进程无法恢复的外部前置缺失（模型配置、凭据或 credits）可进入 `needs_action`。Strict complete-document validation 不得放宽；失败的 staged/pending bytes 不得提交 canonical。该路径继续复用唯一 durable task collection，不引入第二状态机或兼容轨。
-- Stage 2 的唯一 author transport 是严格 block-body payload；旧 full-Markdown stream 必须删除而不是保留为 fallback。服务从当前 contract 生成 JSON Schema、注入 canonical headings/markers/frontmatter、执行基础设施 2 MiB UTF-8 防护并提交 receipt。模型不得输出或修改服务拥有的标题和协议字段；因此标题拼写、重复和顺序不得再消耗一次完整文档重试。body 的完整性、材料格式、内部 H3/H4 层级与业务质量仍 fail closed，并按同一失败 attempt 机制自动重派。
 
 - Dashboard 只投影普通任务状态、轮次、Issue 数量/严重程度摘要、按任务聚合的 compact task telemetry（usage/duration）与 safe projected failure reason；它不是审计或修订 authority，也不展示 raw Registry JSON、`problem`/`actual`/`evidence`、worker prose/thinking 或 worker feedback。Foundation review 期间的 worker message 只保留在运行日志与 durable evidence 中，不进入阶段卡片。
 - 阶段显示必须将 Foundation 审计与修订分开：审计固定为显示 stage 3，修订固定为显示 stage 4。stage 4 是仅用于显示的虚拟 identity，底层仍只有 `DOCUMENT_REVIEW` 与唯一持久化 `foundationAuditState`；冻结的审计卡必须保留 stage 3，进入修订时生成 stage 4 live card，checklist drafting 不得回退到 stage 3。

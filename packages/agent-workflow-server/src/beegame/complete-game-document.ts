@@ -23,34 +23,6 @@ function authoredHeadings(markdown: string): Array<{ level: number; text: string
   return headings
 }
 
-function validateMechanicalHeadingStructure(
-  markdown: string,
-  path: FoundationDocumentPath,
-): void {
-  const contract = getGameDocumentContract(path)
-  const headings = authoredHeadings(markdown).filter(heading => heading.level <= 2)
-  const expected = [
-    { level: 1, text: headings[0]?.text ?? '' },
-    { level: 2, text: 'Executive Summary' },
-    ...contract.sections.map(section => ({ level: 2, text: section.title })),
-    { level: 2, text: 'Production Materials' },
-    ...(markdown.includes('<!-- beegame-audit-appendix -->')
-      ? [{ level: 2, text: 'Audit Appendix' }]
-      : []),
-  ]
-  if (
-    headings.length !== expected.length ||
-    expected.some(
-      (heading, index) =>
-        headings[index]?.level !== heading.level ||
-        headings[index]?.text !== heading.text,
-    )
-  )
-    throw new Error(
-      `complete game document mechanical headings must exactly match the canonical frame for ${path}`,
-    )
-}
-
 function validateSectionHeadingStructure(
   sections: readonly { sectionId: string; body: string }[],
 ): void {
@@ -153,7 +125,91 @@ function nextNonBlankLine(
   return undefined
 }
 
-/** Validate the service-assembled frame without authoring or rewriting content. */
+/**
+ * Bee Game Studio owns protocol comments, while the native author owns every
+ * human-readable heading and body. Normalize only the service comments after
+ * proving that the authored heading contract is already complete and ordered.
+ */
+export function normalizeCompleteGameDocumentProtocol(
+  path: FoundationDocumentPath,
+  value: unknown,
+): string {
+  const body = z.string().trim().min(1).parse(value)
+  const contract = getGameDocumentContract(path)
+  const markerByHeading = new Map<string, string>([
+    ['## Executive Summary', '<!-- beegame-executive-summary -->'],
+    ...contract.sections.map(
+      section =>
+        [`## ${section.title}`, `<!-- beegame-section:${section.sectionId} -->`] as const,
+    ),
+    ['## Production Materials', '<!-- beegame-production-materials -->'],
+    ...contract.productionMaterials.map(
+      material =>
+        [`### ${material.title}`, `<!-- beegame-material:${material.materialId} -->`] as const,
+    ),
+  ])
+  const recognizedMarkers = new Set(markerByHeading.values())
+  const lines = body.split('\n').map(line => line.trimEnd())
+  const authoredLines = lines.filter(line => {
+    const trimmed = line.trim()
+    if (recognizedMarkers.has(trimmed)) return false
+    if (
+      trimmed.startsWith('<!-- beegame-section:') ||
+      trimmed.startsWith('<!-- beegame-material:') ||
+      trimmed === '<!-- beegame-executive-summary -->' ||
+      trimmed === '<!-- beegame-production-materials -->'
+    )
+      throw new Error('complete game document contains an unknown protocol marker')
+    return true
+  })
+
+  const visibleHeadingIndexes = new Map<string, number[]>()
+  let fence: string | undefined
+  authoredLines.forEach((rawLine, index) => {
+    const line = rawLine.trimStart()
+    if (line.startsWith('```') || line.startsWith('~~~')) {
+      const marker = line.slice(0, 3)
+      fence = fence === undefined ? marker : fence === marker ? undefined : fence
+      return
+    }
+    if (fence || !markerByHeading.has(rawLine)) return
+    const indexes = visibleHeadingIndexes.get(rawLine) ?? []
+    indexes.push(index)
+    visibleHeadingIndexes.set(rawLine, indexes)
+  })
+
+  const expectedHeadings = [...markerByHeading.keys()]
+  const orderedIndexes = expectedHeadings.map(heading => {
+    const indexes = visibleHeadingIndexes.get(heading) ?? []
+    if (indexes.length !== 1)
+      throw new Error(
+        `complete game document canonical heading must appear exactly once: ${heading}`,
+      )
+    return indexes[0]!
+  })
+  if (
+    orderedIndexes.some(
+      (index, offset) => offset > 0 && index <= orderedIndexes[offset - 1]!,
+    )
+  )
+    throw new Error(
+      `complete game document headings must exactly match the canonical order for ${path}`,
+    )
+
+  const normalized: string[] = []
+  for (const line of authoredLines) {
+    const marker = markerByHeading.get(line)
+    if (marker) normalized.push(marker)
+    normalized.push(line)
+  }
+  return validateCompleteGameDocumentMarkdown(path, normalized.join('\n'))
+}
+
+/**
+ * Validate one complete Markdown file after the native Bee Game Studio worker
+ * wrote it. This module has no structured document payload and no renderer;
+ * BGS is a mechanical gate, never a document author or transport.
+ */
 export function validateCompleteGameDocumentMarkdown(
   path: FoundationDocumentPath,
   value: unknown,
@@ -163,7 +219,6 @@ export function validateCompleteGameDocumentMarkdown(
   const lines = body.split('\n').map(line => line.trimEnd())
   if (!lines[0]?.startsWith('# ') || lines[0].startsWith('## '))
     throw new Error('complete game document requires one document title')
-  validateMechanicalHeadingStructure(body, path)
   if (EMPTY_TEMPLATE_SENTENCES.some(sentence => body.includes(sentence)))
     throw new Error('complete game document contains an empty template sentence')
 

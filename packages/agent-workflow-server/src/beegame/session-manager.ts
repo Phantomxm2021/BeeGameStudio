@@ -52,6 +52,11 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
+import {
+  createFoundationMarkdownStreamSink,
+  type FoundationMarkdownStreamContract,
+  type FoundationMarkdownStreamSink,
+} from './foundation-markdown-stream'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -262,6 +267,7 @@ export type BeeGameSessionRunnerStartInput = {
   workflowJsonSchema?: Record<string, unknown>
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
+  workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -390,6 +396,7 @@ type SessionRecord = {
   workflowDispatchId?: string
   workflowWorkerType?: string
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
+  workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
@@ -625,6 +632,7 @@ export type StartBeeGameSessionInput = {
   workflowDispatchId?: string
   workflowWorkerType?: string
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
+  workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
@@ -770,6 +778,12 @@ export class BeeGameSessionManager {
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
       ...(input.workflowModelTier ? { workflowModelTier: input.workflowModelTier } : {}),
+      ...(input.workflowMarkdownStreamContract
+        ? {
+            workflowMarkdownStreamContract:
+              input.workflowMarkdownStreamContract,
+          }
+        : {}),
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
         : {}),
@@ -1430,6 +1444,7 @@ export class BeeGameSessionManager {
     prompt: BeeGamePromptInput,
     attachmentDirectory?: string,
   ): Promise<void> {
+    let markdownStreamSink: FoundationMarkdownStreamSink | undefined
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
@@ -1486,6 +1501,11 @@ export class BeeGameSessionManager {
             }
           : {}),
       })
+      if (record.workflowMarkdownStreamContract) {
+        markdownStreamSink = await createFoundationMarkdownStreamSink(
+          record.workflowMarkdownStreamContract,
+        )
+      }
       const runner =
         record.runner ??
         (await this.runner.start({
@@ -1518,6 +1538,12 @@ export class BeeGameSessionManager {
           ...(record.workflowDispatchId
             ? { workflowDispatchId: record.workflowDispatchId }
             : {}),
+          ...(record.workflowMarkdownStreamContract
+            ? {
+                workflowMarkdownStreamContract:
+                  record.workflowMarkdownStreamContract,
+              }
+            : {}),
           ...(record.workflowAllowedPaths
             ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
             : {}),
@@ -1547,7 +1573,9 @@ export class BeeGameSessionManager {
         runner,
         prompt,
         signal,
+        markdownStreamSink,
       )
+      if (markdownStreamSink) await markdownStreamSink.commit()
       try {
         if (!signal.aborted && record.session.status === 'running') {
           const turnId = record.currentTurnId
@@ -1577,6 +1605,9 @@ export class BeeGameSessionManager {
         }
       }
     } catch (err) {
+      if (markdownStreamSink) {
+        await markdownStreamSink.abort(toErrorMessage(err))
+      }
       disposeRunner(record.runner)
       record.runner = null
       if (record.session.status === 'running') {
@@ -1640,6 +1671,7 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
+    markdownStreamSink?: FoundationMarkdownStreamSink,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
@@ -1650,6 +1682,7 @@ export class BeeGameSessionManager {
         : {}),
       signal,
       onMessage: message => {
+        markdownStreamSink?.observe(message)
         appendProjectAgentRawLog(record, message)
         trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {

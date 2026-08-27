@@ -28,10 +28,7 @@ import { encryptSecret } from '../security/secret-crypto'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
-import {
-  authorPayloadFromTestSubmission,
-  renderTestCompleteGameDocument,
-} from './complete-game-document-fixture'
+import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import {
   computeDocumentRevision,
@@ -55,11 +52,11 @@ const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 const originalDataDir = process.env.AGENT_WORKFLOW_DATA_DIR
 const temporaryDirectories: string[] = []
 
-function completeTestFoundationSubmission(
+function completeTestFoundationDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-): any {
+): string {
   const contract = getGameDocumentContract(path)
-  return {
+  return renderTestCompleteGameDocument(path, {
     title: contract.discipline,
     executiveSummary: 'Complete test foundation authority.',
     sections: contract.sections.map(section => ({
@@ -102,16 +99,7 @@ function completeTestFoundationSubmission(
       risks: [],
       openDecisions: [],
     },
-  }
-}
-
-function completeTestFoundationDocument(
-  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-): string {
-  return renderTestCompleteGameDocument(
-    path,
-    completeTestFoundationSubmission(path),
-  )
+  })
 }
 
 beforeEach(async () => {
@@ -922,9 +910,6 @@ describe('delivery workflow session continuation', () => {
         workspacePath: workspace,
         dispatchId: acceptedDispatchId,
         targetPath: acceptedPath,
-        authoredPayload: authorPayloadFromTestSubmission(
-          completeTestFoundationSubmission(acceptedPath),
-        ),
       })
       const recoverableRevision = {
         document: await computeDocumentRevision(

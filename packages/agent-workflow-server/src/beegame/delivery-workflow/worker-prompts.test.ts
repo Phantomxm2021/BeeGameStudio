@@ -46,7 +46,7 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('Revision: revision')
   })
 
-  test('declares a closed structured block payload for initial and parallel foundation authors', () => {
+  test('declares a closed H2 heading protocol for initial and parallel foundation authors', () => {
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
       const prompt = buildWorkerPrompt({
         runId: 'run',
@@ -67,11 +67,26 @@ describe('worker prompts', () => {
         },
       })
       const contract = JSON.parse(prompt.split('\n').at(-1)!) as {
-        completeDocumentContract: { authorOutput: Record<string, unknown> }
+        completeDocumentContract: {
+          mechanicalMarkdownProtocol: {
+            closedHeadingSet: string[]
+            additionalH2: string
+            supportingContent: string
+          }
+        }
       }
-      expect(contract.completeDocumentContract.authorOutput).toMatchObject({
-        format: 'strict_structured_block_payload',
-        exactCoverage: 'all IDs exactly once; no extra, missing or empty blocks',
+      const expectedH2s = [
+        '## Executive Summary',
+        ...getGameDocumentContract('docs/UI_UX_SPEC.md').sections.map(
+          section => `## ${section.title}`,
+        ),
+        '## Production Materials',
+      ]
+
+      expect(contract.completeDocumentContract.mechanicalMarkdownProtocol).toMatchObject({
+        closedHeadingSet: expectedH2s,
+        additionalH2: 'forbidden',
+        supportingContent: 'must be nested under one of the closed H2 headings',
       })
     }
   })

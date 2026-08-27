@@ -101,23 +101,3 @@ export function completeTestSubmission(
     },
   }
 }
-
-export function authorPayloadFromTestSubmission(
-  value: CompleteGameDocumentSubmission,
-): Record<string, unknown> {
-  return {
-    title: value.title,
-    executiveSummary: value.executiveSummary,
-    sections: Object.fromEntries(
-      value.sections.map(section => [section.sectionId, section.body]),
-    ),
-    materials: Object.fromEntries(
-      value.productionMaterials.map(material => [
-        material.materialId,
-        material.format === 'evidence_register'
-          ? '| Evidence | Status |\n| --- | --- |\n| fixture | unverified |'
-          : material.body,
-      ]),
-    ),
-  }
-}

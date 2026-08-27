@@ -60,10 +60,6 @@ import {
   projectFoundationAuthority,
   type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
-import {
-  buildFoundationDocumentAuthorStructuredOutputJsonSchema,
-  foundationDocumentAuthorPayloadSchema,
-} from './foundation-document-author-payload'
 
 type FoundationFactPacketContract = {
   keys: FoundationFactKey[]
@@ -157,11 +153,11 @@ function foundationFactSchemaForRequest(
   ) as unknown as Record<string, unknown>
 }
 import { documentAuthoringMetrics } from './document-authoring-metrics'
-import { commitAuthoredFoundationDocument } from './authored-document-receipt'
+import { readAuthoredDocumentReceipt } from './authored-document-receipt'
 
 export const FOUNDATION_WORKER_OUTPUT_MAX_BYTES = 2 * 1024 * 1024
 
-export function assertFoundationStructuredOutputWithinInfrastructureBoundary(
+function assertFoundationStructuredOutputWithinInfrastructureBoundary(
   value: unknown,
 ): void {
   const serialized = JSON.stringify(value)
@@ -273,6 +269,13 @@ export async function buildDocumentAuthorAuthorityBlock(
     throw new Error(
       'initial document upstream authority does not match its contract',
     )
+  let targetExists = true
+  try {
+    await access(resolve(request.workspacePath, targetPath))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') targetExists = false
+    else throw error
+  }
   await Promise.all(
     upstreamPaths.map(path => access(resolve(request.workspacePath, path))),
   )
@@ -296,14 +299,19 @@ export async function buildDocumentAuthorAuthorityBlock(
     dispatchId,
   })
   onProjection?.(projection)
-  return upstreamPaths.length
-    ? [
-        'BGS projected the complete selected upstream authority below without summarization or rewriting. Use it as the upstream authority for this assignment.',
-        `--- BEGIN FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
-        modelFoundationAuthorityProjectionBytes(projection).trimEnd(),
-        `--- END FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
-      ].join('\n')
-    : ''
+  return [
+    upstreamPaths.length
+      ? [
+          'BGS projected the complete selected upstream authority below without summarization or rewriting. Use it as the upstream authority for this assignment.',
+          `--- BEGIN FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
+          modelFoundationAuthorityProjectionBytes(projection).trimEnd(),
+          `--- END FOUNDATION AUTHORITY ${projectionRelativePath} ---`,
+        ].join('\n')
+      : undefined,
+    targetExists
+      ? `An existing ${targetPath} is present, but this stream must return a complete replacement Markdown body from current authority.`
+      : `The assigned target is ${targetPath}.`,
+  ].filter(Boolean).join('\n\n')
 }
 
 async function durableWriteProjection(
@@ -380,24 +388,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
       const documentAuthorityBlock = ''
-      if (
-        request.workerType === 'document-author' &&
-        request.allowedPaths?.some(path =>
-          CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never),
-        ) &&
-        !isFoundationDocumentAuthoringTurn(request)
-      )
-        throw new Error(
-          'canonical foundation documents require the sole structured author contract',
-        )
-      if (isFoundationDocumentAuthoringTurn(request)) {
-        const digest = request.contract.expectedOriginalDigest
-        if (
-          digest !== null &&
-          (typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest))
-        )
-          throw new Error('foundation document author original digest is invalid')
-      }
       if (request.workerType === 'atomic-task-planner') {
         await mkdir(join(request.workspacePath, '.beegame/workflow/evidence'), {
           recursive: true,
@@ -431,14 +421,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactSchemaForRequest(request) }
           : request.workerType === 'foundation-semantic-reviewer'
             ? { workflowJsonSchema: request.workflowJsonSchema ?? (typeof request.contract.issueId === 'string' ? foundationSemanticRecheckStructuredOutputJsonSchema : foundationSemanticReviewerStructuredOutputJsonSchema) as unknown as Record<string, unknown> }
-          : isFoundationDocumentAuthoringTurn(request)
-            ? {
-                workflowJsonSchema: buildFoundationDocumentAuthorStructuredOutputJsonSchema(
-                  getGameDocumentContract(
-                    request.contract.foundationDocumentPath as FoundationDocumentPath,
-                  ),
-                ),
-              }
           : {}),
         ...(packetWorker
           ? { workflowProjectReadScope: 'empty' as const }
@@ -465,6 +447,18 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 ],
               }
             : {}),
+        ...(isStreamedFoundationAuthoringTurn(request)
+          ? {
+              workflowMarkdownStreamContract: {
+                workspacePath: request.workspacePath,
+                runId: request.runId,
+                dispatchId,
+                targetPath: request.contract
+                  .foundationDocumentPath as FoundationDocumentPath,
+                maxBytes: FOUNDATION_WORKER_OUTPUT_MAX_BYTES,
+              },
+            }
+          : {}),
         ...(request.workerType === 'resource-content-author'
           ? {
               workflowResourceContentCommitContract:
@@ -774,27 +768,41 @@ export function createBeeGameDeliveryWorkerPort(input: {
             const targetPath = request.allowedPaths?.[0]
             if (!targetPath)
               throw new Error('document author target is missing')
-            if (isFoundationDocumentAuthoringTurn(request)) {
-              if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-                await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-              const payload = foundationDocumentAuthorPayloadFromEvents(
-                request,
-                events,
+            if (isStreamedFoundationAuthoringTurn(request)) {
+              if (
+                typeof input.sessions.waitForWorkflowWorkerIdle === 'function'
               )
-              await commitAuthoredFoundationDocument({
-                workspacePath: request.workspacePath,
+                await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+              const drainedFailure = [
+                ...sessionEvents(sessionId).slice(
+                  eventOffsets.get(dispatchId) ?? 0,
+                ),
+              ]
+                .reverse()
+                .find(event => event.type === 'turn.failed')
+              if (drainedFailure)
+                throw new Error(
+                  drainedFailure.text || 'document author stream commit failed',
+                )
+              const receipt = await readAuthoredDocumentReceipt(
+                request.workspacePath,
                 dispatchId,
-                targetPath: targetPath as FoundationDocumentPath,
-                authoredPayload: payload,
-                expectedOriginalDigest:
-                  request.contract.expectedOriginalDigest as string | null,
-              })
+              )
+              if (
+                receipt?.status !== 'committed' ||
+                receipt.targetPath !== targetPath
+              )
+                throw new Error(
+                  'document author completed without a committed Markdown stream receipt',
+                )
               return createDeterministicCanonicalDocumentTerminal(
                 request,
-                [targetPath],
+                [receipt.targetPath],
                 documentAuthoringMetrics(
                   sessionEvents(sessionId),
-                  projectionMetrics(documentAuthorityProjections.get(dispatchId)),
+                  projectionMetrics(
+                    documentAuthorityProjections.get(dispatchId),
+                  ),
                 ),
               )
             }
@@ -807,13 +815,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
             } catch (error) {
               if ((error as NodeJS.ErrnoException).code === 'ENOENT')
                 throw new Error(
-                  `document author canonical output is missing: ${targetPath}`,
+                  `document author output is missing: ${targetPath}`,
                 )
               throw error
             }
             if (!body.trim())
               throw new Error(
-                `document author canonical output is missing: ${targetPath}`,
+                `document author output is missing: ${targetPath}`,
               )
             if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
               await input.sessions.waitForWorkflowWorkerIdle(sessionId)
@@ -869,6 +877,16 @@ function isFoundationDocumentAuthoringTurn(
     CANONICAL_FOUNDATION_DOCUMENTS.includes(
       request.contract.foundationDocumentPath as never,
     )
+  )
+}
+
+function isStreamedFoundationAuthoringTurn(
+  request: WorkerDispatchRequest,
+): boolean {
+  return (
+    isFoundationDocumentAuthoringTurn(request) &&
+    (request.contract.authoringMode === 'initial' ||
+      request.contract.authoringMode === 'parallel-draft')
   )
 }
 
@@ -943,28 +961,6 @@ function createDeterministicCanonicalDocumentTerminal(
   })
 }
 
-function foundationDocumentAuthorPayloadFromEvents(
-  request: WorkerDispatchRequest,
-  events: ReturnType<BeeGameSessionManager['events']>,
-) {
-  const resultEvent = [...events].reverse().find(event => event.type === 'result')
-  const structured =
-    resultEvent?.payload &&
-    typeof resultEvent.payload === 'object' &&
-    'structured_output' in resultEvent.payload
-      ? (resultEvent.payload as Record<string, unknown>).structured_output
-      : undefined
-  if (structured === undefined)
-    throw new Error('document author terminal payload is missing')
-  assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
-  const path = request.contract.foundationDocumentPath
-  if (!isFoundationDocumentAuthoringTurn(request))
-    throw new Error('foundation document author contract is invalid')
-  return foundationDocumentAuthorPayloadSchema(
-    path as FoundationDocumentPath,
-  ).parse(structured)
-}
-
 function structuredSubmissionToolName(
   request: WorkerDispatchRequest,
 ): string | undefined {
@@ -1032,7 +1028,7 @@ async function createDeterministicStructuredTerminal(input: {
   switch (input.request.workerType) {
     case 'document-author':
       throw new Error(
-        'canonical document author completion must commit its payload before terminal construction',
+        'canonical document completion must use its commit receipt',
       )
     case 'foundation-fact-extractor':
       return createDeterministicFoundationFactTerminal(input) ?? (() => {

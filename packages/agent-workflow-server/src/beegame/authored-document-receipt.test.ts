@@ -8,53 +8,75 @@ import {
   readAuthoredDocumentReceipt,
   reconcileAuthoredDocumentReceipt,
 } from './authored-document-receipt'
+import { renderTestCompleteGameDocument } from '../__tests__/complete-game-document-fixture'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import { assembleFoundationDocumentMarkdown } from './foundation-document-author-payload'
 
-function completePayload(path: 'docs/GDD.md') {
+function completeDocument(path: 'docs/GDD.md'): string {
   const contract = getGameDocumentContract(path)
-  return {
+  const body = renderTestCompleteGameDocument(path, {
     title: contract.discipline,
     executiveSummary: 'Complete game design production authority.',
-    sections: Object.fromEntries(contract.sections.map((section, index) => [
-      section.sectionId,
-      `Authoritative production requirements ${index + 1}.`,
-    ])),
-    materials: Object.fromEntries(contract.productionMaterials.map(material => [
-      material.materialId,
+    sections: contract.sections.map((section, index) => ({
+      sectionId: section.sectionId,
+      title: section.title,
+      body: `Authoritative production requirements ${index + 1}.`,
+    })),
+    productionMaterials: contract.productionMaterials.map(material =>
       material.format === 'evidence_register'
-        ? '| Evidence | State |\n| --- | --- |\n| Ref | Pending |'
-        : material.format === 'markdown_table'
-          ? '| Field | Value |\n| --- | --- |\n| Owner | Game design |'
-          : material.format === 'mermaid'
-            ? '```mermaid\ngraph TD\n  A --> B\n```'
-            : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
-    ])),
-  }
+        ? {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            entries: [{
+              evidenceId: `${material.materialId}.pending`,
+              category: 'search_direction' as const,
+              displayName: 'Pending reference direction',
+              purpose: 'Record a production need before source selection.',
+              state: 'source_not_selected' as const,
+              evidenceRefs: [],
+            }],
+          }
+        : {
+            materialId: material.materialId,
+            title: material.title,
+            format: material.format,
+            body:
+              material.format === 'markdown_table'
+                ? '| Field | Value |\n| --- | --- |\n| Owner | Game design |'
+                : material.format === 'mermaid'
+                  ? '```mermaid\ngraph TD\n  A --> B\n```'
+                  : '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
+          },
+    ),
+    auditAppendix: {
+      acceptanceCriteria: ['All game design requirements are implementation-ready.'],
+      upstreamReferences: [],
+      risks: [],
+      openDecisions: [],
+    },
+  })
+  return body
 }
 
 describe('native authored document receipts', () => {
-  test('commits and replays a service-assembled document from a structured payload', async () => {
+  test('commits and replays a document written with native file tools', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'authored-document-'))
     try {
       const targetPath = 'docs/GDD.md' as const
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      const payload = completePayload(targetPath)
-      const authored = assembleFoundationDocumentMarkdown(targetPath, payload)
+      const authored = completeDocument(targetPath)
       await writeFile(join(workspacePath, targetPath), authored)
 
       const first = await commitAuthoredFoundationDocument({
         workspacePath,
         dispatchId: 'native-gdd',
         targetPath,
-        authoredPayload: payload,
         updatedAt: '2026-08-13T01:00:00.000+08:00',
       })
       const second = await commitAuthoredFoundationDocument({
         workspacePath,
         dispatchId: 'native-gdd',
         targetPath,
-        authoredPayload: payload,
         updatedAt: '2026-08-13T01:00:00.000+08:00',
       })
 
@@ -114,16 +136,14 @@ describe('native authored document receipts', () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'authored-reconcile-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      const payload = completePayload('docs/GDD.md')
       await writeFile(
         join(workspacePath, 'docs/GDD.md'),
-        assembleFoundationDocumentMarkdown('docs/GDD.md', payload),
+        completeDocument('docs/GDD.md'),
       )
       const receipt = await commitAuthoredFoundationDocument({
         workspacePath,
         dispatchId: 'native-reconcile',
         targetPath: 'docs/GDD.md',
-        authoredPayload: payload,
         updatedAt: '2026-08-13T01:00:00.000+08:00',
       })
       const receiptPath = join(
@@ -139,36 +159,6 @@ describe('native authored document receipts', () => {
         workspacePath,
         dispatchId: 'native-reconcile',
       })).resolves.toMatchObject({ status: 'committed' })
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
-  test('rejects a structured payload when canonical bytes changed after dispatch', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'authored-stale-target-'))
-    try {
-      const targetPath = 'docs/GDD.md' as const
-      const target = join(workspacePath, targetPath)
-      await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      await writeFile(target, 'original authority')
-      const expectedOriginalDigest = createHash('sha256')
-        .update('original authority')
-        .digest('hex')
-      await writeFile(target, 'concurrent authority')
-
-      await expect(
-        commitAuthoredFoundationDocument({
-          workspacePath,
-          dispatchId: 'stale-author',
-          targetPath,
-          authoredPayload: completePayload(targetPath),
-          expectedOriginalDigest,
-        }),
-      ).rejects.toThrow('target changed during generation')
-      expect(await readFile(target, 'utf8')).toBe('concurrent authority')
-      expect(
-        await readAuthoredDocumentReceipt(workspacePath, 'stale-author'),
-      ).toBeUndefined()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

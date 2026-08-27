@@ -22,12 +22,12 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   if (packetWorker) return buildPacketWorkerPrompt(request)
   if (request.workerType === 'foundation-document-reviser')
     return buildFoundationRevisionWorkerPrompt(request)
-  const foundationAuthor =
+  const streamedFoundationAuthor =
     request.workerType === 'document-author' &&
     request.contract.documentSet === 'foundation' &&
     (request.contract.authoringMode === 'initial' ||
       request.contract.authoringMode === 'parallel-draft')
-  const priorFailureReason = foundationAuthor &&
+  const priorFailureReason = streamedFoundationAuthor &&
     typeof request.contract.priorFailureReason === 'string'
     ? request.contract.priorFailureReason
     : undefined
@@ -80,26 +80,26 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
         : CANONICAL_PROJECT_ARTIFACTS)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
-    foundationAuthor ? undefined : `Phase: ${request.phase}`,
-    foundationAuthor ? undefined : `Run: ${request.runId}`,
-    foundationAuthor ? undefined : `Revision: ${request.revision}`,
-    foundationAuthor
+    streamedFoundationAuthor ? undefined : `Phase: ${request.phase}`,
+    streamedFoundationAuthor ? undefined : `Run: ${request.runId}`,
+    streamedFoundationAuthor ? undefined : `Revision: ${request.revision}`,
+    streamedFoundationAuthor
       ? undefined
       : `Workspace root: ${request.workspacePath}`,
-    foundationAuthor ? undefined : `${pathScopeLabel}: ${pathScope}`,
-    foundationAuthor
+    streamedFoundationAuthor ? undefined : `${pathScopeLabel}: ${pathScope}`,
+    streamedFoundationAuthor
       ? undefined
       : `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
     'The durable confirmed brief context and its digest are the product authority for this run.',
     'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
     workerInstruction(request),
     priorFailureReason
-      ? `Automatic retry after the previous document-author failure: ${priorFailureReason}. Correct that failure in the assigned block payload before ending the turn.`
+      ? `Automatic retry after the previous document-author failure: ${priorFailureReason}. Correct that failure in the assigned canonical Markdown document before ending the turn.`
       : undefined,
-    foundationAuthor
+    streamedFoundationAuthor
       ? undefined
       : 'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    foundationAuthor
+    streamedFoundationAuthor
       ? undefined
       : 'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
@@ -311,7 +311,6 @@ function formatContract(request: WorkerDispatchRequest): string {
     delete contractWithoutDuplicatedBrief.nativeWriteLimit
     delete contractWithoutDuplicatedBrief.upstreamDocumentPaths
     delete contractWithoutDuplicatedBrief.priorFailureReason
-    delete contractWithoutDuplicatedBrief.expectedOriginalDigest
     const completeDocumentContract =
       contractWithoutDuplicatedBrief.completeDocumentContract
     if (
@@ -328,26 +327,44 @@ function formatContract(request: WorkerDispatchRequest): string {
       } = completeDocumentContract as Record<string, unknown>
       contractWithoutDuplicatedBrief.completeDocumentContract = {
         ...authorDocumentContract,
-        authorOutput: {
-          format: 'strict_structured_block_payload',
-          fields: {
-            title: 'one human-readable document title',
-            executiveSummary: 'complete authority-index body',
-            sections: Array.isArray(sections)
-              ? sections.map(value => ({
-                  sectionId: (value as Record<string, unknown>).sectionId,
-                  body: 'complete body only; service supplies the heading and marker',
-                }))
-              : sections,
-            materials: Array.isArray(productionMaterials)
-              ? productionMaterials.map(value => ({
-                  materialId: (value as Record<string, unknown>).materialId,
-                  body: 'complete material body only; service supplies the heading and marker',
-                }))
+        mechanicalMarkdownProtocol: {
+          documentTitle: {
+            position: 'first_non_blank_line',
+            headingPrefix: '# ',
+          },
+          executiveSummary: {
+            heading: '## Executive Summary',
+          },
+          sections: Array.isArray(sections)
+            ? sections.map(value => {
+                const section = value as Record<string, unknown>
+                return {
+                  ...section,
+                  heading: `## ${section.title}`,
+                }
+              })
+            : sections,
+          productionMaterials: {
+            heading: '## Production Materials',
+            entries: Array.isArray(productionMaterials)
+              ? productionMaterials.map(value => {
+                  const material = value as Record<string, unknown>
+                  return {
+                    ...material,
+                    heading: `### ${material.title}`,
+                  }
+                })
               : productionMaterials,
           },
-          exactCoverage: 'all IDs exactly once; no extra, missing or empty blocks',
-          mechanicalFields: 'do not return headings, markers, frontmatter, document_id, version or updated_at',
+          closedHeadingSet: [
+            '## Executive Summary',
+            ...(Array.isArray(sections)
+              ? sections.map(value => `## ${(value as Record<string, unknown>).title}`)
+              : []),
+            '## Production Materials',
+          ],
+          additionalH2: 'forbidden',
+          supportingContent: 'must be nested under one of the closed H2 headings',
         },
       }
     }
@@ -422,12 +439,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
               'Use the canonical form `- [ ] <stable-id> <observable check and evidence expectation>`; tables may add context but cannot replace checkbox tasks.',
               'Do not modify foundation documents, resources, the asset manifest or implementation files.',
             ].join(' ')
-          : request.contract.authoringMode === 'initial' ||
-              request.contract.authoringMode === 'parallel-draft'
+          : request.contract.authoringMode === 'parallel-draft'
             ? [
-                `Return exactly one StructuredOutput object for ${String(request.contract.foundationDocumentPath)}; do not return Markdown, a code fence, headings, markers, frontmatter, document_id, version or updated_at.`,
-                'The object must contain only title, executiveSummary, sections and materials. title is plain one-line text without a leading #. sections and materials are objects keyed by every exact contract ID; provide every body exactly once and do not add keys. Bodies must not contain H1/H2 headings; section bodies may use only nested H3/H4 headings and material bodies must match their declared format. The service supplies all canonical headings, markers, frontmatter and order.',
-                'This is one complete human development discipline assignment. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.',
+                `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation.`,
                 ...((Array.isArray(request.contract.availableUpstreamPaths)
                   ? request.contract.availableUpstreamPaths
                   : Array.isArray(request.contract.upstreamDocumentPaths)
@@ -442,7 +456,16 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                     ]),
                 FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
                 DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. Do not claim verified license status without concrete evidence.',
+                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn, so do not add a redundant final verification or explanation pass.',
+              ].join(' ')
+            : request.contract.authoringMode === 'initial'
+              ? [
+                  `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation. This is one complete human development discipline assignment. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
+                  'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. The first non-blank line must be the single # document title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter or beegame protocol comments. BGS injects document_id, version and updated_at deterministically. BGS injects all beegame protocol comments after the turn. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
+                  FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
+                  DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
+                  'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. Do not author .beegame metadata. Do not claim verified license status without concrete evidence.',
+                  'BGS performs mechanical contract validation after the turn and the dedicated Review stage owns independent audit; do not launch or wait for an independent review or audit.',
                   ...(request.contract.foundationDocumentPath ===
                   'docs/ASSET_PLAN.md'
                     ? [
@@ -540,7 +563,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||
           request.contract.authoringMode === 'parallel-draft')
-        ? 'Return exactly one native StructuredOutput object matching the closed author payload schema. The service commits the payload as canonical Markdown after strict schema and complete-document validation; end the turn after the structured result.'
+        ? ''
         : request.contract.authoringMode === 'initial'
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
