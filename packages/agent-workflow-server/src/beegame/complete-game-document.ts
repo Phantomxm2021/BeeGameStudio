@@ -5,7 +5,8 @@ import {
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
 
-const MARKDOWN_DOCUMENT_REFERENCE = /docs\/[A-Za-z0-9._/-]+\.md/g
+const MARKDOWN_DOCUMENT_REFERENCE =
+  /docs\/[A-Za-z0-9_/-]+(?:\.[A-Za-z0-9_-]+)*/g
 
 function assertCanonicalMarkdownReferences(markdown: string): void {
   const canonical = new Set(CANONICAL_FOUNDATION_DOCUMENTS)
@@ -89,10 +90,29 @@ export function assertMaterialFormat(
   materialId: string,
 ): void {
   const lines = body.split('\n').map(line => line.trim())
+  const tableBlocks = lines.reduce<string[][]>((blocks, line) => {
+    if (!line.startsWith('|') || !line.endsWith('|')) return [...blocks, []]
+    const block = blocks.at(-1)
+    if (block) block.push(line)
+    else blocks.push([line])
+    return blocks
+  }, []).filter(block => block.length > 0)
+  const validTableBlock = (tableLines: readonly string[]) => {
+    const widths = tableLines.map(line =>
+      line.split('').reduce(
+        (count, character, index, source) =>
+          character === '|' && source[index - 1] !== '\\' ? count + 1 : count,
+        0,
+      ),
+    )
+    return tableLines.length >= 3 &&
+      widths[0]! >= 3 &&
+      widths.every(width => width === widths[0]) &&
+      tableLines.some(line => line.includes('---'))
+  }
   const valid =
     format === 'markdown_table' || format === 'evidence_register'
-      ? lines.filter(line => line.startsWith('|') && line.endsWith('|')).length >= 3 &&
-        lines.some(line => line.includes('---'))
+      ? tableBlocks.length > 0 && tableBlocks.every(validTableBlock)
       : format === 'mermaid'
         ? lines.includes('```mermaid') && lines.includes('```')
         : (body.includes('<svg ') || body.includes('<svg>')) &&
@@ -132,20 +152,6 @@ export function isCompleteGameDocumentMarkdownStructure(
   const actualH3 = materialHeadings.map(heading => heading.text)
   if (!exactSequence(actualH3, expectedH3))
     return false
-  const lines = body.split('\n')
-  try {
-    for (const [index, material] of contract.productionMaterials.entries()) {
-      const heading = materialHeadings[index]
-      if (!heading) return false
-      const nextHeading = materialHeadings[index + 1]
-      const materialBody = lines
-        .slice(heading.lineIndex + 1, nextHeading?.lineIndex ?? lines.length)
-        .join('\n')
-      assertMaterialFormat(material.format, materialBody, material.materialId)
-    }
-  } catch {
-    return false
-  }
   return true
 }
 
@@ -154,129 +160,6 @@ function exactSequence(actual: readonly string[], expected: readonly string[]): 
     actual.length === expected.length &&
     expected.every((heading, index) => actual[index] === heading)
   )
-}
-
-const BALANCE_INLINE_CODE = /(?<!`)`([^`\n]+)`(?!`)/g
-const BALANCE_SYMBOLIC_REFERENCE_PATTERN = '(?:[A-Z]\\d+[A-Z]?|[A-Z][A-Z0-9]*(?:[_-][A-Z0-9*]+)+|[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*\\.(?:[a-z][a-z0-9_]*|\\*))'
-const BALANCE_SYMBOLIC_REFERENCE_TOKEN = `(?<![A-Za-z0-9_])${BALANCE_SYMBOLIC_REFERENCE_PATTERN}(?![A-Za-z0-9_*])`
-const BALANCE_SYMBOLIC_REFERENCE = new RegExp(BALANCE_SYMBOLIC_REFERENCE_TOKEN, 'g')
-const BALANCE_MERMAID_FENCE = /```mermaid[^\n]*\n([\s\S]*?)```/g
-const BALANCE_MERMAID_EDGE_LABEL = /(?:[-=.~]+>)\|([^|\n]+)\|/g
-const BALANCE_MERMAID_NODE_DECLARATION = /(^|\s)([A-Za-z][A-Za-z0-9_.-]*)\s*\[([^\]\n]*)\]/gm
-const BALANCE_MERMAID_NODE_REFERENCE = /(^|\s)([A-Z]\d+)(?=\s*(?:\[|[-=.~]+>|$))/gm
-const BALANCE_RANGE = /\b[A-Za-z_]*\d[A-Za-z0-9_]*\s*[–—-]\s*[A-Za-z_]*\d[A-Za-z0-9_]*\b/
-const BALANCE_FORMULA_CALL = /\b[A-Za-z_][A-Za-z0-9_]*\s*\([^()\n]*\)/
-const BALANCE_SYMBOLIC_EXPRESSION = new RegExp(
-  `${BALANCE_SYMBOLIC_REFERENCE_TOKEN}\\s*(?:[+*/×÷−=<>≤≥^]|!=|==|<=|>=)\\s*${BALANCE_SYMBOLIC_REFERENCE_TOKEN}|${BALANCE_SYMBOLIC_REFERENCE_TOKEN}\\s+-\\s+${BALANCE_SYMBOLIC_REFERENCE_TOKEN}`,
-)
-const BALANCE_NUMERIC_LITERAL = /(?<![A-Za-z_])(?:\d+(?:\.\d+)?|\.\d+)(?:\s*%)?(?![A-Za-z_])/u
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function collectBalanceOwnerReferences(
-  body: string,
-  references: Set<string>,
-): void {
-  BALANCE_SYMBOLIC_REFERENCE.lastIndex = 0
-  for (const match of body.matchAll(BALANCE_SYMBOLIC_REFERENCE)) {
-    const reference = match[0]!
-    references.add(reference)
-    const parts = reference.split(/([_-])/)
-    for (let index = 1; index < parts.length - 1; index += 2)
-      references.add(`${parts.slice(0, index + 1).join('')}*`)
-    const dottedParts = reference.split('.')
-    for (let index = 1; index < dottedParts.length; index += 1)
-      references.add(`${dottedParts.slice(0, index).join('.')}.*`)
-  }
-  BALANCE_SYMBOLIC_REFERENCE.lastIndex = 0
-}
-
-function stripAllowedMermaidReferenceLists(
-  body: string,
-  allowedReferences: ReadonlySet<string>,
-): string {
-  BALANCE_MERMAID_FENCE.lastIndex = 0
-  return body.replace(BALANCE_MERMAID_FENCE, (fence: string) => {
-    BALANCE_MERMAID_EDGE_LABEL.lastIndex = 0
-    const withoutReferenceLists = fence.replace(BALANCE_MERMAID_EDGE_LABEL, (label: string, references: string) => {
-      const listedReferences = references
-        .trim()
-        .split(/\s*(?:\/|,|、)\s*/)
-      if (
-        listedReferences.length > 0 &&
-        listedReferences.every((reference: string) => allowedReferences.has(reference))
-      )
-        return label.replace(references, ' '.repeat(references.length))
-      return label
-    })
-    BALANCE_MERMAID_NODE_REFERENCE.lastIndex = 0
-    return withoutReferenceLists.replace(BALANCE_MERMAID_NODE_REFERENCE, '$1 ')
-  })
-}
-
-function assertNoMermaidOwnerAliases(
-  body: string,
-  materialId: string,
-  allowedReferences: ReadonlySet<string>,
-): void {
-  BALANCE_MERMAID_FENCE.lastIndex = 0
-  body.replace(BALANCE_MERMAID_FENCE, (_fence: string, mermaidBody: string) => {
-    BALANCE_MERMAID_NODE_DECLARATION.lastIndex = 0
-    for (const match of mermaidBody.matchAll(BALANCE_MERMAID_NODE_DECLARATION)) {
-      const nodeId = match[2]!.trim()
-      const label = match[3]!.trim().replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, '$1$2')
-      if (!allowedReferences.has(nodeId) && allowedReferences.has(label))
-        throw new Error(`Balance reference-only material contains undeclared Mermaid node alias: ${materialId}`)
-    }
-    return _fence
-  })
-}
-
-function assertBalanceReferenceOnlyMaterial(
-  body: string,
-  materialId: string,
-  materialTitle: string,
-  structuralReferences: ReadonlySet<string>,
-): void {
-  const allowedReferences = new Set([
-    ...structuralReferences,
-    materialId,
-    materialTitle,
-  ])
-  assertNoMermaidOwnerAliases(body, materialId, allowedReferences)
-  for (const match of body.matchAll(BALANCE_INLINE_CODE)) {
-    const code = match[1]!.trim()
-    if (allowedReferences.has(code))
-      continue
-    throw new Error(`Balance reference-only material contains non-reference inline code: ${materialId}`)
-  }
-
-  const formulaScanBody = stripAllowedMermaidReferenceLists(body, allowedReferences)
-  if (BALANCE_FORMULA_CALL.test(formulaScanBody))
-    throw new Error(`Balance reference-only material contains a complete formula expression: ${materialId}`)
-  if (BALANCE_SYMBOLIC_EXPRESSION.test(formulaScanBody))
-    throw new Error(`Balance reference-only material contains a complete formula expression: ${materialId}`)
-  if (BALANCE_RANGE.test(body))
-    throw new Error(`Balance reference-only material contains a copied range: ${materialId}`)
-
-  const structuralReferencePattern = [...new Set([
-    ...structuralReferences,
-    materialId,
-    materialTitle,
-  ])]
-    .sort((left, right) => right.length - left.length)
-    .map(escapeRegExp)
-    .join('|')
-  const structuralReferenceToken = new RegExp(
-    `(?<![A-Za-z0-9_])(?:${structuralReferencePattern})(?![A-Za-z0-9_*])`,
-    'g',
-  )
-  const withoutReferences = stripAllowedMermaidReferenceLists(body, allowedReferences)
-    .replace(structuralReferenceToken, ' ')
-  if (BALANCE_NUMERIC_LITERAL.test(withoutReferences))
-    throw new Error(`Balance reference-only material contains a copied numeric literal: ${materialId}`)
 }
 
 function substantiveContentBlocks(lines: readonly string[]): string[] {
@@ -457,19 +340,6 @@ export function validateCompleteGameDocumentMarkdown(
   const documentEnd = auditIndex >= 0 ? auditIndex : lines.length
   const sectionIndexes = sectionMarkers.map(marker => lines.indexOf(marker))
   const materialIndexes = materialMarkers.map(marker => lines.indexOf(marker))
-  const balanceStructuralReferences =
-    path === 'docs/BALANCE_DESIGN.md'
-      ? new Set<string>([
-          ...CANONICAL_FOUNDATION_DOCUMENTS,
-          ...contract.sections.flatMap(section => [
-            section.title,
-            `## ${section.title}`,
-          ]),
-          ...contract.productionMaterials
-            .filter(material => material.authorityMode === 'owner')
-            .flatMap(material => [material.materialId, material.title]),
-        ])
-      : undefined
   const orderedIndexes = [
     summaryIndex,
     ...sectionIndexes,
@@ -504,11 +374,6 @@ export function validateCompleteGameDocumentMarkdown(
     if (heading?.value !== `## ${section.title}`)
       throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
     assertNonEmptyRange(lines, heading.index, end, `section:${section.sectionId}`)
-    if (balanceStructuralReferences)
-      collectBalanceOwnerReferences(
-        lines.slice(heading.index + 1, end).join('\n'),
-        balanceStructuralReferences,
-      )
   })
   validateSectionHeadingStructure(
     contract.sections.map((section, index) => {
@@ -524,6 +389,7 @@ export function validateCompleteGameDocumentMarkdown(
 
   if (nextNonBlankLine(lines, productionIndex)?.value !== '## Production Materials')
     throw new Error('complete game document production materials heading is invalid')
+
   contract.productionMaterials.forEach((material, index) => {
     const start = materialIndexes[index]!
     const end = materialIndexes[index + 1] ?? documentEnd
@@ -536,15 +402,6 @@ export function validateCompleteGameDocumentMarkdown(
       materialBody,
       material.materialId,
     )
-    if (path === 'docs/BALANCE_DESIGN.md' && material.authorityMode === 'reference_only')
-      assertBalanceReferenceOnlyMaterial(
-        materialBody,
-        material.materialId,
-        material.title,
-        balanceStructuralReferences!,
-      )
-    if (balanceStructuralReferences && material.authorityMode === 'owner')
-      collectBalanceOwnerReferences(materialBody, balanceStructuralReferences)
   })
 
   if (auditIndex >= 0) {

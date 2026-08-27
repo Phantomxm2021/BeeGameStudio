@@ -103,8 +103,6 @@ export function recordFoundationFailure(
   state: FoundationDraftState,
   path: FoundationDocumentPath,
   reason: string,
-  status: Extract<FoundationAuthoringStatus, 'pending' | 'needs_action'> =
-    'pending',
 ): FoundationDraftState {
   if (!reason.trim()) throw new Error('foundation failure reason is required')
   const current = checkpoint(state, path)
@@ -112,7 +110,7 @@ export function recordFoundationFailure(
     throw new Error(`foundation document has no active dispatch: ${path}`)
   return replace(state, path, value => ({
     ...value,
-    status,
+    status: 'needs_action',
     dispatch: undefined,
     failureReason: reason,
   }))

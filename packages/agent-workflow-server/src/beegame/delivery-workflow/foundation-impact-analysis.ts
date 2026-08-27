@@ -86,7 +86,13 @@ function canonicalSection(
   if (typeof sectionId !== 'string' || sectionId.trim().length === 0)
     throw new Error('foundation impact operation section is invalid')
   const contract = getGameDocumentContract(documentPath as FoundationDocumentPath)
-  if (!contract.sections.some(section => section.sectionId === sectionId))
+  const isCanonicalSection = contract.sections.some(
+    section => section.sectionId === sectionId,
+  )
+  const isCanonicalMaterial = contract.productionMaterials.some(
+    material => `material.${material.materialId}` === sectionId,
+  )
+  if (!isCanonicalSection && !isCanonicalMaterial)
     throw new Error(
       `foundation impact operation section is not canonical: ${documentPath}#${sectionId}`,
     )

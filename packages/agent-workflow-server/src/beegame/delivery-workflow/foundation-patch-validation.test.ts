@@ -99,7 +99,8 @@ function productionFixture(): {
     'docs/AUDIO_DESIGN.md',
     'docs/ASSET_PLAN.md',
   ] as FoundationDocumentPath[]) {
-    for (const [index, definition] of getGameDocumentContract(documentPath).sections.entries()) {
+    const contract = getGameDocumentContract(documentPath)
+    for (const [index, definition] of contract.sections.entries()) {
       const ref: SectionRef = {
         documentPath,
         sectionId: definition.sectionId,
@@ -110,6 +111,19 @@ function productionFixture(): {
       }
       sectionIndex.push(ref)
       sections.set(`${documentPath}\0${definition.sectionId}`, ref)
+    }
+    for (const [index, material] of contract.productionMaterials.entries()) {
+      const sectionId = `material.${material.materialId}`
+      const ref: SectionRef = {
+        documentPath,
+        sectionId,
+        heading: material.title,
+        startLine: contract.sections.length + index + 1,
+        endLine: contract.sections.length + index + 3,
+        digest: 'a'.repeat(64),
+      }
+      sectionIndex.push(ref)
+      sections.set(`${documentPath}\0${sectionId}`, ref)
     }
   }
   const factStore = FOUNDATION_FACT_CATALOG.map(definition => {

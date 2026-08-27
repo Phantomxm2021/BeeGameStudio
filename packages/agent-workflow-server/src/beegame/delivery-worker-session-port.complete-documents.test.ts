@@ -89,7 +89,7 @@ describe('delivery worker complete document boundary', () => {
           authoringMode: 'initial',
           documentSet: 'foundation',
           foundationDocumentPath: 'docs/UI_UX_SPEC.md',
-          upstreamDocumentPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+          availableUpstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
         },
       } as never)
       expect(block).not.toContain(

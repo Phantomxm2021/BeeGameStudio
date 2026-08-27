@@ -236,8 +236,8 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     ),
     list(
       'balance.variable_ids',
-      owner('docs/BALANCE_DESIGN.md', 'units_variables'),
-      'Read stable balance variable identifiers.',
+      owner('docs/BALANCE_DESIGN.md', 'material.variable-parameter-table'),
+      'Read stable numeric balance variable identifiers from the canonical variable-parameter-table; do not infer them from Units, Variables and Conventions prose.',
       ['balance-variable-coverage'],
     ),
     list(

@@ -1098,7 +1098,7 @@ async function createCanonicalReceiptRecoveryFixture(input?: {
       documentSet: 'foundation',
       authoringMode: 'initial',
       foundationDocumentPath: firstPath,
-      upstreamDocumentPaths: [],
+      availableUpstreamPaths: [],
     },
   }
   const rawSnapshot: Record<string, unknown> = {
@@ -3420,7 +3420,7 @@ describe('delivery workflow recovery', () => {
     expect(closed).toHaveLength(paths.length)
   })
 
-  test('isolates one invalid foundation terminal while another author keeps running', async () => {
+  test('fails closed on one invalid foundation terminal while preserving sibling evidence', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-isolation-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -3477,13 +3477,13 @@ describe('delivery workflow recovery', () => {
       dispatcher.completeDispatch(failed.dispatchId, {}),
     ).rejects.toThrow('invalid worker terminal result')
     const saved = await store.load()
-    expect(saved?.status).toBe('running')
+    expect(saved?.status).toBe('needs_action')
     expect(
       saved?.foundationDraftState.documents?.find(
         document => document.path === 'docs/LEVEL_SCENE_DESIGN.md',
       ),
     ).toMatchObject({
-      status: 'pending',
+      status: 'needs_action',
       failureReason: expect.any(String),
     })
     expect(
@@ -3493,7 +3493,7 @@ describe('delivery workflow recovery', () => {
     ).toBe(running.dispatchId)
   })
 
-  test('returns a failed parallel document to pending and keeps the run running', async () => {
+  test('fails a parallel document closed without returning it to pending', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-dispatch-failure-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -3546,12 +3546,13 @@ describe('delivery workflow recovery', () => {
     ).rejects.toThrow('canonical heading missing')
 
     expect(await store.load()).toMatchObject({
-      status: 'running',
+      status: 'needs_action',
+      blockedReason: 'canonical heading missing',
       foundationDraftState: {
         documents: expect.arrayContaining([
           expect.objectContaining({
             path,
-            status: 'pending',
+            status: 'needs_action',
             failureReason: 'canonical heading missing',
           }),
         ]),
@@ -3559,7 +3560,7 @@ describe('delivery workflow recovery', () => {
     })
   })
 
-  test('automatically retries a parallel document with its prior failure diagnostic', async () => {
+  test('does not automatically retry a failed parallel document', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-prior-failure-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -3602,32 +3603,28 @@ describe('delivery workflow recovery', () => {
     await controller.store.save(run)
 
     await expect(controller.resume(run)).rejects.toThrow('provider disconnected')
-    for (let index = 0; index < 400 && prompts.length < 2; index += 1)
-      await new Promise(resolve => setTimeout(resolve, 5))
-
-    expect(started).toHaveLength(2)
-    expect(started[1]?.contract.priorFailureReason).toBe('provider disconnected')
-    expect(prompts[1]).toContain('provider disconnected')
-    const retried = await controller.store.load()
-    const retriedDocument = retried?.foundationDraftState.documents?.find(
+    expect(started).toHaveLength(1)
+    expect(prompts).toHaveLength(1)
+    const failed = await controller.store.load()
+    const failedDocument = failed?.foundationDraftState.documents?.find(
       document => document.path === path,
     )
-    expect(retried).toMatchObject({
-      status: 'running',
+    expect(failed).toMatchObject({
+      status: 'needs_action',
+      blockedReason: 'provider disconnected',
       foundationDraftState: {
         documents: expect.arrayContaining([
           expect.objectContaining({
             path,
-            status: 'drafting',
+            status: 'needs_action',
           }),
         ]),
       },
     })
-    expect(retriedDocument?.path).toBe(path)
-    expect(retriedDocument?.failureReason).toBeUndefined()
+    expect(failedDocument?.failureReason).toBe('provider disconnected')
   })
 
-  test('refills a parallel foundation slot while sibling authors remain open', async () => {
+  test('does not refill a failed parallel foundation slot while sibling evidence remains open', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-parallel-refill-'))
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-parallel-refill',
@@ -3705,21 +3702,18 @@ describe('delivery workflow recovery', () => {
     ])
     rejectFirstBalanceTerminal!(new Error('balance heading missing'))
     await resuming
-    for (let index = 0; index < 400 && started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md').length < 2; index += 1)
+    for (let index = 0; index < 400 && (await controller.store.load())?.status !== 'needs_action'; index += 1)
       await new Promise(resolve => setTimeout(resolve, 5))
-
-    expect(started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md')).toHaveLength(2)
+    expect(started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md')).toHaveLength(1)
     expect(started.filter(request => request.taskId === 'docs/ART_DIRECTION.md')).toHaveLength(1)
     expect(started.filter(request => request.taskId === 'docs/UI_UX_SPEC.md')).toHaveLength(1)
-    expect(
-      started.find(request => request.taskId === 'docs/BALANCE_DESIGN.md' && request.contract.priorFailureReason)?.contract.priorFailureReason,
-    ).toBe('balance heading missing')
+    expect(started.some(request => request.contract.priorFailureReason)).toBe(false)
     const saved = await controller.store.load()
-    expect(saved?.status).toBe('running')
-    expect(saved?.blockedReason).toBeUndefined()
+    expect(saved?.status).toBe('needs_action')
+    expect(saved?.blockedReason).toBe('balance heading missing')
   })
 
-  test('automatically restarts a failed initial document author with its diagnostic', async () => {
+  test('does not automatically restart a failed initial document author', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-initial-foundation-retry-'))
     const initial = createTestDeliveryRun({
       runId: 'run-initial-foundation-retry',
@@ -3759,18 +3753,12 @@ describe('delivery workflow recovery', () => {
     await controller.store.save(run)
 
     await expect(controller.resume(run)).rejects.toThrow('initial provider disconnected')
-    for (let index = 0; index < 400 && prompts.length < 2; index += 1)
-      await new Promise(resolve => setTimeout(resolve, 5))
-
-    expect(started).toHaveLength(2)
-    expect(started[1]?.contract.authoringMode).toBe('initial')
-    expect(started[1]?.contract.priorFailureReason).toBe(
-      'initial provider disconnected',
-    )
-    expect(prompts[1]).toContain('initial provider disconnected')
+    expect(started).toHaveLength(1)
+    expect(prompts).toHaveLength(1)
     expect(await controller.store.load()).toMatchObject({
-      status: 'running',
-      activeDispatch: { status: 'running' },
+      status: 'needs_action',
+      blockedReason: 'initial provider disconnected',
+      activeDispatch: { status: 'failed' },
     })
   })
 
@@ -3837,7 +3825,7 @@ describe('delivery workflow recovery', () => {
     })
   })
 
-  test('restarts an orphaned parallel author as a pending running document', async () => {
+  test('fails an orphaned parallel author closed without starting a replacement', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-orphan-'))
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-orphan',
@@ -3906,21 +3894,18 @@ describe('delivery workflow recovery', () => {
     await controller.resume(run)
 
     expect(await controller.store.load()).toMatchObject({
-      status: 'running',
+      status: 'needs_action',
+      blockedReason: 'preserved native document session is unavailable',
       foundationDraftState: {
         documents: expect.arrayContaining([
           expect.objectContaining({
             path,
-            status: 'drafting',
+            status: 'needs_action',
           }),
         ]),
       },
     })
-    expect(started).toHaveLength(1)
-    expect(started[0]?.taskId).toBe(path)
-    expect(started[0]?.contract.priorFailureReason).toBe(
-      'preserved native document session is unavailable',
-    )
+    expect(started).toHaveLength(0)
   })
 
   test('claims the first dispatch durably across independent dispatcher instances', async () => {
@@ -5012,7 +4997,7 @@ describe('delivery workflow recovery', () => {
         documentSet: 'foundation',
         authoringMode: 'initial',
         foundationDocumentPath: activePath,
-        upstreamDocumentPaths: [],
+        availableUpstreamPaths: [],
       },
     }
     await writeFile(

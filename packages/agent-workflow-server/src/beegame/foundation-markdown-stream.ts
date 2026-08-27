@@ -29,6 +29,7 @@ type StreamState = {
   textBlockIndex?: number
   textBlockStarted: boolean
   textBlockClosed: boolean
+  textBlocks: string[]
   terminal: boolean
   receivedBytes: number
   eventIds: Set<string>
@@ -54,6 +55,7 @@ export async function createFoundationMarkdownStreamSink(
   const state: StreamState = {
     textBlockStarted: false,
     textBlockClosed: false,
+    textBlocks: [],
     terminal: false,
     receivedBytes: 0,
     eventIds: new Set(),
@@ -104,6 +106,7 @@ export async function createFoundationMarkdownStreamSink(
         state.textBlockStarted = true
         state.textBlockClosed = false
         state.textBlockIndex = index
+        state.textBlocks.push('')
         return
       }
       if (eventType === 'content_block_delta') {
@@ -120,6 +123,7 @@ export async function createFoundationMarkdownStreamSink(
           return
         }
         state.receivedBytes += bytes
+        state.textBlocks[state.textBlocks.length - 1] += text
         writeTail = writeTail.then(() => appendFile(pendingPath, text, 'utf8'))
         return
       }
@@ -138,8 +142,9 @@ export async function createFoundationMarkdownStreamSink(
         throw new Error('foundation Markdown stream has no complete terminal response')
       if (state.receivedBytes === 0)
         throw new Error('foundation Markdown stream is empty')
+      const authoredBody = mergeTextBlocks(state.textBlocks)
+      await writeFile(pendingPath, authoredBody, 'utf8')
       await syncFile(pendingPath)
-      const authoredBody = await readFile(pendingPath, 'utf8')
       return commitAuthoredFoundationDocument({
         workspacePath: contract.workspacePath,
         dispatchId: contract.dispatchId,
@@ -154,6 +159,17 @@ export async function createFoundationMarkdownStreamSink(
       await writeTail
     },
   }
+}
+
+function mergeTextBlocks(blocks: readonly string[]): string {
+  return blocks.reduce((document, block) => {
+    if (!document) return block
+    const trailingLineStart = document.lastIndexOf('\n') + 1
+    const trailingLine = document.slice(trailingLineStart)
+    return trailingLine && block.startsWith(trailingLine)
+      ? document.slice(0, trailingLineStart) + block
+      : document + block
+  }, '')
 }
 
 export function foundationMarkdownPendingPath(

@@ -73,8 +73,10 @@ function fixtureDocuments(overrides: Partial<Record<string, string>> = {}): Map<
       lines.push(...(byOwner.get(`${path}\0${section.sectionId}`) ?? ['authored content']), '')
     }
     lines.push('<!-- beegame-production-materials -->', '## Production Materials', '')
-    for (const material of contract.productionMaterials)
-      lines.push(`<!-- beegame-material:${material.materialId} -->`, `### ${material.title}`, '', `material ${material.materialId}`, '')
+    for (const material of contract.productionMaterials) {
+      lines.push(`<!-- beegame-material:${material.materialId} -->`, `### ${material.title}`, '')
+      lines.push(...(byOwner.get(`${path}\0material.${material.materialId}`) ?? [`material ${material.materialId}`]), '')
+    }
     return [path, `${lines.join('\n')}\n`] as const
   }))
 }

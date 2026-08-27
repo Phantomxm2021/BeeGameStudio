@@ -11,7 +11,7 @@ const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Judge quality by distinct implementable decisions and traceability, not document length. Use the minimum sufficient headings, tables, rows, diagrams and examples. Do not expand a contract purpose phrase by phrase into H3 headings. Represent each decision in one authoritative prose, table or diagram representation; elsewhere use a stable owner reference. Do not narrate tables or diagrams. Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate. Record a genuinely N/A item once with its reason and impact; never invent a system. Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets. Treat each section as the final decision record: Complete every required section and production material, omit only equivalent repetition, and keep rationale to the minimum needed for a production decision.'
 
 const FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION =
-  'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Define each authoritative fact once and prefer production-dense tables or matrices when they add implementation authority. Use one representation per fact: Owner materials are the authoritative representation for their facts, while Reference-only materials contain stable owner references and must not copy mutable literals or formulas. Reference-only materials contain only source-derived stable owner IDs, canonical owner section/material references, and structural relationships that connect those references; they must not repeat mutable literals, formulas, results, totals, timing, steps, order, ranks, counts, or any other owner fact. For reference-only tables, use columns for owner references and relationship context only; merge all facts into owner representations. Within this document, define each mutable fact in one owner section or representation. In reference-only Mermaid materials, node identifiers and labels must directly reuse source-derived canonical owner IDs; must not rewrite, abbreviate or alias them. Executive Summary indexes authority; each material follows its own authorityMode and authorityRule: owner materials own canonical facts, while reference-only materials index stable owner references and omit equivalent repetition. Do not restate the confirmed brief, upstream authority or another section; reference stable authority. Downstream documents may specialize only already-authorized behavior and must not redefine upstream rules. Executive Summary is an authority index, not an independent fact owner. Follow each material authorityMode and authorityRule in the serialized contract.'
+  'Use exactly one fact owner: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Define each authoritative fact once and prefer production-dense tables or matrices when they add implementation authority. Use one representation per fact: Owner materials are the authoritative representation for their facts, while Reference-only materials contain stable owner references and must not copy mutable literals or formulas. Reference-only materials contain only source-derived stable owner IDs, canonical owner section/material references, and structural relationships that connect those references; they must not repeat mutable literals, formulas, results, totals, timing, steps, order, ranks, counts, or any other owner fact. For reference-only tables, use columns for owner references and relationship context only; merge all facts into owner representations. Within this document, define each mutable fact in one owner section or representation. In reference-only Mermaid materials, node identifiers and labels must directly reuse source-derived canonical owner IDs; must not rewrite, abbreviate or alias them. The `variable-parameter-table` material is the sole owner of every numeric `var.*` and `param.*` ID, unit, value and range; Units/Variables and Entity/Ability Parameters retain only semantic context and relationships, while Fact Store keeps `balance.entity_ids` on `entity_parameters` and `balance.variable_ids` on `material.variable-parameter-table`. Executive Summary indexes authority; each material follows its own authorityMode and authorityRule: owner materials own canonical facts, while reference-only materials index stable owner references and omit equivalent repetition. Do not restate the confirmed brief, upstream authority or another section; reference stable authority. Downstream documents may specialize only already-authorized behavior and must not redefine upstream rules. Executive Summary is an authority index, not an independent fact owner. Follow each material authorityMode and authorityRule in the serialized contract.'
 
 const FOUNDATION_AUTHOR_CLOSURE_CHECK =
   'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once; retain every required heading for N/A content and state its reason and impact. Return only the complete raw Markdown body.'
@@ -31,10 +31,11 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     request.contract.documentSet === 'foundation' &&
     (request.contract.authoringMode === 'initial' ||
       request.contract.authoringMode === 'parallel-draft')
-  const priorFailureReason = streamedFoundationAuthor &&
+  if (
+    streamedFoundationAuthor &&
     typeof request.contract.priorFailureReason === 'string'
-    ? request.contract.priorFailureReason
-    : undefined
+  )
+    throw new Error('foundation document author retry contract is removed')
   const resourceContentReadPaths =
     request.workerType === 'resource-content-author'
       ? [
@@ -67,9 +68,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       ? [
           ...(Array.isArray(request.contract.availableUpstreamPaths)
             ? request.contract.availableUpstreamPaths
-            : Array.isArray(request.contract.upstreamDocumentPaths)
-              ? request.contract.upstreamDocumentPaths
-              : []),
+            : []),
           request.contract.foundationDocumentPath,
         ].filter(
           (path, index, paths): path is string =>
@@ -103,9 +102,6 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       ? 'Markdown cross-document references may use only these exact canonical Foundation paths named above; any other docs/*.md reference is invalid, including inside code fences.'
       : undefined,
     workerInstruction(request),
-    priorFailureReason
-      ? `Automatic retry after the previous document-author failure: ${priorFailureReason}. Correct that failure in the assigned canonical Markdown document before ending the turn.`
-      : undefined,
     streamedFoundationAuthor
       ? undefined
       : 'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
@@ -318,10 +314,6 @@ function formatContract(request: WorkerDispatchRequest): string {
       String(request.contract.authoringMode),
     )
   if (initialFoundationAuthor) {
-    delete contractWithoutDuplicatedBrief.maxNativeWriteContentChars
-    delete contractWithoutDuplicatedBrief.nativeWriteLimit
-    delete contractWithoutDuplicatedBrief.upstreamDocumentPaths
-    delete contractWithoutDuplicatedBrief.priorFailureReason
     const completeDocumentContract =
       contractWithoutDuplicatedBrief.completeDocumentContract
     if (
@@ -455,9 +447,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation.`,
                 ...((Array.isArray(request.contract.availableUpstreamPaths)
                   ? request.contract.availableUpstreamPaths
-                  : Array.isArray(request.contract.upstreamDocumentPaths)
-                    ? request.contract.upstreamDocumentPaths
-                    : []
+                  : []
                 ).length > 0
                   ? [
                       'Use only the available committed upstream authority named by the contract. When an upstream path is present, use its committed authority; do not describe it as unavailable. Do not invent a second document track.',

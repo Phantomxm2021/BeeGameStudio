@@ -40,7 +40,11 @@ describe('foundation authority projection', () => {
     for (const targetPath of CANONICAL_FOUNDATION_DOCUMENTS.slice(1)) {
       const contract = getGameDocumentContract(targetPath)
       const input = sources(contract.upstreamSections.map(source => source.path))
-      const result = projectFoundationAuthority({ targetPath, ...input })
+      const result = projectFoundationAuthority({
+        targetPath,
+        availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+        ...input,
+      })
       const declared = contract.upstreamSections.flatMap(source =>
         source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
       )
@@ -66,7 +70,11 @@ describe('foundation authority projection', () => {
   test('projects only contracted Markdown section content in source order', () => {
     const targetPath = 'docs/UI_UX_SPEC.md'
     const input = sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'])
-    const result = projectFoundationAuthority({ targetPath, ...input })
+    const result = projectFoundationAuthority({
+      targetPath,
+      availableUpstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+      ...input,
+    })
     const selectedSections = new Set(
       getGameDocumentContract(targetPath).upstreamSections.flatMap(source =>
         source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
@@ -161,6 +169,7 @@ describe('foundation authority projection', () => {
     expect(() =>
       projectFoundationAuthority({
         targetPath,
+        availableUpstreamPaths: ['docs/GDD.md'],
         documents: new Map(),
       }),
     ).toThrow(/document.*missing/i)
@@ -178,6 +187,7 @@ describe('foundation authority projection', () => {
     expect(() =>
       projectFoundationAuthority({
         targetPath,
+        availableUpstreamPaths: ['docs/GDD.md'],
         documents: incompleteDocuments,
       }),
     ).toThrow(/section.*missing/i)
@@ -212,6 +222,11 @@ describe('foundation authority projection', () => {
     const result = projectFoundationAuthority({
       targetPath,
       targetSectionIds: ['runtime_state'],
+      availableUpstreamPaths: [
+        'docs/GDD.md',
+        'docs/LEVEL_SCENE_DESIGN.md',
+        'docs/BALANCE_DESIGN.md',
+      ],
       ...input,
     })
     const projectedIds = result.sources.flatMap(source =>
@@ -235,6 +250,7 @@ describe('foundation authority projection', () => {
   test('keeps transport verification metadata out of the model-facing projection', () => {
     const result = projectFoundationAuthority({
       targetPath: 'docs/UI_UX_SPEC.md',
+      availableUpstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
       ...sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']),
     })
     const modelBytes = modelFoundationAuthorityProjectionBytes(result)
@@ -255,5 +271,14 @@ describe('foundation authority projection', () => {
       }
     }
     expect(modelBytes).toContain('Owned source content for')
+  })
+
+  test('treats a missing available upstream selection as no available authority', () => {
+    const result = projectFoundationAuthority({
+      targetPath: 'docs/BALANCE_DESIGN.md',
+      ...sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']),
+    })
+
+    expect(result.sources).toEqual([])
   })
 })

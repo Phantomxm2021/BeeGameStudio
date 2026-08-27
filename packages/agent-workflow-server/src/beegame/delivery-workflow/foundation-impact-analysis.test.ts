@@ -88,6 +88,22 @@ describe('foundation revision impact analysis', () => {
     } satisfies FoundationImpactAnalysis)
   })
 
+  test('treats an owner production material as a canonical revision identity', () => {
+    const result = analyzeFoundationImpact([
+      operation('docs/BALANCE_DESIGN.md', 'material.variable-parameter-table', ['AUD-BALANCE']),
+    ])
+
+    expect(result.changedSections).toEqual([
+      {
+        documentPath: 'docs/BALANCE_DESIGN.md',
+        sectionId: 'material.variable-parameter-table',
+      },
+    ])
+    expect(result.factKeys).toEqual(['balance.variable_ids'])
+    expect(result.checkIds).toEqual(['balance-variable-coverage'])
+    expect(result.issueIds).toEqual(['AUD-BALANCE'])
+  })
+
   test('is stable when operations and issue IDs are reordered', () => {
     const first = analyzeFoundationImpact([
       operation('docs/ASSET_PLAN.md', 'dependencies', ['AUD-Z', 'AUD-Y']),

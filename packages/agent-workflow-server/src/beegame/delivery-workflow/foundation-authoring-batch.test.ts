@@ -84,7 +84,7 @@ describe('parallel foundation authoring batch', () => {
     expect(JSON.stringify(state)).not.toContain('draftDigest')
   })
 
-  test('commits directly from the active stream and isolates failures', () => {
+  test('commits directly from the active stream and fails closed without requeueing an author', () => {
     const state = beginParallelFoundationAuthoring(['docs/GDD.md'])
     expect(() =>
       recordFoundationCommit(state, 'docs/LEVEL_SCENE_DESIGN.md'),
@@ -110,10 +110,11 @@ describe('parallel foundation authoring batch', () => {
       'provider stopped',
     )
     expect(failed.documents?.[1]).toMatchObject({
-      status: 'pending',
+      status: 'needs_action',
       failureReason: 'provider stopped',
     })
     expect(failed.documents?.[2]?.status).toBe('pending')
+    expect(readyDraftPaths(failed)).toEqual([])
   })
 
 })

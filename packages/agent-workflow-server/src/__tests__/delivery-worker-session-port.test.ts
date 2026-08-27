@@ -1034,7 +1034,7 @@ describe('delivery worker session credentials', () => {
         contract: {
           authoringMode: 'initial',
           foundationDocumentPath: 'docs/GDD.md',
-          upstreamDocumentPaths: [],
+          availableUpstreamPaths: [],
         },
       })
       expect(block).toBe('')
@@ -1076,7 +1076,7 @@ describe('delivery worker session credentials', () => {
         authoringMode: 'initial',
         documentSet: 'foundation',
         foundationDocumentPath: 'docs/GDD.md',
-        upstreamDocumentPaths: [],
+        availableUpstreamPaths: [],
         completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
       },
     }
@@ -1133,7 +1133,7 @@ describe('delivery worker session credentials', () => {
         authoringMode: 'initial',
         documentSet: 'foundation',
         foundationDocumentPath: 'docs/GDD.md',
-        upstreamDocumentPaths: [],
+        availableUpstreamPaths: [],
         completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
       },
     }
@@ -1159,7 +1159,7 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('keeps retry failure evidence once across every foundation author mode and document', async () => {
+  test('does not synthesize retry failure evidence for any foundation author', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'document-prompt-retry-dedup-'))
     let submittedPrompt = ''
     let sessionCount = 0
@@ -1212,9 +1212,8 @@ describe('delivery worker session credentials', () => {
               documentSet: 'foundation',
               foundationDocumentPath: path,
               completeDocumentContract: contract,
-              priorFailureReason: reason,
               ...(authoringMode === 'initial'
-                ? { upstreamDocumentPaths: contract.upstreamSections.map(source => source.path) }
+                ? { availableUpstreamPaths: contract.upstreamSections.map(source => source.path) }
                 : { availableUpstreamPaths: [] }),
             },
           }
@@ -1227,7 +1226,7 @@ describe('delivery worker session credentials', () => {
           await port.start(request)
           await port.submit(dispatchId, buildWorkerPrompt(request))
 
-          expect(countOccurrences(submittedPrompt, reason)).toBe(1)
+          expect(countOccurrences(submittedPrompt, reason)).toBe(0)
           expect(submittedPrompt).not.toContain('"priorFailureReason"')
           if (authoringMode === 'parallel-draft')
             expect(submittedPrompt).not.toContain('this initial stream')
@@ -1574,7 +1573,7 @@ describe('delivery worker session credentials', () => {
         contract: {
           authoringMode: 'initial',
           foundationDocumentPath: 'docs/GDD.md',
-          upstreamDocumentPaths: [],
+          availableUpstreamPaths: [],
         },
       })
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -1630,7 +1629,7 @@ describe('delivery worker session credentials', () => {
         contract: {
           authoringMode: 'initial',
           foundationDocumentPath: 'docs/GDD.md',
-          upstreamDocumentPaths: [],
+          availableUpstreamPaths: [],
         },
       })
       await expect(
@@ -1673,7 +1672,7 @@ describe('delivery worker session credentials', () => {
       contract: {
         authoringMode: 'initial',
         foundationDocumentPath: 'docs/GDD.md',
-        upstreamDocumentPaths: [],
+        availableUpstreamPaths: [],
       },
     })
 
@@ -1735,7 +1734,7 @@ describe('delivery worker session credentials', () => {
       contract: {
         authoringMode: 'initial',
         foundationDocumentPath: 'docs/GDD.md',
-        upstreamDocumentPaths: [],
+        availableUpstreamPaths: [],
       },
     }
 

@@ -119,6 +119,68 @@ describe('foundation Markdown stream sink', () => {
     }
   })
 
+  test('replaces an incomplete trailing line replayed by a native continuation', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-line-replay-'))
+    try {
+      const markdown = renderTestCompleteGameDocument(
+        targetPath,
+        completeTestSubmission(targetPath),
+      )
+      const lineStart = markdown.indexOf('Production-ready Core and Session Loops')
+      const split = lineStart + 'Production-ready Core'.length
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-line-replay',
+        dispatchId: 'dispatch-line-replay',
+        targetPath,
+        maxBytes: 512_000,
+      })
+
+      for (const message of [
+        streamEvent({ type: 'message_start', message: { id: 'message-1' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: markdown.slice(0, split) },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({ type: 'message_stop' }),
+        streamEvent({ type: 'message_start', message: { id: 'message-2' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: markdown.slice(lineStart) },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({ type: 'message_stop' }),
+        { type: 'result', subtype: 'success', is_error: false },
+      ]) sink.observe(message)
+
+      await sink.commit()
+
+      expect(await readFile(
+        foundationMarkdownPendingPath(
+          workspacePath,
+          'run-line-replay',
+          'dispatch-line-replay',
+        ),
+        'utf8',
+      )).toBe(markdown)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('publishes ordered visible text once and keeps the body out of the receipt', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-stream-'))
     try {

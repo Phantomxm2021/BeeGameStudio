@@ -1959,12 +1959,11 @@ export function createDeliveryWorkflowController(input: {
           {
             ...run,
             foundationDraftState,
-            status: 'running',
-            blockedReason: undefined,
+            status: 'needs_action',
+            blockedReason: 'preserved native document session is unavailable',
           },
           'document.parallel.session_unavailable',
         )
-        if (recovered.status === 'running') await resumeUnlocked(recovered)
         return
       }
     }

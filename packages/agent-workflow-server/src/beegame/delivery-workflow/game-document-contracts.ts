@@ -103,7 +103,14 @@ const material = (
   authorityMode: GameDocumentProductionMaterialContract['authorityMode'],
   authorityRule: string,
 ): GameDocumentProductionMaterialContract =>
-  Object.freeze({ materialId, title, format, purpose, authorityMode, authorityRule })
+  Object.freeze({
+    materialId,
+    title,
+    format,
+    purpose,
+    authorityMode,
+    authorityRule,
+  })
 
 const upstream = (
   path: FoundationDocumentPath,
@@ -123,10 +130,7 @@ const PRODUCTION_MATERIALS = {
     material('scene-transition-diagram', 'Scene Transition Diagram', 'mermaid', 'Compact lifecycle evidence referencing scene_states and spawn_checkpoint decisions.', 'reference_only', 'Reference the Level scene_states and spawn_checkpoint owners; merge lifecycle rules there and omit duplicated transitions here.'),
   ],
   'docs/BALANCE_DESIGN.md': [
-    material('variable-parameter-table', 'Variable and Parameter Table', 'markdown_table', 'Canonical owner table for units, variables, values, ranges and source references.', 'owner', 'Own Balance units, variables, parameters, values, ranges and source references; all other Balance materials reference these owner IDs.'),
-    material('formula-boundary-table', 'Formula and Boundary Table', 'markdown_table', 'Reference-only structural view containing only source-derived owner IDs (including owner variables and formula IDs) and canonical owner section/material references; structural relationships may connect those references, but no literal values, formulas, results, totals, timing, steps, order, ranks, counts or other owner facts.', 'reference_only', 'Use only source-derived Balance variable and formula owner IDs, canonical owner section/material references, and structural relationships connecting those references; do not restate literal values, formulas, results, totals, timing, steps, order, ranks, counts or other owner facts. Keep table columns to owner references and relationship context only; merge all facts into owner sections/materials.'),
-    material('economy-flow-diagram', 'Economy Flow Diagram', 'mermaid', 'Reference-only structural view containing only source-derived owner IDs (including economy variables and formula IDs) and canonical owner section/material references; structural relationships may connect those references, but no literal values, formulas, results, totals, timing, steps, order, ranks, counts or other owner facts.', 'reference_only', 'Use only source-derived Balance economy owner IDs, canonical owner section/material references, and structural relationships connecting those references; do not restate literal values, formulas, results, totals, timing, steps, order, ranks, counts or other owner facts. Keep table columns to owner references and relationship context only; merge all facts into owner sections/materials. Mermaid node identifiers and labels must directly reuse source-derived canonical owner IDs; must not rewrite, abbreviate or alias them.'),
-    material('tuning-validation-matrix', 'Tuning Validation Matrix', 'markdown_table', 'Reference-only structural view containing only source-derived owner IDs (including tuning variables, formula and scenario IDs) and canonical owner section/material references; structural relationships may connect those references, but no literal values, formulas, results, totals, timing, steps, order, ranks, counts or other owner facts.', 'reference_only', 'Use only source-derived Balance tuning/scenario owner IDs, canonical owner section/material references, and structural relationships connecting those references; do not restate literal values, formulas, results, totals, timing, steps, order, ranks, counts or other owner facts. Keep table columns to owner references and relationship context only; merge all facts into owner sections/materials.'),
+    material('variable-parameter-table', 'Variable and Parameter Table', 'markdown_table', 'Canonical owner table for all numeric variable and parameter IDs (`var.*` and `param.*`), their units, values and ranges and source references; Section prose owns only semantics and relationships.', 'owner', 'Own all numeric `var.*` and `param.*` IDs, units, values, ranges and source references in Balance. `units_variables` and `entity_parameters` must not duplicate numeric values or ranges; they retain only semantic and relationship context.'),
   ],
   'docs/TECHNICAL_DESIGN.md': [
     material('architecture-diagram', 'Architecture Diagram', 'mermaid', 'Compact runtime boundary evidence referencing architecture decisions.', 'reference_only', 'Reference the Technical architecture owner; merge runtime boundaries into that section and omit duplicated component decisions here.'),
@@ -135,7 +139,7 @@ const PRODUCTION_MATERIALS = {
     material('save-recovery-table', 'Save and Recovery Table', 'markdown_table', 'Canonical computable persistence and recovery acceptance rows owning save_load decisions.', 'owner', 'Own canonical Technical persistence, migration, corruption and recovery acceptance rows; corresponding prose and other materials reference this table.'),
   ],
   'docs/ART_DIRECTION.md': [
-    material('visual-language-board', 'Visual Language Board', 'inline_svg', 'One compact visual-language board combining hierarchy, palette, silhouette and prohibited-direction evidence as unique visual acceptance evidence; reference visual_pillars and color_lighting, consume Level/UI geometry, and do not restate prose.', 'owner', 'Own the compact visual language and visual acceptance evidence; reference Level/UI geometry and omit Asset Plan resource, sourcing, licensing and schedule facts.'),
+    material('visual-language-board', 'Visual Language Board', 'markdown_table', 'One compact visual-language board combining hierarchy, palette, silhouette and prohibited-direction evidence as unique visual acceptance evidence; reference visual_pillars and color_lighting, consume Level/UI geometry, and do not restate prose.', 'owner', 'Own the compact visual language and visual acceptance evidence; reference Level/UI geometry and omit Asset Plan resource, sourcing, licensing and schedule facts.'),
     material('animation-vfx-state-table', 'Animation and VFX State Table', 'markdown_table', 'Canonical inspectable state/event rows owning animation and VFX decisions.', 'owner', 'Own canonical Art animation and VFX state/event mappings, timing intent and acceptance evidence; corresponding prose references this table.'),
   ],
   'docs/UI_UX_SPEC.md': [
@@ -164,7 +168,7 @@ const PRODUCTION_MATERIALS = {
 export const FOUNDATION_DOCUMENT_AUTHORITY_RULES = Object.freeze({
   'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
   'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
-  'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
+  'docs/BALANCE_DESIGN.md': 'The variable-parameter-table uniquely owns all numeric `var.*` and `param.*` IDs, units, values and ranges; Units/Variables and Entity/Ability Parameters sections retain only semantic context and relationships, while formulas, economy, progression and tuning facts remain in their owning sections.',
   'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
   'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
   'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
@@ -175,7 +179,7 @@ export const FOUNDATION_DOCUMENT_AUTHORITY_RULES = Object.freeze({
 const FOUNDATION_DOCUMENT_MERGE_REFERENCE_RULES = Object.freeze({
   'docs/GDD.md': 'Merge loop, state and gameplay outcomes into their single owner sections; omit equivalent repetition from Executive Summary and Production Materials, which remain reference-only authority indexes.',
   'docs/LEVEL_SCENE_DESIGN.md': 'Merge spatial topology, placement and traversal literals into one canonical coordinate/layout source; omit duplicated literals from prose and materials, keep reference-only views stable, and delegate non-spatial facts to their owning discipline.',
-  'docs/BALANCE_DESIGN.md': 'Merge mutable values into Units/Variables and formulas into Formula owners; omit copied literals, results, totals and complete formulas from explanatory and production material views, which remain reference-only, and delegate progression/economy decisions to these owners.',
+  'docs/BALANCE_DESIGN.md': 'Merge every numeric `var.*` and `param.*` ID, unit, value and range into the single variable-parameter owner representation; keep Units/Variables and Entity/Ability Parameters to semantics and relationships, and keep formulas, economy, progression and tuning facts in their owning sections.',
   'docs/TECHNICAL_DESIGN.md': 'Merge runtime and data boundary decisions into their owner sections; omit repeated gameplay or content facts from diagrams and tables, retaining only reference-only evidence and technical persistence acceptance.',
   'docs/ART_DIRECTION.md': 'Merge visual language and visual acceptance conditions into Art owners; omit repeated prose and geometry, and delegate resource responsibility, source, license and schedule facts to Asset Plan.',
   'docs/UI_UX_SPEC.md': 'Merge responsive geometry/layout and screen-state ownership into their canonical sections; omit equivalent repetition while keeping material evidence aligned to stable owners.',
@@ -283,8 +287,8 @@ export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
     'Systems and Economy Designer',
     'Own all numeric variables, formulas, curves, constraints and tuning authority.',
     [
-      section('units_variables', 'Units, Variables and Conventions', 'Define all owned units and variables, precision rules and comparison conventions from explicit owner inputs; the variable-parameter-table is the owner material and other Balance materials reference it.', 'balance_and_math'),
-      section('entity_parameters', 'Entity and Ability Parameters', 'Define parameter families, base values, relationships and allowed ranges.', 'balance_and_math', 'gameplay_systems'),
+      section('units_variables', 'Units, Variables and Conventions', 'Define units, unit semantics, variable semantics, precision rules and comparison conventions from explicit owner inputs; numeric `var.*` and `param.*` entries are stored only in the variable-parameter-table, which is their sole owner.', 'balance_and_math'),
+      section('entity_parameters', 'Entity and Ability Parameters', 'Define entity and action parameter identities (`param.*`), parameter semantics, semantic roles and relationships only; numeric parameter entries are stored only in the variable-parameter-table, which is their sole owner, while Fact Store identity remains this section.', 'balance_and_math', 'gameplay_systems'),
       section('formulas', 'Authoritative Formulas', 'Define authoritative formulas, ordering, clamping, rounding and boundaries with recomputable worked results and totals; derived views reference formulas and do not store independent totals.', 'balance_and_math'),
       section('economy', 'Economy Sources, Sinks and Constraints', 'Define resource flows, costs, rewards, affordability and deadlock prevention, making recomputable results and totals derive from owner inputs without independent derived totals.', 'progression_and_economy', 'balance_and_math'),
       section('progression_curves', 'Progression and Capability Curves', 'Define growth, unlock, power and content progression, making recomputable results and totals derive from owner inputs rather than independent derived totals.', 'progression_and_economy', 'balance_and_math'),

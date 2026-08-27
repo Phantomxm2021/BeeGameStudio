@@ -238,9 +238,7 @@ export async function buildDocumentAuthorAuthorityBlock(
     throw new Error('initial document authority target is invalid')
   const upstreamPaths = Array.isArray(request.contract.availableUpstreamPaths)
     ? request.contract.availableUpstreamPaths
-    : Array.isArray(request.contract.upstreamDocumentPaths)
-      ? request.contract.upstreamDocumentPaths
-      : []
+    : []
   if (
     new Set(upstreamPaths).size !== upstreamPaths.length ||
     upstreamPaths.some(
@@ -908,7 +906,7 @@ async function persistFoundationAuthorityIndex(
     request.contract.availableUpstreamPaths,
   )
     ? (request.contract.availableUpstreamPaths as FoundationDocumentPath[])
-    : contract.upstreamSections.map(source => source.path)
+    : []
   const documents = new Map<
     (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
     string

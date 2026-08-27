@@ -28,6 +28,8 @@ type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
 
 const MARKDOWN_PROTOCOL_CONTINUATION_PROMPT =
   'Continue the same raw Markdown response from the exact point where it stopped. Return only the remaining Markdown; do not restart or summarize.'
+const MARKDOWN_PROTOCOL_RESTART_PROMPT =
+  'Your previous raw Markdown response was empty or structurally invalid. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
 
 export function createNativeCliProcessRunner(options: {
   command?: string[]
@@ -267,12 +269,18 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       !isErrorResult(message)
     ) {
       if (isMissingVisibleMarkdownResult(message)) {
-        await this.rejectMarkdownTurn(
-          turn,
-          new Error(
-            'Bee Game Studio native model response ended without visible Markdown',
-          ),
+        if (
+          isMissingProviderStopReason(message) &&
+          turn.markdownProtocolRecoveryCount === 0
         )
+          await this.recoverIncompleteMarkdownTurn(turn, true)
+        else
+          await this.rejectMarkdownTurn(
+            turn,
+            new Error(
+              'Bee Game Studio native model response ended without visible Markdown',
+            ),
+          )
         return
       }
       if (
@@ -281,11 +289,11 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           turn.markdownOutput,
         )
       ) {
-        if (
-          isMissingProviderStopReason(message) &&
-          turn.markdownProtocolRecoveryCount === 0
-        ) {
-          await this.recoverIncompleteMarkdownTurn(turn)
+        if (turn.markdownProtocolRecoveryCount === 0) {
+          await this.recoverIncompleteMarkdownTurn(
+            turn,
+            !isMissingProviderStopReason(message),
+          )
         } else {
           await this.rejectMarkdownTurn(
             turn,
@@ -332,15 +340,11 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
 
   private async recoverIncompleteMarkdownTurn(
     turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
+    fromBeginning = false,
   ): Promise<void> {
-    if (turn.markdownProtocolRecoveryCount > 0) {
-      await this.rejectMarkdownTurn(
-        turn,
-        new Error(
-          'foundation_transport_needs_action: Bee Game Studio native provider ended a Markdown turn without a completion reason',
-        ),
-      )
-      return
+    if (fromBeginning) {
+      turn.markdownOutput = ''
+      turn.markdownStreamDeltaSeen = false
     }
     turn.markdownProtocolRecoveryCount += 1
     this.write({
@@ -353,7 +357,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         content: [
           {
             type: 'text',
-            text: MARKDOWN_PROTOCOL_CONTINUATION_PROMPT,
+            text: fromBeginning
+              ? MARKDOWN_PROTOCOL_RESTART_PROMPT
+              : MARKDOWN_PROTOCOL_CONTINUATION_PROMPT,
           },
         ],
       },

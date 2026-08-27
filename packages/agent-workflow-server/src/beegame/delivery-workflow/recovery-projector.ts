@@ -8,7 +8,7 @@ import {
 } from '../native-resource-content-tool'
 import { validateFoundationAuditStateArtifacts } from './foundation-audit-artifacts'
 import { parseFoundationAuditState } from './foundation-audit-state'
-import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './foundation-document-topology'
+import { getGameDocumentContract } from './game-document-contracts'
 import {
   computeDocumentRevision,
   computeResourceContentDigest,
@@ -1123,7 +1123,7 @@ function rawActiveUnitId(input: {
       currentItemId as never,
     )
     const expectedBriefDigest = sha256(input.confirmedBriefContext)
-    const upstreamPaths = stringArray(contract?.upstreamDocumentPaths)
+    const upstreamPaths = stringArray(contract?.availableUpstreamPaths)
     if (
       !dispatchId ||
       !runId ||
@@ -1159,7 +1159,9 @@ function rawActiveUnitId(input: {
       !upstreamPaths ||
       !sameStrings(
         upstreamPaths,
-        INITIAL_FOUNDATION_UPSTREAM_PATHS[currentItemId as never],
+        getGameDocumentContract(currentItemId as never).upstreamSections.map(
+          source => source.path,
+        ),
       ) ||
       !completedPaths ||
       targetIndex < 0 ||

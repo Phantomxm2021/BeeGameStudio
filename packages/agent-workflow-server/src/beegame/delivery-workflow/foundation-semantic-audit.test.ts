@@ -16,7 +16,7 @@ import {
 
 const expected = [
   ['SEM.gameplay_level_viability', ['GDD#core_loop', 'LEVEL#pacing_beats'], ['game.mechanics', 'level.required_entities'], '核心循环、遭遇、节奏与反制是否可玩且不互相否定', 'HIGH', 'balanced'],
-  ['SEM.progression_balance_coherence', ['GDD#progression', 'LEVEL#content_matrix', 'BALANCE#executive_summary', 'BALANCE#units_variables', 'BALANCE#entity_parameters', 'BALANCE#formulas', 'BALANCE#economy', 'BALANCE#progression_curves', 'BALANCE#challenge_model', 'BALANCE#rewards_value', 'BALANCE#bounds_exploits', 'BALANCE#tuning_validation', 'BALANCE#material.variable-parameter-table', 'BALANCE#material.formula-boundary-table', 'BALANCE#material.economy-flow-diagram', 'BALANCE#material.tuning-validation-matrix'], ['game.resources', 'balance.variable_ids'], '逐波数量、公式、经济、摘要与派生表是否可重算并形成一致的进度与成长体验', 'HIGH', 'balanced'],
+  ['SEM.progression_balance_coherence', ['GDD#progression', 'LEVEL#content_matrix', 'BALANCE#executive_summary', 'BALANCE#units_variables', 'BALANCE#entity_parameters', 'BALANCE#formulas', 'BALANCE#economy', 'BALANCE#progression_curves', 'BALANCE#challenge_model', 'BALANCE#rewards_value', 'BALANCE#bounds_exploits', 'BALANCE#tuning_validation', 'BALANCE#material.variable-parameter-table'], ['game.resources', 'balance.variable_ids'], '逐波数量、公式、经济、摘要与唯一参数表是否可重算并形成一致的进度与成长体验', 'HIGH', 'balanced'],
   ['SEM.state_runtime_recovery', ['GDD#states_flow', 'TECHNICAL#runtime_state', 'TECHNICAL#save_load', 'GDD#material.game-state-flow', 'UI#screen_inventory', 'UI#feedback_errors'], ['game.states'], '状态、失败恢复、持久化与重开确认是否在运行时、界面和派生状态流中一致', 'HIGH', 'balanced'],
   ['SEM.platform_performance_feasibility', ['TECHNICAL#performance', 'TECHNICAL#risks', 'TECHNICAL#executive_summary', 'LEVEL#production_acceptance'], ['game.platform', 'technical.target_fps', 'level.complexity_budget'], '目标平台、关卡复杂度与性能预算是否现实，且不得把已有上游 authority 描述为 unavailable', 'HIGH', 'balanced'],
   ['SEM.interaction_ui_coherence', ['GDD#player_actions', 'UI#input', 'UI#feedback_errors', 'UI#experience_architecture', 'UI#player_journeys', 'UI#prototype_acceptance'], ['game.mechanics', 'ui.supported_actions'], '玩家动作、滚动与交互路径、输入、反馈和错误恢复是否在架构、流程与验收中连贯', 'HIGH', 'balanced'],
@@ -98,7 +98,7 @@ describe('foundation semantic audit authority', () => {
       ref('docs/LEVEL_SCENE_DESIGN.md', 'content_matrix'),
       ref('docs/BALANCE_DESIGN.md', 'executive_summary'),
       ...['units_variables', 'entity_parameters', 'formulas', 'economy', 'progression_curves', 'challenge_model', 'rewards_value', 'bounds_exploits', 'tuning_validation'].map(sectionId => ref('docs/BALANCE_DESIGN.md', sectionId)),
-      ...['variable-parameter-table', 'formula-boundary-table', 'economy-flow-diagram', 'tuning-validation-matrix'].map(materialId => ref('docs/BALANCE_DESIGN.md', `material.${materialId}`)),
+      ref('docs/BALANCE_DESIGN.md', 'material.variable-parameter-table'),
       ref('docs/BALANCE_DESIGN.md', 'material.unrelated'),
     ]
     const sectionBytes = new Map(refs.map(item => [`${item.documentPath}#${item.sectionId}`, `${item.sectionId} bytes`]))

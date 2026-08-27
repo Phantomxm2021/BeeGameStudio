@@ -7,7 +7,6 @@ import {
 } from '../authored-document-receipt'
 import { validateCompleteGameDocumentMarkdown } from '../complete-game-document'
 import { computeDocumentRevision, computeWorkspaceRevision } from './revision'
-import { INITIAL_FOUNDATION_UPSTREAM_PATHS } from './foundation-document-topology'
 import { getGameDocumentContract } from './game-document-contracts'
 import {
   beginParallelFoundationAuthoring,
@@ -243,9 +242,9 @@ export async function startDocumentStage(input: {
       authoringMode: 'initial',
       foundationDocumentPath: initialPath,
       completeDocumentContract: getGameDocumentContract(initialPath),
-      upstreamDocumentPaths: [
-        ...INITIAL_FOUNDATION_UPSTREAM_PATHS[initialPath],
-      ],
+      availableUpstreamPaths: getGameDocumentContract(initialPath).upstreamSections.map(
+        source => source.path,
+      ),
       ...(previousDocumentMetadata ? { previousDocumentMetadata } : {}),
     },
   })
@@ -500,14 +499,11 @@ async function completeInitialFoundationDocumentDraft(input: {
       document: documentRevision,
       workspace: workspaceRevision,
     },
-    // Retain a failed initial-author dispatch as the durable retry diagnostic;
-    // claiming the next dispatch replaces and clears this evidence.
+    // Retain the failed initial-author dispatch as terminal diagnostic evidence.
     activeDispatch: issues.length ? failedActiveDispatch : undefined,
     currentItemId: expectedPath,
-    blockedReason:
-      issues.length && !initialFoundationFailure
-        ? issues.join('; ')
-        : undefined,
+    status: issues.length ? 'needs_action' : input.run.status,
+    blockedReason: issues.length ? issues.join('; ') : undefined,
     updatedAt: new Date().toISOString(),
   }
   if (issues.length) return base
@@ -604,8 +600,8 @@ async function completeParallelFoundationDraft(input: {
         canonicalPath,
         issues.join('; '),
       ),
-      status: 'running',
-      blockedReason: undefined,
+      status: 'needs_action',
+      blockedReason: issues.join('; '),
     }
   const foundationDraftState = recordFoundationCommit(
     input.run.foundationDraftState,

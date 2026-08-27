@@ -407,20 +407,18 @@ export function createDeliveryDispatcher(options: {
     cleanup: {
       stopReason?: string
       preserveSession?: boolean
-      request?: WorkerDispatchRequest
     } = {},
   ): void {
     // Durable state is authoritative. Release the idempotency lane before
     // touching the disposable transport so a stalled session close can never
     // prevent a retry from creating a fresh dispatch.
-    const request = cleanup.request ?? requests.get(dispatchId)
     forgetDispatch(dispatchId)
     if (transportCleanupStarted.has(dispatchId)) return
     // The task mutation happens before release on every foundation failure
     // path. Schedule progress from the durable projection, rather than from
     // an in-memory worker callback, so retries survive transport failures and
     // are serialized by the controller's own lane.
-    void scheduleRetryableFoundationTask(dispatchId, request).catch(() => undefined)
+    void scheduleRetryableFoundationTask(dispatchId).catch(() => undefined)
     transportCleanupStarted.add(dispatchId)
     const cleanupOperation = (async () => {
       if (cleanup.stopReason)
@@ -446,34 +444,10 @@ export function createDeliveryDispatcher(options: {
 
   async function scheduleRetryableFoundationTask(
     dispatchId: string,
-    request?: WorkerDispatchRequest,
   ): Promise<void> {
     if (!options.onRetryable) return
     const run = await options.store.load()
     const location = run ? dispatchLocation(run, dispatchId) : undefined
-    const foundationPath = request ? foundationPathFor(request) : undefined
-    if (
-      run &&
-      run.status === 'running' &&
-      foundationPath &&
-      run.foundationDraftState.documents?.find(
-        document => document.path === foundationPath,
-      )?.status === 'pending'
-    ) {
-      await options.onRetryable(run.runId, foundationPath)
-      return
-    }
-    if (
-      run &&
-      run.status === 'running' &&
-      foundationPath &&
-      request?.contract.authoringMode === 'initial' &&
-      run.activeDispatch?.status === 'failed' &&
-      run.activeDispatch.request?.contract.foundationDocumentPath === foundationPath
-    ) {
-      await options.onRetryable(run.runId, foundationPath)
-      return
-    }
     const task = location?.taskId
       ? run?.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(candidate => candidate.taskId === location.taskId)
       : undefined
@@ -642,7 +616,6 @@ export function createDeliveryDispatcher(options: {
     assertSingleResourceWorkAuthority(request, run)
     if (run.status !== 'running')
       throw new DispatchError('blocked', 'delivery run is not running')
-    const foundationPath = foundationPathFor(request)
     const parallelFoundationPath = parallelFoundationPathFor(request)
     const factRequest = isFoundationFactRequest(request)
     const revisionSemanticRequest = isFoundationRevisionSemanticRequest(run, request)
@@ -706,15 +679,7 @@ export function createDeliveryDispatcher(options: {
     const attempt = durableTask && typeof durableTask.attempt === 'number'
       ? durableTask.attempt + 1
       : 1
-    const priorFailureReason = parallelFoundationPath
-      ? run.foundationDraftState.documents?.find(
-          document => document.path === parallelFoundationPath,
-        )?.failureReason
-      : foundationPath && request.contract.authoringMode === 'initial' &&
-          run.activeDispatch?.status === 'failed' &&
-          run.activeDispatch.request?.contract.foundationDocumentPath === foundationPath
-        ? run.activeDispatch.failureReason
-      : revisionRequest && durableTask && 'failureReason' in durableTask && durableTask.kind === 'document-revision'
+    const priorFailureReason = revisionRequest && durableTask && 'failureReason' in durableTask && durableTask.kind === 'document-revision'
         ? durableTask.failureReason
         : undefined
     const key = idempotencyKey(request, attempt)
@@ -1476,13 +1441,15 @@ export function createDeliveryDispatcher(options: {
               location.path,
               reason,
             ),
+            status: 'needs_action' as const,
+            blockedReason: reason,
             thinking: 'idle' as const,
           }
         : foundationPath && request?.contract.authoringMode === 'initial'
           ? {
               ...run,
-              status: 'running' as const,
-              blockedReason: undefined,
+              status: 'needs_action' as const,
+              blockedReason: reason,
               activeDispatch: invalid,
               thinking: 'idle' as const,
             }
@@ -1498,8 +1465,7 @@ export function createDeliveryDispatcher(options: {
         {
           ...failedRun,
           status: isolatedStatus,
-          blockedReason:
-            isolatedStatus === 'running' ? undefined : reason,
+          blockedReason: reason,
         },
         {
           runId: run.runId,
@@ -1632,9 +1598,7 @@ export function createDeliveryDispatcher(options: {
         )
         const handlerFailure = terminalHandlerStarted
         const status: DeliveryRun['status'] =
-          handlerFailure && (currentLocation.path || initialFoundationFailure)
-            ? 'running'
-            : handlerFailure
+          handlerFailure
               ? 'needs_action'
               : 'failed'
         const failedCurrent = currentLocation.path
@@ -1645,15 +1609,15 @@ export function createDeliveryDispatcher(options: {
                 currentLocation.path,
                 reason,
               ),
-              status: 'running' as const,
+              status: 'needs_action' as const,
             }
           : initialFoundationFailure
-            ? { ...current, status: 'running' as const, blockedReason: undefined, activeDispatch: failed }
+            ? { ...current, status: 'needs_action' as const, blockedReason: reason, activeDispatch: failed }
             : { ...current, status, activeDispatch: failed }
         await options.store.commit(
           {
             ...failedCurrent,
-            blockedReason: status === 'running' ? undefined : reason,
+            blockedReason: reason,
             thinking: 'idle',
           },
           {
@@ -1674,7 +1638,6 @@ export function createDeliveryDispatcher(options: {
       // private transport session is disposable once a terminal result exists.
       if (!draftSessionPreserved || !terminalHandlerCompleted)
         releaseDispatch(dispatchId, {
-          request,
           preserveSession:
             terminalHandlerCompleted &&
             request?.contract.authoringMode === 'parallel-draft',
@@ -1781,15 +1744,15 @@ export function createDeliveryDispatcher(options: {
         await options.store.commit(
           {
             ...failedRun,
-            status: location.path ? 'running' : 'needs_action',
-            ...(location.path ? {} : { blockedReason: reason }),
+            status: 'needs_action',
+            blockedReason: reason,
             thinking: 'idle',
           },
           {
             runId: current.runId,
             type: 'workflow.replay_failed',
             phase: current.phase,
-            status: location.path ? 'running' : 'needs_action',
+            status: 'needs_action',
             revision: current.revision,
             dispatchId: record.dispatchId,
             reason,
@@ -1850,12 +1813,12 @@ export function createDeliveryDispatcher(options: {
         }
       : { ...run, activeDispatch: failed }
     const status: DeliveryRun['status'] =
-      location.path || initialFoundationFailure ? 'running' : 'failed'
+      location.path || initialFoundationFailure ? 'needs_action' : 'failed'
     await options.store.commit(
       {
         ...failedRun,
         status,
-        blockedReason: status === 'running' ? undefined : reason,
+        blockedReason: reason,
         thinking:
           hasRunningFoundationDispatch(failedRun) ||
           failedRun.activeDispatch?.status === 'running'
@@ -1911,7 +1874,6 @@ export function createDeliveryDispatcher(options: {
             run.foundationDraftState,
             location.path,
             reason,
-            'needs_action',
           ),
         }
       : { ...run, activeDispatch: interrupted }

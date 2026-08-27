@@ -43,7 +43,16 @@ function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number])
       .filter(fact => fact.owner.documentPath === path && fact.owner.sectionId === section.sectionId)
       .map(fact => `${fact.key}: ${JSON.stringify(consistentFactValue(fact.key))}`),
     '',
-    ]), '<!-- beegame-production-materials -->', '## Production Materials', '', ...contract.productionMaterials.flatMap(material => [`<!-- beegame-material:${material.materialId} -->`, `### ${material.title}`, '', `material ${material.materialId}`, ''])].join('\n')}\n`
+    ]), '<!-- beegame-production-materials -->', '## Production Materials', '', ...contract.productionMaterials.flatMap(material => [
+      `<!-- beegame-material:${material.materialId} -->`,
+      `### ${material.title}`,
+      '',
+      ...FOUNDATION_FACT_CATALOG
+        .filter(fact => fact.owner.documentPath === path && fact.owner.sectionId === `material.${material.materialId}`)
+        .map(fact => `${fact.key}: ${JSON.stringify(consistentFactValue(fact.key))}`),
+      `material ${material.materialId}`,
+      '',
+    ])].join('\n')}\n`
 }
 
 function port(started = new Set<string>(), requests: WorkerDispatchRequest[] = []): DeliveryWorkerPort {
@@ -54,6 +63,15 @@ function port(started = new Set<string>(), requests: WorkerDispatchRequest[] = [
     async close() {},
     async status(dispatchId) { return { dispatchId, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'unknown', revision: 'rev-1', status: started.has(dispatchId) ? 'running' : 'interrupted', startedAt: new Date().toISOString() } },
   }
+}
+
+async function waitForStartedRequest(requests: WorkerDispatchRequest[], dispatchId: string): Promise<WorkerDispatchRequest> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const request = requests.find(candidate => candidate.dispatchId === dispatchId)
+    if (request) return request
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  throw new Error(`worker request ${dispatchId} did not start`)
 }
 
 function staleTopLevelTerminalDispatch(revision: string): NonNullable<DeliveryRun['activeDispatch']> {
@@ -1565,8 +1583,8 @@ describe('foundation fact runtime controller integration', () => {
       expect(firstRetry.status).toBe('running')
       expect(firstRetry.attempt).toBe(2)
       expect(firstRetry.failureReason).toBeUndefined()
-      const revisionRequestsAfterFirstFailure = requests.filter(request => request.workerType === 'foundation-document-reviser')
-      expect(revisionRequestsAfterFirstFailure[revisionRequestsAfterFirstFailure.length - 1]!.contract.priorFailureReason).toMatch(/invalid|terminal/i)
+      const firstRetryRequest = await waitForStartedRequest(requests, firstRetry.dispatch!.dispatchId)
+      expect(firstRetryRequest.contract.priorFailureReason).toMatch(/invalid|terminal/i)
       await controller.resume(current!)
       current = await controller.store.load()
       const second = current!.foundationAuditState!.tasks.find(task => task.taskId === first.taskId)!
@@ -1574,7 +1592,7 @@ describe('foundation fact runtime controller integration', () => {
       expect(second.status).toBe('running')
       expect(second.attempt).toBe(2)
       expect(second.failureReason).toBeUndefined()
-      expect(requests.find(request => request.dispatchId === second.dispatch!.dispatchId)?.contract.priorFailureReason).toMatch(/.+/)
+      expect((await waitForStartedRequest(requests, second.dispatch!.dispatchId)).contract.priorFailureReason).toMatch(/.+/)
       await expect(controller.dispatcher.completeDispatch(second.dispatch!.dispatchId, {})).rejects.toThrow(/invalid|terminal/i)
       current = await controller.store.load()
       const thirdRetry = current!.foundationAuditState!.tasks.find(task => task.taskId === first.taskId)!

@@ -70,7 +70,7 @@ export function projectFoundationAuthority(input: {
   const target = getGameDocumentContract(input.targetPath)
   const contractedPaths = target.upstreamSections.map(source => source.path)
   const availableUpstreamPaths =
-    input.availableUpstreamPaths ?? contractedPaths
+    input.availableUpstreamPaths ?? []
   if (
     new Set(availableUpstreamPaths).size !== availableUpstreamPaths.length ||
     availableUpstreamPaths.some(path => !contractedPaths.includes(path))

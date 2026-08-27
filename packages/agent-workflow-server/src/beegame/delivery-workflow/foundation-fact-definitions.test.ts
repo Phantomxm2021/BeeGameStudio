@@ -74,6 +74,14 @@ describe('normalized foundation fact catalog', () => {
       documentPath: 'docs/ASSET_PLAN.md',
       sectionId: 'dependencies',
     })
+    expect(foundationFactDefinition('balance.entity_ids')?.owner).toEqual({
+      documentPath: 'docs/BALANCE_DESIGN.md',
+      sectionId: 'entity_parameters',
+    })
+    expect(foundationFactDefinition('balance.variable_ids')?.owner).toEqual({
+      documentPath: 'docs/BALANCE_DESIGN.md',
+      sectionId: 'material.variable-parameter-table',
+    })
   })
 
   test('defines semantic labels for level assets and shared resource facts', () => {

@@ -344,18 +344,25 @@ describe('native CLI process runner', () => {
     ).rejects.toThrow('exited without a terminal result')
   })
 
-  test('rejects a thinking-only provider result for a Markdown stream turn', async () => {
+  test('recovers a thinking-only provider result in the same Markdown dispatch and session', async () => {
     const runtime = await startRuntime({ markdownStream: true })
+    const messages: Record<string, unknown>[] = []
     await expect(
       runtime.submit({
         prompt: 'incomplete-success',
         signal: new AbortController().signal,
-        onMessage: () => undefined,
+        onMessage: message => messages.push(message),
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
-    ).rejects.toThrow(
-      'native model response ended without visible Markdown',
-    )
+    ).resolves.toBeUndefined()
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
+    expect(messages.at(-1)).toMatchObject({
+      type: 'result',
+      subtype: 'success',
+      stop_reason: 'end_turn',
+      received_user_count: 2,
+    })
+    expect(messages.at(-1)?.result).toContain('# Visible Markdown')
     runtime.dispose?.()
   })
 
@@ -416,20 +423,40 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
-  test('does not forward an end-turn result when the recovered Markdown remains truncated', async () => {
+  test('restarts structurally invalid end-turn Markdown in the same dispatch and session', async () => {
     const runtime = await startRuntime({ markdownStream: true })
     const messages: Record<string, unknown>[] = []
 
+    await runtime.submit({
+      prompt: 'malformed-markdown-end-turn',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
+    expect(messages.filter(message => message.type === 'assistant')).toHaveLength(2)
+    expect(messages.at(-1)).toMatchObject({
+      type: 'result',
+      subtype: 'success',
+      stop_reason: 'end_turn',
+      received_user_count: 2,
+    })
+    expect(messages.at(-1)?.result).toContain('\n## Vision and Product Promise\n')
+    runtime.dispose?.()
+  })
+
+  test('fails closed when the one same-dispatch restart remains structurally invalid', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+
     await expect(
       runtime.submit({
-        prompt: 'truncated-markdown-end-turn',
+        prompt: 'malformed-markdown-end-turn-forever',
         signal: new AbortController().signal,
-        onMessage: message => messages.push(message),
+        onMessage: () => undefined,
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).rejects.toThrow('foundation_transport_needs_action')
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(0)
-    expect(messages.filter(message => message.type === 'assistant')).toHaveLength(2)
     runtime.dispose?.()
   })
 

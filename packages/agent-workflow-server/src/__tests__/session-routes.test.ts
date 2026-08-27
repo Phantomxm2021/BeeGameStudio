@@ -937,7 +937,7 @@ describe('delivery workflow session continuation', () => {
           documentSet: 'foundation',
           authoringMode: 'initial',
           foundationDocumentPath: recoverablePath,
-          upstreamDocumentPaths: [acceptedPath],
+          availableUpstreamPaths: [acceptedPath],
         },
       }
       const recoverableSnapshot = {

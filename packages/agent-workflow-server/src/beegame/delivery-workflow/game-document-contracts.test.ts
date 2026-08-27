@@ -120,9 +120,6 @@ describe('complete game document contracts', () => {
       },
       'docs/BALANCE_DESIGN.md': {
         'variable-parameter-table': 'owner',
-        'formula-boundary-table': 'reference_only',
-        'economy-flow-diagram': 'reference_only',
-        'tuning-validation-matrix': 'reference_only',
       },
       'docs/TECHNICAL_DESIGN.md': {
         'architecture-diagram': 'reference_only',
@@ -168,31 +165,16 @@ describe('complete game document contracts', () => {
     ])
   })
 
-  test('keeps Balance reference-only materials as structural owner-reference views', () => {
+  test('keeps Balance production materials to the sole variable-parameter owner without reference projections', () => {
     const materials = getGameDocumentContract('docs/BALANCE_DESIGN.md').productionMaterials
-      .filter(material => material.authorityMode === 'reference_only')
 
-    expect(materials).toHaveLength(3)
-    for (const material of materials) {
-      expect(material.purpose).toContain('source-derived owner IDs')
-      expect(material.authorityRule).toContain('structural relationships')
-      expect(material.authorityRule).toContain('timing')
-      expect(material.authorityRule).toContain('steps')
-      expect(material.authorityRule).toContain('order')
-      expect(material.authorityRule).toContain('ranks')
-      expect(material.authorityRule).toContain('counts')
-      expect(material.authorityRule).toContain('other owner facts')
-      expect(material.authorityRule).toContain('table columns')
-    }
-  })
-
-  test('requires Balance economy Mermaid identities to remain canonical owner IDs', () => {
-    const economy = getGameDocumentContract('docs/BALANCE_DESIGN.md').productionMaterials
-      .find(material => material.materialId === 'economy-flow-diagram')
-
-    expect(economy?.authorityRule).toContain('Mermaid node identifiers and labels')
-    expect(economy?.authorityRule).toContain('source-derived canonical owner IDs')
-    expect(economy?.authorityRule).toContain('must not rewrite, abbreviate or alias')
+    expect(materials.map(material => material.materialId)).toEqual([
+      'variable-parameter-table',
+    ])
+    expect(materials.every(material =>
+      !Object.hasOwn(material, 'referenceOwnerIds') &&
+      !Object.hasOwn(material, 'referenceSources'),
+    )).toBe(true)
   })
 
   test('removes the obsolete global derived-view output policy fields', () => {
@@ -242,21 +224,33 @@ describe('complete game document contracts', () => {
     expect(audio.sections.find(section => section.sectionId === 'production')?.purpose).toContain('Asset Plan')
   })
 
-  test('requires balance derived materials to reference owner variables and formulas', () => {
+  test('separates Balance global variables from entity and action parameters', () => {
     const balance = getGameDocumentContract('docs/BALANCE_DESIGN.md')
-    for (const materialId of ['formula-boundary-table', 'economy-flow-diagram', 'tuning-validation-matrix']) {
-      const purpose = balance.productionMaterials.find(item => item.materialId === materialId)?.purpose
-      expect(purpose?.toLowerCase()).toContain('reference-only')
-      expect(purpose?.toLowerCase()).toContain('variables')
-      expect(purpose?.toLowerCase()).toContain('formulas')
-    }
+    const variables = balance.sections.find(section => section.sectionId === 'units_variables')!
+    const entities = balance.sections.find(section => section.sectionId === 'entity_parameters')!
+    const variableMaterial = balance.productionMaterials.find(material => material.materialId === 'variable-parameter-table')!
+
+    expect(variables.purpose).toContain('unit')
+    expect(variables.purpose).toContain('variable semantics')
+    expect(variables.purpose).not.toContain('values')
+    expect(variables.purpose).not.toContain('ranges')
+    expect(entities.purpose).toContain('parameter semantics')
+    expect(entities.purpose).toContain('relationships')
+    expect(entities.purpose).not.toContain('numeric values')
+    expect(entities.purpose).not.toContain('ranges')
+    expect(entities.purpose).toContain('param.*')
+    expect(entities.purpose).toContain('entity and action')
+    expect(variableMaterial.purpose).toContain('var.*')
+    expect(variableMaterial.purpose).toContain('param.*')
+    expect(variableMaterial.purpose).toContain('values and ranges')
+    expect(variableMaterial.authorityRule).toContain('all numeric')
   })
 
   test('declares one concise authority rule for each foundation document', () => {
     const expected = {
       'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
       'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
-      'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
+      'docs/BALANCE_DESIGN.md': 'The variable-parameter-table uniquely owns all numeric `var.*` and `param.*` IDs, units, values and ranges; Units/Variables and Entity/Ability Parameters sections retain only semantic context and relationships, while formulas, economy, progression and tuning facts remain in their owning sections.',
       'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
       'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
       'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
@@ -329,8 +323,10 @@ describe('complete game document contracts', () => {
       expect(purpose).toContain('not invent layout dimensions')
     }
     for (const materialId of ['visual-language-board']) {
-      const purpose = art.productionMaterials.find(item => item.materialId === materialId)?.purpose
+      const material = art.productionMaterials.find(item => item.materialId === materialId)
+      const purpose = material?.purpose
       expect(purpose).toContain('unique visual acceptance evidence')
+      expect(material?.format).toBe('markdown_table')
     }
 
     const audio = getGameDocumentContract('docs/AUDIO_DESIGN.md')

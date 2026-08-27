@@ -23,7 +23,7 @@ describe('worker prompts', () => {
         documentSet: 'foundation',
         authoringMode: 'initial',
         foundationDocumentPath: 'docs/TECHNICAL_DESIGN.md',
-        upstreamDocumentPaths: [
+        availableUpstreamPaths: [
           'docs/GDD.md',
           'docs/LEVEL_SCENE_DESIGN.md',
           'docs/BALANCE_DESIGN.md',
@@ -168,7 +168,7 @@ describe('worker prompts', () => {
     const rules = {
       'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
       'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
-      'docs/BALANCE_DESIGN.md': 'Variables and formulas own numeric values; explanations and materials reference them without copying results or totals.',
+      'docs/BALANCE_DESIGN.md': 'The variable-parameter-table uniquely owns all numeric `var.*` and `param.*` IDs, units, values and ranges; Units/Variables and Entity/Ability Parameters sections retain only semantic context and relationships, while formulas, economy, progression and tuning facts remain in their owning sections.',
       'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
       'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
       'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',

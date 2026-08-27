@@ -18,7 +18,7 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 const docs = {
   'docs/GDD.md': `# GDD\n<!-- beegame-section:vision -->\n## Vision and Product Promise\nplayers.max: 4\nplatform: quest\n<!-- beegame-section:rules_systems -->\n## Gameplay Rules and Systems\nboss.count: 2\nresources: [hp, energy]\n<!-- beegame-section:player_actions -->\n## Player Actions and Controls\nmechanics: [move, attack, dash]\n<!-- beegame-section:states_flow -->\n## Game States and Flow\nstates: [menu, play, win, loss]\nwin_conditions: [boss defeated]\nloss_conditions: [health zero]\n`,
   'docs/LEVEL_SCENE_DESIGN.md': `# LEVEL\n<!-- beegame-section:encounters -->\n## Encounters and Challenge Placement\nrequired_entities: [player, boss]\n<!-- beegame-section:content_matrix -->\n## Content Matrix and Replay Structure\nrequired_assets: [player, boss]\n<!-- beegame-section:production_acceptance -->\n## Level Production and Acceptance\ncomplexity_budget: 100\n`,
-  'docs/BALANCE_DESIGN.md': `# BALANCE\n<!-- beegame-section:entity_parameters -->\n## Entity and Ability Parameters\nentity_ids: [player, boss]\n<!-- beegame-section:units_variables -->\n## Units, Variables and Conventions\nvariable_ids: [health, damage]\n`,
+  'docs/BALANCE_DESIGN.md': `# BALANCE\n<!-- beegame-section:entity_parameters -->\n## Entity and Ability Parameters\nentity_ids: [player, boss]\n<!-- beegame-section:units_variables -->\n## Units, Variables and Conventions\nunit semantics: health, damage\n<!-- beegame-material:variable-parameter-table -->\n### Variable and Parameter Table\nvariable_ids: [health, damage]\n`,
   'docs/TECHNICAL_DESIGN.md': `# TECH\n<!-- beegame-section:input_interaction -->\n## Input and Interaction Boundary\nsupported_actions: [move, attack]\n<!-- beegame-section:performance -->\n## Performance and Capacity Budgets\ntarget_fps: 72\n<!-- beegame-section:data_content -->\n## Data and Content Contracts\ncontent_kinds: [entity, level]\n`,
   'docs/ART_DIRECTION.md': `# ART\n<!-- beegame-section:visual_pillars -->\n## Visual Pillars and References\nstyle_constraints: [bold silhouettes, high contrast]\n`,
   'docs/UI_UX_SPEC.md': `# UI\n<!-- beegame-section:input -->\n## Input, Focus and Interaction\nsupported_actions: [move, attack]\n<!-- beegame-section:hud -->\n## HUD and In-Game Information\ndisplayed_resources: [hp, energy]\n`,
@@ -31,14 +31,14 @@ function indexDocuments(input: Record<string, string>): SectionRef[] {
   for (const [documentPath, markdown] of Object.entries(input)) {
     const lines = markdown.split('\n')
     for (let index = 0; index < lines.length; index += 1) {
-      const marker = /^<!-- beegame-section:([a-z0-9._-]+) -->$/.exec(lines[index]!.trim())
+      const marker = /^<!-- beegame-(section|material):([a-z0-9._-]+) -->$/.exec(lines[index]!.trim())
       if (!marker) continue
       const heading = lines[index + 1]!.replace(/^##\s+/, '')
-      const next = lines.findIndex((line, offset) => offset > index && /^<!-- beegame-section:/.test(line.trim()))
+      const next = lines.findIndex((line, offset) => offset > index && /^<!-- beegame-(?:section|material):/.test(line.trim()))
       const endLine = next < 0 ? lines.length : next
       output.push({
         documentPath: documentPath as SectionRef['documentPath'],
-        sectionId: marker[1]!,
+        sectionId: marker[1] === 'material' ? `material.${marker[2]!}` : marker[2]!,
         heading,
         startLine: index + 2,
         endLine,

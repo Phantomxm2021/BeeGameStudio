@@ -3,7 +3,7 @@ export {}
 const decoder = new TextDecoder()
 let buffer = ''
 let userMessageCount = 0
-let markdownRecoveryMode: 'normal' | 'never' | 'end_turn' = 'normal'
+let markdownRecoveryMode: 'normal' | 'never' | 'malformed_once' | 'malformed_forever' = 'normal'
 
 const completeGddMarkdown = [
   '# Visible Markdown',
@@ -35,6 +35,11 @@ const completeGddMarkdown = [
   'B --> C',
   '```',
 ].join('\n')
+
+const malformedGddMarkdown = completeGddMarkdown.replace(
+  '## Vision and Product Promise\n',
+  '## Vision and Product PromiseSection detail without a heading boundary.\n',
+)
 
 function emitMarkdownResponse(
   markdown: string,
@@ -95,6 +100,20 @@ for await (const chunk of Bun.stdin.stream()) {
       )
       continue
     }
+    if (
+      userMessageCount > 1 &&
+      typeof content === 'string' &&
+      content.includes('complete raw Markdown document from the beginning')
+    ) {
+      emitMarkdownResponse(
+        markdownRecoveryMode === 'malformed_forever'
+          ? malformedGddMarkdown
+          : completeGddMarkdown,
+        'end_turn',
+        userMessageCount,
+      )
+      continue
+    }
     if (content === 'complete-markdown-without-stop-reason') {
       emitMarkdownResponse(completeGddMarkdown, '', userMessageCount)
       continue
@@ -102,22 +121,30 @@ for await (const chunk of Bun.stdin.stream()) {
     if (
       content === 'truncated-markdown' ||
       content === 'truncated-markdown-forever' ||
-      content === 'truncated-markdown-end-turn' ||
+      content === 'malformed-markdown-end-turn' ||
+      content === 'malformed-markdown-end-turn-forever' ||
       (userMessageCount > 1 &&
         typeof content === 'string' &&
         content.includes('Continue the same raw Markdown response'))
     ) {
       if (content === 'truncated-markdown-forever')
         markdownRecoveryMode = 'never'
-      if (content === 'truncated-markdown-end-turn')
-        markdownRecoveryMode = 'end_turn'
+      if (content === 'malformed-markdown-end-turn')
+        markdownRecoveryMode = 'malformed_once'
+      if (content === 'malformed-markdown-end-turn-forever')
+        markdownRecoveryMode = 'malformed_forever'
       const recovered = userMessageCount > 1
-      const recoveredMarkdown = recovered && markdownRecoveryMode === 'normal'
-        ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Vision and Product Promise'))
-        : '# Partial document\n## Executive Summary\nHalf sentence'
+      const recoveredMarkdown = markdownRecoveryMode === 'malformed_once' ||
+          markdownRecoveryMode === 'malformed_forever'
+        ? malformedGddMarkdown
+        : recovered && markdownRecoveryMode === 'normal'
+          ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Vision and Product Promise'))
+          : '# Partial document\n## Executive Summary\nHalf sentence'
       emitMarkdownResponse(
         recoveredMarkdown,
-        recovered && markdownRecoveryMode !== 'never' ? 'end_turn' : '',
+        markdownRecoveryMode === 'malformed_once' || markdownRecoveryMode === 'malformed_forever'
+          ? 'end_turn'
+          : recovered && markdownRecoveryMode !== 'never' ? 'end_turn' : '',
         userMessageCount,
       )
       continue
