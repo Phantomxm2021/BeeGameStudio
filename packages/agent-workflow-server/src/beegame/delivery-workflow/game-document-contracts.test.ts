@@ -189,10 +189,13 @@ describe('complete game document contracts', () => {
 
   test('declares one executable merge/reference rule for every foundation document', () => {
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
-      const rule = getGameDocumentContract(path).mergeReferenceRule
+      const contract = getGameDocumentContract(path)
+      const rule = contract.mergeReferenceRule
       expect(rule.trim()).toContain('Merge')
-      expect(rule.trim()).toContain('reference-only')
       expect(rule.trim().length).toBeGreaterThan(40)
+      if (contract.productionMaterials.some(material => material.authorityMode === 'reference_only'))
+        expect(rule.trim()).toContain('reference-only')
+      else expect(rule.trim()).not.toContain('reference-only')
     }
   })
 
