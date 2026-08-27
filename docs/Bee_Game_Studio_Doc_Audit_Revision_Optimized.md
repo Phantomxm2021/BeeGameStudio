@@ -52,9 +52,11 @@
 > `.beegame/audit/foundation/<revision>/derived/section-index.json`
 > `.beegame/audit/foundation/<revision>/derived/COMMITTED.json`
 
-## 3.0 人类文档 authority 与派生视图
+## 3.0 人类文档 authority 与材料视图
 
-每份 canonical 文档的 `Executive Summary` 只是 authority index：它只能索引本文件拥有的最终决定与稳定 Section/Material 引用，不能创建第二份事实或独立的可变总数。`Production Materials` 是由所属 Section 决定派生的 compact views；每个视图必须引用其 owner Section/事实，不得复制可变事实、维护独立总计或以视图内容覆盖 owner。每个可变事实只能有一个 canonical owner。
+每份 canonical 文档的 `Executive Summary` 只是 authority index：它只能索引本文件拥有的最终决定与稳定 Section/Material 引用，不能创建第二份事实或独立的可变总数。`Production Materials` 不再默认是统一的 derived views；每个 material 都按 contract 声明自己的 `authorityMode`（`owner` 或 `reference_only`）与 `authorityRule`。`owner` material 是其列明事实类型的唯一 canonical representation；`reference_only` material 只能引用 owner Section、owner material 或稳定事实 ID，不得复制可变事实、维护独立总计或以视图内容覆盖 owner。每个可变事实只能有一个 canonical owner。
+
+这套 material authority mapping 是封闭且精确的，不支持别名、fallback 或并行旧 material：GDD 的 `core-loop-diagram`、`game-state-flow` 为 `reference_only`；Level 的 `world-structure-diagram`、`route-choice-diagram`、`pacing-beat-table` 为 `owner`，`scene-transition-diagram` 为 `reference_only`；Balance 的 `variable-parameter-table` 为 `owner`，`formula-boundary-table`、`economy-flow-diagram`、`tuning-validation-matrix` 为 `reference_only`；Technical 的 `save-recovery-table` 为 `owner`，`architecture-diagram`、`data-flow-diagram`、`runtime-lifecycle-diagram` 为 `reference_only`；Art 的 `visual-language-board` 与 `animation-vfx-state-table` 均为 `owner`；UI 的 `information-architecture-diagram`、`player-flow-diagram`、`screen-state-table`、`wireframe-board`、`focus-accessibility-matrix` 均为 `owner`；Audio 的 `event-cue-matrix`、`music-state-diagram`、`bus-ducking-diagram`、`loudness-delivery-table` 为 `owner`，`sound-reference-register` 为 `reference_only`；Asset 的 `asset-inventory-table`、`responsibility-matrix`、`dependency-integration-diagram`、`license-register`、`milestone-maturity-table` **全部为 `owner`**，分别拥有以 inventory ID 为键的资源库存、责任、依赖/集成、许可证据和里程碑事实。Asset adjacent materials 不是全部 reference-only；每个 Asset material 都拥有自己 distinct 的 row/mapping/evidence fact type，并按 inventory ID 互相引用。
 
 单一 fact owner 同样适用于同一文档内部：可变波次、金额、比例、时长、数量、尺寸和阈值只能在一个 owner Section 中定义。其他 Section 需要该事实时引用稳定 owner Section/决策标识，不得再次保存同一 literal；正文不得在表格之外重新叙述表内同一组事实。Stage 3 只能在 normalized Fact、owner Section 与派生 block 能明确证明重复时发布 Issue，禁止用词频或裸数字频率推断业务重复。
 
@@ -62,9 +64,18 @@ authoring contract 只把实际存在且已提交的 upstream path 当作可用 
 
 Canonical Foundation 文档路径只使用服务端 `CANONICAL_FOUNDATION_DOCUMENTS`：`docs/GDD.md`、`docs/LEVEL_SCENE_DESIGN.md`、`docs/BALANCE_DESIGN.md`、`docs/TECHNICAL_DESIGN.md`、`docs/ART_DIRECTION.md`、`docs/UI_UX_SPEC.md`、`docs/AUDIO_DESIGN.md`、`docs/ASSET_PLAN.md`。Markdown 跨文档引用只能使用上述精确路径；机械门同时检查正文和代码围栏中的 `docs/*.md`，非 canonical Foundation 路径一律 fail closed。普通 `assets/` 或其他非 `docs/*.md` 路径不属于这项检查。
 
-职责边界固定为：Art 只拥有视觉语言与视觉验收条件，Audio 只拥有 event-to-cue 行为、音频技术交付约束与验收条件；Art/Audio 的资源 ID、数量、状态、source/license、责任与 milestone/schedule 只能引用 Asset Plan。Asset Plan 是这些生产事实及其 inventory ID 的唯一 owner，所有相邻材料按 inventory ID reference-only。Balance 的 Units/Variables 与 Formulas 是数值及公式唯一 owner；formula-boundary、economy-flow、tuning-validation 等派生材料只能引用变量、公式、场景 ID，不得复制 literal 数值、结果、总计或完整公式。八份文档的 contract 各自携带一条 merge/reference rule，明确相邻概念的单一 owner representation 与必须 reference-only 的 section/material；initial 和 parallel-draft author 均以该服务端规则为准。
+八份文档的 content-reduction / ownership rules 固定为：
 
-上述规则是职责与引用约束，不是业务输出数量、字数、token、时间、heading、table、row、diagram 或 example 的固定上限或目标；合法内容不得因任意业务尺寸阈值被截断。
+1. **GDD** 拥有行为、状态和玩法规则；数值细节委托 Balance，交互与布局细节委托 UI，GDD 不建立第二份参数或布局表。
+2. **Level** 只拥有空间事实（坐标、拓扑、路径、格位、触发器、场景空间与节奏位置）；经济、运行时、视觉、交互和资源事实委托各自 owner。
+3. **Balance** 拥有变量、参数、数值、范围和公式；其他 Section/material 只引用这些 owner 及其变量、公式、场景和验收 ID。Balance reference-only material 的 syntax gate 禁止 numeric literals、percentages/ranges、complete calls/expressions；inline code 只能是稳定且获准的 owner reference，包括 wildcard variable groups（例如 `V_HAZ_*`、`V_FLT_*`）。因此 prose、table 和 diagram 都不得复制 literal、结果、总计或完整公式。
+4. **Technical** 只拥有 runtime/data boundaries、持久化与恢复的技术事实；不得重新拥有玩法、内容或资源生产事实。
+5. **Art** 拥有一张 compact `visual-language-board` 与 `animation-vfx-state-table` 的视觉/动画验收事实，不拥有资源 ID、数量、source/license、责任或 schedule。Art 只有一个 Visual Language Board；SVG 不是 intrinsically required，visual acceptance evidence 才是要求；需要时允许 compact inline SVG，禁止三张并行 board。
+6. **UI** 拥有 interaction、input、navigation、screen/state 和 responsive layout mappings；其他文档只引用 UI 的稳定 action、screen、region 与 accessibility ID。
+7. **Audio** 拥有 event-to-cue、music state、bus/ducking、loudness/delivery mappings 与验收，不拥有资源生产事实；资源 ID、数量、source/license、责任和 schedule 委托 Asset。
+8. **Asset Plan** 单独拥有全部 resource-production facts；五个 Asset owner materials 各自以 inventory ID 键控 distinct inventory/row/mapping/evidence fact types，其他文档和 Audio/Art materials 只能引用这些 ID。
+
+Quality 与 performance 按 correctness、可实现性和 measured comparison 评估，而不是固定 business caps；上述规则不构成 token、字数、时间、heading、table、row、diagram、example 或业务规模的固定上限/目标。八份文档的 contract 各自携带一条 merge/reference rule；每个 material 必须遵循其声明的 `owner`/`reference_only` mode 与 single canonical representation rule；initial 和 parallel-draft author 均以该服务端规则为准。
 
 ## 3.1 Fact Store
 
@@ -156,10 +167,10 @@ Semantic Audit 不做全文自由扫描，也不按“8 份文档各读一次”
 | `SEM.state_runtime_recovery` | `GDD#states_flow,material.game-state-flow` + `TECHNICAL#runtime_state,save_load` + `UI#screen_inventory,feedback_errors` | `game.states` | 状态、失败恢复、持久化与重开确认在运行时、界面和派生状态流中一致 | HIGH / balanced |
 | `SEM.platform_performance_feasibility` | `TECHNICAL#performance,risks,executive_summary` + `LEVEL#production_acceptance` | `game.platform`, `technical.target_fps`, `level.complexity_budget` | 目标平台、关卡复杂度与性能预算现实，且拒绝把已有上游 authority 描述为 unavailable | HIGH / balanced |
 | `SEM.interaction_ui_coherence` | `GDD#player_actions` + `UI#input,feedback_errors,experience_architecture,player_journeys,prototype_acceptance` | `game.mechanics`, `ui.supported_actions` | 玩家动作、滚动与交互路径、输入、反馈和错误恢复在架构、流程与验收中连贯 | HIGH / balanced |
-| `SEM.camera_visual_readability` | `LEVEL#camera_readability,world_structure,objectives_routes` + `ART#composition_readability,camera_presentation,color_lighting,material.visual-pillar-board,material.palette-board,material.silhouette-scale-board` + `UI#experience_architecture,hud,prototype_acceptance,material.wireframe-board` | `art.style_constraints` | 坐标、路径与格位可计算，viewport、安全区、断点、区域和 overlay 几何在 Level、UI 与 Art 布局之间一致且可读 | MEDIUM / fast |
+| `SEM.camera_visual_readability` | `LEVEL#camera_readability,world_structure,objectives_routes` + `ART#composition_readability,camera_presentation,color_lighting,material.visual-language-board` + `UI#experience_architecture,hud,prototype_acceptance,material.wireframe-board` | `art.style_constraints` | 坐标、路径与格位可计算，viewport、安全区、断点、区域和 overlay 几何在 Level、UI 与 Art 布局之间一致且可读 | MEDIUM / fast |
 | `SEM.content_asset_feasibility` | `ART#animation,vfx,asset_specifications` + `ASSET#executive_summary,inventory,dependencies,formats_budgets,validation,material.asset-inventory-table,material.milestone-maturity-table` | `level.required_assets`, `asset.inventory_ids`, `asset.art_constraint_refs`, `asset.formats` | 资产类型与实例、帧数/图元/物理文件和预算总计可重算且与上游一致，拒绝 stale unavailable 假设 | HIGH / balanced |
 | `SEM.audio_state_feedback` | `GDD#states_flow` + `AUDIO#event_taxonomy,music,production,executive_summary,material.event-cue-matrix,material.music-state-diagram,material.bus-ducking-diagram` | `game.states`, `audio.event_ids` | PAUSED、失焦、静音及其他关键状态在音频正文、摘要、事件/音乐/总线派生视图中行为一致，拒绝 stale unavailable 上游假设 | MEDIUM / fast |
-| `SEM.multimodal_accessibility` | `GDD#accessibility_localization` + `UI#accessibility,material.focus-accessibility-matrix` + `ART#color_lighting,material.palette-board,material.silhouette-scale-board` + `AUDIO#ui_feedback` | 无额外 Fact；只使用列出的 Section | 视觉、输入、焦点与非视觉替代在正文及派生可访问性视图中共同满足可访问性 | HIGH / balanced |
+| `SEM.multimodal_accessibility` | `GDD#accessibility_localization` + `UI#accessibility,material.focus-accessibility-matrix` + `ART#color_lighting,material.visual-language-board` + `AUDIO#ui_feedback` | 无额外 Fact；只使用列出的 Section | 视觉、输入、焦点与非视觉替代在正文及派生可访问性视图中共同满足可访问性 | HIGH / balanced |
 | `SEM.completion_recovery_coherence` | `GDD#states_flow,challenge_recovery,material.game-state-flow` + `LEVEL#objectives_routes,spawn_checkpoint` + `UI#player_journeys,screen_inventory,feedback_errors` | `game.states`, `game.win_conditions`, `game.loss_conditions` | 胜负、目标、失败、检查点、重试与重开确认在状态流、玩家旅程、界面状态和反馈中形成闭环 | HIGH / balanced |
 
 Semantic packet discipline is part of this authority: when normalized Facts already project the relevant owner-section information, the packet does not repeat that section merely as duplicate evidence; deferred semantic facts are the explicit exception and always carry their owner Section. Service-marked `Executive Summary` and `Production Materials` entries (`executive_summary` and `material.<materialId>`) are auditable, revisable blocks and may be included only when explicitly listed by a check. The `Production Materials` container heading and the audit appendix are structural metadata, not part of any preceding section. A marked contract block ends at the next Markdown heading of the same or higher level; packets are formed from the exact complete block or explicitly listed check scope. A legal block is never truncated to satisfy an arbitrary business-size limit. The only fixed output boundary is the existing 2 MiB UTF-8 structured-output infrastructure safeguard in §13.

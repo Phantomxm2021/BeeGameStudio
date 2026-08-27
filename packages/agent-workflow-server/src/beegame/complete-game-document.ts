@@ -103,9 +103,14 @@ const BALANCE_REFERENCE_EXPRESSION = new RegExp(
 )
 const BALANCE_NUMERIC_LITERAL = /(?<![A-Za-z_])(?:\d+(?:\.\d+)?|\.\d+)(?:\s*%)?(?![A-Za-z_])/u
 
-function assertBalanceReferenceOnlyMaterial(body: string, materialId: string): void {
+function assertBalanceReferenceOnlyMaterial(
+  body: string,
+  materialId: string,
+  materialTitle: string,
+): void {
   for (const match of body.matchAll(BALANCE_INLINE_CODE)) {
     const code = match[1]!.trim()
+    if (code === materialId || code === materialTitle) continue
     BALANCE_REFERENCE.lastIndex = 0
     if (!BALANCE_REFERENCE_ONLY.test(code))
       throw new Error(`Balance reference-only material contains non-reference inline code: ${materialId}`)
@@ -364,7 +369,7 @@ export function validateCompleteGameDocumentMarkdown(
       material.materialId,
     )
     if (path === 'docs/BALANCE_DESIGN.md' && material.authorityMode === 'reference_only')
-      assertBalanceReferenceOnlyMaterial(materialBody, material.materialId)
+      assertBalanceReferenceOnlyMaterial(materialBody, material.materialId, material.title)
   })
 
   if (auditIndex >= 0) {

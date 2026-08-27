@@ -144,7 +144,7 @@ describe('native complete game document validation', () => {
     markdown = replaceMaterialBody(
       markdown,
       'formula-boundary-table',
-      'Reference-only prose indexes `V_P_FLOOR`, `V_HAZ_*`, `F01`, `F03A`, `SC_01`, and `AC_01` owners.\n\n| Reference | Owner |\n| --- | --- |\n| variable | `V_P_FLOOR` |\n| formula | `F03A` |',
+      'Reference-only prose indexes `formula-boundary-table`, `V_P_FLOOR`, `V_HAZ_*`, `F01`, `F03A`, `SC_01`, and `AC_01` owners.\n\n| Reference | Owner |\n| --- | --- |\n| variable | `V_P_FLOOR` |\n| formula | `F03A` |',
     )
     markdown = replaceMaterialBody(
       markdown,
