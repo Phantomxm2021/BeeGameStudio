@@ -286,8 +286,8 @@ describe('native complete game document validation', () => {
     )).toThrow(/material.*marker.*line/i)
     expect(() => validateCompleteGameDocumentMarkdown(
       path,
-      markdown.replace(`${first}\n`, ''),
-    )).toThrow(/core-loop-diagram.*marker/i)
+      markdown.replace(first, '<!-- beegame-material:scene-transition-diagram -->'),
+    )).toThrow(/scene-transition-diagram.*marker/i)
   })
 
   test('rejects uneven Markdown table pipes with the owning material line', () => {
@@ -314,6 +314,43 @@ describe('native complete game document validation', () => {
     expect(() => validateCompleteGameDocumentMarkdown(path, malformed)).toThrow(
       /core-loop-diagram.*line|mermaid.*line/i,
     )
+  })
+
+  test('pairs inline backtick runs exactly across lines and respects escaped delimiters', () => {
+    const path = 'docs/GDD.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const valid = replaceSectionBody(
+      markdown,
+      'vision',
+      'Valid ``code ` inner\nspan`` continues across the line.',
+    )
+    expect(validateCompleteGameDocumentMarkdown(path, valid)).toBe(valid)
+
+    const escaped = replaceSectionBody(
+      markdown,
+      'vision',
+      'An escaped \\` delimiter is prose, not a code span.',
+    )
+    expect(validateCompleteGameDocumentMarkdown(path, escaped)).toBe(escaped)
+
+    const unclosed = replaceSectionBody(
+      markdown,
+      'vision',
+      'The unclosed ``broken `span remains open.',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, unclosed)).toThrow(
+      /vision.*line/i,
+    )
+  })
+
+  test('accepts prose ending with a pipe outside an actual Markdown table', () => {
+    const path = 'docs/GDD.md'
+    const markdown = replaceSectionBody(
+      renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+      'vision',
+      'Alternative path |',
+    )
+    expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
   })
 
   test('rejects production tables whose rows do not match the header width', () => {

@@ -180,6 +180,7 @@ function assertMarkdownFenceAndInlineIntegrity(
   startLine: number,
 ): void {
   let open: OpenMarkdownFence | undefined
+  let inline: { length: number; line: number } | undefined
   for (const [index, rawLine] of body.split('\n').entries()) {
     const candidate = markdownFence(rawLine)
     if (candidate) {
@@ -199,19 +200,35 @@ function assertMarkdownFenceAndInlineIntegrity(
       continue
     }
     if (open) continue
-    let backticks = 0
-    for (let character = 0; character < rawLine.length; character += 1) {
-      if (
-        rawLine[character] === '`' &&
-        (character === 0 || rawLine[character - 1] !== '\\')
-      )
-        backticks += 1
+    for (let character = 0; character < rawLine.length;) {
+      if (rawLine[character] !== '`') {
+        character += 1
+        continue
+      }
+      let slashes = 0
+      for (let previous = character - 1; previous >= 0 && rawLine[previous] === '\\'; previous -= 1)
+        slashes += 1
+      let length = 1
+      while (rawLine[character + length] === '`') length += 1
+      character += length
+      if (slashes % 2 !== 0) continue
+      if (inline) {
+        if (length === inline.length) inline = undefined
+      } else {
+        inline = { length, line: index }
+      }
     }
-    if (backticks % 2 !== 0)
-      throw new Error(
-        `Markdown inline code span is unclosed: ${blockId}:line ${startLine + index}`,
-      )
   }
+  if (open) {
+    const language = open.language ? ` ${open.language}` : ''
+    throw new Error(
+      `Markdown${language} code fence is unclosed: ${blockId}:line ${startLine + open.line}`,
+    )
+  }
+  if (inline)
+    throw new Error(
+      `Markdown inline code span is unclosed: ${blockId}:line ${startLine + inline.line}`,
+    )
 }
 
 function markdownTablePipeWidth(line: string): number {
@@ -227,29 +244,32 @@ function assertMarkdownTableIntegrity(
   blockId: string,
   startLine: number,
 ): void {
-  let candidate: Array<{ line: string; index: number }> = []
-  const flush = () => {
-    if (!candidate.length) return
-    const widths = candidate.map(item => markdownTablePipeWidth(item.line))
-    const malformed = candidate.some(item => {
-      const line = item.line.trim()
-      return !line.startsWith('|') || !line.endsWith('|')
-    }) || widths.some(width => width !== widths[0])
-    if (malformed)
+  const lines = body.split('\n').map(line => line.trim())
+  const isTableLine = (line: string) => line.startsWith('|') && line.endsWith('|')
+  const isDelimiter = (line: string) =>
+    isTableLine(line) &&
+    line
+      .slice(1, -1)
+      .split('|')
+      .every(cell => /^:?-{3,}:?$/.test(cell.trim()))
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const header = lines[index]!
+    const delimiter = lines[index + 1]!
+    if (!isTableLine(header) || !isDelimiter(delimiter)) continue
+    const width = markdownTablePipeWidth(header)
+    if (markdownTablePipeWidth(delimiter) !== width)
       throw new Error(
-        `Markdown table pipes are uneven: ${blockId}:line ${startLine + candidate[0]!.index}`,
+        `Markdown table pipes are uneven: ${blockId}:line ${startLine + index + 1}`,
       )
-    candidate = []
-  }
-  for (const [index, rawLine] of body.split('\n').entries()) {
-    const line = rawLine.trim()
-    if (line.startsWith('|') || line.endsWith('|')) {
-      candidate.push({ line, index })
-      continue
+    for (let rowIndex = index + 2; rowIndex < lines.length; rowIndex += 1) {
+      const row = lines[rowIndex]!
+      if (!row.startsWith('|')) break
+      if (!row.endsWith('|') || markdownTablePipeWidth(row) !== width)
+        throw new Error(
+          `Markdown table pipes are uneven: ${blockId}:line ${startLine + rowIndex}`,
+        )
     }
-    flush()
   }
-  flush()
 }
 
 function assertMarkdownIntegrity(
