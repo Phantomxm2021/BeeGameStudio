@@ -4,7 +4,6 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
-import type { FoundationAuthorityProjection } from './foundation-authority-projection'
 
 const MARKDOWN_DOCUMENT_REFERENCE =
   /docs\/[A-Za-z0-9_/-]+(?:\.[A-Za-z0-9_-]+)*/g
@@ -223,6 +222,7 @@ const SEMANTIC_ID_ALIAS = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
 const CJK_ID = /[\u3400-\u9fff\u{20000}-\u{2ffff}]/u
 const PLACEHOLDER_ID = /^(?:placeholder|tbd|todo|unknown)(?:[._-].*)?$/i
 const REFERENCE_SYNTAX = /\b(?:owner\s+)?(?:reference|ref)\s*[:=]\s*([^\n]+)/gi
+const DECLARATION_SYNTAX = /\b(?:owner\s+)?(?:declaration|declare)\s*[:=]\s*([^\n]+)/gi
 const ID_COLUMN = /^(?:id|key|identifier|stable(?:\s+|-)?id)$/i
 const VALUE_COLUMN = /(?:value|range|formula|result|bound|threshold|interval|expression)/i
 
@@ -261,6 +261,7 @@ type StructuredFactRow = {
 
 function explicitIds(block: CompleteDocumentBlock): {
   semantic: string[]
+  semanticDeclarations: string[]
   aliases: string[]
   localDeclarations: Array<{ value: string; line: number }>
   localReferences: Array<{ value: string; line: number }>
@@ -268,13 +269,17 @@ function explicitIds(block: CompleteDocumentBlock): {
 } {
   const allowDeclarations = block.id.startsWith('material.')
   const semantic: string[] = []
+  const semanticDeclarations: string[] = []
   const aliases: string[] = []
   const localDeclarations: Array<{ value: string; line: number }> = []
   const localReferences: Array<{ value: string; line: number }> = []
   const factRows: StructuredFactRow[] = []
   const add = (raw: string, line: number, declaration: boolean) => {
     const value = unquoteId(raw)
-    if (SEMANTIC_ID.test(value)) semantic.push(value)
+    if (SEMANTIC_ID.test(value)) {
+      semantic.push(value)
+      if (declaration) semanticDeclarations.push(value)
+    }
     else if (SEMANTIC_ID_ALIAS.test(value)) aliases.push(value)
     else if (declaration && LOCAL_OWNER_KEY.test(value))
       localDeclarations.push({ value, line })
@@ -309,7 +314,17 @@ function explicitIds(block: CompleteDocumentBlock): {
     for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g))
       add(token[1] ?? token[0], line, false)
   }
-  return { semantic, aliases, localDeclarations, localReferences, factRows }
+  for (const match of block.body.matchAll(DECLARATION_SYNTAX)) {
+    const line = block.startLine + block.body.slice(0, match.index ?? 0).split('\n').length - 1
+    for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g)) {
+      const value = unquoteId(token[1] ?? token[0])
+      if (SEMANTIC_ID.test(value)) {
+        semantic.push(value)
+        semanticDeclarations.push(value)
+      }
+    }
+  }
+  return { semantic, semanticDeclarations, aliases, localDeclarations, localReferences, factRows }
 }
 
 function assertOwnerScopedAuthority(
@@ -374,6 +389,102 @@ function assertOwnerScopedAuthority(
         }
       }
     }
+  }
+}
+
+export type CompleteGameDocumentAuthoritySymbol = Readonly<{
+  id: string
+  documentPath: FoundationDocumentPath
+  sectionId: string
+}>
+
+function completeDocumentBlocks(
+  path: FoundationDocumentPath,
+  lines: readonly string[],
+): CompleteDocumentBlock[] {
+  const contract = getGameDocumentContract(path)
+  const sectionMarkers = contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->`)
+  const materialMarkers = contract.productionMaterials.map(material => `<!-- beegame-material:${material.materialId} -->`)
+  const productionIndex = lines.indexOf('<!-- beegame-production-materials -->')
+  const documentEnd = lines.indexOf('<!-- beegame-audit-appendix -->') >= 0
+    ? lines.indexOf('<!-- beegame-audit-appendix -->')
+    : lines.length
+  const sectionIndexes = sectionMarkers.map(marker => lines.indexOf(marker))
+  const materialIndexes = materialMarkers.map(marker => lines.indexOf(marker))
+  return [
+    ...contract.sections.map((section, index): CompleteDocumentBlock => {
+      const start = sectionIndexes[index]!
+      const end = sectionIndexes[index + 1] ?? productionIndex
+      const heading = nextNonBlankLine(lines, start)
+      return { id: section.sectionId, body: lines.slice((heading?.index ?? start) + 1, end).join('\n'), startLine: (heading?.index ?? start) + 2 }
+    }),
+    ...contract.productionMaterials.map((material, index): CompleteDocumentBlock => {
+      const start = materialIndexes[index]!
+      const end = materialIndexes[index + 1] ?? documentEnd
+      const heading = nextNonBlankLine(lines, start)
+      return { id: `material.${material.materialId}`, body: lines.slice((heading?.index ?? start) + 1, end).join('\n'), startLine: (heading?.index ?? start) + 2 }
+    }),
+  ]
+}
+
+/** Collects only explicit owner declarations for the committed projection. */
+export function collectCompleteGameDocumentAuthoritySymbols(
+  path: FoundationDocumentPath,
+  markdown: string,
+): readonly CompleteGameDocumentAuthoritySymbol[] {
+  return completeDocumentBlocks(path, markdown.split('\n')).flatMap(block => {
+    const ids = explicitIds(block)
+    const tableSymbols = ids.factRows
+      .filter(row => SEMANTIC_ID.test(row.id))
+      .map(row => row.id)
+    const declarationSymbols = ids.semanticDeclarations.filter(id => !tableSymbols.includes(id))
+    return [...new Set([...tableSymbols, ...declarationSymbols])].map(id => ({
+      id,
+      documentPath: path,
+      sectionId: block.id,
+    }))
+  })
+}
+
+/** Collects cross-document IDs only from explicit Reference/ref syntax. */
+export function collectCompleteGameDocumentAuthorityReferences(
+  markdown: string,
+): readonly string[] {
+  const references: string[] = []
+  for (const match of markdown.matchAll(REFERENCE_SYNTAX)) {
+    for (const token of match[1]!.matchAll(/`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.-]*\b/g)) {
+      const value = unquoteId(token[1] ?? token[0])
+      if (SEMANTIC_ID.test(value)) references.push(value)
+    }
+  }
+  return [...new Set(references)]
+}
+
+export function assertCompleteGameDocumentCrossDocumentReferences(
+  path: FoundationDocumentPath,
+  markdown: string,
+  projection: {
+    targetPath: FoundationDocumentPath
+    sources: readonly { path: FoundationDocumentPath; sections: readonly { sectionId: string }[] }[]
+    symbols: readonly CompleteGameDocumentAuthoritySymbol[]
+  },
+): void {
+  const contract = getGameDocumentContract(path)
+  if (projection.targetPath !== path)
+    throw new Error(`committed upstream projection target does not match document: ${path}`)
+  const contracted = new Set(contract.upstreamSections.map(source => source.path))
+  if (projection.sources.some(source => !contracted.has(source.path)))
+    throw new Error(`committed upstream projection contains an undeclared source: ${path}`)
+  const symbols = new Map(projection.symbols.map(symbol => [symbol.id, symbol]))
+  for (const id of collectCompleteGameDocumentAuthorityReferences(markdown)) {
+    if ((path === 'docs/AUDIO_DESIGN.md' || path === 'docs/ART_DIRECTION.md') && id.startsWith('asset.'))
+      throw new Error(`future Asset inventory ID is not available to ${path}: ${id}`)
+    const owner = symbols.get(id)
+    if (!owner)
+      throw new Error(`undefined cross-document semantic ID: ${path}:${id}`)
+    const source = projection.sources.find(candidate => candidate.path === owner.documentPath)
+    if (!source || !source.sections.some(section => section.sectionId === owner.sectionId))
+      throw new Error(`cross-document semantic ID is outside committed upstream projection: ${path}:${id}`)
   }
 }
 
@@ -508,26 +619,9 @@ export function validateCompleteGameDocumentMarkdown(
   const documentEnd = auditIndex >= 0 ? auditIndex : lines.length
   const sectionIndexes = sectionMarkers.map(marker => lines.indexOf(marker))
   const materialIndexes = materialMarkers.map(marker => lines.indexOf(marker))
-  const sectionBodies = contract.sections.map((section, index): CompleteDocumentBlock => {
-    const start = sectionIndexes[index]!
-    const end = sectionIndexes[index + 1] ?? productionIndex
-    const heading = nextNonBlankLine(lines, start)
-    return {
-      id: section.sectionId,
-      body: lines.slice((heading?.index ?? start) + 1, end).join('\n'),
-      startLine: (heading?.index ?? start) + 2,
-    }
-  })
-  const materialBodies = contract.productionMaterials.map((material, index): CompleteDocumentBlock => {
-    const start = materialIndexes[index]!
-    const end = materialIndexes[index + 1] ?? documentEnd
-    const heading = nextNonBlankLine(lines, start)
-    return {
-      id: `material.${material.materialId}`,
-      body: lines.slice((heading?.index ?? start) + 1, end).join('\n').trim(),
-      startLine: (heading?.index ?? start) + 2,
-    }
-  })
+  const blocksById = new Map(completeDocumentBlocks(path, lines).map(block => [block.id, block]))
+  const sectionBodies = contract.sections.map(section => blocksById.get(section.sectionId)!)
+  const materialBodies = contract.productionMaterials.map(material => blocksById.get(`material.${material.materialId}`)!)
   const orderedIndexes = [
     summaryIndex,
     ...sectionIndexes,
@@ -610,78 +704,4 @@ export function validateCompleteGameDocumentMarkdown(
       )
   }
   return `${body}\n`
-}
-
-export type CompleteGameDocumentOwnerSymbol = Readonly<{
-  documentPath: FoundationDocumentPath
-  sectionId: string
-}>
-
-export type CompleteGameDocumentWorkspaceAuthority = Readonly<{
-  projection: FoundationAuthorityProjection
-  ownerSymbols: ReadonlyMap<string, CompleteGameDocumentOwnerSymbol> | Readonly<Record<string, CompleteGameDocumentOwnerSymbol>>
-}>
-
-/**
- * Workspace-aware admission layered on the sole Markdown validator. The
- * projection and symbol table are committed inputs; prose that does not use
- * an explicit ID column or reference syntax remains outside this mechanical
- * gate and is left to Reviewer.
- */
-export function validateCompleteGameDocumentMarkdownWithWorkspaceAuthority(
-  path: FoundationDocumentPath,
-  value: unknown,
-  authority: CompleteGameDocumentWorkspaceAuthority,
-): string {
-  const canonical = validateCompleteGameDocumentMarkdown(path, value)
-  const contract = getGameDocumentContract(path)
-  if (authority.projection.targetPath !== path)
-    throw new Error(`committed upstream projection target does not match document: ${path}`)
-  const contractedUpstream = new Set(contract.upstreamSections.map(source => source.path))
-  if (authority.projection.sources.some(source => !contractedUpstream.has(source.path)))
-    throw new Error(`committed upstream projection contains an undeclared source: ${path}`)
-  const lines = canonical.split('\n')
-  const sectionMarkers = contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->`)
-  const materialMarkers = contract.productionMaterials.map(material => `<!-- beegame-material:${material.materialId} -->`)
-  const blocks = [
-    ...contract.sections.map((section, index): CompleteDocumentBlock => {
-      const start = lines.indexOf(sectionMarkers[index]!)
-      const end = lines.indexOf(sectionMarkers[index + 1] ?? '<!-- beegame-production-materials -->')
-      const heading = nextNonBlankLine(lines, start)
-      return { id: section.sectionId, body: lines.slice((heading?.index ?? start) + 1, end).join('\n'), startLine: (heading?.index ?? start) + 2 }
-    }),
-    ...contract.productionMaterials.map((material, index): CompleteDocumentBlock => {
-      const start = lines.indexOf(materialMarkers[index]!)
-      const end = lines.indexOf(materialMarkers[index + 1] ?? '<!-- beegame-audit-appendix -->')
-      const heading = nextNonBlankLine(lines, start)
-      return { id: `material.${material.materialId}`, body: lines.slice((heading?.index ?? start) + 1, end < 0 ? lines.length : end).join('\n'), startLine: (heading?.index ?? start) + 2 }
-    }),
-  ]
-  const symbols = authority.ownerSymbols instanceof Map
-    ? authority.ownerSymbols
-    : new Map(Object.entries(authority.ownerSymbols))
-  const ownIds = new Set<string>()
-  const references = new Set<string>()
-  for (const block of blocks) {
-    const ids = explicitIds(block)
-    ids.factRows.forEach(row => ownIds.add(row.id))
-    ids.semantic.forEach(id => references.add(id))
-  }
-  const projected = new Map<string, Set<string>>()
-  for (const source of authority.projection.sources) {
-    projected.set(source.path, new Set(source.sections.map(section => section.sectionId)))
-  }
-  for (const id of references) {
-    if (ownIds.has(id)) continue
-    if ((path === 'docs/AUDIO_DESIGN.md' || path === 'docs/ART_DIRECTION.md') && id.startsWith('asset.'))
-      throw new Error(`future Asset inventory ID is not available to ${path}: ${id}`)
-    const owner = symbols.get(id)
-    if (!owner)
-      throw new Error(`undefined cross-document semantic ID: ${path}:${id}`)
-    if (owner.documentPath === path) continue
-    const sections = projected.get(owner.documentPath)
-    if (!sections || !sections.has(owner.sectionId))
-      throw new Error(`cross-document semantic ID is outside committed upstream projection: ${path}:${id}`)
-  }
-  return canonical
 }

@@ -3,8 +3,14 @@ import { mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promise
 import { dirname, join, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import {
+  assertCompleteGameDocumentCrossDocumentReferences,
   normalizeCompleteGameDocumentProtocol,
 } from './complete-game-document'
+import {
+  foundationProjectionRelativePath,
+  parseFoundationAuthorityProjectionBytes,
+} from './foundation-authority-projection'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
@@ -82,6 +88,12 @@ export async function commitAuthoredFoundationDocument(input: {
     authored,
     updatedAt,
   )
+  await assertCommittedFoundationAuthority({
+    workspacePath: input.workspacePath,
+    dispatchId: input.dispatchId,
+    targetPath: input.targetPath,
+    canonical,
+  })
   await durableWrite(target, canonical)
   const audit = {
     schemaVersion: 1 as const,
@@ -131,6 +143,40 @@ export async function commitAuthoredFoundationDocument(input: {
     digest: committed.finalDigest,
   })
   return committed
+}
+
+async function assertCommittedFoundationAuthority(input: {
+  workspacePath: string
+  dispatchId: string
+  targetPath: FoundationDocumentPath
+  canonical: string
+}): Promise<void> {
+  const contract = getGameDocumentContract(input.targetPath)
+  if (!contract.upstreamSections.length) return
+  const projectionPath = resolve(
+    input.workspacePath,
+    foundationProjectionRelativePath(input.dispatchId),
+  )
+  const projection = parseFoundationAuthorityProjectionBytes(
+    await readFile(projectionPath, 'utf8'),
+  )
+  const expectedPaths = contract.upstreamSections.map(source => source.path)
+  if (
+    projection.targetPath !== input.targetPath ||
+    projection.sources.length !== expectedPaths.length ||
+    projection.sources.some((source, index) => source.path !== expectedPaths[index])
+  )
+    throw new Error(`committed upstream projection does not match document contract: ${input.targetPath}`)
+  for (const source of projection.sources) {
+    const current = await readFile(resolve(input.workspacePath, source.path), 'utf8')
+    if (digest(current) !== source.digest)
+      throw new Error(`committed upstream projection is stale: ${source.path}`)
+  }
+  assertCompleteGameDocumentCrossDocumentReferences(
+    input.targetPath,
+    input.canonical,
+    projection,
+  )
 }
 
 export async function readAuthoredDocumentReceipt(

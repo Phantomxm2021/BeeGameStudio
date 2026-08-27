@@ -8,8 +8,13 @@ import {
   readAuthoredDocumentReceipt,
   reconcileAuthoredDocumentReceipt,
 } from './authored-document-receipt'
-import { renderTestCompleteGameDocument } from '../__tests__/complete-game-document-fixture'
+import { completeTestSubmission, renderTestCompleteGameDocument } from '../__tests__/complete-game-document-fixture'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import {
+  canonicalFoundationAuthorityProjectionBytes,
+  projectFoundationAuthority,
+  foundationProjectionRelativePath,
+} from './foundation-authority-projection'
 
 function completeDocument(path: 'docs/GDD.md'): string {
   const contract = getGameDocumentContract(path)
@@ -190,6 +195,50 @@ describe('native authored document receipts', () => {
       await expect(
         readAuthoredDocumentReceipt(workspacePath, 'legacy'),
       ).rejects.toThrow()
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('requires and resolves the committed upstream projection at the document commit boundary', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'authored-authority-'))
+    try {
+      const upstreamPath = 'docs/GDD.md' as const
+      const targetPath = 'docs/LEVEL_SCENE_DESIGN.md' as const
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const upstream = completeDocument(upstreamPath).replace(
+        '## Game States and Flow\n\nAuthoritative production requirements',
+        '## Game States and Flow\n\nOwner declaration: `state.flow`. Authoritative production requirements',
+      )
+      await writeFile(join(workspacePath, upstreamPath), upstream)
+      const target = renderTestCompleteGameDocument(targetPath, completeTestSubmission(targetPath)).replace(
+        'Production-ready World and Scene Structure authority',
+        'Production-ready World and Scene Structure authority. Owner reference: `state.flow`.',
+      )
+      await writeFile(join(workspacePath, targetPath), target)
+      const projection = projectFoundationAuthority({
+        targetPath,
+        availableUpstreamPaths: [upstreamPath],
+        documents: new Map([[upstreamPath, upstream]]),
+      })
+      const projectionPath = join(workspacePath, foundationProjectionRelativePath('authority-pass'))
+      await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
+      await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
+      await expect(commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId: 'authority-pass',
+        targetPath,
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
+      })).resolves.toMatchObject({ status: 'committed', targetPath })
+
+      await writeFile(join(workspacePath, 'docs/GDD.md'), `${upstream}\nchanged`)
+      await expect(commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId: 'authority-stale',
+        targetPath,
+        authoredBody: target,
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
+      })).rejects.toThrow(/projection|stale|missing/i)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

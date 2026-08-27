@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
+import { z } from 'zod/v4'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
+import {
+  collectCompleteGameDocumentAuthoritySymbols,
+  type CompleteGameDocumentAuthoritySymbol,
+} from './complete-game-document'
 
 export type FoundationAuthoritySource = Readonly<{
   path: FoundationDocumentPath
@@ -21,17 +26,24 @@ export type FoundationAuthorityProjection = Readonly<{
   byteLength: number
   rangeCount: number
   projectedLineCount: number
+  symbols: readonly CompleteGameDocumentAuthoritySymbol[]
 }>
+
+export function foundationProjectionRelativePath(dispatchId: string): string {
+  return `.beegame/workflow/document-projections/${dispatchId}.json`
+}
 
 function projectionPayload(input: {
   targetPath: FoundationDocumentPath
   targetSectionIds: readonly string[]
   sources: readonly FoundationAuthoritySource[]
+  symbols: readonly CompleteGameDocumentAuthoritySymbol[]
 }) {
   return {
     targetPath: input.targetPath,
     targetSectionIds: input.targetSectionIds,
     sources: input.sources,
+    symbols: input.symbols,
   }
 }
 
@@ -39,6 +51,47 @@ export function canonicalFoundationAuthorityProjectionBytes(
   projection: FoundationAuthorityProjection,
 ): string {
   return `${JSON.stringify(projectionPayload(projection), null, 2)}\n`
+}
+
+export function parseFoundationAuthorityProjectionBytes(
+  raw: string,
+): FoundationAuthorityProjection {
+  const parsed: unknown = JSON.parse(raw)
+  const sourceSchema = z.object({
+    path: z.string(),
+    sections: z.array(z.object({
+      sectionId: z.string(),
+      startLine: z.number().int().positive(),
+      lineCount: z.number().int().positive(),
+      content: z.string(),
+      digest: z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict()),
+    digest: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict()
+  const schema = z.object({
+    targetPath: z.string(),
+    targetSectionIds: z.array(z.string()),
+    sources: z.array(sourceSchema),
+    symbols: z.array(z.object({
+      id: z.string().regex(/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/),
+      documentPath: z.string(),
+      sectionId: z.string(),
+    }).strict()),
+  }).strict()
+  const stored = schema.parse(parsed)
+  const value = {
+    ...stored,
+    byteLength: new TextEncoder().encode(raw).byteLength,
+    rangeCount: stored.sources.reduce((total, source) => total + source.sections.length, 0),
+    projectedLineCount: stored.sources.reduce((total, source) => total + source.sections.reduce((sum, section) => sum + section.lineCount, 0), 0),
+  } as FoundationAuthorityProjection
+  if (new Set(value.sources.map(source => source.path)).size !== value.sources.length)
+    throw new Error('committed upstream projection contains duplicate sources')
+  if (new Set(value.symbols.map(symbol => symbol.id)).size !== value.symbols.length)
+    throw new Error('committed upstream projection contains duplicate symbols')
+  if (canonicalFoundationAuthorityProjectionBytes(value) !== raw)
+    throw new Error('committed upstream projection bytes are not canonical')
+  return value
 }
 
 /**
@@ -58,6 +111,7 @@ export function modelFoundationAuthorityProjectionBytes(
         content: section.content,
       })),
     })),
+    symbols: projection.symbols,
   }, null, 2)}\n`
 }
 
@@ -93,6 +147,7 @@ export function projectFoundationAuthority(input: {
   )
     throw new Error('foundation authority target sections are invalid')
   const sources: FoundationAuthoritySource[] = []
+  const symbols: CompleteGameDocumentAuthoritySymbol[] = []
 
   for (const source of target.upstreamSections) {
     if (!available.has(source.path)) continue
@@ -100,6 +155,7 @@ export function projectFoundationAuthority(input: {
     if (markdown === undefined)
       throw new Error(`canonical upstream document is missing: ${source.path}`)
     const sourceContract = getGameDocumentContract(source.path)
+    symbols.push(...collectCompleteGameDocumentAuthoritySymbols(source.path, markdown))
     const lines = markdown.split('\n')
     const sectionMarkerLines = lines.flatMap((line, index) =>
       line.trim().startsWith('<!-- beegame-section:') ? [index] : [],
@@ -153,6 +209,7 @@ export function projectFoundationAuthority(input: {
     targetPath: input.targetPath,
     targetSectionIds,
     sources: frozenSources,
+    symbols: Object.freeze([...symbols]),
   })
   const byteLength = new TextEncoder().encode(
     `${JSON.stringify(payload, null, 2)}\n`,
@@ -172,5 +229,6 @@ export function projectFoundationAuthority(input: {
         source.sections.reduce((sum, section) => sum + section.lineCount, 0),
       0,
     ),
+    symbols: Object.freeze([...symbols]),
   })
 }

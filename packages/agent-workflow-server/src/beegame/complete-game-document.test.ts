@@ -5,14 +5,11 @@ import {
 } from '../__tests__/complete-game-document-fixture'
 import {
   assertMaterialFormat,
-  type CompleteGameDocumentOwnerSymbol,
   isCompleteGameDocumentMarkdownStructure,
   normalizeCompleteGameDocumentProtocol,
   validateCompleteGameDocumentMarkdown,
-  validateCompleteGameDocumentMarkdownWithWorkspaceAuthority,
 } from './complete-game-document'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
-import { projectFoundationAuthority } from './foundation-authority-projection'
 
 function replaceMaterialBody(
   markdown: string,
@@ -426,49 +423,4 @@ describe('native complete game document validation', () => {
     expect(validateCompleteGameDocumentMarkdown(audio, audioMarkdown)).toBe(audioMarkdown)
   })
 
-  test('resolves explicit cross-document IDs only through committed projection and symbols', () => {
-    const upstreamPath = 'docs/GDD.md'
-    const targetPath = 'docs/LEVEL_SCENE_DESIGN.md'
-    const upstream = renderTestCompleteGameDocument(upstreamPath, completeTestSubmission(upstreamPath))
-    const projection = projectFoundationAuthority({
-      targetPath,
-      availableUpstreamPaths: [upstreamPath],
-      documents: new Map([[upstreamPath, upstream]]),
-    })
-    const target = replaceSectionBody(
-      renderTestCompleteGameDocument(targetPath, completeTestSubmission(targetPath)),
-      'world_structure',
-      'Owner reference: `state.flow`.',
-    )
-    const authority = {
-      projection,
-      ownerSymbols: new Map<string, CompleteGameDocumentOwnerSymbol>([
-        ['state.flow', { documentPath: upstreamPath, sectionId: 'states_flow' }],
-      ]),
-    }
-    expect(validateCompleteGameDocumentMarkdownWithWorkspaceAuthority(targetPath, target, authority)).toBe(target)
-    expect(() => validateCompleteGameDocumentMarkdownWithWorkspaceAuthority(targetPath, target.replace('state.flow', 'state.missing'), authority)).toThrow(/undefined|semantic ID/i)
-  })
-
-  test('rejects future Asset IDs from Audio and Art workspace admission', () => {
-    const targetPath = 'docs/ART_DIRECTION.md'
-    const upstreamPath = 'docs/GDD.md'
-    const upstream = renderTestCompleteGameDocument(upstreamPath, completeTestSubmission(upstreamPath))
-    const projection = projectFoundationAuthority({
-      targetPath,
-      availableUpstreamPaths: [upstreamPath],
-      documents: new Map([[upstreamPath, upstream]]),
-    })
-    const target = replaceSectionBody(
-      renderTestCompleteGameDocument(targetPath, completeTestSubmission(targetPath)),
-      'visual_pillars',
-      'Owner reference: `asset.inventory.gem`.',
-    )
-    expect(() => validateCompleteGameDocumentMarkdownWithWorkspaceAuthority(targetPath, target, {
-      projection,
-      ownerSymbols: new Map<string, CompleteGameDocumentOwnerSymbol>([
-        ['asset.inventory.gem', { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }],
-      ]),
-    })).toThrow(/future Asset|Asset inventory/i)
-  })
 })

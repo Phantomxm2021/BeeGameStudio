@@ -56,6 +56,7 @@ import {
 import type { FoundationFactPacket } from './delivery-workflow/foundation-fact-extraction'
 import {
   canonicalFoundationAuthorityProjectionBytes,
+  foundationProjectionRelativePath,
   modelFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
   type FoundationAuthorityProjection,
@@ -932,10 +933,6 @@ async function persistFoundationAuthorityIndex(
     canonicalFoundationAuthorityProjectionBytes(projection),
   )
   return projection
-}
-
-function foundationProjectionRelativePath(dispatchId: string): string {
-  return `.beegame/workflow/document-projections/${dispatchId}.json`
 }
 
 function projectionMetrics(projection?: FoundationAuthorityProjection) {
