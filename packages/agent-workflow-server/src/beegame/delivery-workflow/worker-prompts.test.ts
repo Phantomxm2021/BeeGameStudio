@@ -330,6 +330,8 @@ describe('worker prompts', () => {
         expect(prompt).toContain('Each exact reference-column cell must contain exactly one canonical ID/reference token: never prose, path commentary, multiple IDs or N/A text')
         expect(prompt).toContain('Every exact reference-column header is mechanical in any table column position, not only the first column')
         expect(prompt).toContain('These exact reference headers in any table column position are references')
+        expect(prompt).toContain('Document paths belong in a non-mechanical `Document Path` column; `Path Ref` and `Section Ref` are not reserved semantic reference headers')
+        expect(prompt).not.toContain('including `Path Ref`, `Section Ref`')
         expect(prompt).toContain('exact first-column headers `ID`, `Key`, `Identifier` or `Stable ID` declare an owner key')
         expect(prompt).not.toContain('exact first-column headers `Reference ID`, `Owner ID`, `Inventory ID`')
         expect(prompt).toContain('When one row needs multiple owner references, split it into one fact/reference pair per row and repeat the non-declaration Subject/Field cell')

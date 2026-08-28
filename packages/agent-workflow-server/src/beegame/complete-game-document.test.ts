@@ -481,6 +481,18 @@ describe('native complete game document validation', () => {
     )
   })
 
+  test('accepts canonical document paths in a non-semantic Section Ref column', () => {
+    const path = 'docs/ART_DIRECTION.md'
+    const base = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const documentPathReference = replaceMaterialBody(
+      base,
+      'visual-language-board',
+      '| 待定义事实 | Section Ref | Authority Notes |\n| --- | --- | --- |\n| evacuation dependency | docs/GDD.md | see the owning document |',
+    )
+
+    expect(validateCompleteGameDocumentMarkdown(path, documentPathReference)).toBe(documentPathReference)
+  })
+
   test('rejects semantic ID aliases and placeholder/CJK IDs', () => {
     const technical = 'docs/TECHNICAL_DESIGN.md'
     const technicalBase = renderTestCompleteGameDocument(

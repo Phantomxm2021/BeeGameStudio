@@ -382,7 +382,7 @@ const REFERENCE_SYNTAX = /\b(?:owner\s+)?(?:reference|ref)\s*[:=]\s*([^\n]+)/gi
 const DECLARATION_SYNTAX = /\b(?:owner\s+)?(?:declaration|declare)\s*[:=]\s*([^\n]+)/gi
 const MERMAID_FENCE = /```mermaid[^\n]*\n([\s\S]*?)```/gi
 const DECLARATION_COLUMN = /^(?:ID|Key|Identifier|Stable ID)$/
-const REFERENCE_COLUMN = /^(?:Reference ID|Owner ID|Inventory ID|(?:Owner|Asset|Path|Section|Material|Formula|Acceptance|Stable) Ref)$/
+const REFERENCE_COLUMN = /^(?:Reference ID|Owner ID|Inventory ID|(?:Owner|Asset|Material|Formula|Acceptance|Stable) Ref)$/
 const VALUE_COLUMN = /^(?:Value|Range|Formula|Result|Bound|Threshold|Interval|Expression)$/i
 const AUTHORITY_TOKEN = /`([^`\n]+)`|\b[A-Za-z][A-Za-z0-9_.\/-]*\b/g
 
