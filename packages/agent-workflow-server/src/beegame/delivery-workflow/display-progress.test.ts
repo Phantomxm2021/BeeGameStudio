@@ -88,7 +88,7 @@ describe('delivery progress projection', () => {
     ).toMatchObject({
       stageId: 'FOUNDATION_REVISION',
       phaseIndex: 4,
-      phaseCount: 10,
+      phaseCount: 11,
       substage: 'REPAIRING',
     })
 
@@ -101,21 +101,21 @@ describe('delivery progress projection', () => {
     ).toMatchObject({
       stageId: 'FOUNDATION_REVISION',
       phaseIndex: 4,
-      phaseCount: 10,
+      phaseCount: 11,
       substage: 'REPAIRING',
     })
   })
 
-  test('keeps checklist drafting after revision at the virtual revision stage', () => {
+  test('projects checklist authoring as its own stage after Foundation revision', () => {
     expect(
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'CHECKLIST_DRAFTING',
       }),
     ).toMatchObject({
-      stageId: 'FOUNDATION_REVISION',
-      phaseIndex: 4,
-      phaseCount: 10,
+      stageId: 'CHECKLIST_AUTHORING',
+      phaseIndex: 5,
+      phaseCount: 11,
       substage: 'CHECKLIST_DRAFTING',
     })
   })

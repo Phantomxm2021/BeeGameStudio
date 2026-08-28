@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
+import { parseAcceptanceChecklist } from './acceptance-checklist'
 import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -8,7 +9,6 @@ import {
 } from './delivery-workflow/types'
 
 export const REQUIRED_PROJECT_DOCUMENTS = CANONICAL_PROJECT_DOCUMENTS
-export const MAX_ACCEPTANCE_CHECKLIST_TASKS = 64
 
 export type DocumentReadinessAudit = {
   valid: boolean
@@ -29,16 +29,9 @@ export function readAcceptanceChecklistIds(workspacePath: string): string[] {
   )
   try {
     if (!existsSync(path) || !statSync(path).isFile()) return []
-    const identifiers: string[] = []
-    for (const rawLine of readFileSync(path, 'utf8').split('\n')) {
-      const line = rawLine.trimStart()
-      const marker = checklistMarker(line)
-      if (!marker) continue
-      const identifier = checklistIdentifier(line.slice(marker.length).trim())
-      if (identifier && !identifiers.includes(identifier.value))
-        identifiers.push(identifier.value)
-    }
-    return identifiers
+    return parseAcceptanceChecklist(readFileSync(path, 'utf8')).tasks.map(
+      task => task.id,
+    )
   } catch {
     return []
   }
@@ -141,111 +134,5 @@ function auditCompleteFoundationDocument(
 }
 
 function auditChecklistStructure(content: string, path: string): string[] {
-  const issues: string[] = []
-  const identifiers = new Set<string>()
-  let taskCount = 0
-  for (const rawLine of content.split('\n')) {
-    const line = rawLine.trimStart()
-    const marker = checklistMarker(line)
-    if (!marker) continue
-    taskCount += 1
-    const item = line.slice(marker.length).trim()
-    const identifier = checklistIdentifier(item)
-    if (!identifier) {
-      issues.push(
-        `${path}: Checklist task ${taskCount} has no stable identifier.`,
-      )
-      continue
-    }
-    if (identifiers.has(identifier.value)) {
-      issues.push(
-        `${path}: Checklist stable identifier is duplicated: ${identifier.value}`,
-      )
-      continue
-    }
-    identifiers.add(identifier.value)
-    const detail = item.slice(identifier.sourceLength).trimStart()
-    if (!detail) {
-      issues.push(
-        `${path}: Checklist task ${identifier.value} has no observable task description.`,
-      )
-    }
-  }
-  if (taskCount === 0) {
-    issues.push(`${path}: Acceptance checklist contains no task items.`)
-  }
-  if (taskCount > MAX_ACCEPTANCE_CHECKLIST_TASKS) {
-    issues.push(
-      `${path}: Acceptance checklist has ${taskCount} tasks; the maximum is ${MAX_ACCEPTANCE_CHECKLIST_TASKS}. Group variants that share one setup, action and observable outcome.`,
-    )
-  }
-  return issues
-}
-
-function checklistMarker(line: string): string | undefined {
-  for (const marker of ['- [ ]', '- [x]', '- [X]', '* [ ]', '* [x]', '* [X]']) {
-    if (line.startsWith(marker)) return marker
-  }
-  return undefined
-}
-
-function checklistIdentifier(
-  item: string,
-): { value: string; sourceLength: number } | undefined {
-  if (!item) return undefined
-  if (item.startsWith('[')) {
-    const closing = item.indexOf(']', 1)
-    if (closing > 1) {
-      const value = item.slice(1, closing)
-      return isStableIdentifier(value)
-        ? { value, sourceLength: closing + 1 }
-        : undefined
-    }
-  }
-  if (item.startsWith('`')) {
-    const closing = item.indexOf('`', 1)
-    if (closing > 1) {
-      const value = item.slice(1, closing)
-      return isStableIdentifier(value)
-        ? { value, sourceLength: closing + 1 }
-        : undefined
-    }
-  }
-  let end = 0
-  while (end < item.length && !isIdentifierBoundary(item.charCodeAt(end)))
-    end += 1
-  const value = item.slice(0, end)
-  return isStableIdentifier(value) ? { value, sourceLength: end } : undefined
-}
-
-function isIdentifierBoundary(code: number): boolean {
-  return code === 9 || code === 10 || code === 13 || code === 32 || code === 58
-}
-
-function isStableIdentifier(value: string): boolean {
-  if (value.length < 3) return false
-  let hasAlphaNumeric = false
-  let hasSeparator = false
-  for (const character of value) {
-    const code = character.charCodeAt(0)
-    if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
-      hasAlphaNumeric = true
-      continue
-    }
-    if (code >= 48 && code <= 57) {
-      hasAlphaNumeric = true
-      continue
-    }
-    if (
-      character === '-' ||
-      character === '_' ||
-      character === '.' ||
-      character === ':'
-    ) {
-      hasSeparator = true
-      continue
-    }
-    return false
-  }
-  return hasAlphaNumeric && hasSeparator
+  return [...parseAcceptanceChecklist(content, path).issues]
 }

@@ -385,9 +385,9 @@ describe('worker prompts', () => {
       contract: { documentSet: 'checklist' },
     })
 
-    expect(prompt).toContain('one checkbox task for each independently observable approved scenario')
-    expect(prompt).toContain('Merge only equivalent wave, enemy, input, resource, cue or table-row variants')
-    expect(countOccurrences(prompt, 'Author only docs/acceptance/gameplay-checklist.md')).toBe(1)
+    expect(prompt).toContain('distinct, independently observable acceptance condition explicitly present in the projection')
+    expect(prompt).toContain('Do not expand sentences, table rows, variants, prior checklist entries, or generic best practice')
+    expect(countOccurrences(prompt, 'Author only the Checklist candidate at docs/acceptance/gameplay-checklist.md')).toBe(1)
     expect(prompt).not.toContain('24-40 checkbox tasks')
     expect(prompt).not.toContain('never exceed 64 checkbox tasks')
   })

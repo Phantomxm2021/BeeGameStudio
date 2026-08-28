@@ -36,6 +36,7 @@ export type GameDocumentSectionContract = {
   title: string
   purpose: string
   responsibilityIds: readonly GameDocumentResponsibility[]
+  checklistRelevant: boolean
 }
 
 export type GameDocumentProductionMaterialContract = {
@@ -46,6 +47,7 @@ export type GameDocumentProductionMaterialContract = {
   /** The only wire representation accepted in the authored Markdown document. */
   serialization: 'markdown_table' | 'mermaid' | 'inline_svg'
   authorityRule: string
+  checklistRelevant: boolean
 }
 
 export type GameDocumentUpstreamProjection = {
@@ -94,6 +96,7 @@ const section = (
     title,
     purpose,
     responsibilityIds: Object.freeze(responsibilityIds),
+    checklistRelevant: responsibilityIds.some(id => CHECKLIST_RESPONSIBILITIES.has(id)),
   })
 
 const material = (
@@ -110,7 +113,43 @@ const material = (
     purpose,
     serialization: format === 'evidence_register' ? 'markdown_table' : format,
     authorityRule,
+    checklistRelevant: CHECKLIST_MATERIAL_IDS.has(materialId),
   })
+
+const CHECKLIST_RESPONSIBILITIES = new Set<GameDocumentResponsibility>([
+  'gameplay_systems',
+  'game_states',
+  'progression_and_economy',
+  'level_and_world',
+  'balance_and_math',
+  'data_and_persistence',
+  'performance_and_reliability',
+  'art_and_visual_language',
+  'animation_and_vfx',
+  'ui_and_interaction',
+  'accessibility_and_localization',
+  'audio_and_music',
+  'quality_and_acceptance',
+])
+
+const CHECKLIST_MATERIAL_IDS = new Set([
+  'core-loop-diagram',
+  'game-state-flow',
+  'route-choice-diagram',
+  'pacing-beat-table',
+  'variable-parameter-table',
+  'runtime-lifecycle-diagram',
+  'save-recovery-table',
+  'visual-language-board',
+  'animation-vfx-state-table',
+  'player-flow-diagram',
+  'screen-state-table',
+  'focus-accessibility-matrix',
+  'event-cue-matrix',
+  'music-state-diagram',
+  'bus-ducking-diagram',
+  'loudness-delivery-table',
+])
 
 const upstream = (
   path: FoundationDocumentPath,

@@ -214,7 +214,7 @@ Workflow Card 的资源阶段显示固定四项：
 - 每个 canonical commit 后结束当前 dispatch；
 - 删除 token/time/tool/attempt 控制和 budget-yield 自动重派；
 - Gate 通过后唯一转入 Comprehensive Review。
-- Checklist 在进入 Resource Production 前已经完成独立 Review/Closure 并封存；Comprehensive 不再拥有 checklist mutation 或 remediation target。
+- Checklist 在进入 Resource Production 前已按唯一 Checklist parser 和 candidate commit boundary 封存；Comprehensive 不拥有 checklist mutation 或 remediation target，也不建立独立 Checklist Review/Closure authority。其提交与恢复规则以 `Bee_Game_Studio_Doc_Audit_Revision_Optimized.md` 为准。
 - inventory checkpoint 只绑定 Manifest plan、resource records 与本地文件，不绑定无关 Checklist/文档的全量摘要。
 - Content 的 `needs_inventory` 由服务端验证真实缺料；不能用它逃离内容写入或权限错误。
 

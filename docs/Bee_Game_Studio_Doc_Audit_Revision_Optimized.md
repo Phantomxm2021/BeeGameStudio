@@ -450,5 +450,13 @@ Reviewer 发现业务 Issue 后，controller 必须立即将其纳入唯一 Issu
 
 - 所有终态任务都保留 usage、duration 与 failure reason，确保成本和失败可按任务追溯。
 
+## 19. Checklist 单轨提交
+
+Foundation revision READY 后，Checklist 是唯一的下游派生产物，而不是第二份玩法、数值、资源或审计 authority。服务从当前 committed Foundation revision 的 Section Index 和各 document contract 标记为 `checklistRelevant` 的 owner block 生成一个 immutable raw-Markdown authority projection；projection 只含 path、Section/Material identity 与必要原文块。它不注入八份全文、不把失败 Checklist 当作 authority，也不建立第二个 Fact Store 或 coverage truth。
+
+Checklist author 只有一个逻辑 task，并且只写其 dispatch-bound candidate Markdown。candidate 先由服务使用唯一 Checklist parser 验证 checkbox grammar、stable ID 唯一性和非空可观察描述；author prompt 以 projection 限定内容范围并要求合并等价场景。通过后服务原子提交 `docs/acceptance/gameplay-checklist.md`；失败 candidate 只保留 durable diagnostics，永不成为 canonical 文件或后续 author prompt baseline。恢复仍针对同一个逻辑 task 和冻结 projection，创建干净 candidate；不得保留 direct-canonical write、旧 candidate overlay、并行 author 或兼容 reader。
+
+Checklist author 输出始终是 raw Markdown，不以 JSON 替代。Checklist 规模由实际不可互相替代的可观察场景决定；不得以任务数、token、字数、耗时或 attempt 设置业务合格上限。Checklist 结构通过后唯一进入 Resource Preparation。Checklist 是独立展示阶段，不得显示为 Foundation 审计或修订 stage，也不得创建 Checklist Reviewer/Closure 的第二 authority。
+
 **推荐生产架构：Fact Store + Rule Engine + Contract Validator + LLM
 Semantic Auditor + Incremental Patch**

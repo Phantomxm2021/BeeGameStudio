@@ -141,7 +141,7 @@ Document Reviewer 使用新的只读 Claude Code 上下文，并遵循 [Document
 - 不修改项目，不发明第二份产品需求。
 - 返回唯一终态：`READY`、`NEEDS_REVISION` 或 `BLOCKED`。
 
-READY 只有在当前 revision 的 required checks 全部具有有效 pass evidence 且 findings 为空时成立。修复按 `foundation -> checklist -> resource` 的唯一 owner 顺序执行；Closure 只能关闭当前 repair batch。上游变化按确定性依赖失效下游 approval，自动返工达到上限后进入 `needs_action`，不得重新开放同一 revision 的全文审计。
+READY 只有在当前 revision 的 required checks 全部具有有效 pass evidence 且 findings 为空时成立。修复按 `foundation -> checklist -> resource` 的唯一 owner 顺序执行；Closure 只能关闭当前 repair batch。上游变化按确定性依赖失效下游 approval；不以固定 attempt、token、时间或业务规模上限决定修复是否继续。Checklist 的唯一提交与恢复规则由 [优化后的文档审计权威](./Bee_Game_Studio_Doc_Audit_Revision_Optimized.md#19-checklist-单轨提交) 定义，本文件不建立并行 Checklist authority。
 
 ### 4.3 Resource / Art Subagent
 

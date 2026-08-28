@@ -61,6 +61,7 @@ import {
   projectFoundationAuthority,
   type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
+import { buildChecklistAuthorityProjection } from './checklist-authority-projection'
 
 type FoundationFactPacketContract = {
   keys: FoundationFactKey[]
@@ -198,34 +199,20 @@ export async function buildDocumentAuthorAuthorityBlock(
     request.contract.documentSet === 'checklist'
   ) {
     const targetPath = request.allowedPaths?.[0]
-    if (targetPath !== 'docs/acceptance/gameplay-checklist.md')
-      throw new Error('checklist author target is invalid')
-    const documents = await Promise.all(
-      CANONICAL_FOUNDATION_DOCUMENTS.map(async path => ({
-        path,
-        content: await readFile(resolve(request.workspacePath, path), 'utf8'),
-      })),
+    if (
+      typeof targetPath !== 'string' ||
+      targetPath !== request.contract.checklistCandidatePath
     )
-    let existingTarget: string | undefined
-    try {
-      existingTarget = await readFile(
-        resolve(request.workspacePath, targetPath),
-        'utf8',
-      )
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
+      throw new Error('checklist author target is invalid')
+    if (typeof request.contract.approvedDocumentRevision !== 'string')
+      throw new Error('checklist authority revision is missing')
+    const projection = await buildChecklistAuthorityProjection({
+      workspacePath: request.workspacePath,
+      approvedDocumentRevision: request.contract.approvedDocumentRevision,
+    })
     return [
-      `The workflow service projected the approved Foundation documents below. Use this authority to complete the assigned checklist at ${targetPath}, then end the turn normally.`,
-      ...(existingTarget
-        ? [
-            `--- BEGIN CANONICAL CHECKLIST BASELINE: ${targetPath} ---\n${existingTarget}\n--- END CANONICAL CHECKLIST BASELINE: ${targetPath} ---`,
-          ]
-        : []),
-      ...documents.map(
-        document =>
-          `--- BEGIN APPROVED FOUNDATION: ${document.path} ---\n${document.content}\n--- END APPROVED FOUNDATION: ${document.path} ---`,
-      ),
+      `Write the Checklist candidate only at ${targetPath}. The service will validate it and atomically publish it to ${String(request.contract.checklistCanonicalPath)} only when valid. A failed candidate is diagnostic-only and cannot become authority.`,
+      projection,
     ].join('\n\n')
   }
   if (!isFoundationDocumentAuthoringTurn(request)) return ''
@@ -386,7 +373,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
-      const documentAuthorityBlock = ''
+      const documentAuthorityBlock =
+        request.workerType === 'document-author' &&
+        request.contract.documentSet === 'checklist'
+          ? await buildDocumentAuthorAuthorityBlock(request)
+          : ''
       if (request.workerType === 'atomic-task-planner') {
         await mkdir(join(request.workspacePath, '.beegame/workflow/evidence'), {
           recursive: true,
@@ -791,7 +782,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
             throw new Error(
               'resource content author completed without an accepted durable receipt',
             )
-          if (request && isCanonicalDocumentAuthor(request)) {
+          if (request && isDocumentAuthor(request)) {
             const targetPath = request.allowedPaths?.[0]
             if (!targetPath)
               throw new Error('document author target is missing')
@@ -807,7 +798,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 throw new Error(
                   'document author completed without a committed Markdown stream receipt',
                 )
-              return createDeterministicCanonicalDocumentTerminal(
+              return createDeterministicDocumentAuthorTerminal(
                 request,
                 [receipt.targetPath],
                 documentAuthoringMetrics(
@@ -837,7 +828,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
               )
             if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
               await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-            return createDeterministicCanonicalDocumentTerminal(
+            return createDeterministicDocumentAuthorTerminal(
               request,
               [targetPath],
               documentAuthoringMetrics(
@@ -872,7 +863,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
   }
 }
 
-function isCanonicalDocumentAuthor(request: WorkerDispatchRequest): boolean {
+function isDocumentAuthor(request: WorkerDispatchRequest): boolean {
   return request.workerType === 'document-author'
 }
 
@@ -953,13 +944,13 @@ function projectionMetrics(projection?: FoundationAuthorityProjection) {
     : undefined
 }
 
-function createDeterministicCanonicalDocumentTerminal(
+function createDeterministicDocumentAuthorTerminal(
   request: WorkerDispatchRequest,
   writtenPaths: string[],
   authoringMetrics?: ReturnType<typeof documentAuthoringMetrics>,
 ) {
-  if (!isCanonicalDocumentAuthor(request))
-    throw new Error('canonical document author contract is invalid')
+  if (!isDocumentAuthor(request))
+    throw new Error('document author contract is invalid')
   return documentAuthorTerminalSchema.parse({
     workerType: 'document-author',
     status: 'completed',

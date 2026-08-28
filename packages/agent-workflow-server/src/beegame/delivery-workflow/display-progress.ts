@@ -9,6 +9,7 @@ import { isFoundationRevisionPhase } from './foundation-audit-state'
 export const DELIVERY_PROGRESS_STAGES = [
   ...DELIVERY_PHASES.slice(0, 3),
   'FOUNDATION_REVISION',
+  'CHECKLIST_AUTHORING',
   ...DELIVERY_PHASES.slice(3),
 ] as const
 
@@ -25,6 +26,7 @@ export type DeliveryProgressSubstage =
 export type DeliveryProgressStage = (typeof DELIVERY_PROGRESS_STAGES)[number]
 
 export const FOUNDATION_REVISION_STAGE = 'FOUNDATION_REVISION' as const
+export const CHECKLIST_AUTHORING_STAGE = 'CHECKLIST_AUTHORING' as const
 
 /**
  * Revision remains inside DOCUMENT_REVIEW's top-level delivery phase, but it
@@ -55,9 +57,10 @@ export function projectDeliveryProgress(
   )
   const stageId =
     workflow.phase === 'DOCUMENT_REVIEW' &&
-    (workflow.documentStep === 'CHECKLIST_DRAFTING' ||
-      activeFoundationRepair)
-      ? FOUNDATION_REVISION_STAGE
+    workflow.documentStep === 'CHECKLIST_DRAFTING'
+      ? CHECKLIST_AUTHORING_STAGE
+      : workflow.phase === 'DOCUMENT_REVIEW' && activeFoundationRepair
+        ? FOUNDATION_REVISION_STAGE
       : (workflow.phase as DeliveryProgressStage)
   const substage: DeliveryProgressSubstage | undefined =
     workflow.documentStep === 'FOUNDATION_DRAFTING'

@@ -447,9 +447,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
             : 'Unsupported Foundation document authoring mode.',
         request.contract.documentSet === 'checklist'
           ? [
-              'Author only docs/acceptance/gameplay-checklist.md from the eight approved foundation documents.',
-              'Every acceptance task must be one Markdown checkbox line with a stable ID, observable behavior and evidence expectation. Cover core player paths, critical numeric boundaries, level/scene states, UI/audio feedback, visible resource outcomes and failure/recovery paths from the approved authority.',
-              'Group the approved scenarios before authoring. Create one checkbox task for each independently observable approved scenario. Merge only equivalent wave, enemy, input, resource, cue or table-row variants when they share one setup, action and observable outcome; do not create one task per document sentence or variant. A task may cite multiple approved facts while remaining independently pass/fail.',
+              `Author only the Checklist candidate at ${documentAuthorTargetPath(request)} from the injected frozen Checklist Authority Projection.`,
+              'Every acceptance task must be one Markdown checkbox line with a stable ID, observable behavior and evidence expectation. Create a task only for a distinct, independently observable acceptance condition explicitly present in the projection. Do not expand sentences, table rows, variants, prior checklist entries, or generic best practice into new work.',
+              'Merge equivalent variants when they share one setup, action and observable outcome. A task may cite multiple approved facts while remaining independently pass/fail.',
               'Use the canonical form `- [ ] <stable-id> <observable check and evidence expectation>`; tables may add context but cannot replace checkbox tasks.',
               'Do not modify foundation documents, resources, the asset manifest or implementation files.',
             ].join(' ')
@@ -591,6 +591,6 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
 
 function documentAuthorTargetPath(request: WorkerDispatchRequest): string {
   return request.contract.documentSet === 'checklist'
-    ? 'docs/acceptance/gameplay-checklist.md'
+    ? String(request.allowedPaths?.[0])
     : String(request.contract.foundationDocumentPath)
 }

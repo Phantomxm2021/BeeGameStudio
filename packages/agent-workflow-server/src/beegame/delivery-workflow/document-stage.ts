@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import {
@@ -21,6 +22,13 @@ import {
   type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from './types'
+import {
+  CHECKLIST_PATH,
+  checklistCandidatePath,
+  commitChecklistCandidate,
+  readChecklistCandidate,
+} from '../checklist-candidate'
+import { parseAcceptanceChecklist } from '../acceptance-checklist'
 
 import type { WorkerTerminalResult } from './worker-contracts'
 
@@ -36,8 +44,6 @@ type ReadinessAudit = (
 type Dispatcher = {
   dispatch(request: WorkerDispatchRequest): Promise<unknown>
 }
-
-const CHECKLIST_PATH = 'docs/acceptance/gameplay-checklist.md'
 
 async function defaultAudit(
   workspacePath: string,
@@ -262,7 +268,10 @@ export async function startChecklistDraftStage(input: {
     throw new Error('checklist drafting is not the active document step')
   if (input.run.activeDispatch?.status === 'running')
     return input.run.activeDispatch
+  const dispatchId = randomUUID()
+  const candidatePath = checklistCandidatePath(dispatchId)
   return input.dispatcher.dispatch({
+    dispatchId,
     runId: input.run.runId,
     ownerId: input.run.ownerId,
     projectId: input.run.projectId,
@@ -270,11 +279,14 @@ export async function startChecklistDraftStage(input: {
     workerType: 'document-author',
     phase: 'DOCUMENT_REVIEW',
     revision: input.run.revision.document,
-    allowedPaths: [CHECKLIST_PATH],
+    allowedPaths: [candidatePath],
+    projectReadScope: 'empty',
     contract: {
       confirmedBriefDigest: input.run.confirmedBriefDigest,
       documentSet: 'checklist',
       approvedDocumentRevision: input.run.revision.document,
+      checklistCanonicalPath: CHECKLIST_PATH,
+      checklistCandidatePath: candidatePath,
     },
   })
 }
@@ -295,7 +307,11 @@ export async function completeDocumentDraft(input: {
   if (documentSet === 'foundation')
     return completeInitialFoundationDocumentDraft(input)
 
-  const allowedPaths = new Set([CHECKLIST_PATH])
+  const candidatePath = input.run.activeDispatch?.request?.contract
+    .checklistCandidatePath
+  const allowedPaths = new Set(
+    typeof candidatePath === 'string' ? [candidatePath] : [],
+  )
   const outOfScope = input.terminal.writtenPaths.filter(path => {
     const normalized = path.split('\\').join('/')
     return (
@@ -345,26 +361,33 @@ export async function completeDocumentDraft(input: {
   }
   const readiness = input.audit
     ? input.audit(input.workspacePath, {
-        includeChecklist: documentSet === 'checklist',
+        includeChecklist: false,
         includeAssetManifest: false,
       })
     : await defaultAudit(input.workspacePath, {
-        includeChecklist: documentSet === 'checklist',
+        includeChecklist: false,
         includeAssetManifest: false,
       })
+  const candidateIssues =
+    typeof candidatePath !== 'string' || outOfScope.length
+      ? ['checklist author candidate is missing']
+      : await readChecklistCandidate({
+          workspacePath: input.workspacePath,
+          candidatePath,
+        })
+          .then(content => parseAcceptanceChecklist(content, CHECKLIST_PATH).issues)
+          .catch(error => [
+            `checklist candidate is unavailable: ${error instanceof Error ? error.message : 'unknown error'}`,
+          ])
   const metadataIssues = documentMetadataIssues({
     workspacePath: input.workspacePath,
     writtenPaths: input.terminal.writtenPaths,
     previous:
       input.run.activeDispatch?.request?.contract.previousDocumentMetadata,
   })
-  const documentRevision = await computeDocumentRevision(
-    input.workspacePath,
-    input.run.confirmedBriefDigest,
-  )
-  const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
   const issues = [
     ...readiness.issues,
+    ...candidateIssues,
     ...(outOfScope.length
       ? [
           `document author wrote outside the document scope: ${outOfScope.join(', ')}`,
@@ -374,19 +397,30 @@ export async function completeDocumentDraft(input: {
     ...metadataCommitIssues,
     ...metadataIssues,
   ]
-  let updated: DeliveryRun = {
-    ...input.run,
-    revision: {
-      ...input.run.revision,
-      document: documentRevision,
-      workspace: workspaceRevision,
-    },
+  if (issues.length)
+    return {
+      ...input.run,
     activeDispatch: issues.length ? input.run.activeDispatch : undefined,
     status: issues.length ? 'needs_action' : input.run.status,
     blockedReason: issues.length ? issues.join('; ') : undefined,
     updatedAt: new Date().toISOString(),
+    }
+
+  await commitChecklistCandidate({
+    workspacePath: input.workspacePath,
+    candidatePath: candidatePath as string,
+  })
+  const documentRevision = await computeDocumentRevision(
+    input.workspacePath,
+    input.run.confirmedBriefDigest,
+  )
+  const workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
+  const updated: DeliveryRun = {
+    ...input.run,
+    revision: { ...input.run.revision, document: documentRevision, workspace: workspaceRevision },
+    activeDispatch: undefined,
+    updatedAt: new Date().toISOString(),
   }
-  if (issues.length) return updated
 
   return {
     ...updated,

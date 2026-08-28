@@ -696,7 +696,7 @@ export function createDeliveryDispatcher(options: {
           : {}),
       })
     }
-    const dispatchId = randomUUID()
+    const dispatchId = request.dispatchId ?? randomUUID()
     const dispatchRequest = {
       ...request,
       dispatchId,
@@ -716,7 +716,7 @@ export function createDeliveryDispatcher(options: {
       request: dispatchRequest,
     })
     byKey.set(key, record)
-    requests.set(record.dispatchId, request)
+    requests.set(record.dispatchId, dispatchRequest)
     startingDispatches.add(dispatchId)
     let startedDispatchId: string | undefined
     try {
