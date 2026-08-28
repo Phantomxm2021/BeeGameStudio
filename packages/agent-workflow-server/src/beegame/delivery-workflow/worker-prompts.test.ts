@@ -385,7 +385,7 @@ describe('worker prompts', () => {
       contract: { documentSet: 'checklist' },
     })
 
-    expect(prompt).toContain('distinct, independently observable acceptance condition explicitly present in the projection')
+    expect(prompt).toContain('distinct, independently observable acceptance condition explicitly present in a SCENARIO block')
     expect(prompt).toContain('Do not expand sentences, table rows, variants, prior checklist entries, or generic best practice')
     expect(countOccurrences(prompt, 'Author only the Checklist candidate at docs/acceptance/gameplay-checklist.md')).toBe(1)
     expect(prompt).not.toContain('24-40 checkbox tasks')

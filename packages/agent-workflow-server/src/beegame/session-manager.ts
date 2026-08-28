@@ -260,6 +260,7 @@ export type BeeGameSessionRunnerStartInput = {
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowDispatchId?: string
   workflowAllowedPaths?: string[]
+  workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
@@ -398,6 +399,7 @@ type SessionRecord = {
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
+  workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
@@ -634,6 +636,7 @@ export type StartBeeGameSessionInput = {
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
   workflowAllowedPaths?: string[]
+  workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
@@ -786,6 +789,9 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
+        : {}),
+      ...(input.workflowAllowedTools
+        ? { workflowAllowedTools: [...input.workflowAllowedTools] }
         : {}),
       ...(input.workflowProjectReadScope
         ? { workflowProjectReadScope: input.workflowProjectReadScope }
@@ -1547,6 +1553,9 @@ export class BeeGameSessionManager {
           ...(record.workflowAllowedPaths
             ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
             : {}),
+          ...(record.workflowAllowedTools
+            ? { workflowAllowedTools: [...record.workflowAllowedTools] }
+            : {}),
           ...(record.workflowProjectReadScope
             ? { workflowProjectReadScope: record.workflowProjectReadScope }
             : {}),
@@ -1954,6 +1963,19 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
+    const toolRestriction = workflowToolRestriction(record, request)
+    if (toolRestriction) {
+      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'deny',
+        scope: 'once',
+        autoDenied: true,
+        reason: 'workflow_tool_not_allowed',
+      })
+      return Promise.resolve({ behavior: 'deny', scope: 'once', message: toolRestriction })
+    }
     if (
       request.toolName === 'CommitResourceInventoryAuthority' ||
       request.toolName === 'CommitResourceContentAuthority'
@@ -3777,6 +3799,15 @@ function getSessionArtifactRootPathsForEvents(
 
 function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
+}
+
+export function workflowToolRestriction(
+  record: SessionRecord,
+  request: DashboardPermissionRequest,
+): string | undefined {
+  const allowed = record.workflowAllowedTools
+  if (!allowed || allowed.includes(request.toolName)) return undefined
+  return `This workflow worker may use only: ${allowed.join(', ')}.`
 }
 
 function authorizeBeeGamePlatformMutation(

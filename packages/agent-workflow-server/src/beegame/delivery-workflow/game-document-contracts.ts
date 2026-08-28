@@ -31,13 +31,21 @@ export const GAME_DOCUMENT_RESPONSIBILITIES = [
 export type GameDocumentResponsibility =
   (typeof GAME_DOCUMENT_RESPONSIBILITIES)[number]
 
+/** A Checklist may either derive player-observable work, point to an owner gate, or omit a block. */
+export type ChecklistAuthorityMode = 'scenario' | 'gate_reference' | 'exclude'
+
 export type GameDocumentSectionContract = {
   sectionId: string
   title: string
   purpose: string
   responsibilityIds: readonly GameDocumentResponsibility[]
-  checklistRelevant: boolean
+  checklistMode: ChecklistAuthorityMode
 }
+
+type UnboundGameDocumentSectionContract = Omit<
+  GameDocumentSectionContract,
+  'checklistMode'
+>
 
 export type GameDocumentProductionMaterialContract = {
   materialId: string
@@ -47,8 +55,13 @@ export type GameDocumentProductionMaterialContract = {
   /** The only wire representation accepted in the authored Markdown document. */
   serialization: 'markdown_table' | 'mermaid' | 'inline_svg'
   authorityRule: string
-  checklistRelevant: boolean
+  checklistMode: ChecklistAuthorityMode
 }
+
+type UnboundGameDocumentProductionMaterialContract = Omit<
+  GameDocumentProductionMaterialContract,
+  'checklistMode'
+>
 
 export type GameDocumentUpstreamProjection = {
   path: FoundationDocumentPath
@@ -90,13 +103,12 @@ const section = (
   title: string,
   purpose: string,
   ...responsibilityIds: GameDocumentResponsibility[]
-): GameDocumentSectionContract =>
+): UnboundGameDocumentSectionContract =>
   Object.freeze({
     sectionId,
     title,
     purpose,
     responsibilityIds: Object.freeze(responsibilityIds),
-    checklistRelevant: responsibilityIds.some(id => CHECKLIST_RESPONSIBILITIES.has(id)),
   })
 
 const material = (
@@ -105,7 +117,7 @@ const material = (
   format: GameDocumentProductionMaterialContract['format'],
   purpose: string,
   authorityRule: string,
-): GameDocumentProductionMaterialContract =>
+): UnboundGameDocumentProductionMaterialContract =>
   Object.freeze({
     materialId,
     title,
@@ -113,43 +125,7 @@ const material = (
     purpose,
     serialization: format === 'evidence_register' ? 'markdown_table' : format,
     authorityRule,
-    checklistRelevant: CHECKLIST_MATERIAL_IDS.has(materialId),
   })
-
-const CHECKLIST_RESPONSIBILITIES = new Set<GameDocumentResponsibility>([
-  'gameplay_systems',
-  'game_states',
-  'progression_and_economy',
-  'level_and_world',
-  'balance_and_math',
-  'data_and_persistence',
-  'performance_and_reliability',
-  'art_and_visual_language',
-  'animation_and_vfx',
-  'ui_and_interaction',
-  'accessibility_and_localization',
-  'audio_and_music',
-  'quality_and_acceptance',
-])
-
-const CHECKLIST_MATERIAL_IDS = new Set([
-  'core-loop-diagram',
-  'game-state-flow',
-  'route-choice-diagram',
-  'pacing-beat-table',
-  'variable-parameter-table',
-  'runtime-lifecycle-diagram',
-  'save-recovery-table',
-  'visual-language-board',
-  'animation-vfx-state-table',
-  'player-flow-diagram',
-  'screen-state-table',
-  'focus-accessibility-matrix',
-  'event-cue-matrix',
-  'music-state-diagram',
-  'bus-ducking-diagram',
-  'loudness-delivery-table',
-])
 
 const upstream = (
   path: FoundationDocumentPath,
@@ -200,7 +176,7 @@ const PRODUCTION_MATERIALS = {
     material('license-register', 'License Register', 'evidence_register', 'Canonical traceable source/licensing evidence owning records keyed by inventory IDs.', 'Own source, originality, attribution, restriction and license evidence keyed by inventory IDs.'),
     material('milestone-maturity-table', 'Milestone and Maturity Table', 'markdown_table', 'Canonical computable milestone and maturity rows owning capacity, schedule, maturity and status keyed by inventory IDs.', 'Own capacity, schedule, maturity and status rows keyed by inventory IDs.'),
   ],
-} satisfies Record<FoundationDocumentPath, readonly GameDocumentProductionMaterialContract[]>
+} satisfies Record<FoundationDocumentPath, readonly UnboundGameDocumentProductionMaterialContract[]>
 
 export const FOUNDATION_DOCUMENT_AUTHORITY_RULES = Object.freeze({
   'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
@@ -261,11 +237,54 @@ const UPSTREAM_SECTIONS = {
   ],
 } satisfies Record<FoundationDocumentPath, readonly GameDocumentUpstreamProjection[]>
 
+/**
+ * Explicit Checklist inclusion is deliberately independent of document
+ * responsibility.  A discipline owning a fact does not make every owner
+ * detail a player-acceptance task.
+ */
+const CHECKLIST_AUTHORITY_MODES = {
+  'docs/GDD.md': {
+    sections: { vision: 'exclude', experience_pillars: 'exclude', core_loop: 'scenario', player_actions: 'scenario', rules_systems: 'scenario', states_flow: 'scenario', progression: 'gate_reference', content_narrative: 'exclude', challenge_recovery: 'scenario', accessibility_localization: 'scenario', metrics: 'exclude', scope_risks: 'exclude' },
+    materials: { 'core-loop-diagram': 'scenario', 'game-state-flow': 'scenario' },
+  },
+  'docs/LEVEL_SCENE_DESIGN.md': {
+    sections: { world_structure: 'exclude', level_sequence: 'scenario', objectives_routes: 'scenario', pacing_beats: 'scenario', encounters: 'scenario', spawn_checkpoint: 'scenario', camera_readability: 'scenario', scene_states: 'scenario', content_matrix: 'exclude', production_acceptance: 'gate_reference' },
+    materials: { 'world-structure-diagram': 'exclude', 'route-choice-diagram': 'scenario', 'pacing-beat-table': 'scenario' },
+  },
+  'docs/BALANCE_DESIGN.md': {
+    sections: { units_variables: 'exclude', entity_parameters: 'exclude', formulas: 'gate_reference', economy: 'gate_reference', progression_curves: 'gate_reference', challenge_model: 'gate_reference', rewards_value: 'gate_reference', bounds_exploits: 'gate_reference', tuning_validation: 'gate_reference', risks_dependencies: 'exclude' },
+    materials: { 'variable-parameter-table': 'gate_reference' },
+  },
+  'docs/TECHNICAL_DESIGN.md': {
+    sections: { architecture: 'exclude', runtime_state: 'scenario', data_content: 'exclude', save_load: 'scenario', input_interaction: 'scenario', performance: 'gate_reference', online_boundary: 'exclude', security_privacy: 'exclude', diagnostics: 'exclude', build_release: 'exclude', testing: 'gate_reference', risks: 'exclude' },
+    materials: { 'architecture-diagram': 'exclude', 'data-flow-diagram': 'exclude', 'runtime-lifecycle-diagram': 'scenario', 'save-recovery-table': 'scenario' },
+  },
+  'docs/ART_DIRECTION.md': {
+    sections: { visual_pillars: 'exclude', composition_readability: 'scenario', character_style: 'scenario', environment_style: 'scenario', color_lighting: 'scenario', animation: 'scenario', vfx: 'scenario', camera_presentation: 'scenario', asset_specifications: 'gate_reference', pipeline_risks: 'exclude' },
+    materials: { 'visual-language-board': 'scenario', 'animation-vfx-state-table': 'scenario' },
+  },
+  'docs/UI_UX_SPEC.md': {
+    sections: { experience_architecture: 'exclude', player_journeys: 'scenario', screen_inventory: 'scenario', hud: 'scenario', input: 'scenario', feedback_errors: 'scenario', onboarding: 'scenario', accessibility: 'scenario', localization: 'scenario', prototype_acceptance: 'gate_reference' },
+    materials: { 'information-architecture-diagram': 'exclude', 'player-flow-diagram': 'scenario', 'screen-state-table': 'scenario', 'wireframe-board': 'exclude', 'focus-accessibility-matrix': 'scenario' },
+  },
+  'docs/AUDIO_DESIGN.md': {
+    sections: { audio_pillars: 'exclude', event_taxonomy: 'scenario', sfx: 'scenario', music: 'scenario', ambience: 'scenario', ui_feedback: 'scenario', voice: 'scenario', mix: 'gate_reference', implementation: 'exclude', production: 'gate_reference' },
+    materials: { 'event-cue-matrix': 'scenario', 'music-state-diagram': 'scenario', 'bus-ducking-diagram': 'gate_reference', 'loudness-delivery-table': 'gate_reference' },
+  },
+  'docs/ASSET_PLAN.md': {
+    sections: { inventory: 'exclude', ownership: 'exclude', dependencies: 'exclude', source_license: 'exclude', formats_budgets: 'exclude', pipeline: 'exclude', milestones: 'exclude', validation: 'exclude', placeholder_replacement: 'exclude', delivery_risks: 'exclude' },
+    materials: { 'asset-inventory-table': 'exclude', 'responsibility-matrix': 'exclude', 'dependency-integration-diagram': 'exclude', 'license-register': 'exclude', 'milestone-maturity-table': 'exclude' },
+  },
+} as const satisfies Record<FoundationDocumentPath, {
+  sections: Record<string, ChecklistAuthorityMode>
+  materials: Record<string, ChecklistAuthorityMode>
+}>
+
 const contract = (
   path: FoundationDocumentPath,
   discipline: string,
   purpose: string,
-  sections: readonly GameDocumentSectionContract[],
+  sections: readonly UnboundGameDocumentSectionContract[],
 ): GameDocumentContract =>
   Object.freeze({
     path,
@@ -274,13 +293,42 @@ const contract = (
     allowedUpstreamPaths: Object.freeze([
       ...INITIAL_FOUNDATION_UPSTREAM_PATHS[path],
     ]),
-    productionMaterials: Object.freeze([...PRODUCTION_MATERIALS[path]]),
+    productionMaterials: Object.freeze(PRODUCTION_MATERIALS[path].map(item => ({
+      ...item,
+      checklistMode: checklistModeFor(path, 'materials', item.materialId),
+    }))),
     upstreamSections: Object.freeze([...UPSTREAM_SECTIONS[path]]),
-    sections: Object.freeze([...sections]),
+    sections: Object.freeze(sections.map(item => ({
+      ...item,
+      checklistMode: checklistModeFor(path, 'sections', item.sectionId),
+    }))),
     outputPolicy: GAME_DOCUMENT_OUTPUT_POLICY,
     documentAuthorityRule: FOUNDATION_DOCUMENT_AUTHORITY_RULES[path],
     mergeReferenceRule: FOUNDATION_DOCUMENT_MERGE_REFERENCE_RULES[path],
   })
+
+function checklistModeFor(
+  path: FoundationDocumentPath,
+  kind: 'sections' | 'materials',
+  id: string,
+): ChecklistAuthorityMode {
+  const modes = CHECKLIST_AUTHORITY_MODES[path][kind] as Record<string, ChecklistAuthorityMode>
+  const mode = modes[id]
+  if (!mode) throw new Error(`missing explicit Checklist mode: ${path}#${id}`)
+  return mode
+}
+
+export function checklistAuthorityModeForSource(
+  path: string,
+  id: string,
+): ChecklistAuthorityMode | undefined {
+  if (!Object.hasOwn(CHECKLIST_AUTHORITY_MODES, path))
+    return undefined
+  const contract = getGameDocumentContract(path as FoundationDocumentPath)
+  if (id.startsWith('material.'))
+    return contract.productionMaterials.find(item => `material.${item.materialId}` === id)?.checklistMode
+  return contract.sections.find(item => item.sectionId === id)?.checklistMode
+}
 
 export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
   'docs/GDD.md': contract(

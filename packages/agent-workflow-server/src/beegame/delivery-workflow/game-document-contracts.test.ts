@@ -37,6 +37,16 @@ describe('complete game document contracts', () => {
             section.responsibilityIds.length > 0,
         ),
       ).toBe(true)
+      expect(
+        contract.sections.every(section =>
+          ['scenario', 'gate_reference', 'exclude'].includes(section.checklistMode),
+        ),
+      ).toBe(true)
+      expect(
+        contract.productionMaterials.every(material =>
+          ['scenario', 'gate_reference', 'exclude'].includes(material.checklistMode),
+        ),
+      ).toBe(true)
     }
   })
 

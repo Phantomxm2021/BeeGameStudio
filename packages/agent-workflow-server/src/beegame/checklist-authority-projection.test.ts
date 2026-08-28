@@ -12,7 +12,7 @@ afterEach(async () => {
   await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true })))
 })
 
-test('projects only Checklist-relevant owner blocks, never a prior checklist baseline', async () => {
+test('projects explicit scenario blocks and gate identities, never a prior checklist baseline', async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), 'checklist-projection-'))
   workspaces.push(workspacePath)
   await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => {
@@ -25,14 +25,14 @@ test('projects only Checklist-relevant owner blocks, never a prior checklist bas
       ...contract.sections.flatMap(section => [
         `<!-- beegame-section:${section.sectionId} -->`,
         `## ${section.title}`,
-        `${section.checklistRelevant ? 'relevant' : 'omitted'} ${section.sectionId}`,
+        `${section.checklistMode} ${section.sectionId}`,
       ]),
       '<!-- beegame-production-materials -->',
       '## Production Materials',
       ...contract.productionMaterials.flatMap(material => [
         `<!-- beegame-material:${material.materialId} -->`,
         `### ${material.title}`,
-        `${material.checklistRelevant ? 'relevant' : 'omitted'} ${material.materialId}`,
+        `${material.checklistMode} ${material.materialId}`,
       ]),
       '<!-- beegame-audit-appendix -->',
       '## Audit Appendix',
@@ -48,9 +48,11 @@ test('projects only Checklist-relevant owner blocks, never a prior checklist bas
   })
 
   expect(projection).toContain('Approved document revision: revision-1')
-  expect(projection).toContain('relevant core_loop')
-  expect(projection).toContain('relevant variable-parameter-table')
+  expect(projection).toContain('scenario core_loop')
+  expect(projection).toContain('--- GATE REFERENCE docs/BALANCE_DESIGN.md#material.variable-parameter-table')
   expect(projection).not.toContain('summary must not project')
   expect(projection).not.toContain('audit must not project')
-  expect(projection).not.toContain('omitted product_vision')
+  expect(projection).not.toContain('exclude product_vision')
+  expect(projection).not.toContain('exclude asset-inventory-table')
+  expect(projection).not.toContain('gate_reference formulas')
 })

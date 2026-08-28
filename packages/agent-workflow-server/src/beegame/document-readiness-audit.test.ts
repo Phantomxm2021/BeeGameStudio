@@ -167,7 +167,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] PATH-001 source: docs/GDD.md implement: Launch the game expected: playable state evidence: runtime\n'
+          ? '# Acceptance\n- [ ] PATH-001 [docs/GDD.md#core_loop] Launch the game and observe the playable state with runtime evidence.\n'
           : `# ${path}\n`,
       )
     }
@@ -194,7 +194,7 @@ describe('document readiness audit', () => {
               ...Array.from(
                 { length: 179 },
                 (_, index) =>
-                  `- [ ] CHECK-${index + 1} Observe scenario ${index + 1} with runtime evidence.`,
+                  `- [ ] CHECK-${index + 1} [docs/GDD.md#core_loop] Observe scenario ${index + 1} with runtime evidence.`,
               ),
             ].join('\n')
           : `# ${path}\n`,
@@ -218,7 +218,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] PATH-001 source: docs/GDD.md implement: Launch the game expected: initial playable state evidence: runtime\n'
+          ? '# Acceptance\n- [ ] PATH-001 [docs/GDD.md#core_loop] Launch the game and observe the initial playable state with runtime evidence.\n'
           : `# ${path}\n`,
       )
     }
@@ -250,7 +250,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] PATH-001 source: docs/GDD.md implement: Launch the game expected: playable state evidence: runtime\n'
+          ? '# Acceptance\n- [ ] PATH-001 [docs/GDD.md#core_loop] Launch the game and observe the playable state with runtime evidence.\n'
           : `# ${path}\n`,
       )
     }
@@ -279,7 +279,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] Launch the game.\n- [ ] `PATH-002`\n- [ ] PATH-003 source: docs/GDD.md implement: Observe a result expected: result appears evidence: runtime\n- [ ] PATH-003 source: docs/GDD.md implement: Observe the duplicate expected: duplicate appears evidence: runtime\n'
+          ? '# Acceptance\n- [ ] Launch the game.\n- [ ] `PATH-002`\n- [ ] PATH-003 [docs/GDD.md#core_loop] Observe a result with runtime evidence.\n- [ ] PATH-003 [docs/GDD.md#core_loop] Observe the duplicate with runtime evidence.\n'
           : `# ${path}\n`,
       )
     }
@@ -300,7 +300,7 @@ describe('document readiness audit', () => {
 
     expect(auditDocumentReadiness(workspace).issues).toEqual([
       'docs/acceptance/gameplay-checklist.md: Checklist task 1 has no stable identifier.',
-      'docs/acceptance/gameplay-checklist.md: Checklist task PATH-002 has no observable task description.',
+      'docs/acceptance/gameplay-checklist.md: Checklist task PATH-002 has no Checklist authority source tag.',
       'docs/acceptance/gameplay-checklist.md: Checklist stable identifier is duplicated: PATH-003',
     ])
   })
@@ -312,7 +312,7 @@ describe('document readiness audit', () => {
       await writeFile(
         join(workspace, path),
         path.endsWith('gameplay-checklist.md')
-          ? '# Acceptance\n- [ ] [contract:item-primary] source: docs/GDD.md implement: Observe the committed behavior expected: behavior is observable evidence: runtime\n'
+          ? '# Acceptance\n- [ ] [contract:item-primary] [docs/GDD.md#core_loop] Observe the committed behavior with runtime evidence.\n'
           : `# ${path}\n`,
       )
     }

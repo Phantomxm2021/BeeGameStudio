@@ -6,7 +6,8 @@ import { getGameDocumentContract } from './delivery-workflow/game-document-contr
 /**
  * A frozen, Markdown-only view of the approved facts that Checklist may use.
  * It deliberately excludes executive summaries, audit appendices, and prior
- * checklist output: none of those are Checklist authority.
+ * checklist output: none of those are Checklist authority. Scenario blocks
+ * retain their owner text; gate references retain only their stable identity.
  */
 export async function buildChecklistAuthorityProjection(input: {
   workspacePath: string
@@ -20,29 +21,46 @@ export async function buildChecklistAuthorityProjection(input: {
   )
   const blocks = documents.flatMap(([path, content]) => {
     const contract = getGameDocumentContract(path)
-    const ids = [
+    const blocks = [
       ...contract.sections
-        .filter(section => section.checklistRelevant)
-        .map(section => section.sectionId),
+        .filter(section => section.checklistMode !== 'exclude')
+        .map(section => ({
+          id: section.sectionId,
+          title: section.title,
+          mode: section.checklistMode,
+        })),
       ...contract.productionMaterials
-        .filter(material => material.checklistRelevant)
-        .map(material => `material.${material.materialId}`),
+        .filter(material => material.checklistMode !== 'exclude')
+        .map(material => ({
+          id: `material.${material.materialId}`,
+          title: material.title,
+          mode: material.checklistMode,
+        })),
     ]
-    return ids.map(id => ({ path, id, content: markedBlock(content, id) }))
+    return blocks.map(block => ({
+      path,
+      ...block,
+      ...(block.mode === 'scenario' ? { content: markedBlock(content, block.id) } : {}),
+    }))
   })
   return [
     '# Checklist Authority Projection',
     '',
     `Approved document revision: ${input.approvedDocumentRevision}`,
     '',
-    'This is the sole Checklist content authority. Each included block is an approved, checklist-relevant owner block. Do not infer additional scenarios from omitted sections, prior checklists, or generic best practice.',
+    'This is the sole Checklist content authority. Scenario blocks contain approved player-observable source text. Gate references are owner checks, not text to expand. Do not infer scenarios from omitted blocks, prior checklists, or generic best practice.',
     '',
-    ...blocks.flatMap(block => [
-      `--- BEGIN ${block.path}#${block.id} ---`,
-      block.content,
-      `--- END ${block.path}#${block.id} ---`,
-      '',
-    ]),
+    ...blocks.flatMap(block => block.mode === 'scenario'
+      ? [
+          `--- BEGIN SCENARIO ${block.path}#${block.id} ---`,
+          block.content,
+          `--- END SCENARIO ${block.path}#${block.id} ---`,
+          '',
+        ]
+      : [
+          `--- GATE REFERENCE ${block.path}#${block.id}: ${block.title} ---`,
+          '',
+        ]),
   ].join('\n')
 }
 

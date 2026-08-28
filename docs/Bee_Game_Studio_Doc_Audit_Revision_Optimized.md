@@ -452,9 +452,11 @@ Reviewer 发现业务 Issue 后，controller 必须立即将其纳入唯一 Issu
 
 ## 19. Checklist 单轨提交
 
-Foundation revision READY 后，Checklist 是唯一的下游派生产物，而不是第二份玩法、数值、资源或审计 authority。服务从当前 committed Foundation revision 的 Section Index 和各 document contract 标记为 `checklistRelevant` 的 owner block 生成一个 immutable raw-Markdown authority projection；projection 只含 path、Section/Material identity 与必要原文块。它不注入八份全文、不把失败 Checklist 当作 authority，也不建立第二个 Fact Store 或 coverage truth。
+Foundation revision READY 后，Checklist 是唯一的下游派生产物，而不是第二份玩法、数值、资源或审计 authority。每一个 Foundation Section 和 Production Material 必须在唯一 document contract 中显式声明 `checklistMode`：`scenario`、`gate_reference` 或 `exclude`；不得从 discipline、responsibility、标题、关键词或任何 heuristic 自动推导。`scenario` 仅用于能形成独立、玩家可观察 pass/fail 的 source block，projection 才携带该 block 的原文。`gate_reference` 仅输出稳定的 path/block/title 引用，Checklist 只能写固定 owner-gate 行，不得复制数值、预算、资源、SVG、布局、来源、授权、排期或其他 owner detail。`exclude` 不进入 projection。Asset Plan 的资源、责任、来源、授权、排期与库存事实默认 `exclude`，不构成 gameplay acceptance。
 
-Checklist author 只有一个逻辑 task，并且只写其 dispatch-bound candidate Markdown。candidate 先由服务使用唯一 Checklist parser 验证 checkbox grammar、stable ID 唯一性和非空可观察描述；author prompt 以 projection 限定内容范围并要求合并等价场景。通过后服务原子提交 `docs/acceptance/gameplay-checklist.md`；失败 candidate 只保留 durable diagnostics，永不成为 canonical 文件或后续 author prompt baseline。恢复仍针对同一个逻辑 task 和冻结 projection，创建干净 candidate；不得保留 direct-canonical write、旧 candidate overlay、并行 author 或兼容 reader。
+服务只从当前 committed Foundation revision 的这些显式 mode 生成 immutable raw-Markdown authority projection；projection 不注入八份全文、不把失败 Checklist 当作 authority，也不建立第二个 Fact Store、semantic summary 或 coverage truth。每个 checkbox 必须带一个 source tag：`- [ ] ID [docs/path.md#section_or_material] description`。唯一 Checklist parser 机械验证 stable ID、非空描述、source 存在且未 `exclude`；`gate_reference` 必须使用固定的 owner-gate 描述，因而不能重新叙述 owner 内容。它不按关键词、数值或任务数量作语义评分。
+
+Checklist author 只有一个逻辑 task，并且只写其 dispatch-bound candidate Markdown。它的 native tool allowlist 仅为 Write/Edit candidate；不得使用 Bash、Read、Grep、Glob 或其他写入能力绕过 frozen projection。candidate 先由服务使用唯一 Checklist parser 验证上述机械约束；author prompt 以 projection 限定内容范围并要求合并等价场景。通过后服务原子提交 `docs/acceptance/gameplay-checklist.md`；失败 candidate 只保留 durable diagnostics，永不成为 canonical 文件或后续 author prompt baseline。恢复仍针对同一个逻辑 task 和冻结 projection，创建干净 candidate；不得保留 direct-canonical write、旧 candidate overlay、并行 author 或兼容 reader。
 
 Checklist author 输出始终是 raw Markdown，不以 JSON 替代。Checklist 规模由实际不可互相替代的可观察场景决定；不得以任务数、token、字数、耗时或 attempt 设置业务合格上限。Checklist 结构通过后唯一进入 Resource Preparation。Checklist 是独立展示阶段，不得显示为 Foundation 审计或修订 stage，也不得创建 Checklist Reviewer/Closure 的第二 authority。
 

@@ -1,5 +1,8 @@
+import { checklistAuthorityModeForSource } from './delivery-workflow/game-document-contracts'
+
 export type AcceptanceChecklistTask = Readonly<{
   id: string
+  source: string
   description: string
   line: number
 }>
@@ -33,16 +36,49 @@ export function parseAcceptanceChecklist(
       continue
     }
     identifiers.add(identifier.value)
-    const description = item.slice(identifier.sourceLength).trimStart()
+    const source = checklistSource(item.slice(identifier.sourceLength).trimStart())
+    if (!source) {
+      issues.push(`${path}: Checklist task ${identifier.value} has no Checklist authority source tag.`)
+      continue
+    }
+    const mode = checklistAuthorityModeForSource(source.path, source.blockId)
+    if (!mode || mode === 'exclude') {
+      issues.push(`${path}: Checklist task ${identifier.value} cites an excluded or unknown source: ${source.raw}.`)
+      continue
+    }
+    const description = source.description
     if (!description) {
       issues.push(`${path}: Checklist task ${identifier.value} has no observable task description.`)
       continue
     }
-    tasks.push({ id: identifier.value, description, line: index + 1 })
+    if (mode === 'gate_reference' && description !== GATE_REFERENCE_DESCRIPTION) {
+      issues.push(`${path}: Checklist task ${identifier.value} must use the gate-reference form for ${source.raw}.`)
+      continue
+    }
+    tasks.push({ id: identifier.value, source: source.raw, description, line: index + 1 })
   }
   if (!tasks.length && !issues.length)
     issues.push(`${path}: Acceptance checklist contains no task items.`)
   return { tasks, issues }
+}
+
+export const GATE_REFERENCE_DESCRIPTION =
+  'Owner gate passes; evidence: linked owner validation.'
+
+function checklistSource(value: string): {
+  raw: string
+  path: string
+  blockId: string
+  description: string
+} | undefined {
+  const match = /^\[(docs\/[A-Za-z0-9_./-]+\.md)#([a-z0-9._-]+)\]\s+(.+)$/u.exec(value)
+  if (!match) return undefined
+  return {
+    raw: `[${match[1]}#${match[2]}]`,
+    path: match[1]!,
+    blockId: match[2]!,
+    description: match[3]!.trim(),
+  }
 }
 
 function checklistMarker(line: string): string | undefined {

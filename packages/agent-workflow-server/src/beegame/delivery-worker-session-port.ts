@@ -404,6 +404,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
+        ...(request.workerType === 'document-author' && request.contract.documentSet === 'checklist'
+          ? { workflowAllowedTools: ['Write', 'Edit'] }
+          : {}),
         ...(request.contract.modelTier === 'fast' || request.contract.modelTier === 'balanced' || request.contract.modelTier === 'strong' ? { workflowModelTier: request.contract.modelTier } : {}),
         ...(request.workerType === 'foundation-document-reviser' ? { workflowRevisionContract: request.contract } : {}),
         workflowAllowedPaths: request.allowedPaths ?? [],

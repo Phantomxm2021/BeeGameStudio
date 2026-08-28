@@ -448,9 +448,9 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         request.contract.documentSet === 'checklist'
           ? [
               `Author only the Checklist candidate at ${documentAuthorTargetPath(request)} from the injected frozen Checklist Authority Projection.`,
-              'Every acceptance task must be one Markdown checkbox line with a stable ID, observable behavior and evidence expectation. Create a task only for a distinct, independently observable acceptance condition explicitly present in the projection. Do not expand sentences, table rows, variants, prior checklist entries, or generic best practice into new work.',
-              'Merge equivalent variants when they share one setup, action and observable outcome. A task may cite multiple approved facts while remaining independently pass/fail.',
-              'Use the canonical form `- [ ] <stable-id> <observable check and evidence expectation>`; tables may add context but cannot replace checkbox tasks.',
+              'Every acceptance task must be one Markdown checkbox line with a stable ID, source tag, observable behavior and evidence expectation. Create a task only for a distinct, independently observable acceptance condition explicitly present in a SCENARIO block. Do not expand sentences, table rows, variants, prior checklist entries, or generic best practice into new work.',
+              'Merge equivalent variants when they share one setup, action and observable outcome. Keep each task independently pass/fail and cite its one owning source block.',
+              'Use the canonical form `- [ ] <stable-id> [docs/path.md#source_block] <observable check and evidence expectation>`. For a GATE REFERENCE use exactly `Owner gate passes; evidence: linked owner validation.` after its source tag; never copy or expand its owner details. Tables may add context but cannot replace checkbox tasks.',
               'Do not modify foundation documents, resources, the asset manifest or implementation files.',
             ].join(' ')
           : request.contract.authoringMode === 'parallel-draft'
