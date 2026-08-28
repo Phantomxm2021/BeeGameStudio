@@ -162,8 +162,12 @@ export async function createFoundationMarkdownStreamSink(
 }
 
 function mergeTextBlocks(blocks: readonly string[]): string {
-  return blocks.reduce((document, block) => {
+  return blocks.reduce((document, block, index) => {
     if (!document) return block
+    if (index > 0 && block.trimStart().startsWith('# '))
+      throw new Error(
+        'foundation Markdown stream continuation restarted from the top-level title',
+      )
     const trailingLineStart = document.lastIndexOf('\n') + 1
     const trailingLine = document.slice(trailingLineStart)
     return trailingLine && block.startsWith(trailingLine)

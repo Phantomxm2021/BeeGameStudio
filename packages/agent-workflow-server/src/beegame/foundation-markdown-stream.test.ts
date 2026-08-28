@@ -199,6 +199,38 @@ describe('foundation Markdown stream sink', () => {
     }
   })
 
+  test('rejects a continuation block that restarts from a top-level title', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-title-restart-'))
+    try {
+      const markdown = renderTestCompleteGameDocument(
+        targetPath,
+        completeTestSubmission(targetPath),
+      )
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-title-restart',
+        dispatchId: 'dispatch-title-restart',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-title-restart')
+      const prefix = markdown.slice(0, markdown.indexOf('\n## Production Materials'))
+      for (const message of [
+        streamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+        streamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: prefix } }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+        streamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: markdown } }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        { type: 'result', subtype: 'success', is_error: false },
+      ]) sink.observe(message)
+
+      await expect(sink.commit()).rejects.toThrow(/top-level title/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('publishes ordered visible text once and keeps the body out of the receipt', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-stream-'))
     try {

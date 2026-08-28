@@ -14,7 +14,10 @@ import {
   createRuntimeObservability,
   type RuntimeObservability,
 } from './runtime-observability'
-import { isCompleteGameDocumentMarkdownStructure } from './complete-game-document'
+import {
+  firstMissingCanonicalMarkdownHeading,
+  isCompleteGameDocumentMarkdownStructure,
+} from './complete-game-document'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stdin: {
@@ -27,9 +30,9 @@ type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
 }
 
 const MARKDOWN_PROTOCOL_CONTINUATION_PROMPT =
-  'Continue the same raw Markdown response from the exact point where it stopped. Return only the remaining Markdown; do not restart or summarize.'
-const MARKDOWN_PROTOCOL_RESTART_PROMPT =
-  'Your previous raw Markdown response was empty or structurally invalid. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
+  'Continue the same raw Markdown document with only its remaining suffix. Return only Markdown after the bytes already emitted; do not restart, summarize, or repeat any already emitted heading.'
+const MARKDOWN_EMPTY_OUTPUT_RECOVERY_PROMPT =
+  'No visible Markdown was emitted. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
 
 export function createNativeCliProcessRunner(options: {
   command?: string[]
@@ -89,6 +92,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     markdownProtocolRecoveryCount: number
     markdownOutput: string
     markdownStreamDeltaSeen: boolean
+    markdownContinuationOutput: string
+    markdownContinuationExpected: boolean
     resolve(): void
     reject(error: Error): void
     abort(): void
@@ -164,6 +169,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         markdownProtocolRecoveryCount: 0,
         markdownOutput: '',
         markdownStreamDeltaSeen: false,
+        markdownContinuationOutput: '',
+        markdownContinuationExpected: false,
         resolve: () => {
           input.signal.removeEventListener('abort', abort)
           resolve()
@@ -254,13 +261,58 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       if (message.type === 'stream_event') {
         turn.markdownStreamDeltaSeen = true
         turn.markdownOutput += streamedText
+        if (turn.markdownContinuationExpected) {
+          turn.markdownContinuationOutput += streamedText
+          if (startsWithTopLevelMarkdownTitle(turn.markdownContinuationOutput)) {
+            await this.rejectMarkdownTurn(
+              turn,
+              new Error(
+                'foundation_transport_needs_action: Markdown continuation restarted the document from its top-level title',
+              ),
+            )
+            return
+          }
+        }
       } else if (
         message.type === 'assistant' &&
         (!turn.markdownStreamDeltaSeen || !turn.markdownOutput)
       ) {
         turn.markdownOutput += assistantMarkdownText(message)
+      } else if (
+        message.type === 'assistant' &&
+        turn.markdownContinuationExpected &&
+        !turn.markdownContinuationOutput.trim()
+      ) {
+        const assistantText = assistantMarkdownText(message)
+        turn.markdownContinuationOutput += assistantText
+        turn.markdownOutput += assistantText
+        if (startsWithTopLevelMarkdownTitle(turn.markdownContinuationOutput)) {
+          await this.rejectMarkdownTurn(
+            turn,
+            new Error(
+              'foundation_transport_needs_action: Markdown continuation restarted the document from its top-level title',
+            ),
+          )
+          return
+        }
       } else if (message.type === 'result' && !turn.markdownOutput) {
         turn.markdownOutput = stringField(message, 'result')
+      } else if (
+        message.type === 'result' &&
+        turn.markdownContinuationExpected &&
+        !turn.markdownContinuationOutput.trim()
+      ) {
+        turn.markdownContinuationOutput = stringField(message, 'result')
+        turn.markdownOutput += turn.markdownContinuationOutput
+        if (startsWithTopLevelMarkdownTitle(turn.markdownContinuationOutput)) {
+          await this.rejectMarkdownTurn(
+            turn,
+            new Error(
+              'foundation_transport_needs_action: Markdown continuation restarted the document from its top-level title',
+            ),
+          )
+          return
+        }
       }
     }
     if (
@@ -268,12 +320,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       this.sessionInput.workflowMarkdownStreamContract &&
       !isErrorResult(message)
     ) {
-      if (isMissingVisibleMarkdownResult(message)) {
-        if (
-          isMissingProviderStopReason(message) &&
-          turn.markdownProtocolRecoveryCount === 0
-        )
-          await this.recoverIncompleteMarkdownTurn(turn, true)
+      if (isMissingVisibleMarkdownResult(message) && !turn.markdownOutput.trim()) {
+        if (turn.markdownProtocolRecoveryCount === 0)
+          await this.recoverEmptyMarkdownTurn(turn)
         else
           await this.rejectMarkdownTurn(
             turn,
@@ -289,19 +338,22 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           turn.markdownOutput,
         )
       ) {
-        if (turn.markdownProtocolRecoveryCount === 0) {
-          await this.recoverIncompleteMarkdownTurn(
-            turn,
-            !isMissingProviderStopReason(message),
-          )
-        } else {
+        const nextHeading =
+          turn.markdownProtocolRecoveryCount === 0
+            ? firstMissingCanonicalMarkdownHeading(
+                this.sessionInput.workflowMarkdownStreamContract.targetPath,
+                turn.markdownOutput,
+              )
+            : undefined
+        if (nextHeading)
+          await this.recoverIncompleteMarkdownTurn(turn, nextHeading)
+        else
           await this.rejectMarkdownTurn(
             turn,
             new Error(
               'foundation_transport_needs_action: Bee Game Studio native Markdown response ended before its structural closure',
             ),
           )
-        }
         return
       }
     }
@@ -338,14 +390,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     turn.resolve()
   }
 
-  private async recoverIncompleteMarkdownTurn(
+  private async recoverEmptyMarkdownTurn(
     turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-    fromBeginning = false,
   ): Promise<void> {
-    if (fromBeginning) {
-      turn.markdownOutput = ''
-      turn.markdownStreamDeltaSeen = false
-    }
     turn.markdownProtocolRecoveryCount += 1
     this.write({
       type: 'user',
@@ -357,9 +404,31 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         content: [
           {
             type: 'text',
-            text: fromBeginning
-              ? MARKDOWN_PROTOCOL_RESTART_PROMPT
-              : MARKDOWN_PROTOCOL_CONTINUATION_PROMPT,
+            text: MARKDOWN_EMPTY_OUTPUT_RECOVERY_PROMPT,
+          },
+        ],
+      },
+    })
+  }
+
+  private async recoverIncompleteMarkdownTurn(
+    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
+    nextHeading: string,
+  ): Promise<void> {
+    turn.markdownProtocolRecoveryCount += 1
+    turn.markdownContinuationExpected = true
+    turn.markdownContinuationOutput = ''
+    this.write({
+      type: 'user',
+      uuid: crypto.randomUUID(),
+      session_id: this.nativeSessionId ?? '',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: `${MARKDOWN_PROTOCOL_CONTINUATION_PROMPT} If the current trailing section is incomplete, finish it first; then output the first missing canonical heading: ${nextHeading}`,
           },
         ],
       },
@@ -617,10 +686,8 @@ function isMissingVisibleMarkdownResult(
   return stringField(message, 'result').trim().length === 0
 }
 
-function isMissingProviderStopReason(
-  message: Record<string, unknown>,
-): boolean {
-  return stringField(message, 'stop_reason').trim().length === 0
+function startsWithTopLevelMarkdownTitle(value: string): boolean {
+  return value.trimStart().startsWith('# ')
 }
 
 function streamedMarkdownText(message: Record<string, unknown>): string {

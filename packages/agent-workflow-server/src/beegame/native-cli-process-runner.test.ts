@@ -405,7 +405,7 @@ describe('native CLI process runner', () => {
       stop_reason: 'end_turn',
       received_user_count: 2,
     })
-    expect(messages.at(-1)?.result).toContain('## Vision and Product Promise')
+    expect(messages.at(-1)?.result).toContain('## Production Materials')
     runtime.dispose?.()
   })
 
@@ -423,30 +423,25 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
-  test('restarts structurally invalid end-turn Markdown in the same dispatch and session', async () => {
+  test('rejects a structurally invalid Markdown response without restarting it', async () => {
     const runtime = await startRuntime({ markdownStream: true })
     const messages: Record<string, unknown>[] = []
 
-    await runtime.submit({
-      prompt: 'malformed-markdown-end-turn',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
+    await expect(
+      runtime.submit({
+        prompt: 'malformed-markdown-end-turn',
+        signal: new AbortController().signal,
+        onMessage: message => messages.push(message),
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow('foundation_transport_needs_action')
 
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
-    expect(messages.filter(message => message.type === 'assistant')).toHaveLength(2)
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      stop_reason: 'end_turn',
-      received_user_count: 2,
-    })
-    expect(messages.at(-1)?.result).toContain('\n## Vision and Product Promise\n')
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(0)
+    expect(messages.filter(message => message.type === 'assistant')).toHaveLength(1)
     runtime.dispose?.()
   })
 
-  test('fails closed when the one same-dispatch restart remains structurally invalid', async () => {
+  test('fails closed when the one suffix continuation remains structurally invalid', async () => {
     const runtime = await startRuntime({ markdownStream: true })
 
     await expect(
@@ -457,6 +452,20 @@ describe('native CLI process runner', () => {
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).rejects.toThrow('foundation_transport_needs_action')
+    runtime.dispose?.()
+  })
+
+  test('rejects a continuation that starts a second complete document immediately', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+
+    await expect(
+      runtime.submit({
+        prompt: 'truncated-markdown-restart',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow(/restarted the document from its top-level title/i)
     runtime.dispose?.()
   })
 
