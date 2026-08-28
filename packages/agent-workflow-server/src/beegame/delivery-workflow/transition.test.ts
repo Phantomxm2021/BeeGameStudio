@@ -20,6 +20,7 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type DeliveryRun,
 } from './types'
+import { beginParallelFoundationAuthoring } from './foundation-authoring-batch'
 import type { AuditIssue } from './foundation-issue-registry'
 
 const DIGEST = 'a'.repeat(64)
@@ -91,6 +92,47 @@ function auditRun(state: FoundationAuditState): DeliveryRun {
     foundationAuditState: state,
   }
 }
+
+test('retry revives only the selected failed foundation document', () => {
+  const failedPath = 'docs/ASSET_PLAN.md' as const
+  const draftState = beginParallelFoundationAuthoring(['docs/GDD.md'])
+  const run: DeliveryRun = {
+    ...createTestDeliveryRun({ projectId: 'draft-retry', ownerId: 'draft-owner' }),
+    phase: 'DOCUMENT_DRAFTING',
+    documentStep: 'FOUNDATION_DRAFTING',
+    status: 'needs_action',
+    blockedReason: 'document transport failed',
+    foundationDraftState: {
+      ...draftState,
+      documents: draftState.documents!.map(document =>
+        document.path === failedPath
+          ? {
+              ...document,
+              status: 'needs_action' as const,
+              failureReason: 'document transport failed',
+            }
+          : document,
+      ),
+    },
+  }
+
+  const retried = transitionDeliveryRun(run, {
+    type: 'retry',
+    taskId: failedPath,
+  })
+
+  expect(retried).toMatchObject({ status: 'running', blockedReason: undefined })
+  expect(
+    retried.foundationDraftState.documents?.find(
+      document => document.path === failedPath,
+    ),
+  ).toMatchObject({ status: 'pending', dispatch: undefined, failureReason: undefined })
+  expect(
+    retried.foundationDraftState.documents?.find(
+      document => document.path === 'docs/BALANCE_DESIGN.md',
+    )?.status,
+  ).toBe('pending')
+})
 
 function semanticAuditState(
   overrides: Partial<Extract<FoundationAuditState['tasks'][number], { kind: 'semantic' }>> = {},

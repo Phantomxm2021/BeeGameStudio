@@ -560,6 +560,27 @@ export function transitionDeliveryRun(
       )
         fail('retry task must be a failed task')
       {
+        let draftRevived = false
+        const nextDraftState =
+          run.phase === 'DOCUMENT_DRAFTING' && run.foundationDraftState.documents
+            ? {
+                ...run.foundationDraftState,
+                documents: run.foundationDraftState.documents.map(document => {
+                  if (
+                    document.status !== 'needs_action' ||
+                    (event.taskId && document.path !== event.taskId)
+                  )
+                    return document
+                  draftRevived = true
+                  return {
+                    ...document,
+                    status: 'pending' as const,
+                    dispatch: undefined,
+                    failureReason: undefined,
+                  }
+                }),
+              }
+            : undefined
         const revisionState =
           run.phase === 'DOCUMENT_REVIEW' &&
           isActiveFoundationRepairState(run.foundationAuditState)
@@ -640,16 +661,22 @@ export function transitionDeliveryRun(
           activeFoundationRevisionTasks(revisionState).every(task => task.kind === 'document-revision'),
         )
         const foundationStateInCurrentPhase = !!(
+          run.phase === 'DOCUMENT_DRAFTING' &&
+          run.foundationDraftState.documents?.some(
+            document => document.status === 'needs_action',
+          ) ||
           auditState?.tasks.some(task => task.status === 'needs_action') ||
           (revisionState && run.status === 'needs_action') ||
           (revisionState && revisionState.status !== 'planning' && activeFoundationRevisionTasks(revisionState).some(task => task.status === 'needs_action'))
         )
-        const foundationRevived = auditRevived || revisionRevived || revisionBoundaryRevived
+        const foundationRevived =
+          draftRevived || auditRevived || revisionRevived || revisionBoundaryRevived
         const preserveFoundationActionableState =
           foundationStateInCurrentPhase && !foundationRevived
         next = {
           ...run,
           status: preserveFoundationActionableState ? run.status : 'running',
+          ...(draftRevived ? { foundationDraftState: nextDraftState } : {}),
           ...(auditRevived ? { foundationAuditState: nextAuditState } : {}),
           ...(revisionRevived ? { foundationAuditState: nextRevisionState } : {}),
           ...(revisionBoundaryNeedsFactReplan

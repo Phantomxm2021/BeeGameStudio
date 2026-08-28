@@ -409,6 +409,27 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
+  test('continues a long Markdown document until its structure closes', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+    const messages: Record<string, unknown>[] = []
+
+    await runtime.submit({
+      prompt: 'truncated-markdown-twice',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
+    expect(messages.at(-1)).toMatchObject({
+      type: 'result',
+      subtype: 'success',
+      received_user_count: 3,
+    })
+    expect(messages.at(-1)?.result).toContain('## Production Materials')
+    runtime.dispose?.()
+  })
+
   test('classifies an unrecovered Markdown truncation as non-retryable transport failure', async () => {
     const runtime = await startRuntime({ markdownStream: true })
 
@@ -423,40 +444,45 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
-  test('restarts structurally invalid end-turn Markdown in the same dispatch and session', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    const messages: Record<string, unknown>[] = []
-
-    await runtime.submit({
-      prompt: 'malformed-markdown-end-turn',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
-    expect(messages.filter(message => message.type === 'assistant')).toHaveLength(2)
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      stop_reason: 'end_turn',
-      received_user_count: 2,
-    })
-    expect(messages.at(-1)?.result).toContain('\n## Vision and Product Promise\n')
-    runtime.dispose?.()
-  })
-
-  test('fails closed when the one same-dispatch restart remains structurally invalid', async () => {
+  test('rejects a structurally invalid Markdown response without replacing the candidate', async () => {
     const runtime = await startRuntime({ markdownStream: true })
 
     await expect(
       runtime.submit({
-        prompt: 'malformed-markdown-end-turn-forever',
+        prompt: 'malformed-markdown-end-turn',
         signal: new AbortController().signal,
         onMessage: () => undefined,
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).rejects.toThrow('foundation_transport_needs_action')
+    runtime.dispose?.()
+  })
+
+  test('rejects a continuation that restarts the document from its title', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+
+    await expect(
+      runtime.submit({
+        prompt: 'truncated-markdown-forever',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow('restarted the document from its title')
+    runtime.dispose?.()
+  })
+
+  test('rejects a continuation that makes no progress', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+
+    await expect(
+      runtime.submit({
+        prompt: 'truncated-markdown-empty-continuation',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow('Markdown continuation made no progress')
     runtime.dispose?.()
   })
 

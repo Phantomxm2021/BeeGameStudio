@@ -3,7 +3,7 @@ export {}
 const decoder = new TextDecoder()
 let buffer = ''
 let userMessageCount = 0
-let markdownRecoveryMode: 'normal' | 'never' | 'malformed_once' | 'malformed_forever' = 'normal'
+let markdownRecoveryMode: 'normal' | 'never' | 'twice' | 'empty_continuation' | 'malformed_once' | 'malformed_forever' = 'normal'
 
 const completeGddMarkdown = [
   '# Visible Markdown',
@@ -120,6 +120,8 @@ for await (const chunk of Bun.stdin.stream()) {
     }
     if (
       content === 'truncated-markdown' ||
+      content === 'truncated-markdown-twice' ||
+      content === 'truncated-markdown-empty-continuation' ||
       content === 'truncated-markdown-forever' ||
       content === 'malformed-markdown-end-turn' ||
       content === 'malformed-markdown-end-turn-forever' ||
@@ -129,6 +131,10 @@ for await (const chunk of Bun.stdin.stream()) {
     ) {
       if (content === 'truncated-markdown-forever')
         markdownRecoveryMode = 'never'
+      if (content === 'truncated-markdown-twice')
+        markdownRecoveryMode = 'twice'
+      if (content === 'truncated-markdown-empty-continuation')
+        markdownRecoveryMode = 'empty_continuation'
       if (content === 'malformed-markdown-end-turn')
         markdownRecoveryMode = 'malformed_once'
       if (content === 'malformed-markdown-end-turn-forever')
@@ -137,6 +143,17 @@ for await (const chunk of Bun.stdin.stream()) {
       const recoveredMarkdown = markdownRecoveryMode === 'malformed_once' ||
           markdownRecoveryMode === 'malformed_forever'
         ? malformedGddMarkdown
+        : markdownRecoveryMode === 'twice' && userMessageCount === 2
+          ? completeGddMarkdown.slice(
+              completeGddMarkdown.indexOf('\n## Vision and Product Promise'),
+              completeGddMarkdown.indexOf('\n## Player Experience and Design Pillars'),
+            )
+        : markdownRecoveryMode === 'twice' && userMessageCount > 2
+            ? completeGddMarkdown.slice(
+                completeGddMarkdown.indexOf('\n## Player Experience and Design Pillars'),
+              )
+          : markdownRecoveryMode === 'empty_continuation' && recovered
+            ? ''
         : recovered && markdownRecoveryMode === 'normal'
           ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Vision and Product Promise'))
           : '# Partial document\n## Executive Summary\nHalf sentence'
@@ -144,7 +161,7 @@ for await (const chunk of Bun.stdin.stream()) {
         recoveredMarkdown,
         markdownRecoveryMode === 'malformed_once' || markdownRecoveryMode === 'malformed_forever'
           ? 'end_turn'
-          : recovered && markdownRecoveryMode !== 'never' ? 'end_turn' : '',
+        : recovered && markdownRecoveryMode !== 'never' ? 'end_turn' : '',
         userMessageCount,
       )
       continue

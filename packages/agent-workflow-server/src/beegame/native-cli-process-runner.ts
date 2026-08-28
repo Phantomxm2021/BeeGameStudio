@@ -27,9 +27,9 @@ type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
 }
 
 const MARKDOWN_PROTOCOL_CONTINUATION_PROMPT =
-  'Continue the same raw Markdown response from the exact point where it stopped. Return only the remaining Markdown; do not restart or summarize.'
+  'Continue the same raw Markdown response from the exact point where it stopped. Return only the remaining Markdown; do not restart, summarize, or repeat the document title.'
 const MARKDOWN_PROTOCOL_RESTART_PROMPT =
-  'Your previous raw Markdown response was empty or structurally invalid. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
+  'No visible Markdown was emitted. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
 
 export function createNativeCliProcessRunner(options: {
   command?: string[]
@@ -86,9 +86,11 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private activeTurn: {
     input: BeeGameSessionSubmitInput
     requestId: string
-    markdownProtocolRecoveryCount: number
     markdownOutput: string
     markdownStreamDeltaSeen: boolean
+    markdownContinuationExpected: boolean
+    markdownContinuationOutput: string
+    markdownRestartExpected: boolean
     resolve(): void
     reject(error: Error): void
     abort(): void
@@ -161,9 +163,11 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       this.activeTurn = {
         input,
         requestId,
-        markdownProtocolRecoveryCount: 0,
         markdownOutput: '',
         markdownStreamDeltaSeen: false,
+        markdownContinuationExpected: false,
+        markdownContinuationOutput: '',
+        markdownRestartExpected: false,
         resolve: () => {
           input.signal.removeEventListener('abort', abort)
           resolve()
@@ -253,14 +257,35 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       const streamedText = streamedMarkdownText(message)
       if (message.type === 'stream_event') {
         turn.markdownStreamDeltaSeen = true
+        if (turn.markdownContinuationExpected) {
+          turn.markdownContinuationOutput += streamedText
+          if (
+            !turn.markdownRestartExpected &&
+            turn.markdownContinuationOutput.trimStart().startsWith('# ')
+          ) {
+            await this.rejectMarkdownTurn(
+              turn,
+              new Error(
+                'foundation_transport_needs_action: Markdown continuation restarted the document from its title',
+              ),
+            )
+            return
+          }
+        }
         turn.markdownOutput += streamedText
       } else if (
         message.type === 'assistant' &&
         (!turn.markdownStreamDeltaSeen || !turn.markdownOutput)
       ) {
-        turn.markdownOutput += assistantMarkdownText(message)
+        const text = assistantMarkdownText(message)
+        if (turn.markdownContinuationExpected)
+          turn.markdownContinuationOutput += text
+        turn.markdownOutput += text
       } else if (message.type === 'result' && !turn.markdownOutput) {
-        turn.markdownOutput = stringField(message, 'result')
+        const text = stringField(message, 'result')
+        if (turn.markdownContinuationExpected)
+          turn.markdownContinuationOutput = text
+        turn.markdownOutput = text
       }
     }
     if (
@@ -268,11 +293,22 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       this.sessionInput.workflowMarkdownStreamContract &&
       !isErrorResult(message)
     ) {
-      if (isMissingVisibleMarkdownResult(message)) {
-        if (
-          isMissingProviderStopReason(message) &&
-          turn.markdownProtocolRecoveryCount === 0
+      if (
+        turn.markdownContinuationExpected &&
+        !turn.markdownContinuationOutput.trim()
+      ) {
+        await this.rejectMarkdownTurn(
+          turn,
+          new Error(
+            'foundation_transport_needs_action: Markdown continuation made no progress',
+          ),
         )
+        return
+      }
+      turn.markdownContinuationExpected = false
+      turn.markdownRestartExpected = false
+      if (isMissingVisibleMarkdownResult(message)) {
+        if (!turn.markdownOutput.trim())
           await this.recoverIncompleteMarkdownTurn(turn, true)
         else
           await this.rejectMarkdownTurn(
@@ -289,19 +325,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           turn.markdownOutput,
         )
       ) {
-        if (turn.markdownProtocolRecoveryCount === 0) {
-          await this.recoverIncompleteMarkdownTurn(
-            turn,
-            !isMissingProviderStopReason(message),
-          )
-        } else {
-          await this.rejectMarkdownTurn(
-            turn,
-            new Error(
-              'foundation_transport_needs_action: Bee Game Studio native Markdown response ended before its structural closure',
-            ),
-          )
-        }
+        await this.recoverIncompleteMarkdownTurn(turn)
         return
       }
     }
@@ -342,11 +366,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
     fromBeginning = false,
   ): Promise<void> {
-    if (fromBeginning) {
-      turn.markdownOutput = ''
-      turn.markdownStreamDeltaSeen = false
-    }
-    turn.markdownProtocolRecoveryCount += 1
+    turn.markdownContinuationExpected = true
+    turn.markdownContinuationOutput = ''
+    turn.markdownRestartExpected = fromBeginning
     this.write({
       type: 'user',
       uuid: crypto.randomUUID(),
@@ -615,12 +637,6 @@ function isMissingVisibleMarkdownResult(
   message: Record<string, unknown>,
 ): boolean {
   return stringField(message, 'result').trim().length === 0
-}
-
-function isMissingProviderStopReason(
-  message: Record<string, unknown>,
-): boolean {
-  return stringField(message, 'stop_reason').trim().length === 0
 }
 
 function streamedMarkdownText(message: Record<string, unknown>): string {
