@@ -5,7 +5,6 @@ import {
 } from '../__tests__/complete-game-document-fixture'
 import {
   assertMaterialFormat,
-  firstMissingCanonicalMarkdownHeading,
   isCompleteGameDocumentMarkdownStructure,
   normalizeCompleteGameDocumentProtocol,
   validateCompleteGameDocumentMarkdown,
@@ -41,36 +40,6 @@ function replaceSectionBody(
 }
 
 describe('native complete game document validation', () => {
-  test('computes the first missing heading from a valid prefix, including an open fence', () => {
-    const path = 'docs/GDD.md'
-    const canonical = renderTestCompleteGameDocument(path, completeTestSubmission(path))
-    const productionStart = canonical.indexOf('\n## Production Materials')
-    const prefix = canonical.slice(0, productionStart)
-
-    expect(firstMissingCanonicalMarkdownHeading(path, prefix)).toBe(
-      '## Production Materials',
-    )
-    const openFencePrefix =
-      prefix +
-      '\n## Production Materials\n### Core Loop Diagram\n' +
-      String.fromCharCode(96).repeat(3) +
-      'mermaid\nflowchart TD\nA --> B'
-    expect(firstMissingCanonicalMarkdownHeading(path, openFencePrefix)).toBe(
-      '### Game State Flow',
-    )
-  })
-
-  test('does not offer suffix continuation for an invalid top-level heading prefix', () => {
-    const path = 'docs/GDD.md'
-    const canonical = renderTestCompleteGameDocument(path, completeTestSubmission(path))
-    const productionStart = canonical.indexOf('\n## Production Materials')
-    const prefix = canonical.slice(0, productionStart)
-
-    expect(firstMissingCanonicalMarkdownHeading(path, prefix.replace(/^# .*\n/, ''))).toBeUndefined()
-    expect(firstMissingCanonicalMarkdownHeading(path, `${prefix}\n# duplicate title`)).toBeUndefined()
-    expect(firstMissingCanonicalMarkdownHeading(path, `${prefix}\n# late title`)).toBeUndefined()
-  })
-
   test('accepts separate rectangular tables with different schemas in one material', () => {
     const body = [
       '| Event | Cue | Bus |',

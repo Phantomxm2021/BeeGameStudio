@@ -3,7 +3,7 @@ export {}
 const decoder = new TextDecoder()
 let buffer = ''
 let userMessageCount = 0
-let markdownRecoveryMode: 'normal' | 'never' | 'restart' | 'malformed_once' | 'malformed_forever' = 'normal'
+let markdownRecoveryMode: 'normal' | 'never' | 'malformed_once' | 'malformed_forever' = 'normal'
 
 const completeGddMarkdown = [
   '# Visible Markdown',
@@ -121,17 +121,14 @@ for await (const chunk of Bun.stdin.stream()) {
     if (
       content === 'truncated-markdown' ||
       content === 'truncated-markdown-forever' ||
-      content === 'truncated-markdown-restart' ||
       content === 'malformed-markdown-end-turn' ||
       content === 'malformed-markdown-end-turn-forever' ||
       (userMessageCount > 1 &&
         typeof content === 'string' &&
-        content.includes('Continue the same raw Markdown document'))
+        content.includes('Continue the same raw Markdown response'))
     ) {
       if (content === 'truncated-markdown-forever')
         markdownRecoveryMode = 'never'
-      if (content === 'truncated-markdown-restart')
-        markdownRecoveryMode = 'restart'
       if (content === 'malformed-markdown-end-turn')
         markdownRecoveryMode = 'malformed_once'
       if (content === 'malformed-markdown-end-turn-forever')
@@ -140,15 +137,9 @@ for await (const chunk of Bun.stdin.stream()) {
       const recoveredMarkdown = markdownRecoveryMode === 'malformed_once' ||
           markdownRecoveryMode === 'malformed_forever'
         ? malformedGddMarkdown
-        : markdownRecoveryMode === 'restart' && recovered
-          ? completeGddMarkdown
         : recovered && markdownRecoveryMode === 'normal'
-          ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Production Materials'))
-          : content === 'truncated-markdown' ||
-              content === 'truncated-markdown-forever' ||
-              content === 'truncated-markdown-restart'
-            ? completeGddMarkdown.slice(0, completeGddMarkdown.indexOf('\n## Production Materials'))
-            : '# Partial document\n## Executive Summary\nHalf sentence'
+          ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Vision and Product Promise'))
+          : '# Partial document\n## Executive Summary\nHalf sentence'
       emitMarkdownResponse(
         recoveredMarkdown,
         markdownRecoveryMode === 'malformed_once' || markdownRecoveryMode === 'malformed_forever'
