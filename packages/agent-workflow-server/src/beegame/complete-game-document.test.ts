@@ -251,6 +251,26 @@ describe('native complete game document validation', () => {
     ).toThrow(/format/i)
   })
 
+  test('keeps evidence_register as a Markdown table and rejects key-value blocks', () => {
+    const path = 'docs/ASSET_PLAN.md'
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const keyValueBlock = replaceMaterialBody(
+      markdown,
+      'license-register',
+      'evidenceId: asset.source.pending\nstate: source_not_selected\nevidenceRefs: []',
+    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, keyValueBlock)).toThrow(
+      /format.*license-register/i,
+    )
+
+    const evidenceTable = replaceMaterialBody(
+      markdown,
+      'license-register',
+      '| Inventory ID | Source | License Evidence |\n| --- | --- | --- |\n| asset.source.pending | not selected | pending |',
+    )
+    expect(validateCompleteGameDocumentMarkdown(path, evidenceTable)).toBe(evidenceTable)
+  })
+
   test('rejects unclosed fences and inline code with material and line diagnostics', () => {
     const path = 'docs/GDD.md'
     const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))

@@ -43,6 +43,8 @@ export type GameDocumentProductionMaterialContract = {
   title: string
   purpose: string
   format: 'markdown_table' | 'mermaid' | 'inline_svg' | 'evidence_register'
+  /** The only wire representation accepted in the authored Markdown document. */
+  serialization: 'markdown_table' | 'mermaid' | 'inline_svg'
   authorityRule: string
 }
 
@@ -106,6 +108,7 @@ const material = (
     title,
     format,
     purpose,
+    serialization: format === 'evidence_register' ? 'markdown_table' : format,
     authorityRule,
   })
 

@@ -283,6 +283,41 @@ describe('worker prompts', () => {
     }
   })
 
+  test('derives one Markdown-table serialization rule for the evidence register', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+      allowedPaths: ['docs/ASSET_PLAN.md'],
+      contract: {
+        documentSet: 'foundation', authoringMode: 'initial', foundationDocumentPath: 'docs/ASSET_PLAN.md',
+        completeDocumentContract: getGameDocumentContract('docs/ASSET_PLAN.md'),
+      },
+    })
+    const serialized = JSON.parse(
+      prompt.split('\n').find(line => line.startsWith('{'))!,
+    ) as {
+      completeDocumentContract: {
+        mechanicalMarkdownProtocol: {
+          productionMaterials: {
+            entries: Array<{ materialId: string; format: string; serialization: string; serializationRule?: string }>
+          }
+        }
+      }
+    }
+    const licenseRegister = serialized.completeDocumentContract.mechanicalMarkdownProtocol.productionMaterials.entries
+      .find(material => material.materialId === 'license-register')
+
+    expect(licenseRegister).toMatchObject({
+      format: 'evidence_register',
+      serialization: 'markdown_table',
+    })
+    expect(licenseRegister?.serializationRule).toContain('Markdown table only')
+    expect(licenseRegister?.serializationRule).toContain('header row')
+    expect(licenseRegister?.serializationRule).toContain('separator row')
+    expect(licenseRegister?.serializationRule).toContain('do not use a fenced code block')
+    expect(licenseRegister?.serializationRule).toContain('key-value list')
+  })
+
   test('uses the same committed projection instruction regardless of upstream paths', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',

@@ -353,9 +353,19 @@ function formatContract(request: WorkerDispatchRequest): string {
             entries: Array.isArray(productionMaterials)
               ? productionMaterials.map(value => {
                   const material = value as Record<string, unknown>
+                  const serialization = material.serialization
+                  const serializationRule =
+                    serialization === 'markdown_table'
+                      ? 'Markdown table only: include a header row, a separator row, and data rows; do not use a fenced code block, YAML, JSON, or a key-value list.'
+                      : serialization === 'mermaid'
+                        ? 'Mermaid only: use one fenced ```mermaid block; do not replace it with prose, JSON, YAML, or a key-value list.'
+                        : serialization === 'inline_svg'
+                          ? 'Inline SVG only: use one inline <svg>...</svg> block; do not replace it with a fenced code block, JSON, YAML, or a key-value list.'
+                          : undefined
                   return {
                     ...material,
                     heading: `### ${material.title}`,
+                    ...(serializationRule ? { serializationRule } : {}),
                   }
                 })
               : productionMaterials,

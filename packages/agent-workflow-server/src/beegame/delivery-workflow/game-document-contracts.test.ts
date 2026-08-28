@@ -99,6 +99,11 @@ describe('complete game document contracts', () => {
         item => item.materialId === 'license-register',
       )?.format,
     ).toBe('evidence_register')
+    expect(
+      getGameDocumentContract('docs/ASSET_PLAN.md').productionMaterials.find(
+        item => item.materialId === 'license-register',
+      )?.serialization,
+    ).toBe('markdown_table')
   })
 
   test('exposes the closed owner-only material catalog in canonical order', () => {
