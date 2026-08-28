@@ -233,7 +233,7 @@ describe('foundation revision round policy', () => {
     }
   })
 
-  test('stops when issue authority is unchanged even if document bytes drifted', () => {
+  test('continues when unresolved issue authority is unchanged', () => {
     const issues = [issue('AUD-B', 'BLOCKER'), issue('AUD-H', 'HIGH')]
     const result = evaluateFoundationRevisionRoundPolicy({
       phase: 'evaluate',
@@ -247,9 +247,9 @@ describe('foundation revision round policy', () => {
     })
 
     expect(result).toEqual({
-      status: 'needs_action',
-      repairIssueIds: [],
-      reason: 'no_progress',
+      status: 'continue',
+      nextRound: 3,
+      repairIssueIds: ['AUD-B', 'AUD-H'],
     })
   })
 

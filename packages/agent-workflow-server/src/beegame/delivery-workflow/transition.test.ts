@@ -463,7 +463,7 @@ describe('foundation retry transitions', () => {
     expect(retried.foundationAuditState?.tasks).toEqual(documentOnly.tasks)
   })
 
-  test('re-enters a failed planning boundary but never bypasses policy terminal states', () => {
+  test('re-enters a failed planning boundary', () => {
     const planning = {
       ...revisionState(),
       status: 'planning' as const,
@@ -478,12 +478,6 @@ describe('foundation retry transitions', () => {
     expect(retried.status).toBe('running')
     expect(retried.foundationAuditState?.status).toBe('planning')
 
-    const closing = transitionDeliveryRun({
-      ...revisionRun({ ...completedRevisionState(), status: 'round_closing' }),
-      blockedReason: 'foundation revision authority made no progress',
-    }, { type: 'retry' })
-    expect(closing.status).toBe('needs_action')
-    expect(closing.foundationAuditState?.status).toBe('round_closing')
   })
 
   test('does not retry ineligible foundation failures', () => {
@@ -555,15 +549,11 @@ describe('foundation retry transitions', () => {
 
     for (const [label, run] of [
       ['audit_ready', auditRun(auditReadyState())],
-      ['round-closing revision', revisionRun(completedRevisionState())],
+      ['round-closing revision', revisionRun({ ...completedRevisionState(), status: 'round_closing' })],
     ] as const) {
       const retried = transitionDeliveryRun(run, { type: 'retry' })
-      if (label === 'audit_ready') {
-        expect(retried.status, label).toBe('running')
-        expect(retried.blockedReason, label).toBeUndefined()
-      } else {
-        expect(retried.status, label).toBe('needs_action')
-      }
+      expect(retried.status, label).toBe('running')
+      expect(retried.blockedReason, label).toBeUndefined()
     }
   })
 })

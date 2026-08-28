@@ -2164,14 +2164,15 @@ describe('foundation fact runtime controller integration', () => {
     } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
   })
 
-  test('round closing with unchanged publication authority becomes needs_action', async () => {
+  test('round closing with unchanged unresolved issues starts the next planning round', async () => {
     const seeded = await seedRoundClosingRevision({ resultingIssue: true, round: 2, unchangedBefore: true })
     try {
       await seeded.controller.resume(seeded.run)
       const after = await seeded.controller.store.load()
-      expect(after!.status).toBe('needs_action')
-      expect(after!.foundationAuditState!.status).toBe('round_closing')
-      expect(after!.blockedReason).toMatch(/no.progress|no progress/i)
+      expect(after!.status).toBe('running')
+      expect(after!.foundationAuditState!.status).toMatch(/planning|revising/)
+      expect(after!.foundationAuditState!.round).toBe(3)
+      expect(after!.blockedReason).toBeUndefined()
     } finally { await rm(seeded.workspacePath, { recursive: true, force: true }) }
   })
 

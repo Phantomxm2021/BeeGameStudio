@@ -6,10 +6,12 @@ import { buildFoundationSectionIndex } from './foundation-section-index'
 import { extractNormalizedFoundationFacts } from './foundation-fact-extraction'
 import { FOUNDATION_FACT_CATALOG, type FoundationFactKey } from './foundation-fact-definitions'
 import { getGameDocumentContract } from './game-document-contracts'
+import { analyzeFoundationImpact } from './foundation-impact-analysis'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import {
   FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
   runProductionDeterministicFoundationAudit,
+  runProductionDeterministicFoundationImpactAudit,
 } from './foundation-audit-production-manifest'
 import { FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS } from './foundation-audit-authority'
 import {
@@ -313,5 +315,73 @@ describe('service-owned deterministic production audit', () => {
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
+  })
+
+  test('persists a deterministic remediation targeting a canonical production material block', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-deterministic-material-review-'))
+    try {
+      const documents = fixtureDocuments()
+      const sectionIndex = buildFoundationSectionIndex({ documents })
+      const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex })
+      const source = sectionIndex.find(section =>
+        section.documentPath === 'docs/ASSET_PLAN.md' &&
+        section.sectionId === 'material.license-register',
+      )!
+      const issue = {
+        id: 'AUD-AAAAAAAAAAAAAAAAAAAAAAAA',
+        severity: 'HIGH' as const,
+        type: 'contract' as const,
+        source,
+        expected: 'license evidence is complete',
+        actual: 'license evidence is missing',
+        remediation: {
+          kind: 'patch' as const,
+          documentPath: 'docs/ASSET_PLAN.md' as const,
+          sectionIds: ['material.license-register'],
+        },
+      }
+      const documentDigests = Object.fromEntries(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, 'a'.repeat(64)])) as Record<string, string>
+
+      const published = await publishDeterministicFoundationReview({
+        workspacePath,
+        revision: 'revision-deterministic-material',
+        documentDigests,
+        sectionIndex,
+        factStore: extraction.facts,
+        issues: [issue],
+      })
+
+      await expect(loadDeterministicFoundationReview({
+        workspacePath,
+        revision: 'revision-deterministic-material',
+        reviewDigest: published.reviewDigest,
+      })).resolves.toMatchObject({ issues: [issue] })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts a canonical production material in deterministic impact validation', () => {
+    const documents = fixtureDocuments()
+    const sectionIndex = buildFoundationSectionIndex({ documents })
+    const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex })
+    const material = sectionIndex.find(section =>
+      section.documentPath === 'docs/GDD.md' &&
+      section.sectionId === 'material.game-state-flow',
+    )!
+    const impact = analyzeFoundationImpact([{
+      kind: 'REPLACE',
+      documentPath: 'docs/GDD.md',
+      sectionId: material.sectionId,
+      issueIds: ['AUD-MATERIAL-IMPACT'],
+      beforeDigest: material.digest,
+      afterDigest: material.digest,
+    }])
+
+    expect(() => runProductionDeterministicFoundationImpactAudit({
+      sectionIndex,
+      factStore: extraction.facts,
+      impact,
+    })).not.toThrow()
   })
 })

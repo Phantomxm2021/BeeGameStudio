@@ -25,6 +25,7 @@ import {
   type FoundationDeterministicContractDeclaration,
 } from './foundation-audit-authority'
 import { getGameDocumentContract } from './game-document-contracts'
+import { canonicalFoundationBlockIds } from './foundation-section-index'
 import type { FoundationImpactAnalysis } from './foundation-impact-analysis'
 import type { FoundationDocumentPath } from './types'
 import {
@@ -300,8 +301,7 @@ function assertImpactIdentities(impact: FoundationImpactAnalysis): {
     const sectionId = section.sectionId
     if (typeof path !== 'string' || typeof sectionId !== 'string')
       throw new Error('production deterministic impact changedSections is invalid')
-    const contract = getGameDocumentContract(path as FoundationDocumentPath)
-    if (!contract || !contract.sections.some(candidate => candidate.sectionId === sectionId))
+    if (!canonicalFoundationBlockIds(path as FoundationDocumentPath).includes(sectionId))
       throw new Error(`production deterministic impact contains unknown section: ${path}#${sectionId}`)
     const key = `${path}\0${sectionId}`
     if (changedSectionKeys.has(key)) throw new Error(`production deterministic impact changedSections is duplicate: ${key}`)

@@ -3,6 +3,7 @@ import { mkdir, readFile, stat, writeFile, rename, readdir } from 'node:fs/promi
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import {
   buildFoundationSectionIndex,
+  canonicalFoundationBlockIds,
   digestSectionIndex,
   type FoundationSectionIndex,
 } from './foundation-section-index'
@@ -18,7 +19,6 @@ import {
 import type { FoundationAuditState } from './foundation-audit-state'
 import { createFoundationFactStore, digestFactStore, type FoundationFactStore } from './foundation-fact-store'
 import type { AuditIssue } from './foundation-issue-registry'
-import { getGameDocumentContract } from './game-document-contracts'
 import {
   FOUNDATION_AUDIT_PRODUCTION_MANIFEST,
 } from './foundation-audit-production-manifest'
@@ -634,7 +634,7 @@ function validateReviewRemediation(value: unknown, label: string): void {
       !Array.isArray(remediation.sectionIds) || remediation.sectionIds.length === 0 ||
       remediation.sectionIds.some(sectionId => typeof sectionId !== 'string' || !/^[a-z0-9._-]+$/.test(sectionId)) ||
       new Set(remediation.sectionIds).size !== remediation.sectionIds.length ||
-      remediation.sectionIds.some(sectionId => !getGameDocumentContract(remediation.documentPath as FoundationDocumentPath).sections.some(section => section.sectionId === sectionId)))
+      remediation.sectionIds.some(sectionId => !canonicalFoundationBlockIds(remediation.documentPath as FoundationDocumentPath).includes(sectionId)))
       throw new Error(`deterministic review ${label} patch remediation is invalid`)
     return
   }

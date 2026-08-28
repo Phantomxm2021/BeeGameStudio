@@ -15,7 +15,6 @@ export type FoundationRevisionRoundPolicyResult =
   | { status: 'repair'; round: FoundationRevisionRound; repairIssueIds: string[] }
   | { status: 'proceed'; repairIssueIds: [] }
   | { status: 'continue'; nextRound: FoundationRevisionRound; repairIssueIds: string[] }
-  | { status: 'needs_action'; repairIssueIds: []; reason: 'no_progress' }
 
 const SEVERITIES: readonly AuditSeverity[] = ['BLOCKER', 'HIGH', 'MEDIUM', 'LOW']
 
@@ -34,7 +33,6 @@ export function evaluateFoundationRevisionRoundPolicy(input: FoundationRevisionR
   const unchangedIssueAuthority = before.issueRegistryDigest === after.issueRegistryDigest
   if (unchangedIssueAuthority && !sameIssueIdentities(before.issues, after.issues)) throw new Error('foundation revision round issue identity changed under an unchanged authoritative digest')
   if (after.issues.length === 0) return { status: 'proceed', repairIssueIds: [] }
-  if (unchangedIssueAuthority) return { status: 'needs_action', repairIssueIds: [], reason: 'no_progress' }
   if (input.round >= Number.MAX_SAFE_INTEGER) throw new Error('foundation revision round cannot advance beyond the safe integer range')
   return { status: 'continue', nextRound: input.round + 1, repairIssueIds: sortIds(after.issues.map(issue => issue.id)) }
 }

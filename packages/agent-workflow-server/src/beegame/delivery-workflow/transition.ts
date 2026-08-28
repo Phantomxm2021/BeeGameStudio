@@ -135,7 +135,7 @@ function isRetryableFoundationRevisionBoundary(
   if (taskId) return false
   if (runStatus !== 'needs_action') return false
   if (state.status === 'planning') return true
-  if (state.status !== 'validating') return false
+  if (!['validating', 'round_closing'].includes(state.status)) return false
   const activeTasks = activeFoundationRevisionTasks(state)
   return activeTasks.length > 0 && activeTasks.every(task => task.status === 'completed')
 }

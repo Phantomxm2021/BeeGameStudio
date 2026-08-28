@@ -1494,12 +1494,6 @@ export function createDeliveryWorkflowController(input: {
           const locked = await store.load(lease)
           if (locked?.foundationAuditState?.status === 'planning') await store.commit({ ...locked, status: 'needs_action', blockedReason: 'foundation revision planning authority changed before repair tasks were admitted' }, { runId: locked.runId, type: 'foundation.revision.planning.drift', phase: locked.phase, status: 'needs_action', revision: locked.revision }, undefined, lease)
         } finally { await store.unlock(lease) }
-      } else if (policy.status === 'needs_action') {
-        const lease = await store.mutationLock(run.runId)
-        try {
-          const locked = await store.load(lease)
-          if (locked?.foundationAuditState?.status === 'planning') await store.commit({ ...locked, status: 'needs_action', blockedReason: `foundation revision planning needs action: ${policy.reason}` }, { runId: locked.runId, type: 'foundation.revision.planning.needs_action', phase: locked.phase, status: 'needs_action', revision: locked.revision }, undefined, lease)
-        } finally { await store.unlock(lease) }
       }
       return
     }
@@ -1888,7 +1882,6 @@ export function createDeliveryWorkflowController(input: {
       if (!locked?.foundationAuditState || locked.foundationAuditState.status !== 'round_closing') return undefined
       if (policy.status === 'proceed') next = await store.commit({ ...locked, documentStep: 'CHECKLIST_DRAFTING', status: 'running', blockedReason: undefined, foundationAuditState: { ...locked.foundationAuditState, status: 'revision_ready' } }, { runId: locked.runId, type: 'foundation.revision.proceed', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
       else if (policy.status === 'continue') next = await store.commit({ ...locked, status: 'running', blockedReason: undefined, foundationAuditState: { ...locked.foundationAuditState, round: policy.nextRound, status: 'planning', phaseStartedAt: new Date().toISOString(), roundBefore: { documentRevision: state.revision, issueRegistryDigest: state.authority!.issueAuthority.issueRegistryDigest, issueAuthority: state.authority!.issueAuthority }, activeBundleId: undefined, revisionBundles: locked.foundationAuditState.revisionBundles?.map(bundle => bundle.bundleId === locked.foundationAuditState!.activeBundleId ? { ...bundle, status: 'superseded' as const } : bundle), publication: undefined } }, { runId: locked.runId, type: 'foundation.revision.next_round', phase: locked.phase, status: 'running', revision: locked.revision }, undefined, lease)
-      else if (policy.status === 'needs_action') next = await store.commit({ ...locked, status: 'needs_action', blockedReason: `foundation revision ${policy.reason}`, foundationAuditState: { ...locked.foundationAuditState } }, { runId: locked.runId, type: 'foundation.revision.needs_action', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason: policy.reason }, undefined, lease)
       else throw new Error('foundation revision round policy returned an invalid evaluate result')
     } finally { await store.unlock(lease) }
     return next
