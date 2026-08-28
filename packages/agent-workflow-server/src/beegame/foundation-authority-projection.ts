@@ -5,11 +5,6 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
-import { CANONICAL_SEMANTIC_ID } from './canonical-semantic-id'
-import {
-  collectCompleteGameDocumentAuthoritySymbols,
-  type CompleteGameDocumentAuthoritySymbol,
-} from './complete-game-document'
 
 export type FoundationAuthoritySource = Readonly<{
   path: FoundationDocumentPath
@@ -30,7 +25,6 @@ export type FoundationAuthorityProjection = Readonly<{
   byteLength: number
   rangeCount: number
   projectedLineCount: number
-  symbols: readonly CompleteGameDocumentAuthoritySymbol[]
 }>
 
 export function foundationProjectionRelativePath(dispatchId: string): string {
@@ -41,13 +35,11 @@ function projectionPayload(input: {
   targetPath: FoundationDocumentPath
   targetSectionIds: readonly string[]
   sources: readonly FoundationAuthoritySource[]
-  symbols: readonly CompleteGameDocumentAuthoritySymbol[]
 }) {
   return {
     targetPath: input.targetPath,
     targetSectionIds: input.targetSectionIds,
     sources: input.sources,
-    symbols: input.symbols,
   }
 }
 
@@ -77,11 +69,6 @@ export function parseFoundationAuthorityProjectionBytes(
     targetPath: pathSchema,
     targetSectionIds: z.array(z.string()),
     sources: z.array(sourceSchema),
-    symbols: z.array(z.object({
-      id: z.string().regex(CANONICAL_SEMANTIC_ID),
-      documentPath: pathSchema,
-      sectionId: z.string(),
-    }).strict()),
   }).strict()
   const stored = schema.parse(parsed)
   const targetContract = getGameDocumentContract(stored.targetPath)
@@ -110,21 +97,6 @@ export function parseFoundationAuthorityProjectionBytes(
     ))
       throw new Error(`committed upstream projection contains an invalid section digest: ${source.path}`)
   }
-  if (new Set(value.symbols.map(symbol => symbol.id)).size !== value.symbols.length)
-    throw new Error('committed upstream projection contains duplicate symbols')
-  const sourcesByPath = new Map(value.sources.map(source => [source.path, source]))
-  for (const symbol of value.symbols) {
-    const source = sourcesByPath.get(symbol.documentPath)
-    if (!source)
-      throw new Error(`committed upstream projection symbol has no source: ${symbol.id}`)
-    const sourceContract = getGameDocumentContract(symbol.documentPath)
-    const isSection = sourceContract.sections.some(section => section.sectionId === symbol.sectionId)
-    const isMaterial = sourceContract.productionMaterials.some(material => `material.${material.materialId}` === symbol.sectionId)
-    if (!isSection && !isMaterial)
-      throw new Error(`committed upstream projection symbol has an invalid section: ${symbol.id}`)
-    if (isSection && !source.sections.some(section => section.sectionId === symbol.sectionId))
-      throw new Error(`committed upstream projection symbol section is not selected: ${symbol.id}`)
-  }
   if (canonicalFoundationAuthorityProjectionBytes(value) !== raw)
     throw new Error('committed upstream projection bytes are not canonical')
   return value
@@ -147,7 +119,6 @@ export function modelFoundationAuthorityProjectionBytes(
         content: section.content,
       })),
     })),
-    symbols: projection.symbols,
   }, null, 2)}\n`
 }
 
@@ -183,22 +154,12 @@ export function projectFoundationAuthority(input: {
   )
     throw new Error('foundation authority target sections are invalid')
   const sources: FoundationAuthoritySource[] = []
-  const symbols: CompleteGameDocumentAuthoritySymbol[] = []
-
   for (const source of target.upstreamSections) {
     if (!available.has(source.path)) continue
     const markdown = input.documents.get(source.path)
     if (markdown === undefined)
       throw new Error(`canonical upstream document is missing: ${source.path}`)
     const sourceContract = getGameDocumentContract(source.path)
-    const selectedSectionIds = new Set(source.sectionIds)
-    const materialSectionIds = new Set(
-      sourceContract.productionMaterials.map(material => `material.${material.materialId}`),
-    )
-    symbols.push(
-      ...collectCompleteGameDocumentAuthoritySymbols(source.path, markdown)
-        .filter(symbol => selectedSectionIds.has(symbol.sectionId) || materialSectionIds.has(symbol.sectionId)),
-    )
     const lines = markdown.split('\n')
     const sectionMarkerLines = lines.flatMap((line, index) =>
       line.trim().startsWith('<!-- beegame-section:') ? [index] : [],
@@ -247,14 +208,11 @@ export function projectFoundationAuthority(input: {
     )
   }
 
-  if (new Set(symbols.map(symbol => symbol.id)).size !== symbols.length)
-    throw new Error('upstream authority contains duplicate semantic symbols')
   const frozenSources = Object.freeze([...sources])
   const payload = projectionPayload({
     targetPath: input.targetPath,
     targetSectionIds,
     sources: frozenSources,
-    symbols: Object.freeze([...symbols]),
   })
   const byteLength = new TextEncoder().encode(
     `${JSON.stringify(payload, null, 2)}\n`,
@@ -274,6 +232,5 @@ export function projectFoundationAuthority(input: {
         source.sections.reduce((sum, section) => sum + section.lineCount, 0),
       0,
     ),
-    symbols: Object.freeze([...symbols]),
   })
 }

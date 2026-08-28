@@ -309,107 +309,32 @@ describe('native authored document receipts', () => {
     }
   })
 
-  test('rejects undefined cross-document references and future Asset IDs at the commit boundary', async () => {
-    const cases = [
-      {
-        targetPath: 'docs/LEVEL_SCENE_DESIGN.md' as const,
-        reference: 'state.undefined',
-        upstreamPaths: ['docs/GDD.md'] as const,
-        tableReference: true,
-      },
-      {
-        targetPath: 'docs/AUDIO_DESIGN.md' as const,
-        reference: 'asset.futurecue',
-        upstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/UI_UX_SPEC.md'] as const,
-      },
-      {
-        targetPath: 'docs/ART_DIRECTION.md' as const,
-        reference: 'asset.futurevisual',
-        upstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'] as const,
-      },
-    ]
-    for (const [index, current] of cases.entries()) {
-      const workspacePath = await mkdtemp(join(tmpdir(), `authored-cross-ref-${index}-`))
-      try {
-        await mkdir(join(workspacePath, 'docs'), { recursive: true })
-        const documents = new Map<FoundationDocumentPath, string>()
-        for (const upstreamPath of current.upstreamPaths) {
-          const markdown = completeFoundationDocument(upstreamPath)
-          documents.set(upstreamPath, markdown)
-          await writeFile(join(workspacePath, upstreamPath), markdown)
-        }
-        let target = completeFoundationDocument(current.targetPath)
-        target = current.tableReference
-          ? target.replace(
-              '| Field | Value |',
-              `| Reference ID | Value |\n| --- | --- |\n| \`${current.reference}\` | copied |\n\n| Field | Value |`,
-            )
-          : target.replace(
-              '<!-- beegame-audit-appendix -->',
-              `Owner reference: \`${current.reference}\`.\n\n<!-- beegame-audit-appendix -->`,
-            )
-        await writeFile(join(workspacePath, current.targetPath), target)
-        await writeProjectionForTarget(workspacePath, `cross-ref-${index}`, current.targetPath, documents)
-        await expect(commitAuthoredFoundationDocument({
-          workspacePath,
-          dispatchId: `cross-ref-${index}`,
-          targetPath: current.targetPath,
-          updatedAt: '2026-08-13T01:00:00.000+08:00',
-        })).rejects.toThrow(/undefined|future Asset|semantic ID/i)
-      } finally {
-        await rm(workspacePath, { recursive: true, force: true })
-      }
-    }
-
-    const workspacePath = await mkdtemp(join(tmpdir(), 'authored-self-ref-'))
+  test('commits semantic-looking Markdown through the structural Stage 2 gate', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'authored-markdown-content-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
-      const upstream = completeFoundationDocument('docs/GDD.md')
-      await writeFile(join(workspacePath, 'docs/GDD.md'), upstream)
-      const selfReference = completeFoundationDocument('docs/LEVEL_SCENE_DESIGN.md').replace(
-        '## World and Scene Structure\n\n',
-        '## World and Scene Structure\n\nOwner declaration: `LEVEL-ROUTE`. Owner reference: `LEVEL-ROUTE`.\n\n',
+      const targetPath = 'docs/GDD.md' as const
+      const target = completeFoundationDocument(targetPath).replace(
+        '<!-- beegame-audit-appendix -->',
+        'Owner reference: `material.variable-parameter-table`.\n\n<!-- beegame-audit-appendix -->',
       )
-      await writeFile(join(workspacePath, 'docs/LEVEL_SCENE_DESIGN.md'), selfReference)
+      await writeFile(join(workspacePath, targetPath), target)
       await writeProjectionForTarget(
         workspacePath,
-        'self-ref-pass',
-        'docs/LEVEL_SCENE_DESIGN.md',
-        new Map([['docs/GDD.md', upstream]]),
+        'semantic-markdown-content',
+        targetPath,
+        new Map(),
       )
+
       await expect(commitAuthoredFoundationDocument({
         workspacePath,
-        dispatchId: 'self-ref-pass',
-        targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
+        dispatchId: 'semantic-markdown-content',
+        targetPath,
         updatedAt: '2026-08-13T01:00:00.000+08:00',
       })).resolves.toMatchObject({ status: 'committed' })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
-
-    const duplicateWorkspace = await mkdtemp(join(tmpdir(), 'authored-duplicate-semantic-'))
-    try {
-      await mkdir(join(duplicateWorkspace, 'docs'), { recursive: true })
-      const upstream = completeFoundationDocument('docs/GDD.md')
-      await writeFile(join(duplicateWorkspace, 'docs/GDD.md'), upstream)
-      const duplicate = completeFoundationDocument('docs/LEVEL_SCENE_DESIGN.md')
-        .replace('## World and Scene Structure\n\n', '## World and Scene Structure\n\nOwner declaration: `level.route`.\n\n')
-        .replace('## Objectives, Routes and Player Choices\n\n', '## Objectives, Routes and Player Choices\n\nOwner declaration: `level.route`.\n\n')
-      await writeFile(join(duplicateWorkspace, 'docs/LEVEL_SCENE_DESIGN.md'), duplicate)
-      await writeProjectionForTarget(
-        duplicateWorkspace,
-        'duplicate-semantic',
-        'docs/LEVEL_SCENE_DESIGN.md',
-        new Map([['docs/GDD.md', upstream]]),
-      )
-      await expect(commitAuthoredFoundationDocument({
-        workspacePath: duplicateWorkspace,
-        dispatchId: 'duplicate-semantic',
-        targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
-        updatedAt: '2026-08-13T01:00:00.000+08:00',
-      })).rejects.toThrow(/declared by multiple owners|semantic ID/i)
-    } finally {
-      await rm(duplicateWorkspace, { recursive: true, force: true })
-    }
   })
+
 })

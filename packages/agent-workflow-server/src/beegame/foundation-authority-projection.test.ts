@@ -261,6 +261,7 @@ describe('foundation authority projection', () => {
     expect(model).not.toHaveProperty('byteLength')
     expect(model).not.toHaveProperty('rangeCount')
     expect(model).not.toHaveProperty('projectedLineCount')
+    expect(model).not.toHaveProperty('symbols')
     for (const source of model.sources as Array<Record<string, unknown>>) {
       expect(source).not.toHaveProperty('digest')
       for (const section of source.sections as Array<Record<string, unknown>>) {
@@ -283,135 +284,20 @@ describe('foundation authority projection', () => {
     expect(result.sources).toEqual([])
   })
 
-  test('parses only canonical contract paths and permits material symbols outside selected section text', () => {
+  test('rejects the removed semantic symbols projection track', () => {
     const result = projectFoundationAuthority({
       targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
       availableUpstreamPaths: ['docs/GDD.md'],
       ...sources(['docs/GDD.md']),
     })
-    const withMaterialSymbol = {
-      ...result,
-      symbols: [{
-        id: 'state.flow',
-        documentPath: 'docs/GDD.md' as const,
-        sectionId: 'material.game-state-flow',
-      }],
+    const obsolete = {
+      ...JSON.parse(canonicalFoundationAuthorityProjectionBytes(result)),
+      symbols: [],
     }
-    expect(parseFoundationAuthorityProjectionBytes(
-      canonicalFoundationAuthorityProjectionBytes(withMaterialSymbol),
-    ).symbols).toEqual(withMaterialSymbol.symbols)
 
-    const invalid = JSON.parse(canonicalFoundationAuthorityProjectionBytes(result)) as Record<string, unknown>
-    invalid.targetPath = 'docs/not-a-foundation.md'
-    expect(() => parseFoundationAuthorityProjectionBytes(JSON.stringify(invalid))).toThrow()
-  })
-
-  test('projects selected section symbols and material symbols only so its bytes parse immediately', () => {
-    const targetPath = 'docs/BALANCE_DESIGN.md'
-    const gdd = sourceDocument('docs/GDD.md')
-      .replace(
-        '## Production Materials\nSource materials are intentionally outside the authority projection.',
-        [
-          '## Production Materials',
-          ...getGameDocumentContract('docs/GDD.md').productionMaterials.flatMap(material => [
-            `<!-- beegame-material:${material.materialId} -->`,
-            `### ${material.title}`,
-            '',
-          ]),
-        ].join('\n'),
-      )
-      .replace(
-        'Owned source content for vision.',
-        'Declaration: state.unselected\nOwned source content for vision.',
-      )
-      .replace(
-        'Owned source content for core_loop.',
-        'Declaration: state.selected\nOwned source content for core_loop.',
-      )
-      .replace(
-        '<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\n',
-        '<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\nDeclaration: material.selected\n',
-      )
-    const result = projectFoundationAuthority({
-      targetPath,
-      availableUpstreamPaths: ['docs/GDD.md'],
-      documents: new Map([['docs/GDD.md', gdd]]),
-    })
-
-    expect(result.symbols).toContainEqual({
-      id: 'state.selected',
-      documentPath: 'docs/GDD.md',
-      sectionId: 'core_loop',
-    })
-    expect(result.symbols).not.toContainEqual({
-      id: 'state.unselected',
-      documentPath: 'docs/GDD.md',
-      sectionId: 'vision',
-    })
-    expect(result.symbols).toContainEqual({
-      id: 'material.selected',
-      documentPath: 'docs/GDD.md',
-      sectionId: 'material.core-loop-diagram',
-    })
     expect(() => parseFoundationAuthorityProjectionBytes(
-      canonicalFoundationAuthorityProjectionBytes(result),
-    )).not.toThrow()
+      `${JSON.stringify(obsolete, null, 2)}\n`,
+    )).toThrow()
   })
 
-  test('round-trips canonical hyphenated and underscored GDD symbols into the Level projection', () => {
-    const gdd = sourceDocument('docs/GDD.md')
-      .replace(
-        '## Production Materials\nSource materials are intentionally outside the authority projection.',
-        [
-          '## Production Materials',
-          ...getGameDocumentContract('docs/GDD.md').productionMaterials.flatMap(material => [
-            `<!-- beegame-material:${material.materialId} -->`,
-            `### ${material.title}`,
-            '',
-          ]),
-        ].join('\n'),
-      )
-      .replace(
-        'Owned source content for core_loop.',
-        'Declaration: action.assign-crew, param.gen.fuel_consumption\nOwned source content for core_loop.',
-      )
-      .replace(
-        '<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\n',
-        '<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\nDeclaration: material.game-state-flow, material.variable-parameter-table\n',
-      )
-    const result = projectFoundationAuthority({
-      targetPath: 'docs/LEVEL_SCENE_DESIGN.md',
-      availableUpstreamPaths: ['docs/GDD.md'],
-      documents: new Map([['docs/GDD.md', gdd]]),
-    })
-
-    expect(result.symbols.map(symbol => symbol.id)).toEqual(expect.arrayContaining([
-      'action.assign-crew',
-      'param.gen.fuel_consumption',
-      'material.game-state-flow',
-      'material.variable-parameter-table',
-    ]))
-    expect(() => parseFoundationAuthorityProjectionBytes(
-      canonicalFoundationAuthorityProjectionBytes(result),
-    )).not.toThrow()
-  })
-
-  test('rejects duplicate committed semantic symbols while projecting upstream authority', () => {
-    const gdd = sourceDocument('docs/GDD.md').replace(
-      'Owned source content for states_flow.',
-      'Owner declaration: `state.same`.\nOwned source content for states_flow.',
-    )
-    const level = sourceDocument('docs/LEVEL_SCENE_DESIGN.md').replace(
-      'Owned source content for world_structure.',
-      'Owner declaration: `state.same`.\nOwned source content for world_structure.',
-    )
-    expect(() => projectFoundationAuthority({
-      targetPath: 'docs/BALANCE_DESIGN.md',
-      availableUpstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-      documents: new Map([
-        ['docs/GDD.md', gdd],
-        ['docs/LEVEL_SCENE_DESIGN.md', level],
-      ]),
-    })).toThrow(/duplicate semantic symbols/i)
-  })
 })

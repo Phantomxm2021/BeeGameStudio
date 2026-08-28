@@ -2,10 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { z } from 'zod/v4'
-import {
-  assertCompleteGameDocumentCrossDocumentReferences,
-  normalizeCompleteGameDocumentProtocol,
-} from './complete-game-document'
+import { normalizeCompleteGameDocumentProtocol } from './complete-game-document'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   foundationProjectionRelativePath,
@@ -94,7 +91,6 @@ export async function commitAuthoredFoundationDocument(input: {
     workspacePath: input.workspacePath,
     dispatchId: input.dispatchId,
     targetPath: input.targetPath,
-    canonical,
   })
   await durableWrite(target, canonical)
   const audit = {
@@ -151,7 +147,6 @@ async function assertCommittedFoundationAuthority(input: {
   workspacePath: string
   dispatchId: string
   targetPath: FoundationDocumentPath
-  canonical: string
 }): Promise<void> {
   const contract = getGameDocumentContract(input.targetPath)
   const projectionPath = resolve(
@@ -173,14 +168,7 @@ async function assertCommittedFoundationAuthority(input: {
   })
   if (canonicalFoundationAuthorityProjectionBytes(expectedProjection) !== rawProjection)
     throw new Error(`committed upstream projection does not match current committed authority: ${input.targetPath}`)
-  const projection = parseFoundationAuthorityProjectionBytes(
-    rawProjection,
-  )
-  assertCompleteGameDocumentCrossDocumentReferences(
-    input.targetPath,
-    input.canonical,
-    projection,
-  )
+  parseFoundationAuthorityProjectionBytes(rawProjection)
 }
 
 export async function readAuthoredDocumentReceipt(

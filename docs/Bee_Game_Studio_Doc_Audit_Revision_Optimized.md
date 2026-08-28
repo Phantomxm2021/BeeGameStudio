@@ -60,7 +60,7 @@
 
 Balance 的 owner 分界不可推断：`variable-parameter-table` 是全部数值型 `var.*` 与 `param.*` ID、单位、值和范围的唯一 owner；`Units, Variables and Conventions` 与 `Entity and Ability Parameters` Section 只拥有语义、身份和关系，不得复制数值定义。Fact Store 的 `balance.variable_ids` owner identity 同步绑定 `material.variable-parameter-table`。
 
-跨文档 semantic ID 使用 lower-case ASCII dotted namespace（例如 `param.gen.fuel_consumption`）；owner-local keys（例如 `N01`、`BEAT-01`、`VB-01`、`SR-01`）可以保留其 canonical pattern，但必须由 owner 定义并 byte-for-byte 引用。两类 ID 都禁止 alias、placeholder 或 CJK ID；Production Materials 引用的每个 ID 必须先在其声明的 owner source 中精确定义。Balance 的公式 ID 只在 `formulas` Section 定义，其他 Section 只引用该 ID。canonical material 引用只使用 `material.<materialId>`（例如 `material.variable-parameter-table`），不得使用 raw material ID 或显示标题作为并行 authority。
+需要跨文档复用的业务 semantic ID 使用 lower-case ASCII dotted namespace（例如 `param.gen.fuel_consumption`）；owner-local keys（例如 `N01`、`BEAT-01`、`VB-01`、`SR-01`）保留 owner 选定的 canonical pattern，并由消费者 byte-for-byte 引用。两类 ID 都禁止 alias、placeholder 或并行旧拼写。canonical material identity 只来自服务端 material catalog，并使用 `material.<materialId>`（例如 `material.variable-parameter-table`），不得使用 raw material ID 或显示标题建立第二套 authority。Stage 2 只机械验证 raw Markdown 的结构、canonical 文档路径、材料闭包和已提交 upstream section projection 的身份、内容与 digest，不扫描任意自然语言表头、代码围栏或 Mermaid 标签来推断 semantic declaration/reference，也不因这类推断失败阻断初稿提交。跨文档 semantic ID 的 owner、未定义引用和 alias 冲突由 Stage 3 基于完整八文档的 normalized Fact / semantic audit 统一判定；Balance 的公式 ID 仍只在 `formulas` Section 定义，其他 Section 只引用该 ID。
 
 单一 fact owner 同样适用于同一文档内部：可变波次、金额、比例、时长、数量、尺寸和阈值只能在一个 owner Section 中定义。其他 Section 需要该事实时引用稳定 owner Section/决策标识，不得再次保存同一 literal；正文不得在表格之外重新叙述表内同一组事实。Stage 3 只能在 normalized Fact、owner Section 与对应 block 能明确证明重复时发布 Issue，禁止用词频或裸数字频率推断业务重复。
 

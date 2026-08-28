@@ -149,7 +149,7 @@ describe('worker prompts', () => {
         const authorityStart = prompt.indexOf('Use exactly one fact owner across the eight documents:')
         const authorityEnd = prompt.indexOf('must not redefine upstream rules.', authorityStart) + 'must not redefine upstream rules.'.length
         const authorityInstruction = prompt.slice(authorityStart, authorityEnd)
-        expect(authorityInstruction).toContain('For upstream document facts, use only the contract-declared committed upstream projection and symbol table as authority.')
+        expect(authorityInstruction).toContain('Use only this document and the contract-declared committed upstream section projection as content authority.')
         if (sharedAuthorityInstruction === undefined)
           sharedAuthorityInstruction = authorityInstruction
         else expect(authorityInstruction).toBe(sharedAuthorityInstruction)
@@ -304,13 +304,12 @@ describe('worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('For upstream document facts, use only the contract-declared committed upstream projection and symbol table as authority.')
-    expect(prompt).toContain('Do not infer structured freshness from free prose; Reviewer handles free semantic wording that cannot be mechanically classified.')
+    expect(prompt).toContain('Use only this document and the contract-declared committed upstream section projection as content authority.')
     expect(prompt).not.toContain('unavailable upstream')
     expect(prompt).not.toContain('classify freshness')
   })
 
-  test('requires canonical IDs and one-way semantic resource mapping', () => {
+  test('keeps owner guidance concise without a Markdown semantic parser contract', () => {
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
       for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
         const prompt = buildWorkerPrompt({
@@ -322,24 +321,14 @@ describe('worker prompts', () => {
             completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
           },
         })
-        expect(prompt).toContain('Use two ID classes: cross-document semantic IDs use lower-case ASCII dotted namespaces')
-        expect(prompt).toContain('each segment starts with an ASCII letter and may contain lowercase ASCII letters, digits, hyphens or underscores internally, so parse the full dotted token and never accept a partial prefix')
-        expect(prompt).toContain('Valid semantic ID examples include `action.assign-crew`, `param.gen.fuel_consumption` and `material.variable-parameter-table`')
-        expect(prompt).toContain('owner-local keys use uppercase kebab/snake or uppercase letter-digit forms and must be copied byte-for-byte')
-        expect(prompt).toContain('Mermaid dotted labels and graph tokens do not declare IDs automatically')
-        expect(prompt).toContain('Each exact reference-column cell must contain exactly one canonical ID/reference token: never prose, path commentary, multiple IDs or N/A text')
-        expect(prompt).toContain('Every exact reference-column header is mechanical in any table column position, not only the first column')
-        expect(prompt).toContain('These exact reference headers in any table column position are references')
-        expect(prompt).toContain('Document paths belong in a non-mechanical `Document Path` column; `Path Ref` and `Section Ref` are not reserved semantic reference headers')
-        expect(prompt).not.toContain('including `Path Ref`, `Section Ref`')
-        expect(prompt).toContain('exact first-column headers `ID`, `Key`, `Identifier` or `Stable ID` declare an owner key')
-        expect(prompt).not.toContain('exact first-column headers `Reference ID`, `Owner ID`, `Inventory ID`')
-        expect(prompt).toContain('When one row needs multiple owner references, split it into one fact/reference pair per row and repeat the non-declaration Subject/Field cell')
-        expect(prompt).toContain('Put prose in a non-reference column such as `Authority Notes`')
-        expect(prompt).toContain('Use a non-reference header when prose is intended')
-        expect(prompt).toContain('Do not use aliases, placeholders or CJK IDs')
-        expect(prompt).toContain('Audio and Art declare semantic requirements and constraints only; do not name future Asset inventory IDs')
-        expect(prompt).toContain('Asset Plan maps those requirements one-way to its own inventory IDs')
+        expect(prompt).toContain('Define each fact once and use one representation per fact')
+        expect(prompt).toContain('Delegate responsibilities to a not-yet-generated downstream document by its canonical `Document Path` and discipline in ordinary Markdown')
+        expect(prompt).toContain('do not invent downstream facts, material IDs or inventory IDs')
+        expect(prompt).toContain('do not create aliases, placeholders or alternate spellings')
+        expect(prompt).not.toContain('Use two ID classes')
+        expect(prompt).not.toContain('reference-column')
+        expect(prompt).not.toContain('Mermaid dotted labels')
+        expect(prompt).not.toContain('symbol table')
         expect(prompt).not.toContain('authorityMode')
         expect(prompt).not.toContain('reference-only')
         expect(prompt).not.toContain('reference_only')
