@@ -45,7 +45,7 @@ const balanceBytes = [
   ...Array.from(
     { length: 12 },
     () =>
-      'balance.player-hp balance.tick-rate balance.unit.hp balance.unit.none balance.formula.double balance.economy-source balance.economy-sink balance.reward balance.cost balance.curve balance.binding balance.empty balance.missing gameplay.action.start Double HP Earn HP Spend HP Reward Cost Difficulty depends-on amount unit reward cost triggered-by Binding Player HP Tick rate health hp 10 0 100 2 1 4 [] {} café true false null 100 2 4 5 8 binary add multiply reference literal left right operator value unitReferenceIndex outputUnitReferenceIndex',
+      'balance.player-hp balance.tick-rate balance.unit.hp balance.unit.none balance.formula.double balance.economy-source balance.economy-sink balance.reward balance.cost balance.curve balance.binding balance.empty balance.missing balance.typed-true balance.typed-false gameplay.action.start Double HP Earn HP Spend HP Reward Cost Difficulty depends-on amount unit reward cost triggered-by Binding Typed Player HP Tick rate health hp 10 0 100 2 1 4 [] {} café true false null 100 2 4 5 8 binary add multiply reference literal left right operator value unitReferenceIndex outputUnitReferenceIndex',
   ),
   `${'balance.player-hp '.repeat(12)}${'balance.unit.hp '.repeat(12)}${'balance.unit.none '.repeat(4)}binary multiply reference literal`,
 ].join('\n')
@@ -616,7 +616,55 @@ function gameplayProjection(
     Pick<GameplayModuleProjection, 'taskId' | 'foundationRevision'>
   > = {},
   kind: 'gameplay.action' | 'gameplay.event' = 'gameplay.action',
+  invalid = false,
 ): GameplayModuleProjection {
+  const gddSection = currentSource.sectionIndex.find(
+    section => section.documentPath === 'docs/GDD.md',
+  )!
+  const valueLeafPointers = (value: Record<string, unknown>): string[] => {
+    const pointers: string[] = []
+    const visit = (entry: unknown, pointer: string): void => {
+      if (Array.isArray(entry)) {
+        if (entry.length === 0) pointers.push(pointer)
+        else
+          entry.forEach((child, index) => visit(child, `${pointer}/${index}`))
+      } else if (entry && typeof entry === 'object') {
+        const entries = Object.entries(entry as Record<string, unknown>)
+        if (entries.length === 0) pointers.push(pointer)
+        else
+          entries.forEach(([key, child]) => visit(child, `${pointer}/${key}`))
+      } else pointers.push(pointer)
+    }
+    Object.entries(value).forEach(([key, entry]) =>
+      visit(entry, `/value/${key}`),
+    )
+    return pointers
+  }
+  const bindingsFor = (node: {
+    id: string
+    value: Record<string, unknown>
+    references: readonly unknown[]
+    edges: readonly unknown[]
+  }) => {
+    const pointers = [
+      '/id',
+      ...valueLeafPointers(node.value),
+      ...node.references.map((_, index) => `/references/${index}`),
+      ...node.edges.map((_, index) => `/edges/${index}`),
+    ]
+    return Object.fromEntries(
+      pointers.map(pointer => [
+        pointer,
+        {
+          kind: 'owner' as const,
+          documentPath: 'docs/GDD.md' as const,
+          sectionId: gddSection.sectionId,
+          sectionDigest: gddSection.digest,
+          sourcePointer: `/gameplay/${node.id}${pointer}`,
+        },
+      ]),
+    )
+  }
   const module = {
     moduleId: 'gameplay' as const,
     nodes: [
@@ -624,36 +672,73 @@ function gameplayProjection(
         id: 'gameplay.action.start',
         kind,
         producerMode: 'semantic' as const,
-        value: { label: 'Start' },
+        value: invalid
+          ? { label: 'Start', unsupported: true }
+          : { label: 'Start' },
+        references: [
+          {
+            targetId: 'gameplay.condition.ready',
+            targetType: 'gameplay.condition',
+          },
+          { targetId: 'gameplay.effect.damage', targetType: 'gameplay.effect' },
+        ],
+        edges: [
+          {
+            type: 'causes',
+            targetId: 'gameplay.effect.damage',
+            targetType: 'gameplay.effect',
+          },
+          {
+            type: 'requires',
+            targetId: 'gameplay.condition.ready',
+            targetType: 'gameplay.condition',
+          },
+        ],
+        bindings: {},
+      },
+      {
+        id: 'gameplay.condition.ready',
+        kind: 'gameplay.condition' as const,
+        producerMode: 'semantic' as const,
+        value: { expression: { kind: 'boolean', value: true } },
         references: [],
         edges: [],
-        bindings: {
-          '/id': {
-            kind: 'owner' as const,
-            documentPath: 'docs/GDD.md' as const,
-            sectionId: currentSource.sectionIndex.find(
-              section => section.documentPath === 'docs/GDD.md',
-            )!.sectionId,
-            sectionDigest: currentSource.sectionIndex.find(
-              section => section.documentPath === 'docs/GDD.md',
-            )!.digest,
-            sourcePointer: '/gameplay/action/start',
-          },
-          '/value/label': {
-            kind: 'owner' as const,
-            documentPath: 'docs/GDD.md' as const,
-            sectionId: currentSource.sectionIndex.find(
-              section => section.documentPath === 'docs/GDD.md',
-            )!.sectionId,
-            sectionDigest: currentSource.sectionIndex.find(
-              section => section.documentPath === 'docs/GDD.md',
-            )!.digest,
-            sourcePointer: '/gameplay/action/start/label',
-          },
+        bindings: {},
+      },
+      {
+        id: 'gameplay.effect.damage',
+        kind: 'gameplay.effect' as const,
+        producerMode: 'semantic' as const,
+        value: {
+          effect: { operation: 'emit', targetReferenceIndex: 0 },
         },
+        references: [
+          { targetId: 'gameplay.event.tick', targetType: 'gameplay.event' },
+        ],
+        edges: [],
+        bindings: {},
+      },
+      {
+        id: 'gameplay.event.tick',
+        kind: 'gameplay.event' as const,
+        producerMode: 'semantic' as const,
+        value: { label: 'Tick' },
+        references: [],
+        edges: [],
+        bindings: {},
+      },
+      {
+        id: 'gameplay.state.playing',
+        kind: 'gameplay.state' as const,
+        producerMode: 'semantic' as const,
+        value: { label: 'Playing', initial: true, terminal: 'none' },
+        references: [],
+        edges: [],
+        bindings: {},
       },
     ],
   }
+  for (const node of module.nodes) node.bindings = bindingsFor(node)
   const body = {
     schemaVersion: 'game-ir-gameplay-module.v1' as const,
     taskId: overrides.taskId ?? currentSource.taskId,
@@ -783,6 +868,34 @@ describe('Balance producer admission and assembler', () => {
         semantic: wrongOccurrence,
       }),
     ).toThrow(/exactly match|literal|source/i)
+
+    const utfNodes = simpleNodes()
+    utfNodes[2]!.value.label = 'café'
+    const utfSemantic = admitBalanceSemanticResult(packet, {
+      nodes: utfNodes,
+      sourceClaims: sourceClaims(utfNodes, currentSource),
+    })
+    const cafeStart = Buffer.from(balanceBytes, 'utf8').indexOf(
+      Buffer.from('café', 'utf8'),
+    )
+    const splitSemantic = resignSemantic(
+      utfSemantic,
+      utfSemantic.sourceClaims.map(claim =>
+        claim.literal === 'café'
+          ? {
+              ...claim,
+              sourcePointer: `/bytes/${cafeStart + 4}/${cafeStart + 5}`,
+            }
+          : claim,
+      ),
+    )
+    expect(() =>
+      assembleBalanceModule({
+        source: currentSource,
+        mechanical: currentMechanical,
+        semantic: splitSemantic,
+      }),
+    ).toThrow(/UTF-8|literal|source|range/i)
   })
 
   test('rejects any Balance mechanical output under the non-fixed table contract', () => {
@@ -815,6 +928,42 @@ describe('Balance producer admission and assembler', () => {
       buildBalanceSemanticPacket({
         source: currentSource,
         mechanical: currentMechanical,
+      }),
+    ).toThrow(/mechanical|unauthorized|empty/i)
+  })
+
+  test('rejects an independently admitted nonempty mechanical node receipt', () => {
+    const { currentSource, currentMechanical, packet } = packetAndSource()
+    const semantic = admitBalanceSemanticResult(packet, validResult())
+    const assembled = assembleBalanceModule({
+      source: currentSource,
+      mechanical: currentMechanical,
+      semantic,
+    })
+    const node = assembled.module.nodes[0]!
+    const mechanicalNode = { ...node, producerMode: 'mechanical' as const }
+    const ownedTargets = Object.keys(mechanicalNode.bindings)
+      .map(pointer => `node:${mechanicalNode.id}#${pointer}`)
+      .sort(compareCodeUnits)
+    const body = {
+      schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
+      taskId: currentSource.taskId,
+      moduleId: currentSource.moduleId,
+      foundationRevision:
+        currentSource.compileRequest.foundation.foundationRevision,
+      sourceDigest: currentSource.sourceDigest,
+      nodes: [mechanicalNode],
+      verifiedClaims: [],
+      ownedTargets,
+    }
+    const nonempty = admitGameIrMechanicalProjectionReceipt(currentSource, {
+      ...body,
+      receiptDigest: digestGameIrValue(body),
+    })
+    expect(() =>
+      buildBalanceSemanticPacket({
+        source: currentSource,
+        mechanical: nonempty,
       }),
     ).toThrow(/mechanical|unauthorized|empty/i)
   })
@@ -876,6 +1025,32 @@ describe('Balance producer admission and assembler', () => {
           { nodes: invalidNodes, sourceClaims: swapped },
         ),
       ).toThrow(/literal|type|semantic/i)
+    }
+
+    for (const [flag, note] of [
+      [true, null] as const,
+      [false, null] as const,
+    ]) {
+      const typedNodes = simpleNodes()
+      typedNodes.push({
+        id: `balance.typed-${flag ? 'true' : 'false'}`,
+        kind: 'balance.progression-curve',
+        value: { label: 'Typed', points: [], flag, note },
+        references: [],
+        edges: [],
+      })
+      expect(() =>
+        admitBalanceSemanticResult(
+          buildBalanceSemanticPacket({
+            source: currentSource,
+            mechanical: mechanical(currentSource),
+          }),
+          {
+            nodes: typedNodes,
+            sourceClaims: sourceClaims(typedNodes, currentSource),
+          },
+        ),
+      ).not.toThrow()
     }
 
     const emptyNodes = simpleNodes()
@@ -984,7 +1159,7 @@ describe('Balance producer admission and assembler', () => {
         semantic: wrong.semantic,
         gameplay,
       }),
-    ).toThrow(/kind|target|reference/i)
+    ).toThrow(/kind|target|reference|Gameplay|state/i)
   })
 
   test('rejects stale Gameplay task and revision identities independently', () => {
@@ -1041,6 +1216,25 @@ describe('Balance producer admission and assembler', () => {
         sourceClaims: duplicateClaims,
       }),
     ).toThrow(/duplicate|sorted|account/i)
+  })
+
+  test('rejects a Core-valid but Gameplay-schema-invalid projection', () => {
+    const currentSource = source()
+    const admitted = admittedNodes(bindingNodes(), currentSource)
+    const invalidGameplay = gameplayProjection(
+      currentSource,
+      {},
+      'gameplay.action',
+      true,
+    )
+    expect(() =>
+      assembleBalanceModule({
+        source: admitted.currentSource,
+        mechanical: admitted.mechanicalReceipt,
+        semantic: admitted.semantic,
+        gameplay: invalidGameplay,
+      }),
+    ).toThrow(/Gameplay|unknown|unsupported|value/i)
   })
 
   test('compiles complete zero-resource and formula-dense Foundation profiles twice', () => {

@@ -13,6 +13,7 @@ import {
   BALANCE_RELATIONSHIP_ROLES,
   parseBalanceModule,
 } from './balance-schema'
+import { parseGameplayModule } from './gameplay-schema'
 import {
   compareCodeUnits,
   digestGameIrValue,
@@ -761,6 +762,7 @@ function validateSemanticReceipt(
 function gameplayTargets(
   projection: GameplayModuleProjection,
   source: GameIrDomainSourceEnvelope,
+  balanceTargets: ReadonlyMap<string, GameIrNode>,
 ): ReadonlyMap<string, GameIrNode> {
   if (!isRecord(projection)) fail('Gameplay projection must be a plain object')
   exactKeys(
@@ -800,7 +802,8 @@ function gameplayTargets(
     sections: source.authoritySectionIndex,
     expectedModuleId: 'gameplay',
   })
-  return new Map(module.nodes.map(node => [node.id, node]))
+  const typedModule = parseGameplayModule(module, balanceTargets)
+  return new Map(typedModule.nodes.map(node => [node.id, node]))
 }
 
 function bindSemanticNodes(
@@ -885,7 +888,11 @@ export function assembleBalanceModule(input: {
     },
   )
   const targets = input.gameplay
-    ? gameplayTargets(input.gameplay, source)
+    ? gameplayTargets(
+        input.gameplay,
+        source,
+        new Map(coreAdmitted.nodes.map(node => [node.id, node])),
+      )
     : undefined
   const module = parseBalanceModule(coreAdmitted, targets)
   const body: Omit<BalanceModuleProjection, 'projectionDigest'> = {
