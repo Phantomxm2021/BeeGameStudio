@@ -326,6 +326,31 @@ describe('Game IR core candidate and source authority', () => {
         { request: request(), sections },
       ),
     ).toThrow(/duplicate|edge/i)
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          ...explicit,
+          modules: [
+            {
+              ...explicit.modules[0]!,
+              nodes: [
+                {
+                  ...explicit.modules[0]!.nodes[0]!,
+                  edges: [
+                    {
+                      type: 'reference',
+                      targetId: 'player',
+                      targetType: 'entity',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/reserved|reference|edge/i)
   })
 
   test('rejects unknown producer modes and unsafe pointers', () => {

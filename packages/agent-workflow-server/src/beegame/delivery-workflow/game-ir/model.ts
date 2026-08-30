@@ -519,6 +519,8 @@ function parseNode(
   const edges: GameIrRelationshipEdge[] = value.edges.map((entry, index) => {
     if (!isRecord(entry)) fail(`node ${id} edge ${index} must be an object`)
     exactKeys(entry, ['type', 'targetId', 'targetType'], `node ${id} edge`)
+    if (entry.type === 'reference')
+      fail(`node ${id} edge type reference is reserved for references`)
     return {
       type: nonEmptyText(entry.type, `node ${id} edge type`),
       targetId: safeId(entry.targetId, `node ${id} edge targetId`),

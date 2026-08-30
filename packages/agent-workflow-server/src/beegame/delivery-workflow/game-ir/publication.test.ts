@@ -185,6 +185,11 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                   references: [],
                   edges: [
                     {
+                      type: 'blocks',
+                      targetId: `${moduleId}.root`,
+                      targetType: 'semantic-node',
+                    },
+                    {
                       type: 'requires',
                       targetId: `${moduleId}.root`,
                       targetType: 'semantic-node',
@@ -204,6 +209,13 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                       inputPointers: ['/id'],
                     },
                     '/edges/0': {
+                      kind: 'owner',
+                      documentPath: 'docs/GDD.md',
+                      sectionId,
+                      sectionDigest,
+                      sourcePointer: `/ir/${moduleId}/extra-${extraId}/blocks`,
+                    },
+                    '/edges/1': {
                       kind: 'owner',
                       documentPath: 'docs/GDD.md',
                       sectionId,
@@ -350,6 +362,13 @@ describe('atomic Game IR publication and recovery', () => {
     expect(dependencyGraph.edges.some(edge => edge.type === 'requires')).toBe(
       true,
     )
+    expect(
+      new Set(
+        dependencyGraph.edges
+          .filter(edge => edge.kind === 'relationship')
+          .map(edge => edge.type),
+      ),
+    ).toEqual(new Set(['blocks', 'requires']))
     await expect(validateCommittedGameIr(value)).resolves.toEqual(ready)
   })
 
@@ -397,8 +416,10 @@ describe('atomic Game IR publication and recovery', () => {
       result: Object.freeze({
         outcome: 'AMBIGUOUS',
         packetDigest: value.admissions[0]!.packet.packetDigest,
-        reasonCode: 'uncertain',
+        reasonCode: 'ambiguous-projection',
         actual: 'uncertain',
+        missingSubject: '/value/ambiguous',
+        expectedProjection: 'the canonical projection',
         evidencePointers: Object.freeze([
           value.admissions[0]!.packet.allowedEvidencePointers[0]!,
         ]),

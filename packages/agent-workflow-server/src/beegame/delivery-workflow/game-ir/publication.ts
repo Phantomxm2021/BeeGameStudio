@@ -383,18 +383,21 @@ function graph(candidate: GameIrCandidate): Record<string, unknown> {
       ...Object.entries(node.bindings).flatMap(([pointer, binding]) =>
         binding.kind === 'derived'
           ? binding.inputPointers.map(input => ({
+              kind: 'derived',
               from: `${module.moduleId}/${node.id}${pointer}`,
               to: `${module.moduleId}/${node.id}${input}`,
             }))
           : [],
       ),
       ...node.references.map(reference => ({
+        kind: 'reference',
         type: 'reference',
         from: `${module.moduleId}/${node.id}`,
         to: reference.targetId,
         targetType: reference.targetType,
       })),
       ...node.edges.map(edge => ({
+        kind: 'relationship',
         type: edge.type,
         from: `${module.moduleId}/${node.id}`,
         to: edge.targetId,
