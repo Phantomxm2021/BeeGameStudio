@@ -702,6 +702,59 @@ describe('isolated Game IR semantic projection admission', () => {
       }),
     ).toThrow(/subject|canonical|whitespace|invalid/i)
 
+    const hashSubject = 'node:gameplay.root#/value/rule#variant'
+    const hashMissing = admitGameIrSemanticValidationResult(value, {
+      outcome: 'FAIL',
+      packetDigest: value.packetDigest,
+      reasonCode: 'missing-projection',
+      actual: 'required source was not projected',
+      missingSubject: hashSubject,
+      expectedProjection: 'the canonical hash-qualified rule projection',
+      evidencePointers: sectionEvidence,
+    })
+    expect(hashMissing.outcome).toBe('FAIL')
+
+    const baseCandidate = candidate()
+    const boundCandidate = parseGameIrCandidate(
+      {
+        ...baseCandidate,
+        modules: baseCandidate.modules.map(module =>
+          module.moduleId !== 'gameplay'
+            ? module
+            : {
+                ...module,
+                nodes: module.nodes.map(node =>
+                  node.id !== 'gameplay.root'
+                    ? node
+                    : {
+                        ...node,
+                        value: { ...node.value, 'rule#variant': 'strict' },
+                        bindings: {
+                          ...node.bindings,
+                          '/value/rule#variant': node.bindings['/value/label']!,
+                        },
+                      },
+                ),
+              },
+        ),
+      },
+      { request: request(), sections: sectionIndex },
+    )
+    const boundPacket = buildGameIrSemanticValidationPacket(
+      input({ candidate: boundCandidate }),
+    )
+    expect(() =>
+      admitGameIrSemanticValidationResult(boundPacket, {
+        outcome: 'FAIL',
+        packetDigest: boundPacket.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'required source was not projected',
+        missingSubject: hashSubject,
+        expectedProjection: 'the canonical hash-qualified rule projection',
+        evidencePointers: sectionEvidence,
+      }),
+    ).toThrow(/bound|binding|subject|evidence/i)
+
     for (const pseudoTarget of [
       'node:gameplay.root#/kind',
       'node:gameplay.root#/bindings/value',

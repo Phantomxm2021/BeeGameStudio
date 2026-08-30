@@ -187,6 +187,33 @@ describe('Game IR core candidate and source authority', () => {
     ]) {
       expect(() => parseGameIrTargetPointer(pointer)).toThrow(/target pointer/i)
     }
+
+    const base = candidate()
+    const node = base.modules[0]!.nodes[0]!
+    const parsed = parseGameIrCandidate(
+      {
+        ...base,
+        modules: [
+          {
+            ...base.modules[0]!,
+            nodes: [
+              {
+                ...node,
+                value: { ...node.value, 'rule#variant': 'strict' },
+                bindings: {
+                  ...node.bindings,
+                  '/value/rule#variant': node.bindings['/value/health']!,
+                },
+              },
+            ],
+          },
+        ],
+      },
+      { request: request(), sections },
+    )
+    expect(
+      parsed.modules[0]!.nodes[0]!.bindings['/value/rule#variant'],
+    ).toEqual(node.bindings['/value/health'])
   })
 
   test('parses a revision-bound candidate and freezes all containers', () => {

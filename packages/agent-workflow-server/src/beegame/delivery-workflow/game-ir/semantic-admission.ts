@@ -206,11 +206,7 @@ function canonicalTargetSubject(
   if (subject !== subject.trim())
     fail(`${label} must be a canonical node-qualified target subject`)
   const separator = subject.indexOf('#')
-  if (
-    separator <= 'node:'.length ||
-    !subject.startsWith('node:') ||
-    subject.indexOf('#', separator + 1) !== -1
-  )
+  if (separator <= 'node:'.length || !subject.startsWith('node:'))
     fail(`${label} must be a canonical node-qualified target subject`)
   const nodeId = id(subject.slice('node:'.length, separator), `${label} nodeId`)
   if (!nodeIds.includes(nodeId)) fail(`${label} refers to an unknown node`)
