@@ -37,6 +37,8 @@ const currentStageFiles = [
   'recovery.ts',
 ] as const
 
+const gameIrContractFiles = ['contracts.ts'] as const
+
 const forbiddenImportPath = /game-ir(?:\/|['"])/
 const forbiddenFoundationTokens = ['GameIr', 'GAME_IR', 'gameIrState'] as const
 
@@ -69,6 +71,20 @@ async function readSourceFilesRecursively(
 }
 
 describe('Game IR stage boundary', () => {
+  test('keeps the DTO seam independent from Foundation internals', async () => {
+    for (const filename of gameIrContractFiles) {
+      const source = await readFile(
+        join(dirname(fileURLToPath(import.meta.url)), filename),
+        'utf8',
+      )
+      expect(source).toContain("from '../types'")
+      expect(source).not.toMatch(
+        /from ['"].*foundation-(?:audit|fact|issue|revision)/,
+      )
+      expect(source).not.toMatch(/from ['"].*(?:controller|schema|recovery)/)
+    }
+  })
+
   test('rejects every forbidden import and foundation token in synthetic source', () => {
     const syntheticViolations = [
       "import { compileGame } from './game-ir/runtime'",

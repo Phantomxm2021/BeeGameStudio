@@ -1,0 +1,32 @@
+# Task 2 Report: Define strict cross-stage DTOs
+
+## Modifications
+
+- Added `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.ts` with the four exact readonly DTO types, strict Zod schemas, parser functions, exclusive `review | revision_publication` authority union, canonical receipt digest verification with `receiptDigest` omitted, safe IDs/paths, SHA-256 validation, and deep freezing of parsed values.
+- Added `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts` covering valid DTO shapes and every required rejection category.
+- Extended `stage-boundary.test.ts` to verify the contracts seam imports the shared types only and does not import Foundation internals, controller, schema, or recovery.
+- No Foundation production files, controller, schema, types, or recovery files were modified.
+
+## TDD evidence
+
+- RED: the specified Bun test command failed because `contracts.ts` did not exist; the new boundary check also failed with the expected missing-file error.
+- GREEN: the same command passed after the minimal implementation (11 tests, 90 expectations, 0 failures).
+
+## Verification
+
+- `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts` — PASS (11 tests, 90 expectations, 0 failures).
+- `bunx tsc --noEmit -p packages/agent-workflow-server/tsconfig.json` — PASS.
+- `node_modules/.bin/biome check packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts` — PASS.
+- `git diff --check` — PASS.
+
+## Self-review
+
+- Foundation ready receipts require all eight canonical document paths exactly once and reject unknown/missing paths.
+- Authority variants are discriminated and strict, so mixed fields are rejected.
+- Receipt digests are SHA-256 over recursively key-sorted canonical JSON without the `receiptDigest` field, preventing self-hashing.
+- Task/publication IDs, relative artifact paths, digest values, source-binding ordering, and nested strict records are validated at the parser boundary.
+- Parsed roots, nested objects, records, and arrays are frozen.
+
+## Concerns
+
+None.
