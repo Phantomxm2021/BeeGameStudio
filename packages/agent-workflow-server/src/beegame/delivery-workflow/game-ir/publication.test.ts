@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
+import { renameSync } from 'node:fs'
 import {
   chmod,
-  open,
   mkdir,
   mkdtemp,
   readFile,
@@ -716,42 +716,143 @@ describe('atomic Game IR publication and recovery', () => {
     )
   })
 
-  test('syncs journal and publication directory entries before staging and READY', async () => {
+  test('syncs journal and staging tree before rename, then final tree before READY', async () => {
     const value = await setup()
-    const probe = await open(value.workspacePath, 'r')
-    const fileHandlePrototype = Object.getPrototypeOf(probe)
-    await probe.close()
-    const originalSync = fileHandlePrototype.sync
-    const originalWriteFile = fileHandlePrototype.writeFile
-    const events: string[] = []
-    fileHandlePrototype.sync = async function (...args: unknown[]) {
-      const target = await realpath(`/dev/fd/${this.fd}`).catch(() => '')
-      const info = await this.stat().catch(() => undefined)
-      events.push(`${info?.isDirectory() ? 'dir' : 'file'}:${target}`)
-      return originalSync.apply(this, args)
-    }
-    fileHandlePrototype.writeFile = async function (...args: unknown[]) {
-      const target = await realpath(`/dev/fd/${this.fd}`).catch(() => '')
-      events.push(`write:${target}`)
-      return originalWriteFile.apply(this, args)
-    }
-    try {
-      await commitGameIrPublication(value)
-      const root = join(
-        await realpath(value.workspacePath),
-        '.beegame/ir/game-ir.v1',
-      )
-      const journalSync = events.indexOf(`dir:${join(root, '.journal')}`)
-      expect(journalSync).toBeGreaterThanOrEqual(0)
-      expect(
-        events.slice(journalSync + 1).filter(event => event === 'write:'),
-      ).not.toHaveLength(0)
-      expect(events).toContain(`dir:${join(root, '.staging')}`)
-      expect(events).toContain(`dir:${join(root, 'revisions')}`)
-    } finally {
-      fileHandlePrototype.sync = originalSync
-      fileHandlePrototype.writeFile = originalWriteFile
-    }
+    const events: {
+      type: string
+      path?: string
+      from?: string
+      to?: string
+    }[] = []
+    await commitGameIrPublication(value, {
+      onEvent: event => events.push(event),
+    })
+    events.push({ type: 'ready-return' })
+    const root = join(
+      await realpath(value.workspacePath),
+      '.beegame/ir/game-ir.v1',
+    )
+    const journalSync = events.findLastIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, '.journal'),
+    )
+    const stageWork = events.findIndex(event => event.type === 'stage-work')
+    const renameEvent = events.findIndex(event => event.type === 'rename')
+    const readyReturn = events.findIndex(event => event.type === 'ready-return')
+    expect(journalSync).toBeGreaterThanOrEqual(0)
+    expect(stageWork).toBeGreaterThan(journalSync)
+    expect(
+      events.findIndex(
+        event =>
+          event.type === 'directory-sync' &&
+          event.path === join(root, '.staging', value.publicationId, 'modules'),
+      ),
+    ).toBeLessThan(renameEvent)
+    expect(
+      events.findIndex(
+        event =>
+          event.type === 'directory-sync' &&
+          event.path ===
+            join(root, '.staging', value.publicationId, 'source-maps'),
+      ),
+    ).toBeLessThan(renameEvent)
+    expect(
+      events.findIndex(
+        event =>
+          event.type === 'directory-sync' &&
+          event.path === join(root, '.staging', value.publicationId),
+      ),
+    ).toBeLessThan(renameEvent)
+    const revisionsSync = events.findIndex(
+      (event, index) =>
+        index > renameEvent &&
+        event.type === 'directory-sync' &&
+        event.path === join(root, 'revisions'),
+    )
+    const finalSync = events.findIndex(
+      (event, index) =>
+        index > renameEvent &&
+        event.type === 'directory-sync' &&
+        event.path === join(root, 'revisions', 'foundation-revision-1'),
+    )
+    expect(renameEvent).toBeGreaterThan(-1)
+    expect(revisionsSync).toBeGreaterThan(renameEvent)
+    expect(finalSync).toBeGreaterThan(renameEvent)
+    expect(revisionsSync).toBeLessThan(readyReturn)
+    expect(finalSync).toBeLessThan(readyReturn)
+  })
+
+  test('existing final performs its own destination durability barrier before READY', async () => {
+    const value = await setup()
+    await commitGameIrPublication(value)
+    const events: { type: string; path?: string }[] = []
+    await commitGameIrPublication(value, {
+      onEvent: event => events.push(event),
+    })
+    events.push({ type: 'ready-return' })
+    const root = join(
+      await realpath(value.workspacePath),
+      '.beegame/ir/game-ir.v1',
+    )
+    const readyReturn = events.findIndex(event => event.type === 'ready-return')
+    const revisionsSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, 'revisions'),
+    )
+    const finalSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, 'revisions', 'foundation-revision-1'),
+    )
+    expect(revisionsSync).toBeGreaterThan(-1)
+    expect(finalSync).toBeGreaterThan(-1)
+    expect(revisionsSync).toBeLessThan(readyReturn)
+    expect(finalSync).toBeLessThan(readyReturn)
+  })
+
+  test('rename loser performs its own destination durability barrier before READY', async () => {
+    const value = await setup()
+    const events: {
+      type: string
+      path?: string
+      from?: string
+      to?: string
+    }[] = []
+    let stoleRename = false
+    await commitGameIrPublication(value, {
+      onEvent: event => {
+        events.push(event)
+        if (event.type === 'before-rename') {
+          // Steal the actual rename to deterministically exercise the loser branch.
+          renameSync(event.from!, event.to!)
+          stoleRename = true
+        }
+      },
+    })
+    events.push({ type: 'ready-return' })
+    const root = join(
+      await realpath(value.workspacePath),
+      '.beegame/ir/game-ir.v1',
+    )
+    const readyReturn = events.findIndex(event => event.type === 'ready-return')
+    const revisionsSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, 'revisions'),
+    )
+    const finalSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, 'revisions', 'foundation-revision-1'),
+    )
+    expect(stoleRename).toBe(true)
+    expect(events.some(event => event.type === 'rename')).toBe(false)
+    expect(revisionsSync).toBeGreaterThan(-1)
+    expect(finalSync).toBeGreaterThan(-1)
+    expect(revisionsSync).toBeLessThan(readyReturn)
+    expect(finalSync).toBeLessThan(readyReturn)
   })
 
   test('rejects symlink path components before writing outside workspace and has no fixed node cap', async () => {

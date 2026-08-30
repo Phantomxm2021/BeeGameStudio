@@ -68,6 +68,16 @@ export type GameIrPublicationPrepared = Readonly<{
   authorityDigest: string
 }>
 
+export type GameIrPublicationTestEvent = Readonly<{
+  type: 'directory-sync' | 'before-rename' | 'stage-work' | 'rename'
+  path?: string
+  from?: string
+  to?: string
+}>
+export type GameIrPublicationTestHooks = Readonly<{
+  onEvent?: (event: GameIrPublicationTestEvent) => void
+}>
+
 type Artifact = Readonly<{ path: string; bytes: string; digest: string }>
 type Plan = Readonly<{
   authority: GameIrPublicationAuthority
@@ -84,6 +94,7 @@ type Plan = Readonly<{
   journalBytes: string
   ready: GameIrReadyReceipt
   prepared: GameIrPublicationPrepared
+  testHooks?: GameIrPublicationTestHooks
 }>
 
 function fail(message: string): never {
@@ -266,13 +277,50 @@ async function componentsSafe(
 }
 // Directory fsync is required for publication durability; unsupported
 // platforms/filesystems fail closed instead of claiming READY durability.
-async function syncDirectory(root: string, target: string): Promise<void> {
+async function syncDirectory(
+  root: string,
+  target: string,
+  testHooks?: GameIrPublicationTestHooks,
+): Promise<void> {
   await componentsSafe(root, target)
   const handle = await open(target, 'r')
   try {
     await handle.sync()
   } finally {
     await handle.close()
+  }
+  testHooks?.onEvent?.({ type: 'directory-sync', path: target })
+}
+async function durableMkdir(
+  root: string,
+  target: string,
+  testHooks?: GameIrPublicationTestHooks,
+): Promise<void> {
+  const rel = relative(root, resolve(target))
+  if (rel.startsWith('..')) fail('path escapes workspace')
+  let current = root
+  for (const part of rel.split('/').filter(Boolean)) {
+    const parent = current
+    current = join(current, part)
+    let created = false
+    try {
+      const info = await lstat(current)
+      if (info.isSymbolicLink() || !info.isDirectory())
+        fail('existing path component is symlink or non-directory')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      try {
+        await mkdir(current)
+        created = true
+      } catch (mkdirError) {
+        if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST')
+          throw mkdirError
+      }
+      const info = await lstat(current)
+      if (info.isSymbolicLink() || !info.isDirectory())
+        fail('existing path component is symlink or non-directory')
+    }
+    if (created) await syncDirectory(root, parent, testHooks)
   }
 }
 async function writePrivateFile(
@@ -327,10 +375,12 @@ async function locked<T>(key: string, action: () => Promise<T>): Promise<T> {
     if (publicationLocks.get(key) === chain) publicationLocks.delete(key)
   }
 }
-async function ensureDir(root: string, path: string): Promise<void> {
-  await componentsSafe(root, path)
-  await mkdir(path, { recursive: true })
-  await componentsSafe(root, path)
+async function ensureDir(
+  root: string,
+  path: string,
+  testHooks?: GameIrPublicationTestHooks,
+): Promise<void> {
+  await durableMkdir(root, path, testHooks)
 }
 async function installArtifact(
   plan: Plan,
@@ -338,7 +388,7 @@ async function installArtifact(
   target: string,
 ): Promise<void> {
   const source = join(plan.privateRoot, artifact.path)
-  await ensureDir(plan.workspacePath, resolve(source, '..'))
+  await ensureDir(plan.workspacePath, resolve(source, '..'), plan.testHooks)
   await writePrivateFile(plan.workspacePath, source, artifact.bytes)
   await installNoReplace(plan.workspacePath, source, target, artifact.bytes)
 }
@@ -669,10 +719,12 @@ async function writeStage(plan: Plan): Promise<void> {
   await ensureDir(
     plan.workspacePath,
     pathOf(plan.workspacePath, GAME_IR_PUBLICATION_ROOT),
+    plan.testHooks,
   )
   await ensureDir(
     plan.workspacePath,
     pathOf(plan.workspacePath, `${GAME_IR_PUBLICATION_ROOT}/.journal`),
+    plan.testHooks,
   )
   const journalExists = await existing(plan.journal)
   const stageExists = await existing(plan.stage)
@@ -688,11 +740,17 @@ async function writeStage(plan: Plan): Promise<void> {
     },
     plan.journal,
   )
-  await syncDirectory(plan.workspacePath, dirname(plan.journal))
-  await syncDirectory(plan.workspacePath, dirname(dirname(plan.journal)))
+  await syncDirectory(plan.workspacePath, dirname(plan.journal), plan.testHooks)
+  await syncDirectory(
+    plan.workspacePath,
+    dirname(dirname(plan.journal)),
+    plan.testHooks,
+  )
+  plan.testHooks?.onEvent?.({ type: 'stage-work' })
   await ensureDir(
     plan.workspacePath,
     pathOf(plan.workspacePath, `${GAME_IR_PUBLICATION_ROOT}/.staging`),
+    plan.testHooks,
   )
   if (await existing(plan.stage)) {
     await componentsSafe(plan.workspacePath, plan.stage)
@@ -707,9 +765,17 @@ async function writeStage(plan: Plan): Promise<void> {
       'staging',
       true,
     )
-  } else await ensureDir(plan.workspacePath, plan.stage)
-  await ensureDir(plan.workspacePath, join(plan.stage, 'modules'))
-  await ensureDir(plan.workspacePath, join(plan.stage, 'source-maps'))
+  } else await ensureDir(plan.workspacePath, plan.stage, plan.testHooks)
+  await ensureDir(
+    plan.workspacePath,
+    join(plan.stage, 'modules'),
+    plan.testHooks,
+  )
+  await ensureDir(
+    plan.workspacePath,
+    join(plan.stage, 'source-maps'),
+    plan.testHooks,
+  )
   await exactDirectory(
     join(plan.stage, 'modules'),
     artifactNames(plan, 'modules/'),
@@ -764,6 +830,17 @@ async function writeStage(plan: Plan): Promise<void> {
     artifactNames(plan, 'source-maps/'),
     'staging source maps',
   )
+  await syncDirectory(
+    plan.workspacePath,
+    join(plan.stage, 'modules'),
+    plan.testHooks,
+  )
+  await syncDirectory(
+    plan.workspacePath,
+    join(plan.stage, 'source-maps'),
+    plan.testHooks,
+  )
+  await syncDirectory(plan.workspacePath, plan.stage, plan.testHooks)
 }
 
 async function exactFiles(plan: Plan, root: string): Promise<void> {
@@ -862,6 +939,16 @@ async function cleanup(plan: Plan): Promise<void> {
     return
   }
 }
+async function ready(
+  plan: Plan,
+  revisions: string,
+): Promise<GameIrReadyReceipt> {
+  await exactFiles(plan, plan.final)
+  await syncDirectory(plan.workspacePath, plan.final, plan.testHooks)
+  await syncDirectory(plan.workspacePath, revisions, plan.testHooks)
+  await cleanup(plan)
+  return plan.ready
+}
 async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
   await componentsSafe(plan.workspacePath, plan.journal, true)
   if (
@@ -874,9 +961,7 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
   } catch (error) {
     if (!(await existing(plan.stage)) && (await existing(plan.final))) {
       await exactJournal(plan)
-      await exactFiles(plan, plan.final)
-      await cleanup(plan)
-      return plan.ready
+      return ready(plan, dirname(plan.final))
     }
     throw error
   }
@@ -884,17 +969,25 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
     plan.workspacePath,
     `${GAME_IR_PUBLICATION_ROOT}/revisions`,
   )
-  await ensureDir(plan.workspacePath, revisions)
+  await ensureDir(plan.workspacePath, revisions, plan.testHooks)
   await componentsSafe(plan.workspacePath, plan.final)
   if (await existing(plan.final)) {
-    await exactFiles(plan, plan.final)
-    await cleanup(plan)
-    return plan.ready
+    return ready(plan, revisions)
   }
   try {
+    plan.testHooks?.onEvent?.({
+      type: 'before-rename',
+      from: plan.stage,
+      to: plan.final,
+    })
     await rename(plan.stage, plan.final)
-    await syncDirectory(plan.workspacePath, dirname(plan.stage))
-    await syncDirectory(plan.workspacePath, dirname(plan.final))
+    plan.testHooks?.onEvent?.({
+      type: 'rename',
+      from: plan.stage,
+      to: plan.final,
+    })
+    await syncDirectory(plan.workspacePath, dirname(plan.stage), plan.testHooks)
+    await syncDirectory(plan.workspacePath, dirname(plan.final), plan.testHooks)
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     if (code !== 'EEXIST' && code !== 'ENOTEMPTY' && code !== 'ENOENT')
@@ -903,9 +996,7 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
       fail('rename race winner is not yet visible; retry safely')
     await exactFiles(plan, plan.final)
   }
-  await exactFiles(plan, plan.final)
-  await cleanup(plan)
-  return plan.ready
+  return ready(plan, revisions)
 }
 
 export function expectedGameIrPublicationArtifacts(
@@ -936,19 +1027,20 @@ function withWorkspace(
 }
 async function runtimePlan(
   authority: GameIrPublicationAuthority,
+  testHooks?: GameIrPublicationTestHooks,
 ): Promise<Plan> {
   const plan = withWorkspace(
     buildPlan(authority),
     await safeWorkspace(authority.workspacePath),
   )
   const parent = pathOf(plan.workspacePath, '.beegame/.game-ir-private')
-  await ensureDir(plan.workspacePath, parent)
+  await ensureDir(plan.workspacePath, parent, testHooks)
   const segment = `${plan.publicationId}-${process.pid}-${randomBytes(16).toString('hex')}`
   safe(segment, 'private temp segment')
   const privateRoot = pathOf(plan.workspacePath, join(parent, segment))
   await mkdir(privateRoot)
   await componentsSafe(plan.workspacePath, privateRoot)
-  return { ...plan, privateRoot }
+  return { ...plan, privateRoot, testHooks }
 }
 async function cleanupPrivate(plan: Plan): Promise<void> {
   try {
@@ -972,8 +1064,9 @@ export async function prepareGameIrPublication(
 }
 export async function commitGameIrPublication(
   authority: GameIrPublicationAuthority,
+  testHooks?: GameIrPublicationTestHooks,
 ): Promise<GameIrReadyReceipt> {
-  const plan = await runtimePlan(authority)
+  const plan = await runtimePlan(authority, testHooks)
   try {
     return await locked(plan.final, () => publish(plan))
   } finally {
