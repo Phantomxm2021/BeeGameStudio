@@ -588,6 +588,7 @@ git commit -m "feat: publish Game IR atomically"
 **Files:**
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/foundation-parity.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.test.ts`
 - Create: `docs/game-ir-salvage-matrix.md`
 
 **Interfaces:**
@@ -634,6 +635,13 @@ validate the patch, and construct the targeted recheck from those resulting
 artifacts. A no-op operation or a READY receipt from an unrelated fixture does
 not establish parity.
 
+The targeted packet must come from
+`buildFoundationSemanticRecheckPacket` using the actual derived PatchOperation,
+patched documents, rebuilt Section Index, rebuilt fact store and impact. The
+post-revision READY state/receipt must bind those same patched document and
+derived digests. Compare the exact targeted packet identity before and after
+the isolated compile-request boundary.
+
 Resolve the repository root from `import.meta.url`, not `process.cwd()`. Compare
 the protected files byte-for-byte with baseline `70df2e2c`, with an explicit
 diagnostic if the Git baseline is unavailable. In addition, parse every
@@ -646,6 +654,11 @@ with the same AST semantics. Cover import declarations, export declarations,
 import-equals, literal `require`, literal dynamic import, all `GameIr*` and
 `GAME_IR*` runtime identifiers, and common enable/switch identifiers rather
 than two exact names.
+Object property declarations, assignments and accesses such as
+`gameIrState`, `run.gameIrState` and `config.enableGameIr` are routing/state
+surface and must not be excluded merely because the identifier is a property
+name. The standalone stage-boundary scan must retain import/export/require
+violations as well as identifier violations.
 
 - [ ] **Step 2: Run parity tests and verify RED**
 
@@ -677,6 +690,13 @@ dirty tree, and all protected controller/schema/types/transition/recovery
 deltas. Mark Stage 3/4 replacements and direct Foundation-state mutations
 DISCARD; unrelated Reviewer/Revision fixes are REPROVE only when identified as
 independent deltas. Explain any classification that refines design §9.2.
+
+Generate the dirty export/import inventory mechanically from the saved dirty
+worktree during authoring, then transcribe the exact results. Do not list
+symbols from the new isolated contracts as if they were exports of the old
+`game-ir.ts`, and do not omit consumers that import only digest/canonical
+helpers. The matrix must agree with a fresh `rg`/AST inventory of that saved
+checkout.
 
 - [ ] **Step 5: Run the full core and Foundation regression**
 
