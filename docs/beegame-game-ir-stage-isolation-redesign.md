@@ -444,6 +444,8 @@ Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority
 
 相同文档在 Game IR enabled/disabled 下必须产生完全相同的 Stage 3 tasks、Issue Registry、Stage 4 Patch packets、Targeted Recheck 和 Foundation READY receipt。
 
+Phase 1 尚未实现七个领域 producer，因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；不得为了 parity 伪造七个同构 placeholder candidate。测试必须使用现有完整八文档 fixture 和真实 Foundation fact/semantic/revision planning API，在边界调用前后重新序列化同一 documents/state 并重跑规划。完整 candidate parity 从 Gameplay + Balance 等领域 producer 落地后开始。
+
 ### 11.2 架构边界
 
 - Foundation Reviewer/Revision 模块不得 import Game IR；

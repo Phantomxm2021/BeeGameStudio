@@ -595,7 +595,14 @@ git commit -m "feat: publish Game IR atomically"
 
 - [ ] **Step 1: Write parity tests**
 
-For at least two existing complete Foundation fixtures, run the current Foundation deterministic and semantic task planning path twice: once without constructing a Game IR compile request and once while projecting a FoundationReadyReceipt and validating an isolated Game IR candidate. Assert exact equality of:
+For at least two variants built from the existing
+`complete-game-document-fixture`, run the current complete Foundation planning
+path twice: once directly, and once after projecting a
+`FoundationReadyReceipt` and strictly parsing only the isolated compile
+request boundary. Phase 1 has no Gameplay/Balance/World/etc. producers, so this
+parity test must not invent seven placeholder candidates merely to exercise
+later APIs. Candidate/domain integration remains RED for the later domain
+plans. Assert exact equality of:
 
 - Foundation fact task packets;
 - deterministic Issue Registry;
@@ -604,7 +611,27 @@ For at least two existing complete Foundation fixtures, run the current Foundati
 - targeted recheck packet;
 - Foundation READY state/receipt inputs.
 
-The Game IR library may read copies of receipt-bound documents, but the test must assert canonical document digests and Foundation state bytes are unchanged.
+Use `buildFoundationSectionIndex`, normalized fact extraction,
+`buildFoundationFactPackets`, fact result admission, production deterministic
+audit, real semantic packets/task identities, and—in the issue-bearing
+fixture—`buildFoundationRevisionAuthority`, revision batches and targeted
+recheck. Do not hand-write fake section positions, fact task packets, Patch
+packet identities or source digests.
+
+The Game IR boundary may read copies of receipt-bound documents, but the test
+must serialize Foundation documents/state before the call and reserialize the
+same objects after it; then rerun Foundation planning from those same inputs.
+Assert canonical document digests, state bytes, READY receipt fields and all
+Foundation outputs remain unchanged. The compile request must be deterministic
+and receipt-bound, but no production route may construct it.
+
+Resolve the repository root from `import.meta.url`, not `process.cwd()`. Compare
+the protected files byte-for-byte with baseline `70df2e2c`, with an explicit
+diagnostic if the Git baseline is unavailable. In addition, parse every
+production TypeScript source below `delivery-workflow` outside `game-ir/` and
+reject static/dynamic Game IR imports and routing identifiers. The detector
+must have synthetic positive and negative self-tests proving it catches an
+import/route while ignoring comments and ordinary string literals.
 
 - [ ] **Step 2: Run parity tests and verify RED**
 
@@ -612,15 +639,30 @@ The Game IR library may read copies of receipt-bound documents, but the test mus
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/foundation-parity.test.ts
 ```
 
-Expected: FAIL until the fixture helper constructs an admitted candidate using only the new Stage 5 contracts.
+Expected: FAIL until the complete-fixture parity harness and strict outer
+boundary are present.
 
 - [ ] **Step 3: Add the minimum test fixture builder**
 
-Keep the fixture builder in the test file. It may create a small admitted core candidate with mechanical owner bindings, but must not add production domain defaults or placeholder nodes.
+Keep only parity composition helpers in the test file. They may render complete
+existing test documents and construct real Foundation planning inputs, but
+must not add production domain defaults, fake Game IR nodes or placeholder
+domain modules.
 
 - [ ] **Step 4: Write the salvage matrix**
 
-Document every old dirty Game IR-related path and symbol under exactly one category: KEEP, ADAPT, REWRITE, DISCARD or REPROVE. Include why it belongs there, its dependencies, and the later plan that may consume it. Mark all Stage 3/4 replacements and direct Foundation-state mutations DISCARD.
+Inventory the old dirty worktree read-only. Give every dirty Game IR source,
+test fixture, plan, exported symbol, direct production consumer path and
+Stage 3/4 delta a stable ledger item ID and exactly one category: KEEP, ADAPT,
+REWRITE, DISCARD or REPROVE. A file-as-implementation item and a design idea
+inside it are distinct IDs; do not classify the same item twice. Include why,
+dependencies, and the later plan that may consume it. At minimum enumerate
+`game-ir.ts` exports, `game-ir.test.ts`, `typed-owner-records.test.ts`,
+`game-ir-resource-fixture.ts`, every production importer/consumer found in the
+dirty tree, and all protected controller/schema/types/transition/recovery
+deltas. Mark Stage 3/4 replacements and direct Foundation-state mutations
+DISCARD; unrelated Reviewer/Revision fixes are REPROVE only when identified as
+independent deltas. Explain any classification that refines design §9.2.
 
 - [ ] **Step 5: Run the full core and Foundation regression**
 
