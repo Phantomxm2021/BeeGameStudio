@@ -13,7 +13,10 @@ import {
 } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import {
+  GAME_IR_PUBLICATION_ROOT,
   GAME_IR_SCHEMA_VERSION,
+  gameIrCommittedPath,
+  gameIrRevisionPath,
   parseGameIrCompileRequest,
   parseGameIrReadyReceipt,
   type GameIrCompileRequest,
@@ -35,7 +38,6 @@ import {
 } from './semantic-admission'
 import { digestSectionIndex } from '../foundation-section-index'
 
-const ROOT = '.beegame/ir/game-ir.v1'
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const MODULES = GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.map(
   item => item.moduleId,
@@ -522,13 +524,13 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   const revision = request.foundation.foundationRevision
   const stage = pathOf(
     workspacePath,
-    `${ROOT}/.staging/${authority.publicationId}`,
+    `${GAME_IR_PUBLICATION_ROOT}/.staging/${authority.publicationId}`,
   )
   const journal = pathOf(
     workspacePath,
-    `${ROOT}/.journal/${authority.publicationId}.json`,
+    `${GAME_IR_PUBLICATION_ROOT}/.journal/${authority.publicationId}.json`,
   )
-  const final = pathOf(workspacePath, `${ROOT}/revisions/${revision}`)
+  const final = pathOf(workspacePath, gameIrRevisionPath(revision))
   const candidateDigest = digestGameIrValue(candidate)
   const modules: Artifact[] = []
   const sourceMaps: Artifact[] = []
@@ -617,7 +619,7 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     moduleDigests,
     sourceMapDigests,
     dependencyGraphDigest: dependency.digest,
-    committedPath: `${ROOT}/revisions/${revision}/COMMITTED.json`,
+    committedPath: gameIrCommittedPath(revision),
   })
   const entries = [...artifacts, marker].map(item => ({
     path: item.path,
@@ -625,8 +627,8 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   }))
   const journalBytes = `${canonical({ schemaVersion: 'game-ir-publication-journal.v1', status: 'PREPARED', authorityDigest, publicationId: authority.publicationId, foundationRevision: revision, foundationReceiptDigest: request.foundation.receiptDigest, compileRequestDigest, candidateDigest, entries })}\n`
   const prepared = {
-    preparedPath: `${ROOT}/.staging/${authority.publicationId}`,
-    journalPath: `${ROOT}/.journal/${authority.publicationId}.json`,
+    preparedPath: `${GAME_IR_PUBLICATION_ROOT}/.staging/${authority.publicationId}`,
+    journalPath: `${GAME_IR_PUBLICATION_ROOT}/.journal/${authority.publicationId}.json`,
     committedPath: ready.committedPath,
     authorityDigest,
   }
@@ -649,10 +651,13 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
 }
 
 async function writeStage(plan: Plan): Promise<void> {
-  await ensureDir(plan.workspacePath, pathOf(plan.workspacePath, ROOT))
   await ensureDir(
     plan.workspacePath,
-    pathOf(plan.workspacePath, `${ROOT}/.journal`),
+    pathOf(plan.workspacePath, GAME_IR_PUBLICATION_ROOT),
+  )
+  await ensureDir(
+    plan.workspacePath,
+    pathOf(plan.workspacePath, `${GAME_IR_PUBLICATION_ROOT}/.journal`),
   )
   const journalExists = await existing(plan.journal)
   const stageExists = await existing(plan.stage)
@@ -670,7 +675,7 @@ async function writeStage(plan: Plan): Promise<void> {
   )
   await ensureDir(
     plan.workspacePath,
-    pathOf(plan.workspacePath, `${ROOT}/.staging`),
+    pathOf(plan.workspacePath, `${GAME_IR_PUBLICATION_ROOT}/.staging`),
   )
   if (await existing(plan.stage)) {
     await componentsSafe(plan.workspacePath, plan.stage)
@@ -804,9 +809,15 @@ async function cleanup(plan: Plan): Promise<void> {
   }
   try {
     if (
-      (await readdir(join(plan.workspacePath, ROOT, '.staging'))).length === 0
+      (
+        await readdir(
+          join(plan.workspacePath, GAME_IR_PUBLICATION_ROOT, '.staging'),
+        )
+      ).length === 0
     )
-      await rmdir(join(plan.workspacePath, ROOT, '.staging'))
+      await rmdir(
+        join(plan.workspacePath, GAME_IR_PUBLICATION_ROOT, '.staging'),
+      )
   } catch {
     return
   }
@@ -829,7 +840,10 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
     }
     throw error
   }
-  const revisions = pathOf(plan.workspacePath, `${ROOT}/revisions`)
+  const revisions = pathOf(
+    plan.workspacePath,
+    `${GAME_IR_PUBLICATION_ROOT}/revisions`,
+  )
   await ensureDir(plan.workspacePath, revisions)
   await componentsSafe(plan.workspacePath, plan.final)
   if (await existing(plan.final)) {
@@ -866,12 +880,15 @@ function withWorkspace(
   return {
     ...plan,
     workspacePath,
-    stage: pathOf(workspacePath, `${ROOT}/.staging/${plan.publicationId}`),
+    stage: pathOf(
+      workspacePath,
+      `${GAME_IR_PUBLICATION_ROOT}/.staging/${plan.publicationId}`,
+    ),
     journal: pathOf(
       workspacePath,
-      `${ROOT}/.journal/${plan.publicationId}.json`,
+      `${GAME_IR_PUBLICATION_ROOT}/.journal/${plan.publicationId}.json`,
     ),
-    final: pathOf(workspacePath, `${ROOT}/revisions/${plan.revision}`),
+    final: pathOf(workspacePath, gameIrRevisionPath(plan.revision)),
     privateRoot,
   }
 }

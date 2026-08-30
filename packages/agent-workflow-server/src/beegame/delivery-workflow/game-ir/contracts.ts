@@ -8,6 +8,8 @@ import {
 export const GAME_IR_STAGE_BOUNDARY =
   'foundation-ready-receipt -> game-ir-stage.v1' as const
 export const GAME_IR_SCHEMA_VERSION = 'game-ir.v1' as const
+export const GAME_IR_PUBLICATION_ROOT =
+  `.beegame/ir/${GAME_IR_SCHEMA_VERSION}` as const
 export const GAME_IR_CANONICAL_MODULE_IDS = Object.freeze([
   'core',
   'gameplay',
@@ -93,11 +95,15 @@ const safeIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
 const foundationDocumentPathSchema = z.enum(CANONICAL_FOUNDATION_DOCUMENTS)
 
 export function gameIrCommittedPath(foundationRevision: string): string {
+  return `${gameIrRevisionPath(foundationRevision)}/COMMITTED.json`
+}
+
+export function gameIrRevisionPath(foundationRevision: string): string {
   if (!safeIdSchema.safeParse(foundationRevision).success)
     throw new Error(
       'Game IR foundation revision is not a canonical path segment',
     )
-  return `.beegame/ir/${GAME_IR_SCHEMA_VERSION}/revisions/${foundationRevision}/COMMITTED.json`
+  return `${GAME_IR_PUBLICATION_ROOT}/revisions/${foundationRevision}`
 }
 
 const safeRelativeArtifactPathSchema = z.string().refine(value => {

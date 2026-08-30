@@ -27,6 +27,7 @@ import {
   type FoundationDocumentPath,
 } from '../types'
 import {
+  gameIrCommittedPath,
   GAME_IR_SCHEMA_VERSION,
   type FoundationReadyReceipt,
   type GameIrCompileRequest,
@@ -332,7 +333,7 @@ describe('atomic Game IR publication and recovery', () => {
     expect((await readdir(root)).sort()).toEqual(['.journal', 'revisions'])
     expect(await readFile(journalPath, 'utf8')).toBe(journalBytes)
     expect(ready.committedPath).toBe(
-      '.beegame/ir/game-ir.v1/revisions/foundation-revision-1/COMMITTED.json',
+      gameIrCommittedPath(value.compileRequest.foundation.foundationRevision),
     )
     const dependencyGraph = JSON.parse(
       await readFile(
