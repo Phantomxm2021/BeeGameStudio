@@ -1,6 +1,6 @@
 # Game IR Phase 4: Gameplay and Balance Design
 
-Status: implemented; Phase 4 cross-domain and isolation completion gate recorded
+Status: implemented; automated verification complete; independent Task 7 review pending; Phase 4 not yet accepted
 
 ## Goal
 
@@ -524,9 +524,9 @@ No new dependency is required.
 - full server production source remains free of a Game IR route;
 - root/package typecheck, Biome, and diff-check pass.
 
-## Acceptance
+## Acceptance gate
 
-Phase 4 is complete only when:
+Phase 4 will be accepted only when:
 
 - Gameplay and Balance schemas cover every capability listed in the authority
   document;
@@ -544,8 +544,10 @@ Phase 4 is complete only when:
 Chrome acceptance remains deferred until every canonical domain module and the
 single consumer cutover are complete.
 
-Phase 4 completion does not make complete candidate publication, production
-routing, or Chrome acceptance available. Phase 5–9 remain unstarted.
+Automated Phase 4 implementation and verification are complete, but Phase 4 is
+not accepted until the independent Task 7 review is clean. Complete candidate
+publication, production routing, or Chrome acceptance remain unavailable.
+Phase 5–9 remain unstarted.
 
 ## Explicit non-goals
 

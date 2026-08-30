@@ -96,8 +96,7 @@ function text(value: unknown, label: string): string {
 
 function digest(value: unknown, label: string): string {
   const result = text(value, label)
-  if (!/^[a-f0-9]{64}$/.test(result))
-    fail(`${label} must be a SHA-256 digest`)
+  if (!/^[a-f0-9]{64}$/.test(result)) fail(`${label} must be a SHA-256 digest`)
   return result
 }
 
@@ -165,11 +164,19 @@ type VerifiedClaim = Readonly<{
 function normalizeClaims(value: unknown): readonly VerifiedClaim[] {
   const raw = strictArray(value, 'verifiedClaims')
   const claims = raw.map((entry, index) => {
-    if (!isRecord(entry)) fail(`verifiedClaims[${index}] must be a plain object`)
-    exactKeys(entry, ['subject', 'sourcePointer', 'literal'], `verifiedClaims[${index}]`)
+    if (!isRecord(entry))
+      fail(`verifiedClaims[${index}] must be a plain object`)
+    exactKeys(
+      entry,
+      ['subject', 'sourcePointer', 'literal'],
+      `verifiedClaims[${index}]`,
+    )
     return {
       subject: text(entry.subject, `verifiedClaims[${index}].subject`),
-      sourcePointer: text(entry.sourcePointer, `verifiedClaims[${index}].sourcePointer`),
+      sourcePointer: text(
+        entry.sourcePointer,
+        `verifiedClaims[${index}].sourcePointer`,
+      ),
       literal: text(entry.literal, `verifiedClaims[${index}].literal`),
     }
   })
@@ -204,7 +211,10 @@ function mechanicalNodeTargets(
   )
 }
 
-function normalizeAllowed(value: readonly string[] | undefined, label: string): readonly string[] {
+function normalizeAllowed(
+  value: readonly string[] | undefined,
+  label: string,
+): readonly string[] {
   const raw = value === undefined ? [] : strictArray(value, label)
   const output = raw.map((entry, index) => text(entry, `${label}[${index}]`))
   const unique = [...new Set(output)].sort(compareCodeUnits)
@@ -224,11 +234,8 @@ export function admitGameIrMechanicalProjectionReceipt(
   value?: unknown,
 ): GameIrMechanicalProjectionReceipt {
   const source =
-    'source' in sourceOrInput
-      ? sourceOrInput.source
-      : sourceOrInput
-  const raw =
-    'source' in sourceOrInput ? sourceOrInput.receipt : value
+    'source' in sourceOrInput ? sourceOrInput.source : sourceOrInput
+  const raw = 'source' in sourceOrInput ? sourceOrInput.receipt : value
   if (raw === undefined) fail('mechanical receipt is required')
   const validatedSource = validateGameIrDomainSourceEnvelope(source)
   if (!isRecord(raw)) fail('mechanical receipt must be a plain object')
@@ -260,9 +267,15 @@ export function admitGameIrMechanicalProjectionReceipt(
     raw.foundationRevision,
     'mechanical receipt foundationRevision',
   )
-  if (foundationRevision !== validatedSource.compileRequest.foundation.foundationRevision)
+  if (
+    foundationRevision !==
+    validatedSource.compileRequest.foundation.foundationRevision
+  )
     fail('mechanical receipt foundationRevision does not match source')
-  const sourceDigest = digest(raw.sourceDigest, 'mechanical receipt sourceDigest')
+  const sourceDigest = digest(
+    raw.sourceDigest,
+    'mechanical receipt sourceDigest',
+  )
   if (sourceDigest !== validatedSource.sourceDigest)
     fail('mechanical receipt sourceDigest does not match source')
   const nodes = normalizeNodes(raw.nodes, validatedSource)
@@ -284,7 +297,10 @@ export function admitGameIrMechanicalProjectionReceipt(
     verifiedClaims,
     ownedTargets,
   }
-  const receiptDigest = digest(raw.receiptDigest, 'mechanical receipt receiptDigest')
+  const receiptDigest = digest(
+    raw.receiptDigest,
+    'mechanical receipt receiptDigest',
+  )
   if (receiptDigest !== digestGameIrValue(receiptBody(body)))
     fail('mechanical receipt digest is stale or invalid')
   return deepFreeze({ ...body, receiptDigest })
@@ -322,7 +338,8 @@ export function buildGameIrDomainSemanticPacket(
   if (!isRecord(input)) fail('semantic packet input must be a plain object')
   const inputKeys = Reflect.ownKeys(input)
   for (const key of inputKeys) {
-    if (typeof key !== 'string') fail('semantic packet input has a symbol property')
+    if (typeof key !== 'string')
+      fail('semantic packet input has a symbol property')
   }
   const allowedKeys = new Set([
     'source',
@@ -344,7 +361,10 @@ export function buildGameIrDomainSemanticPacket(
     foundationRevision: source.compileRequest.foundation.foundationRevision,
     sourceDigest: source.sourceDigest,
     mechanicalReceiptDigest: mechanical.receiptDigest,
-    allowedNodeKinds: normalizeAllowed(input.allowedNodeKinds, 'allowedNodeKinds'),
+    allowedNodeKinds: normalizeAllowed(
+      input.allowedNodeKinds,
+      'allowedNodeKinds',
+    ),
     allowedRelationshipTypes: normalizeAllowed(
       input.allowedRelationshipTypes,
       'allowedRelationshipTypes',

@@ -16,7 +16,14 @@ const serverSourceRoot = dirname(dirname(deliveryWorkflowRoot))
 
 const gameIrContractFiles = ['contracts.ts'] as const
 
-const TASK_7_NEW_PRODUCTION_FILES: readonly string[] = []
+const TASK_7_PHASE4_PRODUCTION_FILES = [
+  'domain-source.ts',
+  'domain-projection.ts',
+  'gameplay-schema.ts',
+  'balance-schema.ts',
+  'gameplay-producer.ts',
+  'balance-producer.ts',
+] as const
 
 function task7IsolationViolations(source: string): string[] {
   const file = ts.createSourceFile(
@@ -46,7 +53,7 @@ function task7IsolationViolations(source: string): string[] {
     ) {
       const path = node.moduleSpecifier.text
       if (
-        /(?:^|\/)(?:controller|run-store|delivery-run|foundation-issue(?:-registry)?)(?:\.ts)?$/.test(
+        /(?:^|\/)(?:controller|store|run-store|delivery-run|foundation-issue(?:-registry)?)(?:\.ts)?$/.test(
           path,
         )
       )
@@ -220,7 +227,10 @@ describe('Game IR stage boundary', () => {
     const synthetic = `
       import { parseGameIrCandidate } from './model'
       import { createDeliveryWorkflowController } from '../controller'
-      import { DeliveryRun } from '../types'
+      import { getRun } from '../store'
+      import { getDeliveryRun } from '../delivery-run'
+      import { getIssue } from '../foundation-issue-registry'
+      import { DeliveryRun, FoundationIssue } from '../types'
       parseGameIrCandidate(input)
       prepareGameIrPublication(input)
       commitGameIrPublication(input)
@@ -233,7 +243,11 @@ describe('Game IR stage boundary', () => {
         { moduleId: 'implementation-verification' },
       ]
       void createDeliveryWorkflowController
+      void getRun
+      void getDeliveryRun
+      void getIssue
       void DeliveryRun
+      void FoundationIssue
       void result
       void modules
     `
@@ -243,7 +257,11 @@ describe('Game IR stage boundary', () => {
       'api-call: prepareGameIrPublication',
       'api-import: parseGameIrCandidate',
       'identifier: DeliveryRun',
+      'identifier: FoundationIssue',
       'path: ../controller',
+      'path: ../delivery-run',
+      'path: ../foundation-issue-registry',
+      'path: ../store',
       'placeholder-module: core',
       'placeholder-module: implementation-verification',
       'placeholder-module: presentation',
@@ -252,12 +270,38 @@ describe('Game IR stage boundary', () => {
       'provider-dispatch: provider.dispatch',
     ])
     expect(
-      task7IsolationViolations('// parseGameIrCandidate\nconst text = "world"'),
+      task7IsolationViolations(`
+        // parseGameIrCandidate prepareGameIrPublication commitGameIrPublication
+        // controller store run-store delivery-run foundation-issue-registry
+        // DeliveryRun FoundationIssue provider.dispatch core world-scene
+        // presentation resource-realization implementation-verification
+      `),
     ).toEqual([])
     expect(
-      TASK_7_NEW_PRODUCTION_FILES.flatMap(path =>
-        task7IsolationViolations(path).map(
-          violation => `${path}: ${violation}`,
+      task7IsolationViolations(`
+        const vocabulary = "parseGameIrCandidate prepareGameIrPublication commitGameIrPublication controller store run-store delivery-run foundation-issue-registry DeliveryRun FoundationIssue provider.dispatch core world-scene presentation resource-realization implementation-verification"
+        void vocabulary
+      `),
+    ).toEqual([])
+  })
+
+  test('scans every Phase 4 production file from its UTF-8 source', async () => {
+    const sourceFiles = await Promise.all(
+      TASK_7_PHASE4_PRODUCTION_FILES.map(async filename => ({
+        filename,
+        source: await readFile(
+          join(dirname(fileURLToPath(import.meta.url)), filename),
+          'utf8',
+        ),
+      })),
+    )
+    expect(sourceFiles.map(file => file.filename)).toEqual([
+      ...TASK_7_PHASE4_PRODUCTION_FILES,
+    ])
+    expect(
+      sourceFiles.flatMap(({ filename, source }) =>
+        task7IsolationViolations(source).map(
+          violation => `${filename}: ${violation}`,
         ),
       ),
     ).toEqual([])

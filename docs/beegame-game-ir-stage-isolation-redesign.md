@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）完成 cross-domain/isolation gate；Phase 5–9 尚未开始。完整 candidate publication 与 Chrome acceptance 仍不可用
+状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）implementation 与 automated verification 已完成，independent Task 7 review pending，尚未 accepted；Phase 5–9 尚未开始。完整 candidate publication 与 Chrome acceptance 仍不可用
 
 日期：2026-08-30
 
@@ -414,7 +414,11 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 - 已落地 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；
 - 不实现 consumer migration，production routing 仍不可达。
 
-### Phase 4：Gameplay + Balance（已完成；production routing 仍不可达）
+### Phase 4：Gameplay + Balance（implementation/automated verification complete；independent Task 7 review pending）
+
+Implementation and automated verification are complete, but Phase 4 is not
+accepted until the independent Task 7 review is clean. Production routing remains
+unreachable.
 
 - Gameplay 与 Balance 领域 schema、semantic admission、精确 source envelope
   和 immutable module projections 已落地；两者使用同一 READY-bound authority

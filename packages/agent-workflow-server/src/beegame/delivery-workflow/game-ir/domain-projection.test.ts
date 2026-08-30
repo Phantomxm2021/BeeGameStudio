@@ -58,32 +58,32 @@ function canonical(value: unknown): string {
 
 function source(): GameIrDomainSourceEnvelope {
   const bytes = 'bytes'
-  const sectionIndex: readonly GameIrSourceSection[] = CANONICAL_FOUNDATION_DOCUMENTS.map(
-    (documentPath, index) => ({
+  const sectionIndex: readonly GameIrSourceSection[] =
+    CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
       documentPath,
       sectionId: `section-${index}`,
       heading: `Section ${index}`,
       startLine: 1,
       endLine: 1,
       digest: createHash('sha256').update(bytes).digest('hex'),
-    }),
-  )
-  const foundationWithoutDigest: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
-    schemaVersion: 'foundation-ready-receipt.v1',
-    projectId: 'project-1',
-    foundationRevision: 'revision-1',
-    confirmedBriefDigest: digest,
-    documentDigests: Object.fromEntries(
-      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, digest]),
-    ) as FoundationReadyReceipt['documentDigests'],
-    sectionIndexPath: '.beegame/foundation/section-index.json',
-    sectionIndexDigest: digestSectionIndex(sectionIndex),
-    authority: {
-      kind: 'review',
-      reviewDigest: digest,
-      issueRegistryDigest: digest,
-    },
-  }
+    }))
+  const foundationWithoutDigest: Omit<FoundationReadyReceipt, 'receiptDigest'> =
+    {
+      schemaVersion: 'foundation-ready-receipt.v1',
+      projectId: 'project-1',
+      foundationRevision: 'revision-1',
+      confirmedBriefDigest: digest,
+      documentDigests: Object.fromEntries(
+        CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, digest]),
+      ) as FoundationReadyReceipt['documentDigests'],
+      sectionIndexPath: '.beegame/foundation/section-index.json',
+      sectionIndexDigest: digestSectionIndex(sectionIndex),
+      authority: {
+        kind: 'review',
+        reviewDigest: digest,
+        issueRegistryDigest: digest,
+      },
+    }
   const request: GameIrCompileRequest = {
     schemaVersion: 'game-ir-compile-request.v1',
     taskId: 'task-1',
@@ -113,7 +113,8 @@ function receipt(overrides: Partial<GameIrMechanicalProjectionReceipt> = {}) {
     schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
     taskId: currentSource.taskId,
     moduleId: currentSource.moduleId,
-    foundationRevision: currentSource.compileRequest.foundation.foundationRevision,
+    foundationRevision:
+      currentSource.compileRequest.foundation.foundationRevision,
     sourceDigest: currentSource.sourceDigest,
     nodes: [],
     verifiedClaims: [],
@@ -124,16 +125,15 @@ function receipt(overrides: Partial<GameIrMechanicalProjectionReceipt> = {}) {
   const { receiptDigest: _ignored, ...withoutDigest } = value
   return {
     ...value,
-    receiptDigest: createHash('sha256').update(canonical(withoutDigest)).digest('hex'),
+    receiptDigest: createHash('sha256')
+      .update(canonical(withoutDigest))
+      .digest('hex'),
   }
 }
 
 describe('Game IR domain producer contracts', () => {
   test('admits a valid empty mechanical receipt', () => {
-    const admitted = admitGameIrMechanicalProjectionReceipt(
-      source(),
-      receipt(),
-    )
+    const admitted = admitGameIrMechanicalProjectionReceipt(source(), receipt())
     expect(admitted.nodes).toEqual([])
     expect(admitted.verifiedClaims).toEqual([])
     expect(admitted.ownedTargets).toEqual([])
@@ -169,8 +169,8 @@ describe('Game IR domain producer contracts', () => {
   test('rejects incomplete node-to-target ownership accounting', () => {
     expect(() =>
       admitGameIrMechanicalProjectionReceipt(
-          source(),
-          receipt({ nodes: [mechanicalNode] as never, ownedTargets: [] }),
+        source(),
+        receipt({ nodes: [mechanicalNode] as never, ownedTargets: [] }),
       ),
     ).toThrow(/owned|target|account/i)
   })
