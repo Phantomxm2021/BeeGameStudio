@@ -153,6 +153,8 @@ function rawCandidate(): Record<string, unknown> {
           kind: 'semantic-node',
           producerMode: 'semantic',
           value: { label: moduleId },
+          references: [],
+          edges: [],
           bindings: {
             '/id': {
               kind: 'owner',
@@ -506,26 +508,76 @@ describe('isolated Game IR semantic projection admission', () => {
       'binding:docs/GDD.md#core-loop/ir/gameplay',
       'binding:docs/GDD.md#core-loop/ir/gameplay/label',
     ]
-    for (const outcome of ['FAIL', 'AMBIGUOUS'] as const) {
-      const admitted = admitGameIrSemanticValidationResult(value, {
-        outcome,
+    const admitted = admitGameIrSemanticValidationResult(value, {
+      outcome: 'FAIL',
+      packetDigest: value.packetDigest,
+      reasonCode: 'projection-mismatch',
+      actual: 'projection is not supported by source',
+      evidencePointers: exact,
+    })
+    expect(admitted.outcome).toBe('FAIL')
+    expect(() =>
+      admitGameIrSemanticValidationResult(value, {
+        outcome: 'FAIL',
         packetDigest: value.packetDigest,
-        reasonCode: 'projection-mismatch',
-        actual: 'projection is not supported by source',
+        reasonCode: 'ambiguous-projection',
+        actual: 'two projections are possible',
+        missingSubject: '/value/rule',
+        expectedProjection: 'the canonical rule projection',
         evidencePointers: exact,
-      })
-      expect(admitted.outcome).toBe(outcome)
-      for (const reasonCode of ['missing-projection', 'ambiguous-projection']) {
-        const sectionEvidence = admitGameIrSemanticValidationResult(value, {
-          outcome,
-          packetDigest: value.packetDigest,
-          reasonCode,
-          actual: 'required source was not projected',
-          evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
-        })
-        expect(sectionEvidence.outcome).toBe(outcome)
-      }
-    }
+      }),
+    ).toThrow(/reason|outcome|ambiguous/i)
+    expect(() =>
+      admitGameIrSemanticValidationResult(value, {
+        outcome: 'AMBIGUOUS',
+        packetDigest: value.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'required source was not projected',
+        missingSubject: '/value/rule',
+        expectedProjection: 'the canonical rule projection',
+        evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
+      }),
+    ).toThrow(/reason|outcome|missing/i)
+    const missing = admitGameIrSemanticValidationResult(value, {
+      outcome: 'FAIL',
+      packetDigest: value.packetDigest,
+      reasonCode: 'missing-projection',
+      actual: 'required source was not projected',
+      missingSubject: '/value/rule',
+      expectedProjection: 'the canonical rule projection',
+      evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
+    })
+    expect(missing.outcome).toBe('FAIL')
+    const ambiguous = admitGameIrSemanticValidationResult(value, {
+      outcome: 'AMBIGUOUS',
+      packetDigest: value.packetDigest,
+      reasonCode: 'ambiguous-projection',
+      actual: 'two projections are possible',
+      missingSubject: '/value/rule',
+      expectedProjection: 'the canonical rule projection',
+      evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
+    })
+    expect(ambiguous.outcome).toBe('AMBIGUOUS')
+    expect(() =>
+      admitGameIrSemanticValidationResult(value, {
+        outcome: 'FAIL',
+        packetDigest: value.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'required source was not projected',
+        evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
+      }),
+    ).toThrow(/missingSubject|expectedProjection|field|shape/i)
+    expect(() =>
+      admitGameIrSemanticValidationResult(value, {
+        outcome: 'AMBIGUOUS',
+        packetDigest: value.packetDigest,
+        reasonCode: 'ambiguous-projection',
+        actual: 'two projections are possible',
+        subject: '/value/rule',
+        expectedProjection: 'the canonical rule projection',
+        evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
+      }),
+    ).toThrow(/missingSubject|unknown|field|shape/i)
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
         outcome: 'FAIL',
@@ -534,7 +586,7 @@ describe('isolated Game IR semantic projection admission', () => {
         actual: 'section only',
         evidencePointers: ['docs/GDD.md#core-loop'],
       }),
-    ).toThrow(/evidence|pointer|owner/i)
+    ).toThrow(/evidence|pointer|owner|reason/i)
     for (const outcome of ['FAIL', 'AMBIGUOUS'] as const) {
       expect(() =>
         admitGameIrSemanticValidationResult(value, {
@@ -544,7 +596,7 @@ describe('isolated Game IR semantic projection admission', () => {
           actual: 'bound source is not a valid section-only diagnostic',
           evidencePointers: [`section:docs/GDD.md#core-loop@${sectionDigest}`],
         }),
-      ).toThrow(/evidence|owner|bound|missing|ambiguous/i)
+      ).toThrow(/evidence|owner|bound|missing|ambiguous|outcome|reason/i)
     }
     for (const reasonCode of [
       'projection-not-missing',
@@ -568,7 +620,7 @@ describe('isolated Game IR semantic projection admission', () => {
         actual: 'duplicate',
         evidencePointers: [exact[0]!, exact[0]!],
       }),
-    ).toThrow(/duplicate|evidence|pointer/i)
+    ).toThrow(/duplicate|evidence|pointer|reason/i)
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
         outcome: 'FAIL',
@@ -582,6 +634,55 @@ describe('isolated Game IR semantic projection admission', () => {
         candidate: candidate(),
       }),
     ).toThrow(/extra|field|result|shape/i)
+  })
+
+  test('section evidence is scoped to the diagnostic subject, not every binding in its section', () => {
+    const value = packet()
+    const sectionEvidence = [`section:docs/GDD.md#core-loop@${sectionDigest}`]
+    const admitted = admitGameIrSemanticValidationResult(value, {
+      outcome: 'FAIL',
+      packetDigest: value.packetDigest,
+      reasonCode: 'missing-projection',
+      actual: 'required source was not projected',
+      missingSubject: '/value/rule',
+      expectedProjection: 'the canonical rule projection',
+      evidencePointers: sectionEvidence,
+    })
+    expect(admitted.outcome).toBe('FAIL')
+
+    expect(() =>
+      admitGameIrSemanticValidationResult(value, {
+        outcome: 'FAIL',
+        packetDigest: value.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'required source was not projected',
+        missingSubject: '/value/label',
+        expectedProjection: 'the canonical label projection',
+        evidencePointers: sectionEvidence,
+      }),
+    ).toThrow(/bound|binding|subject|evidence/i)
+
+    const ambiguous = admitGameIrSemanticValidationResult(value, {
+      outcome: 'AMBIGUOUS',
+      packetDigest: value.packetDigest,
+      reasonCode: 'ambiguous-projection',
+      actual: 'two projections are possible',
+      missingSubject: '/value/rule',
+      expectedProjection: 'the canonical rule projection',
+      evidencePointers: sectionEvidence,
+    })
+    expect(ambiguous.outcome).toBe('AMBIGUOUS')
+    expect(() =>
+      admitGameIrSemanticValidationResult(value, {
+        outcome: 'AMBIGUOUS',
+        packetDigest: value.packetDigest,
+        reasonCode: 'ambiguous-projection',
+        actual: 'two projections are possible',
+        missingSubject: '/value/label',
+        expectedProjection: 'the canonical label projection',
+        evidencePointers: sectionEvidence,
+      }),
+    ).toThrow(/bound|binding|subject|evidence/i)
   })
 
   test('binds immutable candidate bytes and rejects stale packet or manifest identity', () => {

@@ -43,6 +43,21 @@ export type GameIrSemanticSourceSection = Readonly<{
   bytes: string
 }>
 
+/** Service-owned reasons for a deterministic semantic projection failure. */
+export const GAME_IR_SEMANTIC_FAILURE_REASON_CODES = Object.freeze([
+  'projection-mismatch',
+  'missing-projection',
+] as const)
+export type GameIrSemanticFailureReasonCode =
+  (typeof GAME_IR_SEMANTIC_FAILURE_REASON_CODES)[number]
+
+/** The only reason an isolated semantic validator may return AMBIGUOUS. */
+export const GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES = Object.freeze([
+  'ambiguous-projection',
+] as const)
+export type GameIrSemanticAmbiguousReasonCode =
+  (typeof GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES)[number]
+
 export type GameIrSemanticValidationPacket = Readonly<{
   schemaVersion: 'game-ir-semantic-validation-packet.v1'
   compileRequest: GameIrCompileRequest
@@ -68,15 +83,26 @@ export type GameIrSemanticValidationResult = Readonly<
   | {
       outcome: 'FAIL'
       packetDigest: string
-      reasonCode: string
+      reasonCode: 'projection-mismatch'
       actual: string
+      evidencePointers: readonly string[]
+    }
+  | {
+      outcome: 'FAIL'
+      packetDigest: string
+      reasonCode: 'missing-projection'
+      actual: string
+      missingSubject: string
+      expectedProjection: string
       evidencePointers: readonly string[]
     }
   | {
       outcome: 'AMBIGUOUS'
       packetDigest: string
-      reasonCode: string
+      reasonCode: 'ambiguous-projection'
       actual: string
+      missingSubject: string
+      expectedProjection: string
       evidencePointers: readonly string[]
     }
 >
@@ -123,11 +149,6 @@ const DOMAIN_CHECK_IDS: Record<
 const SHA256 = /^[a-f0-9]{64}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const FOUNDATION_DOCUMENTS = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
-const SECTION_EVIDENCE_REASON_CODES: readonly string[] = Object.freeze([
-  'ambiguous-projection',
-  'missing-projection',
-])
-
 function fail(message: string): never {
   throw new Error(`invalid Game IR semantic admission: ${message}`)
 }
@@ -450,26 +471,27 @@ function moduleSourceClosure(
 ): {
   sections: readonly GameIrSourceSection[]
   evidencePointers: readonly string[]
-  ownerSectionKeys: readonly string[]
+  boundSubjects: readonly string[]
 } {
   const byKey = new Map(index.map(section => [sectionKey(section), section]))
   const sections = new Map<string, GameIrSourceSection>()
   const evidence = new Set<string>()
-  const ownerSectionKeys = new Set<string>()
+  const boundSubjects = new Set<string>()
   for (const ref of index) {
     if (manifest.sourceDocumentPaths.includes(ref.documentPath)) {
       sections.set(sectionKey(ref), ref)
     }
   }
   for (const node of module.nodes) {
-    for (const binding of Object.values(node.bindings)) {
+    for (const [pointer, binding] of Object.entries(node.bindings)) {
+      boundSubjects.add(pointer)
       if (binding.kind !== 'owner') continue
       const ref = byKey.get(sectionKey(binding))
       if (!ref) fail('owner binding is outside the receipt-bound Section Index')
       if (ref.digest !== binding.sectionDigest)
         fail('owner binding section digest does not match Section Index')
       sections.set(sectionKey(ref), ref)
-      ownerSectionKeys.add(sectionKey(ref))
+      boundSubjects.add(binding.sourcePointer)
       evidence.add(ownerEvidencePointer(binding))
     }
   }
@@ -483,7 +505,7 @@ function moduleSourceClosure(
       selected.map(section => Object.freeze({ ...section })),
     ),
     evidencePointers: Object.freeze(evidencePointers),
-    ownerSectionKeys: Object.freeze([...ownerSectionKeys].sort(compare)),
+    boundSubjects: Object.freeze([...boundSubjects].sort(compare)),
   }
 }
 
@@ -599,7 +621,7 @@ function normalizePacketSourceSections(
 function validatePacket(packet: GameIrSemanticValidationPacket): {
   packet: GameIrSemanticValidationPacket
   module: GameIrSemanticValidatorModule
-  ownerSectionKeys: readonly string[]
+  boundSubjects: readonly string[]
 } {
   if (!isRecord(packet)) fail('packet must be an object')
   exactKeys(
@@ -723,7 +745,7 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
   return {
     packet: Object.freeze({ ...body, packetDigest: packet.packetDigest }),
     module,
-    ownerSectionKeys: closure.ownerSectionKeys,
+    boundSubjects: closure.boundSubjects,
   }
 }
 
@@ -745,12 +767,30 @@ function exactStringArray(
 function resultKeys(
   value: Record<string, unknown>,
   outcome: 'PASS' | 'FAIL' | 'AMBIGUOUS',
+  reasonCode?: string,
 ): void {
   exactKeys(
     value,
     outcome === 'PASS'
       ? ['outcome', 'packetDigest', 'checkIds']
-      : ['outcome', 'packetDigest', 'reasonCode', 'actual', 'evidencePointers'],
+      : reasonCode === 'missing-projection' ||
+          reasonCode === 'ambiguous-projection'
+        ? [
+            'outcome',
+            'packetDigest',
+            'reasonCode',
+            'actual',
+            'missingSubject',
+            'expectedProjection',
+            'evidencePointers',
+          ]
+        : [
+            'outcome',
+            'packetDigest',
+            'reasonCode',
+            'actual',
+            'evidencePointers',
+          ],
     `${outcome} result`,
   )
 }
@@ -778,11 +818,37 @@ export function admitGameIrSemanticValidationResult(
   }
   if (result.outcome !== 'FAIL' && result.outcome !== 'AMBIGUOUS')
     fail('result outcome is invalid')
-  resultKeys(result, result.outcome)
+  const rawReasonCode = result.reasonCode
+  if (
+    typeof rawReasonCode !== 'string' ||
+    (!GAME_IR_SEMANTIC_FAILURE_REASON_CODES.includes(
+      rawReasonCode as GameIrSemanticFailureReasonCode,
+    ) &&
+      !GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES.includes(
+        rawReasonCode as GameIrSemanticAmbiguousReasonCode,
+      ))
+  )
+    fail('result reasonCode is not service-owned')
+  const reasonCode = rawReasonCode as
+    | GameIrSemanticFailureReasonCode
+    | GameIrSemanticAmbiguousReasonCode
+  if (
+    (result.outcome === 'FAIL' && reasonCode === 'ambiguous-projection') ||
+    (result.outcome === 'AMBIGUOUS' && reasonCode !== 'ambiguous-projection')
+  )
+    fail('result outcome does not match its service-owned reasonCode')
+  resultKeys(result, result.outcome, reasonCode)
   if (result.packetDigest !== validated.packet.packetDigest)
     fail('result packet digest does not match packet')
-  const reasonCode = text(result.reasonCode, 'result reasonCode')
   const actual = text(result.actual, 'result actual')
+  const requiresProjectionIdentity =
+    reasonCode === 'missing-projection' || reasonCode === 'ambiguous-projection'
+  const missingSubject = requiresProjectionIdentity
+    ? text(result.missingSubject, 'result missingSubject')
+    : undefined
+  const expectedProjection = requiresProjectionIdentity
+    ? text(result.expectedProjection, 'result expectedProjection')
+    : undefined
   const evidenceValues = strictArray(
     result.evidencePointers,
     'result evidencePointers',
@@ -799,7 +865,7 @@ export function admitGameIrSemanticValidationResult(
     if (!allowed.has(pointer))
       fail('result evidence pointer is outside owner namespace')
     if (pointer.startsWith('section:')) {
-      if (!SECTION_EVIDENCE_REASON_CODES.includes(reasonCode))
+      if (!requiresProjectionIdentity)
         fail(
           'section evidence is only valid for missing or ambiguous projections',
         )
@@ -808,8 +874,8 @@ export function admitGameIrSemanticValidationResult(
         0,
         sectionPointer.lastIndexOf('@'),
       )
-      if (validated.ownerSectionKeys.includes(sectionIdentity))
-        fail('section evidence cannot replace an owner binding')
+      if (validated.boundSubjects.includes(missingSubject!))
+        fail('section evidence cannot replace an owner binding for its subject')
     }
     seen.add(pointer)
   }
@@ -817,11 +883,15 @@ export function admitGameIrSemanticValidationResult(
     if (compare(evidence[index - 1]!, evidence[index]!) >= 0)
       fail('result evidencePointers must be unique and sorted')
   }
-  return Object.freeze({
+  const admitted = {
     outcome: result.outcome,
     packetDigest: validated.packet.packetDigest,
     reasonCode,
     actual,
+    ...(requiresProjectionIdentity
+      ? { missingSubject, expectedProjection }
+      : {}),
     evidencePointers: Object.freeze([...evidence]),
-  }) as GameIrSemanticValidationResult
+  }
+  return Object.freeze(admitted) as GameIrSemanticValidationResult
 }
