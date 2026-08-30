@@ -132,13 +132,82 @@ function exact(
   keys: readonly string[],
   label: string,
 ): void {
-  const actual = Object.keys(value).sort()
+  const actual = ownDataKeys(value, label).sort()
   const expected = [...keys].sort()
   if (
     actual.length !== expected.length ||
     actual.some((key, i) => key !== expected[i])
   )
     fail(`${label} has unknown or missing fields`)
+}
+function ownDataKeys(value: object, label: string): string[] {
+  const keys = Reflect.ownKeys(value)
+  const names: string[] = []
+  for (const key of keys) {
+    if (typeof key !== 'string') fail(`${label} has a symbol property`)
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (
+      !descriptor ||
+      !descriptor.enumerable ||
+      !('value' in descriptor) ||
+      descriptor.get ||
+      descriptor.set
+    )
+      fail(`${label} has a non-enumerable or accessor property`)
+    names.push(key)
+  }
+  return names
+}
+function strictAuthorityValue(
+  value: unknown,
+  label: string,
+  seen = new Set<object>(),
+): void {
+  if (value === null || typeof value !== 'object') return
+  if (seen.has(value)) return
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const keys = Reflect.ownKeys(value)
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length')
+    if (!lengthDescriptor || lengthDescriptor.value !== value.length)
+      fail(`${label} has an invalid array length`)
+    const indexes: number[] = []
+    for (const key of keys) {
+      if (key === 'length') continue
+      if (typeof key !== 'string' || !/^\d+$/.test(key))
+        fail(`${label} has a symbol or custom array property`)
+      const index = Number(key)
+      if (!Number.isSafeInteger(index) || index >= value.length)
+        fail(`${label} has a sparse or custom array property`)
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (
+        !descriptor ||
+        !descriptor.enumerable ||
+        !('value' in descriptor) ||
+        descriptor.get ||
+        descriptor.set
+      )
+        fail(`${label} has a sparse or accessor array property`)
+      indexes.push(index)
+      strictAuthorityValue(value[index], `${label}[${index}]`, seen)
+    }
+    indexes.sort((left, right) => left - right)
+    if (
+      indexes.length !== value.length ||
+      indexes.some((index, position) => index !== position)
+    )
+      fail(`${label} is sparse or has custom array properties`)
+    return
+  }
+  if (Object.getPrototypeOf(value) !== Object.prototype)
+    fail(`${label} is not a plain object`)
+  for (const key of ownDataKeys(value, label)) {
+    strictAuthorityValue(
+      (value as Record<string, unknown>)[key],
+      `${label}.${key}`,
+      seen,
+    )
+  }
 }
 function frozen(value: unknown, seen = new Set<object>()): boolean {
   if (value === null || typeof value !== 'object') return true
@@ -189,29 +258,69 @@ async function componentsSafe(
       fail('existing path component is not a directory')
   }
 }
-async function writeExclusive(
+function temporaryPath(path: string, authorityDigest: string): string {
+  return `${path}.tmp-${authorityDigest}`
+}
+async function writeAtomic(
   root: string,
   path: string,
   bytes: string,
+  authorityDigest: string,
 ): Promise<void> {
   await componentsSafe(root, path, true)
-  try {
-    const handle = await open(path, 'wx')
-    try {
-      await handle.writeFile(bytes)
-    } finally {
-      await handle.close()
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  const temporary = temporaryPath(path, authorityDigest)
+  await componentsSafe(root, temporary, true)
+  if (await existing(path)) {
     const info = await lstat(path)
     if (info.isSymbolicLink() || !info.isFile())
       fail(`conflicting path is not a regular file: ${path}`)
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      if ((await readFile(path, 'utf8')) === bytes) return
-      await new Promise(resolve => setTimeout(resolve, 1))
+    if ((await readFile(path, 'utf8')) !== bytes)
+      fail(`conflicting bytes at ${path}`)
+    if (await existing(temporary)) {
+      await componentsSafe(root, temporary, true)
+      await rm(temporary, { force: true })
     }
-    fail(`conflicting bytes at ${path}`)
+    return
+  }
+  let temporaryReady = false
+  while (!temporaryReady) {
+    if (await existing(temporary)) {
+      const info = await lstat(temporary)
+      if (info.isSymbolicLink() || !info.isFile())
+        fail(`temporary path is not a regular file: ${temporary}`)
+      if ((await readFile(temporary, 'utf8')) === bytes) {
+        temporaryReady = true
+      } else {
+        await rm(temporary, { force: true })
+      }
+      continue
+    }
+    try {
+      const handle = await open(temporary, 'wx')
+      try {
+        await handle.writeFile(bytes)
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
+      temporaryReady = true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    }
+  }
+  try {
+    await rename(temporary, path)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') {
+      if (!(await existing(path)))
+        fail(`atomic rename race requires safe retry for ${path}`)
+    } else if (code !== 'EEXIST') throw error
+    const info = await lstat(path)
+    if (info.isSymbolicLink() || !info.isFile())
+      fail(`conflicting path is not a regular file: ${path}`)
+    if ((await readFile(path, 'utf8')) !== bytes)
+      fail(`conflicting bytes at ${path}`)
   }
 }
 async function locked<T>(key: string, action: () => Promise<T>): Promise<T> {
@@ -234,6 +343,26 @@ async function ensureDir(root: string, path: string): Promise<void> {
   await componentsSafe(root, path)
   await mkdir(path, { recursive: true })
   await componentsSafe(root, path)
+}
+function artifactNames(
+  plan: Plan,
+  prefix: string,
+  includeTemporary: boolean,
+): string[] {
+  const names = plan.artifacts
+    .filter(artifact =>
+      prefix === ''
+        ? !artifact.path.startsWith('modules/') &&
+          !artifact.path.startsWith('source-maps/')
+        : artifact.path.startsWith(prefix),
+    )
+    .map(artifact => artifact.path.slice(prefix.length))
+  if (prefix === '') names.push('COMMITTED.json')
+  if (!includeTemporary) return names
+  return [
+    ...names,
+    ...names.map(name => temporaryPath(name, plan.authorityDigest)),
+  ]
 }
 async function exactDirectory(
   path: string,
@@ -337,6 +466,7 @@ function validateAdmissions(
 }
 
 function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
+  strictAuthorityValue(authorityInput, 'publication authority')
   object(authorityInput as unknown, 'publication authority')
   exact(
     authorityInput as unknown as Record<string, unknown>,
@@ -521,7 +651,12 @@ async function writeStage(plan: Plan): Promise<void> {
     plan.workspacePath,
     pathOf(plan.workspacePath, `${ROOT}/.staging`),
   )
-  await writeExclusive(plan.workspacePath, plan.journal, plan.journalBytes)
+  await writeAtomic(
+    plan.workspacePath,
+    plan.journal,
+    plan.journalBytes,
+    plan.authorityDigest,
+  )
   if (await existing(plan.stage)) {
     await componentsSafe(plan.workspacePath, plan.stage)
     await exactDirectory(
@@ -529,14 +664,11 @@ async function writeStage(plan: Plan): Promise<void> {
       [
         'modules',
         'source-maps',
-        ...plan.artifacts
-          .filter(
-            a =>
-              !a.path.startsWith('modules/') &&
-              !a.path.startsWith('source-maps/'),
-          )
-          .map(a => a.path),
+        ...artifactNames(plan, '', true).filter(
+          name => name !== 'COMMITTED.json',
+        ),
         'COMMITTED.json',
+        temporaryPath('COMMITTED.json', plan.authorityDigest),
       ],
       'staging',
       true,
@@ -546,54 +678,58 @@ async function writeStage(plan: Plan): Promise<void> {
   await ensureDir(plan.workspacePath, join(plan.stage, 'source-maps'))
   await exactDirectory(
     join(plan.stage, 'modules'),
-    plan.artifacts
-      .filter(a => a.path.startsWith('modules/'))
-      .map(a => a.path.slice(8)),
+    artifactNames(plan, 'modules/', true),
     'staging modules',
     true,
   )
   await exactDirectory(
     join(plan.stage, 'source-maps'),
-    plan.artifacts
-      .filter(a => a.path.startsWith('source-maps/'))
-      .map(a => a.path.slice(12)),
+    artifactNames(plan, 'source-maps/', true),
     'staging source maps',
     true,
   )
-  for (const artifact of [...plan.artifacts, plan.marker])
-    await writeExclusive(
-      plan.workspacePath,
-      join(plan.stage, artifact.path),
-      artifact.bytes,
-    )
+  for (const artifact of [...plan.artifacts, plan.marker]) {
+    try {
+      await writeAtomic(
+        plan.workspacePath,
+        join(plan.stage, artifact.path),
+        artifact.bytes,
+        plan.authorityDigest,
+      )
+    } catch (error) {
+      if (!(await existing(plan.stage)) && (await existing(plan.final))) {
+        await exactFiles(plan, plan.final)
+        return
+      }
+      throw error
+    }
+  }
+  for (const artifact of [...plan.artifacts, plan.marker]) {
+    const artifactPath = join(plan.stage, artifact.path)
+    if ((await readFile(artifactPath, 'utf8')) !== artifact.bytes)
+      fail(`staging artifact disagrees for ${artifact.path}`)
+  }
+  await removeStageTemporaryFiles(plan)
   await exactDirectory(
     plan.stage,
     [
       'modules',
       'source-maps',
-      ...plan.artifacts
-        .filter(
-          a =>
-            !a.path.startsWith('modules/') &&
-            !a.path.startsWith('source-maps/'),
-        )
-        .map(a => a.path),
+      ...artifactNames(plan, '', false).filter(
+        name => name !== 'COMMITTED.json',
+      ),
       'COMMITTED.json',
     ],
     'staging',
   )
   await exactDirectory(
     join(plan.stage, 'modules'),
-    plan.artifacts
-      .filter(a => a.path.startsWith('modules/'))
-      .map(a => a.path.slice(8)),
+    artifactNames(plan, 'modules/', false),
     'staging modules',
   )
   await exactDirectory(
     join(plan.stage, 'source-maps'),
-    plan.artifacts
-      .filter(a => a.path.startsWith('source-maps/'))
-      .map(a => a.path.slice(12)),
+    artifactNames(plan, 'source-maps/', false),
     'staging source maps',
   )
 }
@@ -640,9 +776,26 @@ async function exactFiles(plan: Plan, root: string): Promise<void> {
       fail(`artifact bytes disagree for ${artifact.path}`)
   }
 }
+async function removeStageTemporaryFiles(plan: Plan): Promise<void> {
+  for (const artifact of [...plan.artifacts, plan.marker]) {
+    const target = join(plan.stage, artifact.path)
+    const temporary = temporaryPath(target, plan.authorityDigest)
+    if (!(await existing(temporary))) continue
+    await componentsSafe(plan.workspacePath, temporary, true)
+    if (!(await existing(target)))
+      fail(`temporary artifact has no complete target: ${artifact.path}`)
+    const info = await lstat(target)
+    if (info.isSymbolicLink() || !info.isFile())
+      fail(`temporary artifact target is not a regular file: ${artifact.path}`)
+    if ((await readFile(target, 'utf8')) !== artifact.bytes)
+      fail(`temporary artifact target disagrees: ${artifact.path}`)
+    await rm(temporary, { force: true })
+  }
+}
 async function cleanup(plan: Plan): Promise<void> {
   await rm(plan.stage, { recursive: true, force: true })
   await rm(plan.journal, { force: true })
+  await rm(temporaryPath(plan.journal, plan.authorityDigest), { force: true })
   for (const path of [
     join(plan.workspacePath, ROOT, '.staging'),
     join(plan.workspacePath, ROOT, '.journal'),
@@ -667,7 +820,11 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
   try {
     await rename(plan.stage, plan.final)
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    const code = (error as NodeJS.ErrnoException).code
+    if (code !== 'EEXIST' && code !== 'ENOTEMPTY' && code !== 'ENOENT')
+      throw error
+    if (!(await existing(plan.final)))
+      fail('rename race winner is not yet visible; retry safely')
     await exactFiles(plan, plan.final)
   }
   await exactFiles(plan, plan.final)

@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   symlink,
 } from 'node:fs/promises'
@@ -61,7 +62,7 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function request(): GameIrCompileRequest {
+function request(publicationId = 'publication-1'): GameIrCompileRequest {
   const body: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
     schemaVersion: 'foundation-ready-receipt.v1',
     projectId: 'project-1',
@@ -81,7 +82,7 @@ function request(): GameIrCompileRequest {
   return {
     schemaVersion: 'game-ir-compile-request.v1',
     taskId: 'compile-task-1',
-    publicationId: 'publication-1',
+    publicationId,
     gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
     foundation: { ...body, receiptDigest: sha(body) },
   }
@@ -90,8 +91,11 @@ function request(): GameIrCompileRequest {
 function sha(value: unknown): string {
   return createHash('sha256').update(canonical(value)).digest('hex')
 }
+function shaBytes(value: string): string {
+  return createHash('sha256').update(value).digest('hex')
+}
 
-function rawCandidate(): Record<string, unknown> {
+function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
   return {
     schemaVersion: GAME_IR_SCHEMA_VERSION,
     taskId: 'compile-task-1',
@@ -101,26 +105,32 @@ function rawCandidate(): Record<string, unknown> {
         moduleId,
         nodes: [
           ...(moduleId === 'gameplay'
-            ? [0, 1, 2].map(index => ({
-                id: `${moduleId}.extra-${index}`,
-                kind: 'derived-node',
-                producerMode: 'derived',
-                value: { score: index },
-                bindings: {
-                  '/id': {
-                    kind: 'owner',
-                    documentPath: 'docs/GDD.md',
-                    sectionId: 'core-loop',
-                    sectionDigest,
-                    sourcePointer: `/ir/${moduleId}/extra-${index}`,
+            ? Array.from({ length: extraNodeCount }, (_, index) => {
+                const extraId =
+                  extraNodeCount > 9
+                    ? String(index).padStart(3, '0')
+                    : String(index)
+                return {
+                  id: `${moduleId}.extra-${extraId}`,
+                  kind: 'derived-node',
+                  producerMode: 'derived',
+                  value: { score: index },
+                  bindings: {
+                    '/id': {
+                      kind: 'owner',
+                      documentPath: 'docs/GDD.md',
+                      sectionId: 'core-loop',
+                      sectionDigest,
+                      sourcePointer: `/ir/${moduleId}/extra-${extraId}`,
+                    },
+                    '/value/score': {
+                      kind: 'derived',
+                      derivationRuleId: `score-${extraId}`,
+                      inputPointers: ['/id'],
+                    },
                   },
-                  '/value/score': {
-                    kind: 'derived',
-                    derivationRuleId: `score-${index}`,
-                    inputPointers: ['/id'],
-                  },
-                },
-              }))
+                }
+              })
             : []),
           {
             id: `${moduleId}.root`,
@@ -150,9 +160,13 @@ function rawCandidate(): Record<string, unknown> {
   }
 }
 
-function authority(workspacePath: string): GameIrPublicationAuthority {
-  const compileRequest = request()
-  const candidate = parseGameIrCandidate(rawCandidate(), {
+function authority(
+  workspacePath: string,
+  extraNodeCount = 3,
+  publicationId = 'publication-1',
+): GameIrPublicationAuthority {
+  const compileRequest = request(publicationId)
+  const candidate = parseGameIrCandidate(rawCandidate(extraNodeCount), {
     request: compileRequest,
     sections: sectionIndex,
   })
@@ -188,10 +202,10 @@ function authority(workspacePath: string): GameIrPublicationAuthority {
 }
 
 const workspaces: string[] = []
-async function setup(): Promise<GameIrPublicationAuthority> {
+async function setup(extraNodeCount = 3): Promise<GameIrPublicationAuthority> {
   const workspacePath = await mkdtemp(join(tmpdir(), 'game-ir-publication-'))
   workspaces.push(workspacePath)
-  return authority(workspacePath)
+  return authority(workspacePath, extraNodeCount)
 }
 afterEach(async () => {
   await Promise.all(
@@ -318,6 +332,48 @@ describe('atomic Game IR publication and recovery', () => {
     const recovered = await recoverGameIrPublication(value)
     await expect(recoverGameIrPublication(value)).resolves.toEqual(recovered)
 
+    for (const relativePath of [
+      'journal',
+      'dependency-graph.json',
+      'COMMITTED.json',
+    ]) {
+      const interrupted = await setup()
+      const interruptedPrepared = await prepareGameIrPublication(interrupted)
+      const target =
+        relativePath === 'journal'
+          ? join(interrupted.workspacePath, interruptedPrepared.journalPath)
+          : join(
+              interrupted.workspacePath,
+              interruptedPrepared.preparedPath,
+              relativePath,
+            )
+      const temporary = `${target}.tmp-${interruptedPrepared.authorityDigest}`
+      await rm(target)
+      await Bun.write(temporary, 'partial write')
+      await expect(recoverGameIrPublication(interrupted)).resolves.toBeTruthy()
+    }
+
+    const renamed = await setup()
+    const renamedPrepared = await prepareGameIrPublication(renamed)
+    expect(
+      await readdir(join(renamed.workspacePath, renamedPrepared.preparedPath)),
+    ).toContain('COMMITTED.json')
+    await mkdir(
+      join(renamed.workspacePath, '.beegame/ir/game-ir.v1/revisions'),
+      { recursive: true },
+    )
+    await rename(
+      join(renamed.workspacePath, renamedPrepared.preparedPath),
+      join(
+        renamed.workspacePath,
+        '.beegame/ir/game-ir.v1/revisions/foundation-revision-1',
+      ),
+    )
+    await expect(recoverGameIrPublication(renamed)).resolves.toBeTruthy()
+    expect(
+      await readdir(join(renamed.workspacePath, '.beegame/ir/game-ir.v1')),
+    ).toEqual(['revisions'])
+
     const second = await setup()
     const secondPrepared = await prepareGameIrPublication(second)
     const journalPath = join(second.workspacePath, secondPrepared.journalPath)
@@ -357,6 +413,7 @@ describe('atomic Game IR publication and recovery', () => {
       'modules/core.json',
       'source-maps/core.json',
       'dependency-graph.json',
+      'manifest.json',
       'COMMITTED.json',
     ]) {
       const clean = await setup()
@@ -367,10 +424,62 @@ describe('atomic Game IR publication and recovery', () => {
         '.beegame/ir/game-ir.v1/revisions/foundation-revision-1',
       )
       const target = join(committedRoot, artifactPath)
-      await Bun.write(
-        target,
-        `${canonical({ attacker: true, recomputedDigest: digest })}\n`,
-      )
+      const attackerBytes = `${canonical({
+        attacker: true,
+        recomputedDigest: shaBytes(artifactPath),
+      })}\n`
+      await Bun.write(target, attackerBytes)
+      if (
+        artifactPath !== 'manifest.json' &&
+        artifactPath !== 'COMMITTED.json'
+      ) {
+        const manifestPath = join(committedRoot, 'manifest.json')
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+          modules: Array<{
+            moduleId: string
+            digest: string
+            sourceMapDigest: string
+          }>
+          dependencyGraphDigest: string
+        }
+        if (artifactPath.startsWith('modules/'))
+          manifest.modules.find(module => module.moduleId === 'core')!.digest =
+            shaBytes(attackerBytes)
+        if (artifactPath.startsWith('source-maps/'))
+          manifest.modules.find(
+            module => module.moduleId === 'core',
+          )!.sourceMapDigest = shaBytes(attackerBytes)
+        if (artifactPath === 'dependency-graph.json')
+          manifest.dependencyGraphDigest = shaBytes(attackerBytes)
+        const manifestBytes = `${canonical(manifest)}\n`
+        await Bun.write(manifestPath, manifestBytes)
+        const markerPath = join(committedRoot, 'COMMITTED.json')
+        const marker = JSON.parse(await readFile(markerPath, 'utf8')) as {
+          manifestDigest: string
+          authorityDigest: string
+          moduleDigests: Record<string, string>
+          sourceMapDigests: Record<string, string>
+          dependencyGraphDigest: string
+        }
+        marker.manifestDigest = shaBytes(manifestBytes)
+        marker.authorityDigest = shaBytes(manifestBytes)
+        if (artifactPath.startsWith('modules/'))
+          marker.moduleDigests.core = shaBytes(attackerBytes)
+        if (artifactPath.startsWith('source-maps/'))
+          marker.sourceMapDigests.core = shaBytes(attackerBytes)
+        if (artifactPath === 'dependency-graph.json')
+          marker.dependencyGraphDigest = shaBytes(attackerBytes)
+        await Bun.write(markerPath, `${canonical(marker)}\n`)
+      } else if (artifactPath === 'manifest.json') {
+        const markerPath = join(committedRoot, 'COMMITTED.json')
+        const marker = JSON.parse(await readFile(markerPath, 'utf8')) as {
+          manifestDigest: string
+          authorityDigest: string
+        }
+        marker.manifestDigest = shaBytes(attackerBytes)
+        marker.authorityDigest = shaBytes(attackerBytes)
+        await Bun.write(markerPath, `${canonical(marker)}\n`)
+      }
       await expect(validateCommittedGameIr(clean)).rejects.toThrow(
         /digest|artifact|authority|module|final/i,
       )
@@ -415,5 +524,146 @@ describe('atomic Game IR publication and recovery', () => {
       left.status === 'fulfilled' && right.status === 'fulfilled' && left.value,
     ).toEqual(right.status === 'fulfilled' && right.value)
     await expect(validateCommittedGameIr(value)).resolves.toBeTruthy()
+  })
+
+  test('coordinates same-revision publishers in independent processes', async () => {
+    const value = await setup()
+    const modulePath = join(
+      process.cwd(),
+      'packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.ts',
+    )
+    const childScript = `
+      import { commitGameIrPublication } from ${JSON.stringify(modulePath)}
+      const freeze = (value) => {
+        if (value && typeof value === 'object') {
+          for (const child of Object.values(value)) freeze(child)
+          Object.freeze(value)
+        }
+        return value
+      }
+      await commitGameIrPublication(freeze(JSON.parse(process.env.GAME_IR_AUTH)))
+    `
+    const serialized = JSON.stringify(value)
+    const launch = () =>
+      Bun.spawn(['bun', '--eval', childScript], {
+        cwd: process.cwd(),
+        env: { ...process.env, GAME_IR_AUTH: serialized },
+        stdout: 'ignore',
+        stderr: 'pipe',
+      })
+    const children = [launch(), launch()]
+    const exits = await Promise.all(children.map(child => child.exited))
+    if (exits.some(exit => exit !== 0)) {
+      const errors = await Promise.all(
+        children.map(child =>
+          child.stderr
+            ? new Response(child.stderr).text()
+            : Promise.resolve(''),
+        ),
+      )
+      throw new Error(errors.join('\n'))
+    }
+    expect(exits).toEqual([0, 0])
+    await expect(validateCommittedGameIr(value)).resolves.toBeTruthy()
+  })
+
+  test('rejects an independent different authority without mixing final bytes', async () => {
+    const value = await setup()
+    const other = authority(value.workspacePath, 3, 'publication-2')
+    const modulePath = join(
+      process.cwd(),
+      'packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.ts',
+    )
+    const childScript = `
+      import { commitGameIrPublication } from ${JSON.stringify(modulePath)}
+      const freeze = (value) => {
+        if (value && typeof value === 'object') {
+          for (const child of Object.values(value)) freeze(child)
+          Object.freeze(value)
+        }
+        return value
+      }
+      try {
+        await commitGameIrPublication(freeze(JSON.parse(process.env.GAME_IR_AUTH)))
+      } catch {
+        process.exit(1)
+      }
+    `
+    const launch = (candidate: GameIrPublicationAuthority) =>
+      Bun.spawn(['bun', '--eval', childScript], {
+        cwd: process.cwd(),
+        env: { ...process.env, GAME_IR_AUTH: JSON.stringify(candidate) },
+        stdout: 'ignore',
+        stderr: 'ignore',
+      })
+    const children = [launch(value), launch(other)]
+    const exits = await Promise.all(children.map(child => child.exited))
+    expect([...exits].sort()).toEqual([0, 1])
+    const winner = exits[0] === 0 ? value : other
+    const loser = exits[0] === 0 ? other : value
+    await expect(validateCommittedGameIr(winner)).resolves.toBeTruthy()
+    await expect(validateCommittedGameIr(loser)).rejects.toThrow()
+  })
+
+  test('rejects strict authority descriptor and array-shape tricks', async () => {
+    const value = await setup()
+    const symbolAuthority = { ...value, [Symbol('hidden')]: true }
+    await expect(prepareGameIrPublication(symbolAuthority)).rejects.toThrow(
+      /symbol|property/i,
+    )
+
+    const nonEnumerableAuthority = { ...value }
+    Object.defineProperty(nonEnumerableAuthority, 'hidden', {
+      value: true,
+      enumerable: false,
+    })
+    await expect(
+      prepareGameIrPublication(nonEnumerableAuthority),
+    ).rejects.toThrow(/non-enumerable|property/i)
+
+    const accessorAuthority = { ...value }
+    Object.defineProperty(accessorAuthority, 'hidden', {
+      get: () => true,
+      enumerable: true,
+    })
+    await expect(prepareGameIrPublication(accessorAuthority)).rejects.toThrow(
+      /accessor|property/i,
+    )
+
+    const sparseAdmissions = [...value.admissions]
+    delete sparseAdmissions[0]
+    await expect(
+      prepareGameIrPublication({
+        ...value,
+        admissions: Object.freeze(sparseAdmissions),
+      }),
+    ).rejects.toThrow(/sparse|array|property/i)
+
+    const customAdmissions = [
+      ...value.admissions,
+    ] as typeof value.admissions & {
+      custom?: boolean
+    }
+    customAdmissions.custom = true
+    await expect(
+      prepareGameIrPublication({
+        ...value,
+        admissions: Object.freeze(customAdmissions),
+      }),
+    ).rejects.toThrow(/custom|array|property/i)
+  })
+
+  test('publishes an expanded candidate beyond common node and edge counts', async () => {
+    const value = await setup(260)
+    const ready = await commitGameIrPublication(value)
+    const graphPath = join(
+      value.workspacePath,
+      ready.committedPath.replace(/COMMITTED\.json$/, 'dependency-graph.json'),
+    )
+    const dependencyGraph = JSON.parse(await readFile(graphPath, 'utf8')) as {
+      edges: readonly unknown[]
+    }
+    expect(dependencyGraph.edges.length).toBeGreaterThan(256)
+    await expect(validateCommittedGameIr(value)).resolves.toEqual(ready)
   })
 })
