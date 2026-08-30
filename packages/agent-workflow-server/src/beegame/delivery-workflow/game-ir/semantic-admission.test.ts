@@ -6,21 +6,35 @@ import {
   type GameIrCompileRequest,
 } from './contracts'
 import {
+  canonicalGameIrJson,
   digestGameIrValue,
   parseGameIrCandidate,
   type GameIrCandidate,
   type GameIrSourceSection,
 } from './model'
 import {
+  GAME_IR_SEMANTIC_VALIDATOR_MANIFEST,
   admitGameIrSemanticValidationResult,
   buildGameIrSemanticValidationPacket,
+  type GameIrSemanticValidationPacketInput,
 } from './semantic-admission'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
 
-const digest = 'a'.repeat(64)
-const sectionDigest = 'b'.repeat(64)
-const technicalSectionDigest = 'c'.repeat(64)
+const receiptDigest = 'a'.repeat(64)
+const markdown = '# Core Loop\n\nThe player survives.'
+const sectionDigest = createHash('sha256').update(markdown).digest('hex')
+
+const sectionIndex: readonly GameIrSourceSection[] = [
+  {
+    documentPath: 'docs/GDD.md',
+    sectionId: 'core-loop',
+    heading: 'Core Loop',
+    startLine: 1,
+    endLine: 3,
+    digest: sectionDigest,
+  },
+]
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -32,206 +46,306 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
-const sections: readonly GameIrSourceSection[] = [
-  {
-    documentPath: 'docs/GDD.md',
-    sectionId: 'core-loop',
-    heading: 'Core Loop',
-    startLine: 1,
-    endLine: 4,
-    digest: sectionDigest,
-  },
-  {
-    documentPath: 'docs/TECHNICAL_DESIGN.md',
-    sectionId: 'runtime-states',
-    heading: 'Runtime States',
-    startLine: 1,
-    endLine: 5,
-    digest: technicalSectionDigest,
-  },
-]
-
-function receiptWithoutDigest(): Omit<FoundationReadyReceipt, 'receiptDigest'> {
-  return {
+function foundation(): FoundationReadyReceipt {
+  const withoutDigest: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
     schemaVersion: 'foundation-ready-receipt.v1',
     projectId: 'project-1',
     foundationRevision: 'foundation-revision-1',
-    confirmedBriefDigest: digest,
+    confirmedBriefDigest: receiptDigest,
     documentDigests: Object.fromEntries(
-      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, digest]),
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, receiptDigest]),
     ) as FoundationReadyReceipt['documentDigests'],
     sectionIndexPath: '.beegame/foundation/section-index.json',
-    sectionIndexDigest: digestSectionIndex(sections),
+    sectionIndexDigest: digestSectionIndex(sectionIndex),
     authority: {
       kind: 'review',
-      reviewDigest: digest,
-      issueRegistryDigest: digest,
+      reviewDigest: receiptDigest,
+      issueRegistryDigest: receiptDigest,
     },
+  }
+  return {
+    ...withoutDigest,
+    receiptDigest: createHash('sha256')
+      .update(canonical(withoutDigest))
+      .digest('hex'),
   }
 }
 
 function request(): GameIrCompileRequest {
-  const foundation = receiptWithoutDigest()
   return {
     schemaVersion: 'game-ir-compile-request.v1',
     taskId: 'compile-task-1',
     publicationId: 'publication-1',
     gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
-    foundation: {
-      ...foundation,
-      receiptDigest: createHash('sha256')
-        .update(canonical(foundation))
-        .digest('hex'),
-    },
+    foundation: foundation(),
+  }
+}
+
+const moduleIds = [...GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules].map(
+  item => item.moduleId,
+)
+
+function rawCandidate(): Record<string, unknown> {
+  return {
+    schemaVersion: GAME_IR_SCHEMA_VERSION,
+    taskId: 'compile-task-1',
+    foundationRevision: 'foundation-revision-1',
+    modules: moduleIds.map(moduleId => ({
+      moduleId,
+      nodes: [
+        {
+          id: `${moduleId}.root`,
+          kind: 'semantic-node',
+          producerMode: 'semantic',
+          value: { label: moduleId },
+          bindings: {
+            '/id': {
+              kind: 'owner',
+              documentPath: 'docs/GDD.md',
+              sectionId: 'core-loop',
+              sectionDigest,
+              sourcePointer: `/ir/${moduleId}`,
+            },
+            '/value/label': {
+              kind: 'owner',
+              documentPath: 'docs/GDD.md',
+              sectionId: 'core-loop',
+              sectionDigest,
+              sourcePointer: `/ir/${moduleId}/label`,
+            },
+          },
+        },
+      ],
+    })),
   }
 }
 
 function candidate(): GameIrCandidate {
-  const owner = {
-    kind: 'owner' as const,
-    documentPath: 'docs/GDD.md' as const,
-    sectionId: 'core-loop',
-    sectionDigest,
-    sourcePointer: '/entities/player',
-  }
-  return parseGameIrCandidate(
-    {
-      schemaVersion: GAME_IR_SCHEMA_VERSION,
-      taskId: 'compile-task-1',
-      foundationRevision: 'foundation-revision-1',
-      modules: [
-        {
-          moduleId: 'gameplay',
-          nodes: [
-            {
-              id: 'player',
-              kind: 'entity',
-              producerMode: 'semantic',
-              value: { health: 3 },
-              bindings: {
-                '/id': owner,
-                '/value/health': {
-                  ...owner,
-                  sourcePointer: '/entities/player/health',
-                },
-              },
-            },
-          ],
-        },
-      ],
-    },
-    { request: request(), sections },
-  )
+  return parseGameIrCandidate(rawCandidate(), {
+    request: request(),
+    sections: sectionIndex,
+  })
+}
+
+function input(
+  overrides: Record<string, unknown> = {},
+): GameIrSemanticValidationPacketInput {
+  return {
+    candidate: candidate(),
+    request: request(),
+    sectionIndex,
+    moduleId: 'gameplay',
+    sectionBytes: { 'docs/GDD.md#core-loop': markdown },
+    ...overrides,
+  } as GameIrSemanticValidationPacketInput
 }
 
 function packet() {
-  const value = candidate()
-  return buildGameIrSemanticValidationPacket({
-    candidate: value,
-    moduleId: 'gameplay',
-    sourceSections: [sections[0]!],
-  })
+  return buildGameIrSemanticValidationPacket(input())
 }
 
 describe('isolated Game IR semantic projection admission', () => {
-  test('binds an immutable module candidate and exact source sections', () => {
-    const value = candidate()
-    const before = digestGameIrValue(value.modules[0]!)
-    const result = buildGameIrSemanticValidationPacket({
-      candidate: value,
-      moduleId: 'gameplay',
-      sourceSections: [sections[0]!],
-    })
-
-    expect(result).toEqual({
-      schemaVersion: 'game-ir-semantic-validation-packet.v1',
-      taskId: 'compile-task-1',
-      foundationRevision: 'foundation-revision-1',
-      moduleId: 'gameplay',
-      candidateDigest: before,
-      sourceSections: [sections[0]!],
-      packetDigest: expect.any(String),
-    })
-    expect(Object.isFrozen(result)).toBe(true)
-    expect(Object.isFrozen(result.sourceSections)).toBe(true)
-    expect(result.packetDigest).toMatch(/^[a-f0-9]{64}$/)
-    expect(digestGameIrValue(value.modules[0]!)).toBe(before)
-  })
-
-  test('admits the exact PASS result and freezes the evidence', () => {
-    const result = admitGameIrSemanticValidationResult(packet(), {
-      outcome: 'PASS',
-      packetDigest: packet().packetDigest,
-    })
-    expect(result).toEqual({
-      outcome: 'PASS',
-      packetDigest: packet().packetDigest,
-    })
-    expect(Object.isFrozen(result)).toBe(true)
-  })
-
-  test('admits structured FAIL and AMBIGUOUS diagnostics', () => {
-    const value = packet()
-    for (const outcome of ['FAIL', 'AMBIGUOUS'] as const) {
-      const result = admitGameIrSemanticValidationResult(value, {
-        outcome,
-        packetDigest: value.packetDigest,
-        reasonCode:
-          outcome === 'FAIL' ? 'projection-mismatch' : 'owner-ambiguous',
-        actual: 'the source admits more than one projection',
-        evidencePointers: ['docs/GDD.md#core-loop'],
-      })
-      expect(result.outcome).toBe(outcome)
-      if (result.outcome !== 'PASS')
-        expect(Object.isFrozen(result.evidencePointers)).toBe(true)
+  test('fix Critical: rejects a missing or empty canonical module before packet construction', () => {
+    const modules = rawCandidate().modules as unknown[]
+    const missing = rawCandidate()
+    missing.modules = moduleIds
+      .filter(moduleId => moduleId !== 'gameplay')
+      .map(moduleId =>
+        modules.find(
+          item => (item as { moduleId: string }).moduleId === moduleId,
+        ),
+      )
+    const empty = rawCandidate()
+    empty.modules = moduleIds.map(moduleId =>
+      moduleId === 'gameplay'
+        ? { moduleId, nodes: [] }
+        : (rawCandidate().modules as unknown[]).find(
+            item => (item as { moduleId: string }).moduleId === moduleId,
+          ),
+    )
+    for (const value of [missing, empty]) {
+      expect(() =>
+        buildGameIrSemanticValidationPacket(
+          input({
+            candidate: parseGameIrCandidate(value, {
+              request: request(),
+              sections: sectionIndex,
+            }),
+          }),
+        ),
+      ).toThrow(/module|canonical|empty|node/i)
     }
   })
 
-  test('rejects worker identity, workflow, and replacement-candidate fields', () => {
+  test('fix Critical: rejects forged Section Index metadata and non-exact source bytes', () => {
+    const forgedIndex = [{ ...sectionIndex[0]!, heading: 'Forged heading' }]
+    expect(() =>
+      buildGameIrSemanticValidationPacket(input({ sectionIndex: forgedIndex })),
+    ).toThrow(/section|digest/i)
+    expect(() =>
+      buildGameIrSemanticValidationPacket(
+        input({ sectionBytes: { 'docs/GDD.md#core-loop': 'different bytes' } }),
+      ),
+    ).toThrow(/byte|digest|source/i)
+    expect(() =>
+      buildGameIrSemanticValidationPacket(input({ sectionBytes: {} })),
+    ).toThrow(/byte|source|missing/i)
+    expect(() =>
+      buildGameIrSemanticValidationPacket(
+        input({
+          sectionBytes: {
+            'docs/GDD.md#core-loop': markdown,
+            'docs/TECHNICAL_DESIGN.md#runtime': markdown,
+          },
+        }),
+      ),
+    ).toThrow(/byte|source|extra/i)
+  })
+
+  test('fix Critical: accepts only a complete admitted candidate and rejects detached relabeling', () => {
+    const detached = candidate().modules.find(
+      item => item.moduleId === 'gameplay',
+    )!
+    expect(() =>
+      buildGameIrSemanticValidationPacket(
+        input({
+          candidate: detached,
+          taskId: 'compile-task-1',
+          foundationRevision: 'foundation-revision-1',
+        }),
+      ),
+    ).toThrow(/candidate|complete|detached|module|unknown|input/i)
+    expect(() =>
+      buildGameIrSemanticValidationPacket(
+        input({ taskId: 'caller-relabelled-task' }),
+      ),
+    ).toThrow(/unknown|identity|task|input/i)
+    expect(() =>
+      buildGameIrSemanticValidationPacket(
+        input({ foundationRevision: 'caller-relabelled-revision' }),
+      ),
+    ).toThrow(/unknown|identity|revision|input/i)
+  })
+
+  test('fix Important: PASS requires exact manifest coverage, while empty PASS is rejected', () => {
     const value = packet()
-    for (const extra of [
-      { expected: 'worker supplied expectation' },
-      { target: { documentPath: 'docs/GDD.md', sectionId: 'core-loop' } },
-      { Patch: { sectionId: 'core-loop' } },
-      { candidate: candidate() },
-      { taskId: 'other-task' },
-      { moduleId: 'other-module' },
+    expect(value.candidateBytes).toBe(canonicalGameIrJson(candidate()))
+    expect(value.candidateDigest).toBe(digestGameIrValue(candidate()))
+    const expected = [...GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules].find(
+      item => item.moduleId === 'gameplay',
+    )!.checkIds
+    expect(expected.length).toBeGreaterThan(0)
+    for (const checkIds of [
+      [],
+      expected.slice(1),
+      [...expected, 'worker-injected-check'],
+      [...expected].reverse(),
+      [...expected, expected[0]!],
     ]) {
       expect(() =>
         admitGameIrSemanticValidationResult(value, {
           outcome: 'PASS',
           packetDigest: value.packetDigest,
-          ...extra,
+          checkIds,
         }),
-      ).toThrow(/result|field|identity|extra|shape/i)
+      ).toThrow(/check|coverage|manifest|order|duplicate/i)
     }
-  })
-
-  test('rejects stale packet digests and unknown or duplicate evidence', () => {
-    const value = packet()
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
         outcome: 'PASS',
-        packetDigest: 'f'.repeat(64),
+        packetDigest: value.packetDigest,
       }),
-    ).toThrow(/packet|digest/i)
+    ).toThrow(/check|coverage|shape|unknown|missing/i)
+    const admitted = admitGameIrSemanticValidationResult(value, {
+      outcome: 'PASS',
+      packetDigest: value.packetDigest,
+      checkIds: expected,
+    })
+    expect(admitted).toEqual({
+      outcome: 'PASS',
+      packetDigest: value.packetDigest,
+      checkIds: expected,
+    })
+    expect(Object.isFrozen(admitted)).toBe(true)
+  })
+
+  test('fix Important: diagnostics require exact owner evidence namespace, never coarse sections', () => {
+    const value = packet()
+    const exact = [
+      'docs/GDD.md#core-loop/ir/gameplay',
+      'docs/GDD.md#core-loop/ir/gameplay/label',
+    ]
+    for (const outcome of ['FAIL', 'AMBIGUOUS'] as const) {
+      const admitted = admitGameIrSemanticValidationResult(value, {
+        outcome,
+        packetDigest: value.packetDigest,
+        reasonCode: 'projection-mismatch',
+        actual: 'projection is not supported by source',
+        evidencePointers: exact,
+      })
+      expect(admitted.outcome).toBe(outcome)
+    }
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
         outcome: 'FAIL',
         packetDigest: value.packetDigest,
-        reasonCode: 'bad-projection',
-        actual: 'bad',
-        evidencePointers: ['docs/GDD.md#unknown'],
+        reasonCode: 'coarse-evidence',
+        actual: 'section only',
+        evidencePointers: ['docs/GDD.md#core-loop'],
       }),
-    ).toThrow(/evidence|pointer/i)
+    ).toThrow(/evidence|pointer|owner/i)
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
         outcome: 'AMBIGUOUS',
         packetDigest: value.packetDigest,
-        reasonCode: 'ambiguous',
-        actual: 'ambiguous',
-        evidencePointers: ['docs/GDD.md#core-loop', 'docs/GDD.md#core-loop'],
+        reasonCode: 'duplicate-evidence',
+        actual: 'duplicate',
+        evidencePointers: [exact[0]!, exact[0]!],
       }),
     ).toThrow(/duplicate|evidence|pointer/i)
+    expect(() =>
+      admitGameIrSemanticValidationResult(value, {
+        outcome: 'FAIL',
+        packetDigest: value.packetDigest,
+        reasonCode: 'worker-fields',
+        actual: 'forged',
+        evidencePointers: exact,
+        expected: 'worker supplied expected',
+        target: 'worker supplied target',
+        Patch: 'worker supplied patch',
+        candidate: candidate(),
+      }),
+    ).toThrow(/extra|field|result|shape/i)
+  })
+
+  test('binds immutable candidate bytes and rejects stale packet or manifest identity', () => {
+    const value = packet()
+    const before = digestGameIrValue(candidate())
+    expect(() =>
+      admitGameIrSemanticValidationResult(
+        { ...value, candidateDigest: 'f'.repeat(64) },
+        {
+          outcome: 'PASS',
+          packetDigest: value.packetDigest,
+          checkIds: value.checkIds,
+        },
+      ),
+    ).toThrow(/packet|candidate|digest/i)
+    expect(() =>
+      admitGameIrSemanticValidationResult(
+        {
+          ...value,
+          validatorManifestDigest: 'f'.repeat(64),
+        },
+        {
+          outcome: 'PASS',
+          packetDigest: value.packetDigest,
+          checkIds: value.checkIds,
+        },
+      ),
+    ).toThrow(/manifest|field|packet/i)
+    expect(digestGameIrValue(candidate())).toBe(before)
+    expect(Object.isFrozen(value)).toBe(true)
+    expect(Object.isFrozen(value.sourceSections)).toBe(true)
   })
 })
