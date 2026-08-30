@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计待确认
+状态：设计已确认，Phase 1 实施中
 
 日期：2026-08-30
 
@@ -101,14 +101,16 @@ Game IR 是下游执行 authority，但不是新的产品决策 authority。任�
 
 ### 5.1 FoundationReadyReceipt
 
-Stage 4 的唯一输出边界必须绑定：
+Foundation READY 的唯一交接边界必须绑定：
 
 - Foundation revision；
 - 八份 canonical document path/digest；
 - Section Index path/digest；
-- Reviewer READY digest；
 - 空 Issue Registry digest；
-- publication authority digest。
+- 唯一 READY authority variant：初审直接 READY 使用 `review` 与 review digest；修订后 READY 使用 `revision_publication` 与 committed publication authority digest/base revision；
+- 对完整 receipt canonical bytes 计算的 Foundation ready receipt digest。
+
+两种 authority variant 是同一 READY 接口的互斥来源类型，不是两条运行轨道。一个 receipt 只能携带其中一种，不能同时携带、fallback 或相互转换。
 
 ### 5.2 GameIrCompileRequest
 
