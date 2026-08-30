@@ -14,7 +14,6 @@ import {
 import { withTestDocumentMetadata } from '../../../__tests__/delivery-workflow-test-helpers'
 import {
   buildFoundationSectionIndex,
-  digestSectionIndex,
   type SectionRef,
 } from '../foundation-section-index'
 import {
@@ -22,37 +21,20 @@ import {
   loadFoundationSemanticReview,
 } from '../foundation-audit-artifacts'
 import {
-  buildFoundationFactPackets,
   extractNormalizedFoundationFacts,
-  mergeFoundationFactResults,
-  validateFoundationFactResults,
   type FoundationFactPacket,
 } from '../foundation-fact-extraction'
 import {
   FOUNDATION_FACT_CATALOG,
   type FoundationFactKey,
 } from '../foundation-fact-definitions'
-import { runProductionDeterministicFoundationAudit } from '../foundation-audit-production-manifest'
 import {
   loadFoundationRevisionPacket,
+  loadFoundationRevisionSemanticResult,
   revisionTaskReceiptTerminalDigest,
 } from '../foundation-revision-stage'
 import {
-  FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
-  admitFoundationSemanticResult,
-  buildFoundationSemanticPacket,
-  type FoundationSemanticPacket,
-} from '../foundation-semantic-audit'
-import {
-  admitFoundationSemanticTerminal,
-  claimFoundationSemanticTasks,
-  createFoundationSemanticTaskCollection,
-  type FoundationSemanticTask,
-} from '../foundation-semantic-runtime'
-import {
-  createFoundationAuditState,
   parseFoundationAuditState,
-  summarizeFoundationIssues,
   type FoundationAuditState,
 } from '../foundation-audit-state'
 import { loadCommittedFoundationRevisionAuthority } from '../foundation-revision-publication'
@@ -115,15 +97,44 @@ type Fixture = {
   name: string
   revision: string
   documents: Map<string, string>
-  sectionIndex: SectionRef[]
-  documentDigests: Record<FoundationDocumentPath, string>
   issueDocuments?: Map<string, string>
-  issueSectionIndex?: SectionRef[]
-  issueDocumentDigests?: Record<FoundationDocumentPath, string>
 }
 
 function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function stableEvidence(value: unknown, key?: string): unknown {
+  if (
+    key === 'dispatchId' ||
+    key === 'runId' ||
+    key === 'sessionId' ||
+    key === 'workspacePath' ||
+    key === 'startedAt' ||
+    key === 'finishedAt' ||
+    key === 'createdAt' ||
+    key === 'updatedAt' ||
+    key === 'phaseStartedAt' ||
+    key === 'completedAt' ||
+    key === 'durationMs' ||
+    key === 'terminalDigest'
+  )
+    return `<${key}>`
+  if (Array.isArray(value)) return value.map(item => stableEvidence(item))
+  if (typeof value === 'string')
+    return value
+      .replace(/\/tmp\/game-ir-parity-[^/]+/g, '<workspace>')
+      .replace(
+        /checklist-candidates\/[0-9a-f-]{36}/g,
+        'checklist-candidates/<candidate>',
+      )
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value).map(([entryKey, entryValue]) => [
+      entryKey,
+      stableEvidence(entryValue, entryKey),
+    ]),
+  )
 }
 
 function sectionText(
@@ -210,25 +221,11 @@ function makeFixture(name: string): Fixture {
   const documents = fixtureDocuments(name === 'issue' ? 'rules' : name)
   const issueDocuments =
     name === 'issue' ? fixtureDocuments('issue') : undefined
-  const issueSectionIndex = issueDocuments
-    ? buildFoundationSectionIndex({ documents: issueDocuments })
-    : undefined
-  const issueDocumentDigests = issueDocuments
-    ? (Object.fromEntries(
-        [...issueDocuments].map(([path, body]) => [path, sha256(body)]),
-      ) as Record<FoundationDocumentPath, string>)
-    : undefined
   return {
     name,
     revision: `foundation-${name}`,
     documents,
-    sectionIndex: buildFoundationSectionIndex({ documents }),
-    documentDigests: Object.fromEntries(
-      [...documents].map(([path, body]) => [path, sha256(body)]),
-    ) as Record<FoundationDocumentPath, string>,
     issueDocuments,
-    issueSectionIndex,
-    issueDocumentDigests,
   }
 }
 
@@ -264,252 +261,6 @@ function factPacketResults(
       },
     }
   })
-}
-
-function buildFactPlan(fixture: Fixture) {
-  const extraction = extractNormalizedFoundationFacts({
-    documents: fixture.documents,
-    sectionIndex: fixture.sectionIndex,
-  })
-  const packets = buildFoundationFactPackets({
-    revision: fixture.revision,
-    documents: fixture.documents,
-    sectionIndex: fixture.sectionIndex,
-    unresolvedKeys: extraction.unresolvedKeys,
-  })
-  const workerFacts = packets.flatMap(
-    packet =>
-      validateFoundationFactResults({
-        packet,
-        expectedRevision: fixture.revision,
-        documents: fixture.documents,
-        sectionIndex: fixture.sectionIndex,
-        results: factPacketResults(
-          packet,
-          fixture.documents,
-          fixture.sectionIndex,
-        ),
-      }).facts,
-  )
-  const factStore = mergeFoundationFactResults({
-    mechanicalFacts: extraction.facts,
-    workerFacts,
-    workerReceipts: packets.flatMap(
-      packet =>
-        validateFoundationFactResults({
-          packet,
-          expectedRevision: fixture.revision,
-          documents: fixture.documents,
-          sectionIndex: fixture.sectionIndex,
-          results: factPacketResults(
-            packet,
-            fixture.documents,
-            fixture.sectionIndex,
-          ),
-        }).receipts,
-    ),
-  })
-  return { extraction, packets, factStore }
-}
-
-function buildSemanticPlan(
-  fixture: Fixture,
-  factStore: ReturnType<typeof buildFactPlan>['factStore'],
-  issues: ReturnType<typeof runProductionDeterministicFoundationAudit>,
-) {
-  const sectionBytes = new Map(
-    fixture.sectionIndex.map(section => [
-      `${section.documentPath}#${section.sectionId}`,
-      sectionText(fixture.documents, section),
-    ]),
-  )
-  const packets = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check =>
-    buildFoundationSemanticPacket({
-      revision: fixture.revision,
-      checkId: check.checkId,
-      sectionIndex: fixture.sectionIndex,
-      sectionBytes,
-      factStore,
-      deterministicIssuePrefix: issues,
-      deterministicReviewDigest: sha256(`${fixture.revision}:deterministic`),
-    }),
-  )
-  const tasks = packets.map(
-    (packet, index): FoundationSemanticTask => ({
-      taskId: `${fixture.revision}.semantic.${index}`,
-      kind: 'semantic',
-      revision: fixture.revision,
-      checkId: packet.checkId,
-      packetDigest: packet.identity,
-      modelTier: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks[index]!.modelTier,
-      status: 'pending',
-      attempt: 0,
-    }),
-  )
-  return {
-    packets,
-    tasks: createFoundationSemanticTaskCollection({
-      revision: fixture.revision,
-      phaseStartedAt: PHASE_STARTED_AT,
-      tasks,
-    }),
-  }
-}
-
-function completeSemanticState(
-  tasks: ReturnType<typeof buildSemanticPlan>['tasks'],
-  packets: readonly FoundationSemanticPacket[],
-) {
-  let state = tasks
-  const results = new Map(
-    packets.map(packet => [
-      packet.checkId,
-      admitFoundationSemanticResult(packet, {
-        checkId: packet.checkId,
-        packetIdentity: packet.identity,
-        outcome: 'PASS',
-      }),
-    ]),
-  )
-  while (state.tasks.some(task => task.status === 'pending')) {
-    state = claimFoundationSemanticTasks(state, {
-      now: PHASE_STARTED_AT,
-      configuredTiers: { fast: true, balanced: true },
-      dispatchIdFor: task => `${task.taskId}.dispatch`,
-    })
-    for (const task of state.tasks.filter(item => item.status === 'running')) {
-      const terminal = {
-        workerType: 'foundation-semantic-reviewer' as const,
-        status: 'completed' as const,
-        runId: `${task.taskId}.run`,
-        dispatchId: task.dispatch!.dispatchId,
-        taskId: task.taskId,
-        revision: task.revision,
-        packetDigest: task.packetDigest,
-        outcome: 'PASS' as const,
-      }
-      state = admitFoundationSemanticTerminal(state, {
-        taskId: task.taskId,
-        dispatchId: task.dispatch!.dispatchId,
-        revision: task.revision,
-        packetDigest: task.packetDigest,
-        terminal,
-        usage: {
-          input_tokens: 0,
-          cache_read_tokens: 0,
-          cache_creation_tokens: 0,
-          completion_tokens: 0,
-          total_tokens: 0,
-        },
-        durationMs: 0,
-        now: PHASE_STARTED_AT,
-      }).state
-    }
-  }
-  return {
-    ...state,
-    tasks: state.tasks.map(task => ({
-      ...task,
-      admittedResult: results.get(task.checkId),
-    })),
-  }
-}
-
-function readyState(
-  fixture: Fixture,
-  semantic: ReturnType<typeof completeSemanticState>,
-  factStore: ReturnType<typeof buildFactPlan>['factStore'],
-  issues: readonly unknown[],
-): FoundationAuditState {
-  const indexDigest = digestSectionIndex(fixture.sectionIndex)
-  const factDigest = sha256(JSON.stringify(factStore))
-  const issueDigest = sha256(JSON.stringify(issues))
-  const derivedRoot = `.beegame/audit/foundation/${fixture.revision}/derived`
-  const reviewDigest = sha256(`${fixture.revision}:review:${issueDigest}`)
-  const base = createFoundationAuditState({
-    revision: fixture.revision,
-    documentDigests: CANONICAL_PATHS.map(path => ({
-      path,
-      digest: fixture.documentDigests[path]!,
-    })),
-    manifest: {
-      revision: fixture.revision,
-      status: 'index_staged',
-      catalogVersion: 'foundation-facts.v2',
-      sectionIndexDigest: indexDigest,
-    },
-  })
-  return parseFoundationAuditState({
-    ...base,
-    status: 'audit_ready',
-    phaseStartedAt: PHASE_STARTED_AT,
-    tasks: semantic.tasks,
-    derived: {
-      manifestPath: `${derivedRoot}/manifest.json`,
-      manifestDigest: sha256(`${fixture.revision}:manifest`),
-      markerPath: `${derivedRoot}/COMMITTED.json`,
-      markerDigest: sha256(`${fixture.revision}:marker`),
-      factStorePath: `${derivedRoot}/fact-store.json`,
-      factStoreDigest: factDigest,
-      sectionIndexPath: `${derivedRoot}/section-index.json`,
-      sectionIndexDigest: indexDigest,
-    },
-    deterministic: {
-      reviewDigest: issueDigest,
-      issueRegistryPath: `.beegame/audit/foundation/${fixture.revision}/staging/review/issue-registry.json`,
-      issueRegistryDigest: issueDigest,
-      manifestPath: `.beegame/audit/foundation/${fixture.revision}/staging/review/manifest.json`,
-      manifestDigest: sha256(`${fixture.revision}:manifest`),
-      markerPath: `.beegame/audit/foundation/${fixture.revision}/staging/review/COMMITTED.json`,
-      markerDigest: sha256(`${fixture.revision}:marker`),
-      catalogVersion: 'foundation-facts.v2',
-      contractGraphDigest: sha256(`${fixture.revision}:contracts`),
-      sectionIndexDigest: indexDigest,
-      factStoreDigest: factDigest,
-    },
-    semantic: { aggregateUsage: semantic.aggregateUsage },
-    review: {
-      reviewDigest,
-      issueRegistryPath: `.beegame/audit/foundation/${fixture.revision}/review/${reviewDigest}/issue-registry.json`,
-      issueRegistryDigest: issueDigest,
-      manifestPath: `.beegame/audit/foundation/${fixture.revision}/review/${reviewDigest}/manifest.json`,
-      manifestDigest: sha256(`${fixture.revision}:review-manifest`),
-      markerPath: `.beegame/audit/foundation/${fixture.revision}/review/${reviewDigest}/COMMITTED.json`,
-      markerDigest: sha256(`${fixture.revision}:review-marker`),
-      sectionIndexDigest: indexDigest,
-      factStoreDigest: factDigest,
-      semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest,
-      issueSummary: summarizeFoundationIssues(issues as never[]),
-    },
-  })
-}
-
-function foundationPlan(fixture: Fixture) {
-  const fact = buildFactPlan(fixture)
-  const issues = runProductionDeterministicFoundationAudit({
-    sectionIndex: fixture.sectionIndex,
-    factStore: fact.factStore,
-  })
-  const semantic = buildSemanticPlan(fixture, fact.factStore, issues)
-  const completedSemantic = completeSemanticState(
-    semantic.tasks,
-    semantic.packets,
-  )
-  const state = readyState(fixture, completedSemantic, fact.factStore, issues)
-  return {
-    factPackets: fact.packets,
-    factStore: fact.factStore,
-    issueRegistry: issues,
-    semanticPackets: semantic.packets,
-    semanticTasks: semantic.tasks,
-    readyState: state,
-    readyInputs: {
-      revision: state.revision,
-      documentDigests: state.documentDigests,
-      sectionIndexDigest: state.sectionIndexDigest,
-      issueSummary: state.review?.issueSummary,
-    },
-  }
 }
 
 async function writeDocuments(
@@ -716,17 +467,30 @@ async function controllerIssuePlan(fixture: Fixture, workspacePath: string) {
   let semanticBundleEvidence:
     | NonNullable<FoundationAuditState['revisionBundles']>[number]
     | undefined
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  const preRevisionFingerprints = new Set<string>()
+  while (true) {
     if (!current?.foundationAuditState)
       throw new Error('controller lost Foundation audit state')
-    if (current.foundationAuditState.status === 'semantic_review') {
+    const state = current.foundationAuditState
+    const hasReviewAuthority =
+      state.review?.reviewDigest !== undefined ||
+      state.roundBefore?.issueAuthority.kind === 'review'
+    if (
+      hasReviewAuthority &&
+      ['audit_ready', 'planning', 'revising'].includes(state.status)
+    )
+      break
+    const fingerprint = sha256(JSON.stringify(stableEvidence(state)))
+    if (!preRevisionFingerprints.add(fingerprint))
+      throw new Error(
+        'controller made no progress toward pre-revision audit_ready',
+      )
+    if (state.status === 'semantic_review') {
       await completeControllerSemanticTasks(
         controller,
         'semantic_review',
         'ASSET#inventory',
       )
-    } else if (current.foundationAuditState.status === 'audit_ready') {
-      break
     } else {
       await controller.resume(current)
     }
@@ -768,12 +532,20 @@ async function controllerIssuePlan(fixture: Fixture, workspacePath: string) {
   if (preReview.issues.length === 0)
     throw new Error('issue fixture did not produce a published review issue')
 
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  const revisionFingerprints = new Set<string>()
+  while (true) {
     const state = current.foundationAuditState
-    const revisionTask = state?.tasks.find(
-      task => task.kind === 'document-revision' && task.status === 'running',
+    if (!state) throw new Error('controller lost revision audit state')
+    if (
+      state.status === 'revising' &&
+      state.tasks.some(
+        task => task.kind === 'document-revision' && task.status === 'running',
+      )
     )
-    if (state?.status === 'revising' && revisionTask) break
+      break
+    const fingerprint = sha256(JSON.stringify(stableEvidence(state)))
+    if (!revisionFingerprints.add(fingerprint))
+      throw new Error('controller made no progress toward revision dispatch')
     await controller.resume(current)
     current = await controller.store.load()
     if (!current) throw new Error('controller revision run disappeared')
@@ -851,12 +623,16 @@ async function controllerIssuePlan(fixture: Fixture, workspacePath: string) {
     },
   )
 
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  const postRevisionFingerprints = new Set<string>()
+  while (true) {
     current = await controller.store.load()
     if (!current?.foundationAuditState)
       throw new Error('controller lost revision audit state')
     const state = current.foundationAuditState
     if (state.status === 'revision_ready') break
+    const fingerprint = sha256(JSON.stringify(stableEvidence(state)))
+    if (!postRevisionFingerprints.add(fingerprint))
+      throw new Error('controller made no progress toward revision_ready')
     if (state.status === 'semantic_recheck') {
       await controller.resume(current)
       await completeControllerSemanticTasks(controller, 'semantic_recheck')
@@ -951,43 +727,41 @@ async function controllerIssuePlan(fixture: Fixture, workspacePath: string) {
   )
   if (!bundle)
     throw new Error('controller revision_ready active bundle is missing')
+  const semanticResult = await loadFoundationRevisionSemanticResult({
+    workspacePath,
+    revision: semanticTask.revision,
+    round: semanticTask.round,
+    taskId: semanticTask.taskId,
+    issueId: semanticTask.issueId,
+    packetDigest: semanticTask.packetDigest,
+    resultDigest: semanticTask.resultDigest!,
+    resultPath: semanticTask.resultPath!,
+  })
   return {
-    preRevisionState,
     preRevision,
     preReview,
     preDerived,
     readyState: revisionReadyState,
     publication,
-    resultingDerived,
     revisionTask,
     semanticTask,
+    semanticResult,
     bundle: semanticBundleEvidence,
     readyBundle: bundle,
-    requests,
-    identity: {
-      preRevision,
-      reviewDigest: preReview.reviewDigest,
-      reviewIssueRegistryDigest: preReview.digests.issueRegistry,
-      preSectionIndexDigest: preDerived.digests.sectionIndex,
-      revisionPacketDigest: revisionTask.packetDigest,
-      semanticPacketDigest: semanticTask.packetDigest,
-      semanticResultDigest: semanticTask.resultDigest,
-      publication: {
-        baseRevision: publication.baseRevision,
-        authorityDigest: publication.authorityDigest,
-        resultingRevision: publication.resultingRevision,
-        resultingIssueRegistryDigest: publication.resultingIssueRegistryDigest,
-        documentDigests: publication.documentDigests,
-      },
-      readyState: {
-        revision: revisionReadyState.revision,
-        documentDigests: revisionReadyState.documentDigests,
-        sectionIndexDigest: revisionReadyState.sectionIndexDigest,
-        authority: revisionReadyState.authority,
-        roundBefore: revisionReadyState.roundBefore,
-        activeBundleId: revisionReadyState.activeBundleId,
-      },
-    },
+    identity: stableEvidence({
+      dispatches: requests,
+      preRevisionState,
+      preReview,
+      preDerived,
+      readyState: revisionReadyState,
+      publication,
+      resultingDerived,
+      revisionTask,
+      semanticTask,
+      semanticResult,
+      bundle: semanticBundleEvidence,
+      readyBundle: bundle,
+    }),
   }
 }
 
@@ -1090,46 +864,6 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
     }
   })
 
-  test('runs real complete-document Foundation planning around the strict READY boundary', () => {
-    for (const fixture of [makeFixture('rules'), makeFixture('scene')]) {
-      const beforeDocuments = JSON.stringify([...fixture.documents])
-      const before = foundationPlan(fixture)
-      const beforeState = JSON.stringify(before.readyState)
-      const receipt = projectFoundationReadyReceipt({
-        state: before.readyState,
-        projectId: `project-${fixture.name}`,
-        confirmedBriefDigest: sha256(`${fixture.name}:brief`),
-      })
-      const request = parseGameIrCompileRequest({
-        schemaVersion: 'game-ir-compile-request.v1',
-        taskId: `${fixture.revision}.compile`,
-        publicationId: `${fixture.revision}.publication`,
-        gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
-        foundation: receipt,
-      })
-      expect(request.foundation).toEqual(receipt)
-      expect(
-        projectFoundationReadyReceipt({
-          state: before.readyState,
-          projectId: `project-${fixture.name}`,
-          confirmedBriefDigest: sha256(`${fixture.name}:brief`),
-        }),
-      ).toEqual(receipt)
-      expect(JSON.stringify([...fixture.documents])).toBe(beforeDocuments)
-      expect(JSON.stringify(before.readyState)).toBe(beforeState)
-      const after = foundationPlan(fixture)
-      expect(after).toEqual(before)
-      expect(JSON.stringify([...fixture.documents])).toBe(beforeDocuments)
-      expect(JSON.stringify(after.readyState)).toBe(beforeState)
-      expect(request.foundation.documentDigests).toEqual(
-        fixture.documentDigests,
-      )
-      expect(request.foundation.sectionIndexDigest).toBe(
-        digestSectionIndex(fixture.sectionIndex),
-      )
-    }
-  })
-
   test('keeps real issue registry, revision authority, batches, and targeted recheck stable across READY parsing', async () => {
     const fixture = makeFixture('issue')
     const workspacePath = await mkdtemp(join('/tmp', 'game-ir-parity-'))
@@ -1141,6 +875,12 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       expect(before.preReview.issues).toHaveLength(2)
       expect(before.semanticTask.resultDigest).toMatch(/^[a-f0-9]{64}$/)
       expect(before.semanticTask.terminalDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(before.semanticTask.terminalDigest).toBe(
+        sha256(JSON.stringify(before.semanticTask.dispatch?.terminalResult)),
+      )
+      expect(before.semanticTask.terminalDigest).not.toBe(
+        before.semanticTask.resultDigest,
+      )
       expect(before.semanticTask.resultPath).toMatch(/result\.json/)
       expect(before.semanticTask.dispatch?.terminalResult).toMatchObject({
         status: 'completed',
@@ -1155,6 +895,21 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
         before.semanticTask.taskId,
       ])
       const ready = before.readyState
+      expect(before.readyBundle.taskIds).toContain(before.semanticTask.taskId)
+      const readySemanticTask = ready.tasks.find(
+        (task): task is FoundationRevisionSemanticRecheckTask =>
+          task.taskId === before.semanticTask.taskId &&
+          task.kind === 'semantic-recheck',
+      )
+      expect(readySemanticTask).toMatchObject({
+        kind: 'semantic-recheck',
+        resultDigest: before.semanticTask.resultDigest,
+        terminalDigest: before.semanticTask.terminalDigest,
+      })
+      expect(readySemanticTask?.dispatch?.terminalResult).toEqual(
+        before.semanticTask.dispatch?.terminalResult,
+      )
+      expect(readySemanticTask?.resultPath).toBe(before.semanticTask.resultPath)
       expect(ready.status).toBe('revision_ready')
       expect(ready.issueSummary).toEqual({
         total: 0,
@@ -1171,6 +926,13 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       })
       expect(before.publication.baseRevision).toBe(before.preRevision)
       expect(before.bundle.baseDocumentRevision).toBe(before.preRevision)
+      expect(before.readyBundle.baseDocumentRevision).toBe(before.preRevision)
+      expect(ready.authority?.issueAuthority).toEqual({
+        kind: 'publication',
+        baseRevision: before.publication.baseRevision,
+        authorityDigest: before.publication.authorityDigest,
+        issueRegistryDigest: before.publication.resultingIssueRegistryDigest,
+      })
       const readyDerived = ready.derived
       if (!readyDerived)
         throw new Error('revision-ready derived evidence is missing')
@@ -1232,36 +994,63 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       )
       expect(request.foundation).toEqual(receipt)
 
-      const markerPath = join(workspacePath, readyDerived.markerPath)
-      const markerBytes = await readFile(markerPath)
-      await rm(markerPath)
+      const publicationCommittedPath = join(
+        workspacePath,
+        before.publication.committedPath,
+      )
+      const publicationCommittedBytes = await readFile(publicationCommittedPath)
+      await rm(publicationCommittedPath)
       await expect(
-        loadCommittedFoundationDerivedArtifacts({
+        loadCommittedFoundationRevisionAuthority({
           workspacePath,
-          revision: ready.revision,
+          revision: before.publication.baseRevision,
         }),
-      ).resolves.toBeUndefined()
-      await writeFile(markerPath, markerBytes)
+      ).rejects.toThrow(/committed|publication|authority/i)
+      await writeFile(publicationCommittedPath, publicationCommittedBytes)
+      await expect(
+        loadCommittedFoundationRevisionAuthority({
+          workspacePath,
+          revision: before.publication.baseRevision,
+        }),
+      ).resolves.toEqual(before.publication)
       const staleDigest = '0'.repeat(64)
       const sectionIndexPath = join(
         workspacePath,
         readyDerived.sectionIndexPath,
       )
       const sectionIndexBytes = await readFile(sectionIndexPath, 'utf8')
+      const sectionIndex = JSON.parse(sectionIndexBytes) as {
+        digest?: unknown
+        [key: string]: unknown
+      }
+      expect(sectionIndex.digest).toBe(readyDerived.sectionIndexDigest)
+      sectionIndex.digest = staleDigest
       await writeFile(
         sectionIndexPath,
-        sectionIndexBytes.replace(
-          /"digest": "[a-f0-9]{64}"/,
-          `"digest": "${staleDigest}"`,
-        ),
+        `${JSON.stringify(sectionIndex, null, 2)}\n`,
       )
       await expect(
         loadCommittedFoundationDerivedArtifacts({
           workspacePath,
           revision: ready.revision,
         }),
-      ).rejects.toThrow(/binding|digest/i)
+      ).rejects.toThrow(
+        'committed foundation derived artifact binding is invalid',
+      )
       await writeFile(sectionIndexPath, sectionIndexBytes)
+      await expect(
+        loadCommittedFoundationDerivedArtifacts({
+          workspacePath,
+          revision: ready.revision,
+        }),
+      ).resolves.toBeDefined()
+      await expect(
+        loadFoundationSemanticReview({
+          workspacePath,
+          revision: before.preRevision,
+          reviewDigest: staleDigest,
+        }),
+      ).rejects.toThrow(/review|publication|digest|missing/i)
       expect(() =>
         parseFoundationAuditState({
           ...ready,
@@ -1273,12 +1062,17 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
             },
           },
         }),
-      ).toThrow(/publication|authority|resulting revision/i)
+      ).toThrow(
+        'published foundation state must bind the resulting revision and exact publication authority',
+      )
       expect(JSON.stringify([...issueDocuments])).toBe(beforeDocuments)
       await writeDocuments(secondWorkspacePath, issueDocuments)
       const after = await controllerIssuePlan(fixture, secondWorkspacePath)
       expect(after.identity).toEqual(before.identity)
       expect(after.publication).toEqual(before.publication)
+      expect(after.publication.resultingIssues).toEqual(
+        before.publication.resultingIssues,
+      )
       expect(after.revisionTask.packetDigest).toBe(
         before.revisionTask.packetDigest,
       )
