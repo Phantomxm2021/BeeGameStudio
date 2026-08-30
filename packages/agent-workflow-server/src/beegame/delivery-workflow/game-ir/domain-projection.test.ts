@@ -176,26 +176,46 @@ describe('Game IR domain producer contracts', () => {
   })
 
   test('rejects malformed nested node references, edges, and bindings', () => {
-    for (const node of [
+    const nodeVariants = [
       {
         ...mechanicalNode,
         references: [{ targetId: 'bad' }],
+        bindings: {
+          ...mechanicalNode.bindings,
+          '/references/0': mechanicalNode.bindings['/id'],
+        },
+        ownedTargets: [
+          'node:balance.var.hp#/id',
+          'node:balance.var.hp#/references/0',
+          'node:balance.var.hp#/value/baseline',
+        ],
       },
       {
         ...mechanicalNode,
         edges: [{ type: 'depends-on', targetId: 'bad' }],
+        bindings: {
+          ...mechanicalNode.bindings,
+          '/edges/0': mechanicalNode.bindings['/id'],
+        },
+        ownedTargets: [
+          'node:balance.var.hp#/edges/0',
+          'node:balance.var.hp#/id',
+          'node:balance.var.hp#/value/baseline',
+        ],
       },
       {
         ...mechanicalNode,
         bindings: { '/id': { kind: 'owner' } },
+        ownedTargets: ['node:balance.var.hp#/id'],
       },
-    ]) {
+    ]
+    for (const { ownedTargets, ...node } of nodeVariants) {
       expect(() =>
         admitGameIrMechanicalProjectionReceipt(
           source(),
-          receipt({ nodes: [node] as never, ownedTargets: [] }),
+          receipt({ nodes: [node] as never, ownedTargets }),
         ),
-      ).toThrow(/reference|edge|target|binding|module|source/i)
+      ).toThrow(/invalid Game IR candidate: .*?(reference|edge|binding)/i)
     }
   })
 

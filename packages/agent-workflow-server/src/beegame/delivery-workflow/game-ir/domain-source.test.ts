@@ -264,8 +264,18 @@ describe('Game IR domain source closure', () => {
     })
     const narrowed = {
       ...envelope,
-      sectionIndex: envelope.sectionIndex.slice(1),
+      authoritySectionIndex: envelope.authoritySectionIndex.filter(
+        section =>
+          section.documentPath === 'docs/BALANCE_DESIGN.md' ||
+          section.documentPath === 'docs/GDD.md',
+      ),
+      sectionIndex: envelope.authoritySectionIndex.filter(
+        section =>
+          section.documentPath === 'docs/BALANCE_DESIGN.md' ||
+          section.documentPath === 'docs/GDD.md',
+      ),
       sectionBytes: {
+        'docs/BALANCE_DESIGN.md#section-2': sectionBytes['docs/BALANCE_DESIGN.md']!,
         'docs/GDD.md#section-0': sectionBytes['docs/GDD.md']!,
       },
     } as Record<string, unknown>
@@ -275,7 +285,7 @@ describe('Game IR domain source closure', () => {
       ),
     )
     expect(() => validateGameIrDomainSourceEnvelope(narrowed)).toThrow(
-      /complete|eight|authority|index|closure/i,
+      /authority|section|digest|index/i,
     )
   })
 })
