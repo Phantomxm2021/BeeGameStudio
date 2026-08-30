@@ -1,6 +1,6 @@
 # Game IR Phase 4: Gameplay and Balance Design
 
-Status: implemented; automated verification complete; independent Task 7 review pending; Phase 4 not yet accepted
+Status: implemented; automated verification complete; independent Task 7 review clean; Phase 4 accepted
 
 ## Goal
 
@@ -526,7 +526,8 @@ No new dependency is required.
 
 ## Acceptance gate
 
-Phase 4 will be accepted only when:
+Phase 4 is accepted: the independent Task 7 review is clean, and the following
+completion-gate conditions are satisfied:
 
 - Gameplay and Balance schemas cover every capability listed in the authority
   document;
@@ -544,9 +545,10 @@ Phase 4 will be accepted only when:
 Chrome acceptance remains deferred until every canonical domain module and the
 single consumer cutover are complete.
 
-Automated Phase 4 implementation and verification are complete, but Phase 4 is
-not accepted until the independent Task 7 review is clean. Complete candidate
-publication, production routing, or Chrome acceptance remain unavailable.
+Automated Phase 4 implementation and verification are complete, and the
+independent Task 7 review is clean. This acceptance covers only the isolated
+Gameplay and Balance projections. Complete candidate publication, production
+routing, or Chrome acceptance remain unavailable.
 Phase 5–9 remain unstarted.
 
 ## Explicit non-goals

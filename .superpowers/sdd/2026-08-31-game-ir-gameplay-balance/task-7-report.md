@@ -1,6 +1,6 @@
 # Task 7 report: Phase 4 cross-domain and isolation completion gate
 
-Status: implementation and automated verification complete; independent Task 7 review pending; Phase 4 is not yet accepted. Committed with subject
+Status: implementation and automated verification complete; independent Task 7 review clean; Phase 4 accepted. Committed with subject
 `test: prove isolated Game IR gameplay and balance`.
 
 ## Exact verification commands and results
@@ -31,7 +31,7 @@ Both design documents now describe `authoritySectionIndex` plus selected
 canonicalizer, Balance exact `/bytes/<start>/<end>` evidence, semantic-only
 current Balance mechanical policy, bidirectional typed validation, and the
 Phase 4 acceptance boundary. Implementation and automated verification are
-complete; independent Task 7 review is pending, so Phase 4 is not yet accepted.
+complete; independent Task 7 review is clean, so Phase 4 is accepted.
 Phase 5–9 remain unstarted. Complete candidate publication, production routing,
 and Chrome acceptance remain unavailable.
 
@@ -43,9 +43,8 @@ and Chrome acceptance remain unavailable.
 
 ## Concerns
 
-Independent Task 7 review is pending; Phase 4 is intentionally not marked
-accepted. No test, typecheck, parity, unreachable-scan, formatting, or
-diff-check concerns remain.
+Independent Task 7 review is clean and Phase 4 is accepted. No test, typecheck,
+parity, unreachable-scan, formatting, or diff-check concerns remain.
 
 ## Fix round 1 evidence
 
@@ -68,10 +67,23 @@ diff-check concerns remain.
   Phases 8–9 are consumer migration and real acceptance.
 - Scanned both Phase 4 design documents for equivalent stale “producer not
   implemented” or “candidate parity starts after Gameplay/Balance” claims; no
-  contradictions remain. Phase 4 remains pending independent final re-review,
-  and Phase 5–9, production routing, complete publication, and Chrome remain
-  unavailable.
+  contradictions remain. Phase 4 is accepted after the clean independent final
+  re-review, and Phase 5–9, production routing, complete publication, and Chrome
+  remain unavailable.
 - `./node_modules/.bin/biome check docs/beegame-game-ir-stage-isolation-redesign.md docs/superpowers/specs/2026-08-31-game-ir-gameplay-balance-design.md packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir` — passed (exit 0; 26 files checked).
+- `git diff --check` — passed.
+
+## Fix round 4 evidence
+
+- Recorded the clean independent Task 7 review in both Phase 4 design documents
+  and accepted Phase 4. The acceptance is limited to the isolated Gameplay and
+  Balance projections; Phases 5–7 domain modules, Phase 8 consumer migration,
+  and Phase 9 real/Chrome acceptance remain unstarted.
+- Complete seven-module candidate publication and production routing remain
+  unavailable.
+- Scanned both Phase 4 design documents and this report for stale pending or
+  not-accepted Phase 4 status claims; no active contradictions remain.
+- `./node_modules/.bin/biome check docs/beegame-game-ir-stage-isolation-redesign.md docs/superpowers/specs/2026-08-31-game-ir-gameplay-balance-design.md packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir` — passed (exit 0).
 - `git diff --check` — passed.
 
 ## Fix round 3 evidence
