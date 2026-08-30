@@ -18,11 +18,12 @@ the compile request; it does not construct a domain producer or route.
 | GI-OLD-01 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.ts` implementation | DISCARD | Mixed compiler, publication, resource projection, and routing authority; rewrite from bounded Stage 5 contracts. |
 | GI-OLD-02 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.test.ts` | DISCARD | Tests the abandoned mixed authority; reproduce only independently justified invariants. |
 | GI-OLD-03 | `packages/agent-workflow-server/src/beegame/delivery-workflow/typed-owner-records.test.ts` | DISCARD | Typed-owner replacement competes with the stable Fact Store/Reviewer. |
-| GI-OLD-04 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir-resource-fixture.ts` | DISCARD | Dirty fixture bytes are not canonical documents or receipts. |
+| GI-OLD-04 | `packages/agent-workflow-server/src/__tests__/game-ir-resource-fixture.ts` | DISCARD | Dirty fixture bytes are not canonical documents or receipts. |
+| GI-OLD-05 | `docs/beegame-game-ir-implementation-plan.md` | DISCARD | The abandoned implementation plan is historical context, not an authority or migration input. |
 
 ## Every old `game-ir.ts` export
 
-Mechanical inventory command: `rg '^export' packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.ts` in the saved old dirty checkout (uncommitted worktree; no source commit). It returned 29 export declarations. The records are intentionally separate from implementation/idea items (§9.2 refinement).
+Mechanical inventory command: `rg '^export' packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.ts` in the saved old dirty checkout (uncommitted worktree; no source commit). It returned exactly 40 export declarations. The records are intentionally separate from implementation/idea items (§9.2 refinement).
 
 | ID | Export symbol | Category | Disposition |
 | --- | --- | --- | --- |
@@ -55,10 +56,21 @@ Mechanical inventory command: `rg '^export' packages/agent-workflow-server/src/b
 | GI-EXP-27 | `publishGameIr` | REWRITE | Rebuild only under immutable publication authority. |
 | GI-EXP-28 | `validateCommittedGameIr` | REWRITE | Rebuild revision-bound validation and recovery checks. |
 | GI-EXP-29 | `recoverGameIrPublication` | DISCARD | Mutable recovery conflicts with revision-bound recovery. |
+| GI-EXP-30 | `gameIrSourceBindingSchema` | ADAPT | Preserve strict source-binding validation only under the new receipt authority. |
+| GI-EXP-31 | `parseGameIrModuleRecord` | REWRITE | Rebuild parsing around canonical producer-owned module records. |
+| GI-EXP-32 | `GameIrAssetRequirementProjection` | REWRITE | Re-specify asset requirements as a derived projection, not mutable IR state. |
+| GI-EXP-33 | `gameIrAssetRequirementProjectionSchema` | REWRITE | Rebuild the schema after asset ownership and evidence are specified. |
+| GI-EXP-34 | `GameIrResourceAuthority` | REWRITE | Replace mixed resource authority with a receipt-bound resource contract. |
+| GI-EXP-35 | `gameIrResourceAuthoritySchema` | REWRITE | Rebuild resource authority validation from immutable evidence. |
+| GI-EXP-36 | `parseGameIrResourceAuthority` | REWRITE | Rebuild parsing with explicit version, digest, and receipt checks. |
+| GI-EXP-37 | `assertCurrentGameIrResourceAuthority` | DISCARD | Current mutable-authority assertion encodes the abandoned route. |
+| GI-EXP-38 | `assertAssetManifestMatchesProjection` | REPROVE | Reprove this invariant against the eventual producer-owned projection. |
+| GI-EXP-39 | `projectCommittedAssetRequirements` | REWRITE | Rebuild projection from committed, receipt-bound publication evidence. |
+| GI-EXP-40 | `loadCurrentGameIrResourceAuthority` | DISCARD | A current mutable loader is incompatible with the immutable cutover authority. |
 
 ## Old production importers and consumers
 
-Mechanical inventory command: `rg -l "from .*game-ir|GAME_IR_|GameIr" packages/agent-workflow-server/src/beegame/delivery-workflow --glob '*.ts'` plus the TypeScript AST import scan, run against the saved old dirty checkout. It returned exactly 16 production importer/consumer paths; none is inferred from the new branch.
+Mechanical inventory command: `rg -l "from .*game-ir|GAME_IR_|GameIr|gameIr" packages/agent-workflow-server/src/beegame/delivery-workflow --glob '*.ts'` plus the TypeScript AST import/identifier scan, run against the saved old dirty checkout and excluding tests/game-ir itself. It returned the exact 16 direct importers below plus five indirect production consumers; none is inferred from the new branch.
 
 | ID | Exact importer/consumer path | Category | Consumer responsibility and disposition |
 | --- | --- | --- | --- |
@@ -78,6 +90,11 @@ Mechanical inventory command: `rg -l "from .*game-ir|GAME_IR_|GameIr" packages/a
 | GI-CNS-14 | `resource-task-resolver.ts` | DISCARD | Resource task resolver; rebuild after Resource producer ownership. |
 | GI-CNS-15 | `schema.ts` | DISCARD | Protected schema importer; no Game IR state addition. |
 | GI-CNS-16 | `types.ts` | DISCARD | Protected type importer; no Game IR phase addition. |
+| GI-CNS-17 | `comprehensive-reviewer-contract.ts` | DISCARD | Reviewer contract consumer; preserve the stable Reviewer interface and reprove any future IR projection. |
+| GI-CNS-18 | `delivery-gate.ts` | DISCARD | Delivery gate consumer; no Game IR readiness route is admitted in Phase 1. |
+| GI-CNS-19 | `display-progress.ts` | DISCARD | Progress display consumer; do not migrate dirty phase or authority state. |
+| GI-CNS-20 | `document-stage.ts` | DISCARD | Document-stage consumer; retain Foundation stage semantics until a producer-owned cutover. |
+| GI-CNS-21 | `workflow-display-message.ts` | DISCARD | Workflow message consumer; reprove any eventual publication status projection. |
 
 ## Protected Stage 3/4 deltas and exact Foundation symbols
 

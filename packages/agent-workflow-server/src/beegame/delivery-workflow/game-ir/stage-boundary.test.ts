@@ -91,8 +91,16 @@ function boundaryViolations(source: string): string[] {
 
 function currentStage5Markers(source: string): string[] {
   return boundaryViolations(source)
-    .filter(item => item.startsWith('identifier:'))
-    .map(item => item.slice('identifier: '.length))
+}
+
+function standaloneProductionViolations(
+  files: ReadonlyArray<{ path: string; source: string }>,
+): string[] {
+  return files.flatMap(file =>
+    currentStage5Markers(file.source).map(
+      violation => `${file.path}: ${violation}`,
+    ),
+  )
 }
 
 async function readSourceFilesRecursively(
@@ -180,6 +188,15 @@ describe('Game IR stage boundary', () => {
       'identifier: gameIrState',
       'identifier: enableGameIr',
     ])
+
+    expect(
+      standaloneProductionViolations([
+        {
+          path: 'synthetic-import.ts',
+          source: "import { compileGame } from './game-ir/runtime'",
+        },
+      ]),
+    ).toEqual(['synthetic-import.ts: import: ./game-ir/runtime'])
   })
 
   test('keeps Foundation internals independent from Game IR', async () => {
@@ -197,14 +214,8 @@ describe('Game IR stage boundary', () => {
   })
 
   test('keeps incomplete Stage 5 unreachable from current production files', async () => {
-    for (const file of await readProductionSourceFiles()) {
-      expect({
-        filename: file.path,
-        markers: currentStage5Markers(file.source),
-      }).toEqual({
-        filename: file.path,
-        markers: [],
-      })
-    }
+    expect(
+      standaloneProductionViolations(await readProductionSourceFiles()),
+    ).toEqual([])
   })
 })
