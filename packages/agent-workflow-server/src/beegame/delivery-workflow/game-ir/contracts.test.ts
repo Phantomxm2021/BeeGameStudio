@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
 import {
+  GAME_IR_CANONICAL_MODULE_IDS,
   GAME_IR_SCHEMA_VERSION,
+  gameIrCommittedPath,
   parseFoundationDefectReport,
   parseFoundationReadyReceipt,
   parseGameIrCompileRequest,
@@ -108,6 +110,9 @@ function defectReport(
 function readyReceipt(
   overrides: Partial<GameIrReadyReceipt> = {},
 ): GameIrReadyReceipt {
+  const moduleDigests = Object.fromEntries(
+    GAME_IR_CANONICAL_MODULE_IDS.map(moduleId => [moduleId, digest]),
+  ) as Record<(typeof GAME_IR_CANONICAL_MODULE_IDS)[number], string>
   return {
     schemaVersion: 'game-ir-ready-receipt.v1',
     taskId: 'compile-task-1',
@@ -116,10 +121,10 @@ function readyReceipt(
     foundationRevision: validFoundation.foundationRevision,
     foundationReceiptDigest: validFoundation.receiptDigest,
     manifestDigest: digest,
-    moduleDigests: { gameplay: digest },
-    sourceMapDigests: { gameplay: digest },
+    moduleDigests,
+    sourceMapDigests: { ...moduleDigests },
     dependencyGraphDigest: digest,
-    committedPath: '.beegame/game-ir/publication-1/COMMITTED.json',
+    committedPath: gameIrCommittedPath(validFoundation.foundationRevision),
     ...overrides,
   }
 }
@@ -240,6 +245,76 @@ describe('isolated Game IR contracts', () => {
         receiptDigest: '0'.repeat(64),
       }),
     ).toThrow(/receipt.*digest|digest/i)
+  })
+
+  test('requires the complete V1 canonical module digest set', () => {
+    const canonicalModules = Object.fromEntries(
+      GAME_IR_CANONICAL_MODULE_IDS.map(moduleId => [moduleId, digest]),
+    )
+    expect(Object.keys(readyReceipt().moduleDigests).sort()).toEqual(
+      [...GAME_IR_CANONICAL_MODULE_IDS].sort(),
+    )
+    expect(() =>
+      parseGameIrReadyReceipt(
+        readyReceipt({
+          moduleDigests: {} as GameIrReadyReceipt['moduleDigests'],
+        }),
+      ),
+    ).toThrow(/module|canonical|missing/i)
+    expect(() =>
+      parseGameIrReadyReceipt(
+        readyReceipt({
+          moduleDigests: {
+            ...canonicalModules,
+            unknown: digest,
+          } as unknown as GameIrReadyReceipt['moduleDigests'],
+        }),
+      ),
+    ).toThrow(/module|canonical|unknown/i)
+    expect(() =>
+      parseGameIrReadyReceipt({
+        ...readyReceipt(),
+        sourceMapDigests: { gameplay: digest },
+      }),
+    ).toThrow(/source.?map|module|canonical|missing/i)
+  })
+
+  test('requires module and source-map digest key sets to match exactly', () => {
+    const sourceMapDigests = Object.fromEntries(
+      Object.entries(readyReceipt().sourceMapDigests).filter(
+        ([moduleId]) => moduleId !== 'gameplay',
+      ),
+    ) as GameIrReadyReceipt['sourceMapDigests']
+    expect(() =>
+      parseGameIrReadyReceipt(readyReceipt({ sourceMapDigests })),
+    ).toThrow(/source.?map|module|match|canonical/i)
+  })
+
+  test('derives one canonical committed path from schema version and foundation revision', () => {
+    expect(parseGameIrReadyReceipt(readyReceipt()).committedPath).toBe(
+      '.beegame/ir/game-ir.v1/revisions/foundation-revision-1/COMMITTED.json',
+    )
+    expect(() =>
+      parseGameIrReadyReceipt(
+        readyReceipt({
+          committedPath:
+            '.beegame/ir/game-ir.v1/revisions/publication-1/COMMITTED.json',
+        }),
+      ),
+    ).toThrow(/committed|canonical|path/i)
+    expect(() =>
+      parseGameIrReadyReceipt(
+        readyReceipt({
+          committedPath: '.beegame/game-ir/publication-1/COMMITTED.json',
+        }),
+      ),
+    ).toThrow(/committed|canonical|path/i)
+    expect(() =>
+      parseGameIrReadyReceipt({
+        ...readyReceipt(),
+        foundationRevision: 'revision/escape',
+      }),
+    ).toThrow(/revision|canonical|path/i)
   })
 
   test('rejects unsafe task and publication IDs and traversal artifact paths', () => {

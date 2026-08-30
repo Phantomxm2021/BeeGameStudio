@@ -8,6 +8,16 @@ import {
 export const GAME_IR_STAGE_BOUNDARY =
   'foundation-ready-receipt -> game-ir-stage.v1' as const
 export const GAME_IR_SCHEMA_VERSION = 'game-ir.v1' as const
+export const GAME_IR_CANONICAL_MODULE_IDS = Object.freeze([
+  'core',
+  'gameplay',
+  'balance',
+  'world-scene',
+  'presentation',
+  'resource-realization',
+  'implementation-verification',
+] as const)
+export type GameIrModuleId = (typeof GAME_IR_CANONICAL_MODULE_IDS)[number]
 
 export type FoundationReadyReceipt = Readonly<{
   schemaVersion: 'foundation-ready-receipt.v1'
@@ -67,8 +77,8 @@ export type GameIrReadyReceipt = Readonly<{
   foundationRevision: string
   foundationReceiptDigest: string
   manifestDigest: string
-  moduleDigests: Readonly<Record<string, string>>
-  sourceMapDigests: Readonly<Record<string, string>>
+  moduleDigests: Readonly<Record<GameIrModuleId, string>>
+  sourceMapDigests: Readonly<Record<GameIrModuleId, string>>
   dependencyGraphDigest: string
   committedPath: string
 }>
@@ -81,6 +91,14 @@ const nonEmptyTextSchema = z.string().refine(value => value.trim().length > 0, {
 })
 const safeIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
 const foundationDocumentPathSchema = z.enum(CANONICAL_FOUNDATION_DOCUMENTS)
+
+export function gameIrCommittedPath(foundationRevision: string): string {
+  if (!safeIdSchema.safeParse(foundationRevision).success)
+    throw new Error(
+      'Game IR foundation revision is not a canonical path segment',
+    )
+  return `.beegame/ir/${GAME_IR_SCHEMA_VERSION}/revisions/${foundationRevision}/COMMITTED.json`
+}
 
 const safeRelativeArtifactPathSchema = z.string().refine(value => {
   if (
@@ -266,5 +284,29 @@ export function parseFoundationDefectReport(
 }
 
 export function parseGameIrReadyReceipt(value: unknown): GameIrReadyReceipt {
-  return deepFreeze(gameIrReadyReceiptSchema.parse(value)) as GameIrReadyReceipt
+  const parsed = gameIrReadyReceiptSchema.parse(value) as GameIrReadyReceipt
+  const expectedKeys = [...GAME_IR_CANONICAL_MODULE_IDS].sort()
+  const moduleKeys = Object.keys(parsed.moduleDigests).sort()
+  const sourceMapKeys = Object.keys(parsed.sourceMapDigests).sort()
+  if (
+    moduleKeys.length !== expectedKeys.length ||
+    moduleKeys.some((key, index) => key !== expectedKeys[index])
+  )
+    throw new Error(
+      'Game IR ready receipt has missing or unknown canonical modules',
+    )
+  if (
+    sourceMapKeys.length !== expectedKeys.length ||
+    sourceMapKeys.some((key, index) => key !== expectedKeys[index])
+  )
+    throw new Error(
+      'Game IR ready receipt has missing or unknown canonical source maps',
+    )
+  if (moduleKeys.some((moduleId, index) => moduleId !== sourceMapKeys[index]))
+    throw new Error(
+      'Game IR ready receipt module and source-map digest keys must match',
+    )
+  if (parsed.committedPath !== gameIrCommittedPath(parsed.foundationRevision))
+    throw new Error('Game IR ready receipt committed path is not canonical')
+  return deepFreeze(parsed)
 }
