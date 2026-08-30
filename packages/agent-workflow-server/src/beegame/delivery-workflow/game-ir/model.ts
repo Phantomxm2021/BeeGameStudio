@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import {
   parseGameIrCompileRequest,
   type GameIrCompileRequest,
+  type GameIrModuleId,
 } from './contracts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
@@ -348,6 +349,14 @@ function sourceSectionMap(
   return map
 }
 
+function normalizeSourceSections(
+  value: readonly GameIrSourceSection[],
+): GameIrSourceSection[] {
+  const normalized = normalizeJsonValue(value, 'source sections')
+  if (!Array.isArray(normalized)) fail('source sections must be an array')
+  return normalized as GameIrSourceSection[]
+}
+
 function sectionLine(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
     fail(`${label} must be a positive line number`)
@@ -658,6 +667,41 @@ function parseModule(
   return { moduleId, nodes }
 }
 
+type ModuleInput = Readonly<{
+  request: GameIrCompileRequest
+  sections: readonly GameIrSourceSection[]
+  expectedModuleId?: GameIrModuleId
+}>
+
+function parseGameIrModuleCandidateInternal(
+  value: unknown,
+  sections: Map<string, GameIrSourceSection>,
+  request: GameIrCompileRequest,
+  expectedModuleId?: GameIrModuleId,
+): GameIrModuleCandidate {
+  const module = parseModule(value, sections, request)
+  if (expectedModuleId && module.moduleId !== expectedModuleId)
+    fail('module ID does not match expected module')
+  return module
+}
+
+export function parseGameIrModuleCandidate(
+  value: unknown,
+  input: ModuleInput,
+): GameIrModuleCandidate {
+  const request = parseGameIrCompileRequest(input.request)
+  const sections = sourceSectionMap(
+    normalizeSourceSections(input.sections),
+    request,
+  )
+  return parseGameIrModuleCandidateInternal(
+    normalizeJsonValue(value, 'module'),
+    sections,
+    request,
+    input.expectedModuleId,
+  )
+}
+
 function referenceOrder(left: GameIrReference, right: GameIrReference): number {
   return compareCodeUnits(
     `${left.targetId}\0${left.targetType}`,
@@ -683,14 +727,8 @@ export function parseGameIrCandidate(
   },
 ): GameIrCandidate {
   const request = parseGameIrCompileRequest(input.request)
-  const normalizedSections = normalizeJsonValue(
-    input.sections,
-    'source sections',
-  )
-  if (!Array.isArray(normalizedSections))
-    fail('source sections must be an array')
   const sections = sourceSectionMap(
-    normalizedSections as GameIrSourceSection[],
+    normalizeSourceSections(input.sections),
     request,
   )
   const normalizedValue = normalizeJsonValue(value, 'candidate')
@@ -714,7 +752,7 @@ export function parseGameIrCandidate(
   if (!Array.isArray(normalizedValue.modules))
     fail('candidate modules must be an array')
   const modules = normalizedValue.modules.map(module =>
-    parseModule(module, sections, request),
+    parseGameIrModuleCandidateInternal(module, sections, request),
   )
   for (let index = 1; index < modules.length; index += 1) {
     if (

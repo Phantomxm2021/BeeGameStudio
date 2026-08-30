@@ -9,6 +9,7 @@ import {
   canonicalGameIrJson,
   digestGameIrValue,
   parseGameIrTargetPointer,
+  parseGameIrModuleCandidate,
   parseGameIrCandidate,
   type GameIrCandidate,
   type GameIrSourceBinding,
@@ -168,6 +169,76 @@ function derivedCandidate(
 }
 
 describe('Game IR core candidate and source authority', () => {
+  test('admits one isolated module and checks its expected identity', () => {
+    const rawGameplayModule = candidate().modules[0]!
+    const module = parseGameIrModuleCandidate(rawGameplayModule, {
+      request: request(),
+      sections,
+      expectedModuleId: 'gameplay',
+    })
+    expect(module.moduleId).toBe('gameplay')
+    expect(module.nodes).toHaveLength(1)
+    expect(() =>
+      parseGameIrModuleCandidate(rawGameplayModule, {
+        request: request(),
+        sections,
+        expectedModuleId: 'balance',
+      }),
+    ).toThrow(/module/i)
+  })
+
+  test('rejects isolated modules with stale source bindings', () => {
+    const rawGameplayModule = candidate().modules[0]!
+    const node = rawGameplayModule.nodes[0]!
+    expect(() =>
+      parseGameIrModuleCandidate(
+        {
+          ...rawGameplayModule,
+          nodes: [
+            {
+              ...node,
+              bindings: {
+                ...node.bindings,
+                '/value/health': {
+                  ...node.bindings['/value/health']!,
+                  sectionDigest: 'd'.repeat(64),
+                },
+              },
+            },
+          ],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/section|digest/i)
+  })
+
+  test('keeps complete-candidate cross-module reference closure', () => {
+    const rawGameplayModule = candidate().modules[0]!
+    const node = rawGameplayModule.nodes[0]!
+    const danglingReference = {
+      ...rawGameplayModule,
+      nodes: [
+        {
+          ...node,
+          references: [{ targetId: 'missing-core-node', targetType: 'entity' }],
+          bindings: {
+            ...node.bindings,
+            '/references/0': node.bindings['/id']!,
+          },
+        },
+      ],
+    }
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          ...candidate(),
+          modules: [{ moduleId: 'core', nodes: [] }, danglingReference],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/reference|target|closure/i)
+  })
+
   test('uses one canonical target-pointer classifier for node bindings', () => {
     expect(parseGameIrTargetPointer('/id')).toBe('/id')
     expect(parseGameIrTargetPointer('/value')).toBe('/value')
