@@ -386,6 +386,19 @@ the checks required for each module. V1 requires `core`, `gameplay`, `balance`,
 non-empty before a packet can be built. Common checks include projection
 fidelity, projection completeness, source bounds, ambiguity, and cross-module
 invariants; each module also has its domain check from the redesign document.
+Each manifest module also declares its immutable `sourceDocumentPaths`.
+Validator source scope is the union of every Section Index entry in those
+service-owned documents and any additional section used by an owner binding;
+it is never inferred only from candidate bindings. The caller must provide
+exact Markdown bytes for that entire union, no more and no less. This lets the
+validator detect a candidate that omitted a relevant section without sending
+all eight documents to every module validator.
+
+V1 source documents are: core/gameplay → GDD; balance → GDD + Balance;
+world-scene → GDD + Level/Scene; presentation → GDD + Art + UI/UX + Audio;
+resource-realization → Asset Plan + Technical + Art + UI/UX + Audio +
+Level/Scene; implementation-verification → GDD + Level/Scene + Balance +
+Technical. Lists are canonical and sorted in the manifest digest.
 
 The builder accepts no detached module or caller-supplied task/revision
 identity. It reparses the complete immutable candidate against the compile
@@ -397,10 +410,13 @@ validator manifest identity/digest/check IDs, and the exact Markdown bytes for
 the selected source sections. The service verifies each Markdown byte digest
 against its Section Index ref before constructing the packet.
 
-Evidence pointers use the exact owner-binding source namespace
-`<documentPath>#<sectionId><sourcePointer>`; a coarse section identity is not
-admissible. A PASS is a coverage receipt and must return the exact fixed check
-IDs in canonical order. The result is exactly one of:
+Evidence pointers use either the exact owner-binding namespace
+`binding:<documentPath>#<sectionId><sourcePointer>` or, only when diagnosing a
+missing/ambiguous projection with no binding, the immutable source-section
+namespace `section:<documentPath>#<sectionId>@<sectionDigest>`. A bare coarse
+section identity is not admissible. A PASS is a coverage receipt and must
+return the exact fixed check IDs in canonical order. The result is exactly one
+of:
 
 ```ts
 { outcome: 'PASS'; packetDigest: string; checkIds: string[] }

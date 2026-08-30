@@ -304,9 +304,9 @@ Game IR schema 为每个字段声明唯一 producerMode：mechanical、semantic 
 
 Semantic Producer 只有 candidate 写权限。独立的只读 Semantic Projection Validator 按 module 检查 candidate 是否忠实、完整且没有超出 source evidence；它只能返回 PASS 或结构化 compiler diagnostic，不能修改 candidate、文档或业务 Issue。
 
-Validator 不接受可重新贴 task/revision 身份的 detached module。服务端 packet 必须绑定完整 admitted candidate、compile request、Foundation READY receipt、完整 Section Index 及所选 module 使用的精确 Markdown section bytes；section bytes 必须机械匹配 Section Index digest。固定 validator manifest 定义 V1 canonical modules 与每个 module 的必检项，PASS 必须返回完整、唯一、有序的 coverage receipt。仅有 packet digest 回显的布尔 PASS 不构成 admission evidence。
+Validator 不接受可重新贴 task/revision 身份的 detached module。服务端 packet 必须绑定完整 admitted candidate、compile request、Foundation READY receipt、完整 Section Index 及所选 module 使用的精确 Markdown section bytes；section bytes 必须机械匹配 Section Index digest。固定 validator manifest 定义 V1 canonical modules、每个 module 的必检项和 service-owned `sourceDocumentPaths`。必读 source scope 是 manifest 指定文档的全部 Section Index entries 与 candidate 额外 owner bindings 的并集，不能由 candidate 单独反推；caller 必须提供该并集的精确 Markdown bytes，不能多也不能少。PASS 必须返回完整、唯一、有序的 coverage receipt。仅有 packet digest 回显的布尔 PASS 不构成 admission evidence。
 
-V1 canonical modules 为 core、gameplay、balance、world-scene、presentation、resource-realization 与 implementation-verification。模块不得缺失或为空。诊断 evidence pointer 必须精确到 owner Source Binding 的 document、section 与 sourcePointer，不能用整个 section identity 扩大证据范围。
+V1 canonical modules 为 core、gameplay、balance、world-scene、presentation、resource-realization 与 implementation-verification。模块不得缺失或为空。诊断 evidence pointer 优先精确到 owner Source Binding 的 document、section 与 sourcePointer；当诊断的正是 missing/ambiguous projection、尚不存在 binding 时，允许使用带 section digest 的 immutable `section:<document>#<section>@<digest>` pointer。裸 document/section identity 不可入场。
 
 同一 input 支持两个不同且无法机械区分的合法映射时，Validator 必须返回 ambiguity diagnostic，并由 Stage 5 输出 FoundationDefectReport。不得用模型偏好、默认值或首次成功输出选择业务含义。
 
