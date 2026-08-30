@@ -558,6 +558,31 @@ describe('Balance Game IR schema', () => {
     expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(/unit/i)
   })
 
+  test('eagerly rejects a wrong unit kind on an otherwise-unused variable', () => {
+    const module = cloneModule()
+    const nodes = module.nodes as unknown as MutableNode[]
+    nodes.push(
+      node(
+        'balance.unused',
+        'balance.variable',
+        {
+          label: 'Unused value',
+          baseline: 1,
+          unitReferenceIndex: 0,
+        },
+        {
+          references: [ref('balance.score', 'balance.variable')],
+        },
+      ),
+    )
+    nodes.sort((left, right) =>
+      left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+    )
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(
+      /unit reference must target balance\.unit/i,
+    )
+  })
+
   test('rejects division by a negative zero literal', () => {
     const module = cloneModule()
     nodeById(module, 'balance.formula.currency').value.expression = {
