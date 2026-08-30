@@ -50,3 +50,18 @@ None.
 - Every mutated Foundation receipt used to test authority/document-key strictness now carries a digest computed from the exact mutated payload with only `receiptDigest` omitted.
 - The new unknown-field cases exercise their intended strict object level without relying on receipt digest behavior.
 - Production contract implementation was not changed in this fix round.
+
+## Review fix round 2
+
+- Changed the mixed-authority strictness mutant to use `validFoundation` unchanged as its base and retain its original valid `receiptDigest`; only `baseRevision` and `authorityDigest` are added to the authority object.
+- Changed the extra canonical document-path mutant to retain `validFoundation.receiptDigest` while adding only the extra path.
+- Changed the Foundation receipt root unknown-field mutant to retain `validFoundation.receiptDigest` while adding only the root field.
+- Kept the missing-document-key mutant on the isolated path: it removes the key and recomputes the digest after omitting `receiptDigest`.
+- No production contract semantics were changed.
+
+## Review-fix-round-2 verification
+
+- `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts` — PASS (11 tests, 96 expectations, 0 failures).
+- `bunx tsc --noEmit -p packages/agent-workflow-server/tsconfig.json` — PASS.
+- `node_modules/.bin/biome check packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts` — PASS.
+- `git diff --check` — PASS.

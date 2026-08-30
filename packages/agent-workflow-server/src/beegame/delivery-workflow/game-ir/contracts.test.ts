@@ -162,26 +162,22 @@ describe('isolated Game IR contracts', () => {
       'revision_publication',
     )
     expect(() =>
-      parseFoundationReadyReceipt(
-        withCanonicalReceiptDigest({
-          ...receipt,
-          authority: {
-            kind: 'review',
-            reviewDigest: digest,
-            issueRegistryDigest: digest,
-            baseRevision: 'foundation-revision-0',
-            authorityDigest: digest,
-          },
-        }),
-      ),
+      parseFoundationReadyReceipt({
+        ...validFoundation,
+        authority: {
+          ...validFoundation.authority,
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+          baseRevision: 'foundation-revision-0',
+          authorityDigest: digest,
+        },
+      } as unknown),
     ).toThrow()
   })
 
   test('rejects unknown and missing fields in strict schemas', () => {
     expect(() =>
-      parseFoundationReadyReceipt(
-        withCanonicalReceiptDigest({ ...validFoundation, extra: true }),
-      ),
+      parseFoundationReadyReceipt({ ...validFoundation, extra: true }),
     ).toThrow()
     expect(() =>
       parseFoundationReadyReceipt(
@@ -194,15 +190,13 @@ describe('isolated Game IR contracts', () => {
       ),
     ).toThrow()
     expect(() =>
-      parseFoundationReadyReceipt(
-        withCanonicalReceiptDigest({
-          ...validFoundation,
-          documentDigests: {
-            ...validFoundation.documentDigests,
-            'docs/UNKNOWN.md': digest,
-          },
-        }),
-      ),
+      parseFoundationReadyReceipt({
+        ...validFoundation,
+        documentDigests: {
+          ...validFoundation.documentDigests,
+          'docs/UNKNOWN.md': digest,
+        },
+      } as unknown),
     ).toThrow()
     expect(() =>
       parseGameIrCompileRequest({ ...compileRequest(), extra: true }),
