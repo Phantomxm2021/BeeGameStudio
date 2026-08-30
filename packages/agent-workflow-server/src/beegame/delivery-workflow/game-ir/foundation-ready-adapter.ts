@@ -3,6 +3,7 @@ import {
   parseFoundationAuditState,
   type FoundationAuditState,
 } from '../foundation-audit-state'
+import { relativeFoundationAuditArtifactPaths } from '../foundation-audit-artifacts'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
@@ -90,9 +91,12 @@ function assertDocumentBindings(
 
 function assertCurrentSectionIndex(state: FoundationAuditState): void {
   const derived = state.derived
+  const canonicalDerivedSectionIndexPath = relativeFoundationAuditArtifactPaths(
+    state.revision,
+  ).sectionIndex.replace('/staging/', '/derived/')
   if (
     !derived ||
-    derived.sectionIndexPath !== state.sectionIndexPath ||
+    derived.sectionIndexPath !== canonicalDerivedSectionIndexPath ||
     derived.sectionIndexDigest !== state.sectionIndexDigest ||
     !/^[a-f0-9]{64}$/.test(state.sectionIndexDigest)
   )

@@ -62,7 +62,7 @@ function auditReadyState(): FoundationAuditState {
       markerDigest: DIGEST,
       factStorePath: `.beegame/audit/foundation/${REVISION}/derived/fact-store.json`,
       factStoreDigest: DIGEST,
-      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/staging/section-index.json`,
+      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/derived/section-index.json`,
       sectionIndexDigest: DIGEST,
     },
     deterministic: {
@@ -251,7 +251,7 @@ describe('Foundation READY outer adapter', () => {
       documentDigests: Object.fromEntries(
         CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, DIGEST]),
       ),
-      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/staging/section-index.json`,
+      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/derived/section-index.json`,
       sectionIndexDigest: DIGEST,
       authority: {
         kind: 'review',

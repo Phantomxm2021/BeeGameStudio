@@ -32,3 +32,9 @@ The contracts helper required a minimal export-only change because it was previo
 - `revision_ready` now obtains the sole active bundle through `activeFoundationRevisionBundle` and requires publication `baseRevision` to equal both `roundBefore.documentRevision` and the active bundle `baseDocumentRevision`.
 - Added parser-valid Section Index path tampering and parser-valid round-before/active-bundle lineage tampering negatives; each fails at the adapter's exact invariant.
 - Verification: adapter + contracts + boundary tests pass (19 tests, 119 expectations); TypeScript, Biome, and `git diff --check` pass.
+
+## Review fix round 2
+
+- Removed the incorrect `derived.sectionIndexPath === state.sectionIndexPath` requirement that rejected real `audit_ready` states.
+- `audit_ready` now verifies `derived.sectionIndexPath` against the canonical revision-derived path and projects that derived path into the receipt, while retaining digest bindings.
+- Restored the parser-valid fixture with its staging outer path and canonical derived path; the path tampering negative now targets another safe parser-valid path.
