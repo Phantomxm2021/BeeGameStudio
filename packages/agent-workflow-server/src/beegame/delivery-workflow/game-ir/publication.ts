@@ -692,16 +692,14 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
 }
 
 async function writeStage(plan: Plan): Promise<void> {
+  const journalDirectory = dirname(plan.journal)
+  const stageDirectory = dirname(plan.stage)
   await ensureDir(
     plan.workspacePath,
     pathOf(plan.workspacePath, GAME_IR_PUBLICATION_ROOT),
     plan.testHooks,
   )
-  await ensureDir(
-    plan.workspacePath,
-    pathOf(plan.workspacePath, `${GAME_IR_PUBLICATION_ROOT}/.journal`),
-    plan.testHooks,
-  )
+  await ensureDir(plan.workspacePath, journalDirectory, plan.testHooks)
   const journalExists = await existing(plan.journal)
   const stageExists = await existing(plan.stage)
   const finalExists = await existing(plan.final)
@@ -716,7 +714,6 @@ async function writeStage(plan: Plan): Promise<void> {
     },
     plan.journal,
   )
-  const journalDirectory = dirname(plan.journal)
   await syncDirectory(plan.workspacePath, journalDirectory, plan.testHooks)
   await syncDirectory(
     plan.workspacePath,
@@ -724,11 +721,7 @@ async function writeStage(plan: Plan): Promise<void> {
     plan.testHooks,
   )
   plan.testHooks?.onEvent?.({ type: 'stage-work' })
-  await ensureDir(
-    plan.workspacePath,
-    pathOf(plan.workspacePath, `${GAME_IR_PUBLICATION_ROOT}/.staging`),
-    plan.testHooks,
-  )
+  await ensureDir(plan.workspacePath, stageDirectory, plan.testHooks)
   if (await existing(plan.stage)) {
     await componentsSafe(plan.workspacePath, plan.stage)
     await exactDirectory(
@@ -895,6 +888,7 @@ async function exactJournal(plan: Plan): Promise<void> {
 }
 async function cleanup(plan: Plan): Promise<void> {
   const privateCleanup = join(plan.privateRoot, 'cleanup')
+  const stageDirectory = dirname(plan.stage)
   try {
     await rename(plan.stage, privateCleanup)
     await rm(privateCleanup, { recursive: true, force: true })
@@ -902,16 +896,8 @@ async function cleanup(plan: Plan): Promise<void> {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
   }
   try {
-    if (
-      (
-        await readdir(
-          join(plan.workspacePath, GAME_IR_PUBLICATION_ROOT, '.staging'),
-        )
-      ).length === 0
-    )
-      await rmdir(
-        join(plan.workspacePath, GAME_IR_PUBLICATION_ROOT, '.staging'),
-      )
+    if ((await readdir(stageDirectory)).length === 0)
+      await rmdir(stageDirectory)
   } catch {
     return
   }
@@ -946,14 +932,10 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
     }
     throw error
   }
-  const revisions = pathOf(
-    plan.workspacePath,
-    `${GAME_IR_PUBLICATION_ROOT}/revisions`,
-  )
-  await ensureDir(plan.workspacePath, revisions, plan.testHooks)
+  await ensureDir(plan.workspacePath, finalDirectory, plan.testHooks)
   await componentsSafe(plan.workspacePath, plan.final)
   if (await existing(plan.final)) {
-    return ready(plan, revisions)
+    return ready(plan, finalDirectory)
   }
   const stageDirectory = dirname(plan.stage)
   try {
@@ -978,7 +960,7 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
       fail('rename race winner is not yet visible; retry safely')
     await exactFiles(plan, plan.final)
   }
-  return ready(plan, revisions)
+  return ready(plan, finalDirectory)
 }
 
 function withWorkspace(
