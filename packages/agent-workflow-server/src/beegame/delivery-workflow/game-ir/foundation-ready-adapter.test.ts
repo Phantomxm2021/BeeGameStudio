@@ -62,7 +62,7 @@ function auditReadyState(): FoundationAuditState {
       markerDigest: DIGEST,
       factStorePath: `.beegame/audit/foundation/${REVISION}/derived/fact-store.json`,
       factStoreDigest: DIGEST,
-      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/derived/section-index.json`,
+      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/staging/section-index.json`,
       sectionIndexDigest: DIGEST,
     },
     deterministic: {
@@ -251,7 +251,7 @@ describe('Foundation READY outer adapter', () => {
       documentDigests: Object.fromEntries(
         CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, DIGEST]),
       ),
-      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/derived/section-index.json`,
+      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/staging/section-index.json`,
       sectionIndexDigest: DIGEST,
       authority: {
         kind: 'review',
@@ -343,6 +343,19 @@ describe('Foundation READY outer adapter', () => {
     ).toThrow()
   })
 
+  test('rejects an audit-ready state whose derived Section Index path is stale', () => {
+    const state = auditReadyState()
+    const derived = {
+      ...state.derived!,
+      sectionIndexPath: `.beegame/audit/foundation/${REVISION}/derived/other-index.json`,
+    }
+    const parserValid = parseFoundationAuditState({ ...state, derived })
+    expect(parserValid.derived?.sectionIndexPath).toBe(derived.sectionIndexPath)
+    expect(() => projectFoundationReadyReceipt(input(parserValid))).toThrow(
+      /Section Index binding/i,
+    )
+  })
+
   test('rejects inconsistent revision publication bindings', () => {
     const state = revisionReadyState()
     expect(() =>
@@ -375,5 +388,52 @@ describe('Foundation READY outer adapter', () => {
         input({ ...state, publication: undefined }),
       ),
     ).toThrow(/publication|authority|metadata/i)
+  })
+
+  test('rejects a publication whose base revision diverges from round-before lineage', () => {
+    const state = revisionReadyState()
+    const parserValid = parseFoundationAuditState({
+      ...state,
+      roundBefore: {
+        ...state.roundBefore!,
+        documentRevision: 'different-lineage',
+      },
+    })
+    expect(parserValid.roundBefore?.documentRevision).toBe('different-lineage')
+    expect(() => projectFoundationReadyReceipt(input(parserValid))).toThrow(
+      /lineage|base revision/i,
+    )
+  })
+
+  test('rejects a publication whose active bundle base diverges from publication lineage', () => {
+    const state = revisionReadyState()
+    const bundle = state.revisionBundles![0]!
+    const task = state.tasks[0]!
+    if (task.kind !== 'impacted-facts')
+      throw new Error('revision fixture task kind changed')
+    const divergentRevision = 'different-bundle-lineage'
+    const divergentTask = {
+      ...task,
+      revision: divergentRevision,
+      packetPath: foundationRevisionPacketPath(
+        divergentRevision,
+        task.round,
+        task.taskId,
+      ),
+      dispatch: task.dispatch
+        ? { ...task.dispatch, revision: divergentRevision }
+        : undefined,
+    }
+    const parserValid = parseFoundationAuditState({
+      ...state,
+      revisionBundles: [{ ...bundle, baseDocumentRevision: divergentRevision }],
+      tasks: [divergentTask],
+    })
+    expect(parserValid.revisionBundles?.[0]?.baseDocumentRevision).toBe(
+      divergentRevision,
+    )
+    expect(() => projectFoundationReadyReceipt(input(parserValid))).toThrow(
+      /lineage|base revision/i,
+    )
   })
 })

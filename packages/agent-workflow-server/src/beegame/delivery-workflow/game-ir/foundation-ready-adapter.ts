@@ -1,4 +1,5 @@
 import {
+  activeFoundationRevisionBundle,
   parseFoundationAuditState,
   type FoundationAuditState,
 } from '../foundation-audit-state'
@@ -91,6 +92,7 @@ function assertCurrentSectionIndex(state: FoundationAuditState): void {
   const derived = state.derived
   if (
     !derived ||
+    derived.sectionIndexPath !== state.sectionIndexPath ||
     derived.sectionIndexDigest !== state.sectionIndexDigest ||
     !/^[a-f0-9]{64}$/.test(state.sectionIndexDigest)
   )
@@ -129,6 +131,14 @@ function projectAuthority(
       'Foundation READY committed revision publication authority is missing',
     )
   const issueAuthority = authority.issueAuthority
+  const activeBundle = activeFoundationRevisionBundle(state)
+  if (
+    issueAuthority.baseRevision !== state.roundBefore?.documentRevision ||
+    issueAuthority.baseRevision !== activeBundle.baseDocumentRevision
+  )
+    throw new Error(
+      'Foundation READY revision publication base revision lineage is inconsistent',
+    )
   if (
     publication.resultingRevision !== state.revision ||
     publication.authorityDigest !== issueAuthority.authorityDigest ||

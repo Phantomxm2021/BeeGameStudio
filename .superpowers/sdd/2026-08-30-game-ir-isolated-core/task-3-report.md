@@ -25,3 +25,10 @@ Complete. Commit: `3b1ba9ba` (`feat: project Foundation READY receipt`).
 ## Concerns
 
 The contracts helper required a minimal export-only change because it was previously private; its implementation is unchanged.
+
+## Review fix round 1
+
+- `audit_ready` now requires `derived.sectionIndexPath === state.sectionIndexPath` and projects the current state path.
+- `revision_ready` now obtains the sole active bundle through `activeFoundationRevisionBundle` and requires publication `baseRevision` to equal both `roundBefore.documentRevision` and the active bundle `baseDocumentRevision`.
+- Added parser-valid Section Index path tampering and parser-valid round-before/active-bundle lineage tampering negatives; each fails at the adapter's exact invariant.
+- Verification: adapter + contracts + boundary tests pass (19 tests, 119 expectations); TypeScript, Biome, and `git diff --check` pass.
