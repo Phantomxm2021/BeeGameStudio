@@ -578,17 +578,6 @@ describe('Game IR core candidate and source authority', () => {
       parseGameIrCandidate(hidden, { request: request(), sections }),
     ).toThrow(/descriptor|enumerable|json/i)
 
-    const nonOrdinary = candidate()
-    Object.defineProperty(nonOrdinary.modules[0]!.nodes[0]!.value, 'locked', {
-      enumerable: true,
-      configurable: true,
-      writable: false,
-      value: 1,
-    })
-    expect(() =>
-      parseGameIrCandidate(nonOrdinary, { request: request(), sections }),
-    ).toThrow(/descriptor|writable|json/i)
-
     const sparse = candidate()
     const sparseArray: unknown[] = []
     sparseArray.length = 2
@@ -666,6 +655,63 @@ describe('Game IR core candidate and source authority', () => {
     expect(
       parseGameIrCandidate(emptyDerived, { request: request(), sections }),
     ).toBeTruthy()
+  })
+
+  test('accepts frozen parsed candidates and preserves digest identity', () => {
+    const plain = candidate()
+    const parsed = parseGameIrCandidate(plain, { request: request(), sections })
+    expect(() => canonicalGameIrJson(parsed)).not.toThrow()
+    expect(digestGameIrValue(parsed)).toBe(digestGameIrValue(plain))
+    expect(() =>
+      parseGameIrCandidate(parsed, { request: request(), sections }),
+    ).not.toThrow()
+
+    const emptyArrayCandidate = candidate({
+      modules: [
+        {
+          ...candidate().modules[0]!,
+          nodes: [
+            {
+              ...candidate().modules[0]!.nodes[0]!,
+              value: { items: [] },
+              bindings: {
+                '/id': candidate().modules[0]!.nodes[0]!.bindings['/id']!,
+                '/value/items':
+                  candidate().modules[0]!.nodes[0]!.bindings['/value/health']!,
+              },
+            },
+          ],
+        },
+      ],
+    })
+    const parsedEmptyArray = parseGameIrCandidate(emptyArrayCandidate, {
+      request: request(),
+      sections,
+    })
+    expect(() => canonicalGameIrJson(parsedEmptyArray)).not.toThrow()
+
+    const nonWritable = candidate()
+    Object.defineProperty(nonWritable.modules[0]!.nodes[0]!.value, 'stable', {
+      enumerable: true,
+      configurable: false,
+      writable: false,
+      value: 7,
+    })
+    ;(nonWritable.modules[0]!.nodes[0]!.bindings as Record<string, unknown>)[
+      '/value/stable'
+    ] = nonWritable.modules[0]!.nodes[0]!.bindings['/value/health']!
+    const parsedNonWritable = parseGameIrCandidate(nonWritable, {
+      request: request(),
+      sections,
+    })
+    expect(parsedNonWritable).not.toBe(nonWritable)
+    expect(parsedNonWritable.modules[0]!.nodes[0]!.value).not.toBe(
+      nonWritable.modules[0]!.nodes[0]!.value,
+    )
+    expect(parsedNonWritable.modules[0]!.nodes[0]!.value.stable).toBe(7)
+    expect(Object.isFrozen(parsedNonWritable.modules[0]!.nodes[0]!.value)).toBe(
+      true,
+    )
   })
 
   test('canonicalizes object keys without changing declared array order', () => {

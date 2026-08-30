@@ -171,7 +171,6 @@ function normalizeJsonValue(value: unknown, path: string): unknown {
       !lengthDescriptor ||
       !('value' in lengthDescriptor) ||
       lengthDescriptor.enumerable !== false ||
-      lengthDescriptor.writable !== true ||
       lengthDescriptor.configurable !== false
     )
       fail(`${path} has a non-JSON length descriptor`)
@@ -188,9 +187,7 @@ function normalizeJsonValue(value: unknown, path: string): unknown {
       if (
         !descriptor ||
         !('value' in descriptor) ||
-        descriptor.enumerable !== true ||
-        descriptor.writable !== true ||
-        descriptor.configurable !== true
+        descriptor.enumerable !== true
       )
         fail(`${path}/${index} has a non-JSON property descriptor`)
     }
@@ -209,9 +206,7 @@ function normalizeJsonValue(value: unknown, path: string): unknown {
     if (
       !descriptor ||
       !('value' in descriptor) ||
-      descriptor.enumerable !== true ||
-      descriptor.writable !== true ||
-      descriptor.configurable !== true
+      descriptor.enumerable !== true
     )
       fail(`${path}/${key} has a non-JSON property descriptor`)
     Object.defineProperty(normalized, key, {
