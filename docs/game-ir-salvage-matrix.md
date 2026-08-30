@@ -233,7 +233,7 @@ Mechanical inventory command: `rg '^export' packages/agent-workflow-server/src/b
 
 ## Old production importers and consumers
 
-Mechanical inventory command: `rg -il 'game[_ -]?ir|GAME_IR|GameIr|gameIr' packages/agent-workflow-server/src/beegame/delivery-workflow --glob '*.ts' --glob '!**/*.test.ts' --glob '!**/game-ir/**'` plus the TypeScript AST direct-import scan, run against the saved old dirty checkout with tests and `game-ir/` excluded from the production result. The marker command is intentionally case-insensitive; the resulting inventory is the exact 16 direct importers below plus five separately verified indirect production consumers, not a case-sensitive `rg` count.
+Mechanical inventory command: `rg -il 'game[_-]?ir' packages/agent-workflow-server/src/beegame/delivery-workflow --glob '*.ts' --glob '!**/*.test.ts' --glob '!game-ir.ts'` plus the TypeScript AST direct-import scan, run against the saved old dirty checkout with tests and `game-ir.ts` excluded from the production result. The marker command is intentionally case-insensitive; it returns exactly 21 production paths in that worktree, matching the exact 16 direct importers below plus five separately verified indirect production consumers.
 
 | ID | Exact importer/consumer path | Category | Consumer responsibility and disposition |
 | --- | --- | --- | --- |
