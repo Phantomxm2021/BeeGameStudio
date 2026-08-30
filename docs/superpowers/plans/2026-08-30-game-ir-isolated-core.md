@@ -698,6 +698,15 @@ symbols from the new isolated contracts as if they were exports of the old
 helpers. The matrix must agree with a fresh `rg`/AST inventory of that saved
 checkout.
 
+Do not hand-select a supposed subset of dirty Reviewer/Revision paths. Record
+the complete saved-worktree `git status --porcelain=v1 -uall` snapshot with its
+HEAD, entry count and SHA-256 digest, and list every returned path/status once
+in an artifact ledger. Each dirty artifact delta is `DISCARD`; a future
+independent fix starts from the stable baseline and is separately `REPROVE`d.
+Export-symbol and consumer-relationship tables are different conceptual item
+types and may reference a path already present in the artifact snapshot, but
+must say so explicitly.
+
 - [ ] **Step 5: Run the full core and Foundation regression**
 
 ```bash
