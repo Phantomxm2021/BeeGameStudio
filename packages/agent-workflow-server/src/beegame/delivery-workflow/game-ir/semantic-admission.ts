@@ -196,6 +196,55 @@ function id(value: unknown, label: string): string {
   return result
 }
 
+function canonicalTargetSubject(
+  value: unknown,
+  nodeIds: readonly string[],
+  label: string,
+): string {
+  const subject = text(value, label)
+  const separator = subject.indexOf('#')
+  if (
+    separator <= 'node:'.length ||
+    !subject.startsWith('node:') ||
+    subject.indexOf('#', separator + 1) !== -1
+  )
+    fail(`${label} must be a canonical node-qualified target subject`)
+  const nodeId = id(subject.slice('node:'.length, separator), `${label} nodeId`)
+  if (!nodeIds.includes(nodeId)) fail(`${label} refers to an unknown node`)
+  const pointer = subject.slice(separator + 1)
+  if (!pointer.startsWith('/') || /\s/.test(pointer))
+    fail(`${label} must contain a canonical JSON pointer`)
+  const segments = pointer.slice(1).split('/')
+  if (
+    segments.some(
+      segment =>
+        segment.length === 0 ||
+        segment === '.' ||
+        segment === '..' ||
+        segment.includes('\\') ||
+        segment.includes('__proto__') ||
+        segment.includes('constructor') ||
+        segment.includes('prototype') ||
+        /~(?![01])/.test(segment),
+    )
+  )
+    fail(`${label} must contain a canonical JSON pointer`)
+  const normalizedPointer = `/${segments
+    .map(segment =>
+      segment
+        .replaceAll('~1', '/')
+        .replaceAll('~0', '~')
+        .replaceAll('~', '~0')
+        .replaceAll('/', '~1'),
+    )
+    .join('/')}`
+  if (normalizedPointer !== pointer)
+    fail(`${label} is not canonically normalized`)
+  const canonical = `node:${nodeId}#${normalizedPointer}`
+  if (canonical !== subject) fail(`${label} is not canonically normalized`)
+  return canonical
+}
+
 function digest(value: unknown, label: string): string {
   const result = text(value, label)
   if (!SHA256.test(result)) fail(`${label} must be a SHA-256 digest`)
@@ -472,11 +521,13 @@ function moduleSourceClosure(
   sections: readonly GameIrSourceSection[]
   evidencePointers: readonly string[]
   boundSubjects: readonly string[]
+  nodeIds: readonly string[]
 } {
   const byKey = new Map(index.map(section => [sectionKey(section), section]))
   const sections = new Map<string, GameIrSourceSection>()
   const evidence = new Set<string>()
   const boundSubjects = new Set<string>()
+  const nodeIds = module.nodes.map(node => node.id)
   for (const ref of index) {
     if (manifest.sourceDocumentPaths.includes(ref.documentPath)) {
       sections.set(sectionKey(ref), ref)
@@ -484,14 +535,13 @@ function moduleSourceClosure(
   }
   for (const node of module.nodes) {
     for (const [pointer, binding] of Object.entries(node.bindings)) {
-      boundSubjects.add(pointer)
+      boundSubjects.add(`node:${node.id}#${pointer}`)
       if (binding.kind !== 'owner') continue
       const ref = byKey.get(sectionKey(binding))
       if (!ref) fail('owner binding is outside the receipt-bound Section Index')
       if (ref.digest !== binding.sectionDigest)
         fail('owner binding section digest does not match Section Index')
       sections.set(sectionKey(ref), ref)
-      boundSubjects.add(binding.sourcePointer)
       evidence.add(ownerEvidencePointer(binding))
     }
   }
@@ -506,6 +556,7 @@ function moduleSourceClosure(
     ),
     evidencePointers: Object.freeze(evidencePointers),
     boundSubjects: Object.freeze([...boundSubjects].sort(compare)),
+    nodeIds: Object.freeze(nodeIds),
   }
 }
 
@@ -622,6 +673,7 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
   packet: GameIrSemanticValidationPacket
   module: GameIrSemanticValidatorModule
   boundSubjects: readonly string[]
+  nodeIds: readonly string[]
 } {
   if (!isRecord(packet)) fail('packet must be an object')
   exactKeys(
@@ -746,6 +798,7 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
     packet: Object.freeze({ ...body, packetDigest: packet.packetDigest }),
     module,
     boundSubjects: closure.boundSubjects,
+    nodeIds: closure.nodeIds,
   }
 }
 
@@ -844,7 +897,11 @@ export function admitGameIrSemanticValidationResult(
   const requiresProjectionIdentity =
     reasonCode === 'missing-projection' || reasonCode === 'ambiguous-projection'
   const missingSubject = requiresProjectionIdentity
-    ? text(result.missingSubject, 'result missingSubject')
+    ? canonicalTargetSubject(
+        result.missingSubject,
+        validated.nodeIds,
+        'result missingSubject',
+      )
     : undefined
   const expectedProjection = requiresProjectionIdentity
     ? text(result.expectedProjection, 'result expectedProjection')

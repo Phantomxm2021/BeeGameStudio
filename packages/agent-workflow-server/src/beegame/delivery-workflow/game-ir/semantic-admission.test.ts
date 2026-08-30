@@ -172,6 +172,34 @@ function rawCandidate(): Record<string, unknown> {
             },
           },
         },
+        ...(moduleId === 'gameplay'
+          ? [
+              {
+                id: `${moduleId}.secondary`,
+                kind: 'semantic-node',
+                producerMode: 'semantic',
+                value: {},
+                references: [],
+                edges: [],
+                bindings: {
+                  '/id': {
+                    kind: 'owner',
+                    documentPath: 'docs/GDD.md',
+                    sectionId: 'core-loop',
+                    sectionDigest,
+                    sourcePointer: '/value/label',
+                  },
+                  '/value': {
+                    kind: 'owner',
+                    documentPath: 'docs/GDD.md',
+                    sectionId: 'core-loop',
+                    sectionDigest,
+                    sourcePointer: `/ir/${moduleId}/secondary-value`,
+                  },
+                },
+              },
+            ]
+          : []),
       ],
     })),
   }
@@ -516,13 +544,14 @@ describe('isolated Game IR semantic projection admission', () => {
       evidencePointers: exact,
     })
     expect(admitted.outcome).toBe('FAIL')
+
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
         outcome: 'FAIL',
         packetDigest: value.packetDigest,
         reasonCode: 'ambiguous-projection',
         actual: 'two projections are possible',
-        missingSubject: '/value/rule',
+        missingSubject: 'node:gameplay.root#/value/rule',
         expectedProjection: 'the canonical rule projection',
         evidencePointers: exact,
       }),
@@ -533,7 +562,7 @@ describe('isolated Game IR semantic projection admission', () => {
         packetDigest: value.packetDigest,
         reasonCode: 'missing-projection',
         actual: 'required source was not projected',
-        missingSubject: '/value/rule',
+        missingSubject: 'node:gameplay.root#/value/rule',
         expectedProjection: 'the canonical rule projection',
         evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
       }),
@@ -543,7 +572,7 @@ describe('isolated Game IR semantic projection admission', () => {
       packetDigest: value.packetDigest,
       reasonCode: 'missing-projection',
       actual: 'required source was not projected',
-      missingSubject: '/value/rule',
+      missingSubject: 'node:gameplay.root#/value/rule',
       expectedProjection: 'the canonical rule projection',
       evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
     })
@@ -553,7 +582,7 @@ describe('isolated Game IR semantic projection admission', () => {
       packetDigest: value.packetDigest,
       reasonCode: 'ambiguous-projection',
       actual: 'two projections are possible',
-      missingSubject: '/value/rule',
+      missingSubject: 'node:gameplay.root#/value/rule',
       expectedProjection: 'the canonical rule projection',
       evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
     })
@@ -573,7 +602,7 @@ describe('isolated Game IR semantic projection admission', () => {
         packetDigest: value.packetDigest,
         reasonCode: 'ambiguous-projection',
         actual: 'two projections are possible',
-        subject: '/value/rule',
+        subject: 'node:gameplay.root#/value/rule',
         expectedProjection: 'the canonical rule projection',
         evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
       }),
@@ -644,11 +673,22 @@ describe('isolated Game IR semantic projection admission', () => {
       packetDigest: value.packetDigest,
       reasonCode: 'missing-projection',
       actual: 'required source was not projected',
-      missingSubject: '/value/rule',
+      missingSubject: 'node:gameplay.root#/value/rule',
       expectedProjection: 'the canonical rule projection',
       evidencePointers: sectionEvidence,
     })
     expect(admitted.outcome).toBe('FAIL')
+
+    const isolated = admitGameIrSemanticValidationResult(value, {
+      outcome: 'FAIL',
+      packetDigest: value.packetDigest,
+      reasonCode: 'missing-projection',
+      actual: 'required source was not projected',
+      missingSubject: 'node:gameplay.secondary#/value/label',
+      expectedProjection: 'the canonical secondary label projection',
+      evidencePointers: sectionEvidence,
+    })
+    expect(isolated.outcome).toBe('FAIL')
 
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
@@ -656,7 +696,19 @@ describe('isolated Game IR semantic projection admission', () => {
         packetDigest: value.packetDigest,
         reasonCode: 'missing-projection',
         actual: 'required source was not projected',
-        missingSubject: '/value/label',
+        missingSubject: 'node:gameplay.root#/value/rule ',
+        expectedProjection: 'the canonical rule projection',
+        evidencePointers: sectionEvidence,
+      }),
+    ).toThrow(/subject|canonical|whitespace|invalid/i)
+
+    expect(() =>
+      admitGameIrSemanticValidationResult(value, {
+        outcome: 'FAIL',
+        packetDigest: value.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'required source was not projected',
+        missingSubject: 'node:gameplay.root#/value/label',
         expectedProjection: 'the canonical label projection',
         evidencePointers: sectionEvidence,
       }),
@@ -667,7 +719,7 @@ describe('isolated Game IR semantic projection admission', () => {
       packetDigest: value.packetDigest,
       reasonCode: 'ambiguous-projection',
       actual: 'two projections are possible',
-      missingSubject: '/value/rule',
+      missingSubject: 'node:gameplay.root#/value/rule',
       expectedProjection: 'the canonical rule projection',
       evidencePointers: sectionEvidence,
     })
@@ -678,7 +730,7 @@ describe('isolated Game IR semantic projection admission', () => {
         packetDigest: value.packetDigest,
         reasonCode: 'ambiguous-projection',
         actual: 'two projections are possible',
-        missingSubject: '/value/label',
+        missingSubject: 'node:gameplay.root#/value/label',
         expectedProjection: 'the canonical label projection',
         evidencePointers: sectionEvidence,
       }),
