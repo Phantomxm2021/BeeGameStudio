@@ -702,6 +702,27 @@ describe('isolated Game IR semantic projection admission', () => {
       }),
     ).toThrow(/subject|canonical|whitespace|invalid/i)
 
+    for (const pseudoTarget of [
+      'node:gameplay.root#/kind',
+      'node:gameplay.root#/bindings/value',
+      'node:gameplay.root#/source/value',
+      'node:gameplay.root#/references/-1',
+      'node:gameplay.root#/references/01',
+      'node:gameplay.root#/edges/0/extra',
+    ]) {
+      expect(() =>
+        admitGameIrSemanticValidationResult(value, {
+          outcome: 'FAIL',
+          packetDigest: value.packetDigest,
+          reasonCode: 'missing-projection',
+          actual: 'required source was not projected',
+          missingSubject: pseudoTarget,
+          expectedProjection: 'the canonical rule projection',
+          evidencePointers: sectionEvidence,
+        }),
+      ).toThrow(/subject|target|pointer|projection/i)
+    }
+
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
         outcome: 'FAIL',

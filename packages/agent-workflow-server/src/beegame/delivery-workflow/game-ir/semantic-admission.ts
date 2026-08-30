@@ -5,6 +5,7 @@ import {
 } from './contracts'
 import {
   canonicalGameIrJson,
+  parseGameIrTargetPointer,
   parseGameIrCandidate,
   type GameIrCandidate,
   type GameIrModuleCandidate,
@@ -202,6 +203,8 @@ function canonicalTargetSubject(
   label: string,
 ): string {
   const subject = text(value, label)
+  if (subject !== subject.trim())
+    fail(`${label} must be a canonical node-qualified target subject`)
   const separator = subject.indexOf('#')
   if (
     separator <= 'node:'.length ||
@@ -211,36 +214,15 @@ function canonicalTargetSubject(
     fail(`${label} must be a canonical node-qualified target subject`)
   const nodeId = id(subject.slice('node:'.length, separator), `${label} nodeId`)
   if (!nodeIds.includes(nodeId)) fail(`${label} refers to an unknown node`)
-  const pointer = subject.slice(separator + 1)
-  if (!pointer.startsWith('/') || /\s/.test(pointer))
-    fail(`${label} must contain a canonical JSON pointer`)
-  const segments = pointer.slice(1).split('/')
-  if (
-    segments.some(
-      segment =>
-        segment.length === 0 ||
-        segment === '.' ||
-        segment === '..' ||
-        segment.includes('\\') ||
-        segment.includes('__proto__') ||
-        segment.includes('constructor') ||
-        segment.includes('prototype') ||
-        /~(?![01])/.test(segment),
-    )
-  )
-    fail(`${label} must contain a canonical JSON pointer`)
-  const normalizedPointer = `/${segments
-    .map(segment =>
-      segment
-        .replaceAll('~1', '/')
-        .replaceAll('~0', '~')
-        .replaceAll('~', '~0')
-        .replaceAll('/', '~1'),
-    )
-    .join('/')}`
-  if (normalizedPointer !== pointer)
-    fail(`${label} is not canonically normalized`)
-  const canonical = `node:${nodeId}#${normalizedPointer}`
+  const pointerText = subject.slice(separator + 1)
+  let pointer: string
+  try {
+    pointer = parseGameIrTargetPointer(pointerText)
+  } catch {
+    fail(`${label} must contain a canonical Game IR target pointer`)
+  }
+  if (pointer !== pointerText) fail(`${label} is not canonically normalized`)
+  const canonical = `node:${nodeId}#${pointer}`
   if (canonical !== subject) fail(`${label} is not canonically normalized`)
   return canonical
 }

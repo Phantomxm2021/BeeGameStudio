@@ -8,6 +8,7 @@ import {
 import {
   canonicalGameIrJson,
   digestGameIrValue,
+  parseGameIrTargetPointer,
   parseGameIrCandidate,
   type GameIrCandidate,
   type GameIrSourceBinding,
@@ -167,6 +168,27 @@ function derivedCandidate(
 }
 
 describe('Game IR core candidate and source authority', () => {
+  test('uses one canonical target-pointer classifier for node bindings', () => {
+    expect(parseGameIrTargetPointer('/id')).toBe('/id')
+    expect(parseGameIrTargetPointer('/value')).toBe('/value')
+    expect(parseGameIrTargetPointer('/value/name')).toBe('/value/name')
+    expect(parseGameIrTargetPointer('/references/0')).toBe('/references/0')
+    expect(parseGameIrTargetPointer('/edges/12')).toBe('/edges/12')
+    expect(parseGameIrTargetPointer('/value/label with spaces')).toBe(
+      '/value/label with spaces',
+    )
+    for (const pointer of [
+      '/kind',
+      '/bindings/value',
+      '/source/value',
+      '/references/-1',
+      '/references/01',
+      '/edges/1/extra',
+    ]) {
+      expect(() => parseGameIrTargetPointer(pointer)).toThrow(/target pointer/i)
+    }
+  })
+
   test('parses a revision-bound candidate and freezes all containers', () => {
     const parsed = parseGameIrCandidate(candidate(), {
       request: request(),

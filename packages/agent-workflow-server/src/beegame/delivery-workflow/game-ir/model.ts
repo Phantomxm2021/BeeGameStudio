@@ -172,6 +172,25 @@ function localPointer(pointer: string): string {
   return `/${pointerSegments(pointer).map(encodePointerSegment).join('/')}`
 }
 
+/**
+ * Parse the pointer namespace that can identify a node-owned Game IR target.
+ * The returned pointer is normalized by the same JSON Pointer parser used by
+ * model bindings; target existence is intentionally checked by the caller.
+ */
+export function parseGameIrTargetPointer(value: unknown): string {
+  if (!isSafeJsonPointer(value))
+    fail('target pointer must be a safe JSON pointer')
+  const pointer = localPointer(value)
+  if (
+    pointer === '/id' ||
+    pointer === '/value' ||
+    pointer.startsWith('/value/') ||
+    STRUCTURAL_POINTER.test(pointer)
+  )
+    return pointer
+  fail('target pointer must identify /id, a value path, reference, or edge')
+}
+
 function normalizeJsonValue(value: unknown, path: string): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean')
     return value
@@ -538,21 +557,10 @@ function parseNode(
   const parsedBindings: Record<string, GameIrSourceBinding> = {}
   const normalizedPointers = new Set<string>()
   for (const [rawPointer, binding] of Object.entries(value.bindings)) {
-    if (!isSafeJsonPointer(rawPointer))
-      fail(`node ${id} has an unsafe binding pointer`)
-    const pointer = localPointer(rawPointer)
+    const pointer = parseGameIrTargetPointer(rawPointer)
     if (normalizedPointers.has(pointer))
       fail(`node ${id} has duplicate binding pointers`)
     normalizedPointers.add(pointer)
-    if (
-      pointer !== '/id' &&
-      pointer !== '/value' &&
-      !pointer.startsWith('/value/') &&
-      !STRUCTURAL_POINTER.test(pointer)
-    )
-      fail(
-        `node ${id} binding does not target /id, a value leaf, reference, or edge`,
-      )
     if (STRUCTURAL_POINTER.test(pointer)) {
       const [collection, indexText] = pointer.slice(1).split('/')
       const entries = collection === 'references' ? references : edges
