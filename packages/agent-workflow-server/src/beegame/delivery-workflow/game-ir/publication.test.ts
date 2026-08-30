@@ -52,6 +52,12 @@ import {
 } from './publication'
 
 const digest = 'a'.repeat(64)
+const chmodProbeSupported =
+  ['aix', 'darwin', 'freebsd', 'linux', 'openbsd', 'sunos'].includes(
+    process.platform,
+  ) &&
+  typeof process.getuid === 'function' &&
+  process.getuid() !== 0
 const documents = new Map(
   CANONICAL_FOUNDATION_DOCUMENTS.map(path => {
     const submission = completeTestSubmission(path)
@@ -659,29 +665,37 @@ describe('atomic Game IR publication and recovery', () => {
     expect(await readdir(external)).toEqual(['publication-1.json'])
   })
 
-  test('recovery rejects an external journal ancestor before consulting its target', async () => {
-    const value = await setup()
-    const prepared = await prepareGameIrPublication(value)
-    await commitGameIrPublication(value)
-    const journalPath = join(value.workspacePath, prepared.journalPath)
-    const journalDirectory = dirname(journalPath)
-    const external = await mkdtemp(
-      join(tmpdir(), 'game-ir-journal-permission-'),
-    )
-    workspaces.push(external)
-    await Bun.write(join(external, 'publication-1.json'), 'outside\n')
-    await rm(journalDirectory, { recursive: true })
-    await symlink(external, journalDirectory)
-    await chmod(external, 0o000)
-    try {
-      await expect(recoverGameIrPublication(value)).rejects.toThrow(
-        'existing path component is symlink or non-directory',
+  test.skipIf(!chmodProbeSupported)(
+    'recovery rejects an external journal ancestor before consulting its target',
+    async () => {
+      const value = await setup()
+      const prepared = await prepareGameIrPublication(value)
+      await commitGameIrPublication(value)
+      const journalPath = join(value.workspacePath, prepared.journalPath)
+      const journalDirectory = dirname(journalPath)
+      const external = await mkdtemp(
+        join(tmpdir(), 'game-ir-journal-permission-'),
       )
-    } finally {
-      await chmod(external, 0o700)
-    }
-    expect(await readdir(external)).toEqual(['publication-1.json'])
-  })
+      workspaces.push(external)
+      const externalJournal = join(external, 'publication-1.json')
+      await Bun.write(externalJournal, 'outside\n')
+      await chmod(external, 0o000)
+      try {
+        // The mutation proof requires POSIX non-root permission semantics.
+        await expect(readFile(externalJournal, 'utf8')).rejects.toThrow(
+          /EACCES|EPERM|permission denied/i,
+        )
+        await rm(journalDirectory, { recursive: true })
+        await symlink(external, journalDirectory)
+        await expect(recoverGameIrPublication(value)).rejects.toThrow(
+          'existing path component is symlink or non-directory',
+        )
+      } finally {
+        await chmod(external, 0o700)
+      }
+      expect(await readdir(external)).toEqual(['publication-1.json'])
+    },
+  )
 
   test('rejects the committed journal file replaced with an external symlink', async () => {
     const value = await setup()
