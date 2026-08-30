@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { renameSync } from 'node:fs'
 import {
   chmod,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -742,18 +743,18 @@ describe('atomic Game IR publication and recovery', () => {
     const readyReturn = events.findIndex(event => event.type === 'ready-return')
     expect(journalSync).toBeGreaterThanOrEqual(0)
     expect(stageWork).toBeGreaterThan(journalSync)
-    const modulesSync = events.findIndex(
+    const modulesSync = events.findLastIndex(
       event =>
         event.type === 'directory-sync' &&
         event.path === join(root, '.staging', value.publicationId, 'modules'),
     )
-    const sourceMapsSync = events.findIndex(
+    const sourceMapsSync = events.findLastIndex(
       event =>
         event.type === 'directory-sync' &&
         event.path ===
           join(root, '.staging', value.publicationId, 'source-maps'),
     )
-    const stageSync = events.findIndex(
+    const stageSync = events.findLastIndex(
       event =>
         event.type === 'directory-sync' &&
         event.path === join(root, '.staging', value.publicationId),
@@ -761,6 +762,8 @@ describe('atomic Game IR publication and recovery', () => {
     expect(modulesSync).toBeGreaterThanOrEqual(0)
     expect(sourceMapsSync).toBeGreaterThanOrEqual(0)
     expect(stageSync).toBeGreaterThanOrEqual(0)
+    expect(stageSync).toBeGreaterThan(modulesSync)
+    expect(stageSync).toBeGreaterThan(sourceMapsSync)
     expect(modulesSync).toBeLessThan(renameEvent)
     expect(sourceMapsSync).toBeLessThan(renameEvent)
     expect(stageSync).toBeLessThan(renameEvent)
@@ -858,6 +861,28 @@ describe('atomic Game IR publication and recovery', () => {
     expect(finalSync).toBeGreaterThan(-1)
     expect(revisionsSync).toBeLessThan(readyReturn)
     expect(finalSync).toBeLessThan(readyReturn)
+  })
+
+  test('validate ignores crash-residual staging and never follows external private cleanup', async () => {
+    const value = await setup()
+    await commitGameIrPublication(value)
+    const stage = join(
+      value.workspacePath,
+      '.beegame/ir/game-ir.v1/.staging',
+      value.publicationId,
+    )
+    await mkdir(stage, { recursive: true })
+    const external = await mkdtemp(join(tmpdir(), 'game-ir-validate-private-'))
+    workspaces.push(external)
+    const privatePlaceholder = join(
+      value.workspacePath,
+      '.beegame/.game-ir-private/placeholder',
+    )
+    await symlink(external, privatePlaceholder)
+    const before = await readdir(external)
+    await validateCommittedGameIr(value)
+    expect(await readdir(external)).toEqual(before)
+    expect((await lstat(stage)).isDirectory()).toBe(true)
   })
 
   test('rename loser performs its own destination durability barrier before READY', async () => {

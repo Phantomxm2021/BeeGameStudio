@@ -937,13 +937,16 @@ async function cleanup(plan: Plan): Promise<void> {
     return
   }
 }
+async function durabilityBarrier(plan: Plan, revisions: string): Promise<void> {
+  await syncDirectory(plan.workspacePath, plan.final, plan.testHooks)
+  await syncDirectory(plan.workspacePath, revisions, plan.testHooks)
+}
 async function ready(
   plan: Plan,
   revisions: string,
 ): Promise<GameIrReadyReceipt> {
   await exactFiles(plan, plan.final)
-  await syncDirectory(plan.workspacePath, plan.final, plan.testHooks)
-  await syncDirectory(plan.workspacePath, revisions, plan.testHooks)
+  await durabilityBarrier(plan, revisions)
   await cleanup(plan)
   return plan.ready
 }
@@ -1089,5 +1092,7 @@ export async function validateCommittedGameIr(
   }
   await exactJournal(plan)
   if (!(await existing(plan.final))) fail('COMMITTED revision is missing')
-  return ready(plan, dirname(plan.final))
+  await exactFiles(plan, plan.final)
+  await durabilityBarrier(plan, dirname(plan.final))
+  return plan.ready
 }
