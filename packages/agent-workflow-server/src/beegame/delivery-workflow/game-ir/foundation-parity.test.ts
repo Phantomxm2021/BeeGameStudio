@@ -27,6 +27,7 @@ import {
   type FoundationFactKey,
 } from '../foundation-fact-definitions'
 import { runProductionDeterministicFoundationAudit } from '../foundation-audit-production-manifest'
+import { compileFoundationIssueRegistry } from '../foundation-audit-check-definitions'
 import { analyzeFoundationImpact } from '../foundation-impact-analysis'
 import { buildFoundationRevisionBatches } from '../foundation-revision-batches'
 import {
@@ -36,6 +37,7 @@ import {
   revisionTaskReceiptTerminalDigest,
 } from '../foundation-revision-stage'
 import {
+  buildFoundationSemanticRecheckPacket,
   rebuildFoundationImpactedFacts,
   validateFoundationPatch,
 } from '../foundation-patch-validation'
@@ -43,6 +45,7 @@ import {
   FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
   admitFoundationSemanticResult,
   buildFoundationSemanticPacket,
+  semanticResultToFoundationIssueDrafts,
   type FoundationSemanticPacket,
 } from '../foundation-semantic-audit'
 import {
@@ -529,14 +532,51 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     documents: auditFixture.documents,
   })
   const fact = buildFactPlan({ ...auditFixture, sectionIndex })
-  const productionIssues = runProductionDeterministicFoundationAudit({
+  const deterministicIssues = runProductionDeterministicFoundationAudit({
     sectionIndex,
     factStore: fact.factStore,
   })
-  if (productionIssues.length === 0)
+  if (deterministicIssues.length === 0)
     throw new Error('issue fixture did not produce a deterministic issue')
-  // The production deterministic audit is the sole issue authority. This is
-  // deliberately not replaced by a test-authored semantic draft.
+  const semanticPlan = buildSemanticPlan(
+    { ...auditFixture, sectionIndex },
+    fact.factStore,
+    deterministicIssues,
+  )
+  const semanticSourcePacket = semanticPlan.packets.find(
+    packet => packet.checkId === 'SEM.content_asset_feasibility',
+  )!
+  const semanticResult = admitFoundationSemanticResult(semanticSourcePacket, {
+    checkId: semanticSourcePacket.checkId,
+    packetIdentity: semanticSourcePacket.identity,
+    outcome: 'ISSUES',
+    issues: [
+      {
+        problem: 'asset inventory count is intentionally inconsistent',
+        expected: 'asset.boss.count agrees with the GDD',
+        actual: 'asset.boss.count is 4 while the GDD declares 3',
+        sourceSectionKey: 'ASSET#inventory',
+        remediation: { kind: 'patch', sectionKeys: ['ASSET#inventory'] },
+        reasonCode: 'asset_inventory_conflict',
+      },
+    ],
+  })
+  const semanticIssues = compileFoundationIssueRegistry({
+    sectionIndex,
+    factStore: fact.factStore,
+    drafts: semanticResultToFoundationIssueDrafts(
+      semanticSourcePacket,
+      semanticResult,
+    ),
+  })
+  // Both sets are production-shaped registry output: deterministic findings
+  // and a semantic finding admitted through the real semantic task contract.
+  const productionIssues = [...deterministicIssues, ...semanticIssues]
+  const admittedIssue = productionIssues.find(
+    issue => issue.type === 'semantic',
+  )
+  if (!admittedIssue)
+    throw new Error('issue fixture did not produce an admitted semantic issue')
   const issues = productionIssues
   const batches = buildFoundationRevisionBatches({
     issues,
@@ -660,6 +700,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
       throw new Error('rebuilt issue evidence section is missing')
     return { ...issue, source, ...(target ? { target } : {}) }
   })
+  const impact = analyzeFoundationImpact(operations)
   const validation = validateFoundationPatch({
     validatorTaskId: `${fixture.revision}.validator.0`,
     round: 1,
@@ -667,11 +708,43 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     baseDocumentDigest: authority.baseDocumentDigest,
     postPatchDocumentDigest: stagedDocumentDigest,
     patchOperations: operations,
-    impact: analyzeFoundationImpact(operations),
+    impact,
     admittedIssues: rebuiltIssueRefs,
     sectionIndex: patchedSectionIndex,
     factStore: rebuiltFactStore,
   })
+  const targeted = buildFoundationSemanticRecheckPacket({
+    issue: {
+      ...admittedIssue,
+      source: patchedSectionIndex.find(
+        section =>
+          section.documentPath === admittedIssue.source.documentPath &&
+          section.sectionId === admittedIssue.source.sectionId,
+      )!,
+    },
+    patchOperation: operation,
+    sectionIndex: patchedSectionIndex,
+    documents: patchedDocuments,
+    impact,
+    factStore: rebuiltFactStore,
+  })
+  const patchedDocumentDigests = Object.fromEntries(
+    [...patchedDocuments].map(([path, body]) => [path, sha256(body)]),
+  ) as Record<FoundationDocumentPath, string>
+  const patchedFixture: Fixture = {
+    ...auditFixture,
+    documents: patchedDocuments,
+    sectionIndex: patchedSectionIndex,
+    documentDigests: patchedDocumentDigests,
+  }
+  const postReady = foundationPlan(patchedFixture)
+  if (
+    sha256(JSON.stringify(rebuiltFactStore)) !==
+    sha256(JSON.stringify(postReady.factStore))
+  )
+    throw new Error(
+      'post-revision READY fact authority drifted from rebuilt facts',
+    )
   if (validation.patchValidations.some(item => item.status !== 'PASS'))
     throw new Error('real targeted deterministic recheck did not pass')
   if (operation.afterDigest === operation.beforeDigest)
@@ -683,8 +756,10 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     receipt,
     operations,
     patchedSectionIndex,
-    patchedFactStore: patchedFact.factStore,
+    patchedFactStore: rebuiltFactStore,
     validation,
+    targeted,
+    postReady,
   }
 }
 
@@ -716,17 +791,6 @@ function forbiddenSyntax(source: string): string[] {
   )
   const violations: string[] = []
   const gameIrModule = (value: string) => /(?:^|\/)game-ir(?:\/|$)/.test(value)
-  const propertyName = (node: ts.Identifier): boolean => {
-    const parent = node.parent
-    return (
-      (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-      (ts.isQualifiedName(parent) && parent.right === node) ||
-      ((ts.isPropertyAssignment(parent) ||
-        ts.isMethodDeclaration(parent) ||
-        ts.isMethodSignature(parent)) &&
-        parent.name === node)
-    )
-  }
   const visit = (node: ts.Node): void => {
     if (
       ts.isImportDeclaration(node) &&
@@ -767,7 +831,6 @@ function forbiddenSyntax(source: string): string[] {
     }
     if (
       ts.isIdentifier(node) &&
-      !propertyName(node) &&
       (/^(?:GameIr|gameIr)[A-Za-z0-9_]*$/.test(node.text) ||
         /^GAME_IR[A-Za-z0-9_]*$/.test(node.text) ||
         /(?:enable|switch).*gameir|gameir.*(?:enable|switch)/i.test(node.text))
@@ -848,9 +911,12 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       await writeDocuments(workspacePath, issueDocuments)
       const beforeDocuments = JSON.stringify([...issueDocuments])
       const before = await issuePlan(fixture, workspacePath)
-      const ready = foundationPlan(fixture).readyState
+      const ready = before.postReady.readyState
       const readyStateBytes = JSON.stringify(ready)
-      const readyDocumentDigests = JSON.stringify(fixture.documentDigests)
+      const readyDocumentDigests = JSON.stringify(
+        before.postReady.readyState.documentDigests,
+      )
+      const targetedPacketDigest = before.targeted.packetDigest
       const receipt = projectFoundationReadyReceipt({
         state: ready,
         projectId: 'project-issue',
@@ -865,13 +931,17 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       })
       expect(JSON.stringify([...issueDocuments])).toBe(beforeDocuments)
       expect(JSON.stringify(ready)).toBe(readyStateBytes)
-      expect(JSON.stringify(fixture.documentDigests)).toBe(readyDocumentDigests)
+      expect(JSON.stringify(before.postReady.readyState.documentDigests)).toBe(
+        readyDocumentDigests,
+      )
       await writeDocuments(secondWorkspacePath, issueDocuments)
       const after = await issuePlan(fixture, secondWorkspacePath)
       expect(after).toEqual(before)
       expect(after.authority.packetDigest).toMatch(/^[a-f0-9]{64}$/)
       expect(after.receipt.terminalDigest).toMatch(/^[a-f0-9]{64}$/)
       expect(after.operations).toHaveLength(1)
+      expect(after.targeted.packetDigest).toBe(targetedPacketDigest)
+      expect(after.postReady.readyState).toEqual(before.postReady.readyState)
       expect(
         after.validation.patchValidations.every(item => item.status === 'PASS'),
       ).toBe(true)
@@ -908,9 +978,19 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
     ])
     expect(
       forbiddenSyntax(
-        "// import './game-ir/model'\nconst text = 'GAME_IR_COMPILATION gameIrState'; const object = { GameIrState: 'x' }; const value = object.GameIrState; /* import('./game-ir') */",
+        "// import './game-ir/model'\nconst text = 'GAME_IR_COMPILATION gameIrState'; /* import('./game-ir') */",
       ),
     ).toEqual([])
+    expect(
+      forbiddenSyntax(
+        'const object = { GameIrState: "x" }; const value = object.GameIrState; const run = { gameIrState: value }; const config = { enableGameIr: true }',
+      ),
+    ).toEqual([
+      'identifier:GameIrState',
+      'identifier:GameIrState',
+      'identifier:gameIrState',
+      'identifier:enableGameIr',
+    ])
     const violations = productionSources().flatMap(path =>
       forbiddenSyntax(readFileSync(path, 'utf8')).map(
         item => `${path}:${item}`,

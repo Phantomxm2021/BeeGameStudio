@@ -9,7 +9,8 @@ import {
   symlink,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
@@ -51,6 +52,11 @@ const sectionIndex: readonly GameIrSourceSection[] = [
     digest: sectionDigest,
   },
 ]
+
+const publicationModulePath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  'publication.ts',
+)
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -572,12 +578,8 @@ describe('atomic Game IR publication and recovery', () => {
 
   test('coordinates same-revision publishers in independent processes', async () => {
     const value = await setup()
-    const modulePath = join(
-      process.cwd(),
-      'packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.ts',
-    )
     const childScript = `
-      import { commitGameIrPublication } from ${JSON.stringify(modulePath)}
+      import { commitGameIrPublication } from ${JSON.stringify(publicationModulePath)}
       const freeze = (value) => {
         if (value && typeof value === 'object') {
           for (const child of Object.values(value)) freeze(child)
@@ -636,12 +638,8 @@ describe('atomic Game IR publication and recovery', () => {
     const value = await setup()
     const other = authority(value.workspacePath, 4, 'publication-1')
     await prepareGameIrPublication(value)
-    const modulePath = join(
-      process.cwd(),
-      'packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.ts',
-    )
     const childScript = `
-      import { commitGameIrPublication } from ${JSON.stringify(modulePath)}
+      import { commitGameIrPublication } from ${JSON.stringify(publicationModulePath)}
       const freeze = (value) => {
         if (value && typeof value === 'object') {
           for (const child of Object.values(value)) freeze(child)

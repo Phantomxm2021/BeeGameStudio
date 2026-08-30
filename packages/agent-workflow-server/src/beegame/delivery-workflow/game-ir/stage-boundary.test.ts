@@ -45,19 +45,7 @@ function boundaryViolations(source: string): string[] {
   const moduleViolation = (kind: string, value: string) => {
     if (gameIrModule(value)) violations.push(`${kind}: ${value}`)
   }
-  const propertyName = (node: ts.Identifier): boolean => {
-    const parent = node.parent
-    return (
-      (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-      (ts.isQualifiedName(parent) && parent.right === node) ||
-      ((ts.isPropertyAssignment(parent) ||
-        ts.isMethodDeclaration(parent) ||
-        ts.isMethodSignature(parent)) &&
-        parent.name === node)
-    )
-  }
   const runtimeIdentifier = (node: ts.Identifier): boolean => {
-    if (propertyName(node)) return false
     return (
       /^(?:GameIr|gameIr)[A-Za-z0-9_]*$/.test(node.text) ||
       /^GAME_IR[A-Za-z0-9_]*$/.test(node.text) ||
@@ -179,9 +167,19 @@ describe('Game IR stage boundary', () => {
     ])
     expect(
       boundaryViolations(
-        "// import './game-ir/runtime'\nconst text = 'GameIrResult'; const object = { GameIrResult: 'x' }; const value = object.GameIrResult",
+        "// import './game-ir/runtime'\nconst text = 'GameIrResult'",
       ),
     ).toEqual([])
+    expect(
+      boundaryViolations(
+        'const object = { GameIrState: "x" }; const value = object.GameIrState; const run = { gameIrState: value }; const config = { enableGameIr: true }',
+      ),
+    ).toEqual([
+      'identifier: GameIrState',
+      'identifier: GameIrState',
+      'identifier: gameIrState',
+      'identifier: enableGameIr',
+    ])
   })
 
   test('keeps Foundation internals independent from Game IR', async () => {

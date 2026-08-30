@@ -15,84 +15,69 @@ the compile request; it does not construct a domain producer or route.
 
 | ID | Exact item | Category | Disposition |
 | --- | --- | --- | --- |
-| GI-OLD-01 | `src/beegame/delivery-workflow/game-ir.ts` implementation | DISCARD | Mixed compiler, publication, resource projection, and routing authority; rewrite from bounded Stage 5 contracts. |
-| GI-OLD-02 | `src/beegame/delivery-workflow/game-ir.test.ts` | DISCARD | Tests the abandoned mixed authority; reproduce only independently justified invariants. |
-| GI-OLD-03 | `src/beegame/delivery-workflow/typed-owner-records.test.ts` | DISCARD | Typed-owner replacement competes with the stable Fact Store/Reviewer. |
-| GI-OLD-04 | `src/beegame/delivery-workflow/game-ir-resource-fixture.ts` | DISCARD | Dirty fixture bytes are not canonical documents or receipts. |
+| GI-OLD-01 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.ts` implementation | DISCARD | Mixed compiler, publication, resource projection, and routing authority; rewrite from bounded Stage 5 contracts. |
+| GI-OLD-02 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.test.ts` | DISCARD | Tests the abandoned mixed authority; reproduce only independently justified invariants. |
+| GI-OLD-03 | `packages/agent-workflow-server/src/beegame/delivery-workflow/typed-owner-records.test.ts` | DISCARD | Typed-owner replacement competes with the stable Fact Store/Reviewer. |
+| GI-OLD-04 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir-resource-fixture.ts` | DISCARD | Dirty fixture bytes are not canonical documents or receipts. |
 
 ## Every old `game-ir.ts` export
 
-The following 38 export records are intentionally separate: an implementation
-record and the idea it suggested are not one salvage item (§9.2 refinement).
+Mechanical inventory command: `rg '^export' packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.ts` in the saved old dirty checkout (uncommitted worktree; no source commit). It returned 29 export declarations. The records are intentionally separate from implementation/idea items (§9.2 refinement).
 
 | ID | Export symbol | Category | Disposition |
 | --- | --- | --- | --- |
-| GI-EXP-01 | `GAME_IR_SCHEMA_VERSION` | ADAPT | Keep version discipline; derive the final schema from the canonical contract. |
-| GI-EXP-02 | `GAME_IR_MODULE_IDS` | ADAPT | Keep strict IDs; the seven-module set is not yet a domain producer. |
-| GI-EXP-03 | `GameIrModuleId` | ADAPT | Reuse identifier discipline after module ownership is specified. |
-| GI-EXP-04 | `GameIrState` | REWRITE | Replace mutable state with revision-bound receipts. |
-| GI-EXP-05 | `GameIrManifest` | REWRITE | Rebuild as a derived immutable publication artifact. |
-| GI-EXP-06 | `GameIrManifestSchema` | REWRITE | Re-specify after publication authority exists. |
-| GI-EXP-07 | `GameIrModule` | REWRITE | Re-specify module ownership and producer boundaries. |
-| GI-EXP-08 | `gameIrModuleSchema` | ADAPT | Strict shape is useful only after producer contracts exist. |
-| GI-EXP-09 | `GameIrSourceMap` | ADAPT | Preserve source/evidence binding under Foundation authority. |
-| GI-EXP-10 | `gameIrSourceMapSchema` | KEEP | Exact source-map digest binding is domain-independent. |
-| GI-EXP-11 | `GameIrDependencyGraph` | REWRITE | Rebuild graph closure from canonical module dependencies. |
-| GI-EXP-12 | `gameIrDependencyGraphSchema` | KEEP | Graph closure remains a valid integrity invariant. |
-| GI-EXP-13 | `GameIrResourceAuthority` | REWRITE | Resource authority must be receipt-bound, not current-file-bound. |
-| GI-EXP-14 | `gameIrResourceAuthoritySchema` | ADAPT | Preserve strict parsing after Resource Realization is designed. |
-| GI-EXP-15 | `GameIrAssetRequirementProjection` | ADAPT | Preserve one-to-many delivery intent; redesign the projection. |
-| GI-EXP-16 | `GameIrAssetRequirement` | REWRITE | Rebuild as a Resource Realization-owned record. |
-| GI-EXP-17 | `GameIrAssetManifest` | REWRITE | Rebuild from resource receipts, never dirty output. |
-| GI-EXP-18 | `GameIrProjection` | DISCARD | Old projection mixed consumer concerns and was not authority. |
-| GI-EXP-19 | `GameIrNode` | REWRITE | Re-specify after Gameplay/World ownership is defined. |
-| GI-EXP-20 | `GameIrSourceBinding` | ADAPT | Preserve immutable owner/evidence identity. |
-| GI-EXP-21 | `GameIrCompileRequest` | REWRITE | Phase 1 uses only the strict public request parser. |
-| GI-EXP-22 | `gameIrCompileRequestSchema` | ADAPT | Keep the DTO seam; no Foundation internals or routing. |
-| GI-EXP-23 | `GameIrReadyReceipt` | ADAPT | Current adapter projects a real Foundation READY receipt. |
-| GI-EXP-24 | `GameIrPublication` | REWRITE | Rebuild as an atomic immutable publication journal. |
-| GI-EXP-25 | `GameIrPublicationAuthority` | REWRITE | Rebuild around revision and receipt identity. |
-| GI-EXP-26 | `gameIrPublicationSchema` | REWRITE | Re-specify only with complete publication semantics. |
-| GI-EXP-27 | `canonicalGameIrJson` | KEEP | Canonical encoding is reusable identity material. |
-| GI-EXP-28 | `digestGameIrBytes` | KEEP | Digest identity is required for immutable artifacts. |
-| GI-EXP-29 | `parseGameIrResourceAuthority` | ADAPT | Preserve strict parsing with new receipt-bound fields. |
-| GI-EXP-30 | `parseGameIrModule` | REWRITE | Rebuild against the final module contract. |
-| GI-EXP-31 | `parseGameIrManifest` | REWRITE | Rebuild against the final publication manifest. |
-| GI-EXP-32 | `loadCurrentCommittedGameIr` | DISCARD | A mutable `current`/`latest` reader creates a second authority. |
-| GI-EXP-33 | `assertAssetManifestMatchesProjection` | DISCARD | Coupled a downstream projection to the old manifest and route. |
-| GI-EXP-34 | `compileGameIr` | DISCARD | Domain producer was incomplete and had no Foundation authorization. |
-| GI-EXP-35 | `validateGameIr` | REWRITE | Rebuild as module-specific validation after producer contracts. |
-| GI-EXP-36 | `recoverGameIr` | DISCARD | Mutable recovery conflicts with revision-bound recovery. |
-| GI-EXP-37 | `publishGameIr` | REWRITE | Rebuild only under immutable publication authority. |
-| GI-EXP-38 | `projectFoundationReadyReceipt` | ADAPT | Keep only the narrow Phase 1 READY projection already isolated. |
+| GI-EXP-01 | `GAME_IR_MODULE_IDS` | ADAPT | Keep strict IDs; final module ownership is a later plan. |
+| GI-EXP-02 | `GameIrModuleId` | ADAPT | Reuse identifier discipline after ownership is specified. |
+| GI-EXP-03 | `GameIrModuleData` | REWRITE | Rebuild module data around producer-owned records. |
+| GI-EXP-04 | `GameIrModuleArtifact` | REWRITE | Rebuild as a receipt-bound immutable artifact. |
+| GI-EXP-05 | `GameIrSourceBinding` | ADAPT | Preserve immutable owner/evidence identity. |
+| GI-EXP-06 | `GameIrSourceMap` | REWRITE | Rebuild source-map authority around Foundation receipts. |
+| GI-EXP-07 | `GameIrDependencyGraph` | REWRITE | Rebuild graph closure from canonical module dependencies. |
+| GI-EXP-08 | `GameIrRequiredModuleDescriptor` | REWRITE | Re-specify publication descriptors after producer contracts. |
+| GI-EXP-09 | `GameIrManifest` | REWRITE | Rebuild as a derived immutable publication artifact. |
+| GI-EXP-10 | `GameIrCommitted` | REWRITE | Rebuild committed authority around publication identity. |
+| GI-EXP-11 | `GameIrState` | DISCARD | Mutable state is a forbidden second workflow authority. |
+| GI-EXP-12 | `gameIrModuleSchema` | ADAPT | Strict shape is useful only after producer contracts exist. |
+| GI-EXP-13 | `gameIrSourceMapSchema` | KEEP | Exact source-map digest binding is domain-independent. |
+| GI-EXP-14 | `gameIrDependencyGraphSchema` | KEEP | Graph closure remains a valid integrity invariant. |
+| GI-EXP-15 | `gameIrManifestSchema` | REWRITE | Re-specify against the final publication authority. |
+| GI-EXP-16 | `gameIrCommittedSchema` | REWRITE | Re-specify immutable commit evidence. |
+| GI-EXP-17 | `gameIrStateSchema` | DISCARD | Old state schema encoded an unreachable route. |
+| GI-EXP-18 | `GAME_IR_COMPILER_VERSION` | ADAPT | Preserve version identity only under new compiler authority. |
+| GI-EXP-19 | `GAME_IR_CATALOG_VERSION` | ADAPT | Catalog versioning remains useful after ownership rewrite. |
+| GI-EXP-20 | `GAME_IR_ROOT` | DISCARD | Old filesystem root encoded mutable current output. |
+| GI-EXP-21 | `canonicalGameIrJson` | KEEP | Canonical encoding is reusable identity material. |
+| GI-EXP-22 | `digestGameIrBytes` | KEEP | Digest identity is required for immutable artifacts. |
+| GI-EXP-23 | `GameIrCompilation` | REWRITE | Rebuild as a complete authority envelope. |
+| GI-EXP-24 | `GameIrCompileInput` | REWRITE | Replace with the strict public compile request. |
+| GI-EXP-25 | `compileGameIr` | DISCARD | Incomplete domain producer had no Foundation authorization. |
+| GI-EXP-26 | `GameIrPublication` | REWRITE | Rebuild as an atomic immutable publication journal. |
+| GI-EXP-27 | `publishGameIr` | REWRITE | Rebuild only under immutable publication authority. |
+| GI-EXP-28 | `validateCommittedGameIr` | REWRITE | Rebuild revision-bound validation and recovery checks. |
+| GI-EXP-29 | `recoverGameIrPublication` | DISCARD | Mutable recovery conflicts with revision-bound recovery. |
 
 ## Old production importers and consumers
 
-AST/`rg` inventory records each historical path separately. The old dirty
-importers are not present in the isolated checkout (the current production
-scan is empty); they are listed explicitly so no catch-all consumer is silently
-carried forward.
+Mechanical inventory command: `rg -l "from .*game-ir|GAME_IR_|GameIr" packages/agent-workflow-server/src/beegame/delivery-workflow --glob '*.ts'` plus the TypeScript AST import scan, run against the saved old dirty checkout. It returned exactly 16 production importer/consumer paths; none is inferred from the new branch.
 
 | ID | Exact importer/consumer path | Category | Consumer responsibility and disposition |
 | --- | --- | --- | --- |
-| GI-CNS-01 | `delivery-workflow/implementation-projection.ts` | DISCARD | Imported old module; projected Implementation owner blocks. Delete at future cutover. |
-| GI-CNS-02 | `delivery-workflow/implementation-stage.ts` | DISCARD | Consumed implementation projection; wait for a complete producer. |
-| GI-CNS-03 | `delivery-workflow/resource-stage.ts` | DISCARD | Consumed resource authority; migrate only to Resource receipts. |
-| GI-CNS-04 | `delivery-workflow/resource-task-resolver.ts` | DISCARD | Resolved tasks from dirty resource output; no migration. |
-| GI-CNS-05 | `delivery-workflow/delivery-gate.ts` | DISCARD | Used IR output as a delivery gate; retain Foundation gates. |
-| GI-CNS-06 | `delivery-workflow/validation-stage.ts` | DISCARD | Validated downstream projection before domain ownership existed. |
-| GI-CNS-07 | `delivery-workflow/document-stage.ts` | DISCARD | Mixed document authoring with IR projection. |
-| GI-CNS-08 | `delivery-workflow/controller.ts` | DISCARD | Any dirty compile branch is forbidden; protected bytes stay baseline. |
-| GI-CNS-09 | `delivery-workflow/transition.ts` | DISCARD | Any dirty IR transition is a second workflow authority. |
-| GI-CNS-10 | `delivery-workflow/recovery.ts` | DISCARD | Any dirty IR resume/recovery branch is forbidden. |
-| GI-CNS-11 | `delivery-workflow/schema.ts` | DISCARD | Any dirty IR state schema addition is not portable. |
-| GI-CNS-12 | `delivery-workflow/types.ts` | DISCARD | Any dirty phase/type addition changes stable Stage 3/4 authority. |
-| GI-CNS-13 | `delivery-workflow/dispatch.ts` | DISCARD | Any dirty IR dispatch bypassed the Foundation READY seam. |
-| GI-CNS-14 | `delivery-workflow/revision.ts` | DISCARD | Any dirty reader of IR revision output competes with Revision authority. |
-| GI-CNS-15 | `delivery-workflow/run-store.ts` | DISCARD | Any dirty persisted-current reader is a dual track. |
-| GI-CNS-16 | `delivery-workflow/accepted-unit-journal.ts` | DISCARD | Any dirty acceptance projection is not canonical Foundation evidence. |
-| GI-CNS-17 | `delivery-workflow/system-delivery-contract.ts` | DISCARD | Any dirty delivery contract widened Stage 5 prematurely. |
-| GI-CNS-18 | `delivery-workflow/worker-contracts.ts` | DISCARD | Any dirty worker IR payload is not an admitted service contract. |
+| GI-CNS-01 | `accepted-resource-graph.ts` | DISCARD | Resource graph reader; delete old IR authority at future cutover. |
+| GI-CNS-02 | `comprehensive-artifacts.ts` | DISCARD | Read comprehensive artifact projection; no dirty output migration. |
+| GI-CNS-03 | `comprehensive-ready-reader.ts` | DISCARD | Readiness reader; replace only with receipt-bound authority later. |
+| GI-CNS-04 | `comprehensive-remediation.ts` | DISCARD | Remediation consumer; keep Foundation Issue/Revision authority. |
+| GI-CNS-05 | `comprehensive-review-evaluation.ts` | DISCARD | Review evaluator; no parallel IR review authority. |
+| GI-CNS-06 | `comprehensive-review-state.ts` | DISCARD | Review state reader; preserve stable Foundation state. |
+| GI-CNS-07 | `comprehensive-service.ts` | DISCARD | Service composition path; no production route in Phase 1. |
+| GI-CNS-08 | `controller.ts` | DISCARD | Controller importer/route; protected bytes remain baseline. |
+| GI-CNS-09 | `implementation-projection.ts` | DISCARD | Implementation projection consumer; delete old reader at cutover. |
+| GI-CNS-10 | `recovery-projector.ts` | DISCARD | Recovery projection consumer; no mutable current IR recovery. |
+| GI-CNS-11 | `recovery.ts` | DISCARD | Protected recovery importer; no second workflow authority. |
+| GI-CNS-12 | `resource-gate-receipt.ts` | DISCARD | Resource gate consumer; migrate only to receipt-bound resource authority. |
+| GI-CNS-13 | `resource-stage.ts` | DISCARD | Resource stage consumer; no dirty output migration. |
+| GI-CNS-14 | `resource-task-resolver.ts` | DISCARD | Resource task resolver; rebuild after Resource producer ownership. |
+| GI-CNS-15 | `schema.ts` | DISCARD | Protected schema importer; no Game IR state addition. |
+| GI-CNS-16 | `types.ts` | DISCARD | Protected type importer; no Game IR phase addition. |
 
 ## Protected Stage 3/4 deltas and exact Foundation symbols
 
