@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
 import {
   chmod,
+  open,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   symlink,
@@ -59,6 +61,10 @@ const chmodProbeSupported =
   ) &&
   typeof process.getuid === 'function' &&
   process.getuid() !== 0
+const fifoProbeSupported =
+  ['aix', 'darwin', 'freebsd', 'linux', 'openbsd', 'sunos'].includes(
+    process.platform,
+  ) && typeof process.getuid === 'function'
 const documents = new Map(
   CANONICAL_FOUNDATION_DOCUMENTS.map(path => {
     const submission = completeTestSubmission(path)
@@ -693,6 +699,61 @@ describe('atomic Game IR publication and recovery', () => {
     }
   })
 
+  test('rejects committed directory leaves before reading them', async () => {
+    const value = await setup()
+    await commitGameIrPublication(value)
+    const target = join(
+      value.workspacePath,
+      '.beegame/ir/game-ir.v1/revisions/foundation-revision-1/modules/core.json',
+    )
+    await rm(target)
+    await mkdir(target)
+    await expect(validateCommittedGameIr(value)).rejects.toThrow(
+      /regular file|artifact/i,
+    )
+    await expect(recoverGameIrPublication(value)).rejects.toThrow(
+      /regular file|artifact/i,
+    )
+  })
+
+  test('syncs journal and publication directory entries before staging and READY', async () => {
+    const value = await setup()
+    const probe = await open(value.workspacePath, 'r')
+    const fileHandlePrototype = Object.getPrototypeOf(probe)
+    await probe.close()
+    const originalSync = fileHandlePrototype.sync
+    const originalWriteFile = fileHandlePrototype.writeFile
+    const events: string[] = []
+    fileHandlePrototype.sync = async function (...args: unknown[]) {
+      const target = await realpath(`/dev/fd/${this.fd}`).catch(() => '')
+      const info = await this.stat().catch(() => undefined)
+      events.push(`${info?.isDirectory() ? 'dir' : 'file'}:${target}`)
+      return originalSync.apply(this, args)
+    }
+    fileHandlePrototype.writeFile = async function (...args: unknown[]) {
+      const target = await realpath(`/dev/fd/${this.fd}`).catch(() => '')
+      events.push(`write:${target}`)
+      return originalWriteFile.apply(this, args)
+    }
+    try {
+      await commitGameIrPublication(value)
+      const root = join(
+        await realpath(value.workspacePath),
+        '.beegame/ir/game-ir.v1',
+      )
+      const journalSync = events.indexOf(`dir:${join(root, '.journal')}`)
+      expect(journalSync).toBeGreaterThanOrEqual(0)
+      expect(
+        events.slice(journalSync + 1).filter(event => event === 'write:'),
+      ).not.toHaveLength(0)
+      expect(events).toContain(`dir:${join(root, '.staging')}`)
+      expect(events).toContain(`dir:${join(root, 'revisions')}`)
+    } finally {
+      fileHandlePrototype.sync = originalSync
+      fileHandlePrototype.writeFile = originalWriteFile
+    }
+  })
+
   test('rejects symlink path components before writing outside workspace and has no fixed node cap', async () => {
     const value = await setup()
     await mkdir(join(value.workspacePath, '.beegame/ir/game-ir.v1'), {
@@ -771,6 +832,67 @@ describe('atomic Game IR publication and recovery', () => {
         await chmod(external, 0o700)
       }
       expect(await readdir(external)).toEqual(['publication-1.json'])
+    },
+  )
+
+  test.skipIf(!fifoProbeSupported)(
+    'validate and recovery reject committed FIFOs without blocking on read',
+    async () => {
+      const value = await setup()
+      await commitGameIrPublication(value)
+      const fifoPath = join(
+        value.workspacePath,
+        '.beegame/ir/game-ir.v1/revisions/foundation-revision-1/modules/core.json',
+      )
+      await rm(fifoPath)
+      const fifo = Bun.spawn(['mkfifo', fifoPath], {
+        stdout: 'ignore',
+        stderr: 'pipe',
+      })
+      expect(await fifo.exited).toBe(0)
+      const childScript = `
+        import { validateCommittedGameIr, recoverGameIrPublication } from ${JSON.stringify(publicationModulePath)}
+        const freeze = (value) => {
+          if (value && typeof value === 'object') {
+            for (const child of Object.values(value)) freeze(child)
+            Object.freeze(value)
+          }
+          return value
+        }
+        try {
+          const authority = freeze(JSON.parse(process.env.GAME_IR_AUTH))
+          if (process.env.GAME_IR_OPERATION === 'recover')
+            await recoverGameIrPublication(authority)
+          else await validateCommittedGameIr(authority)
+          process.exit(0)
+        } catch {
+          process.exit(1)
+        }
+      `
+      for (const operation of ['validate', 'recover']) {
+        const child = Bun.spawn(['bun', '--eval', childScript], {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            GAME_IR_AUTH: JSON.stringify(value),
+            GAME_IR_OPERATION: operation,
+          },
+          stdout: 'ignore',
+          stderr: 'pipe',
+        })
+        const outcome = await Promise.race([
+          child.exited.then(exit => ({ exit, timedOut: false })),
+          new Promise<{ exit: number; timedOut: boolean }>(resolve =>
+            setTimeout(() => resolve({ exit: -1, timedOut: true }), 500),
+          ),
+        ])
+        if (outcome.timedOut) {
+          child.kill()
+          await child.exited
+          throw new Error(`${operation} blocked on FIFO read`)
+        }
+        expect(outcome.exit).not.toBe(0)
+      }
     },
   )
 

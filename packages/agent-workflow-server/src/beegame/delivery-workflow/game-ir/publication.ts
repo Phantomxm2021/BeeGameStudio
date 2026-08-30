@@ -11,7 +11,7 @@ import {
   rm,
   rmdir,
 } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import {
   GAME_IR_PUBLICATION_ROOT,
   GAME_IR_SCHEMA_VERSION,
@@ -262,6 +262,17 @@ async function componentsSafe(
       fail('existing path component is symlink or non-directory')
     if (file && i < parts.length - 1 && !info.isDirectory())
       fail('existing path component is not a directory')
+  }
+}
+// Directory fsync is required for publication durability; unsupported
+// platforms/filesystems fail closed instead of claiming READY durability.
+async function syncDirectory(root: string, target: string): Promise<void> {
+  await componentsSafe(root, target)
+  const handle = await open(target, 'r')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
   }
 }
 async function writePrivateFile(
@@ -677,6 +688,8 @@ async function writeStage(plan: Plan): Promise<void> {
     },
     plan.journal,
   )
+  await syncDirectory(plan.workspacePath, dirname(plan.journal))
+  await syncDirectory(plan.workspacePath, dirname(dirname(plan.journal)))
   await ensureDir(
     plan.workspacePath,
     pathOf(plan.workspacePath, `${GAME_IR_PUBLICATION_ROOT}/.staging`),
@@ -722,7 +735,13 @@ async function writeStage(plan: Plan): Promise<void> {
   }
   for (const artifact of [...plan.artifacts, plan.marker]) {
     const artifactPath = join(plan.stage, artifact.path)
-    if ((await readFile(artifactPath, 'utf8')) !== artifact.bytes)
+    if (
+      (await readRegularFile(
+        plan.workspacePath,
+        artifactPath,
+        `staging artifact ${artifact.path}`,
+      )) !== artifact.bytes
+    )
       fail(`staging artifact disagrees for ${artifact.path}`)
   }
   await exactDirectory(
@@ -783,19 +802,36 @@ async function exactFiles(plan: Plan, root: string): Promise<void> {
   )
   for (const artifact of [...plan.artifacts, plan.marker]) {
     const artifactPath = join(root, artifact.path)
-    await componentsSafe(plan.workspacePath, artifactPath, true)
-    const bytes = await readFile(artifactPath, 'utf8')
+    const bytes = await readRegularFile(
+      plan.workspacePath,
+      artifactPath,
+      `artifact ${artifact.path}`,
+    )
     if (bytes !== artifact.bytes)
       fail(`artifact bytes disagree for ${artifact.path}`)
   }
 }
+async function readRegularFile(
+  root: string,
+  target: string,
+  label: string,
+): Promise<string> {
+  await componentsSafe(root, target, true)
+  const info = await lstat(target)
+  if (info.isSymbolicLink() || !info.isFile())
+    fail(`${label} is not a regular file`)
+  return readFile(target, 'utf8')
+}
 async function exactJournal(plan: Plan): Promise<void> {
   await componentsSafe(plan.workspacePath, plan.journal, true)
   try {
-    const info = await lstat(plan.journal)
-    if (info.isSymbolicLink() || !info.isFile())
-      fail('immutable PREPARED journal is not a regular file')
-    if ((await readFile(plan.journal, 'utf8')) !== plan.journalBytes)
+    if (
+      (await readRegularFile(
+        plan.workspacePath,
+        plan.journal,
+        'immutable PREPARED journal',
+      )) !== plan.journalBytes
+    )
       fail('immutable PREPARED journal disagrees with authority')
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
@@ -857,6 +893,8 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
   }
   try {
     await rename(plan.stage, plan.final)
+    await syncDirectory(plan.workspacePath, dirname(plan.stage))
+    await syncDirectory(plan.workspacePath, dirname(plan.final))
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     if (code !== 'EEXIST' && code !== 'ENOTEMPTY' && code !== 'ENOENT')
