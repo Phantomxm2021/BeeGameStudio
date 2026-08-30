@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join } from 'node:path'
+import * as ts from 'typescript'
 
 const deliveryWorkflowRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -29,31 +30,81 @@ const protectedFoundationFiles = [
   'revision.ts',
 ] as const
 
-const currentStageFiles = [
-  'types.ts',
-  'schema.ts',
-  'controller.ts',
-  'transition.ts',
-  'recovery.ts',
-] as const
-
 const gameIrContractFiles = ['contracts.ts'] as const
 
-const forbiddenImportPath = /game-ir(?:\/|['"])/
-const forbiddenFoundationTokens = ['GameIr', 'GAME_IR', 'gameIrState'] as const
-
 function boundaryViolations(source: string): string[] {
+  const file = ts.createSourceFile(
+    'boundary.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  )
   const violations: string[] = []
-  if (forbiddenImportPath.test(source)) violations.push('game-ir import path')
-  for (const token of forbiddenFoundationTokens)
-    if (source.includes(token)) violations.push(`token: ${token}`)
+  const gameIrModule = (value: string) => /(?:^|\/)game-ir(?:\/|$)/.test(value)
+  const moduleViolation = (kind: string, value: string) => {
+    if (gameIrModule(value)) violations.push(`${kind}: ${value}`)
+  }
+  const propertyName = (node: ts.Identifier): boolean => {
+    const parent = node.parent
+    return (
+      (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+      (ts.isQualifiedName(parent) && parent.right === node) ||
+      ((ts.isPropertyAssignment(parent) ||
+        ts.isMethodDeclaration(parent) ||
+        ts.isMethodSignature(parent)) &&
+        parent.name === node)
+    )
+  }
+  const runtimeIdentifier = (node: ts.Identifier): boolean => {
+    if (propertyName(node)) return false
+    return (
+      /^(?:GameIr|gameIr)[A-Za-z0-9_]*$/.test(node.text) ||
+      /^GAME_IR[A-Za-z0-9_]*$/.test(node.text) ||
+      /(?:enable|switch).*gameir|gameir.*(?:enable|switch)/i.test(node.text)
+    )
+  }
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      if (ts.isStringLiteral(node.moduleSpecifier))
+        moduleViolation('import', node.moduleSpecifier.text)
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      moduleViolation('export', node.moduleSpecifier.text)
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      ts.isStringLiteral(node.moduleReference.expression)
+    ) {
+      moduleViolation('import-equals', node.moduleReference.expression.text)
+    } else if (
+      ts.isCallExpression(node) &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      if (node.expression.kind === ts.SyntaxKind.ImportKeyword)
+        moduleViolation('dynamic-import', node.arguments[0].text)
+      if (
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'require'
+      )
+        moduleViolation('require', node.arguments[0].text)
+    }
+    if (ts.isIdentifier(node) && runtimeIdentifier(node))
+      violations.push(`identifier: ${node.text}`)
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
   return violations
 }
 
 function currentStage5Markers(source: string): string[] {
-  return ['GAME_IR_COMPILATION', 'gameIrState'].filter(token =>
-    source.includes(token),
-  )
+  return boundaryViolations(source)
+    .filter(item => item.startsWith('identifier:'))
+    .map(item => item.slice('identifier: '.length))
 }
 
 async function readSourceFilesRecursively(
@@ -68,6 +119,23 @@ async function readSourceFilesRecursively(
       files.push({ path, source: await readFile(path, 'utf8') })
   }
   return files
+}
+
+async function readProductionSourceFiles(): Promise<
+  Array<{ path: string; source: string }>
+> {
+  const files: Array<{ path: string; source: string }> = []
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name === 'game-ir' || entry.name.endsWith('.test.ts')) continue
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await visit(path)
+      else if (entry.isFile() && entry.name.endsWith('.ts'))
+        files.push({ path, source: await readFile(path, 'utf8') })
+    }
+  }
+  await visit(deliveryWorkflowRoot)
+  return files.sort((left, right) => left.path.localeCompare(right.path))
 }
 
 describe('Game IR stage boundary', () => {
@@ -88,19 +156,31 @@ describe('Game IR stage boundary', () => {
   test('rejects every forbidden import and foundation token in synthetic source', () => {
     const syntheticViolations = [
       "import { compileGame } from './game-ir/runtime'",
+      "export { compileGame } from './game-ir/runtime'",
+      "import x = require('./game-ir/runtime')",
+      "const x = require('./game-ir/runtime')",
+      "const x = import('./game-ir/runtime')",
       'type GameIrResult = unknown',
-      'const kind = GAME_IR',
-      'const state = gameIrState',
+      'const kind = GAME_IR_ENABLED',
+      'const state = enableGameIr',
+      'const state = switchGameIr',
     ].map(source => boundaryViolations(source))
 
     expect(syntheticViolations).toEqual([
-      ['game-ir import path'],
-      ['token: GameIr'],
-      ['token: GAME_IR'],
-      ['token: gameIrState'],
+      ['import: ./game-ir/runtime'],
+      ['export: ./game-ir/runtime'],
+      ['import-equals: ./game-ir/runtime'],
+      ['require: ./game-ir/runtime'],
+      ['dynamic-import: ./game-ir/runtime'],
+      ['identifier: GameIrResult'],
+      ['identifier: GAME_IR_ENABLED'],
+      ['identifier: enableGameIr'],
+      ['identifier: switchGameIr'],
     ])
     expect(
-      boundaryViolations("import { foundation } from './foundation-runtime'"),
+      boundaryViolations(
+        "// import './game-ir/runtime'\nconst text = 'GameIrResult'; const object = { GameIrResult: 'x' }; const value = object.GameIrResult",
+      ),
     ).toEqual([])
   })
 
@@ -119,13 +199,12 @@ describe('Game IR stage boundary', () => {
   })
 
   test('keeps incomplete Stage 5 unreachable from current production files', async () => {
-    for (const filename of currentStageFiles) {
-      const source = await readFile(
-        join(deliveryWorkflowRoot, filename),
-        'utf8',
-      )
-      expect({ filename, markers: currentStage5Markers(source) }).toEqual({
-        filename,
+    for (const file of await readProductionSourceFiles()) {
+      expect({
+        filename: file.path,
+        markers: currentStage5Markers(file.source),
+      }).toEqual({
+        filename: file.path,
         markers: [],
       })
     }

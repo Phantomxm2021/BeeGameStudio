@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,14 +27,18 @@ import {
   type FoundationFactKey,
 } from '../foundation-fact-definitions'
 import { runProductionDeterministicFoundationAudit } from '../foundation-audit-production-manifest'
-import { compileFoundationIssueRegistry } from '../foundation-audit-check-definitions'
 import { analyzeFoundationImpact } from '../foundation-impact-analysis'
 import { buildFoundationRevisionBatches } from '../foundation-revision-batches'
 import {
   buildFoundationRevisionAuthority,
-  type PatchOperation,
+  createFoundationRevisionStage,
+  deriveFoundationPatchOperations,
+  revisionTaskReceiptTerminalDigest,
 } from '../foundation-revision-stage'
-import { buildFoundationSemanticRecheckPacket } from '../foundation-patch-validation'
+import {
+  rebuildFoundationImpactedFacts,
+  validateFoundationPatch,
+} from '../foundation-patch-validation'
 import {
   FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
   admitFoundationSemanticResult,
@@ -105,6 +109,9 @@ type Fixture = {
   documents: Map<string, string>
   sectionIndex: SectionRef[]
   documentDigests: Record<FoundationDocumentPath, string>
+  issueDocuments?: Map<string, string>
+  issueSectionIndex?: SectionRef[]
+  issueDocumentDigests?: Record<FoundationDocumentPath, string>
 }
 
 function sha256(value: string | Uint8Array): string {
@@ -192,7 +199,17 @@ const CANONICAL_PATHS = [
 ] as const
 
 function makeFixture(name: string): Fixture {
-  const documents = fixtureDocuments(name)
+  const documents = fixtureDocuments(name === 'issue' ? 'rules' : name)
+  const issueDocuments =
+    name === 'issue' ? fixtureDocuments('issue') : undefined
+  const issueSectionIndex = issueDocuments
+    ? buildFoundationSectionIndex({ documents: issueDocuments })
+    : undefined
+  const issueDocumentDigests = issueDocuments
+    ? (Object.fromEntries(
+        [...issueDocuments].map(([path, body]) => [path, sha256(body)]),
+      ) as Record<FoundationDocumentPath, string>)
+    : undefined
   return {
     name,
     revision: `foundation-${name}`,
@@ -201,6 +218,9 @@ function makeFixture(name: string): Fixture {
     documentDigests: Object.fromEntries(
       [...documents].map(([path, body]) => [path, sha256(body)]),
     ) as Record<FoundationDocumentPath, string>,
+    issueDocuments,
+    issueSectionIndex,
+    issueDocumentDigests,
   }
 }
 
@@ -497,41 +517,27 @@ async function writeDocuments(
 }
 
 async function issuePlan(fixture: Fixture, workspacePath: string) {
+  const auditFixture: Fixture = fixture.issueDocuments
+    ? {
+        ...fixture,
+        documents: fixture.issueDocuments,
+        sectionIndex: fixture.issueSectionIndex!,
+        documentDigests: fixture.issueDocumentDigests!,
+      }
+    : fixture
   const sectionIndex = buildFoundationSectionIndex({
-    documents: fixture.documents,
+    documents: auditFixture.documents,
   })
-  const fact = buildFactPlan({ ...fixture, sectionIndex })
+  const fact = buildFactPlan({ ...auditFixture, sectionIndex })
   const productionIssues = runProductionDeterministicFoundationAudit({
     sectionIndex,
     factStore: fact.factStore,
   })
   if (productionIssues.length === 0)
     throw new Error('issue fixture did not produce a deterministic issue')
-  const source = sectionIndex.find(
-    section =>
-      section.documentPath === 'docs/ASSET_PLAN.md' &&
-      section.sectionId === 'inventory',
-  )!
-  const issues = compileFoundationIssueRegistry({
-    sectionIndex,
-    factStore: fact.factStore,
-    drafts: [
-      {
-        checkId: 'fixture.boss-count',
-        severity: 'HIGH',
-        type: 'semantic',
-        source,
-        expected: 'asset boss count agrees with the GDD',
-        actual: 'asset boss count intentionally diverges from the GDD',
-        remediation: {
-          kind: 'patch',
-          documentPath: source.documentPath,
-          sectionIds: ['inventory'],
-        },
-        conflictIdentity: { fixture: fixture.name, source: source.digest },
-      },
-    ],
-  })
+  // The production deterministic audit is the sole issue authority. This is
+  // deliberately not replaced by a test-authored semantic draft.
+  const issues = productionIssues
   const batches = buildFoundationRevisionBatches({
     issues,
     registry: {
@@ -547,21 +553,21 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
   const batch = batches[0]!
   const authority = await buildFoundationRevisionAuthority({
     workspacePath,
-    revision: `${fixture.revision}.issue`,
+    revision: `${auditFixture.revision}.issue`,
     taskId: `${fixture.revision}.revision.0`,
     round: 1,
     batch,
     issues,
-    sourceAuthorityDigest: sha256(`${fixture.revision}:authority`),
+    sourceAuthorityDigest: sha256(`${auditFixture.revision}:authority`),
     sourceIssueRegistryDigest: sha256(JSON.stringify(issues)),
     sourceDerivedDigests: {
       sectionIndex: digestSectionIndex(sectionIndex),
       factStore: sha256(JSON.stringify(fact.factStore)),
-      manifest: sha256(`${fixture.revision}:manifest`),
+      manifest: sha256(`${auditFixture.revision}:manifest`),
     },
     sourceDocumentDigests: CANONICAL_PATHS.map(path => ({
       path,
-      digest: fixture.documentDigests[path]!,
+      digest: auditFixture.documentDigests[path]!,
     })),
     normalizedFacts: fact.factStore,
   })
@@ -570,23 +576,116 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
       section.documentPath === batch.documentPath &&
       section.sectionId === batch.sectionIds[0],
   )!
-  const operation: PatchOperation = {
-    kind: 'REPLACE',
-    documentPath: changed.documentPath,
-    sectionId: changed.sectionId,
-    issueIds: batch.issueIds,
-    beforeDigest: authority.baseDocumentDigest,
-    afterDigest: changed.digest,
-  }
-  const targeted = buildFoundationSemanticRecheckPacket({
-    issue: issues[0]!,
-    patchOperation: operation,
-    sectionIndex,
-    documents: fixture.documents,
-    impact: analyzeFoundationImpact([operation]),
-    factStore: fact.factStore,
+  if (!changed)
+    throw new Error('production issue batch has no authorized section')
+  const stage = await createFoundationRevisionStage({
+    workspacePath,
+    revision: `${auditFixture.revision}.issue`,
+    documentPath: batch.documentPath,
+    expectedBaseDocumentDigest: authority.baseDocumentDigest,
   })
-  return { issueRegistry: issues, batches, authority, targeted }
+  const originalMarkdown = await readFile(
+    join(workspacePath, batch.documentPath),
+    'utf8',
+  )
+  const patchedMarkdown = originalMarkdown.replace(
+    'asset.boss.count: 4',
+    'asset.boss.count: 3',
+  )
+  if (patchedMarkdown === originalMarkdown)
+    throw new Error('issue fixture did not expose the admitted section text')
+  await writeFile(
+    join(workspacePath, stage.stagedPath),
+    patchedMarkdown,
+    'utf8',
+  )
+  const stagedDocumentDigest = sha256(patchedMarkdown)
+  const receiptCore = {
+    taskId: `${fixture.revision}.revision.0`,
+    round: 1 as const,
+    documentPath: batch.documentPath,
+    issueIds: batch.issueIds,
+    baseDocumentDigest: authority.baseDocumentDigest,
+    stagedDocumentDigest,
+    changedSectionIds: batch.sectionIds,
+    stagedPath: stage.stagedPath,
+  }
+  const receipt = {
+    ...receiptCore,
+    terminalDigest: revisionTaskReceiptTerminalDigest(receiptCore),
+  }
+  const operations = await deriveFoundationPatchOperations({
+    workspacePath,
+    revision: `${fixture.revision}.issue`,
+    taskId: receipt.taskId,
+    batch,
+    issues,
+    receipt,
+  })
+  if (operations.length === 0)
+    throw new Error('revision produced no PatchOperation')
+  const operation = operations[0]!
+  const patchedDocuments = new Map(auditFixture.documents)
+  patchedDocuments.set(batch.documentPath, patchedMarkdown)
+  const patchedSectionIndex = buildFoundationSectionIndex({
+    documents: patchedDocuments,
+  })
+  const patchedFact = rebuildFoundationImpactedFacts({
+    phase: 'plan',
+    committedFactStore: fact.factStore,
+    documents: patchedDocuments,
+    sectionIndex: patchedSectionIndex,
+    impact: analyzeFoundationImpact(operations),
+    revision: `${auditFixture.revision}.issue`,
+  })
+  const rebuiltFactStore = fact.factStore.map(
+    item =>
+      patchedFact.extraction.facts.find(
+        candidate => candidate.key === item.key,
+      ) ?? item,
+  )
+  // The patch rebuild changes the bytes of the admitted source section. The
+  // issue identity remains production-owned; refresh only its evidence refs
+  // from the rebuilt index so the validator checks the new artifact bytes.
+  const rebuiltIssueRefs = issues.map(issue => {
+    const refresh = (ref: SectionRef) =>
+      patchedSectionIndex.find(
+        section =>
+          section.documentPath === ref.documentPath &&
+          section.sectionId === ref.sectionId,
+      )
+    const source = refresh(issue.source)
+    const target = issue.target ? refresh(issue.target) : undefined
+    if (!source || (issue.target && !target))
+      throw new Error('rebuilt issue evidence section is missing')
+    return { ...issue, source, ...(target ? { target } : {}) }
+  })
+  const validation = validateFoundationPatch({
+    validatorTaskId: `${fixture.revision}.validator.0`,
+    round: 1,
+    documentPath: batch.documentPath,
+    baseDocumentDigest: authority.baseDocumentDigest,
+    postPatchDocumentDigest: stagedDocumentDigest,
+    patchOperations: operations,
+    impact: analyzeFoundationImpact(operations),
+    admittedIssues: rebuiltIssueRefs,
+    sectionIndex: patchedSectionIndex,
+    factStore: rebuiltFactStore,
+  })
+  if (validation.patchValidations.some(item => item.status !== 'PASS'))
+    throw new Error('real targeted deterministic recheck did not pass')
+  if (operation.afterDigest === operation.beforeDigest)
+    throw new Error('revision operation has a no-op afterDigest')
+  return {
+    issueRegistry: issues,
+    batches,
+    authority,
+    receipt,
+    operations,
+    patchedSectionIndex,
+    patchedFactStore: patchedFact.factStore,
+    validation,
+  }
 }
 
 function productionSources(): string[] {
@@ -616,24 +715,64 @@ function forbiddenSyntax(source: string): string[] {
     ts.ScriptKind.TS,
   )
   const violations: string[] = []
-  const routeNames = new Set(['GAME_IR_COMPILATION', 'gameIrState'])
+  const gameIrModule = (value: string) => /(?:^|\/)game-ir(?:\/|$)/.test(value)
+  const propertyName = (node: ts.Identifier): boolean => {
+    const parent = node.parent
+    return (
+      (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+      (ts.isQualifiedName(parent) && parent.right === node) ||
+      ((ts.isPropertyAssignment(parent) ||
+        ts.isMethodDeclaration(parent) ||
+        ts.isMethodSignature(parent)) &&
+        parent.name === node)
+    )
+  }
   const visit = (node: ts.Node): void => {
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
-      /(?:^|\/)game-ir(?:\/|$)/.test(node.moduleSpecifier.text)
+      gameIrModule(node.moduleSpecifier.text)
     )
       violations.push(`import:${node.moduleSpecifier.text}`)
-    if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length === 1 &&
-      ts.isStringLiteral(node.arguments[0]) &&
-      /(?:^|\/)game-ir(?:\/|$)/.test(node.arguments[0].text)
+    else if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      gameIrModule(node.moduleSpecifier.text)
     )
-      violations.push(`dynamic-import:${node.arguments[0].text}`)
-    if (ts.isIdentifier(node) && routeNames.has(node.text))
-      violations.push(`route:${node.text}`)
+      violations.push(`export:${node.moduleSpecifier.text}`)
+    else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      ts.isStringLiteral(node.moduleReference.expression) &&
+      gameIrModule(node.moduleReference.expression.text)
+    )
+      violations.push(`import-equals:${node.moduleReference.expression.text}`)
+    else if (
+      ts.isCallExpression(node) &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      if (
+        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        gameIrModule(node.arguments[0].text)
+      )
+        violations.push(`dynamic-import:${node.arguments[0].text}`)
+      if (
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'require' &&
+        gameIrModule(node.arguments[0].text)
+      )
+        violations.push(`require:${node.arguments[0].text}`)
+    }
+    if (
+      ts.isIdentifier(node) &&
+      !propertyName(node) &&
+      (/^(?:GameIr|gameIr)[A-Za-z0-9_]*$/.test(node.text) ||
+        /^GAME_IR[A-Za-z0-9_]*$/.test(node.text) ||
+        /(?:enable|switch).*gameir|gameir.*(?:enable|switch)/i.test(node.text))
+    )
+      violations.push(`identifier:${node.text}`)
     ts.forEachChild(node, visit)
   }
   visit(file)
@@ -703,12 +842,15 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
   test('keeps real issue registry, revision authority, batches, and targeted recheck stable across READY parsing', async () => {
     const fixture = makeFixture('issue')
     const workspacePath = await mkdtemp(join('/tmp', 'game-ir-parity-'))
+    const secondWorkspacePath = await mkdtemp(join('/tmp', 'game-ir-parity-'))
     try {
-      await writeDocuments(workspacePath, fixture.documents)
-      const beforeDocuments = JSON.stringify([...fixture.documents])
+      const issueDocuments = fixture.issueDocuments ?? fixture.documents
+      await writeDocuments(workspacePath, issueDocuments)
+      const beforeDocuments = JSON.stringify([...issueDocuments])
       const before = await issuePlan(fixture, workspacePath)
-      const ready = foundationPlan(makeFixture('rules')).readyState
+      const ready = foundationPlan(fixture).readyState
       const readyStateBytes = JSON.stringify(ready)
+      const readyDocumentDigests = JSON.stringify(fixture.documentDigests)
       const receipt = projectFoundationReadyReceipt({
         state: ready,
         projectId: 'project-issue',
@@ -721,14 +863,24 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
         gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
         foundation: receipt,
       })
-      expect(JSON.stringify([...fixture.documents])).toBe(beforeDocuments)
+      expect(JSON.stringify([...issueDocuments])).toBe(beforeDocuments)
       expect(JSON.stringify(ready)).toBe(readyStateBytes)
-      const after = await issuePlan(fixture, workspacePath)
+      expect(JSON.stringify(fixture.documentDigests)).toBe(readyDocumentDigests)
+      await writeDocuments(secondWorkspacePath, issueDocuments)
+      const after = await issuePlan(fixture, secondWorkspacePath)
       expect(after).toEqual(before)
       expect(after.authority.packetDigest).toMatch(/^[a-f0-9]{64}$/)
-      expect(after.targeted.packetDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(after.receipt.terminalDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(after.operations).toHaveLength(1)
+      expect(
+        after.validation.patchValidations.every(item => item.status === 'PASS'),
+      ).toBe(true)
+      expect(after.operations[0]!.afterDigest).not.toBe(
+        after.operations[0]!.beforeDigest,
+      )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
+      await rm(secondWorkspacePath, { recursive: true, force: true })
     }
   })
 
@@ -739,15 +891,24 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       ),
     ).toEqual([
       'import:./game-ir/model',
-      'route:GAME_IR_COMPILATION',
-      'route:gameIrState',
+      'identifier:GAME_IR_COMPILATION',
+      'identifier:gameIrState',
     ])
     expect(forbiddenSyntax("void import('./game-ir/publication')")).toEqual([
       'dynamic-import:./game-ir/publication',
     ])
     expect(
       forbiddenSyntax(
-        "// import './game-ir/model'\nconst text = 'GAME_IR_COMPILATION gameIrState'; /* import('./game-ir') */",
+        "export { x } from './game-ir/model'; import x = require('./game-ir/model'); const y = require('./game-ir/model')",
+      ),
+    ).toEqual([
+      'export:./game-ir/model',
+      'import-equals:./game-ir/model',
+      'require:./game-ir/model',
+    ])
+    expect(
+      forbiddenSyntax(
+        "// import './game-ir/model'\nconst text = 'GAME_IR_COMPILATION gameIrState'; const object = { GameIrState: 'x' }; const value = object.GameIrState; /* import('./game-ir') */",
       ),
     ).toEqual([])
     const violations = productionSources().flatMap(path =>
