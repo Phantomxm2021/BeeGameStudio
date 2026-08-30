@@ -1041,12 +1041,9 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       'identifier: gameIrState',
       'identifier: enableGameIr',
     ])
-    const deliveryWorkflowRoot = resolve(
-      ROOT,
-      'packages/agent-workflow-server/src/beegame/delivery-workflow',
-    )
+    const serverSourceRoot = resolve(ROOT, 'packages/agent-workflow-server/src')
     const violations = standaloneProductionViolations(
-      await readProductionSourceFiles(deliveryWorkflowRoot),
+      await readProductionSourceFiles(serverSourceRoot),
     )
     expect(violations).toEqual([])
   })

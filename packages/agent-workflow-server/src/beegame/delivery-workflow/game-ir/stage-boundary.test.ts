@@ -11,6 +11,7 @@ import {
 } from './stage-boundary-test-helpers'
 
 const deliveryWorkflowRoot = dirname(dirname(fileURLToPath(import.meta.url)))
+const serverSourceRoot = dirname(dirname(deliveryWorkflowRoot))
 
 const gameIrContractFiles = ['contracts.ts'] as const
 
@@ -116,6 +117,10 @@ describe('Game IR stage boundary', () => {
           path: 'synthetic-switch.ts',
           source: 'const switched = switchGameIr',
         },
+        {
+          path: 'src/app/routes.ts',
+          source: "import { compileGame } from '../game-ir/runtime'",
+        },
       ]),
     ).toEqual([
       'synthetic-static-import.ts: import: ./game-ir/runtime',
@@ -130,6 +135,7 @@ describe('Game IR stage boundary', () => {
       'synthetic-property-access.ts: identifier: gameIrState',
       'synthetic-enable.ts: identifier: enableGameIr',
       'synthetic-switch.ts: identifier: switchGameIr',
+      'src/app/routes.ts: import: ../game-ir/runtime',
     ])
   })
 
@@ -149,12 +155,8 @@ describe('Game IR stage boundary', () => {
   })
 
   test('keeps incomplete Stage 5 unreachable from current production files', async () => {
-    const violations = (
-      await readProductionSourceFiles(deliveryWorkflowRoot)
-    ).flatMap(file =>
-      boundaryViolations(file.source).map(
-        violation => `${file.path}: ${violation}`,
-      ),
+    const violations = standaloneProductionViolations(
+      await readProductionSourceFiles(serverSourceRoot),
     )
     expect(violations).toEqual([])
   })
