@@ -200,6 +200,20 @@ function sectionKey(
   return `${value.documentPath}#${value.sectionId}`
 }
 
+function sameSection(
+  left: GameIrSourceSection,
+  right: GameIrSourceSection,
+): boolean {
+  return (
+    left.documentPath === right.documentPath &&
+    left.sectionId === right.sectionId &&
+    left.heading === right.heading &&
+    left.startLine === right.startLine &&
+    left.endLine === right.endLine &&
+    left.digest === right.digest
+  )
+}
+
 function ownerEvidencePointer(binding: {
   documentPath: FoundationDocumentPath
   sectionId: string
@@ -251,8 +265,8 @@ function normalizeSection(value: unknown, label: string): GameIrSourceSection {
 }
 
 function normalizeSectionIndex(value: unknown): readonly GameIrSourceSection[] {
-  if (!Array.isArray(value)) fail('sectionIndex must be an array')
-  const output = value.map((item, index) =>
+  const dense = strictArray(value, 'sectionIndex')
+  const output = dense.map((item, index) =>
     Object.freeze(normalizeSection(item, `sectionIndex[${index}]`)),
   )
   const identities = new Set(output.map(sectionKey))
@@ -263,6 +277,41 @@ function normalizeSectionIndex(value: unknown): readonly GameIrSourceSection[] {
       fail('sectionIndex must be in canonical order')
   }
   return Object.freeze(output)
+}
+
+function strictArray(value: unknown, label: string): readonly unknown[] {
+  if (!Array.isArray(value)) fail(`${label} must be an array`)
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length')
+  if (
+    !lengthDescriptor ||
+    !('value' in lengthDescriptor) ||
+    lengthDescriptor.value !== value.length ||
+    lengthDescriptor.enumerable !== false ||
+    lengthDescriptor.configurable !== false
+  )
+    fail(`${label} has an invalid length property`)
+  const ownKeys = Reflect.ownKeys(value)
+  const expectedKeys = new Set<string>([
+    'length',
+    ...Array.from({ length: value.length }, (_, index) => String(index)),
+  ])
+  if (
+    ownKeys.length !== expectedKeys.size ||
+    ownKeys.some(key => typeof key !== 'string' || !expectedKeys.has(key))
+  )
+    fail(`${label} must be a dense JSON array without custom properties`)
+  const normalized: unknown[] = []
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index))
+    if (
+      !descriptor ||
+      !('value' in descriptor) ||
+      descriptor.enumerable !== true
+    )
+      fail(`${label}[${index}] must be a dense data property`)
+    normalized.push(descriptor.value)
+  }
+  return normalized
 }
 
 function manifestWithoutDigest(): Omit<
@@ -447,8 +496,8 @@ export function buildGameIrSemanticValidationPacket(
 function normalizePacketSourceSections(
   value: unknown,
 ): readonly GameIrSemanticSourceSection[] {
-  if (!Array.isArray(value)) fail('packet sourceSections must be an array')
-  const output = value.map((raw, index) => {
+  const dense = strictArray(value, 'packet sourceSections')
+  const output = dense.map((raw, index) => {
     if (!isRecord(raw))
       fail(`packet sourceSections[${index}] must be an object`)
     exactKeys(raw, ['ref', 'bytes'], `packet sourceSections[${index}]`)
@@ -550,33 +599,26 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
   )
     fail('packet validator manifest digest is stale')
   const module = moduleManifest(packet.moduleId)
-  const checkIds = packet.checkIds
-  if (
-    !Array.isArray(checkIds) ||
-    checkIds.length !== module.checkIds.length ||
-    checkIds.some((value, index) => value !== module.checkIds[index])
+  const checkIds = exactStringArray(
+    packet.checkIds,
+    module.checkIds,
+    'packet checkIds',
   )
-    fail('packet checkIds do not match the service manifest')
   const selected = selectedModule(candidate, module.moduleId)
   const closure = moduleSourceClosure(selected, fullIndex)
   const sourceSections = normalizePacketSourceSections(packet.sourceSections)
   if (
     sourceSections.length !== closure.sections.length ||
     sourceSections.some(
-      (item, index) =>
-        sectionKey(item.ref) !== sectionKey(closure.sections[index]!) ||
-        item.ref.digest !== closure.sections[index]!.digest,
+      (item, index) => !sameSection(item.ref, closure.sections[index]!),
     )
   )
     fail('packet source closure is stale or incomplete')
-  if (
-    !Array.isArray(packet.allowedEvidencePointers) ||
-    packet.allowedEvidencePointers.length !== closure.evidencePointers.length ||
-    packet.allowedEvidencePointers.some(
-      (value, index) => value !== closure.evidencePointers[index],
-    )
+  const allowedEvidencePointers = exactStringArray(
+    packet.allowedEvidencePointers,
+    closure.evidencePointers,
+    'packet evidence namespace',
   )
-    fail('packet evidence namespace is stale')
   const body = {
     schemaVersion: packet.schemaVersion,
     compileRequest: request,
@@ -591,9 +633,9 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
     moduleId: packet.moduleId,
     validatorManifestVersion: packet.validatorManifestVersion,
     validatorManifestDigest: packet.validatorManifestDigest,
-    checkIds: module.checkIds,
+    checkIds,
     sourceSections,
-    allowedEvidencePointers: closure.evidencePointers,
+    allowedEvidencePointers,
   } as const
   if (packet.packetDigest !== packetDigest(body))
     fail('packet digest is stale or invalid')
@@ -608,13 +650,14 @@ function exactStringArray(
   expected: readonly string[],
   label: string,
 ): readonly string[] {
-  if (!Array.isArray(value) || value.length !== expected.length)
+  const dense = strictArray(value, label)
+  if (dense.length !== expected.length)
     fail(`${label} has incomplete or extra values`)
-  if (value.some(item => typeof item !== 'string'))
+  if (dense.some(item => typeof item !== 'string'))
     fail(`${label} has invalid values`)
-  if (value.some((item, index) => item !== expected[index]))
+  if (dense.some((item, index) => item !== expected[index]))
     fail(`${label} is not the exact canonical coverage`)
-  return Object.freeze([...value])
+  return Object.freeze(dense as string[])
 }
 
 function resultKeys(
@@ -658,14 +701,15 @@ export function admitGameIrSemanticValidationResult(
     fail('result packet digest does not match packet')
   const reasonCode = text(result.reasonCode, 'result reasonCode')
   const actual = text(result.actual, 'result actual')
-  if (
-    !Array.isArray(result.evidencePointers) ||
-    result.evidencePointers.length === 0
+  const evidenceValues = strictArray(
+    result.evidencePointers,
+    'result evidencePointers',
   )
+  if (evidenceValues.length === 0)
     fail('result evidencePointers must not be empty')
-  const evidence = result.evidencePointers
-  if (evidence.some(item => typeof item !== 'string'))
+  if (evidenceValues.some(item => typeof item !== 'string'))
     fail('result evidencePointers must contain strings')
+  const evidence = evidenceValues as readonly string[]
   const allowed = new Set(validated.packet.allowedEvidencePointers)
   const seen = new Set<string>()
   for (const pointer of evidence) {

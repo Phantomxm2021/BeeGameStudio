@@ -144,6 +144,16 @@ function packet() {
   return buildGameIrSemanticValidationPacket(input())
 }
 
+function withPacketDigest(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const { packetDigest: _packetDigest, ...body } = value
+  return {
+    ...value,
+    packetDigest: createHash('sha256').update(canonical(body)).digest('hex'),
+  }
+}
+
 describe('isolated Game IR semantic projection admission', () => {
   test('fix Critical: rejects a missing or empty canonical module before packet construction', () => {
     const modules = rawCandidate().modules as unknown[]
@@ -347,5 +357,83 @@ describe('isolated Game IR semantic projection admission', () => {
     expect(digestGameIrValue(candidate())).toBe(before)
     expect(Object.isFrozen(value)).toBe(true)
     expect(Object.isFrozen(value.sourceSections)).toBe(true)
+  })
+
+  test('fix Important: rejects source ref metadata forged with a recomputed packet digest', () => {
+    const value = packet()
+    for (const refPatch of [{ heading: 'Forged heading' }, { endLine: 99 }]) {
+      const forged = withPacketDigest({
+        ...value,
+        sourceSections: [
+          {
+            ...value.sourceSections[0]!,
+            ref: { ...value.sourceSections[0]!.ref, ...refPatch },
+          },
+        ],
+      })
+      expect(() =>
+        admitGameIrSemanticValidationResult(forged as never, {
+          outcome: 'PASS',
+          packetDigest: forged.packetDigest,
+          checkIds: value.checkIds,
+        }),
+      ).toThrow(/section|metadata|source|index|digest/i)
+    }
+  })
+
+  test('fix Important: PASS checkIds rejects sparse, undefined, accessor, and custom array state', () => {
+    const value = packet()
+    const expected = [...value.checkIds]
+    const sparse = new Array(expected.length) as string[]
+    const deleted = [...expected]
+    delete deleted[0]
+    const undefinedEntry = [...expected]
+    undefinedEntry[0] = undefined as never
+    const accessor = [...expected] as string[]
+    Object.defineProperty(accessor, '0', {
+      configurable: true,
+      enumerable: true,
+      get: () => expected[0],
+    })
+    const custom = [...expected] as string[] & { hidden?: string }
+    custom.hidden = 'forged'
+    for (const checkIds of [
+      sparse,
+      deleted,
+      undefinedEntry,
+      accessor,
+      custom,
+    ]) {
+      expect(() =>
+        admitGameIrSemanticValidationResult(value, {
+          outcome: 'PASS',
+          packetDigest: value.packetDigest,
+          checkIds,
+        }),
+      ).toThrow(/check|coverage|array|dense|property|json/i)
+    }
+  })
+
+  test('fix Important: build and admission do not mutate or alias one shared input', () => {
+    const shared = input()
+    const candidateBefore = digestGameIrValue(shared.candidate)
+    const sectionIndexBefore = canonical(shared.sectionIndex)
+    const sourceBytes = shared.sectionBytes as Record<string, string>
+    const sourceBytesBefore = { ...sourceBytes }
+    const packetValue = buildGameIrSemanticValidationPacket(shared)
+    admitGameIrSemanticValidationResult(packetValue, {
+      outcome: 'PASS',
+      packetDigest: packetValue.packetDigest,
+      checkIds: packetValue.checkIds,
+    })
+    sourceBytes['docs/GDD.md#core-loop'] = 'mutated after packet construction'
+    expect(digestGameIrValue(shared.candidate)).toBe(candidateBefore)
+    expect(canonical(shared.sectionIndex)).toBe(sectionIndexBefore)
+    expect(sourceBytesBefore['docs/GDD.md#core-loop']).toBe(markdown)
+    expect(packetValue.sourceSections[0]!.bytes).toBe(markdown)
+    expect(packetValue.candidateDigest).toBe(candidateBefore)
+    expect(packetValue.candidateBytes).toBe(
+      canonicalGameIrJson(shared.candidate),
+    )
   })
 })
