@@ -526,6 +526,7 @@ function parseVariableValue(
 
 function parseFormulaValue(node: GameIrNode): {
   value: Readonly<Record<string, unknown>>
+  consumedReferences: Set<number>
 } {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
   exactKeys(
@@ -555,6 +556,7 @@ function parseFormulaValue(node: GameIrNode): {
       expression,
       outputUnitReferenceIndex,
     },
+    consumedReferences: usedReferences,
   }
 }
 
@@ -582,6 +584,7 @@ function parsePoints(
 
 function parseValue(node: GameIrNode): {
   value: Readonly<Record<string, unknown>>
+  consumedReferences?: Set<number>
 } {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
   if (node.kind === 'balance.unit') {
@@ -598,7 +601,10 @@ function parseValue(node: GameIrNode): {
   }
   if (node.kind === 'balance.formula') {
     const parsed = parseFormulaValue(node)
-    return { value: parsed.value }
+    return {
+      value: parsed.value,
+      consumedReferences: parsed.consumedReferences,
+    }
   }
   if (node.kind === 'balance.progression-curve') {
     exactKeys(
@@ -617,6 +623,16 @@ function parseValue(node: GameIrNode): {
   if (!fields) fail(`node ${node.id} has an unknown kind`)
   exactKeys(node.value, fields, `node ${node.id} value`)
   return { value: { label: text(node.value.label, `node ${node.id} label`) } }
+}
+
+function assertReferenceConsumption(
+  node: GameIrNode,
+  consumedReferences: ReadonlySet<number>,
+): void {
+  for (let index = 0; index < node.references.length; index += 1) {
+    if (!consumedReferences.has(index))
+      fail(`node ${node.id} has an unused reference at index ${index}`)
+  }
 }
 
 function assertNoEmbeddedTargetIds(
@@ -764,8 +780,6 @@ function unitForNode(
         fail(
           `formula ${node.id} ${binary.operator} has a unit dimension mismatch`,
         )
-      if (!unitsEqual(left, right))
-        fail(`formula ${node.id} ${binary.operator} has a unit mismatch`)
       return left
     }
     if (binary.operator === 'divide' && isProvenZero(binary.right))
@@ -829,7 +843,37 @@ function constantValue(
 
 function isProvenZero(expression: BalanceFormulaExpression): boolean {
   const value = constantValue(expression)
-  return value !== undefined && Object.is(value, 0)
+  return value !== undefined && value === 0
+}
+
+function assertEconomyUnitCoherence(
+  nodes: readonly ParsedNode[],
+  targets: ReadonlyMap<string, GameIrNode>,
+  units: ReadonlyMap<string, BalanceUnit>,
+  formulas: ReadonlyMap<string, BalanceUnit>,
+): void {
+  for (const node of nodes) {
+    if (
+      node.kind !== 'balance.economy-source' &&
+      node.kind !== 'balance.economy-sink'
+    )
+      continue
+    const amountEdge = node.edges.find(edgeValue => edgeValue.type === 'amount')
+    const unitEdge = node.edges.find(edgeValue => edgeValue.type === 'unit')
+    const amountTarget = amountEdge && targets.get(amountEdge.targetId)
+    const explicitUnit = unitEdge && units.get(unitEdge.targetId)
+    if (!amountTarget || !explicitUnit)
+      fail(`node ${node.id} economy amount or unit target is invalid`)
+    const inferredAmountUnit = unitForNode(
+      amountTarget,
+      targets,
+      units,
+      formulas,
+      new Set(),
+    )
+    if (!unitsEqual(inferredAmountUnit, explicitUnit))
+      fail(`node ${node.id} economy amount and unit are not coherent`)
+  }
 }
 
 export function parseBalanceModule(
@@ -854,6 +898,30 @@ export function parseBalanceModule(
     const parsedValue = parseValue(node)
     validateRoles(node, targets)
     exactRoleReferences(node)
+    const consumedReferences =
+      parsedValue.consumedReferences ?? new Set<number>()
+    if (node.kind === 'balance.variable' || node.kind === 'balance.parameter') {
+      const unitReferenceIndex = parsedValue.value.unitReferenceIndex as number
+      consumedReferences.add(unitReferenceIndex)
+      const unitReference = node.references[unitReferenceIndex]
+      const unitTarget = unitReference && targets.get(unitReference.targetId)
+      if (!unitTarget || unitTarget.kind !== 'balance.unit')
+        fail(`node ${node.id} unit reference must target balance.unit`)
+    } else if (
+      node.kind === 'balance.economy-source' ||
+      node.kind === 'balance.economy-sink' ||
+      node.kind === 'balance.reward' ||
+      node.kind === 'balance.cost' ||
+      node.kind === 'balance.reward-cost-binding'
+    ) {
+      for (
+        let referenceIndex = 0;
+        referenceIndex < node.references.length;
+        referenceIndex += 1
+      )
+        consumedReferences.add(referenceIndex)
+    }
+    assertReferenceConsumption(node, consumedReferences)
     parsed.push({
       ...node,
       value: parsedValue.value,
@@ -918,6 +986,7 @@ export function parseBalanceModule(
     if (node.kind === 'balance.formula')
       unitForNode(node, targets, units, formulas, new Set())
   }
+  assertEconomyUnitCoherence(parsed, targets, units, formulas)
   const targetIds = new Set(targets.keys())
   for (const node of parsed)
     assertNoEmbeddedTargetIds(node.value, targetIds, `node ${node.id} value`)

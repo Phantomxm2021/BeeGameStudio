@@ -297,6 +297,15 @@ function cloneModule(): GameIrModuleCandidate {
   return structuredClone(validBalanceModule())
 }
 
+function gameplayTargets(): ReadonlyMap<string, GameIrNode> {
+  return new Map([
+    [
+      'gameplay.jump',
+      { id: 'gameplay.jump', kind: 'gameplay.action' } as GameIrNode,
+    ],
+  ])
+}
+
 function nodeById(module: GameIrModuleCandidate, id: string): MutableNode {
   return module.nodes.find(
     candidate => candidate.id === id,
@@ -305,15 +314,7 @@ function nodeById(module: GameIrModuleCandidate, id: string): MutableNode {
 
 describe('Balance Game IR schema', () => {
   test('accepts the complete balance fixture and freezes normalized output', () => {
-    const parsed = parseBalanceModule(
-      validBalanceModule(),
-      new Map([
-        [
-          'gameplay.jump',
-          { id: 'gameplay.jump', kind: 'gameplay.action' } as GameIrNode,
-        ],
-      ]),
-    )
+    const parsed = parseBalanceModule(validBalanceModule(), gameplayTargets())
     expect(parsed.moduleId).toBe('balance')
     expect(parsed.nodes).toHaveLength(17)
     expect(Object.isFrozen(parsed)).toBe(true)
@@ -547,6 +548,81 @@ describe('Balance Game IR schema', () => {
         ]),
       ),
     ).toThrow(/balance|role|amount|reward|trigger|progression|point/i)
+  })
+
+  test('rejects a variable unit reference that is valid but points to the wrong unit', () => {
+    const module = cloneModule()
+    nodeById(module, 'balance.hp').references = [
+      ref('balance.score', 'balance.variable'),
+    ]
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(/unit/i)
+  })
+
+  test('rejects division by a negative zero literal', () => {
+    const module = cloneModule()
+    nodeById(module, 'balance.formula.currency').value.expression = {
+      kind: 'binary',
+      operator: 'divide',
+      left: { kind: 'literal', value: 1, unitReferenceIndex: 0 },
+      right: { kind: 'literal', value: -0, unitReferenceIndex: 0 },
+    }
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(/zero/i)
+  })
+
+  test.each([
+    'add',
+    'subtract',
+    'minimum',
+    'maximum',
+  ] as const)('accepts %s for same-dimension operands with different scales', operator => {
+    const module = cloneModule()
+    const nodes = module.nodes as unknown as MutableNode[]
+    nodes.push(
+      node('balance.unit.ms', 'balance.unit', {
+        symbol: 'ms',
+        dimensions: [{ base: 'time', exponent: 1 }],
+        scale: { numerator: 1, denominator: 1000 },
+      }),
+    )
+    const formula = nodeById(module, 'balance.formula.math')
+    formula.references = [
+      ref('balance.unit.ms', 'balance.unit'),
+      ref('balance.unit.s', 'balance.unit'),
+    ]
+    formula.edges = []
+    formula.value.expression = {
+      kind: 'binary',
+      operator,
+      left: { kind: 'literal', value: 1, unitReferenceIndex: 0 },
+      right: { kind: 'literal', value: 1, unitReferenceIndex: 1 },
+    }
+    formula.value.outputUnitReferenceIndex = 0
+    nodes.sort((left, right) =>
+      left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+    )
+    expect(() => parseBalanceModule(module, gameplayTargets())).not.toThrow()
+  })
+
+  test('rejects economy amount and explicit unit with incoherent units', () => {
+    const module = cloneModule()
+    const source = nodeById(module, 'balance.source')
+    source.references[1] = ref('balance.unit.hp', 'balance.unit')
+    source.edges[1] = edge('unit', 'balance.unit.hp', 'balance.unit')
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(
+      /unit|coher/i,
+    )
+  })
+
+  test.each([
+    'balance.unit.s',
+    'balance.curve',
+  ])('rejects unused references on relationship-free node %s', id => {
+    const module = cloneModule()
+    const target = nodeById(module, id)
+    target.references = [ref('balance.unit.none', 'balance.unit')]
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(
+      /reference|consum/i,
+    )
   })
 
   test('does not impose a fixed progression point count', () => {
