@@ -333,14 +333,6 @@ function sourceSectionMap(
     )
   }
   const index = [...map.values()]
-  for (
-    let indexPosition = 1;
-    indexPosition < index.length;
-    indexPosition += 1
-  ) {
-    if (sectionOrder(index[indexPosition - 1]!, index[indexPosition]!) >= 0)
-      fail('source sections must be unique and sorted')
-  }
   if (
     digestSectionIndex(index as readonly SectionRef[]) !==
     request.foundation.sectionIndexDigest
@@ -361,15 +353,6 @@ function sectionLine(value: unknown, label: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
     fail(`${label} must be a positive line number`)
   return value
-}
-
-function sectionOrder(
-  left: GameIrSourceSection,
-  right: GameIrSourceSection,
-): number {
-  const leftKey = `${left.documentPath}\0${left.startLine}\0${left.sectionId}`
-  const rightKey = `${right.documentPath}\0${right.startLine}\0${right.sectionId}`
-  return leftKey.localeCompare(rightKey)
 }
 
 function sourceBinding(

@@ -304,15 +304,6 @@ function sectionEvidencePointer(ref: GameIrSourceSection): string {
   return `section:${ref.documentPath}#${ref.sectionId}@${ref.digest}`
 }
 
-function sectionOrder(
-  left: GameIrSourceSection,
-  right: GameIrSourceSection,
-): number {
-  return `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
-    `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
-  )
-}
-
 function normalizeSection(value: unknown, label: string): GameIrSourceSection {
   if (!isRecord(value)) fail(`${label} must be an object`)
   exactKeys(
@@ -353,10 +344,6 @@ function normalizeSectionIndex(value: unknown): readonly GameIrSourceSection[] {
   const identities = new Set(output.map(sectionKey))
   if (identities.size !== output.length)
     fail('sectionIndex contains duplicate sections')
-  for (let index = 1; index < output.length; index += 1) {
-    if (sectionOrder(output[index - 1]!, output[index]!) >= 0)
-      fail('sectionIndex must be in canonical order')
-  }
   const coveredDocuments = new Set(output.map(section => section.documentPath))
   for (const documentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
     if (!coveredDocuments.has(documentPath))
@@ -537,7 +524,7 @@ function moduleSourceClosure(
       evidence.add(ownerEvidencePointer(binding))
     }
   }
-  const selected = [...sections.values()].sort(sectionOrder)
+  const selected = [...sections.values()]
   for (const ref of selected) evidence.add(sectionEvidencePointer(ref))
   const evidencePointers = [...evidence].sort(compare)
   if (selected.length === 0 || evidencePointers.length === 0)
@@ -650,10 +637,6 @@ function normalizePacketSourceSections(
       fail(`packet source bytes do not match ${sectionKey(ref)}`)
     return Object.freeze({ ref, bytes })
   })
-  for (let index = 1; index < output.length; index += 1) {
-    if (sectionOrder(output[index - 1]!.ref, output[index]!.ref) >= 0)
-      fail('packet sourceSections must be unique and sorted')
-  }
   return Object.freeze(output)
 }
 

@@ -109,16 +109,6 @@ function sectionKey(
   return `${section.documentPath}#${section.sectionId}`
 }
 
-function sectionOrder(
-  left: GameIrSourceSection,
-  right: GameIrSourceSection,
-): number {
-  return compareCodeUnits(
-    `${left.documentPath}\0${left.startLine}\0${left.sectionId}`,
-    `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
-  )
-}
-
 function freezeSections(
   sections: readonly GameIrSourceSection[],
 ): readonly GameIrSourceSection[] {
@@ -166,8 +156,7 @@ function normalizeSectionIndex(value: unknown): GameIrSourceSection[] {
       fail('sectionIndex has a hidden or accessor property')
   }
   for (let index = 0; index < value.length; index += 1) {
-    if (!Object.hasOwn(value, String(index)))
-      fail('sectionIndex must be dense')
+    if (!Object.hasOwn(value, String(index))) fail('sectionIndex must be dense')
   }
   const output = value.map((raw, index) => {
     if (!isPlainRecord(raw))
@@ -213,7 +202,6 @@ function normalizeSectionIndex(value: unknown): GameIrSourceSection[] {
       digest: sectionDigest,
     }
   })
-  output.sort(sectionOrder)
   const identities = new Set<string>()
   for (const section of output) {
     const identity = `${section.documentPath}\0${section.sectionId}`
@@ -221,16 +209,10 @@ function normalizeSectionIndex(value: unknown): GameIrSourceSection[] {
       fail('sectionIndex contains duplicate sections')
     identities.add(identity)
   }
-  for (let index = 1; index < output.length; index += 1) {
-    if (sectionOrder(output[index - 1]!, output[index]!) >= 0)
-      fail('sectionIndex must be uniquely sorted')
-  }
   return output
 }
 
-function sectionBytesEntries(
-  value: unknown,
-): Array<readonly [string, string]> {
+function sectionBytesEntries(value: unknown): Array<readonly [string, string]> {
   let entries: Array<readonly [string, string]>
   if (value instanceof Map) {
     if (Object.getPrototypeOf(value) !== Map.prototype)
@@ -376,12 +358,16 @@ export function validateGameIrDomainSourceEnvelope(
   const moduleId = value.moduleId
   if (moduleId !== 'gameplay' && moduleId !== 'balance')
     fail('source envelope moduleId is invalid')
-  const authoritySectionIndex = normalizeSectionIndex(value.authoritySectionIndex)
+  const authoritySectionIndex = normalizeSectionIndex(
+    value.authoritySectionIndex,
+  )
   if (authoritySectionIndex.length === 0)
     fail('authority Section Index must not be empty')
   for (const documentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
     if (
-      !authoritySectionIndex.some(section => section.documentPath === documentPath)
+      !authoritySectionIndex.some(
+        section => section.documentPath === documentPath,
+      )
     )
       fail('authority Section Index must contain all eight canonical documents')
   }

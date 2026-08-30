@@ -642,7 +642,7 @@ describe('Game IR core candidate and source authority', () => {
     ).toThrow(/leaf|binding/i)
   })
 
-  test('recomputes the complete Section Index digest before admitting owners', () => {
+  test('recomputes the complete Section Index digest without imposing another order', () => {
     const forged = [
       { ...sections[0]!, heading: 'Forged heading' },
       sections[1]!,
@@ -659,12 +659,12 @@ describe('Game IR core candidate and source authority', () => {
         sections: [{ ...sections[0]!, endLine: 99 }, sections[1]!],
       }),
     ).toThrow(/section.*digest|digest.*section/i)
-    expect(() =>
+    expect(
       parseGameIrCandidate(candidate(), {
         request: request(),
         sections: [...sections].reverse(),
       }),
-    ).toThrow(/sorted|section/i)
+    ).toBeTruthy()
     expect(() =>
       parseGameIrCandidate(candidate(), {
         request: request(),

@@ -305,7 +305,10 @@ function admittedSemantic(): GameIrDomainSemanticReceipt {
   return admittedSemanticFor(source())
 }
 
-function completeFixtureSource(profile: string): GameIrDomainSourceEnvelope {
+function completeFixtureSource(profile: string): {
+  source: GameIrDomainSourceEnvelope
+  fullIndex: readonly GameIrSourceSection[]
+} {
   const documents = Object.fromEntries(
     CANONICAL_FOUNDATION_DOCUMENTS.map(path => {
       const submission = completeTestSubmission(path)
@@ -325,20 +328,10 @@ function completeFixtureSource(profile: string): GameIrDomainSourceEnvelope {
             }
           : submission
       const authored = renderTestCompleteGameDocument(path, profileSubmission)
-      // Keep every complete-fixture section in a three-digit line range so the
-      // repository's source-index comparators agree on canonical ordering.
-      const padded = `${'\n'.repeat(100)}${authored}`
-      return [path, withTestDocumentMetadata(path, padded)] as const
+      return [path, withTestDocumentMetadata(path, authored)] as const
     }),
   ) as Record<FoundationDocumentPath, string>
-  const completeIndex = [...buildFoundationSectionIndex({ documents })].sort(
-    (left, right) =>
-      compareCodeUnits(
-        `${left.documentPath}\0${left.startLine}\0${left.sectionId}`,
-        `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
-      ),
-  )
-  const fullIndex = completeIndex
+  const fullIndex = buildFoundationSectionIndex({ documents })
   const documentDigests = Object.fromEntries(
     CANONICAL_FOUNDATION_DOCUMENTS.map(path => [
       path,
@@ -381,12 +374,15 @@ function completeFixtureSource(profile: string): GameIrDomainSourceEnvelope {
         .join('\n'),
     ]),
   )
-  return buildGameIrDomainSourceEnvelope({
-    moduleId: 'gameplay',
-    request,
-    sectionIndex: fullIndex,
-    sectionBytes,
-  })
+  return {
+    source: buildGameIrDomainSourceEnvelope({
+      moduleId: 'gameplay',
+      request,
+      sectionIndex: fullIndex,
+      sectionBytes,
+    }),
+    fullIndex,
+  }
 }
 
 describe('Gameplay producer admission and assembler', () => {
@@ -701,33 +697,67 @@ describe('Gameplay producer admission and assembler', () => {
 
   test('compiles two complete Foundation fixture source profiles twice deterministically', () => {
     const projections = ['alpha', 'beta'].map(profile => {
-      const currentSource = completeFixtureSource(profile)
-      const gddSectionId = currentSource.sectionIndex[0]!.sectionId
-      const currentMechanical = mechanical(currentSource)
-      const semantic = admittedSemanticFor(currentSource, gddSectionId)
-      const first = assembleGameplayModule({
-        source: currentSource,
-        mechanical: currentMechanical,
-        semantic,
-      })
-      const second = assembleGameplayModule({
-        source: currentSource,
-        mechanical: currentMechanical,
-        semantic,
-      })
-      expect(digestGameIrValue(first.module)).toBe(
-        digestGameIrValue(second.module),
+      const { source: currentSource, fullIndex } =
+        completeFixtureSource(profile)
+      expect(currentSource.authoritySectionIndex).toEqual(fullIndex)
+      expect(
+        new Set(
+          currentSource.authoritySectionIndex.map(
+            section => section.documentPath,
+          ),
+        ),
+      ).toEqual(new Set(CANONICAL_FOUNDATION_DOCUMENTS))
+      expect(
+        fullIndex.find(
+          section =>
+            section.documentPath === 'docs/ASSET_PLAN.md' &&
+            section.sectionId === 'executive_summary',
+        )?.startLine,
+      ).toBe(9)
+      expect(
+        fullIndex.find(
+          section =>
+            section.documentPath === 'docs/ASSET_PLAN.md' &&
+            section.sectionId === 'material.milestone-maturity-table',
+        )?.startLine,
+      ).toBe(96)
+      expect(currentSource.sectionIndex).toEqual(
+        currentSource.authoritySectionIndex.filter(
+          section => section.documentPath === 'docs/GDD.md',
+        ),
       )
-      expect(canonical(first)).toBe(canonical(second))
-      expect(first.projectionDigest).toBe(second.projectionDigest)
-      return first
+      return currentSource.sectionIndex.map(section => {
+        const currentMechanical = mechanical(currentSource)
+        const semantic = admittedSemanticFor(currentSource, section.sectionId)
+        const first = assembleGameplayModule({
+          source: currentSource,
+          mechanical: currentMechanical,
+          semantic,
+        })
+        const second = assembleGameplayModule({
+          source: currentSource,
+          mechanical: currentMechanical,
+          semantic,
+        })
+        expect(digestGameIrValue(first.module)).toBe(
+          digestGameIrValue(second.module),
+        )
+        expect(canonical(first)).toBe(canonical(second))
+        expect(first.projectionDigest).toBe(second.projectionDigest)
+        return first
+      })
     })
     expect(canonical(projections[0]!)).not.toBe(canonical(projections[1]!))
-    expect(digestGameIrValue(projections[0]!.module)).not.toBe(
-      digestGameIrValue(projections[1]!.module),
+    expect(projections[0]).toHaveLength(projections[1]!.length)
+    expect(
+      projections[0]!.map(projection => digestGameIrValue(projection.module)),
+    ).not.toEqual(
+      projections[1]!.map(projection => digestGameIrValue(projection.module)),
     )
-    expect(projections[0]!.projectionDigest).not.toBe(
-      projections[1]!.projectionDigest,
+    expect(
+      projections[0]!.map(projection => projection.projectionDigest),
+    ).not.toEqual(
+      projections[1]!.map(projection => projection.projectionDigest),
     )
   })
 })
