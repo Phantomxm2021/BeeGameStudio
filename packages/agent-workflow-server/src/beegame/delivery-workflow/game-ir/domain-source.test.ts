@@ -11,7 +11,11 @@ import {
   type FoundationDocumentPath,
 } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
-import { buildGameIrDomainSourceEnvelope } from './domain-source'
+import {
+  buildGameIrDomainSourceEnvelope,
+  validateGameIrDomainSourceEnvelope,
+} from './domain-source'
+import { digestGameIrValue } from './model'
 
 const digest = (value: string): string =>
   createHash('sha256').update(value).digest('hex')
@@ -249,5 +253,29 @@ describe('Game IR domain source closure', () => {
         },
       }),
     ).toThrow(/complete|eight|document|index/i)
+  })
+
+  test('rejects a re-digested source envelope with a narrowed authority index', () => {
+    const envelope = buildGameIrDomainSourceEnvelope({
+      moduleId: 'balance',
+      request: request(),
+      sectionIndex,
+      sectionBytes: exactBalanceBytes(),
+    })
+    const narrowed = {
+      ...envelope,
+      sectionIndex: envelope.sectionIndex.slice(1),
+      sectionBytes: {
+        'docs/GDD.md#section-0': sectionBytes['docs/GDD.md']!,
+      },
+    } as Record<string, unknown>
+    narrowed.sourceDigest = digestGameIrValue(
+      Object.fromEntries(
+        Object.entries(narrowed).filter(([key]) => key !== 'sourceDigest'),
+      ),
+    )
+    expect(() => validateGameIrDomainSourceEnvelope(narrowed)).toThrow(
+      /complete|eight|authority|index|closure/i,
+    )
   })
 })

@@ -21,6 +21,7 @@ export type GameIrDomainSourceEnvelope = Readonly<{
   taskId: string
   moduleId: GameIrDomainId
   compileRequest: GameIrCompileRequest
+  authoritySectionIndex: readonly GameIrSourceSection[]
   sectionIndex: readonly GameIrSourceSection[]
   sectionBytes: Readonly<Record<string, string>>
   sourceDigest: string
@@ -115,6 +116,26 @@ function sectionOrder(
   return compareCodeUnits(
     `${left.documentPath}\0${left.startLine}\0${left.sectionId}`,
     `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
+  )
+}
+
+function freezeSections(
+  sections: readonly GameIrSourceSection[],
+): readonly GameIrSourceSection[] {
+  return Object.freeze(sections.map(section => Object.freeze({ ...section })))
+}
+
+function sameSection(
+  left: GameIrSourceSection,
+  right: GameIrSourceSection,
+): boolean {
+  return (
+    left.documentPath === right.documentPath &&
+    left.sectionId === right.sectionId &&
+    left.heading === right.heading &&
+    left.startLine === right.startLine &&
+    left.endLine === right.endLine &&
+    left.digest === right.digest
   )
 }
 
@@ -317,9 +338,8 @@ export function buildGameIrDomainSourceEnvelope(
     taskId: request.taskId,
     moduleId,
     compileRequest: request,
-    sectionIndex: Object.freeze(
-      selected.map(section => Object.freeze({ ...section })),
-    ),
+    authoritySectionIndex: freezeSections(fullIndex),
+    sectionIndex: freezeSections(selected),
     sectionBytes: Object.freeze(sectionBytes),
   }
   return deepFreeze({
@@ -340,6 +360,7 @@ export function validateGameIrDomainSourceEnvelope(
       'taskId',
       'moduleId',
       'compileRequest',
+      'authoritySectionIndex',
       'sectionIndex',
       'sectionBytes',
       'sourceDigest',
@@ -355,12 +376,29 @@ export function validateGameIrDomainSourceEnvelope(
   const moduleId = value.moduleId
   if (moduleId !== 'gameplay' && moduleId !== 'balance')
     fail('source envelope moduleId is invalid')
+  const authoritySectionIndex = normalizeSectionIndex(value.authoritySectionIndex)
+  if (authoritySectionIndex.length === 0)
+    fail('authority Section Index must not be empty')
+  for (const documentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
+    if (
+      !authoritySectionIndex.some(section => section.documentPath === documentPath)
+    )
+      fail('authority Section Index must contain all eight canonical documents')
+  }
+  if (
+    digestSectionIndex(authoritySectionIndex) !==
+    request.foundation.sectionIndexDigest
+  )
+    fail('authority Section Index digest does not match the Foundation receipt')
   const sections = normalizeSectionIndex(value.sectionIndex)
   const expectedDocuments = DOMAIN_SOURCE_DOCUMENTS[moduleId]
+  const expectedSections = authoritySectionIndex.filter(section =>
+    expectedDocuments.includes(section.documentPath as never),
+  )
   if (
-    sections.length === 0 ||
+    sections.length !== expectedSections.length ||
     sections.some(
-      section => !expectedDocuments.includes(section.documentPath as never),
+      (section, index) => !sameSection(section, expectedSections[index]!),
     )
   )
     fail('source envelope section closure is invalid')
@@ -384,9 +422,8 @@ export function validateGameIrDomainSourceEnvelope(
     taskId,
     moduleId,
     compileRequest: request,
-    sectionIndex: Object.freeze(
-      sections.map(section => Object.freeze({ ...section })),
-    ),
+    authoritySectionIndex: freezeSections(authoritySectionIndex),
+    sectionIndex: freezeSections(sections),
     sectionBytes: Object.freeze(sectionBytes),
   }
   const sourceDigest = digest(

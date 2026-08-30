@@ -1,7 +1,7 @@
 import {
-  canonicalGameIrJson,
   compareCodeUnits,
   digestGameIrValue,
+  parseGameIrModuleCandidate,
   type GameIrNode,
 } from './model'
 import {
@@ -138,44 +138,22 @@ function deepFreeze<T>(value: T): T {
   return value
 }
 
-function canonicalClone<T>(value: T, label: string): T {
-  try {
-    return JSON.parse(canonicalGameIrJson(value)) as T
-  } catch (error) {
-    throw new Error(
-      `invalid Game IR domain projection: ${label} is not canonical JSON (${error instanceof Error ? error.message : String(error)})`,
-    )
-  }
-}
-
-function normalizeNode(value: unknown, index: number): GameIrNode {
-  if (!isRecord(value)) fail(`nodes[${index}] must be a plain object`)
-  exactKeys(
-    value,
-    ['id', 'kind', 'producerMode', 'value', 'references', 'edges', 'bindings'],
-    `nodes[${index}]`,
-  )
-  const id = text(value.id, `nodes[${index}].id`)
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id))
-    fail(`nodes[${index}].id is not a safe identifier`)
-  text(value.kind, `nodes[${index}].kind`)
-  if (value.producerMode !== 'mechanical')
-    fail(`nodes[${index}] must be mechanically produced`)
-  if (!isRecord(value.value)) fail(`nodes[${index}].value must be an object`)
-  strictArray(value.references, `nodes[${index}].references`)
-  strictArray(value.edges, `nodes[${index}].edges`)
-  if (!isRecord(value.bindings)) fail(`nodes[${index}].bindings must be an object`)
-  return canonicalClone(value, `nodes[${index}]`) as GameIrNode
-}
-
-function normalizeNodes(value: unknown): readonly GameIrNode[] {
+function normalizeNodes(
+  value: unknown,
+  source: GameIrDomainSourceEnvelope,
+): readonly GameIrNode[] {
   const raw = strictArray(value, 'nodes')
-  const nodes = raw.map(normalizeNode)
-  for (let index = 1; index < nodes.length; index += 1) {
-    if (compareCodeUnits(nodes[index - 1]!.id, nodes[index]!.id) >= 0)
-      fail('nodes must be unique and sorted by ID')
-  }
-  return Object.freeze(nodes.map(node => deepFreeze(node)))
+  const parsed = parseGameIrModuleCandidate(
+    { moduleId: source.moduleId, nodes: raw },
+    {
+      request: source.compileRequest,
+      sections: source.authoritySectionIndex,
+      expectedModuleId: source.moduleId,
+    },
+  )
+  if (parsed.nodes.some(node => node.producerMode !== 'mechanical'))
+    fail('nodes must be mechanically produced')
+  return Object.freeze(parsed.nodes.map(node => deepFreeze(node)))
 }
 
 type VerifiedClaim = Readonly<{
@@ -212,6 +190,18 @@ function normalizeTargets(value: unknown, label: string): readonly string[] {
       fail(`${label} must be unique and sorted`)
   }
   return Object.freeze([...targets])
+}
+
+function mechanicalNodeTargets(
+  nodes: readonly GameIrNode[],
+): readonly string[] {
+  return Object.freeze(
+    nodes
+      .flatMap(node =>
+        Object.keys(node.bindings).map(pointer => `node:${node.id}#${pointer}`),
+      )
+      .sort(compareCodeUnits),
+  )
 }
 
 function normalizeAllowed(value: readonly string[] | undefined, label: string): readonly string[] {
@@ -275,9 +265,15 @@ export function admitGameIrMechanicalProjectionReceipt(
   const sourceDigest = digest(raw.sourceDigest, 'mechanical receipt sourceDigest')
   if (sourceDigest !== validatedSource.sourceDigest)
     fail('mechanical receipt sourceDigest does not match source')
-  const nodes = normalizeNodes(raw.nodes)
+  const nodes = normalizeNodes(raw.nodes, validatedSource)
   const verifiedClaims = normalizeClaims(raw.verifiedClaims)
   const ownedTargets = normalizeTargets(raw.ownedTargets, 'ownedTargets')
+  const expectedTargets = mechanicalNodeTargets(nodes)
+  if (
+    ownedTargets.length !== expectedTargets.length ||
+    ownedTargets.some((target, index) => target !== expectedTargets[index])
+  )
+    fail('ownedTargets must exactly account for every mechanical node target')
   const body: Omit<GameIrMechanicalProjectionReceipt, 'receiptDigest'> = {
     schemaVersion: 'game-ir-mechanical-projection-receipt.v1',
     taskId,

@@ -21,6 +21,31 @@ import { digestSectionIndex } from '../foundation-section-index'
 
 const digest = 'a'.repeat(64)
 
+const mechanicalNode = {
+  id: 'balance.var.hp',
+  kind: 'balance.variable',
+  producerMode: 'mechanical' as const,
+  value: { baseline: 10 },
+  references: [],
+  edges: [],
+  bindings: {
+    '/id': {
+      kind: 'owner' as const,
+      documentPath: 'docs/GDD.md' as const,
+      sectionId: 'section-0',
+      sectionDigest: createHash('sha256').update('bytes').digest('hex'),
+      sourcePointer: '/balance/variables/hp',
+    },
+    '/value/baseline': {
+      kind: 'owner' as const,
+      documentPath: 'docs/GDD.md' as const,
+      sectionId: 'section-0',
+      sectionDigest: createHash('sha256').update('bytes').digest('hex'),
+      sourcePointer: '/balance/variables/hp/baseline',
+    },
+  },
+}
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   if (value && typeof value === 'object')
@@ -141,10 +166,61 @@ describe('Game IR domain producer contracts', () => {
     }
   })
 
+  test('rejects incomplete node-to-target ownership accounting', () => {
+    expect(() =>
+      admitGameIrMechanicalProjectionReceipt(
+          source(),
+          receipt({ nodes: [mechanicalNode] as never, ownedTargets: [] }),
+      ),
+    ).toThrow(/owned|target|account/i)
+  })
+
+  test('rejects malformed nested node references, edges, and bindings', () => {
+    for (const node of [
+      {
+        ...mechanicalNode,
+        references: [{ targetId: 'bad' }],
+      },
+      {
+        ...mechanicalNode,
+        edges: [{ type: 'depends-on', targetId: 'bad' }],
+      },
+      {
+        ...mechanicalNode,
+        bindings: { '/id': { kind: 'owner' } },
+      },
+    ]) {
+      expect(() =>
+        admitGameIrMechanicalProjectionReceipt(
+          source(),
+          receipt({ nodes: [node] as never, ownedTargets: [] }),
+        ),
+      ).toThrow(/reference|edge|target|binding|module|source/i)
+    }
+  })
+
+  test('rejects noncanonical owned target spellings', () => {
+    expect(() =>
+      admitGameIrMechanicalProjectionReceipt(
+        source(),
+        receipt({
+          nodes: [mechanicalNode] as never,
+          ownedTargets: ['balance.var.hp#/value/baseline'],
+        }),
+      ),
+    ).toThrow(/owned|target|canonical|account/i)
+  })
+
   test('rejects semantic packets that relabel source identity or mechanical ownership', () => {
     const mechanical = admitGameIrMechanicalProjectionReceipt(
       source(),
-      receipt({ ownedTargets: ['node:balance.var.hp#/value/baseline'] }),
+      receipt({
+        nodes: [mechanicalNode],
+        ownedTargets: [
+          'node:balance.var.hp#/id',
+          'node:balance.var.hp#/value/baseline',
+        ],
+      }),
     )
     const packet = buildGameIrDomainSemanticPacket({
       source: source(),
