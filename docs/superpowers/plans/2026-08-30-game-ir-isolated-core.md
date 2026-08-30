@@ -507,10 +507,18 @@ unexpected/conflicting bytes, performs the same atomic directory rename, and
 reconciles an already complete final directory before cleanup.
 
 All existing path components beneath a canonicalized workspace root must be
-checked with `lstat`; symlinks and non-directories are rejected. Revision and
-publication path segments are validated before any write. New files use
-exclusive/no-follow creation where supported. No filesystem mutation occurs
-before authority, paths and the complete expected artifact set are validated.
+checked with `lstat`; stored symlinks and non-directories are rejected.
+Revision and publication path segments are validated before any write. New
+files use exclusive/no-follow creation where supported. No filesystem mutation
+occurs before authority, paths and the complete expected artifact set are
+validated. Cross-process Bee Game publishers must coordinate through the same
+protocol and reconcile rename races. An unrelated same-user process that
+maliciously replaces a checked ancestor between path-based Node/Bun syscalls is
+outside this application integrity boundary: this runtime has no portable
+`openat`/directory-fd API, and such a process can also rewrite application code
+and committed outputs. Validation must detect resulting divergence, but the
+design does not claim native sandbox guarantees it cannot perform a first
+write.
 
 Test:
 
@@ -533,6 +541,11 @@ Test:
   journal;
 - traversal, pre-existing symlink components and concurrent same-revision
   publishers cannot write outside the root or produce mixed final bytes;
+- journal and staging files use temp-write/fsync/rename (or an equivalent
+  atomic-file primitive), so a crash during a file write leaves only a
+  disposable recognized temp file and never a partial authority artifact;
+- strict authority objects and arrays reject symbol, accessor, non-enumerable,
+  sparse and custom-property state;
 - no arbitrary module/node/artifact count cap exists.
 
 - [ ] **Step 2: Run tests and verify RED**

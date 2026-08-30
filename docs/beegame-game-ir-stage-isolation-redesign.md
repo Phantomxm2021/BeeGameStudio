@@ -337,7 +337,9 @@ Publication 的唯一输入是外部可重建的 `GameIrPublicationAuthority`：
 
 最终 revision 目录使用完整目录原子切换：先写 PREPARED journal，在私有 staging 中补齐并验证全部文件，最后写 staging/COMMITTED.json，再把整个非空 staging 目录原子 rename 到此前不存在的 final revision 路径。不得逐文件写入或覆盖可见 final 目录。并发赢家只有在 exact external authority 校验一致时才可作为幂等成功；否则 fail closed。
 
-所有 workspace 下的既有路径组件必须拒绝 symlink 与非目录，revision/publication segment 必须在任何写入前通过安全校验。恢复可以补齐缺失的 expected staging bytes，但必须拒绝 unexpected 或 conflicting bytes；final READY 只由完整、外部 authority 一致的 COMMITTED publication 表示。
+所有 workspace 下的既有路径组件必须拒绝已存 symlink 与非目录，revision/publication segment 必须在任何写入前通过安全校验。Journal 与 staging artifact 使用临时文件写入、同步和原子 rename，partial temp 只能被同一 external authority 的 recovery 丢弃重建。恢复可以补齐缺失的 expected staging bytes，但必须拒绝 unexpected 或 conflicting bytes；final READY 只由完整、外部 authority 一致的 COMMITTED publication 表示。
+
+该边界协调所有遵守同一协议的 Bee Game 进程，并在每次 validation 检测 workspace divergence；不宣称 Node/Bun path API 能阻止同权限恶意进程在两个 syscall 之间替换父目录。运行时没有可移植的 directory-fd/openat 能力，而同权限进程本来也能直接改写应用代码和 committed output。若未来威胁模型要求抵御此类本机攻击，应由宿主 sandbox 或单独审计的 native filesystem broker 提供，不在 Game IR 业务代码中伪造保证。
 
 ## 9. 现有实现回收规则
 
