@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import {
+  link,
   mkdir,
   open,
   lstat,
@@ -72,6 +73,7 @@ type Plan = Readonly<{
   stage: string
   journal: string
   final: string
+  privateRoot: string
   authorityDigest: string
   artifacts: readonly Artifact[]
   marker: Artifact
@@ -258,69 +260,40 @@ async function componentsSafe(
       fail('existing path component is not a directory')
   }
 }
-function temporaryPath(path: string, authorityDigest: string): string {
-  return `${path}.tmp-${authorityDigest}`
-}
-async function writeAtomic(
+async function writePrivateFile(
   root: string,
   path: string,
   bytes: string,
-  authorityDigest: string,
 ): Promise<void> {
   await componentsSafe(root, path, true)
-  const temporary = temporaryPath(path, authorityDigest)
-  await componentsSafe(root, temporary, true)
-  if (await existing(path)) {
-    const info = await lstat(path)
-    if (info.isSymbolicLink() || !info.isFile())
-      fail(`conflicting path is not a regular file: ${path}`)
-    if ((await readFile(path, 'utf8')) !== bytes)
-      fail(`conflicting bytes at ${path}`)
-    if (await existing(temporary)) {
-      await componentsSafe(root, temporary, true)
-      await rm(temporary, { force: true })
-    }
-    return
-  }
-  let temporaryReady = false
-  while (!temporaryReady) {
-    if (await existing(temporary)) {
-      const info = await lstat(temporary)
-      if (info.isSymbolicLink() || !info.isFile())
-        fail(`temporary path is not a regular file: ${temporary}`)
-      if ((await readFile(temporary, 'utf8')) === bytes) {
-        temporaryReady = true
-      } else {
-        await rm(temporary, { force: true })
-      }
-      continue
-    }
-    try {
-      const handle = await open(temporary, 'wx')
-      try {
-        await handle.writeFile(bytes)
-        await handle.sync()
-      } finally {
-        await handle.close()
-      }
-      temporaryReady = true
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-  }
+  const handle = await open(path, 'wx')
   try {
-    await rename(temporary, path)
+    await handle.writeFile(bytes)
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+async function installNoReplace(
+  root: string,
+  source: string,
+  target: string,
+  bytes: string,
+): Promise<void> {
+  await componentsSafe(root, source, true)
+  await componentsSafe(root, target, true)
+  try {
+    await link(source, target)
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') {
-      if (!(await existing(path)))
-        fail(`atomic rename race requires safe retry for ${path}`)
-    } else if (code !== 'EEXIST') throw error
-    const info = await lstat(path)
+    if (code !== 'EEXIST') throw error
+    const info = await lstat(target)
     if (info.isSymbolicLink() || !info.isFile())
-      fail(`conflicting path is not a regular file: ${path}`)
-    if ((await readFile(path, 'utf8')) !== bytes)
-      fail(`conflicting bytes at ${path}`)
+      fail(`conflicting path is not a regular file: ${target}`)
+    if ((await readFile(target, 'utf8')) !== bytes)
+      fail(`conflicting bytes at ${target}`)
+  } finally {
+    await rm(source, { force: true })
   }
 }
 async function locked<T>(key: string, action: () => Promise<T>): Promise<T> {
@@ -344,11 +317,17 @@ async function ensureDir(root: string, path: string): Promise<void> {
   await mkdir(path, { recursive: true })
   await componentsSafe(root, path)
 }
-function artifactNames(
+async function installArtifact(
   plan: Plan,
-  prefix: string,
-  includeTemporary: boolean,
-): string[] {
+  artifact: Artifact,
+  target: string,
+): Promise<void> {
+  const source = join(plan.privateRoot, artifact.path)
+  await ensureDir(plan.workspacePath, resolve(source, '..'))
+  await writePrivateFile(plan.workspacePath, source, artifact.bytes)
+  await installNoReplace(plan.workspacePath, source, target, artifact.bytes)
+}
+function artifactNames(plan: Plan, prefix: string): string[] {
   const names = plan.artifacts
     .filter(artifact =>
       prefix === ''
@@ -358,11 +337,7 @@ function artifactNames(
     )
     .map(artifact => artifact.path.slice(prefix.length))
   if (prefix === '') names.push('COMMITTED.json')
-  if (!includeTemporary) return names
-  return [
-    ...names,
-    ...names.map(name => temporaryPath(name, plan.authorityDigest)),
-  ]
+  return names
 }
 async function exactDirectory(
   path: string,
@@ -632,6 +607,7 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     stage,
     journal,
     final,
+    privateRoot: pathOf(workspacePath, '.beegame/.game-ir-private/placeholder'),
     authorityDigest,
     artifacts,
     marker,
@@ -647,15 +623,18 @@ async function writeStage(plan: Plan): Promise<void> {
     plan.workspacePath,
     pathOf(plan.workspacePath, `${ROOT}/.journal`),
   )
+  await installArtifact(
+    plan,
+    {
+      path: 'journal.json',
+      bytes: plan.journalBytes,
+      digest: sha(plan.journalBytes),
+    },
+    plan.journal,
+  )
   await ensureDir(
     plan.workspacePath,
     pathOf(plan.workspacePath, `${ROOT}/.staging`),
-  )
-  await writeAtomic(
-    plan.workspacePath,
-    plan.journal,
-    plan.journalBytes,
-    plan.authorityDigest,
   )
   if (await existing(plan.stage)) {
     await componentsSafe(plan.workspacePath, plan.stage)
@@ -664,11 +643,8 @@ async function writeStage(plan: Plan): Promise<void> {
       [
         'modules',
         'source-maps',
-        ...artifactNames(plan, '', true).filter(
-          name => name !== 'COMMITTED.json',
-        ),
+        ...artifactNames(plan, '').filter(name => name !== 'COMMITTED.json'),
         'COMMITTED.json',
-        temporaryPath('COMMITTED.json', plan.authorityDigest),
       ],
       'staging',
       true,
@@ -678,24 +654,19 @@ async function writeStage(plan: Plan): Promise<void> {
   await ensureDir(plan.workspacePath, join(plan.stage, 'source-maps'))
   await exactDirectory(
     join(plan.stage, 'modules'),
-    artifactNames(plan, 'modules/', true),
+    artifactNames(plan, 'modules/'),
     'staging modules',
     true,
   )
   await exactDirectory(
     join(plan.stage, 'source-maps'),
-    artifactNames(plan, 'source-maps/', true),
+    artifactNames(plan, 'source-maps/'),
     'staging source maps',
     true,
   )
   for (const artifact of [...plan.artifacts, plan.marker]) {
     try {
-      await writeAtomic(
-        plan.workspacePath,
-        join(plan.stage, artifact.path),
-        artifact.bytes,
-        plan.authorityDigest,
-      )
+      await installArtifact(plan, artifact, join(plan.stage, artifact.path))
     } catch (error) {
       if (!(await existing(plan.stage)) && (await existing(plan.final))) {
         await exactFiles(plan, plan.final)
@@ -709,27 +680,24 @@ async function writeStage(plan: Plan): Promise<void> {
     if ((await readFile(artifactPath, 'utf8')) !== artifact.bytes)
       fail(`staging artifact disagrees for ${artifact.path}`)
   }
-  await removeStageTemporaryFiles(plan)
   await exactDirectory(
     plan.stage,
     [
       'modules',
       'source-maps',
-      ...artifactNames(plan, '', false).filter(
-        name => name !== 'COMMITTED.json',
-      ),
+      ...artifactNames(plan, '').filter(name => name !== 'COMMITTED.json'),
       'COMMITTED.json',
     ],
     'staging',
   )
   await exactDirectory(
     join(plan.stage, 'modules'),
-    artifactNames(plan, 'modules/', false),
+    artifactNames(plan, 'modules/'),
     'staging modules',
   )
   await exactDirectory(
     join(plan.stage, 'source-maps'),
-    artifactNames(plan, 'source-maps/', false),
+    artifactNames(plan, 'source-maps/'),
     'staging source maps',
   )
 }
@@ -776,26 +744,9 @@ async function exactFiles(plan: Plan, root: string): Promise<void> {
       fail(`artifact bytes disagree for ${artifact.path}`)
   }
 }
-async function removeStageTemporaryFiles(plan: Plan): Promise<void> {
-  for (const artifact of [...plan.artifacts, plan.marker]) {
-    const target = join(plan.stage, artifact.path)
-    const temporary = temporaryPath(target, plan.authorityDigest)
-    if (!(await existing(temporary))) continue
-    await componentsSafe(plan.workspacePath, temporary, true)
-    if (!(await existing(target)))
-      fail(`temporary artifact has no complete target: ${artifact.path}`)
-    const info = await lstat(target)
-    if (info.isSymbolicLink() || !info.isFile())
-      fail(`temporary artifact target is not a regular file: ${artifact.path}`)
-    if ((await readFile(target, 'utf8')) !== artifact.bytes)
-      fail(`temporary artifact target disagrees: ${artifact.path}`)
-    await rm(temporary, { force: true })
-  }
-}
 async function cleanup(plan: Plan): Promise<void> {
   await rm(plan.stage, { recursive: true, force: true })
   await rm(plan.journal, { force: true })
-  await rm(temporaryPath(plan.journal, plan.authorityDigest), { force: true })
   for (const path of [
     join(plan.workspacePath, ROOT, '.staging'),
     join(plan.workspacePath, ROOT, '.journal'),
@@ -808,7 +759,16 @@ async function cleanup(plan: Plan): Promise<void> {
   }
 }
 async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
-  await writeStage(plan)
+  try {
+    await writeStage(plan)
+  } catch (error) {
+    if (!(await existing(plan.stage)) && (await existing(plan.final))) {
+      await exactFiles(plan, plan.final)
+      await cleanup(plan)
+      return plan.ready
+    }
+    throw error
+  }
   const revisions = pathOf(plan.workspacePath, `${ROOT}/revisions`)
   await ensureDir(plan.workspacePath, revisions)
   await componentsSafe(plan.workspacePath, plan.final)
@@ -838,7 +798,11 @@ export function expectedGameIrPublicationArtifacts(
   const plan = buildPlan(authority)
   return Object.freeze([...plan.artifacts, plan.marker])
 }
-function withWorkspace(plan: Plan, workspacePath: string): Plan {
+function withWorkspace(
+  plan: Plan,
+  workspacePath: string,
+  privateRoot = plan.privateRoot,
+): Plan {
   return {
     ...plan,
     workspacePath,
@@ -848,28 +812,50 @@ function withWorkspace(plan: Plan, workspacePath: string): Plan {
       `${ROOT}/.journal/${plan.publicationId}.json`,
     ),
     final: pathOf(workspacePath, `${ROOT}/revisions/${plan.revision}`),
+    privateRoot,
   }
+}
+async function runtimePlan(
+  authority: GameIrPublicationAuthority,
+): Promise<Plan> {
+  const plan = withWorkspace(
+    buildPlan(authority),
+    await safeWorkspace(authority.workspacePath),
+  )
+  const parent = pathOf(plan.workspacePath, '.beegame/.game-ir-private')
+  await ensureDir(plan.workspacePath, parent)
+  const segment = `${plan.publicationId}-${process.pid}-${randomBytes(16).toString('hex')}`
+  safe(segment, 'private temp segment')
+  const privateRoot = pathOf(plan.workspacePath, join(parent, segment))
+  await mkdir(privateRoot)
+  await componentsSafe(plan.workspacePath, privateRoot)
+  return { ...plan, privateRoot }
+}
+async function cleanupPrivate(plan: Plan): Promise<void> {
+  await rm(plan.privateRoot, { recursive: true, force: true })
 }
 export async function prepareGameIrPublication(
   authority: GameIrPublicationAuthority,
 ): Promise<GameIrPublicationPrepared> {
-  const plan = withWorkspace(
-    buildPlan(authority),
-    await safeWorkspace(authority.workspacePath),
-  )
-  return locked(plan.final, async () => {
-    await writeStage(plan)
-    return plan.prepared
-  })
+  const plan = await runtimePlan(authority)
+  try {
+    return await locked(plan.final, async () => {
+      await writeStage(plan)
+      return plan.prepared
+    })
+  } finally {
+    await cleanupPrivate(plan)
+  }
 }
 export async function commitGameIrPublication(
   authority: GameIrPublicationAuthority,
 ): Promise<GameIrReadyReceipt> {
-  const plan = withWorkspace(
-    buildPlan(authority),
-    await safeWorkspace(authority.workspacePath),
-  )
-  return locked(plan.final, () => publish(plan))
+  const plan = await runtimePlan(authority)
+  try {
+    return await locked(plan.final, () => publish(plan))
+  } finally {
+    await cleanupPrivate(plan)
+  }
 }
 export async function recoverGameIrPublication(
   authority: GameIrPublicationAuthority,

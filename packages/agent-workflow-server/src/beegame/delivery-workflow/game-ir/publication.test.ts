@@ -332,26 +332,26 @@ describe('atomic Game IR publication and recovery', () => {
     const recovered = await recoverGameIrPublication(value)
     await expect(recoverGameIrPublication(value)).resolves.toEqual(recovered)
 
-    for (const relativePath of [
-      'journal',
-      'dependency-graph.json',
-      'COMMITTED.json',
-    ]) {
-      const interrupted = await setup()
-      const interruptedPrepared = await prepareGameIrPublication(interrupted)
-      const target =
-        relativePath === 'journal'
-          ? join(interrupted.workspacePath, interruptedPrepared.journalPath)
-          : join(
-              interrupted.workspacePath,
-              interruptedPrepared.preparedPath,
-              relativePath,
-            )
-      const temporary = `${target}.tmp-${interruptedPrepared.authorityDigest}`
-      await rm(target)
-      await Bun.write(temporary, 'partial write')
-      await expect(recoverGameIrPublication(interrupted)).resolves.toBeTruthy()
-    }
+    const interrupted = await setup()
+    const interruptedPrepared = await prepareGameIrPublication(interrupted)
+    const crashedPrivateRoot = join(
+      interrupted.workspacePath,
+      '.beegame/.game-ir-private/crashed-publication-123-abcdef',
+    )
+    await mkdir(crashedPrivateRoot, { recursive: true })
+    await Bun.write(
+      join(crashedPrivateRoot, 'manifest.partial'),
+      'partial write',
+    )
+    await rm(
+      join(
+        interrupted.workspacePath,
+        interruptedPrepared.preparedPath,
+        'manifest.json',
+      ),
+    )
+    await expect(recoverGameIrPublication(interrupted)).resolves.toBeTruthy()
+    expect(await readdir(crashedPrivateRoot)).toEqual(['manifest.partial'])
 
     const renamed = await setup()
     const renamedPrepared = await prepareGameIrPublication(renamed)
@@ -373,6 +373,21 @@ describe('atomic Game IR publication and recovery', () => {
     expect(
       await readdir(join(renamed.workspacePath, '.beegame/ir/game-ir.v1')),
     ).toEqual(['revisions'])
+
+    const conflict = await setup()
+    const conflictPrepared = await prepareGameIrPublication(conflict)
+    const conflictManifest = join(
+      conflict.workspacePath,
+      conflictPrepared.preparedPath,
+      'manifest.json',
+    )
+    await Bun.write(conflictManifest, 'conflicting target\n')
+    await expect(recoverGameIrPublication(conflict)).rejects.toThrow(
+      /conflict|bytes|artifact/i,
+    )
+    expect(await readFile(conflictManifest, 'utf8')).toBe(
+      'conflicting target\n',
+    )
 
     const second = await setup()
     const secondPrepared = await prepareGameIrPublication(second)
@@ -551,25 +566,27 @@ describe('atomic Game IR publication and recovery', () => {
         stdout: 'ignore',
         stderr: 'pipe',
       })
-    const children = [launch(), launch()]
-    const exits = await Promise.all(children.map(child => child.exited))
-    if (exits.some(exit => exit !== 0)) {
-      const errors = await Promise.all(
-        children.map(child =>
-          child.stderr
-            ? new Response(child.stderr).text()
-            : Promise.resolve(''),
-        ),
-      )
-      throw new Error(errors.join('\n'))
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const children = [launch(), launch()]
+      const exits = await Promise.all(children.map(child => child.exited))
+      if (exits.some(exit => exit !== 0)) {
+        const errors = await Promise.all(
+          children.map(child =>
+            child.stderr
+              ? new Response(child.stderr).text()
+              : Promise.resolve(''),
+          ),
+        )
+        throw new Error(errors.join('\n'))
+      }
+      expect(exits).toEqual([0, 0])
     }
-    expect(exits).toEqual([0, 0])
     await expect(validateCommittedGameIr(value)).resolves.toBeTruthy()
   })
 
   test('rejects an independent different authority without mixing final bytes', async () => {
     const value = await setup()
-    const other = authority(value.workspacePath, 3, 'publication-2')
+    const other = authority(value.workspacePath, 4, 'publication-1')
     const modulePath = join(
       process.cwd(),
       'packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.ts',
