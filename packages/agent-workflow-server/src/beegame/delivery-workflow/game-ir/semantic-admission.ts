@@ -231,8 +231,7 @@ function sectionOrder(
   left: GameIrSourceSection,
   right: GameIrSourceSection,
 ): number {
-  return compare(
-    `${left.documentPath}\0${left.startLine}\0${left.sectionId}`,
+  return `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
     `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
   )
 }
@@ -386,13 +385,36 @@ function moduleManifest(moduleId: unknown): GameIrSemanticValidatorModule {
 }
 
 function sectionBytesEntries(value: unknown): readonly [string, string][] {
-  const entries =
-    value instanceof Map
-      ? [...value.entries()]
-      : isRecord(value)
-        ? Object.entries(value)
-        : null
-  if (!entries) fail('sectionBytes must be a map or object')
+  let entries: readonly [string, string][]
+  if (value instanceof Map) {
+    if (Reflect.ownKeys(value).length !== 0)
+      fail('sectionBytes map has custom properties')
+    entries = [...value.entries()]
+  } else {
+    if (
+      !isRecord(value) ||
+      (Object.getPrototypeOf(value) !== Object.prototype &&
+        Object.getPrototypeOf(value) !== null)
+    )
+      fail('sectionBytes must be a map or plain object')
+    const ownKeys = Reflect.ownKeys(value)
+    for (const key of ownKeys) {
+      if (typeof key !== 'string') fail('sectionBytes has a symbol property')
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (
+        !descriptor ||
+        !descriptor.enumerable ||
+        !('value' in descriptor) ||
+        descriptor.get ||
+        descriptor.set
+      )
+        fail('sectionBytes has a hidden or accessor property')
+    }
+    entries = ownKeys.map(key => [
+      key as string,
+      value[key as string] as string,
+    ])
+  }
   if (
     entries.some(
       ([key, bytes]) => typeof key !== 'string' || typeof bytes !== 'string',
@@ -422,13 +444,16 @@ function moduleSourceClosure(
 ): {
   sections: readonly GameIrSourceSection[]
   evidencePointers: readonly string[]
+  ownerSectionKeys: readonly string[]
 } {
   const byKey = new Map(index.map(section => [sectionKey(section), section]))
   const sections = new Map<string, GameIrSourceSection>()
   const evidence = new Set<string>()
+  const ownerSectionKeys = new Set<string>()
   for (const ref of index) {
-    if (manifest.sourceDocumentPaths.includes(ref.documentPath))
+    if (manifest.sourceDocumentPaths.includes(ref.documentPath)) {
       sections.set(sectionKey(ref), ref)
+    }
   }
   for (const node of module.nodes) {
     for (const binding of Object.values(node.bindings)) {
@@ -438,6 +463,7 @@ function moduleSourceClosure(
       if (ref.digest !== binding.sectionDigest)
         fail('owner binding section digest does not match Section Index')
       sections.set(sectionKey(ref), ref)
+      ownerSectionKeys.add(sectionKey(ref))
       evidence.add(ownerEvidencePointer(binding))
     }
   }
@@ -451,6 +477,7 @@ function moduleSourceClosure(
       selected.map(section => Object.freeze({ ...section })),
     ),
     evidencePointers: Object.freeze(evidencePointers),
+    ownerSectionKeys: Object.freeze([...ownerSectionKeys].sort(compare)),
   }
 }
 
@@ -566,6 +593,7 @@ function normalizePacketSourceSections(
 function validatePacket(packet: GameIrSemanticValidationPacket): {
   packet: GameIrSemanticValidationPacket
   module: GameIrSemanticValidatorModule
+  ownerSectionKeys: readonly string[]
 } {
   if (!isRecord(packet)) fail('packet must be an object')
   exactKeys(
@@ -689,6 +717,7 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
   return {
     packet: Object.freeze({ ...body, packetDigest: packet.packetDigest }),
     module,
+    ownerSectionKeys: closure.ownerSectionKeys,
   }
 }
 
@@ -763,6 +792,19 @@ export function admitGameIrSemanticValidationResult(
     if (seen.has(pointer)) fail('result evidencePointers contain duplicates')
     if (!allowed.has(pointer))
       fail('result evidence pointer is outside owner namespace')
+    if (pointer.startsWith('section:')) {
+      if (!/missing|ambiguous/i.test(reasonCode))
+        fail(
+          'section evidence is only valid for missing or ambiguous projections',
+        )
+      const sectionPointer = pointer.slice('section:'.length)
+      const sectionIdentity = sectionPointer.slice(
+        0,
+        sectionPointer.lastIndexOf('@'),
+      )
+      if (validated.ownerSectionKeys.includes(sectionIdentity))
+        fail('section evidence cannot replace an owner binding')
+    }
     seen.add(pointer)
   }
   for (let index = 1; index < evidence.length; index += 1) {

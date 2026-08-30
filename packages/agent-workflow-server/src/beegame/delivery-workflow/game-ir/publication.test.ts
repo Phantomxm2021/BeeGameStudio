@@ -13,8 +13,19 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'bun:test'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
-import { digestSectionIndex } from '../foundation-section-index'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from '../../../__tests__/complete-game-document-fixture'
+import { withTestDocumentMetadata } from '../../../__tests__/delivery-workflow-test-helpers'
+import {
+  buildFoundationSectionIndex,
+  digestSectionIndex,
+} from '../foundation-section-index'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from '../types'
 import {
   GAME_IR_SCHEMA_VERSION,
   type FoundationReadyReceipt,
@@ -41,29 +52,33 @@ import {
 } from './publication'
 
 const digest = 'a'.repeat(64)
-const markdown = '# Core Loop\n\nThe player survives.\n'
-const sectionDigest = createHash('sha256').update(markdown).digest('hex')
-const sectionIndex: readonly GameIrSourceSection[] =
-  CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => {
-    const bytes =
-      documentPath === 'docs/GDD.md'
-        ? markdown
-        : `# Section ${index}\n\nSource ${documentPath}.\n`
-    return {
-      documentPath,
-      sectionId:
-        documentPath === 'docs/GDD.md' ? 'core-loop' : `section-${index}`,
-      heading:
-        documentPath === 'docs/GDD.md' ? 'Core Loop' : `Section ${index}`,
-      startLine: 1,
-      endLine: 3,
-      digest: shaBytes(bytes),
-    }
-  }).sort((left, right) =>
-    `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
-      `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
-    ),
-  )
+const documents = new Map(
+  CANONICAL_FOUNDATION_DOCUMENTS.map(path => {
+    const submission = completeTestSubmission(path)
+    return [
+      path,
+      withTestDocumentMetadata(
+        path,
+        renderTestCompleteGameDocument(path, submission),
+      ),
+    ] as const
+  }),
+)
+const sectionIndex: readonly GameIrSourceSection[] = [
+  ...buildFoundationSectionIndex({ documents }),
+].sort((left, right) =>
+  `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
+    `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
+  ),
+)
+const documentDigests = Object.fromEntries(
+  [...documents].map(([path, bytes]) => [path, shaBytes(bytes)]),
+) as Record<FoundationDocumentPath, string>
+const gddSection = sectionIndex.find(
+  section => section.documentPath === 'docs/GDD.md',
+)!
+const sectionDigest = gddSection.digest
+const sectionId = gddSection.sectionId
 
 function sectionKey(
   ref: Pick<GameIrSourceSection, 'documentPath' | 'sectionId'>,
@@ -80,13 +95,15 @@ function sectionBytesFor(moduleId: string): Record<string, string> {
       .filter(
         section =>
           module.sourceDocumentPaths.includes(section.documentPath) ||
-          section.documentPath === 'docs/GDD.md',
+          sectionKey(section) === sectionKey(gddSection),
       )
       .map(section => [
         sectionKey(section),
-        section.documentPath === 'docs/GDD.md'
-          ? markdown
-          : `# Section ${CANONICAL_FOUNDATION_DOCUMENTS.indexOf(section.documentPath)}\n\nSource ${section.documentPath}.\n`,
+        documents
+          .get(section.documentPath)!
+          .split('\n')
+          .slice(section.startLine - 1, section.endLine)
+          .join('\n'),
       ]),
   )
   return result
@@ -112,10 +129,8 @@ function request(publicationId = 'publication-1'): GameIrCompileRequest {
     schemaVersion: 'foundation-ready-receipt.v1',
     projectId: 'project-1',
     foundationRevision: 'foundation-revision-1',
-    confirmedBriefDigest: digest,
-    documentDigests: Object.fromEntries(
-      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, digest]),
-    ) as FoundationReadyReceipt['documentDigests'],
+    confirmedBriefDigest: shaBytes('confirmed brief'),
+    documentDigests: documentDigests,
     sectionIndexPath: '.beegame/foundation/section-index.json',
     sectionIndexDigest: digestSectionIndex(sectionIndex),
     authority: {
@@ -164,7 +179,7 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                     '/id': {
                       kind: 'owner',
                       documentPath: 'docs/GDD.md',
-                      sectionId: 'core-loop',
+                      sectionId,
                       sectionDigest,
                       sourcePointer: `/ir/${moduleId}/extra-${extraId}`,
                     },
@@ -186,14 +201,14 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
               '/id': {
                 kind: 'owner',
                 documentPath: 'docs/GDD.md',
-                sectionId: 'core-loop',
+                sectionId,
                 sectionDigest,
                 sourcePointer: `/ir/${moduleId}`,
               },
               '/value/label': {
                 kind: 'owner',
                 documentPath: 'docs/GDD.md',
-                sectionId: 'core-loop',
+                sectionId,
                 sectionDigest,
                 sourcePointer: `/ir/${moduleId}/label`,
               },
@@ -261,6 +276,26 @@ afterEach(async () => {
 })
 
 describe('atomic Game IR publication and recovery', () => {
+  test('binds semantic packet Section Indexes to the external publication authority', async () => {
+    const value = await setup()
+    for (const sectionIndex of [
+      Object.freeze(value.sectionIndex.slice(0, 1)),
+      Object.freeze(
+        value.sectionIndex.map((section, index) =>
+          Object.freeze(
+            index === 0
+              ? { ...section, heading: `${section.heading} tampered` }
+              : section,
+          ),
+        ),
+      ),
+    ]) {
+      await expect(
+        prepareGameIrPublication({ ...value, sectionIndex }),
+      ).rejects.toThrow(/section|index|authority|packet|digest/i)
+    }
+  })
+
   test('writes PREPARED journal first and exposes only a complete revision after directory rename', async () => {
     const value = await setup()
     const prepared = await prepareGameIrPublication(value)

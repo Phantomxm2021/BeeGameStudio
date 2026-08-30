@@ -292,6 +292,43 @@ describe('isolated Game IR semantic projection admission', () => {
     ).toThrow(/sectionBytes|source closure|missing/i)
   })
 
+  test('rejects sectionBytes with hidden, symbol, or accessor properties without invoking accessors', () => {
+    const hidden = sectionBytesFor('gameplay') as Record<string, string>
+    Object.defineProperty(hidden, 'hidden', {
+      value: markdown,
+      enumerable: false,
+    })
+    expect(() =>
+      buildGameIrSemanticValidationPacket(input({ sectionBytes: hidden })),
+    ).toThrow(/sectionBytes|property|hidden/i)
+
+    const symbolKey = Symbol('forged')
+    const symbol = sectionBytesFor('gameplay') as Record<
+      string | symbol,
+      string
+    >
+    symbol[symbolKey] = markdown
+    expect(() =>
+      buildGameIrSemanticValidationPacket(input({ sectionBytes: symbol })),
+    ).toThrow(/sectionBytes|symbol|property/i)
+
+    let invoked = false
+    const accessor = sectionBytesFor('gameplay') as Record<string, string>
+    const key = 'docs/GDD.md#core-loop'
+    Object.defineProperty(accessor, key, {
+      enumerable: true,
+      configurable: true,
+      get() {
+        invoked = true
+        return markdown
+      },
+    })
+    expect(() =>
+      buildGameIrSemanticValidationPacket(input({ sectionBytes: accessor })),
+    ).toThrow(/sectionBytes|accessor|property/i)
+    expect(invoked).toBe(false)
+  })
+
   test('includes every manifest document and rejects extra or missing bytes for a multi-document module', () => {
     const value = buildGameIrSemanticValidationPacket(
       input({ moduleId: 'balance', sectionBytes: sectionBytesFor('balance') }),
@@ -477,6 +514,17 @@ describe('isolated Game IR semantic projection admission', () => {
         evidencePointers: ['docs/GDD.md#core-loop'],
       }),
     ).toThrow(/evidence|pointer|owner/i)
+    for (const outcome of ['FAIL', 'AMBIGUOUS'] as const) {
+      expect(() =>
+        admitGameIrSemanticValidationResult(value, {
+          outcome,
+          packetDigest: value.packetDigest,
+          reasonCode: 'projection-mismatch',
+          actual: 'bound source is not a valid section-only diagnostic',
+          evidencePointers: [`section:docs/GDD.md#core-loop@${sectionDigest}`],
+        }),
+      ).toThrow(/evidence|owner|bound|missing|ambiguous/i)
+    }
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
         outcome: 'AMBIGUOUS',

@@ -33,6 +33,7 @@ import {
   type GameIrSemanticValidationPacket,
   type GameIrSemanticValidationResult,
 } from './semantic-admission'
+import { digestSectionIndex } from '../foundation-section-index'
 
 const ROOT = '.beegame/ir/game-ir.v1'
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -427,6 +428,17 @@ function validateAdmissions(
       packet.foundationReceiptDigest !== request.foundation.receiptDigest
     )
       fail('semantic packet identity is stale')
+    const authoritySectionIndexDigest = digestSectionIndex(
+      authority.sectionIndex,
+    )
+    if (
+      request.foundation.sectionIndexDigest !== authoritySectionIndexDigest ||
+      packet.sectionIndexDigest !== authoritySectionIndexDigest ||
+      canonical(packet.sectionIndex) !== canonical(authority.sectionIndex)
+    )
+      fail(
+        'semantic packet Section Index is detached from publication authority',
+      )
     if (
       packet.candidateBytes !== canonicalGameIrJson(candidate) ||
       packet.candidateDigest !== digestGameIrValue(candidate) ||
@@ -459,6 +471,13 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   const request = parseGameIrCompileRequest(authorityInput.compileRequest)
   if (request.publicationId !== authorityInput.publicationId)
     fail('publicationId does not match compile request')
+  if (
+    digestSectionIndex(authorityInput.sectionIndex) !==
+    request.foundation.sectionIndexDigest
+  )
+    fail(
+      'publication authority Section Index does not match Foundation receipt',
+    )
   safe(request.foundation.foundationRevision, 'foundationRevision')
   if (
     !frozen(authorityInput.candidate) ||
