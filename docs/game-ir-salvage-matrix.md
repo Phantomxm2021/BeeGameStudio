@@ -1,56 +1,92 @@
 # Game IR salvage matrix
 
-This ledger is the Phase 1 boundary for the Game IR work. It records the
-previous dirty-tree Game IR attempt and the small set of ideas that are safe
-to carry into the isolated Stage 5 core. Every entry has exactly one outcome;
-no dirty worktree state, generated artifact, or uncommitted run is migrated.
+This is a read-only inventory of the previous dirty Game IR attempt. The dirty
+worktree itself, generated output, run state, and uncommitted evidence have no
+migration value. The inventory was checked against the dirty checkout's
+production importers and the symbols named by its implementation consumer;
+the old source and fixture files are no longer present in the isolated
+worktree. Every item below has one stable ID and exactly one disposition.
 
 The stable Foundation baseline is `70df2e2c`. The protected Stage 3/4 files
 (`types.ts`, `schema.ts`, `controller.ts`, `transition.ts`, and `recovery.ts`)
-remain byte-identical to that baseline. The parity test also runs the stable
-deterministic, semantic, revision-batch, and targeted-recheck helpers twice.
+are byte-identical to that baseline. Phase 1 only projects and strictly parses
+a READY compile request; it does not construct a domain candidate.
 
-## Ledger
+## Source and test inventory
 
-| Old path or symbol | Category | Why | Dependencies and later consumer |
-| --- | --- | --- | --- |
-| `game-ir.ts` dirty-tree compiler and its generated output | DISCARD | It combined typed-owner compilation with Foundation routing and was never a Phase 1 authority. Dirty-tree state is not a source artifact. | None; reconstruct from the receipt-bound Stage 5 contracts in the Gameplay + Balance plan. |
-| `GameIrState` / `gameIrState` | DISCARD | A mutable workflow state and second writer would create a second Stage 5 authority. | None; `GameIrReadyReceipt` and the immutable publication are the only future handoff. |
-| `GAME_IR_COMPILATION` controller/schema/transition/recovery branches | DISCARD | They make incomplete Stage 5 reachable from Stage 3/4 and alter persisted Foundation routing. | None; a later consumer-cutover plan may add a route only after all Stage 5 modules are complete. |
-| typed-owner parser used as the Stage 3 Reviewer | DISCARD | It was a Stage 3 replacement that removed or competed with the Foundation Fact Store. Stage 3 remains the stable deterministic/semantic Reviewer. | None; the isolated Stage 5 model has its own strict source-binding parser. |
-| Game IR parser admission invoked by Stage 4 Revision | DISCARD | Stage 4 legality is determined by its Issue Registry, Patch, and Targeted Recheck; Stage 5 diagnostics cannot become Foundation issues. | None; Stage 5 admission stays downstream of a READY receipt. |
-| Foundation Fact/Contract/Rule deletion or weakening from the dirty attempt | DISCARD | These are Stage 3 authority changes, not portable Game IR work, and would invalidate the stable baseline. | None; any future Foundation defect is independently reproduced and separately audited. |
-| one-off test keywords, paths, formats, or project-specific defaults | DISCARD | Test-only accommodations are not product authority and cannot justify a migration or compatibility branch. | None; future fixtures construct only receipt-bound canonical inputs. |
-| direct writes to `foundationAuditState` or the Issue Registry | DISCARD | Stage 5 is read-only with respect to Foundation authority. | None; only the outer adapter may translate a future `FoundationDefectReport`. |
-| legacy reader, migration reader, fallback, compatibility alias, or hot migration | DISCARD | They would create multiple readers or allow stale/old schemas to become reachable. | None; future cutover deletes the old reader in the same commit as each consumer switch. |
-| legacy `latest`, candidate alias, or mutable current pointer | DISCARD | Publication is revision-bound and has one complete-directory visibility boundary. | None; `COMMITTED.json` and `GameIrReadyReceipt` are sufficient. |
-| per-file final-directory copy and self-signed recovery | DISCARD | Recovery must rebuild expected bytes from external authority; partial final trees must never look READY. | None; atomic directory publication/recovery already covers the cut points. |
-| canonical JSON and SHA-256 encoding | KEEP | It provides byte-stable identity for receipts, candidates, packets, and artifacts. | Current contracts/model/publication; every future Stage 5 module. |
-| `SourceBinding` identity and exact source-pointer namespace | KEEP | Unique owner/derived evidence is required for candidate admission and validator coverage. | Current model and semantic admission; all seven canonical modules. |
-| canonical ID/reference and dependency-graph closure checks | KEEP | They are domain-independent integrity checks, not old product decisions. | Current model/publication; Gameplay, Balance, World, and later consumers. |
-| staging/journal/atomic-directory publication and `COMMITTED` marker | KEEP | The crash-safe publication boundary is valid when driven by external authority. | Current publication/recovery; future Resource and Implementation consumers. |
-| stale authority rejection and recovery cut-point coverage | KEEP | Foundation revision/digest binding prevents detached or stale output. | Current contracts/publication; every Stage 5 cutover. |
-| one-to-many logical-resource realization projection | KEEP | A logical requirement may legitimately have variants and multiple delivery artifacts. | Resource Realization plan and downstream Resource Planner/Curator. |
-| resource authority binding from the dirty implementation | ADAPT | Preserve the authority relationship, but derive it from the strict READY receipt and new resource module rather than old manifest fields. | Resource Realization plan; Resource Planner and Content consumer. |
-| current nine-module typed schema | ADAPT | Its module inventory and identity ideas are inputs only; the Stage 5 schema must cover the seven canonical modules and the full product definition. | Gameplay + Balance, World + Presentation, Resource, and Implementation plans. |
-| typed-record compiler | REWRITE | The old compiler encoded shallow records and mixed responsibilities. Producers must have disjoint mechanical/semantic/derived fields and strict source coverage. | Gameplay + Balance producer plan, then the remaining module plans. |
-| Checklist ID binding | ADAPT | Stable IDs can provide traceability, but Checklist content remains the raw Markdown Foundation projection. | Acceptance Checklist cutover after Stage 5 publication. |
-| Manifest authority binding | ADAPT | Keep a manifest as a derived publication artifact, not a caller-supplied or mutable authority. | Current publication; all downstream readers after consumer cutover. |
-| Foundation Reviewer changes made during Game IR development | REPROVE | Those deltas have no migration credit. A change is eligible only after an independent test reproduces it on the stable baseline. | Foundation defect plans; any accepted fix is a separate audited commit. |
-| Foundation Revision changes made during Game IR development | REPROVE | Revision behavior, Patch validation, and Targeted Recheck must be demonstrated independently before any reuse. | Foundation Revision maintenance plan; no Stage 5 dependency. |
-| dirty Reviewer/Revision fixture data, run state, and generated receipts | DISCARD | Persisted dirty-tree evidence is not canonical authority and cannot be replayed into the new strict contracts. | None; create fresh fixtures from a READY Foundation receipt. |
-| resource/consumer routing changes from the dirty attempt | DISCARD | No Stage 5 consumer is cut over in Phase 1; retaining a partial route would create a fallback or dual reader. | None; each consumer is migrated once in the later single-track cutover. |
+| ID | Dirty source, test, fixture, or symbol | Category | Rationale and dependencies | Later consumer |
+| --- | --- | --- | --- | --- |
+| GI-SRC-01 | `src/beegame/delivery-workflow/game-ir.ts` implementation | DISCARD | The file mixed typed-record compilation, publication, resource projection, Foundation routing, and mutable state. It is not an authority and must not be copied as a unit. | None; later domain plans rebuild from strict Stage 5 contracts. |
+| GI-SRC-02 | `game-ir.ts` generated module/source-map/graph/manifest output | DISCARD | Generated bytes and dirty runs are not source authority; the old per-file visibility boundary was unsafe. | None; Stage 5 publication reconstructs all bytes from external authority. |
+| GI-EXP-01 | `GAME_IR_MODULE_IDS` | ADAPT | The inventory idea is useful, but the old module set is not the Phase 1 domain schema. | Gameplay + Balance and subsequent module plans. |
+| GI-EXP-02 | `assertAssetManifestMatchesProjection` | DISCARD | It couples a downstream asset projection to the old manifest and consumer route. | None; Resource Realization gets a new receipt-bound authority. |
+| GI-EXP-03 | `canonicalGameIrJson` | KEEP | Canonical encoding is domain-independent identity material. | Current contracts, model, semantic admission, and publication. |
+| GI-EXP-04 | `digestGameIrBytes` | KEEP | Digest identity is required for immutable packets and artifacts. | Every Stage 5 module and publication. |
+| GI-EXP-05 | `gameIrDependencyGraphSchema` | KEEP | Graph closure is a valid integrity invariant independent of old product fields. | Current publication; later Gameplay/World/Implementation graphs. |
+| GI-EXP-06 | `gameIrModuleSchema` | ADAPT | Strict module shape is reusable only after the seven canonical modules and producer ownership are specified. | Gameplay + Balance, World + Presentation, Resource, Implementation. |
+| GI-EXP-07 | `gameIrSourceMapSchema` | KEEP | Exact source-map binding preserves owner evidence and digest provenance. | Current model/publication and all downstream modules. |
+| GI-EXP-08 | `loadCurrentCommittedGameIr` | DISCARD | A mutable `latest`/current reader is a second authority and permits detached output. | None; consumers will read a revision-bound READY receipt after cutover. |
+| GI-EXP-09 | `parseGameIrResourceAuthority` | ADAPT | Resource authority binding is useful, but the old manifest shape and consumer assumptions are not. | Resource Realization and Resource Planner cutover. |
+| GI-EXP-10 | `GameIrAssetRequirementProjection` | ADAPT | One logical requirement may map to many delivery artifacts, but the old projection is not the complete Resource Realization model. | Resource Realization plan. |
+| GI-EXP-11 | `GameIrModuleId` | ADAPT | Preserve strict identifier discipline while deriving the final set from the canonical module contract. | All later domain producers. |
+| GI-TST-01 | `game-ir.test.ts` dirty test suite | DISCARD | It tests the abandoned mixed compiler/consumer authority and may encode dirty assumptions. | None; retain only independently reproduced invariants in isolated tests. |
+| GI-TST-02 | `typed-owner-records.test.ts` | DISCARD | It validates a Stage 3 replacement, which conflicts with the stable Fact Store and semantic Reviewer. | None; Stage 3 remains covered by Foundation tests. |
+| GI-FIX-01 | `game-ir-resource-fixture.ts` | DISCARD | Fixture data is dirty run evidence, not a canonical document or receipt; no fixture migration is allowed. | None; later Resource tests render fresh complete-document fixtures. |
+| GI-IDEA-01 | resource one-to-many delivery projection | KEEP | The domain idea is sound and does not require the old consumer or manifest. | Resource Realization plan and Resource Planner/Curator. |
+| GI-IDEA-02 | resource authority binding | ADAPT | Keep the relationship, derive it from the strict READY/publication receipt instead of old fields. | Resource Realization plan. |
+| GI-IDEA-03 | Checklist ID binding | ADAPT | IDs can provide traceability, but Checklist Markdown remains Foundation authority. | Acceptance Checklist cutover after Stage 5. |
+| GI-IDEA-04 | Manifest authority binding | ADAPT | A manifest is a derived artifact, never caller-supplied mutable authority. | Current publication and later consumers. |
 
-## Boundary result
+## Dirty production importers and consumer paths
 
-The Phase 1 core now integrates and tests `core`, `gameplay`, `balance`,
-`world-scene`, `presentation`, `resource-realization`, and
-`implementation-verification` candidates, but no production controller,
-transition, schema, or recovery route constructs a compile request. Foundation
-Reviewer/Revision files import no Game IR symbols, and there is no legacy,
-fallback, compatibility, dual-write, or fixed node/module/artifact cap.
+The only dirty production importer found in the read-only checkout was
+`implementation-projection.ts`; no other current source imported the old
+`./game-ir` module. Its import and every consumer path remain separate ledger
+items from the source exports.
 
-The next plan may add Gameplay and Balance schemas and producers only through
-`FoundationReadyReceipt`. It must preserve this ledger rule: an ambiguous or
-unresolved Stage 5 projection is not a Foundation Issue unless an outer
-adapter emits a separately validated defect report.
+| ID | Dirty path or symbol | Category | Rationale and dependencies | Later consumer |
+| --- | --- | --- | --- | --- |
+| GI-CNS-01 | `delivery-workflow/implementation-projection.ts` import of `./game-ir` | DISCARD | It made an incomplete IR a production Implementation authority and bypassed the Phase 1 READY seam. | None; Implementation waits for a completed Stage 5 cutover. |
+| GI-CNS-02 | `implementation-projection.ts` current committed-IR loader | DISCARD | The loader depended on mutable current output and could select detached or stale files. | None; use a revision-bound implementation receipt later. |
+| GI-CNS-03 | `implementation-projection.ts` asset/resource projection consumer | DISCARD | It consumed the old resource manifest and mixed resource/content gates with Game IR publication. | None; Resource Realization and consumer migrations are separate later phases. |
+| GI-CNS-04 | `implementation-projection.ts` checklist/owner-block projection from old IR | DISCARD | It widened Stage 5 into Checklist and Implementation authority before the domain model existed. | None; Checklist remains a Foundation raw-Markdown projection. |
+| GI-CNS-05 | any dirty resource, content, inventory, or implementation route not present in the isolated checkout | DISCARD | No absent dirty route may be guessed or migrated; a later cutover must identify and delete each old reader in the same commit. | Later single-track consumer plans only. |
+
+## Stage 3/4 deltas and state mutations
+
+Each protected-file delta is classified independently. All Stage 3/4
+replacements and direct Foundation-state mutations are discarded. Reviewer and
+Revision behavior is re-proven independently, never imported from dirty
+evidence.
+
+| ID | Protected delta or direct mutation | Category | Rationale and dependencies | Later consumer |
+| --- | --- | --- | --- | --- |
+| GI-DLT-01 | `types.ts`: `GAME_IR_COMPILATION` phase and `gameIrState` fields | DISCARD | It changed the stable workflow authority to make incomplete Stage 5 reachable. | None in Phase 1. |
+| GI-DLT-02 | `schema.ts`: Game IR route/state schema additions | DISCARD | Stage 3/4 schema must not know the Stage 5 schema or persist a second state track. | Later cutover only after all Stage 5 modules are complete. |
+| GI-DLT-03 | `controller.ts`: Game IR compile/dispatch branch | DISCARD | A production controller route would make the incomplete domain model reachable. | Later single-track route, same commit as old-reader deletion. |
+| GI-DLT-04 | `transition.ts`: Game IR transition and terminal handling | DISCARD | It altered Stage 3/4 transitions and allowed Stage 5 failures to affect Foundation workflow state. | None until the complete cutover plan. |
+| GI-DLT-05 | `recovery.ts`: Game IR recovery and resume branch | DISCARD | It introduced a second recovery authority and hot migration behavior. | None; Stage 5 owns its own revision-bound recovery later. |
+| GI-DLT-06 | Foundation Fact/Contract/Rule/Check deletions or weakening | DISCARD | These were Stage 3 authority regressions, not portable Game IR work. | None; stable Foundation suite is the source of truth. |
+| GI-DLT-07 | typed-owner parser replacing the Stage 3 Reviewer | DISCARD | The replacement removed or competed with the deterministic Fact Store and semantic packets. | None; Stage 5 has a separate strict source-binding parser. |
+| GI-DLT-08 | Stage 4 Game IR parser admission | DISCARD | Patch, Issue Registry, and Targeted Recheck alone determine Stage 4 legality. | None; Stage 5 admission remains downstream. |
+| GI-DLT-09 | direct writes from Game IR to `foundationAuditState` or Issue Registry | DISCARD | Stage 5 is read-only over Foundation authority; diagnostics require an outer defect adapter. | None in Phase 1. |
+| GI-DLT-10 | legacy reader, migration reader, fallback, compatibility alias, or hot migration | DISCARD | Multiple readers or fallback would create the forbidden dual track. | None; cutover deletes old readers atomically. |
+| GI-DLT-11 | Foundation Reviewer delta introduced during Game IR work | REPROVE | No dirty fix receives migration credit; only an independent stable-baseline reproduction may be accepted. | Separate Foundation defect commit, if reproduced. |
+| GI-DLT-12 | Foundation Revision delta introduced during Game IR work | REPROVE | Revision, Patch, and Targeted Recheck behavior must be independently reproduced and audited. | Separate Foundation maintenance commit, if reproduced. |
+| GI-DLT-13 | dirty Reviewer/Revision fixtures, run state, and generated receipts | DISCARD | Persisted dirty evidence is not canonical and cannot be replayed into strict state. | None; parity builds fresh fixtures. |
+| GI-DLT-14 | one-off test keyword/path/format/project defaults | DISCARD | Case-specific accommodations are not product authority and must not become compatibility logic. | None. |
+
+## Classification refinement
+
+Design §9.1 keeps the generic ideas in GI-EXP-03/04/05/07 and GI-IDEA-01;
+§9.2 adapts the bounded shapes in GI-EXP-01/06/09/10/11 and GI-IDEA-02/03/04;
+§9.3 discards every Stage 3/4 replacement, direct Foundation mutation, dirty
+consumer, and dirty fixture; §9.4 re-proves only the independent Reviewer and
+Revision deltas in GI-DLT-11/12. A file implementation and an idea inside it
+therefore have distinct IDs without assigning either item twice.
+
+Phase 1 integrates only the Foundation READY adapter and strict compile-request
+parser. It does not construct Gameplay, Balance, World, Presentation, Resource
+Realization, Implementation, or Verification candidates. The next plan may add
+those producers through `FoundationReadyReceipt`; it may not change Stage 3/4
+routing, add a fallback, or migrate dirty state.
