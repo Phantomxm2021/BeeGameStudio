@@ -8,8 +8,12 @@ Each item has one ID and one disposition. No dirty-tree content is migrated.
 
 Stable Foundation baseline: `70df2e2c`. The five protected Stage 3/4 files
 (`types.ts`, `schema.ts`, `controller.ts`, `transition.ts`, `recovery.ts`)
-are byte-identical to it. Phase 1 only projects a real READY receipt and parses
-the compile request; it does not construct a domain producer or route.
+are byte-identical to it. The Core Phase now implements strict contracts, the
+Foundation READY adapter, the Core model, semantic admission, publication,
+recovery, and parity. These are isolated and tested, but production routing
+remains unreachable. Gameplay, Balance, and later domain producers, consumer
+cutover, and the production route are not implemented; this matrix does not
+claim that the full Game IR is complete.
 
 ## Old dirty artifact snapshot (165 entries)
 
@@ -243,7 +247,7 @@ Mechanical inventory command: `rg -il 'game[_-]?ir' packages/agent-workflow-serv
 | GI-CNS-04 | `comprehensive-remediation.ts` | DISCARD | Remediation consumer; keep Foundation Issue/Revision authority. |
 | GI-CNS-05 | `comprehensive-review-evaluation.ts` | DISCARD | Review evaluator; no parallel IR review authority. |
 | GI-CNS-06 | `comprehensive-review-state.ts` | DISCARD | Review state reader; preserve stable Foundation state. |
-| GI-CNS-07 | `comprehensive-service.ts` | DISCARD | Service composition path; no production route in Phase 1. |
+| GI-CNS-07 | `comprehensive-service.ts` | DISCARD | Service composition path; no production route in the Core Phase. |
 | GI-CNS-08 | `controller.ts` | DISCARD | Controller importer/route; protected bytes remain baseline. |
 | GI-CNS-09 | `implementation-projection.ts` | DISCARD | Implementation projection consumer; delete old reader at cutover. |
 | GI-CNS-10 | `recovery-projector.ts` | DISCARD | Recovery projection consumer; no mutable current IR recovery. |
@@ -254,7 +258,7 @@ Mechanical inventory command: `rg -il 'game[_-]?ir' packages/agent-workflow-serv
 | GI-CNS-15 | `schema.ts` | DISCARD | Protected schema importer; no Game IR state addition. |
 | GI-CNS-16 | `types.ts` | DISCARD | Protected type importer; no Game IR phase addition. |
 | GI-CNS-17 | `comprehensive-reviewer-contract.ts` | DISCARD | Reviewer contract consumer; preserve the stable Reviewer interface and reprove any future IR projection. |
-| GI-CNS-18 | `delivery-gate.ts` | DISCARD | Delivery gate consumer; no Game IR readiness route is admitted in Phase 1. |
+| GI-CNS-18 | `delivery-gate.ts` | DISCARD | Delivery gate consumer; no Game IR readiness route is admitted in the Core Phase. |
 | GI-CNS-19 | `display-progress.ts` | DISCARD | Progress display consumer; do not migrate dirty phase or authority state. |
 | GI-CNS-20 | `document-stage.ts` | DISCARD | Document-stage consumer; retain Foundation stage semantics until a producer-owned cutover. |
 | GI-CNS-21 | `workflow-display-message.ts` | DISCARD | Workflow message consumer; reprove any eventual publication status projection. |
@@ -276,8 +280,10 @@ records and their design ideas have separate IDs because §9.2 allows a sound
 idea to be refined while its implementation is discarded. Reviewer/Revision
 outputs and interfaces are discarded/reproved, not migrated.
 
-Phase 1 integrates all Game IR core modules as isolated, tested code, but they
-remain unreachable: no production imports, markers, compatibility layer,
-fallback, cap, or routing switch exists. The next plan may add producers through
-`FoundationReadyReceipt` only after the complete domain model exists and old
-readers are deleted in the same cutover.
+The Core Phase integrates the strict contracts, Foundation READY adapter, Core
+model, semantic admission, publication, recovery, and parity as isolated,
+tested code, but they remain unreachable: no production imports, markers,
+compatibility layer, fallback, cap, or routing switch exists. Gameplay,
+Balance, and later domain producers plus consumer cutover remain future work.
+The next plan may add producers through `FoundationReadyReceipt` only after the
+complete domain model exists and old readers are deleted in the same cutover.

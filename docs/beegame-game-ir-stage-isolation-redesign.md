@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认，Phase 1 实施中
+状态：设计已确认；Phase 3 Core 已完成，但 production routing 仍不可达；Phase 4（Gameplay + Balance）及后续尚未开始
 
 日期：2026-08-30
 
@@ -400,38 +400,38 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 - 加入 Game IR enabled/disabled parity test；
 - 加入 import boundary test。
 
-### Phase 3：Stage 5 独立 Core
+### Phase 3：Stage 5 独立 Core（已完成；production routing 仍不可达）
 
-- 定义四个阶段接口；
-- 落地 Core schema、state、admission、publication 和 recovery；
-- 不实现 consumer migration。
+- 已定义四个阶段接口；
+- 已落地 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；
+- 不实现 consumer migration，production routing 仍不可达。
 
-### Phase 4：Gameplay + Balance
+### Phase 4：Gameplay + Balance（未开始）
 
-- 落地行为、状态、规则、事件、公式和数值依赖；
-- 验证 source coverage 和 graph closure。
+- 尚未落地 Gameplay/Balance 领域 producer、行为、状态、规则、事件、公式和数值依赖；
+- 领域 producer 落地后再验证 source coverage 和 graph closure。
 
-### Phase 5：World + Presentation
+### Phase 5：World + Presentation（未开始）
 
 - 落地 scene graph、instances、routes、encounters、UI、Audio、Animation 和 VFX binding。
 
-### Phase 6：Resource Realization
+### Phase 6：Resource Realization（未开始）
 
 - 落地 logical requirement、variant、delivery artifacts 与 runtime binding；
 - 支持一资源多文件；
 - 验证技术约束和 budget。
 
-### Phase 7：Implementation + Verification
+### Phase 7：Implementation + Verification（未开始）
 
 - 落地 implementation target、dependency、acceptance scenario、invariant 和 evidence trace。
 
-### Phase 8：Consumer 单轨迁移
+### Phase 8：Consumer 单轨迁移（未开始）
 
 按 Resource Planner、Resource Curator、Content、Implementation、Comprehensive Reviewer、Acceptance 顺序逐个迁移。每个 consumer 在同一提交中切换唯一 reader 并删除旧 reader，不保留 fallback 或双写。
 
 Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority；Game IR 只提供稳定 ID traceability，不重写 Checklist 业务内容。
 
-### Phase 9：真实验收
+### Phase 9：真实验收（未开始）
 
 - 自动测试全部通过后再启动 Chrome；
 - 不恢复经过热 schema 修改的旧 run；
@@ -444,7 +444,7 @@ Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority
 
 相同文档在 Game IR enabled/disabled 下必须产生完全相同的 Stage 3 tasks、Issue Registry、Stage 4 Patch packets、Targeted Recheck 和 Foundation READY receipt。
 
-Phase 1 尚未实现七个领域 producer，因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；不得为了 parity 伪造七个同构 placeholder candidate。测试必须使用现有完整八文档 fixture 和真实 Foundation fact/semantic/revision planning API，在边界调用前后重新序列化同一 documents/state 并重跑规划。完整 candidate parity 从 Gameplay + Balance 等领域 producer 落地后开始。
+Core Phase 已实现 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；Gameplay、Balance、World/Scene、Presentation、Resource Realization、Implementation/Verification 的领域 producer 尚未实现。因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；production routing 仍不可达，不得为了 parity 伪造七个同构 placeholder candidate。测试必须使用现有完整八文档 fixture 和真实 Foundation fact/semantic/revision planning API，在边界调用前后重新序列化同一 documents/state 并重跑规划。完整 candidate parity 从 Gameplay + Balance 等领域 producer 落地后开始。
 
 ### 11.2 架构边界
 
