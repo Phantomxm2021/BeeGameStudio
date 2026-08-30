@@ -377,8 +377,8 @@ function sourceMap(
 }
 function graph(candidate: GameIrCandidate): Record<string, unknown> {
   const edges = candidate.modules.flatMap(module =>
-    module.nodes.flatMap(node =>
-      Object.entries(node.bindings).flatMap(([pointer, binding]) =>
+    module.nodes.flatMap(node => [
+      ...Object.entries(node.bindings).flatMap(([pointer, binding]) =>
         binding.kind === 'derived'
           ? binding.inputPointers.map(input => ({
               from: `${module.moduleId}/${node.id}${pointer}`,
@@ -386,7 +386,19 @@ function graph(candidate: GameIrCandidate): Record<string, unknown> {
             }))
           : [],
       ),
-    ),
+      ...node.references.map(reference => ({
+        type: 'reference',
+        from: `${module.moduleId}/${node.id}`,
+        to: reference.targetId,
+        targetType: reference.targetType,
+      })),
+      ...node.edges.map(edge => ({
+        type: edge.type,
+        from: `${module.moduleId}/${node.id}`,
+        to: edge.targetId,
+        targetType: edge.targetType,
+      })),
+    ]),
   )
   edges.sort((a, b) => canonical(a).localeCompare(canonical(b)))
   return {

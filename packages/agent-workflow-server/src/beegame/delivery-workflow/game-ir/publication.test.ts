@@ -181,6 +181,14 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                   kind: 'derived-node',
                   producerMode: 'derived',
                   value: { score: index },
+                  references: [],
+                  edges: [
+                    {
+                      type: 'requires',
+                      targetId: `${moduleId}.root`,
+                      targetType: 'semantic-node',
+                    },
+                  ],
                   bindings: {
                     '/id': {
                       kind: 'owner',
@@ -194,6 +202,13 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                       derivationRuleId: `score-${extraId}`,
                       inputPointers: ['/id'],
                     },
+                    '/edges/0': {
+                      kind: 'owner',
+                      documentPath: 'docs/GDD.md',
+                      sectionId,
+                      sectionDigest,
+                      sourcePointer: `/ir/${moduleId}/extra-${extraId}/requires`,
+                    },
                   },
                 }
               })
@@ -203,6 +218,8 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
             kind: 'semantic-node',
             producerMode: 'semantic',
             value: { label: moduleId },
+            references: [],
+            edges: [],
             bindings: {
               '/id': {
                 kind: 'owner',
@@ -317,7 +334,7 @@ describe('atomic Game IR publication and recovery', () => {
     expect(ready.committedPath).toBe(
       '.beegame/ir/game-ir.v1/revisions/foundation-revision-1/COMMITTED.json',
     )
-    expect(
+    const dependencyGraph = JSON.parse(
       await readFile(
         join(
           value.workspacePath,
@@ -328,7 +345,10 @@ describe('atomic Game IR publication and recovery', () => {
         ),
         'utf8',
       ),
-    ).toContain('gameplay.extra-0')
+    ) as { edges: readonly Record<string, unknown>[] }
+    expect(dependencyGraph.edges.some(edge => edge.type === 'requires')).toBe(
+      true,
+    )
     await expect(validateCommittedGameIr(value)).resolves.toEqual(ready)
   })
 

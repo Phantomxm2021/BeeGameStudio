@@ -103,6 +103,8 @@ function candidate(overrides: Partial<GameIrCandidate> = {}): GameIrCandidate {
               health: 3,
               state: { initial: 'ready' },
             },
+            references: [],
+            edges: [],
             bindings: {
               '/id': {
                 kind: 'owner',
@@ -222,6 +224,108 @@ describe('Game IR core candidate and source authority', () => {
         { request: request(), sections },
       ),
     ).toThrow(/node/i)
+  })
+
+  test('requires explicit typed references and relationship edges to close globally', () => {
+    const node = candidate().modules[0]!.nodes[0]!
+    const explicit = candidate({
+      modules: [
+        {
+          ...candidate().modules[0]!,
+          nodes: [
+            {
+              ...node,
+              references: [{ targetId: 'player', targetType: 'entity' }],
+              edges: [
+                {
+                  type: 'requires',
+                  targetId: 'player',
+                  targetType: 'entity',
+                },
+              ],
+              bindings: {
+                ...node.bindings,
+                '/references/0': node.bindings['/id']!,
+                '/edges/0': node.bindings['/id']!,
+              },
+            },
+          ],
+        },
+      ],
+    })
+    expect(
+      parseGameIrCandidate(explicit, { request: request(), sections }),
+    ).toBeTruthy()
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          ...explicit,
+          modules: [
+            {
+              ...explicit.modules[0]!,
+              nodes: [
+                {
+                  ...explicit.modules[0]!.nodes[0]!,
+                  references: [{ targetId: 'missing', targetType: 'entity' }],
+                },
+              ],
+            },
+          ],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/reference|target|closure/i)
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          ...explicit,
+          modules: [
+            {
+              ...explicit.modules[0]!,
+              nodes: [
+                {
+                  ...explicit.modules[0]!.nodes[0]!,
+                  references: [
+                    { targetId: 'player', targetType: 'wrong-type' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/type|reference|target/i)
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          ...explicit,
+          modules: [
+            {
+              ...explicit.modules[0]!,
+              nodes: [
+                {
+                  ...explicit.modules[0]!.nodes[0]!,
+                  edges: [
+                    {
+                      type: 'requires',
+                      targetId: 'player',
+                      targetType: 'entity',
+                    },
+                    {
+                      type: 'requires',
+                      targetId: 'player',
+                      targetType: 'entity',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/duplicate|edge/i)
   })
 
   test('rejects unknown producer modes and unsafe pointers', () => {

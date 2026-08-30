@@ -26,11 +26,24 @@ export type GameIrSourceBinding =
       inputPointers: readonly string[]
     }>
 
+export type GameIrReference = Readonly<{
+  targetId: string
+  targetType: string
+}>
+
+export type GameIrRelationshipEdge = Readonly<{
+  type: string
+  targetId: string
+  targetType: string
+}>
+
 export type GameIrNode = Readonly<{
   id: string
   kind: string
   producerMode: 'mechanical' | 'semantic' | 'derived'
   value: Readonly<Record<string, unknown>>
+  references: readonly GameIrReference[]
+  edges: readonly GameIrRelationshipEdge[]
   bindings: Readonly<Record<string, GameIrSourceBinding>>
 }>
 
@@ -61,6 +74,7 @@ const FOUNDATION_DOCUMENTS = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
 const PRODUCER_MODES = new Set(['mechanical', 'semantic', 'derived'])
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const SHA256 = /^[a-f0-9]{64}$/
+const STRUCTURAL_POINTER = /^\/(references|edges)\/(0|[1-9]\d*)$/
 
 function fail(message: string): never {
   throw new Error(`invalid Game IR candidate: ${message}`)
@@ -435,6 +449,14 @@ function valueLeafPointers(value: RecordValue): string[] {
 function localTargetExists(node: GameIrNode, pointer: string): boolean {
   const segments = pointerSegments(pointer)
   if (segments.length === 1 && segments[0] === 'id') return true
+  if (
+    segments.length === 2 &&
+    (segments[0] === 'references' || segments[0] === 'edges') &&
+    /^(0|[1-9]\d*)$/.test(segments[1]!)
+  ) {
+    const entries = segments[0] === 'references' ? node.references : node.edges
+    return Number(segments[1]) < entries.length
+  }
   if (segments.length === 1 && segments[0] === 'value')
     return Object.keys(node.value).length === 0
   if (segments.length < 2 || segments[0] !== 'value') return false
@@ -462,7 +484,11 @@ function parseNode(
   request: GameIrCompileRequest,
 ): GameIrNode {
   if (!isRecord(value)) fail(`node in module ${moduleId} must be an object`)
-  exactKeys(value, ['id', 'kind', 'producerMode', 'value', 'bindings'], 'node')
+  exactKeys(
+    value,
+    ['id', 'kind', 'producerMode', 'value', 'references', 'edges', 'bindings'],
+    'node',
+  )
   const id = safeId(value.id, 'node id')
   const kind = nonEmptyText(value.kind, `node ${id} kind`)
   if (
@@ -471,6 +497,38 @@ function parseNode(
   )
     fail(`node ${id} has an unknown producer mode`)
   if (!isRecord(value.value)) fail(`node ${id} value must be an object`)
+  if (!Array.isArray(value.references))
+    fail(`node ${id} references must be an array`)
+  const references: GameIrReference[] = value.references.map((entry, index) => {
+    if (!isRecord(entry))
+      fail(`node ${id} reference ${index} must be an object`)
+    exactKeys(entry, ['targetId', 'targetType'], `node ${id} reference`)
+    return {
+      targetId: safeId(entry.targetId, `node ${id} reference targetId`),
+      targetType: nonEmptyText(
+        entry.targetType,
+        `node ${id} reference targetType`,
+      ),
+    }
+  })
+  for (let index = 1; index < references.length; index += 1) {
+    if (referenceOrder(references[index - 1]!, references[index]!) >= 0)
+      fail(`node ${id} references must be unique and sorted`)
+  }
+  if (!Array.isArray(value.edges)) fail(`node ${id} edges must be an array`)
+  const edges: GameIrRelationshipEdge[] = value.edges.map((entry, index) => {
+    if (!isRecord(entry)) fail(`node ${id} edge ${index} must be an object`)
+    exactKeys(entry, ['type', 'targetId', 'targetType'], `node ${id} edge`)
+    return {
+      type: nonEmptyText(entry.type, `node ${id} edge type`),
+      targetId: safeId(entry.targetId, `node ${id} edge targetId`),
+      targetType: nonEmptyText(entry.targetType, `node ${id} edge targetType`),
+    }
+  })
+  for (let index = 1; index < edges.length; index += 1) {
+    if (edgeOrder(edges[index - 1]!, edges[index]!) >= 0)
+      fail(`node ${id} edges must be unique and sorted`)
+  }
   if (!isRecord(value.bindings)) fail(`node ${id} bindings must be an object`)
 
   const parsedBindings: Record<string, GameIrSourceBinding> = {}
@@ -485,9 +543,20 @@ function parseNode(
     if (
       pointer !== '/id' &&
       pointer !== '/value' &&
-      !pointer.startsWith('/value/')
+      !pointer.startsWith('/value/') &&
+      !STRUCTURAL_POINTER.test(pointer)
     )
-      fail(`node ${id} binding does not target /id or a value leaf`)
+      fail(
+        `node ${id} binding does not target /id, a value leaf, reference, or edge`,
+      )
+    if (STRUCTURAL_POINTER.test(pointer)) {
+      const [collection, indexText] = pointer.slice(1).split('/')
+      const entries = collection === 'references' ? references : edges
+      if (Number(indexText) >= entries.length)
+        fail(
+          `node ${id} binding ${pointer} targets a missing ${collection} entry`,
+        )
+    }
     const parsed = sourceBinding(binding, pointer, sections, request)
     parsedBindings[pointer] = parsed
   }
@@ -498,7 +567,8 @@ function parseNode(
   const leaves = valueLeafPointers(value.value)
   const leafSet = new Set(leaves)
   for (const pointer of Object.keys(parsedBindings)) {
-    if (pointer !== '/id' && !leafSet.has(pointer))
+    const structural = STRUCTURAL_POINTER.test(pointer)
+    if (pointer !== '/id' && !structural && !leafSet.has(pointer))
       fail(`node ${id} binding ${pointer} does not target a value leaf`)
   }
   for (const pointer of leaves) {
@@ -508,11 +578,26 @@ function parseNode(
     if (binding.kind !== expectedKind)
       fail(`node ${id} ${pointer} conflicts with producer mode`)
   }
+  for (const collection of ['references', 'edges'] as const) {
+    const entries = collection === 'references' ? references : edges
+    entries.forEach((_, index) => {
+      const pointer = `/${collection}/${index}`
+      const binding = parsedBindings[pointer]
+      if (!binding)
+        fail(`node ${id} ${collection} entry ${index} has no binding`)
+      if (binding.kind !== 'owner')
+        fail(
+          `node ${id} ${collection} entry ${index} must have an owner binding`,
+        )
+    })
+  }
   const parsedNode: GameIrNode = {
     id,
     kind,
     producerMode: value.producerMode as GameIrNode['producerMode'],
     value: value.value,
+    references,
+    edges,
     bindings: parsedBindings,
   }
   const states = new Map<string, 'visiting' | 'done'>()
@@ -561,6 +646,23 @@ function parseModule(
   return { moduleId, nodes }
 }
 
+function referenceOrder(left: GameIrReference, right: GameIrReference): number {
+  return compare(
+    `${left.targetId}\0${left.targetType}`,
+    `${right.targetId}\0${right.targetType}`,
+  )
+}
+
+function edgeOrder(
+  left: GameIrRelationshipEdge,
+  right: GameIrRelationshipEdge,
+): number {
+  return compare(
+    `${left.type}\0${left.targetId}\0${left.targetType}`,
+    `${right.type}\0${right.targetId}\0${right.targetType}`,
+  )
+}
+
 export function parseGameIrCandidate(
   value: unknown,
   input: {
@@ -605,6 +707,30 @@ export function parseGameIrCandidate(
   for (let index = 1; index < modules.length; index += 1) {
     if (compare(modules[index - 1]!.moduleId, modules[index]!.moduleId) >= 0)
       fail('module IDs must be unique and sorted')
+  }
+  const nodes = new Map<string, GameIrNode>()
+  for (const module of modules) {
+    for (const node of module.nodes) {
+      if (nodes.has(node.id))
+        fail(`duplicate node ID ${node.id} across modules`)
+      nodes.set(node.id, node)
+    }
+  }
+  for (const module of modules) {
+    for (const node of module.nodes) {
+      for (const reference of node.references) {
+        const target = nodes.get(reference.targetId)
+        if (!target) fail(`reference ${node.id} targets an unknown node`)
+        if (target.kind !== reference.targetType)
+          fail(`reference ${node.id} target type does not match target node`)
+      }
+      for (const edge of node.edges) {
+        const target = nodes.get(edge.targetId)
+        if (!target) fail(`edge ${node.id} targets an unknown node`)
+        if (target.kind !== edge.targetType)
+          fail(`edge ${node.id} target type does not match target node`)
+      }
+    }
   }
   return deepFreeze({
     schemaVersion: 'game-ir.v1',
