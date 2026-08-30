@@ -103,30 +103,8 @@ function fail(message: string): never {
 function sha(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
 }
-function canonical(value: unknown): string {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean')
-    return JSON.stringify(value)
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) fail('non-finite canonical value')
-    return JSON.stringify(value)
-  }
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
-  if (
-    !value ||
-    typeof value !== 'object' ||
-    Object.getPrototypeOf(value) !== Object.prototype
-  )
-    fail('canonical value is not JSON')
-  return `{${Object.keys(value as Record<string, unknown>)
-    .sort()
-    .map(
-      key =>
-        `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`,
-    )
-    .join(',')}}`
-}
 function json(path: string, value: unknown): Artifact {
-  const bytes = `${canonical(value)}\n`
+  const bytes = `${canonicalGameIrJson(value)}\n`
   return { path, bytes, digest: sha(bytes) }
 }
 function safe(value: unknown, label: string): asserts value is string {
@@ -413,7 +391,7 @@ async function exactDirectory(
   if (
     subset
       ? actual.some(item => !allowed.includes(item))
-      : canonical(actual) !== canonical(allowed)
+      : canonicalGameIrJson(actual) !== canonicalGameIrJson(allowed)
   )
     fail(`${label} has unexpected or missing entries`)
 }
@@ -465,7 +443,9 @@ function graph(candidate: GameIrCandidate): Record<string, unknown> {
       })),
     ]),
   )
-  edges.sort((a, b) => compareCodeUnits(canonical(a), canonical(b)))
+  edges.sort((a, b) =>
+    compareCodeUnits(canonicalGameIrJson(a), canonicalGameIrJson(b)),
+  )
   return {
     schemaVersion: 'game-ir-dependency-graph.v1',
     foundationRevision: candidate.foundationRevision,
@@ -511,7 +491,8 @@ function validateAdmissions(
     if (
       request.foundation.sectionIndexDigest !== authoritySectionIndexDigest ||
       packet.sectionIndexDigest !== authoritySectionIndexDigest ||
-      canonical(packet.sectionIndex) !== canonical(authority.sectionIndex)
+      canonicalGameIrJson(packet.sectionIndex) !==
+        canonicalGameIrJson(authority.sectionIndex)
     )
       fail(
         'semantic packet Section Index is detached from publication authority',
@@ -519,7 +500,8 @@ function validateAdmissions(
     if (
       packet.candidateBytes !== canonicalGameIrJson(candidate) ||
       packet.candidateDigest !== digestGameIrValue(candidate) ||
-      canonical(packet.compileRequest) !== canonical(request)
+      canonicalGameIrJson(packet.compileRequest) !==
+        canonicalGameIrJson(request)
     )
       fail('semantic packet is detached from authority')
     admitted.push(
@@ -585,14 +567,10 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   }
   const workspacePath = resolve(authority.workspacePath)
   const revision = request.foundation.foundationRevision
-  const stage = pathOf(
-    workspacePath,
-    `${GAME_IR_PUBLICATION_ROOT}/.staging/${authority.publicationId}`,
-  )
-  const journal = pathOf(
-    workspacePath,
-    `${GAME_IR_PUBLICATION_ROOT}/.journal/${authority.publicationId}.json`,
-  )
+  const preparedPath = `${GAME_IR_PUBLICATION_ROOT}/.staging/${authority.publicationId}`
+  const journalPath = `${GAME_IR_PUBLICATION_ROOT}/.journal/${authority.publicationId}.json`
+  const stage = pathOf(workspacePath, preparedPath)
+  const journal = pathOf(workspacePath, journalPath)
   const final = pathOf(workspacePath, gameIrRevisionPath(revision))
   const candidateDigest = digestGameIrValue(candidate)
   const modules: Artifact[] = []
@@ -617,7 +595,7 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     sourceMapDigests[module.moduleId] = sourceArtifact.digest
   }
   const dependency = json('dependency-graph.json', graph(candidate))
-  const compileRequestDigest = sha(canonical(request))
+  const compileRequestDigest = sha(canonicalGameIrJson(request))
   const semanticEvidence = admissions.map(admission => ({
     moduleId: admission.moduleId,
     packetDigest: admission.packet.packetDigest,
@@ -645,7 +623,7 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   })
   const artifacts = [...modules, ...sourceMaps, dependency, manifest]
   const authorityDigest = sha(
-    canonical({
+    canonicalGameIrJson({
       publicationId: authority.publicationId,
       compileRequest: request,
       candidateDigest,
@@ -688,10 +666,10 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     path: item.path,
     digest: item.digest,
   }))
-  const journalBytes = `${canonical({ schemaVersion: 'game-ir-publication-journal.v1', status: 'PREPARED', authorityDigest, publicationId: authority.publicationId, foundationRevision: revision, foundationReceiptDigest: request.foundation.receiptDigest, compileRequestDigest, candidateDigest, entries })}\n`
+  const journalBytes = `${canonicalGameIrJson({ schemaVersion: 'game-ir-publication-journal.v1', status: 'PREPARED', authorityDigest, publicationId: authority.publicationId, foundationRevision: revision, foundationReceiptDigest: request.foundation.receiptDigest, compileRequestDigest, candidateDigest, entries })}\n`
   const prepared = {
-    preparedPath: `${GAME_IR_PUBLICATION_ROOT}/.staging/${authority.publicationId}`,
-    journalPath: `${GAME_IR_PUBLICATION_ROOT}/.journal/${authority.publicationId}.json`,
+    preparedPath,
+    journalPath,
     committedPath: ready.committedPath,
     authorityDigest,
   }
@@ -738,10 +716,11 @@ async function writeStage(plan: Plan): Promise<void> {
     },
     plan.journal,
   )
-  await syncDirectory(plan.workspacePath, dirname(plan.journal), plan.testHooks)
+  const journalDirectory = dirname(plan.journal)
+  await syncDirectory(plan.workspacePath, journalDirectory, plan.testHooks)
   await syncDirectory(
     plan.workspacePath,
-    dirname(dirname(plan.journal)),
+    dirname(journalDirectory),
     plan.testHooks,
   )
   plan.testHooks?.onEvent?.({ type: 'stage-work' })
@@ -957,12 +936,13 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
     ((await existing(plan.stage)) || (await existing(plan.final)))
   )
     fail('immutable PREPARED journal is missing')
+  const finalDirectory = dirname(plan.final)
   try {
     await writeStage(plan)
   } catch (error) {
     if (!(await existing(plan.stage)) && (await existing(plan.final))) {
       await exactJournal(plan)
-      return ready(plan, dirname(plan.final))
+      return ready(plan, finalDirectory)
     }
     throw error
   }
@@ -975,6 +955,7 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
   if (await existing(plan.final)) {
     return ready(plan, revisions)
   }
+  const stageDirectory = dirname(plan.stage)
   try {
     plan.testHooks?.onEvent?.({
       type: 'before-rename',
@@ -987,8 +968,8 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
       from: plan.stage,
       to: plan.final,
     })
-    await syncDirectory(plan.workspacePath, dirname(plan.stage), plan.testHooks)
-    await syncDirectory(plan.workspacePath, dirname(plan.final), plan.testHooks)
+    await syncDirectory(plan.workspacePath, stageDirectory, plan.testHooks)
+    await syncDirectory(plan.workspacePath, finalDirectory, plan.testHooks)
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     if (code !== 'EEXIST' && code !== 'ENOTEMPTY' && code !== 'ENOENT')
@@ -1000,28 +981,17 @@ async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
   return ready(plan, revisions)
 }
 
-export function expectedGameIrPublicationArtifacts(
-  authority: GameIrPublicationAuthority,
-): readonly Readonly<{ path: string; bytes: string; digest: string }>[] {
-  const plan = buildPlan(authority)
-  return Object.freeze([...plan.artifacts, plan.marker])
-}
 function withWorkspace(
   plan: Plan,
   workspacePath: string,
   privateRoot = plan.privateRoot,
 ): Plan {
+  const { preparedPath, journalPath } = plan.prepared
   return {
     ...plan,
     workspacePath,
-    stage: pathOf(
-      workspacePath,
-      `${GAME_IR_PUBLICATION_ROOT}/.staging/${plan.publicationId}`,
-    ),
-    journal: pathOf(
-      workspacePath,
-      `${GAME_IR_PUBLICATION_ROOT}/.journal/${plan.publicationId}.json`,
-    ),
+    stage: pathOf(workspacePath, preparedPath),
+    journal: pathOf(workspacePath, journalPath),
     final: pathOf(workspacePath, gameIrRevisionPath(plan.revision)),
     privateRoot,
   }
@@ -1093,6 +1063,7 @@ export async function validateCommittedGameIr(
   await exactJournal(plan)
   if (!(await existing(plan.final))) fail('COMMITTED revision is missing')
   await exactFiles(plan, plan.final)
-  await durabilityBarrier(plan, dirname(plan.final))
+  const finalDirectory = dirname(plan.final)
+  await durabilityBarrier(plan, finalDirectory)
   return plan.ready
 }

@@ -5,8 +5,6 @@ import {
   type FoundationDocumentPath,
 } from '../types'
 
-export const GAME_IR_STAGE_BOUNDARY =
-  'foundation-ready-receipt -> game-ir-stage.v1' as const
 export const GAME_IR_SCHEMA_VERSION = 'game-ir.v1' as const
 export const GAME_IR_PUBLICATION_ROOT =
   `.beegame/ir/${GAME_IR_SCHEMA_VERSION}` as const
@@ -92,12 +90,7 @@ const nonEmptyTextSchema = z.string().refine(value => value.trim().length > 0, {
   message: 'must not be empty',
 })
 const safeIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
-export function isSafeGameIrRevisionSegment(value: unknown): value is string {
-  return safeIdSchema.safeParse(value).success
-}
-const foundationRevisionSchema = z
-  .string()
-  .refine(isSafeGameIrRevisionSegment, 'must be a safe revision path segment')
+const foundationRevisionSchema = safeIdSchema
 const foundationDocumentPathSchema = z.enum(CANONICAL_FOUNDATION_DOCUMENTS)
 
 export function gameIrCommittedPath(foundationRevision: string): string {
@@ -105,7 +98,7 @@ export function gameIrCommittedPath(foundationRevision: string): string {
 }
 
 export function gameIrRevisionPath(foundationRevision: string): string {
-  if (!isSafeGameIrRevisionSegment(foundationRevision))
+  if (!safeIdSchema.safeParse(foundationRevision).success)
     throw new Error(
       'Game IR foundation revision is not a canonical path segment',
     )

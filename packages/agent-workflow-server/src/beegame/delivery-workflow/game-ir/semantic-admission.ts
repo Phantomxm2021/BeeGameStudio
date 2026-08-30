@@ -552,16 +552,10 @@ function moduleSourceClosure(
   }
 }
 
-function packetBody(
-  packet: Omit<GameIrSemanticValidationPacket, 'packetDigest'>,
-): Omit<GameIrSemanticValidationPacket, 'packetDigest'> {
-  return packet
-}
-
 function packetDigest(
   packet: Omit<GameIrSemanticValidationPacket, 'packetDigest'>,
 ): string {
-  return sha256(canonicalGameIrJson(packetBody(packet)))
+  return sha256(canonicalGameIrJson(packet))
 }
 
 function inputKeys(value: Record<string, unknown>): void {
@@ -921,11 +915,6 @@ export function admitGameIrSemanticValidationResult(
         fail(
           'section evidence is only valid for missing or ambiguous projections',
         )
-      const sectionPointer = pointer.slice('section:'.length)
-      const sectionIdentity = sectionPointer.slice(
-        0,
-        sectionPointer.lastIndexOf('@'),
-      )
       if (validated.boundSubjects.includes(missingSubject!))
         fail('section evidence cannot replace an owner binding for its subject')
     }
