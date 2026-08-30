@@ -599,6 +599,55 @@ describe('atomic Game IR publication and recovery', () => {
     expect(await readdir(traversalWorkspace.workspacePath)).toEqual([])
   })
 
+  test('rejects a journal or journal ancestor replaced with an external symlink after commit', async () => {
+    const value = await setup()
+    const prepared = await prepareGameIrPublication(value)
+    await commitGameIrPublication(value)
+    const journalPath = join(value.workspacePath, prepared.journalPath)
+    const journalBytes = await readFile(journalPath, 'utf8')
+    const journalDirectory = dirname(journalPath)
+    const external = await mkdtemp(join(tmpdir(), 'game-ir-journal-outside-'))
+    workspaces.push(external)
+    const externalJournal = join(external, 'publication-1.json')
+    await Bun.write(externalJournal, journalBytes)
+
+    await rm(journalDirectory, { recursive: true })
+    await symlink(external, journalDirectory)
+    await expect(validateCommittedGameIr(value)).rejects.toThrow(
+      /journal|symlink|path/i,
+    )
+    await expect(recoverGameIrPublication(value)).rejects.toThrow(
+      /journal|symlink|path/i,
+    )
+    expect(await readFile(externalJournal, 'utf8')).toBe(journalBytes)
+    expect(await readdir(external)).toEqual(['publication-1.json'])
+  })
+
+  test('rejects the committed journal file replaced with an external symlink', async () => {
+    const value = await setup()
+    const prepared = await prepareGameIrPublication(value)
+    await commitGameIrPublication(value)
+    const journalPath = join(value.workspacePath, prepared.journalPath)
+    const journalBytes = await readFile(journalPath, 'utf8')
+    const external = await mkdtemp(
+      join(tmpdir(), 'game-ir-journal-file-outside-'),
+    )
+    workspaces.push(external)
+    const externalJournal = join(external, 'journal.json')
+    await Bun.write(externalJournal, journalBytes)
+
+    await rm(journalPath)
+    await symlink(externalJournal, journalPath)
+    await expect(validateCommittedGameIr(value)).rejects.toThrow(
+      /journal|symlink|path/i,
+    )
+    await expect(recoverGameIrPublication(value)).rejects.toThrow(
+      /journal|symlink|path/i,
+    )
+    expect(await readFile(externalJournal, 'utf8')).toBe(journalBytes)
+    expect(await readdir(external)).toEqual(['journal.json'])
+  })
+
   test('concurrent same-revision publishers yield one exact winner', async () => {
     const value = await setup()
     const [left, right] = await Promise.allSettled([

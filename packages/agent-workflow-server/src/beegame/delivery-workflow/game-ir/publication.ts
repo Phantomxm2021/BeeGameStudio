@@ -750,6 +750,7 @@ async function exactFiles(plan: Plan, root: string): Promise<void> {
   }
 }
 async function exactJournal(plan: Plan): Promise<void> {
+  await componentsSafe(plan.workspacePath, plan.journal, true)
   try {
     const info = await lstat(plan.journal)
     if (info.isSymbolicLink() || !info.isFile())
@@ -780,6 +781,7 @@ async function cleanup(plan: Plan): Promise<void> {
   }
 }
 async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
+  await componentsSafe(plan.workspacePath, plan.journal, true)
   if (
     !(await existing(plan.journal)) &&
     ((await existing(plan.stage)) || (await existing(plan.final)))
