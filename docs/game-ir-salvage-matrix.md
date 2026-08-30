@@ -11,15 +11,178 @@ Stable Foundation baseline: `70df2e2c`. The five protected Stage 3/4 files
 are byte-identical to it. Phase 1 only projects a real READY receipt and parses
 the compile request; it does not construct a domain producer or route.
 
-## Old files and docs
+## Old dirty artifact snapshot (165 entries)
 
-| ID | Exact item | Category | Disposition |
-| --- | --- | --- | --- |
-| GI-OLD-01 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.ts` implementation | DISCARD | Mixed compiler, publication, resource projection, and routing authority; rewrite from bounded Stage 5 contracts. |
-| GI-OLD-02 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.test.ts` | DISCARD | Tests the abandoned mixed authority; reproduce only independently justified invariants. |
-| GI-OLD-03 | `packages/agent-workflow-server/src/beegame/delivery-workflow/typed-owner-records.test.ts` | DISCARD | Typed-owner replacement competes with the stable Fact Store/Reviewer. |
-| GI-OLD-04 | `packages/agent-workflow-server/src/__tests__/game-ir-resource-fixture.ts` | DISCARD | Dirty fixture bytes are not canonical documents or receipts. |
-| GI-OLD-05 | `docs/beegame-game-ir-implementation-plan.md` | DISCARD | The abandoned implementation plan is historical context, not an authority or migration input. |
+This table is the complete saved-worktree snapshot, not a hand-selected subset. Source: `/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/.worktrees/document-audit-authority-clean`; `HEAD=70df2e2c79bd214862af3959a257c5f5f42bd666`; command `git status --porcelain=v1 -uall`; exact 165-line stream SHA256 `71c2dea5e2ce055344208042de052d9914d7b839c6fcb642430087224654844f`. Status is preserved as `M`, `D`, or `??`; every path has one artifact ID and one `DISCARD` disposition. These artifact items are distinct from the concept/export/consumer relationship tables below.
+
+| ID | Status | Exact artifact path | Category | Disposition |
+| --- | --- | --- | --- | --- |
+| GI-ART-001 | M | `apps/frontend/src/components/Demiurge/WorkflowCard.test.tsx` | ARTIFACT | DISCARD |
+| GI-ART-002 | M | `apps/frontend/src/components/Demiurge/WorkflowStageCard.tsx` | ARTIFACT | DISCARD |
+| GI-ART-003 | M | `apps/frontend/src/viewModels/displayModels.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-004 | M | `apps/frontend/src/viewModels/displayModels.ts` | ARTIFACT | DISCARD |
+| GI-ART-005 | M | `docs/Bee_Game_Studio_Doc_Audit_Revision_Optimized.md` | ARTIFACT | DISCARD |
+| GI-ART-006 | M | `docs/beegame-native-game-delivery-architecture.md` | ARTIFACT | DISCARD |
+| GI-ART-007 | M | `docs/beegame-resource-content-contract.md` | ARTIFACT | DISCARD |
+| GI-ART-008 | M | `docs/beegame-resource-production-plan.md` | ARTIFACT | DISCARD |
+| GI-ART-009 | M | `docs/resource-library-production.md` | ARTIFACT | DISCARD |
+| GI-ART-010 | M | `packages/agent-workflow-server/src/__tests__/asset-contracts-resource-binding.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-011 | M | `packages/agent-workflow-server/src/__tests__/complete-game-document-fixture.ts` | ARTIFACT | DISCARD |
+| GI-ART-012 | M | `packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-013 | M | `packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-014 | M | `packages/agent-workflow-server/src/__tests__/delivery-workflow-resource-integration.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-015 | M | `packages/agent-workflow-server/src/__tests__/delivery-workflow-test-helpers.ts` | ARTIFACT | DISCARD |
+| GI-ART-016 | M | `packages/agent-workflow-server/src/__tests__/idea-to-complete-documents.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-017 | M | `packages/agent-workflow-server/src/__tests__/session-manager-resilience.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-018 | M | `packages/agent-workflow-server/src/__tests__/session-routes.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-019 | M | `packages/agent-workflow-server/src/__tests__/workflow-stage-snapshot-projection.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-020 | M | `packages/agent-workflow-server/src/app.ts` | ARTIFACT | DISCARD |
+| GI-ART-021 | M | `packages/agent-workflow-server/src/beegame/acceptance-checklist.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-022 | M | `packages/agent-workflow-server/src/beegame/acceptance-checklist.ts` | ARTIFACT | DISCARD |
+| GI-ART-023 | M | `packages/agent-workflow-server/src/beegame/asset-contract-audit.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-024 | M | `packages/agent-workflow-server/src/beegame/asset-contract-audit.ts` | ARTIFACT | DISCARD |
+| GI-ART-025 | M | `packages/agent-workflow-server/src/beegame/asset-contracts-resource-binding.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-026 | M | `packages/agent-workflow-server/src/beegame/asset-contracts.ts` | ARTIFACT | DISCARD |
+| GI-ART-027 | M | `packages/agent-workflow-server/src/beegame/authored-document-receipt.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-028 | M | `packages/agent-workflow-server/src/beegame/checklist-authority-projection.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-029 | M | `packages/agent-workflow-server/src/beegame/checklist-authority-projection.ts` | ARTIFACT | DISCARD |
+| GI-ART-030 | M | `packages/agent-workflow-server/src/beegame/checklist-candidate.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-031 | M | `packages/agent-workflow-server/src/beegame/checklist-candidate.ts` | ARTIFACT | DISCARD |
+| GI-ART-032 | M | `packages/agent-workflow-server/src/beegame/complete-game-document.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-033 | M | `packages/agent-workflow-server/src/beegame/complete-game-document.ts` | ARTIFACT | DISCARD |
+| GI-ART-034 | M | `packages/agent-workflow-server/src/beegame/configured-provisional-resource-adapters.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-035 | M | `packages/agent-workflow-server/src/beegame/configured-provisional-resource-adapters.ts` | ARTIFACT | DISCARD |
+| GI-ART-036 | M | `packages/agent-workflow-server/src/beegame/content-contracts.ts` | ARTIFACT | DISCARD |
+| GI-ART-037 | M | `packages/agent-workflow-server/src/beegame/delivery-worker-session-port.ts` | ARTIFACT | DISCARD |
+| GI-ART-038 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/accepted-unit-journal.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-039 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/accepted-unit-journal.ts` | ARTIFACT | DISCARD |
+| GI-ART-040 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/controller.ts` | ARTIFACT | DISCARD |
+| GI-ART-041 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/delivery-gate.ts` | ARTIFACT | DISCARD |
+| GI-ART-042 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.ts` | ARTIFACT | DISCARD |
+| GI-ART-043 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/display-progress.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-044 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/display-progress.ts` | ARTIFACT | DISCARD |
+| GI-ART-045 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/document-author-boundary.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-046 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/document-display-tasks.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-047 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/document-display-tasks.ts` | ARTIFACT | DISCARD |
+| GI-ART-048 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/document-stage.ts` | ARTIFACT | DISCARD |
+| GI-ART-049 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-050 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.ts` | ARTIFACT | DISCARD |
+| GI-ART-051 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-authority.ts` | ARTIFACT | DISCARD |
+| GI-ART-052 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-053 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.ts` | ARTIFACT | DISCARD |
+| GI-ART-054 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-055 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.ts` | ARTIFACT | DISCARD |
+| GI-ART-056 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-cutover.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-057 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-integration.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-058 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-059 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.ts` | ARTIFACT | DISCARD |
+| GI-ART-060 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-061 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.ts` | ARTIFACT | DISCARD |
+| GI-ART-062 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-063 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.ts` | ARTIFACT | DISCARD |
+| GI-ART-064 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-065 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.ts` | ARTIFACT | DISCARD |
+| GI-ART-066 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-067 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.ts` | ARTIFACT | DISCARD |
+| GI-ART-068 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-069 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.ts` | ARTIFACT | DISCARD |
+| GI-ART-070 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-071 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-072 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.ts` | ARTIFACT | DISCARD |
+| GI-ART-073 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-074 | D | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.ts` | ARTIFACT | DISCARD |
+| GI-ART-075 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-076 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.ts` | ARTIFACT | DISCARD |
+| GI-ART-077 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-issue-registry.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-078 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-issue-registry.ts` | ARTIFACT | DISCARD |
+| GI-ART-079 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-080 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.ts` | ARTIFACT | DISCARD |
+| GI-ART-081 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-project-deterministic-rules.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-082 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-project-deterministic-rules.ts` | ARTIFACT | DISCARD |
+| GI-ART-083 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-084 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.ts` | ARTIFACT | DISCARD |
+| GI-ART-085 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-086 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.ts` | ARTIFACT | DISCARD |
+| GI-ART-087 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-audit.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-088 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-audit.ts` | ARTIFACT | DISCARD |
+| GI-ART-089 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-runtime.ts` | ARTIFACT | DISCARD |
+| GI-ART-090 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-091 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.ts` | ARTIFACT | DISCARD |
+| GI-ART-092 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-093 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.ts` | ARTIFACT | DISCARD |
+| GI-ART-094 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/recovery.ts` | ARTIFACT | DISCARD |
+| GI-ART-095 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/resource-stage.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-096 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/resource-stage.ts` | ARTIFACT | DISCARD |
+| GI-ART-097 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/resource-task-resolver.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-098 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/resource-task-resolver.ts` | ARTIFACT | DISCARD |
+| GI-ART-099 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/revision.ts` | ARTIFACT | DISCARD |
+| GI-ART-100 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/run-store.ts` | ARTIFACT | DISCARD |
+| GI-ART-101 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-102 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/schema.ts` | ARTIFACT | DISCARD |
+| GI-ART-103 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/transition.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-104 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/transition.ts` | ARTIFACT | DISCARD |
+| GI-ART-105 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/types.ts` | ARTIFACT | DISCARD |
+| GI-ART-106 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.ts` | ARTIFACT | DISCARD |
+| GI-ART-107 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-108 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts` | ARTIFACT | DISCARD |
+| GI-ART-109 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-110 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.ts` | ARTIFACT | DISCARD |
+| GI-ART-111 | M | `packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-112 | M | `packages/agent-workflow-server/src/beegame/document-readiness-audit.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-113 | M | `packages/agent-workflow-server/src/beegame/document-readiness-audit.ts` | ARTIFACT | DISCARD |
+| GI-ART-114 | M | `packages/agent-workflow-server/src/beegame/foundation-markdown-stream.ts` | ARTIFACT | DISCARD |
+| GI-ART-115 | D | `packages/agent-workflow-server/src/beegame/native-asset-manifest-tool.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-116 | M | `packages/agent-workflow-server/src/beegame/native-asset-manifest-tool.ts` | ARTIFACT | DISCARD |
+| GI-ART-117 | M | `packages/agent-workflow-server/src/beegame/native-cli-process-runner.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-118 | M | `packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts` | ARTIFACT | DISCARD |
+| GI-ART-119 | M | `packages/agent-workflow-server/src/beegame/native-foundation-revision-result-tool.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-120 | M | `packages/agent-workflow-server/src/beegame/native-foundation-revision-result-tool.ts` | ARTIFACT | DISCARD |
+| GI-ART-121 | M | `packages/agent-workflow-server/src/beegame/native-resource-content-tool.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-122 | M | `packages/agent-workflow-server/src/beegame/native-resource-content-tool.ts` | ARTIFACT | DISCARD |
+| GI-ART-123 | M | `packages/agent-workflow-server/src/beegame/native-resource-inventory-commit-tool.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-124 | M | `packages/agent-workflow-server/src/beegame/native-resource-inventory-commit-tool.ts` | ARTIFACT | DISCARD |
+| GI-ART-125 | M | `packages/agent-workflow-server/src/beegame/native-resource-library-tool.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-126 | M | `packages/agent-workflow-server/src/beegame/native-resource-library-tool.ts` | ARTIFACT | DISCARD |
+| GI-ART-127 | M | `packages/agent-workflow-server/src/beegame/project-resource-application.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-128 | M | `packages/agent-workflow-server/src/beegame/provisional-resource-adapters.ts` | ARTIFACT | DISCARD |
+| GI-ART-129 | M | `packages/agent-workflow-server/src/beegame/resource-delivery-readiness.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-130 | M | `packages/agent-workflow-server/src/beegame/resource-delivery-readiness.ts` | ARTIFACT | DISCARD |
+| GI-ART-131 | M | `packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-132 | M | `packages/agent-workflow-server/src/beegame/resource-inventory-commit.ts` | ARTIFACT | DISCARD |
+| GI-ART-133 | M | `packages/agent-workflow-server/src/beegame/resource-inventory-revision.ts` | ARTIFACT | DISCARD |
+| GI-ART-134 | M | `packages/agent-workflow-server/src/beegame/resource-match-observation.ts` | ARTIFACT | DISCARD |
+| GI-ART-135 | M | `packages/agent-workflow-server/src/beegame/session-manager.ts` | ARTIFACT | DISCARD |
+| GI-ART-136 | ?? | `docs/beegame-game-ir-implementation-plan.md` | ARTIFACT | DISCARD |
+| GI-ART-137 | ?? | `packages/agent-workflow-server/src/__tests__/comprehensive-controller.integration.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-138 | ?? | `packages/agent-workflow-server/src/__tests__/comprehensive-reviewer-session-port.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-139 | ?? | `packages/agent-workflow-server/src/__tests__/game-ir-resource-fixture.ts` | ARTIFACT | DISCARD |
+| GI-ART-140 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/accepted-resource-graph.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-141 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/accepted-resource-graph.ts` | ARTIFACT | DISCARD |
+| GI-ART-142 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-artifacts.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-143 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-artifacts.ts` | ARTIFACT | DISCARD |
+| GI-ART-144 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-ready-reader.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-145 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-ready-reader.ts` | ARTIFACT | DISCARD |
+| GI-ART-146 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-remediation.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-147 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-remediation.ts` | ARTIFACT | DISCARD |
+| GI-ART-148 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-review-evaluation.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-149 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-review-evaluation.ts` | ARTIFACT | DISCARD |
+| GI-ART-150 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-review-state.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-151 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-review-state.ts` | ARTIFACT | DISCARD |
+| GI-ART-152 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-reviewer-contract.ts` | ARTIFACT | DISCARD |
+| GI-ART-153 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-reviewer-worker-contract.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-154 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-service.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-155 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/comprehensive-service.ts` | ARTIFACT | DISCARD |
+| GI-ART-156 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-157 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir.ts` | ARTIFACT | DISCARD |
+| GI-ART-158 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/implementation-projection.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-159 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/implementation-projection.ts` | ARTIFACT | DISCARD |
+| GI-ART-160 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/resource-gate-receipt.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-161 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/resource-gate-receipt.ts` | ARTIFACT | DISCARD |
+| GI-ART-162 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/revision.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-163 | ?? | `packages/agent-workflow-server/src/beegame/delivery-workflow/typed-owner-records.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-164 | ?? | `packages/agent-workflow-server/src/beegame/native-resource-mcp-bridge.test.ts` | ARTIFACT | DISCARD |
+| GI-ART-165 | ?? | `packages/agent-workflow-server/src/beegame/native-resource-mcp-bridge.ts` | ARTIFACT | DISCARD |
+
 
 ## Every old `game-ir.ts` export
 
@@ -105,73 +268,6 @@ Mechanical inventory command: `rg -il 'game[_ -]?ir|GAME_IR|GameIr|gameIr' packa
 | GI-DELTA-03 | `controller.ts` compile/dispatch branch | DISCARD | Baseline exact; current production remains unreachable. |
 | GI-DELTA-04 | `transition.ts` transition/terminal handling | DISCARD | Baseline exact; no Stage 5 effect on Foundation state. |
 | GI-DELTA-05 | `recovery.ts` resume/recovery branch | DISCARD | Baseline exact; no hot migration or fallback. |
-## Old dirty changed source and test artifacts
-
-Inventory commands: `git diff --name-only 70df2e2c` followed by `git diff 70df2e2c -- <path>` for each returned source or test path in the saved old dirty worktree. This is a diff-content inventory, not a scan of the isolated replacement. Each path is listed exactly once; paths already represented in the old-files/docs, consumer, or protected-delta tables are excluded. There are no family rows, catch-alls, generated receipts, or shared run-state entries.
-
-| ID | Exact changed path | Category | Disposition |
-| --- | --- | --- | --- |
-| GI-DIRTY-01 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.ts` | DISCARD | Dirty audit artifact implementation is not a migration input. |
-| GI-DIRTY-02 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.test.ts` | DISCARD | Dirty artifact tests are discarded; future behavior starts from baseline. |
-| GI-DIRTY-03 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-authority.ts` | DISCARD | Dirty audit authority changes are discarded. |
-| GI-DIRTY-04 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-boundary.ts` | DISCARD | Dirty audit-boundary changes are discarded. |
-| GI-DIRTY-05 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.ts` | DISCARD | Dirty deterministic check implementation is discarded. |
-| GI-DIRTY-06 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.test.ts` | DISCARD | Dirty deterministic check tests are discarded. |
-| GI-DIRTY-07 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.ts` | DISCARD | Dirty contract changes are discarded. |
-| GI-DIRTY-08 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.test.ts` | DISCARD | Dirty contract tests are discarded. |
-| GI-DIRTY-09 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-cutover.test.ts` | DISCARD | Dirty cutover test artifact is discarded. |
-| GI-DIRTY-10 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-integration.test.ts` | DISCARD | Dirty audit integration test artifact is discarded. |
-| GI-DIRTY-11 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.ts` | DISCARD | Dirty production-manifest authority changes are discarded. |
-| GI-DIRTY-12 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.test.ts` | DISCARD | Dirty production-manifest tests are discarded. |
-| GI-DIRTY-13 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.ts` | DISCARD | Dirty deterministic rule changes are discarded. |
-| GI-DIRTY-14 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.test.ts` | DISCARD | Dirty deterministic rule tests are discarded. |
-| GI-DIRTY-15 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.ts` | DISCARD | Dirty audit-state authority changes are discarded. |
-| GI-DIRTY-16 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.test.ts` | DISCARD | Dirty audit-state tests are discarded. |
-| GI-DIRTY-17 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.ts` | DISCARD | Dirty fact catalog changes are discarded. |
-| GI-DIRTY-18 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.test.ts` | DISCARD | Dirty fact catalog tests are discarded. |
-| GI-DIRTY-19 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.ts` | DISCARD | Dirty fact extraction changes are discarded. |
-| GI-DIRTY-20 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.test.ts` | DISCARD | Dirty fact extraction tests are discarded. |
-| GI-DIRTY-21 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.ts` | DISCARD | Dirty fact runtime changes are discarded. |
-| GI-DIRTY-22 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.test.ts` | DISCARD | Dirty fact runtime tests are discarded. |
-| GI-DIRTY-23 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts` | DISCARD | Dirty fact runtime integration artifact is discarded. |
-| GI-DIRTY-24 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.ts` | DISCARD | Dirty Fact Store changes are discarded. |
-| GI-DIRTY-25 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.test.ts` | DISCARD | Dirty Fact Store tests are discarded. |
-| GI-DIRTY-26 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-issue-registry.ts` | DISCARD | Dirty issue registry changes are discarded. |
-| GI-DIRTY-27 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-issue-registry.test.ts` | DISCARD | Dirty issue registry tests are discarded. |
-| GI-DIRTY-28 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.ts` | DISCARD | Dirty impact-analysis changes are discarded. |
-| GI-DIRTY-29 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.test.ts` | DISCARD | Dirty impact-analysis tests are discarded. |
-| GI-DIRTY-30 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.ts` | DISCARD | Dirty patch-validation changes are discarded. |
-| GI-DIRTY-31 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.test.ts` | DISCARD | Dirty patch-validation tests are discarded. |
-| GI-DIRTY-32 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.ts` | DISCARD | Dirty revision-batch changes are discarded. |
-| GI-DIRTY-33 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.test.ts` | DISCARD | Dirty revision-batch tests are discarded. |
-| GI-DIRTY-34 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.ts` | DISCARD | Dirty revision-publication changes are discarded. |
-| GI-DIRTY-35 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.test.ts` | DISCARD | Dirty revision-publication tests are discarded. |
-| GI-DIRTY-36 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-round-policy.ts` | DISCARD | Dirty revision-round policy changes are discarded. |
-| GI-DIRTY-37 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-round-policy.test.ts` | DISCARD | Dirty revision-round policy tests are discarded. |
-| GI-DIRTY-38 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.ts` | DISCARD | Dirty revision-stage changes are discarded. |
-| GI-DIRTY-39 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.test.ts` | DISCARD | Dirty revision-stage tests are discarded. |
-| GI-DIRTY-40 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-audit.ts` | DISCARD | Dirty semantic-audit authority changes are discarded. |
-| GI-DIRTY-41 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-audit.test.ts` | DISCARD | Dirty semantic-audit tests are discarded. |
-| GI-DIRTY-42 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-runtime.ts` | DISCARD | Dirty semantic runtime changes are discarded. |
-| GI-DIRTY-43 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-runtime.test.ts` | DISCARD | Dirty semantic runtime tests are discarded. |
-| GI-DIRTY-44 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-worker-contract.test.ts` | DISCARD | Dirty semantic worker-contract test artifact is discarded. |
-| GI-DIRTY-45 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.ts` | DISCARD | Dirty authoring-batch changes are discarded. |
-| GI-DIRTY-46 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.test.ts` | DISCARD | Dirty authoring-batch tests are discarded. |
-| GI-DIRTY-47 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-project-deterministic-rules.ts` | DISCARD | Dirty project-rule changes are discarded. |
-| GI-DIRTY-48 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-project-deterministic-rules.test.ts` | DISCARD | Dirty project-rule tests are discarded. |
-| GI-DIRTY-49 | `packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.test.ts` | DISCARD | Dirty recovery projector test artifact is discarded. |
-| GI-DIRTY-50 | `packages/agent-workflow-server/src/beegame/delivery-workflow/revision.ts` | DISCARD | Dirty revision authority changes are discarded. |
-| GI-DIRTY-51 | `packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts` | DISCARD | Dirty schema-evolution test artifact is discarded. |
-| GI-DIRTY-52 | `packages/agent-workflow-server/src/beegame/delivery-workflow/transition.test.ts` | DISCARD | Dirty transition test artifact is discarded. |
-| GI-DIRTY-53 | `packages/agent-workflow-server/src/beegame/complete-game-document.ts` | DISCARD | Dirty complete-document implementation is discarded. |
-| GI-DIRTY-54 | `packages/agent-workflow-server/src/beegame/complete-game-document.test.ts` | DISCARD | Dirty complete-document tests are discarded. |
-| GI-DIRTY-55 | `packages/agent-workflow-server/src/__tests__/complete-game-document-fixture.ts` | DISCARD | Dirty complete-document fixture bytes are discarded. |
-| GI-DIRTY-56 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.ts` | DISCARD | Dirty document-contract changes are discarded. |
-| GI-DIRTY-57 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.test.ts` | DISCARD | Dirty document-contract tests are discarded. |
-| GI-DIRTY-58 | `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts` | DISCARD | Dirty worker-prompt changes are discarded. |
-| GI-DIRTY-59 | `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts` | DISCARD | Dirty worker-prompt tests are discarded. |
-| GI-DIRTY-60 | `packages/agent-workflow-server/src/beegame/delivery-workflow/display-progress.test.ts` | DISCARD | Dirty progress-display test artifact is discarded. |
-| GI-DIRTY-61 | `packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.test.ts` | DISCARD | Dirty workflow-message test artifact is discarded. |
 
 Every dirty Reviewer and Revision artifact listed above is `DISCARD`; any
 future Reviewer/Revision behavior, output, or interface must be independently

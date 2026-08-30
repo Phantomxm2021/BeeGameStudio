@@ -192,36 +192,64 @@ describe('Game IR stage boundary', () => {
     expect(
       standaloneProductionViolations([
         {
-          path: 'synthetic-all-violations.ts',
-          source: [
-            "import { compileGame } from './game-ir/runtime'",
-            "export { compileGame } from './game-ir/runtime'",
-            "import x = require('./game-ir/runtime')",
-            "const required = require('./game-ir/runtime')",
-            "const loaded = import('./game-ir/runtime')",
-            'type GameIrResult = unknown',
-            'const kind = GAME_IR_ENABLED',
-            'const object = { GameIrState: "x" }',
-            'const value = object.GameIrState',
-            'const run = { gameIrState: value }',
-            'const config = { enableGameIr: true }',
-            'const switched = switchGameIr',
-          ].join('; '),
+          path: 'synthetic-static-import.ts',
+          source: "import { compileGame } from './game-ir/runtime'",
+        },
+        {
+          path: 'synthetic-export.ts',
+          source: "export { compileGame } from './game-ir/runtime'",
+        },
+        {
+          path: 'synthetic-import-equals.ts',
+          source: "import x = require('./game-ir/runtime')",
+        },
+        {
+          path: 'synthetic-require.ts',
+          source: "const required = require('./game-ir/runtime')",
+        },
+        {
+          path: 'synthetic-dynamic-import.ts',
+          source: "const loaded = import('./game-ir/runtime')",
+        },
+        {
+          path: 'synthetic-game-ir-identifier.ts',
+          source: 'type GameIrResult = unknown',
+        },
+        {
+          path: 'synthetic-game-ir-constant.ts',
+          source: 'const kind = GAME_IR_ENABLED',
+        },
+        {
+          path: 'synthetic-property-declaration.ts',
+          source: 'const object = { GameIrState: "x" }',
+        },
+        {
+          path: 'synthetic-property-access.ts',
+          source:
+            'const value = object.GameIrState; const state = run.gameIrState',
+        },
+        {
+          path: 'synthetic-enable.ts',
+          source: 'const config = { enableGameIr: true }',
+        },
+        {
+          path: 'synthetic-switch.ts',
+          source: 'const switched = switchGameIr',
         },
       ]),
     ).toEqual([
-      'synthetic-all-violations.ts: import: ./game-ir/runtime',
-      'synthetic-all-violations.ts: export: ./game-ir/runtime',
-      'synthetic-all-violations.ts: import-equals: ./game-ir/runtime',
-      'synthetic-all-violations.ts: require: ./game-ir/runtime',
-      'synthetic-all-violations.ts: dynamic-import: ./game-ir/runtime',
-      'synthetic-all-violations.ts: identifier: GameIrResult',
-      'synthetic-all-violations.ts: identifier: GAME_IR_ENABLED',
-      'synthetic-all-violations.ts: identifier: GameIrState',
-      'synthetic-all-violations.ts: identifier: GameIrState',
-      'synthetic-all-violations.ts: identifier: gameIrState',
-      'synthetic-all-violations.ts: identifier: enableGameIr',
-      'synthetic-all-violations.ts: identifier: switchGameIr',
+      'synthetic-static-import.ts: import: ./game-ir/runtime',
+      'synthetic-export.ts: export: ./game-ir/runtime',
+      'synthetic-import-equals.ts: import-equals: ./game-ir/runtime',
+      'synthetic-require.ts: require: ./game-ir/runtime',
+      'synthetic-dynamic-import.ts: dynamic-import: ./game-ir/runtime',
+      'synthetic-game-ir-identifier.ts: identifier: GameIrResult',
+      'synthetic-game-ir-constant.ts: identifier: GAME_IR_ENABLED',
+      'synthetic-property-declaration.ts: identifier: GameIrState',
+      'synthetic-property-access.ts: identifier: GameIrState',
+      'synthetic-property-access.ts: identifier: gameIrState',
+      'synthetic-enable.ts: identifier: enableGameIr',
+      'synthetic-switch.ts: identifier: switchGameIr',
     ])
   })
 
