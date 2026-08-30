@@ -7,6 +7,10 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from '../types'
+import {
+  digestSectionIndex,
+  type SectionRef,
+} from '../foundation-section-index'
 
 export type GameIrSourceBinding =
   | Readonly<{
@@ -45,6 +49,9 @@ export type GameIrCandidate = Readonly<{
 export type GameIrSourceSection = Readonly<{
   documentPath: FoundationDocumentPath
   sectionId: string
+  heading: string
+  startLine: number
+  endLine: number
   digest: string
 }>
 
@@ -151,25 +158,73 @@ function localPointer(pointer: string): string {
   return `/${pointerSegments(pointer).map(encodePointerSegment).join('/')}`
 }
 
-function validateJsonValue(value: unknown, path: string): void {
+function normalizeJsonValue(value: unknown, path: string): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean')
-    return
+    return value
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) fail(`${path} must contain a finite number`)
-    return
+    return value
   }
   if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      if (!(index in value)) fail(`${path}/${index} is undefined`)
-      validateJsonValue(value[index], `${path}/${index}`)
+    const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length')
+    if (
+      !lengthDescriptor ||
+      !('value' in lengthDescriptor) ||
+      lengthDescriptor.enumerable !== false ||
+      lengthDescriptor.writable !== true ||
+      lengthDescriptor.configurable !== false
+    )
+      fail(`${path} has a non-JSON length descriptor`)
+    const normalized: unknown[] = []
+    const ownKeys = Reflect.ownKeys(value)
+    for (const key of ownKeys) {
+      if (key === 'length') continue
+      if (typeof key !== 'string' || !/^\d+$/.test(key))
+        fail(`${path} contains a symbol or hidden array property`)
+      const index = Number(key)
+      if (!Number.isSafeInteger(index) || index >= value.length)
+        fail(`${path} contains an invalid array index`)
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)
+      if (
+        !descriptor ||
+        !('value' in descriptor) ||
+        descriptor.enumerable !== true ||
+        descriptor.writable !== true ||
+        descriptor.configurable !== true
+      )
+        fail(`${path}/${index} has a non-JSON property descriptor`)
     }
-    return
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, String(index)))
+        fail(`${path}/${index} is undefined in a sparse array`)
+      normalized.push(normalizeJsonValue(value[index], `${path}/${index}`))
+    }
+    return normalized
   }
   if (!isRecord(value)) fail(`${path} must contain only JSON values`)
-  for (const [key, entry] of Object.entries(value)) {
-    if (key.includes('\0')) fail(`${path} contains an unsafe object key`)
-    validateJsonValue(entry, `${path}/${encodePointerSegment(key)}`)
+  const normalized: RecordValue = {}
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') fail(`${path} contains a symbol property`)
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (
+      !descriptor ||
+      !('value' in descriptor) ||
+      descriptor.enumerable !== true ||
+      descriptor.writable !== true ||
+      descriptor.configurable !== true
+    )
+      fail(`${path}/${key} has a non-JSON property descriptor`)
+    Object.defineProperty(normalized, key, {
+      value: normalizeJsonValue(
+        descriptor.value,
+        `${path}/${encodePointerSegment(key)}`,
+      ),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
   }
+  return normalized
 }
 
 function canonicalValue(value: unknown): string {
@@ -208,7 +263,14 @@ function sourceSectionMap(
     if (!isRecord(sectionValue)) fail('source section must be an object')
     exactKeys(
       sectionValue,
-      ['documentPath', 'sectionId', 'digest'],
+      [
+        'documentPath',
+        'sectionId',
+        'heading',
+        'startLine',
+        'endLine',
+        'digest',
+      ],
       'source section',
     )
     const documentPath = foundationDocumentPath(
@@ -216,6 +278,14 @@ function sourceSectionMap(
       'source section documentPath',
     )
     const sectionId = safeId(sectionValue.sectionId, 'source section sectionId')
+    const heading = nonEmptyText(sectionValue.heading, 'source section heading')
+    const startLine = sectionLine(
+      sectionValue.startLine,
+      'source section startLine',
+    )
+    const endLine = sectionLine(sectionValue.endLine, 'source section endLine')
+    if (endLine < startLine)
+      fail('source section endLine must not precede startLine')
     const sectionDigest = digest(sectionValue.digest, 'source section digest')
     if (!request.foundation.documentDigests[documentPath])
       fail('source section document is outside the Foundation receipt')
@@ -223,10 +293,46 @@ function sourceSectionMap(
     if (map.has(key)) fail('source sections contain a duplicate section')
     map.set(
       key,
-      Object.freeze({ documentPath, sectionId, digest: sectionDigest }),
+      Object.freeze({
+        documentPath,
+        sectionId,
+        heading,
+        startLine,
+        endLine,
+        digest: sectionDigest,
+      }),
     )
   }
+  const index = [...map.values()]
+  for (
+    let indexPosition = 1;
+    indexPosition < index.length;
+    indexPosition += 1
+  ) {
+    if (sectionOrder(index[indexPosition - 1]!, index[indexPosition]!) >= 0)
+      fail('source sections must be unique and sorted')
+  }
+  if (
+    digestSectionIndex(index as readonly SectionRef[]) !==
+    request.foundation.sectionIndexDigest
+  )
+    fail('source sections do not match the receipt section index digest')
   return map
+}
+
+function sectionLine(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
+    fail(`${label} must be a positive line number`)
+  return value
+}
+
+function sectionOrder(
+  left: GameIrSourceSection,
+  right: GameIrSourceSection,
+): number {
+  const leftKey = `${left.documentPath}\0${left.startLine}\0${left.sectionId}`
+  const rightKey = `${right.documentPath}\0${right.startLine}\0${right.sectionId}`
+  return leftKey.localeCompare(rightKey)
 }
 
 function sourceBinding(
@@ -304,15 +410,27 @@ function valueLeafPointers(value: RecordValue): string[] {
   const leaves: string[] = []
   const visit = (entry: unknown, path: string): void => {
     if (Array.isArray(entry)) {
+      if (entry.length === 0) {
+        leaves.push(path)
+        return
+      }
       entry.forEach((child, index) => visit(child, `${path}/${index}`))
       return
     }
     if (isRecord(entry)) {
+      if (Object.keys(entry).length === 0) {
+        leaves.push(path)
+        return
+      }
       for (const [key, child] of Object.entries(entry))
         visit(child, `${path}/${encodePointerSegment(key)}`)
       return
     }
     leaves.push(path)
+  }
+  if (Object.keys(value).length === 0) {
+    leaves.push('/value')
+    return leaves
   }
   for (const [key, entry] of Object.entries(value))
     visit(entry, `/value/${encodePointerSegment(key)}`)
@@ -322,6 +440,8 @@ function valueLeafPointers(value: RecordValue): string[] {
 function localTargetExists(node: GameIrNode, pointer: string): boolean {
   const segments = pointerSegments(pointer)
   if (segments.length === 1 && segments[0] === 'id') return true
+  if (segments.length === 1 && segments[0] === 'value')
+    return Object.keys(node.value).length === 0
   if (segments.length < 2 || segments[0] !== 'value') return false
   let current: unknown = node.value
   for (const segment of segments.slice(1)) {
@@ -333,7 +453,11 @@ function localTargetExists(node: GameIrNode, pointer: string): boolean {
       current = current[segment]
     } else return false
   }
-  return !Array.isArray(current) && !isRecord(current)
+  return (
+    (!Array.isArray(current) && !isRecord(current)) ||
+    (Array.isArray(current) && current.length === 0) ||
+    (isRecord(current) && Object.keys(current).length === 0)
+  )
 }
 
 function parseNode(
@@ -352,7 +476,6 @@ function parseNode(
   )
     fail(`node ${id} has an unknown producer mode`)
   if (!isRecord(value.value)) fail(`node ${id} value must be an object`)
-  validateJsonValue(value.value, `node ${id} value`)
   if (!isRecord(value.bindings)) fail(`node ${id} bindings must be an object`)
 
   const parsedBindings: Record<string, GameIrSourceBinding> = {}
@@ -364,7 +487,11 @@ function parseNode(
     if (normalizedPointers.has(pointer))
       fail(`node ${id} has duplicate binding pointers`)
     normalizedPointers.add(pointer)
-    if (pointer !== '/id' && !pointer.startsWith('/value/'))
+    if (
+      pointer !== '/id' &&
+      pointer !== '/value' &&
+      !pointer.startsWith('/value/')
+    )
       fail(`node ${id} binding does not target /id or a value leaf`)
     const parsed = sourceBinding(binding, pointer, sections, request)
     parsedBindings[pointer] = parsed
@@ -382,25 +509,41 @@ function parseNode(
   for (const pointer of leaves) {
     const binding = parsedBindings[pointer]
     if (!binding) fail(`node ${id} value leaf ${pointer} has no binding`)
-    if (binding.kind === 'derived') {
-      for (const input of binding.inputPointers) {
-        if (
-          !localTargetExists(
-            { ...value, bindings: parsedBindings } as GameIrNode,
-            input,
-          )
-        )
-          fail(`node ${id} derived input ${input} does not target a local leaf`)
-      }
-    }
+    const expectedKind = value.producerMode === 'derived' ? 'derived' : 'owner'
+    if (binding.kind !== expectedKind)
+      fail(`node ${id} ${pointer} conflicts with producer mode`)
   }
-  return {
+  const parsedNode: GameIrNode = {
     id,
     kind,
     producerMode: value.producerMode as GameIrNode['producerMode'],
     value: value.value,
     bindings: parsedBindings,
   }
+  const states = new Map<string, 'visiting' | 'done'>()
+  const reachesOwner = (pointer: string): boolean => {
+    const normalized = localPointer(pointer)
+    if (normalized === '/id') return true
+    if (!localTargetExists(parsedNode, normalized))
+      fail(`node ${id} derived input ${pointer} does not target a local leaf`)
+    const binding = parsedBindings[normalized]
+    if (!binding) fail(`node ${id} derived input ${pointer} has no binding`)
+    if (binding.kind === 'owner') return true
+    if (states.get(normalized) === 'visiting')
+      fail(`node ${id} derived bindings contain a dependency cycle`)
+    if (states.get(normalized) === 'done') return true
+    states.set(normalized, 'visiting')
+    for (const input of binding.inputPointers) reachesOwner(input)
+    states.set(normalized, 'done')
+    return true
+  }
+  for (const pointer of leaves) {
+    const binding = parsedBindings[pointer]!
+    if (binding.kind === 'derived') {
+      for (const input of binding.inputPointers) reachesOwner(input)
+    }
+  }
+  return parsedNode
 }
 
 function parseModule(
@@ -431,26 +574,37 @@ export function parseGameIrCandidate(
   },
 ): GameIrCandidate {
   const request = parseGameIrCompileRequest(input.request)
-  const sections = sourceSectionMap(input.sections, request)
-  if (!isRecord(value)) fail('candidate must be an object')
+  const normalizedSections = normalizeJsonValue(
+    input.sections,
+    'source sections',
+  )
+  if (!Array.isArray(normalizedSections))
+    fail('source sections must be an array')
+  const sections = sourceSectionMap(
+    normalizedSections as GameIrSourceSection[],
+    request,
+  )
+  const normalizedValue = normalizeJsonValue(value, 'candidate')
+  if (!isRecord(normalizedValue)) fail('candidate must be an object')
   exactKeys(
-    value,
+    normalizedValue,
     ['schemaVersion', 'taskId', 'foundationRevision', 'modules'],
     'candidate',
   )
-  if (value.schemaVersion !== 'game-ir.v1')
+  if (normalizedValue.schemaVersion !== 'game-ir.v1')
     fail('candidate schemaVersion is invalid')
-  const taskId = safeId(value.taskId, 'candidate taskId')
+  const taskId = safeId(normalizedValue.taskId, 'candidate taskId')
   if (taskId !== request.taskId)
     fail('candidate taskId does not match compile request')
   const foundationRevision = nonEmptyText(
-    value.foundationRevision,
+    normalizedValue.foundationRevision,
     'candidate foundationRevision',
   )
   if (foundationRevision !== request.foundation.foundationRevision)
     fail('candidate foundationRevision does not match compile request')
-  if (!Array.isArray(value.modules)) fail('candidate modules must be an array')
-  const modules = value.modules.map(module =>
+  if (!Array.isArray(normalizedValue.modules))
+    fail('candidate modules must be an array')
+  const modules = normalizedValue.modules.map(module =>
     parseModule(module, sections, request),
   )
   for (let index = 1; index < modules.length; index += 1) {
@@ -466,8 +620,7 @@ export function parseGameIrCandidate(
 }
 
 export function canonicalGameIrJson(value: unknown): string {
-  validateJsonValue(value, '$')
-  return canonicalValue(value)
+  return canonicalValue(normalizeJsonValue(value, '$'))
 }
 
 export function digestGameIrValue(value: unknown): string {

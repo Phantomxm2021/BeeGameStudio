@@ -14,8 +14,11 @@ import {
   type GameIrSourceSection,
 } from './model'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
+import { digestSectionIndex } from '../foundation-section-index'
 
 const digest = 'a'.repeat(64)
+const sectionDigest = 'b'.repeat(64)
+const technicalSectionDigest = 'c'.repeat(64)
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -37,7 +40,7 @@ function receiptWithoutDigest(): Omit<FoundationReadyReceipt, 'receiptDigest'> {
       CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, digest]),
     ) as FoundationReadyReceipt['documentDigests'],
     sectionIndexPath: '.beegame/foundation/section-index.json',
-    sectionIndexDigest: digest,
+    sectionIndexDigest: digestSectionIndex(sectionIndex),
     authority: {
       kind: 'review',
       reviewDigest: digest,
@@ -45,6 +48,25 @@ function receiptWithoutDigest(): Omit<FoundationReadyReceipt, 'receiptDigest'> {
     },
   }
 }
+
+const sectionIndex: readonly GameIrSourceSection[] = [
+  {
+    documentPath: 'docs/GDD.md',
+    sectionId: 'core-loop',
+    heading: 'Core Loop',
+    startLine: 1,
+    endLine: 4,
+    digest: sectionDigest,
+  },
+  {
+    documentPath: 'docs/TECHNICAL_DESIGN.md',
+    sectionId: 'runtime-states',
+    heading: 'Runtime States',
+    startLine: 1,
+    endLine: 5,
+    digest: technicalSectionDigest,
+  },
+]
 
 function request(): GameIrCompileRequest {
   const foundation = receiptWithoutDigest()
@@ -62,18 +84,7 @@ function request(): GameIrCompileRequest {
   }
 }
 
-const sections: readonly GameIrSourceSection[] = [
-  {
-    documentPath: 'docs/GDD.md',
-    sectionId: 'core-loop',
-    digest,
-  },
-  {
-    documentPath: 'docs/TECHNICAL_DESIGN.md',
-    sectionId: 'runtime-states',
-    digest,
-  },
-]
+const sections = sectionIndex
 
 function candidate(overrides: Partial<GameIrCandidate> = {}): GameIrCandidate {
   return {
@@ -97,20 +108,22 @@ function candidate(overrides: Partial<GameIrCandidate> = {}): GameIrCandidate {
                 kind: 'owner',
                 documentPath: 'docs/GDD.md',
                 sectionId: 'core-loop',
-                sectionDigest: digest,
+                sectionDigest: sectionDigest,
                 sourcePointer: '/entities/player',
               },
               '/value/health': {
                 kind: 'owner',
                 documentPath: 'docs/GDD.md',
                 sectionId: 'core-loop',
-                sectionDigest: digest,
+                sectionDigest: sectionDigest,
                 sourcePointer: '/entities/player/health',
               },
               '/value/state/initial': {
-                kind: 'derived',
-                derivationRuleId: 'initial-state',
-                inputPointers: ['/value/health'],
+                kind: 'owner',
+                documentPath: 'docs/GDD.md',
+                sectionId: 'core-loop',
+                sectionDigest: sectionDigest,
+                sourcePointer: '/entities/player/state',
               },
             },
           },
@@ -119,6 +132,36 @@ function candidate(overrides: Partial<GameIrCandidate> = {}): GameIrCandidate {
     ],
     ...overrides,
   }
+}
+
+function derivedCandidate(
+  overrides: Partial<GameIrCandidate['modules'][number]['nodes'][number]> = {},
+): GameIrCandidate {
+  const base = candidate()
+  const node = base.modules[0]!.nodes[0]!
+  return candidate({
+    modules: [
+      {
+        ...base.modules[0]!,
+        nodes: [
+          {
+            ...node,
+            producerMode: 'derived',
+            value: { score: 3 },
+            bindings: {
+              '/id': node.bindings['/id']!,
+              '/value/score': {
+                kind: 'derived',
+                derivationRuleId: 'score-from-id',
+                inputPointers: ['/id'],
+              },
+            },
+            ...overrides,
+          },
+        ],
+      },
+    ],
+  })
 }
 
 describe('Game IR core candidate and source authority', () => {
@@ -348,6 +391,281 @@ describe('Game IR core candidate and source authority', () => {
         { request: request(), sections },
       ),
     ).toThrow(/leaf|binding/i)
+  })
+
+  test('recomputes the complete Section Index digest before admitting owners', () => {
+    const forged = [
+      { ...sections[0]!, heading: 'Forged heading' },
+      sections[1]!,
+    ]
+    expect(() =>
+      parseGameIrCandidate(candidate(), {
+        request: request(),
+        sections: forged,
+      }),
+    ).toThrow(/section.*digest|digest.*section/i)
+    expect(() =>
+      parseGameIrCandidate(candidate(), {
+        request: request(),
+        sections: [{ ...sections[0]!, endLine: 99 }, sections[1]!],
+      }),
+    ).toThrow(/section.*digest|digest.*section/i)
+    expect(() =>
+      parseGameIrCandidate(candidate(), {
+        request: request(),
+        sections: [...sections].reverse(),
+      }),
+    ).toThrow(/sorted|section/i)
+    expect(() =>
+      parseGameIrCandidate(candidate(), {
+        request: request(),
+        sections: [...sections, sections[0]!],
+      }),
+    ).toThrow(/duplicate|section/i)
+  })
+
+  test('enforces one producer mode for every value leaf', () => {
+    const node = candidate().modules[0]!.nodes[0]!
+    expect(() =>
+      parseGameIrCandidate(
+        candidate({
+          modules: [
+            {
+              ...candidate().modules[0]!,
+              nodes: [
+                {
+                  ...node,
+                  bindings: {
+                    ...node.bindings,
+                    '/value/health': {
+                      kind: 'derived',
+                      derivationRuleId: 'health-copy',
+                      inputPointers: ['/id'],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+        { request: request(), sections },
+      ),
+    ).toThrow(/producer|owner/i)
+    expect(() =>
+      parseGameIrCandidate(
+        derivedCandidate({
+          bindings: {
+            '/id': node.bindings['/id']!,
+            '/value/score': node.bindings['/value/health']!,
+          },
+        }),
+        { request: request(), sections },
+      ),
+    ).toThrow(/producer|derived/i)
+    expect(
+      parseGameIrCandidate(derivedCandidate(), {
+        request: request(),
+        sections,
+      }),
+    ).toBeTruthy()
+  })
+
+  test('requires every derived dependency chain to reach owner evidence', () => {
+    const node = derivedCandidate().modules[0]!.nodes[0]!
+    expect(() =>
+      parseGameIrCandidate(
+        derivedCandidate({
+          bindings: {
+            '/id': node.bindings['/id']!,
+            '/value/score': {
+              kind: 'derived',
+              derivationRuleId: 'self',
+              inputPointers: ['/value/score'],
+            },
+          },
+        }),
+        { request: request(), sections },
+      ),
+    ).toThrow(/cycle|owner|derived/i)
+
+    const twoNodeCycle = derivedCandidate({
+      value: { first: 1, second: 2 },
+      bindings: {
+        '/id': node.bindings['/id']!,
+        '/value/first': {
+          kind: 'derived',
+          derivationRuleId: 'cycle-a',
+          inputPointers: ['/value/second'],
+        },
+        '/value/second': {
+          kind: 'derived',
+          derivationRuleId: 'cycle-b',
+          inputPointers: ['/value/first'],
+        },
+      },
+    })
+    expect(() =>
+      parseGameIrCandidate(twoNodeCycle, { request: request(), sections }),
+    ).toThrow(/cycle|owner|derived/i)
+
+    expect(
+      parseGameIrCandidate(
+        derivedCandidate({
+          value: { source: 1, score: 2 },
+          bindings: {
+            '/id': node.bindings['/id']!,
+            '/value/source': {
+              kind: 'derived',
+              derivationRuleId: 'source-from-id',
+              inputPointers: ['/id'],
+            },
+            '/value/score': {
+              kind: 'derived',
+              derivationRuleId: 'score-from-source',
+              inputPointers: ['/value/source'],
+            },
+          },
+        }),
+        { request: request(), sections },
+      ),
+    ).toBeTruthy()
+  })
+
+  test('rejects hidden non-JSON state and returns an unaliased normalized tree', () => {
+    const accessor = candidate()
+    Object.defineProperty(accessor.modules[0]!.nodes[0]!.value, 'hidden', {
+      enumerable: true,
+      configurable: true,
+      get: () => 1,
+    })
+    expect(() =>
+      parseGameIrCandidate(accessor, { request: request(), sections }),
+    ).toThrow(/descriptor|accessor|json/i)
+
+    const symbolValue = candidate().modules[0]!.nodes[0]!.value
+    Object.defineProperty(symbolValue, Symbol('hidden'), {
+      enumerable: true,
+      configurable: true,
+      value: 1,
+    })
+    expect(() =>
+      parseGameIrCandidate(
+        Object.assign(candidate(), {
+          modules: [
+            {
+              ...candidate().modules[0]!,
+              nodes: [
+                {
+                  ...candidate().modules[0]!.nodes[0]!,
+                  value: symbolValue,
+                },
+              ],
+            },
+          ],
+        }),
+        { request: request(), sections },
+      ),
+    ).toThrow(/symbol|json/i)
+    expect(() => canonicalGameIrJson(symbolValue)).toThrow(/symbol|json/i)
+
+    const hidden = candidate()
+    Object.defineProperty(hidden.modules[0]!.nodes[0]!.value, 'hidden', {
+      enumerable: false,
+      configurable: true,
+      value: 1,
+    })
+    expect(() =>
+      parseGameIrCandidate(hidden, { request: request(), sections }),
+    ).toThrow(/descriptor|enumerable|json/i)
+
+    const nonOrdinary = candidate()
+    Object.defineProperty(nonOrdinary.modules[0]!.nodes[0]!.value, 'locked', {
+      enumerable: true,
+      configurable: true,
+      writable: false,
+      value: 1,
+    })
+    expect(() =>
+      parseGameIrCandidate(nonOrdinary, { request: request(), sections }),
+    ).toThrow(/descriptor|writable|json/i)
+
+    const sparse = candidate()
+    const sparseArray: unknown[] = []
+    sparseArray.length = 2
+    ;(sparse.modules[0]!.nodes[0]!.value as Record<string, unknown>).items =
+      sparseArray
+    expect(() =>
+      parseGameIrCandidate(sparse, { request: request(), sections }),
+    ).toThrow(/sparse|undefined|json/i)
+
+    const input = candidate()
+    const parsed = parseGameIrCandidate(input, { request: request(), sections })
+    expect(parsed).not.toBe(input)
+    expect(parsed.modules[0]!.nodes[0]!.value).not.toBe(
+      input.modules[0]!.nodes[0]!.value,
+    )
+    ;(input.modules[0]!.nodes[0]!.value as Record<string, unknown>).health = 99
+    expect(parsed.modules[0]!.nodes[0]!.value.health).toBe(3)
+    expect(Object.isFrozen(parsed.modules[0]!.nodes[0]!.value)).toBe(true)
+  })
+
+  test('treats empty objects and arrays as bindable leaves', () => {
+    const baseNode = candidate().modules[0]!.nodes[0]!
+    const emptyOwner = candidate({
+      modules: [
+        {
+          ...candidate().modules[0]!,
+          nodes: [
+            {
+              ...baseNode,
+              value: { emptyObject: {}, emptyArray: [] },
+              bindings: {
+                '/id': baseNode.bindings['/id']!,
+                '/value/emptyObject': baseNode.bindings['/value/health']!,
+                '/value/emptyArray': baseNode.bindings['/value/health']!,
+              },
+            },
+          ],
+        },
+      ],
+    })
+    expect(
+      parseGameIrCandidate(emptyOwner, { request: request(), sections }),
+    ).toBeTruthy()
+    expect(() =>
+      parseGameIrCandidate(
+        candidate({
+          modules: [
+            {
+              ...candidate().modules[0]!,
+              nodes: [
+                {
+                  ...baseNode,
+                  value: { empty: {} },
+                  bindings: { '/id': baseNode.bindings['/id']! },
+                },
+              ],
+            },
+          ],
+        }),
+        { request: request(), sections },
+      ),
+    ).toThrow(/leaf|binding/i)
+
+    const emptyDerived = derivedCandidate({
+      value: { empty: {} },
+      bindings: {
+        '/id': baseNode.bindings['/id']!,
+        '/value/empty': {
+          kind: 'derived',
+          derivationRuleId: 'empty-from-id',
+          inputPointers: ['/id'],
+        },
+      },
+    })
+    expect(
+      parseGameIrCandidate(emptyDerived, { request: request(), sections }),
+    ).toBeTruthy()
   })
 
   test('canonicalizes object keys without changing declared array order', () => {
