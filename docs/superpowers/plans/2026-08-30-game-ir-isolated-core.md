@@ -367,8 +367,11 @@ git commit -m "feat: define Game IR core model"
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-admission.test.ts`
 
 **Interfaces:**
-- Consumes: one immutable module candidate and its exact source sections
+- Consumes: the complete admitted candidate, its compile request, the full
+  receipt-bound Section Index, one selected canonical module, and the exact
+  authored Markdown section bytes used by that module
 - Produces:
+  - `GAME_IR_SEMANTIC_VALIDATOR_MANIFEST`
   - `GameIrSemanticValidationPacket`
   - `GameIrSemanticValidationResult`
   - `buildGameIrSemanticValidationPacket(input)`
@@ -376,15 +379,41 @@ git commit -m "feat: define Game IR core model"
 
 - [ ] **Step 1: Write admission tests**
 
-The packet binds task ID, Foundation revision, module ID, candidate digest, exact source sections and their digests. The result is exactly one of:
+The service-owned validator manifest fixes the canonical Game IR modules and
+the checks required for each module. V1 requires `core`, `gameplay`, `balance`,
+`world-scene`, `presentation`, `resource-realization`, and
+`implementation-verification`; every required module must be present and
+non-empty before a packet can be built. Common checks include projection
+fidelity, projection completeness, source bounds, ambiguity, and cross-module
+invariants; each module also has its domain check from the redesign document.
+
+The builder accepts no detached module or caller-supplied task/revision
+identity. It reparses the complete immutable candidate against the compile
+request and full Section Index, mechanically recomputes the Section Index
+digest, selects the requested module, and derives its exact owner-source
+closure. Each packet carries the complete candidate bytes, candidate digest,
+Foundation receipt and Section Index identities, selected module ID, fixed
+validator manifest identity/digest/check IDs, and the exact Markdown bytes for
+the selected source sections. The service verifies each Markdown byte digest
+against its Section Index ref before constructing the packet.
+
+Evidence pointers use the exact owner-binding source namespace
+`<documentPath>#<sectionId><sourcePointer>`; a coarse section identity is not
+admissible. A PASS is a coverage receipt and must return the exact fixed check
+IDs in canonical order. The result is exactly one of:
 
 ```ts
-{ outcome: 'PASS'; packetDigest: string }
+{ outcome: 'PASS'; packetDigest: string; checkIds: string[] }
 { outcome: 'FAIL'; packetDigest: string; reasonCode: string; actual: string; evidencePointers: string[] }
 { outcome: 'AMBIGUOUS'; packetDigest: string; reasonCode: string; actual: string; evidencePointers: string[] }
 ```
 
-Reject worker-supplied expected, target, Patch, replacement candidate, unknown evidence pointer, stale packet digest, duplicate evidence pointer and any extra key. Assert validator output can never modify candidate bytes.
+Reject empty/missing canonical modules, forged Section Index metadata, missing
+or extra source bytes, source byte digest mismatch, worker-supplied expected,
+target, Patch, replacement candidate, unknown or coarse evidence pointer,
+stale packet/manifest/candidate digest, incomplete/duplicate/unsorted PASS
+coverage, duplicate evidence pointer and any extra key. Assert validator output
+can never modify candidate bytes.
 
 - [ ] **Step 2: Run tests and verify RED**
 
@@ -396,7 +425,10 @@ Expected: FAIL because semantic admission does not exist.
 
 - [ ] **Step 3: Implement packet and result admission**
 
-Keep the implementation pure. It does not dispatch a model in this task and does not write workflow state. `AMBIGUOUS` is mapped to a FoundationDefectReport only by a later Stage 5 orchestrator plan.
+Keep the implementation pure. It does not dispatch a model in this task and
+does not write workflow state. The manifest is service-owned and cannot be
+overridden by input. `AMBIGUOUS` is mapped to a FoundationDefectReport only by
+a later Stage 5 orchestrator plan.
 
 - [ ] **Step 4: Run tests and verify GREEN**
 
