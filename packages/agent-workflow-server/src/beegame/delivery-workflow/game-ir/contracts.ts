@@ -11,13 +11,13 @@ export const GAME_IR_SCHEMA_VERSION = 'game-ir.v1' as const
 export const GAME_IR_PUBLICATION_ROOT =
   `.beegame/ir/${GAME_IR_SCHEMA_VERSION}` as const
 export const GAME_IR_CANONICAL_MODULE_IDS = Object.freeze([
+  'balance',
   'core',
   'gameplay',
-  'balance',
-  'world-scene',
+  'implementation-verification',
   'presentation',
   'resource-realization',
-  'implementation-verification',
+  'world-scene',
 ] as const)
 export type GameIrModuleId = (typeof GAME_IR_CANONICAL_MODULE_IDS)[number]
 
@@ -92,6 +92,12 @@ const nonEmptyTextSchema = z.string().refine(value => value.trim().length > 0, {
   message: 'must not be empty',
 })
 const safeIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
+export function isSafeGameIrRevisionSegment(value: unknown): value is string {
+  return safeIdSchema.safeParse(value).success
+}
+const foundationRevisionSchema = z
+  .string()
+  .refine(isSafeGameIrRevisionSegment, 'must be a safe revision path segment')
 const foundationDocumentPathSchema = z.enum(CANONICAL_FOUNDATION_DOCUMENTS)
 
 export function gameIrCommittedPath(foundationRevision: string): string {
@@ -99,7 +105,7 @@ export function gameIrCommittedPath(foundationRevision: string): string {
 }
 
 export function gameIrRevisionPath(foundationRevision: string): string {
-  if (!safeIdSchema.safeParse(foundationRevision).success)
+  if (!isSafeGameIrRevisionSegment(foundationRevision))
     throw new Error(
       'Game IR foundation revision is not a canonical path segment',
     )
@@ -137,7 +143,7 @@ const reviewAuthoritySchema = z
 const revisionPublicationAuthoritySchema = z
   .object({
     kind: z.literal('revision_publication'),
-    baseRevision: nonEmptyTextSchema,
+    baseRevision: foundationRevisionSchema,
     authorityDigest: sha256Schema,
     issueRegistryDigest: sha256Schema,
   })
@@ -152,7 +158,7 @@ const foundationReadyReceiptSchema = z
   .object({
     schemaVersion: z.literal('foundation-ready-receipt.v1'),
     projectId: nonEmptyTextSchema,
-    foundationRevision: nonEmptyTextSchema,
+    foundationRevision: foundationRevisionSchema,
     confirmedBriefDigest: sha256Schema,
     documentDigests: documentDigestsSchema,
     sectionIndexPath: safeRelativeArtifactPathSchema,
@@ -206,7 +212,7 @@ const foundationDefectReportSchema = z
   .object({
     schemaVersion: z.literal('foundation-defect-report.v1'),
     taskId: safeIdSchema,
-    foundationRevision: nonEmptyTextSchema,
+    foundationRevision: foundationRevisionSchema,
     reasonCode: nonEmptyTextSchema,
     expected: nonEmptyTextSchema,
     actual: nonEmptyTextSchema,
@@ -224,7 +230,7 @@ const gameIrReadyReceiptSchema = z
     taskId: safeIdSchema,
     publicationId: safeIdSchema,
     gameIrSchemaVersion: z.literal(GAME_IR_SCHEMA_VERSION),
-    foundationRevision: nonEmptyTextSchema,
+    foundationRevision: foundationRevisionSchema,
     foundationReceiptDigest: sha256Schema,
     manifestDigest: sha256Schema,
     moduleDigests: digestRecordSchema,

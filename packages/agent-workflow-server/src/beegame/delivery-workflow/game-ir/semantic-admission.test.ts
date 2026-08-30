@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
 import {
+  GAME_IR_CANONICAL_MODULE_IDS,
   GAME_IR_SCHEMA_VERSION,
   type FoundationReadyReceipt,
   type GameIrCompileRequest,
@@ -240,6 +241,17 @@ function withPacketDigest(
 }
 
 describe('isolated Game IR semantic projection admission', () => {
+  test('uses the contracts canonical module order and exact descriptor coverage', () => {
+    expect(
+      GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.map(item => item.moduleId),
+    ).toEqual([...GAME_IR_CANONICAL_MODULE_IDS])
+    expect(
+      [...GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules]
+        .map(item => item.moduleId)
+        .sort(),
+    ).toEqual([...GAME_IR_CANONICAL_MODULE_IDS].sort())
+  })
+
   test('service-owned validator modules declare the canonical source document scope', () => {
     const expected: Record<string, readonly FoundationDocumentPath[]> = {
       core: ['docs/GDD.md'],

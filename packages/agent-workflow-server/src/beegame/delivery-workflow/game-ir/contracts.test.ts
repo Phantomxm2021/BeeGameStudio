@@ -248,6 +248,15 @@ describe('isolated Game IR contracts', () => {
   })
 
   test('requires the complete V1 canonical module digest set', () => {
+    expect(GAME_IR_CANONICAL_MODULE_IDS).toEqual([
+      'balance',
+      'core',
+      'gameplay',
+      'implementation-verification',
+      'presentation',
+      'resource-realization',
+      'world-scene',
+    ])
     const canonicalModules = Object.fromEntries(
       GAME_IR_CANONICAL_MODULE_IDS.map(moduleId => [moduleId, digest]),
     )
@@ -334,6 +343,16 @@ describe('isolated Game IR contracts', () => {
         foundationReceipt({ sectionIndexPath: '../section-index.json' }),
       ),
     ).toThrow()
+    expect(() =>
+      parseFoundationReadyReceipt(
+        foundationReceipt({ foundationRevision: '../escape' }),
+      ),
+    ).toThrow(/revision|canonical|path/i)
+    expect(() =>
+      parseFoundationDefectReport(
+        defectReport({ foundationRevision: 'revision\\escape' }),
+      ),
+    ).toThrow(/revision|canonical|path/i)
     expect(() =>
       parseGameIrReadyReceipt(
         readyReceipt({ committedPath: '/tmp/COMMITTED.json' }),

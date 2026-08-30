@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import {
+  GAME_IR_CANONICAL_MODULE_IDS,
   parseGameIrCompileRequest,
+  type GameIrModuleId,
   type GameIrCompileRequest,
 } from './contracts'
 import {
@@ -21,14 +23,7 @@ export const GAME_IR_SEMANTIC_VALIDATOR_MANIFEST_VERSION =
   'game-ir-semantic-validator-manifest.v1' as const
 
 export type GameIrSemanticValidatorModule = Readonly<{
-  moduleId:
-    | 'core'
-    | 'gameplay'
-    | 'balance'
-    | 'world-scene'
-    | 'presentation'
-    | 'resource-realization'
-    | 'implementation-verification'
+  moduleId: GameIrModuleId
   checkIds: readonly string[]
   sourceDocumentPaths: readonly FoundationDocumentPath[]
 }>
@@ -116,16 +111,6 @@ export type GameIrSemanticValidationPacketInput = Readonly<{
   sectionBytes: ReadonlyMap<string, string> | Readonly<Record<string, string>>
 }>
 
-const MODULE_IDS: readonly GameIrSemanticValidatorModule['moduleId'][] = [
-  'balance',
-  'core',
-  'gameplay',
-  'implementation-verification',
-  'presentation',
-  'resource-realization',
-  'world-scene',
-]
-
 const COMMON_CHECK_IDS = [
   'projection.fidelity',
   'projection.completeness',
@@ -134,18 +119,58 @@ const COMMON_CHECK_IDS = [
   'projection.cross-module-invariants',
 ] as const
 
-const DOMAIN_CHECK_IDS: Record<
-  GameIrSemanticValidatorModule['moduleId'],
-  string
-> = {
-  core: 'domain.core',
-  gameplay: 'domain.gameplay',
-  balance: 'domain.balance',
-  'world-scene': 'domain.world-scene',
-  presentation: 'domain.presentation',
-  'resource-realization': 'domain.resource-realization',
-  'implementation-verification': 'domain.implementation-verification',
+type GameIrSemanticModuleDescriptor = Readonly<{
+  domainCheckId: string
+  sourceDocumentPaths: readonly FoundationDocumentPath[]
+}>
+
+function moduleDescriptor(
+  domainCheckId: string,
+  sourceDocumentPaths: readonly FoundationDocumentPath[],
+): GameIrSemanticModuleDescriptor {
+  return Object.freeze({
+    domainCheckId,
+    sourceDocumentPaths: Object.freeze([...sourceDocumentPaths]),
+  })
 }
+
+const MODULE_DESCRIPTORS: Readonly<
+  Record<GameIrModuleId, GameIrSemanticModuleDescriptor>
+> = Object.freeze({
+  core: moduleDescriptor('domain.core', ['docs/GDD.md']),
+  gameplay: moduleDescriptor('domain.gameplay', ['docs/GDD.md']),
+  balance: moduleDescriptor('domain.balance', [
+    'docs/GDD.md',
+    'docs/BALANCE_DESIGN.md',
+  ]),
+  'world-scene': moduleDescriptor('domain.world-scene', [
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+  ]),
+  presentation: moduleDescriptor('domain.presentation', [
+    'docs/GDD.md',
+    'docs/ART_DIRECTION.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/AUDIO_DESIGN.md',
+  ]),
+  'resource-realization': moduleDescriptor('domain.resource-realization', [
+    'docs/ASSET_PLAN.md',
+    'docs/TECHNICAL_DESIGN.md',
+    'docs/ART_DIRECTION.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/AUDIO_DESIGN.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+  ]),
+  'implementation-verification': moduleDescriptor(
+    'domain.implementation-verification',
+    [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/BALANCE_DESIGN.md',
+      'docs/TECHNICAL_DESIGN.md',
+    ],
+  ),
+})
 
 const SHA256 = /^[a-f0-9]{64}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -379,36 +404,25 @@ function manifestWithoutDigest(): Omit<
   GameIrSemanticValidatorManifest,
   'digest'
 > {
-  const modules = MODULE_IDS.map(moduleId => {
-    const checkIds = [...COMMON_CHECK_IDS, DOMAIN_CHECK_IDS[moduleId]].sort(
+  const canonicalModuleIds = [...GAME_IR_CANONICAL_MODULE_IDS].sort(compare)
+  const descriptorIds = Object.keys(MODULE_DESCRIPTORS).sort(compare)
+  if (
+    descriptorIds.length !== canonicalModuleIds.length ||
+    descriptorIds.some(
+      (moduleId, index) => moduleId !== canonicalModuleIds[index],
+    )
+  )
+    fail(
+      'semantic module descriptors do not cover canonical module IDs exactly',
+    )
+  const modules = GAME_IR_CANONICAL_MODULE_IDS.map(moduleId => {
+    const descriptor = MODULE_DESCRIPTORS[moduleId]
+    const checkIds = [...COMMON_CHECK_IDS, descriptor.domainCheckId].sort(
       compare,
     )
-    const sourceDocumentPaths = {
-      core: ['docs/GDD.md'],
-      gameplay: ['docs/GDD.md'],
-      balance: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
-      'world-scene': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-      presentation: [
-        'docs/GDD.md',
-        'docs/ART_DIRECTION.md',
-        'docs/UI_UX_SPEC.md',
-        'docs/AUDIO_DESIGN.md',
-      ],
-      'resource-realization': [
-        'docs/ASSET_PLAN.md',
-        'docs/TECHNICAL_DESIGN.md',
-        'docs/ART_DIRECTION.md',
-        'docs/UI_UX_SPEC.md',
-        'docs/AUDIO_DESIGN.md',
-        'docs/LEVEL_SCENE_DESIGN.md',
-      ],
-      'implementation-verification': [
-        'docs/GDD.md',
-        'docs/LEVEL_SCENE_DESIGN.md',
-        'docs/BALANCE_DESIGN.md',
-        'docs/TECHNICAL_DESIGN.md',
-      ],
-    }[moduleId].sort(compare) as FoundationDocumentPath[]
+    const sourceDocumentPaths = [...descriptor.sourceDocumentPaths].sort(
+      compare,
+    )
     return Object.freeze({
       moduleId,
       checkIds: Object.freeze(checkIds),
@@ -572,10 +586,12 @@ export function buildGameIrSemanticValidationPacket(
   })
   if (digestSectionIndex(fullIndex) !== request.foundation.sectionIndexDigest)
     fail('sectionIndex does not match Foundation receipt')
-  if (candidate.modules.length !== MODULE_IDS.length)
+  if (candidate.modules.length !== GAME_IR_CANONICAL_MODULE_IDS.length)
     fail('candidate must contain every canonical module exactly once')
-  for (let index = 0; index < MODULE_IDS.length; index += 1) {
-    if (candidate.modules[index]?.moduleId !== MODULE_IDS[index])
+  for (let index = 0; index < GAME_IR_CANONICAL_MODULE_IDS.length; index += 1) {
+    if (
+      candidate.modules[index]?.moduleId !== GAME_IR_CANONICAL_MODULE_IDS[index]
+    )
       fail('candidate canonical modules are missing, duplicated, or unsorted')
     if (candidate.modules[index]!.nodes.length === 0)
       fail('canonical module must be non-empty')
@@ -712,11 +728,12 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
     candidate.foundationRevision !== packet.foundationRevision
   )
     fail('packet candidate identity does not match packet')
-  if (candidate.modules.length !== MODULE_IDS.length)
+  if (candidate.modules.length !== GAME_IR_CANONICAL_MODULE_IDS.length)
     fail('packet candidate has incomplete canonical modules')
-  for (let index = 0; index < MODULE_IDS.length; index += 1) {
+  for (let index = 0; index < GAME_IR_CANONICAL_MODULE_IDS.length; index += 1) {
     if (
-      candidate.modules[index]?.moduleId !== MODULE_IDS[index] ||
+      candidate.modules[index]?.moduleId !==
+        GAME_IR_CANONICAL_MODULE_IDS[index] ||
       candidate.modules[index]!.nodes.length === 0
     )
       fail('packet candidate canonical module coverage is invalid')
