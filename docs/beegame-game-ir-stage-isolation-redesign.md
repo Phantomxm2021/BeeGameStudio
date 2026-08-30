@@ -329,6 +329,16 @@ Compiler 是唯一 candidate writer，Validator 是只读 admission，因此二�
 - canonical ordering；
 - revision/digest binding。
 
+### 8.6 Publication / Recovery
+
+Publication 的唯一输入是外部可重建的 `GameIrPublicationAuthority`：compile request、完整 candidate、receipt-bound Section Index，以及七个 canonical module 各自的真实 semantic packet 与 admitted PASS result。Publisher 必须重新执行 candidate 与 semantic admission；不能接受 digest-only PASS、detached module、字段 alias 或 caller 自报的 task/revision。
+
+服务端从该 authority 纯函数重建 module、source map、dependency graph、manifest、semantic evidence 与 COMMITTED marker 的全部 canonical bytes。Journal 只记录预期 authority/digest，不构成新的 authority；recovery 与 committed validation 必须重新接收外部 authority 并逐字节比较重建结果，不能让 journal、staging 或 final artifacts 循环自证。
+
+最终 revision 目录使用完整目录原子切换：先写 PREPARED journal，在私有 staging 中补齐并验证全部文件，最后写 staging/COMMITTED.json，再把整个非空 staging 目录原子 rename 到此前不存在的 final revision 路径。不得逐文件写入或覆盖可见 final 目录。并发赢家只有在 exact external authority 校验一致时才可作为幂等成功；否则 fail closed。
+
+所有 workspace 下的既有路径组件必须拒绝 symlink 与非目录，revision/publication segment 必须在任何写入前通过安全校验。恢复可以补齐缺失的 expected staging bytes，但必须拒绝 unexpected 或 conflicting bytes；final READY 只由完整、外部 authority 一致的 COMMITTED publication 表示。
+
 ## 9. 现有实现回收规则
 
 ### 9.1 默认保留候选

@@ -454,8 +454,11 @@ git commit -m "feat: define Game IR semantic admission"
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.test.ts`
 
 **Interfaces:**
-- Consumes: admitted `GameIrCandidate`, compile request, semantic PASS receipts for every semantic module
+- Consumes one exact `GameIrPublicationAuthority`: publication ID, compile
+  request, complete candidate, full receipt-bound Section Index, and the real
+  semantic packet plus admitted PASS result for every canonical module
 - Produces:
+  - a pure expected-artifact builder used by publication and validation
   - `prepareGameIrPublication(input)`
   - `commitGameIrPublication(input)`
   - `recoverGameIrPublication(input)`
@@ -478,19 +481,58 @@ Use a temporary workspace. Assert the sole layout is:
     COMMITTED.json
 ```
 
+The API has one field name for each authority. Do not accept aliases such as
+`request`/`compileRequest` or `semanticReceipts`/`semanticPassReceipts`.
+Publication must reparse the candidate against the compile request and full
+Section Index, then call semantic result admission for each exact packet/result
+pair. The seven canonical modules must be present once, sorted, and each packet
+must bind the same candidate, receipt, validator manifest and module.
+
+The expected artifact set is rebuilt purely from that external authority and
+contains exact canonical bytes for every module, source map, dependency graph,
+manifest and marker. Manifest/journal/marker bind the Foundation receipt,
+compile request digest, candidate digest, semantic packet/result evidence,
+module/source-map digests and dependency graph digest. Recovery and committed
+validation always receive the same external authority and compare exact
+expected bytes; journal/staging/final files can never self-attest.
+
+Publication uses a complete-directory visibility boundary: write PREPARED
+journal first, build and validate the entire private staging tree, write its
+COMMITTED marker last, then atomically rename the non-empty staging directory
+to the previously absent revision directory. Never copy or overwrite files in
+an already-visible final directory. On a rename race, validate the winner
+against external authority: exact bytes are an idempotent success, conflicts
+fail closed. Recovery fills only missing expected staging files, rejects
+unexpected/conflicting bytes, performs the same atomic directory rename, and
+reconciles an already complete final directory before cleanup.
+
+All existing path components beneath a canonicalized workspace root must be
+checked with `lstat`; symlinks and non-directories are rejected. Revision and
+publication path segments are validated before any write. New files use
+exclusive/no-follow creation where supported. No filesystem mutation occurs
+before authority, paths and the complete expected artifact set are validated.
+
 Test:
 
 - PREPARED journal exists before final publication;
-- COMMITTED is written last;
+- COMMITTED is written last inside private staging and becomes visible only in
+  the atomic directory rename;
 - no `latest`, candidate alias or mutable current pointer exists;
-- crash after each file rolls forward to the same committed receipt;
+- crash after each journal/staging/rename/cleanup cut point rolls forward to
+  the same committed receipt using the external authority;
 - replay is idempotent;
 - conflicting final bytes fail closed;
-- tampered staging, journal, module, source map, manifest or marker fails closed;
+- coordinated tampering of journal plus staging, and tampered final module,
+  source map, dependency graph, manifest or marker fail closed even when all
+  attacker-controlled digests are recomputed;
 - stale Foundation revision/digest fails closed;
-- semantic module without PASS admission cannot publish;
+- fake digest-only PASS, mixed/stale packet, detached/empty/invalid candidate,
+  missing module and semantic module without real PASS admission cannot publish;
 - failed staging is never exposed as READY;
-- successful recovery removes staging and journal;
+- successful recovery and marker-before-cleanup replay remove staging and
+  journal;
+- traversal, pre-existing symlink components and concurrent same-revision
+  publishers cannot write outside the root or produce mixed final bytes;
 - no arbitrary module/node/artifact count cap exists.
 
 - [ ] **Step 2: Run tests and verify RED**
@@ -503,7 +545,12 @@ Expected: FAIL because publication does not exist.
 
 - [ ] **Step 3: Implement minimal atomic publication**
 
-Port only canonical JSON, digest, journal, directory validation and roll-forward ideas from the old dirty `game-ir.ts`. Do not port its typed-owner compiler, Foundation Issue routing, resource consumer, `GameIrState`, or controller/recovery branches. Split manifest/source-map construction from filesystem mutation.
+Port only canonical JSON, digest, journal and directory validation ideas from
+the old dirty `game-ir.ts`. Replace its per-file final copying with the single
+directory publication boundary above. Do not port its typed-owner compiler,
+Foundation Issue routing, resource consumer, `GameIrState`, controller/recovery
+branches, compatibility aliases or self-signed recovery. Split exact
+manifest/source-map/dependency construction from filesystem mutation.
 
 - [ ] **Step 4: Run tests and verify GREEN**
 
