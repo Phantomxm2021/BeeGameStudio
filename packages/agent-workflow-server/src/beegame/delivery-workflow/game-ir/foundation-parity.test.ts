@@ -34,10 +34,12 @@ import {
   buildFoundationRevisionAuthority,
   createFoundationRevisionStage,
   deriveFoundationPatchOperations,
+  foundationPatchOperationsDigest,
   revisionTaskReceiptTerminalDigest,
 } from '../foundation-revision-stage'
 import {
   buildFoundationSemanticRecheckPacket,
+  admitFoundationSemanticRecheckResult,
   rebuildFoundationImpactedFacts,
   validateFoundationPatch,
 } from '../foundation-patch-validation'
@@ -60,6 +62,7 @@ import {
   summarizeFoundationIssues,
   type FoundationAuditState,
 } from '../foundation-audit-state'
+import { publishFoundationRevision } from '../foundation-revision-publication'
 import type { FoundationDocumentPath } from '../types'
 import { GAME_IR_SCHEMA_VERSION, parseGameIrCompileRequest } from './contracts'
 import { projectFoundationReadyReceipt } from './foundation-ready-adapter'
@@ -591,6 +594,10 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     },
   })
   const batch = batches[0]!
+  const sourceIssueRegistryDigest = sha256(JSON.stringify(issues))
+  const sourceAuthorityDigest = sha256(
+    `${auditFixture.revision}:review:${sourceIssueRegistryDigest}`,
+  )
   const authority = await buildFoundationRevisionAuthority({
     workspacePath,
     revision: `${auditFixture.revision}.issue`,
@@ -598,8 +605,8 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     round: 1,
     batch,
     issues,
-    sourceAuthorityDigest: sha256(`${auditFixture.revision}:authority`),
-    sourceIssueRegistryDigest: sha256(JSON.stringify(issues)),
+    sourceAuthorityDigest,
+    sourceIssueRegistryDigest,
     sourceDerivedDigests: {
       sectionIndex: digestSectionIndex(sectionIndex),
       factStore: sha256(JSON.stringify(fact.factStore)),
@@ -611,6 +618,15 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     })),
     normalizedFacts: fact.factStore,
   })
+  const sourceDerivedDigests = (
+    authority.packet.immutableDigests as {
+      sourceDerivedDigests: {
+        sectionIndex: string
+        factStore: string
+        manifest: string
+      }
+    }
+  ).sourceDerivedDigests
   const changed = sectionIndex.find(
     section =>
       section.documentPath === batch.documentPath &&
@@ -628,10 +644,13 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     join(workspacePath, batch.documentPath),
     'utf8',
   )
-  const patchedMarkdown = originalMarkdown.replace(
-    'asset.boss.count: 4',
-    'asset.boss.count: 3',
-  )
+  const patchedMarkdown = originalMarkdown
+    .replace('asset.boss.count: 4', 'asset.boss.count: 3')
+    .replace('version: 1.0.0', 'version: 1.0.1')
+    .replace(
+      'updated_at: 2026-08-12T00:00:00.000Z',
+      'updated_at: 2026-08-12T00:00:00.001Z',
+    )
   if (patchedMarkdown === originalMarkdown)
     throw new Error('issue fixture did not expose the admitted section text')
   await writeFile(
@@ -728,6 +747,14 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     impact,
     factStore: rebuiltFactStore,
   })
+  const targetedResult = admitFoundationSemanticRecheckResult(
+    targeted,
+    { status: 'PASS' },
+    {
+      taskId: `${fixture.revision}.revision.semantic-recheck.0`,
+      issue: admittedIssue,
+    },
+  )
   const patchedDocumentDigests = Object.fromEntries(
     [...patchedDocuments].map(([path, body]) => [path, sha256(body)]),
   ) as Record<FoundationDocumentPath, string>
@@ -749,6 +776,166 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     throw new Error('real targeted deterministic recheck did not pass')
   if (operation.afterDigest === operation.beforeDigest)
     throw new Error('revision operation has a no-op afterDigest')
+
+  const publicationRevision = `${auditFixture.revision}.issue`
+  const publication = await publishFoundationRevision({
+    workspacePath,
+    revision: publicationRevision,
+    confirmedBriefDigest: sha256('issue:brief'),
+    round: 1,
+    batches,
+    receipts: [receipt],
+    revisionDeclarations: [
+      {
+        status: 'APPLIED',
+        changedSectionIds: [...receipt.changedSectionIds],
+      },
+    ],
+    patchOperations: operations,
+    patchValidations: validation.patchValidations,
+    semanticRecheckResults: [targetedResult],
+    resultingIssues: [],
+  })
+  if (
+    !CANONICAL_PATHS.every(
+      path =>
+        publication.documentDigests[path] === patchedDocumentDigests[path],
+    )
+  )
+    throw new Error(
+      'publication document authority diverged from patched bytes',
+    )
+  if (
+    foundationPatchOperationsDigest(publication.patchOperations) !==
+    foundationPatchOperationsDigest(operations)
+  )
+    throw new Error(
+      'publication patch authority diverged from revision operations',
+    )
+  const publishedDerived = postReady.readyState.derived!
+  const publishedRevision = publication.resultingRevision
+  const publishedDerivedRoot = `.beegame/audit/foundation/${publishedRevision}/derived`
+  const revisionTask = {
+    taskId: receipt.taskId,
+    kind: 'document-revision' as const,
+    revision: publication.baseRevision,
+    round: 1,
+    packetPath: authority.packetPath,
+    packetDigest: authority.packetDigest,
+    status: 'completed' as const,
+    attempt: 1,
+    terminalDigest: receipt.terminalDigest,
+    usage: {
+      input_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+    },
+    durationMs: 0,
+    bundleId: 'bundle-1',
+    dispatch: {
+      dispatchId: `${receipt.taskId}.dispatch`,
+      workerType: 'foundation-document-reviser' as const,
+      phase: 'DOCUMENT_REVIEW' as const,
+      taskId: receipt.taskId,
+      revision: publication.baseRevision,
+      status: 'completed' as const,
+      startedAt: PHASE_STARTED_AT,
+      finishedAt: PHASE_STARTED_AT,
+      terminalResult: { receiptDigest: sha256(JSON.stringify(receipt)) },
+    },
+    documentPath: receipt.documentPath,
+    issueIds: [...receipt.issueIds],
+    sectionIds: [...receipt.changedSectionIds],
+    stagedPath: receipt.stagedPath,
+    baseDocumentDigest: receipt.baseDocumentDigest,
+    dependencyDigests: {
+      sourceAuthority: sourceAuthorityDigest,
+      sourceIssueRegistry: sourceIssueRegistryDigest,
+      sourceSectionIndex: sourceDerivedDigests.sectionIndex,
+      sourceFactStore: sourceDerivedDigests.factStore,
+      sourceManifest: sourceDerivedDigests.manifest,
+    },
+    frozen: false,
+    receipt,
+  }
+  const revisionReadyState = parseFoundationAuditState({
+    ...postReady.readyState,
+    status: 'revision_ready',
+    revision: publishedRevision,
+    documentDigests: publication.documentDigests,
+    sectionIndexDigest: publishedDerived.sectionIndexDigest,
+    sectionIndexPath: `${publishedDerivedRoot}/section-index.json`,
+    manifestPath: `${publishedDerivedRoot}/manifest.json`,
+    tasks: [revisionTask],
+    authority: {
+      issueAuthority: {
+        kind: 'publication',
+        baseRevision: publication.baseRevision,
+        authorityDigest: publication.authorityDigest,
+        issueRegistryDigest: publication.resultingIssueRegistryDigest,
+      },
+      derivedDigests: {
+        sectionIndex: publishedDerived.sectionIndexDigest,
+        factStore: publishedDerived.factStoreDigest,
+        manifest: publishedDerived.manifestDigest,
+      },
+      documentDigests: CANONICAL_PATHS.map(path => ({
+        path,
+        digest: publication.documentDigests[path]!,
+      })),
+    },
+    roundBefore: {
+      documentRevision: publication.baseRevision,
+      issueRegistryDigest: sourceIssueRegistryDigest,
+      issueAuthority: {
+        kind: 'review',
+        reviewDigest: sourceAuthorityDigest,
+        issueRegistryDigest: sourceIssueRegistryDigest,
+      },
+    },
+    round: 1,
+    issueSummary: summarizeFoundationIssues(publication.resultingIssues),
+    publication: {
+      preparedPath: publication.preparedPath,
+      journalPath: publication.journalPath,
+      committedPath: publication.committedPath,
+      authorityDigest: publication.authorityDigest,
+      resultingRevision: publication.resultingRevision,
+      resultingIssueRegistryDigest: publication.resultingIssueRegistryDigest,
+    },
+    activeBundleId: 'bundle-1',
+    revisionBundles: [
+      {
+        bundleId: 'bundle-1',
+        status: 'active',
+        round: 1,
+        baseDocumentRevision: publication.baseRevision,
+        baseDocumentDigests: CANONICAL_PATHS.map(path => ({
+          path,
+          digest: auditFixture.documentDigests[path]!,
+        })),
+        remediationDigest: sha256(JSON.stringify(operations)),
+        taskIds: [revisionTask.taskId],
+        frozenTaskIds: [],
+      },
+    ],
+    phaseStartedAt: PHASE_STARTED_AT,
+    derived: {
+      manifestPath: `${publishedDerivedRoot}/manifest.json`,
+      manifestDigest: publishedDerived.manifestDigest,
+      markerPath: `${publishedDerivedRoot}/COMMITTED.json`,
+      markerDigest: publishedDerived.markerDigest,
+      factStorePath: `${publishedDerivedRoot}/fact-store.json`,
+      factStoreDigest: publishedDerived.factStoreDigest,
+      sectionIndexPath: `${publishedDerivedRoot}/section-index.json`,
+      sectionIndexDigest: publishedDerived.sectionIndexDigest,
+    },
+    review: undefined,
+    deterministic: undefined,
+    semantic: undefined,
+  })
   return {
     issueRegistry: issues,
     batches,
@@ -759,7 +946,10 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     patchedFactStore: rebuiltFactStore,
     validation,
     targeted,
+    targetedResult,
     postReady,
+    publication,
+    revisionReadyState,
   }
 }
 
@@ -911,24 +1101,78 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       await writeDocuments(workspacePath, issueDocuments)
       const beforeDocuments = JSON.stringify([...issueDocuments])
       const before = await issuePlan(fixture, workspacePath)
-      const ready = before.postReady.readyState
+      const ready = before.revisionReadyState
+      const activeBundle = ready.revisionBundles?.find(
+        bundle => bundle.bundleId === ready.activeBundleId,
+      )
+      expect(ready.status).toBe('revision_ready')
+      expect(ready.roundBefore?.documentRevision).toBe(
+        before.publication.baseRevision,
+      )
+      expect(activeBundle?.baseDocumentRevision).toBe(
+        before.publication.baseRevision,
+      )
+      const readyDerived = ready.derived
+      if (!readyDerived)
+        throw new Error('revision-ready derived evidence is missing')
+      expect(ready.publication).toEqual({
+        preparedPath: before.publication.preparedPath,
+        journalPath: before.publication.journalPath,
+        committedPath: before.publication.committedPath,
+        authorityDigest: before.publication.authorityDigest,
+        resultingRevision: before.publication.resultingRevision,
+        resultingIssueRegistryDigest:
+          before.publication.resultingIssueRegistryDigest,
+      })
+      expect(readyDerived).toEqual({
+        ...readyDerived,
+        manifestPath: `.beegame/audit/foundation/${before.publication.resultingRevision}/derived/manifest.json`,
+        markerPath: `.beegame/audit/foundation/${before.publication.resultingRevision}/derived/COMMITTED.json`,
+        factStorePath: `.beegame/audit/foundation/${before.publication.resultingRevision}/derived/fact-store.json`,
+        sectionIndexPath: `.beegame/audit/foundation/${before.publication.resultingRevision}/derived/section-index.json`,
+      })
+      expect(readyDerived).toMatchObject({
+        manifestDigest: ready.authority?.derivedDigests.manifest,
+        factStoreDigest: ready.authority?.derivedDigests.factStore,
+        sectionIndexDigest: ready.authority?.derivedDigests.sectionIndex,
+      })
       const readyStateBytes = JSON.stringify(ready)
       const readyDocumentDigests = JSON.stringify(
         before.postReady.readyState.documentDigests,
       )
       const targetedPacketDigest = before.targeted.packetDigest
+      const revisionPacketDigest = before.authority.packetDigest
       const receipt = projectFoundationReadyReceipt({
         state: ready,
         projectId: 'project-issue',
         confirmedBriefDigest: sha256('issue:brief'),
       })
-      parseGameIrCompileRequest({
+      const request = parseGameIrCompileRequest({
         schemaVersion: 'game-ir-compile-request.v1',
         taskId: 'foundation-issue.compile',
         publicationId: 'foundation-issue.publication',
         gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
         foundation: receipt,
       })
+      expect(receipt.authority).toEqual({
+        kind: 'revision_publication',
+        baseRevision: before.publication.baseRevision,
+        authorityDigest: before.publication.authorityDigest,
+        issueRegistryDigest: before.publication.resultingIssueRegistryDigest,
+      })
+      expect(receipt.foundationRevision).toBe(
+        before.publication.resultingRevision,
+      )
+      expect(receipt.documentDigests).toEqual(
+        before.publication.documentDigests as Record<
+          FoundationDocumentPath,
+          string
+        >,
+      )
+      expect(receipt.sectionIndexDigest).toBe(
+        before.revisionReadyState.sectionIndexDigest,
+      )
+      expect(request.foundation).toEqual(receipt)
       expect(JSON.stringify([...issueDocuments])).toBe(beforeDocuments)
       expect(JSON.stringify(ready)).toBe(readyStateBytes)
       expect(JSON.stringify(before.postReady.readyState.documentDigests)).toBe(
@@ -937,11 +1181,13 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       await writeDocuments(secondWorkspacePath, issueDocuments)
       const after = await issuePlan(fixture, secondWorkspacePath)
       expect(after).toEqual(before)
+      expect(after.publication.status).toBe('committed')
       expect(after.authority.packetDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(after.authority.packetDigest).toBe(revisionPacketDigest)
       expect(after.receipt.terminalDigest).toMatch(/^[a-f0-9]{64}$/)
       expect(after.operations).toHaveLength(1)
       expect(after.targeted.packetDigest).toBe(targetedPacketDigest)
-      expect(after.postReady.readyState).toEqual(before.postReady.readyState)
+      expect(after.revisionReadyState).toEqual(before.revisionReadyState)
       expect(
         after.validation.patchValidations.every(item => item.status === 'PASS'),
       ).toBe(true)
