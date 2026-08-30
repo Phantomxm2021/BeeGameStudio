@@ -123,6 +123,10 @@ const DOMAIN_CHECK_IDS: Record<
 const SHA256 = /^[a-f0-9]{64}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const FOUNDATION_DOCUMENTS = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
+const SECTION_EVIDENCE_REASON_CODES: readonly string[] = Object.freeze([
+  'ambiguous-projection',
+  'missing-projection',
+])
 
 function fail(message: string): never {
   throw new Error(`invalid Game IR semantic admission: ${message}`)
@@ -387,9 +391,11 @@ function moduleManifest(moduleId: unknown): GameIrSemanticValidatorModule {
 function sectionBytesEntries(value: unknown): readonly [string, string][] {
   let entries: readonly [string, string][]
   if (value instanceof Map) {
+    if (Object.getPrototypeOf(value) !== Map.prototype)
+      fail('sectionBytes must use the canonical Map prototype')
     if (Reflect.ownKeys(value).length !== 0)
       fail('sectionBytes map has custom properties')
-    entries = [...value.entries()]
+    entries = [...Map.prototype.entries.call(value)]
   } else {
     if (
       !isRecord(value) ||
@@ -793,7 +799,7 @@ export function admitGameIrSemanticValidationResult(
     if (!allowed.has(pointer))
       fail('result evidence pointer is outside owner namespace')
     if (pointer.startsWith('section:')) {
-      if (!/missing|ambiguous/i.test(reasonCode))
+      if (!SECTION_EVIDENCE_REASON_CODES.includes(reasonCode))
         fail(
           'section evidence is only valid for missing or ambiguous projections',
         )

@@ -329,6 +329,25 @@ describe('isolated Game IR semantic projection admission', () => {
     expect(invoked).toBe(false)
   })
 
+  test('rejects Map subclasses without invoking overridden entries accessors', () => {
+    let invoked = false
+    class GetterMap extends Map<string, string> {}
+    Object.defineProperty(GetterMap.prototype, 'entries', {
+      configurable: true,
+      get() {
+        invoked = true
+        throw new Error('entries getter invoked')
+      },
+    })
+    const sectionBytes = new GetterMap(
+      Object.entries(sectionBytesFor('gameplay')),
+    )
+    expect(() =>
+      buildGameIrSemanticValidationPacket(input({ sectionBytes })),
+    ).toThrow(/sectionBytes|map|plain|subclass/i)
+    expect(invoked).toBe(false)
+  })
+
   test('includes every manifest document and rejects extra or missing bytes for a multi-document module', () => {
     const value = buildGameIrSemanticValidationPacket(
       input({ moduleId: 'balance', sectionBytes: sectionBytesFor('balance') }),
@@ -496,14 +515,16 @@ describe('isolated Game IR semantic projection admission', () => {
         evidencePointers: exact,
       })
       expect(admitted.outcome).toBe(outcome)
-      const sectionEvidence = admitGameIrSemanticValidationResult(value, {
-        outcome,
-        packetDigest: value.packetDigest,
-        reasonCode: 'missing-projection',
-        actual: 'required source was not projected',
-        evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
-      })
-      expect(sectionEvidence.outcome).toBe(outcome)
+      for (const reasonCode of ['missing-projection', 'ambiguous-projection']) {
+        const sectionEvidence = admitGameIrSemanticValidationResult(value, {
+          outcome,
+          packetDigest: value.packetDigest,
+          reasonCode,
+          actual: 'required source was not projected',
+          evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
+        })
+        expect(sectionEvidence.outcome).toBe(outcome)
+      }
     }
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
@@ -524,6 +545,20 @@ describe('isolated Game IR semantic projection admission', () => {
           evidencePointers: [`section:docs/GDD.md#core-loop@${sectionDigest}`],
         }),
       ).toThrow(/evidence|owner|bound|missing|ambiguous/i)
+    }
+    for (const reasonCode of [
+      'projection-not-missing',
+      'unambiguous-projection-mismatch',
+    ]) {
+      expect(() =>
+        admitGameIrSemanticValidationResult(value, {
+          outcome: 'FAIL',
+          packetDigest: value.packetDigest,
+          reasonCode,
+          actual: 'section evidence is not allowed for this reason',
+          evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
+        }),
+      ).toThrow(/evidence|missing|ambiguous|reason/i)
     }
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
