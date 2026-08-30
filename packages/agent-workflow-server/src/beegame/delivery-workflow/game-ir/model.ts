@@ -92,8 +92,8 @@ function exactKeys(
   expected: readonly string[],
   label: string,
 ): void {
-  const actual = Object.keys(value).sort(compare)
-  const wanted = [...expected].sort(compare)
+  const actual = Object.keys(value).sort(compareCodeUnits)
+  const wanted = [...expected].sort(compareCodeUnits)
   if (
     actual.length !== wanted.length ||
     actual.some((key, index) => key !== wanted[index])
@@ -101,7 +101,7 @@ function exactKeys(
     fail(`${label} has unknown or missing fields`)
 }
 
-function compare(left: string, right: string): number {
+export function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
 
@@ -249,7 +249,7 @@ function canonicalValue(value: unknown): string {
   }
   if (!isRecord(value)) fail('canonical JSON accepts only JSON values')
   return `{${Object.keys(value)
-    .sort(compare)
+    .sort(compareCodeUnits)
     .map(key => `${JSON.stringify(key)}:${canonicalValue(value[key])}`)
     .join(',')}}`
 }
@@ -405,7 +405,9 @@ function sourceBinding(
       inputPointers.push(input)
     }
     for (let index = 1; index < inputPointers.length; index += 1) {
-      if (compare(inputPointers[index - 1]!, inputPointers[index]!) >= 0)
+      if (
+        compareCodeUnits(inputPointers[index - 1]!, inputPointers[index]!) >= 0
+      )
         fail(
           `derived binding ${pointer} inputPointers must be unique and sorted`,
         )
@@ -642,14 +644,14 @@ function parseModule(
     parseNode(node, moduleId, sections, request),
   )
   for (let index = 1; index < nodes.length; index += 1) {
-    if (compare(nodes[index - 1]!.id, nodes[index]!.id) >= 0)
+    if (compareCodeUnits(nodes[index - 1]!.id, nodes[index]!.id) >= 0)
       fail(`module ${moduleId} node IDs must be unique and sorted`)
   }
   return { moduleId, nodes }
 }
 
 function referenceOrder(left: GameIrReference, right: GameIrReference): number {
-  return compare(
+  return compareCodeUnits(
     `${left.targetId}\0${left.targetType}`,
     `${right.targetId}\0${right.targetType}`,
   )
@@ -659,7 +661,7 @@ function edgeOrder(
   left: GameIrRelationshipEdge,
   right: GameIrRelationshipEdge,
 ): number {
-  return compare(
+  return compareCodeUnits(
     `${left.type}\0${left.targetId}\0${left.targetType}`,
     `${right.type}\0${right.targetId}\0${right.targetType}`,
   )
@@ -707,7 +709,12 @@ export function parseGameIrCandidate(
     parseModule(module, sections, request),
   )
   for (let index = 1; index < modules.length; index += 1) {
-    if (compare(modules[index - 1]!.moduleId, modules[index]!.moduleId) >= 0)
+    if (
+      compareCodeUnits(
+        modules[index - 1]!.moduleId,
+        modules[index]!.moduleId,
+      ) >= 0
+    )
       fail('module IDs must be unique and sorted')
   }
   const nodes = new Map<string, GameIrNode>()

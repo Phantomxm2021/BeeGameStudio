@@ -194,6 +194,16 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                       targetId: `${moduleId}.root`,
                       targetType: 'semantic-node',
                     },
+                    {
+                      type: 'z',
+                      targetId: `${moduleId}.root`,
+                      targetType: 'semantic-node',
+                    },
+                    {
+                      type: 'ä',
+                      targetId: `${moduleId}.root`,
+                      targetType: 'semantic-node',
+                    },
                   ],
                   bindings: {
                     '/id': {
@@ -221,6 +231,20 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                       sectionId,
                       sectionDigest,
                       sourcePointer: `/ir/${moduleId}/extra-${extraId}/requires`,
+                    },
+                    '/edges/2': {
+                      kind: 'owner',
+                      documentPath: 'docs/GDD.md',
+                      sectionId,
+                      sectionDigest,
+                      sourcePointer: `/ir/${moduleId}/extra-${extraId}/z`,
+                    },
+                    '/edges/3': {
+                      kind: 'owner',
+                      documentPath: 'docs/GDD.md',
+                      sectionId,
+                      sectionDigest,
+                      sourcePointer: `/ir/${moduleId}/extra-${extraId}/ä`,
                     },
                   },
                 }
@@ -347,18 +371,19 @@ describe('atomic Game IR publication and recovery', () => {
     expect(ready.committedPath).toBe(
       gameIrCommittedPath(value.compileRequest.foundation.foundationRevision),
     )
-    const dependencyGraph = JSON.parse(
-      await readFile(
-        join(
-          value.workspacePath,
-          ready.committedPath.replace(
-            /COMMITTED\.json$/,
-            'dependency-graph.json',
-          ),
+    const dependencyGraphBytes = await readFile(
+      join(
+        value.workspacePath,
+        ready.committedPath.replace(
+          /COMMITTED\.json$/,
+          'dependency-graph.json',
         ),
-        'utf8',
       ),
-    ) as { edges: readonly Record<string, unknown>[] }
+      'utf8',
+    )
+    const dependencyGraph = JSON.parse(dependencyGraphBytes) as {
+      edges: readonly Record<string, unknown>[]
+    }
     expect(dependencyGraph.edges.some(edge => edge.type === 'requires')).toBe(
       true,
     )
@@ -368,7 +393,13 @@ describe('atomic Game IR publication and recovery', () => {
           .filter(edge => edge.kind === 'relationship')
           .map(edge => edge.type),
       ),
-    ).toEqual(new Set(['blocks', 'requires']))
+    ).toEqual(new Set(['blocks', 'requires', 'z', 'ä']))
+    const firstRelationshipTypes = dependencyGraph.edges
+      .filter(edge => edge.kind === 'relationship')
+      .slice(0, 4)
+      .map(edge => edge.type)
+    expect(firstRelationshipTypes).toEqual(['blocks', 'requires', 'z', 'ä'])
+    expect(ready.dependencyGraphDigest).toBe(shaBytes(dependencyGraphBytes))
     await expect(validateCommittedGameIr(value)).resolves.toEqual(ready)
   })
 
@@ -411,19 +442,23 @@ describe('atomic Game IR publication and recovery', () => {
         admissions: Object.freeze([stale, ...value.admissions.slice(1)]),
       }),
     ).rejects.toThrow(/packet|revision|immutable/i)
-    const ambiguous = Object.freeze({
-      ...value.admissions[0]!,
-      result: Object.freeze({
+    const ambiguousResult = admitGameIrSemanticValidationResult(
+      value.admissions[0]!.packet,
+      {
         outcome: 'AMBIGUOUS',
         packetDigest: value.admissions[0]!.packet.packetDigest,
         reasonCode: 'ambiguous-projection',
         actual: 'uncertain',
-        missingSubject: '/value/ambiguous',
+        missingSubject: 'node:balance.root#/value/ambiguous',
         expectedProjection: 'the canonical projection',
         evidencePointers: Object.freeze([
           value.admissions[0]!.packet.allowedEvidencePointers[0]!,
         ]),
-      }) as GameIrSemanticValidationResult,
+      },
+    )
+    const ambiguous = Object.freeze({
+      ...value.admissions[0]!,
+      result: ambiguousResult,
     })
     await expect(
       prepareGameIrPublication({

@@ -24,6 +24,7 @@ import {
 } from './contracts'
 import {
   canonicalGameIrJson,
+  compareCodeUnits,
   digestGameIrValue,
   parseGameIrCandidate,
   type GameIrCandidate,
@@ -405,7 +406,7 @@ function graph(candidate: GameIrCandidate): Record<string, unknown> {
       })),
     ]),
   )
-  edges.sort((a, b) => canonical(a).localeCompare(canonical(b)))
+  edges.sort((a, b) => compareCodeUnits(canonical(a), canonical(b)))
   return {
     schemaVersion: 'game-ir-dependency-graph.v1',
     foundationRevision: candidate.foundationRevision,
