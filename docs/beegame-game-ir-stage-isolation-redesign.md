@@ -333,7 +333,7 @@ Compiler 是唯一 candidate writer，Validator 是只读 admission，因此二�
 
 Publication 的唯一输入是外部可重建的 `GameIrPublicationAuthority`：compile request、完整 candidate、receipt-bound Section Index，以及七个 canonical module 各自的真实 semantic packet 与 admitted PASS result。Publisher 必须重新执行 candidate 与 semantic admission；不能接受 digest-only PASS、detached module、字段 alias 或 caller 自报的 task/revision。
 
-服务端从该 authority 纯函数重建 module、source map、dependency graph、manifest、semantic evidence 与 COMMITTED marker 的全部 canonical bytes。Journal 只记录预期 authority/digest，不构成新的 authority；recovery 与 committed validation 必须重新接收外部 authority 并逐字节比较重建结果，不能让 journal、staging 或 final artifacts 循环自证。
+服务端从该 authority 纯函数重建 module、source map、dependency graph、manifest、semantic evidence 与 COMMITTED marker 的全部 canonical bytes。Journal 只记录预期 authority/digest，不构成新的 authority；recovery 与 committed validation 必须重新接收外部 authority 并逐字节比较重建结果，不能让 journal、staging 或 final artifacts 循环自证。Publication ID 不得复用，PREPARED journal 在 READY 后作为 immutable audit evidence 保留，不执行存在 check/unlink 竞态的事后删除。
 
 最终 revision 目录使用完整目录原子切换：先写 PREPARED journal，在私有 staging 中补齐并验证全部文件，最后写 staging/COMMITTED.json，再把整个非空 staging 目录原子 rename 到此前不存在的 final revision 路径。不得逐文件写入或覆盖可见 final 目录。并发赢家只有在 exact external authority 校验一致时才可作为幂等成功；否则 fail closed。
 

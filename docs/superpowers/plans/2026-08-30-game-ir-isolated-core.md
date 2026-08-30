@@ -537,8 +537,9 @@ Test:
 - fake digest-only PASS, mixed/stale packet, detached/empty/invalid candidate,
   missing module and semantic module without real PASS admission cannot publish;
 - failed staging is never exposed as READY;
-- successful recovery and marker-before-cleanup replay remove staging and
-  journal;
+- successful recovery and marker-before-cleanup replay remove shared staging;
+  the PREPARED journal is immutable audit evidence and remains bound to its
+  never-reused publication ID after READY;
 - traversal, pre-existing symlink components and concurrent same-revision
   publishers cannot write outside the root or produce mixed final bytes;
 - journal and staging files use temp-write/fsync/rename (or an equivalent
