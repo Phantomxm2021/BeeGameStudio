@@ -58,3 +58,17 @@ diff-check concerns remain.
   string-literal fixtures produce no violations.
 - Formatted the two Phase 4-owned domain projection files and reran the exact
   required directory Biome command successfully.
+
+## Fix round 2 evidence
+
+- Updated the Stage Isolation redesign test-strategy paragraph to state that
+  Gameplay and Balance isolated projections and their producer/assembler gates
+  are implemented and verified. It now defers complete seven-module candidate
+  parity and publication until the remaining Phase 5–9 domain modules land.
+- Scanned both Phase 4 design documents for equivalent stale “producer not
+  implemented” or “candidate parity starts after Gameplay/Balance” claims; no
+  contradictions remain. Phase 4 remains pending independent final re-review,
+  and Phase 5–9, production routing, complete publication, and Chrome remain
+  unavailable.
+- `./node_modules/.bin/biome check docs/beegame-game-ir-stage-isolation-redesign.md docs/superpowers/specs/2026-08-31-game-ir-gameplay-balance-design.md packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir` — passed (exit 0; 26 files checked).
+- `git diff --check` — passed.
