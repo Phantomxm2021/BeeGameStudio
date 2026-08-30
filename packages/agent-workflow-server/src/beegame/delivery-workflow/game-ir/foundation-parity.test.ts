@@ -16,6 +16,11 @@ import {
   type SectionRef,
 } from '../foundation-section-index'
 import {
+  loadCommittedFoundationDerivedArtifacts,
+  publishFoundationDerivedArtifacts,
+} from '../foundation-audit-artifacts'
+import { digestFactStore } from '../foundation-fact-store'
+import {
   buildFoundationFactPackets,
   extractNormalizedFoundationFacts,
   mergeFoundationFactResults,
@@ -35,11 +40,19 @@ import {
   createFoundationRevisionStage,
   deriveFoundationPatchOperations,
   foundationPatchOperationsDigest,
+  foundationRevisionPacketDigest,
+  loadFoundationRevisionPacket,
+  loadFoundationRevisionSemanticPacket,
+  loadFoundationRevisionSemanticResult,
   revisionTaskReceiptTerminalDigest,
+  writeFoundationRevisionPacket,
+  writeFoundationRevisionSemanticPacket,
+  writeFoundationRevisionSemanticResult,
 } from '../foundation-revision-stage'
 import {
   buildFoundationSemanticRecheckPacket,
   admitFoundationSemanticRecheckResult,
+  digestFoundationSemanticRecheckResult,
   rebuildFoundationImpactedFacts,
   validateFoundationPatch,
 } from '../foundation-patch-validation'
@@ -594,23 +607,43 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     },
   })
   const batch = batches[0]!
-  const sourceIssueRegistryDigest = sha256(JSON.stringify(issues))
-  const sourceAuthorityDigest = sha256(
-    `${auditFixture.revision}:review:${sourceIssueRegistryDigest}`,
-  )
+  const preRevisionPlan = foundationPlan(auditFixture)
+  const preRevisionReview = preRevisionPlan.readyState.review
+  if (!preRevisionReview)
+    throw new Error('pre-revision Foundation review authority is missing')
+  const sourceAuthorityDigest = preRevisionReview.reviewDigest
+  const sourceIssueRegistryDigest = preRevisionReview.issueRegistryDigest
+  await publishFoundationDerivedArtifacts({
+    workspacePath,
+    revision: auditFixture.revision,
+    documentDigests: CANONICAL_PATHS.map(path => ({
+      path,
+      digest: auditFixture.documentDigests[path]!,
+    })),
+    sectionIndex,
+    factStore: fact.factStore,
+    normalizedFactDigest: digestFactStore(fact.factStore),
+    manifest: {},
+  })
+  const preRevisionDerived = await loadCommittedFoundationDerivedArtifacts({
+    workspacePath,
+    revision: auditFixture.revision,
+  })
+  if (!preRevisionDerived)
+    throw new Error('pre-revision derived authority was not committed')
   const authority = await buildFoundationRevisionAuthority({
     workspacePath,
-    revision: `${auditFixture.revision}.issue`,
+    revision: auditFixture.revision,
     taskId: `${fixture.revision}.revision.0`,
     round: 1,
     batch,
     issues,
-    sourceAuthorityDigest,
-    sourceIssueRegistryDigest,
+    sourceAuthorityDigest: preRevisionReview.reviewDigest,
+    sourceIssueRegistryDigest: preRevisionReview.issueRegistryDigest,
     sourceDerivedDigests: {
-      sectionIndex: digestSectionIndex(sectionIndex),
-      factStore: sha256(JSON.stringify(fact.factStore)),
-      manifest: sha256(`${auditFixture.revision}:manifest`),
+      sectionIndex: preRevisionDerived.digests.sectionIndex,
+      factStore: preRevisionDerived.digests.factStore,
+      manifest: preRevisionDerived.digests.manifest,
     },
     sourceDocumentDigests: CANONICAL_PATHS.map(path => ({
       path,
@@ -627,6 +660,28 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
       }
     }
   ).sourceDerivedDigests
+  const revisionPacketPath = await writeFoundationRevisionPacket({
+    workspacePath,
+    revision: auditFixture.revision,
+    round: 1,
+    taskId: `${fixture.revision}.revision.0`,
+    documentPath: batch.documentPath,
+    packet: authority.packet,
+    packetDigest: authority.packetDigest,
+  })
+  const persistedRevisionPacket = await loadFoundationRevisionPacket({
+    workspacePath,
+    revision: auditFixture.revision,
+    round: 1,
+    taskId: `${fixture.revision}.revision.0`,
+    documentPath: batch.documentPath,
+    packetDigest: authority.packetDigest,
+  })
+  if (
+    foundationRevisionPacketDigest(persistedRevisionPacket) !==
+    authority.packetDigest
+  )
+    throw new Error('revision packet artifact identity is stale')
   const changed = sectionIndex.find(
     section =>
       section.documentPath === batch.documentPath &&
@@ -636,7 +691,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     throw new Error('production issue batch has no authorized section')
   const stage = await createFoundationRevisionStage({
     workspacePath,
-    revision: `${auditFixture.revision}.issue`,
+    revision: auditFixture.revision,
     documentPath: batch.documentPath,
     expectedBaseDocumentDigest: authority.baseDocumentDigest,
   })
@@ -675,7 +730,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
   }
   const operations = await deriveFoundationPatchOperations({
     workspacePath,
-    revision: `${fixture.revision}.issue`,
+    revision: auditFixture.revision,
     taskId: receipt.taskId,
     batch,
     issues,
@@ -695,7 +750,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     documents: patchedDocuments,
     sectionIndex: patchedSectionIndex,
     impact: analyzeFoundationImpact(operations),
-    revision: `${auditFixture.revision}.issue`,
+    revision: auditFixture.revision,
   })
   const rebuiltFactStore = fact.factStore.map(
     item =>
@@ -747,14 +802,50 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     impact,
     factStore: rebuiltFactStore,
   })
-  const targetedResult = admitFoundationSemanticRecheckResult(
-    targeted,
+  const publicationRevision = auditFixture.revision
+  const semanticTaskId = `${fixture.revision}.revision.semantic-recheck.0`
+  const semanticPacketPath = await writeFoundationRevisionSemanticPacket({
+    workspacePath,
+    revision: publicationRevision,
+    round: 1,
+    taskId: semanticTaskId,
+    packet: targeted,
+  })
+  const persistedSemanticPacket = (await loadFoundationRevisionSemanticPacket({
+    workspacePath,
+    revision: publicationRevision,
+    round: 1,
+    taskId: semanticTaskId,
+    packetDigest: targeted.packetDigest,
+  })) as unknown as typeof targeted
+  const admittedSemanticResult = admitFoundationSemanticRecheckResult(
+    persistedSemanticPacket,
     { status: 'PASS' },
-    {
-      taskId: `${fixture.revision}.revision.semantic-recheck.0`,
-      issue: admittedIssue,
-    },
+    { taskId: semanticTaskId, issue: admittedIssue },
   )
+  const semanticResultDigest = digestFoundationSemanticRecheckResult(
+    admittedSemanticResult,
+  )
+  const semanticResultPath = await writeFoundationRevisionSemanticResult({
+    workspacePath,
+    revision: publicationRevision,
+    round: 1,
+    taskId: semanticTaskId,
+    issueId: admittedIssue.id,
+    packetDigest: targeted.packetDigest,
+    result: admittedSemanticResult,
+    resultDigest: semanticResultDigest,
+  })
+  const persistedSemanticResult = await loadFoundationRevisionSemanticResult({
+    workspacePath,
+    revision: publicationRevision,
+    round: 1,
+    taskId: semanticTaskId,
+    issueId: admittedIssue.id,
+    packetDigest: targeted.packetDigest,
+    resultDigest: semanticResultDigest,
+    resultPath: semanticResultPath,
+  })
   const patchedDocumentDigests = Object.fromEntries(
     [...patchedDocuments].map(([path, body]) => [path, sha256(body)]),
   ) as Record<FoundationDocumentPath, string>
@@ -777,7 +868,6 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
   if (operation.afterDigest === operation.beforeDigest)
     throw new Error('revision operation has a no-op afterDigest')
 
-  const publicationRevision = `${auditFixture.revision}.issue`
   const publication = await publishFoundationRevision({
     workspacePath,
     revision: publicationRevision,
@@ -793,7 +883,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     ],
     patchOperations: operations,
     patchValidations: validation.patchValidations,
-    semanticRecheckResults: [targetedResult],
+    semanticRecheckResults: [persistedSemanticResult],
     resultingIssues: [],
   })
   if (
@@ -812,15 +902,43 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     throw new Error(
       'publication patch authority diverged from revision operations',
     )
-  const publishedDerived = postReady.readyState.derived!
   const publishedRevision = publication.resultingRevision
+  const resultingDocuments = new Map(
+    await Promise.all(
+      CANONICAL_PATHS.map(
+        async path =>
+          [path, await readFile(join(workspacePath, path), 'utf8')] as const,
+      ),
+    ),
+  )
+  const resultingSectionIndex = buildFoundationSectionIndex({
+    documents: resultingDocuments,
+  })
+  await publishFoundationDerivedArtifacts({
+    workspacePath,
+    revision: publishedRevision,
+    documentDigests: CANONICAL_PATHS.map(path => ({
+      path,
+      digest: publication.documentDigests[path]!,
+    })),
+    sectionIndex: resultingSectionIndex,
+    factStore: rebuiltFactStore,
+    normalizedFactDigest: digestFactStore(rebuiltFactStore),
+    manifest: {},
+  })
+  const publishedDerived = await loadCommittedFoundationDerivedArtifacts({
+    workspacePath,
+    revision: publishedRevision,
+  })
+  if (!publishedDerived)
+    throw new Error('resulting derived authority was not committed')
   const publishedDerivedRoot = `.beegame/audit/foundation/${publishedRevision}/derived`
   const revisionTask = {
     taskId: receipt.taskId,
     kind: 'document-revision' as const,
     revision: publication.baseRevision,
     round: 1,
-    packetPath: authority.packetPath,
+    packetPath: revisionPacketPath,
     packetDigest: authority.packetDigest,
     status: 'completed' as const,
     attempt: 1,
@@ -860,15 +978,51 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     frozen: false,
     receipt,
   }
+  const semanticTask = {
+    taskId: semanticTaskId,
+    kind: 'semantic-recheck' as const,
+    revision: publication.baseRevision,
+    round: 1,
+    packetPath: semanticPacketPath,
+    packetDigest: targeted.packetDigest,
+    status: 'completed' as const,
+    attempt: 1,
+    terminalDigest: semanticResultDigest,
+    usage: {
+      input_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+    },
+    durationMs: 0,
+    resultPath: semanticResultPath,
+    resultDigest: semanticResultDigest,
+    bundleId: 'bundle-1',
+    issueId: admittedIssue.id,
+    issue: admittedIssue,
+    modelTier: 'strong' as const,
+    dispatch: {
+      dispatchId: `${semanticTaskId}.dispatch`,
+      workerType: 'foundation-semantic-reviewer' as const,
+      phase: 'DOCUMENT_REVIEW' as const,
+      taskId: semanticTaskId,
+      revision: publication.baseRevision,
+      status: 'completed' as const,
+      startedAt: PHASE_STARTED_AT,
+      finishedAt: PHASE_STARTED_AT,
+      terminalResult: persistedSemanticResult,
+    },
+  }
   const revisionReadyState = parseFoundationAuditState({
     ...postReady.readyState,
     status: 'revision_ready',
     revision: publishedRevision,
     documentDigests: publication.documentDigests,
-    sectionIndexDigest: publishedDerived.sectionIndexDigest,
+    sectionIndexDigest: publishedDerived.digests.sectionIndex,
     sectionIndexPath: `${publishedDerivedRoot}/section-index.json`,
     manifestPath: `${publishedDerivedRoot}/manifest.json`,
-    tasks: [revisionTask],
+    tasks: [revisionTask, semanticTask],
     authority: {
       issueAuthority: {
         kind: 'publication',
@@ -877,9 +1031,9 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
         issueRegistryDigest: publication.resultingIssueRegistryDigest,
       },
       derivedDigests: {
-        sectionIndex: publishedDerived.sectionIndexDigest,
-        factStore: publishedDerived.factStoreDigest,
-        manifest: publishedDerived.manifestDigest,
+        sectionIndex: publishedDerived.digests.sectionIndex,
+        factStore: publishedDerived.digests.factStore,
+        manifest: publishedDerived.digests.manifest,
       },
       documentDigests: CANONICAL_PATHS.map(path => ({
         path,
@@ -917,20 +1071,20 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
           digest: auditFixture.documentDigests[path]!,
         })),
         remediationDigest: sha256(JSON.stringify(operations)),
-        taskIds: [revisionTask.taskId],
+        taskIds: [revisionTask.taskId, semanticTask.taskId],
         frozenTaskIds: [],
       },
     ],
     phaseStartedAt: PHASE_STARTED_AT,
     derived: {
       manifestPath: `${publishedDerivedRoot}/manifest.json`,
-      manifestDigest: publishedDerived.manifestDigest,
+      manifestDigest: publishedDerived.digests.manifest,
       markerPath: `${publishedDerivedRoot}/COMMITTED.json`,
-      markerDigest: publishedDerived.markerDigest,
+      markerDigest: publishedDerived.digests.marker,
       factStorePath: `${publishedDerivedRoot}/fact-store.json`,
-      factStoreDigest: publishedDerived.factStoreDigest,
+      factStoreDigest: publishedDerived.digests.factStore,
       sectionIndexPath: `${publishedDerivedRoot}/section-index.json`,
-      sectionIndexDigest: publishedDerived.sectionIndexDigest,
+      sectionIndexDigest: publishedDerived.digests.sectionIndex,
     },
     review: undefined,
     deterministic: undefined,
@@ -946,9 +1100,16 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     patchedFactStore: rebuiltFactStore,
     validation,
     targeted,
-    targetedResult,
+    persistedSemanticResult,
+    persistedSemanticPacket,
     postReady,
     publication,
+    resultingDerived: {
+      documentDigests: publishedDerived.documentDigests,
+      sectionIndex: publishedDerived.sectionIndex,
+      factStore: publishedDerived.factStore,
+      digests: publishedDerived.digests,
+    },
     revisionReadyState,
   }
 }
@@ -1101,6 +1262,8 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       await writeDocuments(workspacePath, issueDocuments)
       const beforeDocuments = JSON.stringify([...issueDocuments])
       const before = await issuePlan(fixture, workspacePath)
+      expect(before.persistedSemanticResult.status).toBe('PASS')
+      expect(before.resultingDerived.digests.marker).toMatch(/^[a-f0-9]{64}$/)
       const ready = before.revisionReadyState
       const activeBundle = ready.revisionBundles?.find(
         bundle => bundle.bundleId === ready.activeBundleId,
