@@ -64,11 +64,24 @@ diff-check concerns remain.
 - Updated the Stage Isolation redesign test-strategy paragraph to state that
   Gameplay and Balance isolated projections and their producer/assembler gates
   are implemented and verified. It now defers complete seven-module candidate
-  parity and publication until the remaining Phase 5–9 domain modules land.
+  parity and publication until the remaining Phase 5–7 domain modules land;
+  Phases 8–9 are consumer migration and real acceptance.
 - Scanned both Phase 4 design documents for equivalent stale “producer not
   implemented” or “candidate parity starts after Gameplay/Balance” claims; no
   contradictions remain. Phase 4 remains pending independent final re-review,
   and Phase 5–9, production routing, complete publication, and Chrome remain
   unavailable.
 - `./node_modules/.bin/biome check docs/beegame-game-ir-stage-isolation-redesign.md docs/superpowers/specs/2026-08-31-game-ir-gameplay-balance-design.md packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir` — passed (exit 0; 26 files checked).
+- `git diff --check` — passed.
+
+## Fix round 3 evidence
+
+- Corrected the roadmap attribution in the Stage Isolation redesign and this
+  report: remaining domain-module implementation is Phases 5–7; Phase 8 is
+  consumer migration and Phase 9 is real acceptance. All Phases 5–9 remain
+  unstarted, and complete publication, production routing, and Chrome remain
+  unavailable.
+- Scanned both Phase 4 design documents for the inaccurate “Phase 5–9 domain
+  modules” attribution; no equivalent stale phrase remains.
+- `./node_modules/.bin/biome check docs/beegame-game-ir-stage-isolation-redesign.md docs/superpowers/specs/2026-08-31-game-ir-gameplay-balance-design.md packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir` — passed (exit 0).
 - `git diff --check` — passed.
