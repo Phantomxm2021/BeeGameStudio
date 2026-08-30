@@ -30,3 +30,23 @@
 ## Concerns
 
 None.
+
+## Review fix round 1
+
+- Corrected the authority-mutant test to omit `receiptDigest` before recomputing the canonical digest, so the strict mutually exclusive union is the exercised failure.
+- Corrected missing/extra canonical document digest mutants the same way, ensuring keyset validation is not masked by an unrelated stale receipt digest.
+- Added fresh strict-schema negatives for unknown fields at the compile-request root, defect-report root, and defect-report target object.
+- Added root `Object.isFrozen` assertions for `GameIrCompileRequest`, `FoundationDefectReport`, and `GameIrReadyReceipt`.
+
+## Review-fix verification
+
+- `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts` — PASS (11 tests, 96 expectations, 0 failures).
+- `bunx tsc --noEmit -p packages/agent-workflow-server/tsconfig.json` — PASS.
+- `node_modules/.bin/biome check packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts` — PASS.
+- `git diff --check` — PASS.
+
+## Review-fix self-review
+
+- Every mutated Foundation receipt used to test authority/document-key strictness now carries a digest computed from the exact mutated payload with only `receiptDigest` omitted.
+- The new unknown-field cases exercise their intended strict object level without relying on receipt digest behavior.
+- Production contract implementation was not changed in this fix round.

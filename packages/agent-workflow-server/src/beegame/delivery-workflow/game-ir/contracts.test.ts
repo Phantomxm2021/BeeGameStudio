@@ -29,6 +29,15 @@ function sha256(value: unknown): string {
   return createHash('sha256').update(canonical(value)).digest('hex')
 }
 
+function withCanonicalReceiptDigest(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const withoutReceiptDigest = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== 'receiptDigest'),
+  )
+  return { ...value, receiptDigest: sha256(withoutReceiptDigest) }
+}
+
 function withReceiptDigest(
   receipt: Omit<FoundationReadyReceipt, 'receiptDigest'>,
 ): FoundationReadyReceipt {
@@ -130,11 +139,14 @@ describe('isolated Game IR contracts', () => {
     expect(Object.isFrozen(foundation.documentDigests)).toBe(true)
     expect(Object.isFrozen(foundation.authority)).toBe(true)
     expect(Object.isFrozen(compile.foundation)).toBe(true)
+    expect(Object.isFrozen(compile)).toBe(true)
     expect(Object.isFrozen(defect.source)).toBe(true)
     expect(Object.isFrozen(defect.target)).toBe(true)
     expect(Object.isFrozen(defect.sourceBindingPointers)).toBe(true)
+    expect(Object.isFrozen(defect)).toBe(true)
     expect(Object.isFrozen(ready.moduleDigests)).toBe(true)
     expect(Object.isFrozen(ready.sourceMapDigests)).toBe(true)
+    expect(Object.isFrozen(ready)).toBe(true)
   })
 
   test('uses an exclusive revision-publication authority variant', () => {
@@ -150,16 +162,8 @@ describe('isolated Game IR contracts', () => {
       'revision_publication',
     )
     expect(() =>
-      parseFoundationReadyReceipt({
-        ...receipt,
-        authority: {
-          kind: 'review',
-          reviewDigest: digest,
-          issueRegistryDigest: digest,
-          baseRevision: 'foundation-revision-0',
-          authorityDigest: digest,
-        },
-        receiptDigest: sha256({
+      parseFoundationReadyReceipt(
+        withCanonicalReceiptDigest({
           ...receipt,
           authority: {
             kind: 'review',
@@ -169,37 +173,53 @@ describe('isolated Game IR contracts', () => {
             authorityDigest: digest,
           },
         }),
-      }),
+      ),
     ).toThrow()
   })
 
   test('rejects unknown and missing fields in strict schemas', () => {
     expect(() =>
-      parseFoundationReadyReceipt({ ...validFoundation, extra: true }),
+      parseFoundationReadyReceipt(
+        withCanonicalReceiptDigest({ ...validFoundation, extra: true }),
+      ),
     ).toThrow()
     expect(() =>
-      parseFoundationReadyReceipt({
-        ...validFoundation,
-        documentDigests: Object.fromEntries(
-          CANONICAL_FOUNDATION_DOCUMENTS.slice(1).map(path => [path, digest]),
-        ),
-        receiptDigest: digest,
-      }),
+      parseFoundationReadyReceipt(
+        withCanonicalReceiptDigest({
+          ...validFoundation,
+          documentDigests: Object.fromEntries(
+            CANONICAL_FOUNDATION_DOCUMENTS.slice(1).map(path => [path, digest]),
+          ),
+        }),
+      ),
     ).toThrow()
     expect(() =>
-      parseFoundationReadyReceipt({
-        ...validFoundation,
-        documentDigests: {
-          ...validFoundation.documentDigests,
-          'docs/UNKNOWN.md': digest,
-        },
-        receiptDigest: digest,
-      }),
+      parseFoundationReadyReceipt(
+        withCanonicalReceiptDigest({
+          ...validFoundation,
+          documentDigests: {
+            ...validFoundation.documentDigests,
+            'docs/UNKNOWN.md': digest,
+          },
+        }),
+      ),
+    ).toThrow()
+    expect(() =>
+      parseGameIrCompileRequest({ ...compileRequest(), extra: true }),
     ).toThrow()
     expect(() =>
       parseFoundationDefectReport({
         ...defectReport(),
         source: { ...defectReport().source, extra: true },
+      }),
+    ).toThrow()
+    expect(() =>
+      parseFoundationDefectReport({ ...defectReport(), extra: true }),
+    ).toThrow()
+    expect(() =>
+      parseFoundationDefectReport({
+        ...defectReport(),
+        target: { ...defectReport().target, extra: true },
       }),
     ).toThrow()
     expect(() =>
