@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import * as ts from 'typescript'
 import { describe, expect, test } from 'bun:test'
 import { createDeliveryWorkflowController } from '../controller'
 import { createInitialDeliveryRun } from '../run-store'
@@ -50,6 +49,12 @@ import type {
 } from '../types'
 import { GAME_IR_SCHEMA_VERSION, parseGameIrCompileRequest } from './contracts'
 import { projectFoundationReadyReceipt } from './foundation-ready-adapter'
+import {
+  boundaryViolations,
+  FOUNDATION_PROTECTED_FILES,
+  readProductionSourceFiles,
+  standaloneProductionViolations,
+} from './stage-boundary-test-helpers'
 
 const ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -57,13 +62,6 @@ const ROOT = resolve(
 )
 const BASELINE = '70df2e2c'
 const PHASE_STARTED_AT = '2026-08-24T00:00:00.000Z'
-const PROTECTED_FILES = [
-  'packages/agent-workflow-server/src/beegame/delivery-workflow/types.ts',
-  'packages/agent-workflow-server/src/beegame/delivery-workflow/schema.ts',
-  'packages/agent-workflow-server/src/beegame/delivery-workflow/controller.ts',
-  'packages/agent-workflow-server/src/beegame/delivery-workflow/transition.ts',
-  'packages/agent-workflow-server/src/beegame/delivery-workflow/recovery.ts',
-] as const
 const WORKER_KEY: FoundationFactKey = 'game.win_conditions'
 const VALUES: Record<FoundationFactKey, string> = {
   'game.players.max': '4',
@@ -765,88 +763,9 @@ async function controllerIssuePlan(fixture: Fixture, workspacePath: string) {
   }
 }
 
-function productionSources(): string[] {
-  const root = resolve(
-    ROOT,
-    'packages/agent-workflow-server/src/beegame/delivery-workflow',
-  )
-  const paths: string[] = []
-  const visit = (directory: string) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (entry.name === 'game-ir' || entry.name.endsWith('.test.ts')) continue
-      const path = join(directory, entry.name)
-      if (entry.isDirectory()) visit(path)
-      else if (entry.name.endsWith('.ts')) paths.push(path)
-    }
-  }
-  visit(root)
-  return paths.sort()
-}
-
-function forbiddenSyntax(source: string): string[] {
-  const file = ts.createSourceFile(
-    'synthetic.ts',
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  )
-  const violations: string[] = []
-  const gameIrModule = (value: string) => /(?:^|\/)game-ir(?:\/|$)/.test(value)
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      gameIrModule(node.moduleSpecifier.text)
-    )
-      violations.push(`import:${node.moduleSpecifier.text}`)
-    else if (
-      ts.isExportDeclaration(node) &&
-      node.moduleSpecifier &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      gameIrModule(node.moduleSpecifier.text)
-    )
-      violations.push(`export:${node.moduleSpecifier.text}`)
-    else if (
-      ts.isImportEqualsDeclaration(node) &&
-      ts.isExternalModuleReference(node.moduleReference) &&
-      ts.isStringLiteral(node.moduleReference.expression) &&
-      gameIrModule(node.moduleReference.expression.text)
-    )
-      violations.push(`import-equals:${node.moduleReference.expression.text}`)
-    else if (
-      ts.isCallExpression(node) &&
-      node.arguments.length === 1 &&
-      ts.isStringLiteral(node.arguments[0])
-    ) {
-      if (
-        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-        gameIrModule(node.arguments[0].text)
-      )
-        violations.push(`dynamic-import:${node.arguments[0].text}`)
-      if (
-        ts.isIdentifier(node.expression) &&
-        node.expression.text === 'require' &&
-        gameIrModule(node.arguments[0].text)
-      )
-        violations.push(`require:${node.arguments[0].text}`)
-    }
-    if (
-      ts.isIdentifier(node) &&
-      (/^(?:GameIr|gameIr)[A-Za-z0-9_]*$/.test(node.text) ||
-        /^GAME_IR[A-Za-z0-9_]*$/.test(node.text) ||
-        /(?:enable|switch).*gameir|gameir.*(?:enable|switch)/i.test(node.text))
-    )
-      violations.push(`identifier:${node.text}`)
-    ts.forEachChild(node, visit)
-  }
-  visit(file)
-  return violations
-}
-
 describe('Foundation parity against stable baseline 70df2e2c', () => {
   test('uses a repository-root baseline and protects Stage 3/4 bytes', () => {
-    for (const path of PROTECTED_FILES) {
+    for (const path of FOUNDATION_PROTECTED_FILES) {
       const baseline = Bun.spawnSync([
         'git',
         '-C',
@@ -1085,47 +1004,49 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
     }
   })
 
-  test('AST boundary scan catches real imports/routes but ignores comments and strings', () => {
+  test('AST boundary scan catches real imports/routes but ignores comments and strings', async () => {
     expect(
-      forbiddenSyntax(
+      boundaryViolations(
         "import { x } from './game-ir/model'; const state = GAME_IR_COMPILATION; const old = gameIrState",
       ),
     ).toEqual([
-      'import:./game-ir/model',
-      'identifier:GAME_IR_COMPILATION',
-      'identifier:gameIrState',
+      'import: ./game-ir/model',
+      'identifier: GAME_IR_COMPILATION',
+      'identifier: gameIrState',
     ])
-    expect(forbiddenSyntax("void import('./game-ir/publication')")).toEqual([
-      'dynamic-import:./game-ir/publication',
+    expect(boundaryViolations("void import('./game-ir/publication')")).toEqual([
+      'dynamic-import: ./game-ir/publication',
     ])
     expect(
-      forbiddenSyntax(
+      boundaryViolations(
         "export { x } from './game-ir/model'; import x = require('./game-ir/model'); const y = require('./game-ir/model')",
       ),
     ).toEqual([
-      'export:./game-ir/model',
-      'import-equals:./game-ir/model',
-      'require:./game-ir/model',
+      'export: ./game-ir/model',
+      'import-equals: ./game-ir/model',
+      'require: ./game-ir/model',
     ])
     expect(
-      forbiddenSyntax(
+      boundaryViolations(
         "// import './game-ir/model'\nconst text = 'GAME_IR_COMPILATION gameIrState'; /* import('./game-ir') */",
       ),
     ).toEqual([])
     expect(
-      forbiddenSyntax(
+      boundaryViolations(
         'const object = { GameIrState: "x" }; const value = object.GameIrState; const run = { gameIrState: value }; const config = { enableGameIr: true }',
       ),
     ).toEqual([
-      'identifier:GameIrState',
-      'identifier:GameIrState',
-      'identifier:gameIrState',
-      'identifier:enableGameIr',
+      'identifier: GameIrState',
+      'identifier: GameIrState',
+      'identifier: gameIrState',
+      'identifier: enableGameIr',
     ])
-    const violations = productionSources().flatMap(path =>
-      forbiddenSyntax(readFileSync(path, 'utf8')).map(
-        item => `${path}:${item}`,
-      ),
+    const deliveryWorkflowRoot = resolve(
+      ROOT,
+      'packages/agent-workflow-server/src/beegame/delivery-workflow',
+    )
+    const violations = standaloneProductionViolations(
+      await readProductionSourceFiles(deliveryWorkflowRoot),
     )
     expect(violations).toEqual([])
   })
