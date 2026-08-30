@@ -493,22 +493,10 @@ function validateGraph(nodes: readonly ParsedNode[]): void {
   const states = new Map<string, ParsedNode>()
   const transitions: Array<{ node: ParsedNode; from: string; to: string }> = []
   const initial = new Set<string>()
-  const labels = new Map<string, Set<string>>()
   for (const node of nodes) {
     if (node.kind === 'gameplay.state') {
       states.set(node.id, node)
       if (node.value.initial === true) initial.add(node.id)
-    }
-    if (
-      node.kind === 'gameplay.action' ||
-      node.kind === 'gameplay.transition'
-    ) {
-      const byKind = labels.get(node.kind) ?? new Set<string>()
-      const valueLabel = node.value.label as string
-      if (byKind.has(valueLabel))
-        fail(`duplicate ${node.kind} label ${valueLabel}`)
-      byKind.add(valueLabel)
-      labels.set(node.kind, byKind)
     }
   }
   if (states.size === 0) fail('gameplay module must declare at least one state')

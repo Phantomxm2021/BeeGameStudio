@@ -1,9 +1,75 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
-import { digestGameIrValue, type GameIrNode } from './model'
+import {
+  compareCodeUnits,
+  digestGameIrValue,
+  parseGameIrModuleCandidate,
+  type GameIrModuleCandidate,
+  type GameIrNode,
+  type GameIrSourceSection,
+} from './model'
+import {
+  GAME_IR_SCHEMA_VERSION,
+  type FoundationReadyReceipt,
+  type GameIrCompileRequest,
+} from './contracts'
 import {
   parseGameplayModule,
   type GameplayConditionExpression,
 } from './gameplay-schema'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
+import { digestSectionIndex } from '../foundation-section-index'
+
+const sectionDigest = 'b'.repeat(64)
+const gameplaySection: GameIrSourceSection = {
+  documentPath: 'docs/GDD.md',
+  sectionId: 'gameplay',
+  heading: 'Gameplay',
+  startLine: 1,
+  endLine: 100,
+  digest: sectionDigest,
+}
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value && typeof value === 'object')
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => compareCodeUnits(left, right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
+      .join(',')}}`
+  return JSON.stringify(value)
+}
+
+function request(): GameIrCompileRequest {
+  const foundation: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
+    schemaVersion: 'foundation-ready-receipt.v1',
+    projectId: 'project-1',
+    foundationRevision: 'foundation-revision-1',
+    confirmedBriefDigest: sectionDigest,
+    documentDigests: Object.fromEntries(
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, sectionDigest]),
+    ) as FoundationReadyReceipt['documentDigests'],
+    sectionIndexPath: '.beegame/foundation/section-index.json',
+    sectionIndexDigest: digestSectionIndex([gameplaySection]),
+    authority: {
+      kind: 'review',
+      reviewDigest: sectionDigest,
+      issueRegistryDigest: sectionDigest,
+    },
+  }
+  return {
+    schemaVersion: 'game-ir-compile-request.v1',
+    taskId: 'compile-task-1',
+    publicationId: 'publication-1',
+    gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
+    foundation: {
+      ...foundation,
+      receiptDigest: createHash('sha256')
+        .update(canonical(foundation))
+        .digest('hex'),
+    },
+  }
+}
 
 type MutableNode = {
   id: string
@@ -12,7 +78,15 @@ type MutableNode = {
   value: Record<string, unknown>
   references: Array<{ targetId: string; targetType: string }>
   edges: Array<{ type: string; targetId: string; targetType: string }>
-  bindings: Record<string, never>
+  bindings: Record<string, OwnerBinding>
+}
+
+type OwnerBinding = {
+  kind: 'owner'
+  documentPath: 'docs/GDD.md'
+  sectionId: string
+  sectionDigest: string
+  sourcePointer: string
 }
 
 type MutableModule = {
@@ -35,6 +109,55 @@ function node(
     edges: options.edges ?? [],
     bindings: {},
   }
+}
+
+function valueLeafPointers(value: unknown): string[] {
+  const leaves: string[] = []
+  const visit = (entry: unknown, path: string): void => {
+    if (Array.isArray(entry)) {
+      if (entry.length === 0) leaves.push(path)
+      else entry.forEach((child, index) => visit(child, `${path}/${index}`))
+      return
+    }
+    if (entry && typeof entry === 'object') {
+      const entries = Object.entries(entry as Record<string, unknown>)
+      if (entries.length === 0) leaves.push(path)
+      else
+        entries.forEach(([key, child]) =>
+          visit(
+            child,
+            `${path}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`,
+          ),
+        )
+      return
+    }
+    leaves.push(path)
+  }
+  Object.entries(value as Record<string, unknown>).forEach(([key, child]) =>
+    visit(child, `/value/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`),
+  )
+  return leaves
+}
+
+function bindNode(nodeValue: MutableNode): void {
+  const pointers = [
+    '/id',
+    ...valueLeafPointers(nodeValue.value),
+    ...nodeValue.references.map((_, index) => `/references/${index}`),
+    ...nodeValue.edges.map((_, index) => `/edges/${index}`),
+  ]
+  nodeValue.bindings = Object.fromEntries(
+    pointers.map(pointer => [
+      pointer,
+      {
+        kind: 'owner',
+        documentPath: 'docs/GDD.md',
+        sectionId: gameplaySection.sectionId,
+        sectionDigest,
+        sourcePointer: `/gameplay/${nodeValue.id}${pointer}`,
+      },
+    ]),
+  ) as Record<string, OwnerBinding>
 }
 
 function edge(type: string, targetId: string, targetType: string) {
@@ -160,7 +283,8 @@ function validModule(): MutableModule {
       },
     ),
   ]
-  nodes.sort((left, right) => left.id.localeCompare(right.id))
+  nodes.forEach(bindNode)
+  nodes.sort((left, right) => compareCodeUnits(left.id, right.id))
   return { moduleId: 'gameplay', nodes }
 }
 
@@ -168,9 +292,17 @@ function cloneModule(module: MutableModule): MutableModule {
   return structuredClone(module)
 }
 
+function admittedModule(): GameIrModuleCandidate {
+  return parseGameIrModuleCandidate(validModule(), {
+    request: request(),
+    sections: [gameplaySection],
+    expectedModuleId: 'gameplay',
+  })
+}
+
 describe('Gameplay Game IR schema', () => {
   test('accepts the complete gameplay graph and freezes the result', () => {
-    const parsed = parseGameplayModule(validModule())
+    const parsed = parseGameplayModule(admittedModule())
     expect(parsed.moduleId).toBe('gameplay')
     expect(parsed.nodes).toHaveLength(16)
     expect(Object.isFrozen(parsed)).toBe(true)
@@ -296,7 +428,7 @@ describe('Gameplay Game IR schema', () => {
     )
   })
 
-  test('rejects duplicate action and transition labels', () => {
+  test('allows duplicate display labels when Core identities differ', () => {
     const duplicateAction = cloneModule(validModule())
     const action = duplicateAction.nodes.find(
       node => node.id === 'action.jump',
@@ -305,10 +437,18 @@ describe('Gameplay Game IR schema', () => {
       ...action,
       id: 'action.jump-copy',
     })
-    duplicateAction.nodes.sort((left, right) => left.id.localeCompare(right.id))
-    expect(() => parseGameplayModule(duplicateAction)).toThrow(
-      /duplicate.*action|action.*duplicate/i,
+    duplicateAction.nodes.sort((left, right) =>
+      compareCodeUnits(left.id, right.id),
     )
+    expect(
+      parseGameplayModule(
+        parseGameIrModuleCandidate(duplicateAction, {
+          request: request(),
+          sections: [gameplaySection],
+          expectedModuleId: 'gameplay',
+        }),
+      ).nodes,
+    ).toHaveLength(17)
 
     const duplicateTransition = cloneModule(validModule())
     const transition = duplicateTransition.nodes.find(
@@ -319,11 +459,17 @@ describe('Gameplay Game IR schema', () => {
       id: 'transition.finish-copy',
     })
     duplicateTransition.nodes.sort((left, right) =>
-      left.id.localeCompare(right.id),
+      compareCodeUnits(left.id, right.id),
     )
-    expect(() => parseGameplayModule(duplicateTransition)).toThrow(
-      /duplicate.*transition|transition.*duplicate/i,
-    )
+    expect(
+      parseGameplayModule(
+        parseGameIrModuleCandidate(duplicateTransition, {
+          request: request(),
+          sections: [gameplaySection],
+          expectedModuleId: 'gameplay',
+        }),
+      ).nodes,
+    ).toHaveLength(17)
   })
 
   test('rejects unreachable states and transitions out of terminal states', () => {
