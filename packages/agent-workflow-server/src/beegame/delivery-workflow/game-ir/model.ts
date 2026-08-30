@@ -106,6 +106,28 @@ export function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
 
+function sourceSectionCanonicalKey(section: GameIrSourceSection): string {
+  return `${section.documentPath}\0${section.startLine}\0${section.sectionId}`
+}
+
+export function canonicalizeGameIrSourceSections(
+  sections: readonly GameIrSourceSection[],
+): GameIrSourceSection[] {
+  const identities = new Set<string>()
+  for (const section of sections) {
+    const identity = `${section.documentPath}\0${section.sectionId}`
+    if (identities.has(identity))
+      fail('source sections contain a duplicate section')
+    identities.add(identity)
+  }
+  return [...sections].sort((left, right) =>
+    compareCodeUnits(
+      sourceSectionCanonicalKey(left),
+      sourceSectionCanonicalKey(right),
+    ),
+  )
+}
+
 function nonEmptyText(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.trim().length === 0)
     fail(`${label} must be non-empty text`)
@@ -287,7 +309,7 @@ function sourceSectionMap(
   request: GameIrCompileRequest,
 ): Map<string, GameIrSourceSection> {
   if (!Array.isArray(sections)) fail('source sections must be an array')
-  const map = new Map<string, GameIrSourceSection>()
+  const normalized: GameIrSourceSection[] = []
   for (const sectionValue of sections) {
     if (!isRecord(sectionValue)) fail('source section must be an object')
     exactKeys(
@@ -318,10 +340,7 @@ function sourceSectionMap(
     const sectionDigest = digest(sectionValue.digest, 'source section digest')
     if (!request.foundation.documentDigests[documentPath])
       fail('source section document is outside the Foundation receipt')
-    const key = `${documentPath}\0${sectionId}`
-    if (map.has(key)) fail('source sections contain a duplicate section')
-    map.set(
-      key,
+    normalized.push(
       Object.freeze({
         documentPath,
         sectionId,
@@ -332,13 +351,18 @@ function sourceSectionMap(
       }),
     )
   }
-  const index = [...map.values()]
+  const index = canonicalizeGameIrSourceSections(normalized)
   if (
     digestSectionIndex(index as readonly SectionRef[]) !==
     request.foundation.sectionIndexDigest
   )
     fail('source sections do not match the receipt section index digest')
-  return map
+  return new Map(
+    index.map(section => [
+      `${section.documentPath}\0${section.sectionId}`,
+      section,
+    ]),
+  )
 }
 
 function normalizeSourceSections(

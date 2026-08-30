@@ -226,3 +226,193 @@ No scoped implementation concern remains. Per the controller ruling, the
 protected Foundation Section Index producer and digest implementation were not
 modified; Game IR validates that receipt digest and preserves the supplied
 authority array instead of re-authoring its order.
+
+---
+
+## Fix round 1/5: one Game IR canonical order
+
+This section supersedes the initial report's ordering ruling and its final
+concern statement above. Independent review established that Foundation's
+`digestSectionIndex` sorts entries before hashing. The Foundation receipt
+therefore authenticates the exact Section Index set and metadata, but it does
+not authenticate the caller-supplied array permutation. Preserving caller
+order, as implemented in `c7b0f980`, allowed multiple Game IR source envelope,
+packet, and projection byte orders under the same valid Foundation receipt.
+
+### Superseding architecture
+
+Game IR now derives one order after strict boundary normalization:
+
+```text
+documentPath + NUL + startLine + NUL + sectionId
+```
+
+The key is compared with raw JavaScript code-unit comparison. The exported
+Core function `canonicalizeGameIrSourceSections` is the only production
+source-index canonicalizer. It rejects duplicate `(documentPath, sectionId)`
+identities, returns a new array, and does not mutate caller input.
+
+- Core calls it before receipt digest recomputation and source lookup map
+  construction.
+- Domain source calls it after strict JSON/metadata normalization and filters
+  each selected closure from that canonical full index.
+- Generic semantic admission calls it after strict normalization. Its module
+  closure first collects all manifest and owner-binding section keys into a
+  set, then filters the canonical full index. Node or map insertion order can
+  no longer determine source order.
+- Publication calls the same function on its already-validated, frozen
+  authority array before comparing semantic packets and computing publication
+  authority bytes.
+
+Builder inputs may arrive in any receipt-valid permutation and normalize to
+the same bytes. Already-signed domain envelopes and semantic packets must carry
+the canonical array; validation does not silently forgive post-sign reorder.
+
+### RED evidence
+
+#### Domain source permutation
+
+```text
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-source.test.ts \
+  -t 'canonicalizes receipt-valid caller permutations before selecting a domain'
+```
+
+Before implementation: `0 pass, 1 fail`. Reversing the same receipt-valid
+eight-document index produced a reversed `authoritySectionIndex`, a different
+Balance subset order, and a different `sourceDigest`.
+
+#### Generic semantic packet permutation
+
+```text
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-admission.test.ts \
+  -t 'canonicalizes caller permutations to one complete semantic packet'
+```
+
+Before implementation: `0 pass, 1 fail`. Reversing the same receipt-valid
+index reversed `packet.sectionIndex` and changed packet bytes/digest. The
+generic fixture's manual `localeCompare` pre-sort was removed, and its GDD
+sections now use the explicit unpadded `9` and `96` line starts.
+
+#### Complete Gameplay fixture permutation
+
+```text
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/gameplay-producer.test.ts \
+  -t 'compiles two complete Foundation fixture source profiles twice deterministically'
+```
+
+Before implementation: `0 pass, 1 fail`. The unpadded complete Foundation
+fixture retained Foundation order rather than the required Game IR code-unit
+order, and its reversed valid permutation produced distinct source authority
+arrays.
+
+#### Shared Core API
+
+```text
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/model.test.ts \
+  -t 'defines one code-unit canonical Section Index order for every caller permutation'
+```
+
+Before implementation: `0 pass, 1 fail, 1 error`; Bun reported that the named
+`canonicalizeGameIrSourceSections` export did not exist.
+
+#### Downstream publication audit
+
+The first full Game IR run after the three primary boundaries were corrected
+reported `143 pass, 19 fail`. Every failure was in publication and reported:
+
+```text
+invalid Game IR publication: semantic packet Section Index is detached from publication authority
+```
+
+Publication still compared the new canonical semantic packet against its raw
+caller-order authority array. Routing the validated publication authority
+through the same shared canonicalizer fixed the common root cause; no separate
+publication comparator was added.
+
+### GREEN evidence
+
+Focused Core/domain/semantic/Gameplay tests:
+
+```text
+bun test \
+  packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/model.test.ts \
+  packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-source.test.ts \
+  packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-projection.test.ts \
+  packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-admission.test.ts \
+  packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/gameplay-producer.test.ts
+```
+
+Result: `70 pass, 0 fail, 382 expect() calls` across 5 files.
+
+Full Game IR:
+
+```text
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/*.test.ts
+```
+
+Result: `162 pass, 0 fail, 798 expect() calls` across 12 files.
+
+Protected Foundation parity and Stage boundary:
+
+```text
+bun test \
+  packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/foundation-parity.test.ts \
+  packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts
+```
+
+Result: `7 pass, 0 fail, 122 expect() calls` across 2 files.
+
+Root and server-package typechecks both ran `tsc --noEmit` and exited 0.
+Biome checked all changed TypeScript files with no issues, and
+`git diff --check` exited 0.
+
+### Regression coverage
+
+- Core proves forward and reversed valid permutations canonicalize identically,
+  the input array is not mutated, and duplicate identities still fail.
+- Domain source proves complete authority arrays, selected Balance arrays,
+  canonical envelope bytes, and `sourceDigest` are identical across caller
+  permutations.
+- Generic semantic admission proves exact full indexes, exact selected source
+  sections, canonical packet bytes, and `packetDigest` are identical across
+  permutations while every required GDD section remains present.
+- The complete unpadded eight-document Gameplay fixture proves both source
+  permutations produce identical full/selected arrays, envelope bytes, and
+  source digests. Every selected GDD section still traverses mechanical and
+  semantic admission through deterministic Gameplay assembly.
+- Existing altered heading/line/digest, duplicate identity, exact byte,
+  hidden/accessor, caller narrowing, and post-sign reorder tests remain green.
+
+### Fix-round changed files
+
+- `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/model.ts`
+- `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/model.test.ts`
+- `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-source.ts`
+- `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-source.test.ts`
+- `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-admission.ts`
+- `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-admission.test.ts`
+- `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/gameplay-producer.test.ts`
+- `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.ts`
+- `.superpowers/sdd/2026-08-31-game-ir-gameplay-balance/task-5-section-order-correction-report.md`
+
+### Fix-round self-review
+
+- No Foundation, Reviewer, Revision, schema, compatibility, fallback,
+  migration, dual-reader, route, or fixed-cap behavior changed.
+- No production `localeCompare` or local code-unit source-index sort remains in
+  Core, domain source, semantic admission, or publication.
+- Domain and semantic selection use `filter` over the canonical full index;
+  insertion order is not an authority.
+- Duplicate identity and exact Foundation digest validation happen before any
+  candidate owner or source bytes are admitted.
+- Unrelated module, node, reference, edge, target, claim, evidence, and JSON
+  canonical ordering rules are unchanged.
+- The shared canonicalizer returns a new array and introduces no dependency,
+  compatibility path, or new abstraction layer.
+
+### Fix-round concerns
+
+No scoped concern remains. Foundation's protected order-insensitive digest is
+unchanged; Game IR now deterministically canonicalizes the authenticated
+content set exactly once at its Core boundary and reuses that implementation
+everywhere source-index order is material.

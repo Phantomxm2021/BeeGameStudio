@@ -305,7 +305,10 @@ function admittedSemantic(): GameIrDomainSemanticReceipt {
   return admittedSemanticFor(source())
 }
 
-function completeFixtureSource(profile: string): {
+function completeFixtureSource(
+  profile: string,
+  reverseIndex = false,
+): {
   source: GameIrDomainSourceEnvelope
   fullIndex: readonly GameIrSourceSection[]
 } {
@@ -378,7 +381,7 @@ function completeFixtureSource(profile: string): {
     source: buildGameIrDomainSourceEnvelope({
       moduleId: 'gameplay',
       request,
-      sectionIndex: fullIndex,
+      sectionIndex: reverseIndex ? [...fullIndex].reverse() : fullIndex,
       sectionBytes,
     }),
     fullIndex,
@@ -699,7 +702,20 @@ describe('Gameplay producer admission and assembler', () => {
     const projections = ['alpha', 'beta'].map(profile => {
       const { source: currentSource, fullIndex } =
         completeFixtureSource(profile)
-      expect(currentSource.authoritySectionIndex).toEqual(fullIndex)
+      const permutedSource = completeFixtureSource(profile, true).source
+      const canonicalFullIndex = [...fullIndex].sort((left, right) =>
+        compareCodeUnits(
+          `${left.documentPath}\0${left.startLine}\0${left.sectionId}`,
+          `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
+        ),
+      )
+      expect(currentSource.authoritySectionIndex).toEqual(canonicalFullIndex)
+      expect(permutedSource.authoritySectionIndex).toEqual(
+        currentSource.authoritySectionIndex,
+      )
+      expect(permutedSource.sectionIndex).toEqual(currentSource.sectionIndex)
+      expect(permutedSource.sourceDigest).toBe(currentSource.sourceDigest)
+      expect(canonical(permutedSource)).toBe(canonical(currentSource))
       expect(
         new Set(
           currentSource.authoritySectionIndex.map(

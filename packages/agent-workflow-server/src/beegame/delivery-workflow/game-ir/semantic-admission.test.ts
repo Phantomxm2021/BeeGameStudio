@@ -36,21 +36,20 @@ const sectionIndex: readonly GameIrSourceSection[] = [
     documentPath: 'docs/GDD.md' as FoundationDocumentPath,
     sectionId: 'core-loop',
     heading: 'Core Loop',
-    startLine: 1,
-    endLine: 3,
+    startLine: 9,
+    endLine: 11,
     digest: sectionDigest,
   },
   {
     documentPath: 'docs/GDD.md' as FoundationDocumentPath,
     sectionId: 'rules',
     heading: 'Rules',
-    startLine: 4,
-    endLine: 6,
+    startLine: 96,
+    endLine: 98,
     digest: rulesDigest,
   },
-  ...CANONICAL_FOUNDATION_DOCUMENTS.filter(path => path !== 'docs/GDD.md')
-    .sort((left, right) => left.localeCompare(right))
-    .map((documentPath, index) => ({
+  ...CANONICAL_FOUNDATION_DOCUMENTS.filter(path => path !== 'docs/GDD.md').map(
+    (documentPath, index) => ({
       documentPath: documentPath as FoundationDocumentPath,
       sectionId: `section-${index}`,
       heading: `Section ${index}`,
@@ -59,12 +58,9 @@ const sectionIndex: readonly GameIrSourceSection[] = [
       digest: createHash('sha256')
         .update(`# ${documentPath}\n\nSource ${index}.`)
         .digest('hex'),
-    })),
-].sort((left, right) =>
-  `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
-    `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
+    }),
   ),
-)
+]
 
 function sectionKey(
   ref: Pick<GameIrSourceSection, 'documentPath' | 'sectionId'>,
@@ -416,6 +412,22 @@ describe('isolated Game IR semantic projection admission', () => {
         input({ moduleId: 'balance', sectionBytes: bytes }),
       ),
     ).toThrow(/sectionBytes|source closure|missing/i)
+  })
+
+  test('canonicalizes caller permutations to one complete semantic packet', () => {
+    const first = packet()
+    const permuted = buildGameIrSemanticValidationPacket(
+      input({ sectionIndex: [...sectionIndex].reverse() }),
+    )
+
+    expect(permuted.sectionIndex).toEqual(first.sectionIndex)
+    expect(permuted.sourceSections).toEqual(first.sourceSections)
+    expect(permuted.sourceSections.map(item => sectionKey(item.ref))).toEqual([
+      'docs/GDD.md#core-loop',
+      'docs/GDD.md#rules',
+    ])
+    expect(permuted.packetDigest).toBe(first.packetDigest)
+    expect(canonicalGameIrJson(permuted)).toBe(canonicalGameIrJson(first))
   })
 
   test('fix Critical: rejects a missing or empty canonical module before packet construction', () => {

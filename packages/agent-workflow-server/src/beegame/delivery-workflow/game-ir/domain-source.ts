@@ -4,6 +4,7 @@ import {
   type GameIrCompileRequest,
 } from './contracts'
 import {
+  canonicalizeGameIrSourceSections,
   compareCodeUnits,
   digestGameIrValue,
   type GameIrSourceSection,
@@ -129,7 +130,10 @@ function sameSection(
   )
 }
 
-function normalizeSectionIndex(value: unknown): GameIrSourceSection[] {
+function normalizeSectionIndex(
+  value: unknown,
+  requireCanonical = false,
+): GameIrSourceSection[] {
   if (!Array.isArray(value)) fail('sectionIndex must be an array')
   const lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length')
   if (
@@ -202,14 +206,13 @@ function normalizeSectionIndex(value: unknown): GameIrSourceSection[] {
       digest: sectionDigest,
     }
   })
-  const identities = new Set<string>()
-  for (const section of output) {
-    const identity = `${section.documentPath}\0${section.sectionId}`
-    if (identities.has(identity))
-      fail('sectionIndex contains duplicate sections')
-    identities.add(identity)
-  }
-  return output
+  const canonical = canonicalizeGameIrSourceSections(output)
+  if (
+    requireCanonical &&
+    output.some((section, index) => !sameSection(section, canonical[index]!))
+  )
+    fail('sectionIndex must use the canonical Game IR order')
+  return canonical
 }
 
 function sectionBytesEntries(value: unknown): Array<readonly [string, string]> {
@@ -360,6 +363,7 @@ export function validateGameIrDomainSourceEnvelope(
     fail('source envelope moduleId is invalid')
   const authoritySectionIndex = normalizeSectionIndex(
     value.authoritySectionIndex,
+    true,
   )
   if (authoritySectionIndex.length === 0)
     fail('authority Section Index must not be empty')
@@ -376,7 +380,7 @@ export function validateGameIrDomainSourceEnvelope(
     request.foundation.sectionIndexDigest
   )
     fail('authority Section Index digest does not match the Foundation receipt')
-  const sections = normalizeSectionIndex(value.sectionIndex)
+  const sections = normalizeSectionIndex(value.sectionIndex, true)
   const expectedDocuments = DOMAIN_SOURCE_DOCUMENTS[moduleId]
   const expectedSections = authoritySectionIndex.filter(section =>
     expectedDocuments.includes(section.documentPath as never),

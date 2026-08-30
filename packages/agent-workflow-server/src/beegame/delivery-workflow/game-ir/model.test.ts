@@ -6,6 +6,7 @@ import {
   type GameIrCompileRequest,
 } from './contracts'
 import {
+  canonicalizeGameIrSourceSections,
   canonicalGameIrJson,
   digestGameIrValue,
   parseGameIrTargetPointer,
@@ -169,6 +170,16 @@ function derivedCandidate(
 }
 
 describe('Game IR core candidate and source authority', () => {
+  test('defines one code-unit canonical Section Index order for every caller permutation', () => {
+    const reversed = [...sections].reverse()
+    expect(canonicalizeGameIrSourceSections(sections)).toEqual([...sections])
+    expect(canonicalizeGameIrSourceSections(reversed)).toEqual([...sections])
+    expect(reversed).toEqual([...sections].reverse())
+    expect(() =>
+      canonicalizeGameIrSourceSections([...sections, sections[0]!]),
+    ).toThrow(/duplicate|section/i)
+  })
+
   test('admits one isolated module and checks its expected identity', () => {
     const rawGameplayModule = candidate().modules[0]!
     const module = parseGameIrModuleCandidate(rawGameplayModule, {
@@ -642,7 +653,7 @@ describe('Game IR core candidate and source authority', () => {
     ).toThrow(/leaf|binding/i)
   })
 
-  test('recomputes the complete Section Index digest without imposing another order', () => {
+  test('recomputes the complete Section Index digest without trusting caller order', () => {
     const forged = [
       { ...sections[0]!, heading: 'Forged heading' },
       sections[1]!,

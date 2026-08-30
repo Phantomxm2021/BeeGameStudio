@@ -6,6 +6,7 @@ import {
   type GameIrCompileRequest,
 } from './contracts'
 import {
+  canonicalizeGameIrSourceSections,
   canonicalGameIrJson,
   parseGameIrTargetPointer,
   parseGameIrCandidate,
@@ -336,20 +337,28 @@ function normalizeSection(value: unknown, label: string): GameIrSourceSection {
   }
 }
 
-function normalizeSectionIndex(value: unknown): readonly GameIrSourceSection[] {
+function normalizeSectionIndex(
+  value: unknown,
+  requireCanonical = false,
+): readonly GameIrSourceSection[] {
   const dense = strictArray(value, 'sectionIndex')
   const output = dense.map((item, index) =>
     Object.freeze(normalizeSection(item, `sectionIndex[${index}]`)),
   )
-  const identities = new Set(output.map(sectionKey))
-  if (identities.size !== output.length)
-    fail('sectionIndex contains duplicate sections')
-  const coveredDocuments = new Set(output.map(section => section.documentPath))
+  const canonical = canonicalizeGameIrSourceSections(output)
+  if (
+    requireCanonical &&
+    output.some((section, index) => !sameSection(section, canonical[index]!))
+  )
+    fail('sectionIndex must use the canonical Game IR order')
+  const coveredDocuments = new Set(
+    canonical.map(section => section.documentPath),
+  )
   for (const documentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
     if (!coveredDocuments.has(documentPath))
       fail(`sectionIndex is missing canonical document ${documentPath}`)
   }
-  return Object.freeze(output)
+  return Object.freeze(canonical)
 }
 
 function strictArray(value: unknown, label: string): readonly unknown[] {
@@ -503,13 +512,13 @@ function moduleSourceClosure(
   nodeIds: readonly string[]
 } {
   const byKey = new Map(index.map(section => [sectionKey(section), section]))
-  const sections = new Map<string, GameIrSourceSection>()
+  const sectionKeys = new Set<string>()
   const evidence = new Set<string>()
   const boundSubjects = new Set<string>()
   const nodeIds = module.nodes.map(node => node.id)
   for (const ref of index) {
     if (manifest.sourceDocumentPaths.includes(ref.documentPath)) {
-      sections.set(sectionKey(ref), ref)
+      sectionKeys.add(sectionKey(ref))
     }
   }
   for (const node of module.nodes) {
@@ -520,11 +529,11 @@ function moduleSourceClosure(
       if (!ref) fail('owner binding is outside the receipt-bound Section Index')
       if (ref.digest !== binding.sectionDigest)
         fail('owner binding section digest does not match Section Index')
-      sections.set(sectionKey(ref), ref)
+      sectionKeys.add(sectionKey(ref))
       evidence.add(ownerEvidencePointer(binding))
     }
   }
-  const selected = [...sections.values()]
+  const selected = index.filter(ref => sectionKeys.has(sectionKey(ref)))
   for (const ref of selected) evidence.add(sectionEvidencePointer(ref))
   const evidencePointers = [...evidence].sort(compare)
   if (selected.length === 0 || evidencePointers.length === 0)
@@ -682,7 +691,7 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
     fail('packet Foundation revision does not match compile request')
   if (packet.foundationReceiptDigest !== request.foundation.receiptDigest)
     fail('packet Foundation receipt digest does not match compile request')
-  const fullIndex = normalizeSectionIndex(packet.sectionIndex)
+  const fullIndex = normalizeSectionIndex(packet.sectionIndex, true)
   if (
     packet.sectionIndexDigest !== request.foundation.sectionIndexDigest ||
     digestSectionIndex(fullIndex) !== packet.sectionIndexDigest

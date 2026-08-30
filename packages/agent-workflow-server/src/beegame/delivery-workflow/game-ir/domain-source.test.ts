@@ -27,20 +27,15 @@ const sectionBytes: Record<string, string> = Object.fromEntries(
   }),
 )
 
-const sectionIndex: readonly GameIrSourceSection[] = CANONICAL_FOUNDATION_DOCUMENTS.map(
-  (documentPath, index) => ({
+const sectionIndex: readonly GameIrSourceSection[] =
+  CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
     documentPath,
     sectionId: `section-${index}`,
     heading: `Section ${index}`,
     startLine: 1,
     endLine: 3,
     digest: digest(sectionBytes[documentPath]!),
-  }),
-).sort((left, right) =>
-  `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
-    `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
-  ),
-)
+  }))
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -138,6 +133,26 @@ describe('Game IR domain source closure', () => {
     ])
   })
 
+  test('canonicalizes receipt-valid caller permutations before selecting a domain', () => {
+    const first = buildGameIrDomainSourceEnvelope({
+      moduleId: 'balance',
+      request: request(),
+      sectionIndex,
+      sectionBytes: exactBalanceBytes(),
+    })
+    const permuted = buildGameIrDomainSourceEnvelope({
+      moduleId: 'balance',
+      request: request(),
+      sectionIndex: [...sectionIndex].reverse(),
+      sectionBytes: exactBalanceBytes(),
+    })
+
+    expect(permuted.authoritySectionIndex).toEqual(first.authoritySectionIndex)
+    expect(permuted.sectionIndex).toEqual(first.sectionIndex)
+    expect(permuted.sourceDigest).toBe(first.sourceDigest)
+    expect(canonical(permuted)).toBe(canonical(first))
+  })
+
   test('rejects missing, extra, or altered closure bytes', () => {
     const base = {
       moduleId: 'gameplay' as const,
@@ -208,7 +223,10 @@ describe('Game IR domain source closure', () => {
     ).toThrow(/section|digest/i)
 
     const hidden = exactBytes()
-    Object.defineProperty(hidden, 'hidden', { value: 'hidden', enumerable: false })
+    Object.defineProperty(hidden, 'hidden', {
+      value: 'hidden',
+      enumerable: false,
+    })
     expect(() =>
       buildGameIrDomainSourceEnvelope({
         moduleId: 'gameplay',
@@ -275,7 +293,8 @@ describe('Game IR domain source closure', () => {
           section.documentPath === 'docs/GDD.md',
       ),
       sectionBytes: {
-        'docs/BALANCE_DESIGN.md#section-2': sectionBytes['docs/BALANCE_DESIGN.md']!,
+        'docs/BALANCE_DESIGN.md#section-2':
+          sectionBytes['docs/BALANCE_DESIGN.md']!,
         'docs/GDD.md#section-0': sectionBytes['docs/GDD.md']!,
       },
     } as Record<string, unknown>

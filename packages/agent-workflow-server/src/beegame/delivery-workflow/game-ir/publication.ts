@@ -23,6 +23,7 @@ import {
   type GameIrReadyReceipt,
 } from './contracts'
 import {
+  canonicalizeGameIrSourceSections,
   canonicalGameIrJson,
   compareCodeUnits,
   digestGameIrValue,
@@ -548,6 +549,9 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     request,
     sections: authorityInput.sectionIndex,
   })
+  const sectionIndex = Object.freeze(
+    canonicalizeGameIrSourceSections(authorityInput.sectionIndex),
+  )
   if (
     candidate.modules.length !== MODULES.length ||
     candidate.modules.some(
@@ -556,13 +560,17 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     )
   )
     fail('candidate canonical module coverage is invalid')
-  const admissions = validateAdmissions(authorityInput, request, candidate)
+  const admissions = validateAdmissions(
+    { ...authorityInput, sectionIndex },
+    request,
+    candidate,
+  )
   const authority: GameIrPublicationAuthority = {
     workspacePath: authorityInput.workspacePath,
     publicationId: authorityInput.publicationId,
     compileRequest: request,
     candidate,
-    sectionIndex: authorityInput.sectionIndex,
+    sectionIndex,
     admissions,
   }
   const workspacePath = resolve(authority.workspacePath)
