@@ -587,6 +587,7 @@ git commit -m "feat: publish Game IR atomically"
 
 **Files:**
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/foundation-parity.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts`
 - Create: `docs/game-ir-salvage-matrix.md`
 
 **Interfaces:**
@@ -625,6 +626,14 @@ Assert canonical document digests, state bytes, READY receipt fields and all
 Foundation outputs remain unchanged. The compile request must be deterministic
 and receipt-bound, but no production route may construct it.
 
+For the Stage 4 fixture, use one admitted production issue from the same
+complete-document authority, build the real revision authority, modify only an
+authorized staged section, derive PatchOperations from the actual base/staged
+bytes and revision receipt, rebuild the Section Index and impacted facts,
+validate the patch, and construct the targeted recheck from those resulting
+artifacts. A no-op operation or a READY receipt from an unrelated fixture does
+not establish parity.
+
 Resolve the repository root from `import.meta.url`, not `process.cwd()`. Compare
 the protected files byte-for-byte with baseline `70df2e2c`, with an explicit
 diagnostic if the Git baseline is unavailable. In addition, parse every
@@ -632,6 +641,11 @@ production TypeScript source below `delivery-workflow` outside `game-ir/` and
 reject static/dynamic Game IR imports and routing identifiers. The detector
 must have synthetic positive and negative self-tests proving it catches an
 import/route while ignoring comments and ordinary string literals.
+Replace the original raw `source.includes` matcher in `stage-boundary.test.ts`
+with the same AST semantics. Cover import declarations, export declarations,
+import-equals, literal `require`, literal dynamic import, all `GameIr*` and
+`GAME_IR*` runtime identifiers, and common enable/switch identifiers rather
+than two exact names.
 
 - [ ] **Step 2: Run parity tests and verify RED**
 
