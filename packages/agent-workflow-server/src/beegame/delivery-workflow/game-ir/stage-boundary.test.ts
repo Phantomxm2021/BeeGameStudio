@@ -192,11 +192,37 @@ describe('Game IR stage boundary', () => {
     expect(
       standaloneProductionViolations([
         {
-          path: 'synthetic-import.ts',
-          source: "import { compileGame } from './game-ir/runtime'",
+          path: 'synthetic-all-violations.ts',
+          source: [
+            "import { compileGame } from './game-ir/runtime'",
+            "export { compileGame } from './game-ir/runtime'",
+            "import x = require('./game-ir/runtime')",
+            "const required = require('./game-ir/runtime')",
+            "const loaded = import('./game-ir/runtime')",
+            'type GameIrResult = unknown',
+            'const kind = GAME_IR_ENABLED',
+            'const object = { GameIrState: "x" }',
+            'const value = object.GameIrState',
+            'const run = { gameIrState: value }',
+            'const config = { enableGameIr: true }',
+            'const switched = switchGameIr',
+          ].join('; '),
         },
       ]),
-    ).toEqual(['synthetic-import.ts: import: ./game-ir/runtime'])
+    ).toEqual([
+      'synthetic-all-violations.ts: import: ./game-ir/runtime',
+      'synthetic-all-violations.ts: export: ./game-ir/runtime',
+      'synthetic-all-violations.ts: import-equals: ./game-ir/runtime',
+      'synthetic-all-violations.ts: require: ./game-ir/runtime',
+      'synthetic-all-violations.ts: dynamic-import: ./game-ir/runtime',
+      'synthetic-all-violations.ts: identifier: GameIrResult',
+      'synthetic-all-violations.ts: identifier: GAME_IR_ENABLED',
+      'synthetic-all-violations.ts: identifier: GameIrState',
+      'synthetic-all-violations.ts: identifier: GameIrState',
+      'synthetic-all-violations.ts: identifier: gameIrState',
+      'synthetic-all-violations.ts: identifier: enableGameIr',
+      'synthetic-all-violations.ts: identifier: switchGameIr',
+    ])
   })
 
   test('keeps Foundation internals independent from Game IR', async () => {

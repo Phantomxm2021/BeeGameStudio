@@ -66,11 +66,11 @@ Mechanical inventory command: `rg '^export' packages/agent-workflow-server/src/b
 | GI-EXP-37 | `assertCurrentGameIrResourceAuthority` | DISCARD | Current mutable-authority assertion encodes the abandoned route. |
 | GI-EXP-38 | `assertAssetManifestMatchesProjection` | REPROVE | Reprove this invariant against the eventual producer-owned projection. |
 | GI-EXP-39 | `projectCommittedAssetRequirements` | REWRITE | Rebuild projection from committed, receipt-bound publication evidence. |
-| GI-EXP-40 | `loadCurrentGameIrResourceAuthority` | DISCARD | A current mutable loader is incompatible with the immutable cutover authority. |
+| GI-EXP-40 | `loadCurrentCommittedGameIr` | DISCARD | The old current-committed loader is discarded; any replacement must be re-established under immutable publication authority. |
 
 ## Old production importers and consumers
 
-Mechanical inventory command: `rg -l "from .*game-ir|GAME_IR_|GameIr|gameIr" packages/agent-workflow-server/src/beegame/delivery-workflow --glob '*.ts'` plus the TypeScript AST import/identifier scan, run against the saved old dirty checkout and excluding tests/game-ir itself. It returned the exact 16 direct importers below plus five indirect production consumers; none is inferred from the new branch.
+Mechanical inventory command: `rg -il 'game[_ -]?ir|GAME_IR|GameIr|gameIr' packages/agent-workflow-server/src/beegame/delivery-workflow --glob '*.ts' --glob '!**/*.test.ts' --glob '!**/game-ir/**'` plus the TypeScript AST direct-import scan, run against the saved old dirty checkout with tests and `game-ir/` excluded from the production result. The marker command is intentionally case-insensitive; the resulting inventory is the exact 16 direct importers below plus five separately verified indirect production consumers, not a case-sensitive `rg` count.
 
 | ID | Exact importer/consumer path | Category | Consumer responsibility and disposition |
 | --- | --- | --- | --- |
@@ -105,19 +105,80 @@ Mechanical inventory command: `rg -l "from .*game-ir|GAME_IR_|GameIr|gameIr" pac
 | GI-DELTA-03 | `controller.ts` compile/dispatch branch | DISCARD | Baseline exact; current production remains unreachable. |
 | GI-DELTA-04 | `transition.ts` transition/terminal handling | DISCARD | Baseline exact; no Stage 5 effect on Foundation state. |
 | GI-DELTA-05 | `recovery.ts` resume/recovery branch | DISCARD | Baseline exact; no hot migration or fallback. |
-| GI-DELTA-06 | Foundation Fact/Contract/Rule/Check deletions or weakening | DISCARD | Stable Foundation authority is retained byte-for-byte and behaviorally. |
-| GI-DELTA-07 | typed-owner exact symbols (`TypedOwnerRecord`, parser, owner-record fixtures) | DISCARD | Exact old symbols are not migrated; Fact Store remains authoritative. |
-| GI-DELTA-08 | direct `foundationAuditState`/Issue Registry writes | DISCARD | Stage 5 is read-only over Foundation authority. |
-| GI-DELTA-09 | legacy reader, compatibility alias, fallback, or hot migration | DISCARD | Explicitly forbidden dual track. |
-| GI-DELTA-10 | dirty Reviewer delta | REPROVE | No migration credit; reproduce independently from baseline if needed. |
-| GI-DELTA-11 | dirty Revision delta | REPROVE | No migration credit; reproduce independently with Patch/Recheck evidence. |
-| GI-DELTA-12 | dirty Reviewer/Revision fixtures, run state, generated receipts | DISCARD | Fresh complete-document fixtures are required. |
+## Old dirty changed source and test artifacts
 
-Reviewer and Revision deltas are explicitly `REPROVE` or `DISCARD`; none is
-`KEEP` or `ADAPT`. Implementation records and their design ideas have separate
-IDs because §9.2 allows a sound idea to be refined while its implementation is
-discarded. Reviewer/Revision outputs and interfaces are all discarded/reproved,
-not migrated.
+Inventory commands: `git diff --name-only 70df2e2c` followed by `git diff 70df2e2c -- <path>` for each returned source or test path in the saved old dirty worktree. This is a diff-content inventory, not a scan of the isolated replacement. Each path is listed exactly once; paths already represented in the old-files/docs, consumer, or protected-delta tables are excluded. There are no family rows, catch-alls, generated receipts, or shared run-state entries.
+
+| ID | Exact changed path | Category | Disposition |
+| --- | --- | --- | --- |
+| GI-DIRTY-01 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.ts` | DISCARD | Dirty audit artifact implementation is not a migration input. |
+| GI-DIRTY-02 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.test.ts` | DISCARD | Dirty artifact tests are discarded; future behavior starts from baseline. |
+| GI-DIRTY-03 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-authority.ts` | DISCARD | Dirty audit authority changes are discarded. |
+| GI-DIRTY-04 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-boundary.ts` | DISCARD | Dirty audit-boundary changes are discarded. |
+| GI-DIRTY-05 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.ts` | DISCARD | Dirty deterministic check implementation is discarded. |
+| GI-DIRTY-06 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.test.ts` | DISCARD | Dirty deterministic check tests are discarded. |
+| GI-DIRTY-07 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.ts` | DISCARD | Dirty contract changes are discarded. |
+| GI-DIRTY-08 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.test.ts` | DISCARD | Dirty contract tests are discarded. |
+| GI-DIRTY-09 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-cutover.test.ts` | DISCARD | Dirty cutover test artifact is discarded. |
+| GI-DIRTY-10 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-integration.test.ts` | DISCARD | Dirty audit integration test artifact is discarded. |
+| GI-DIRTY-11 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.ts` | DISCARD | Dirty production-manifest authority changes are discarded. |
+| GI-DIRTY-12 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.test.ts` | DISCARD | Dirty production-manifest tests are discarded. |
+| GI-DIRTY-13 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.ts` | DISCARD | Dirty deterministic rule changes are discarded. |
+| GI-DIRTY-14 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.test.ts` | DISCARD | Dirty deterministic rule tests are discarded. |
+| GI-DIRTY-15 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.ts` | DISCARD | Dirty audit-state authority changes are discarded. |
+| GI-DIRTY-16 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.test.ts` | DISCARD | Dirty audit-state tests are discarded. |
+| GI-DIRTY-17 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.ts` | DISCARD | Dirty fact catalog changes are discarded. |
+| GI-DIRTY-18 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.test.ts` | DISCARD | Dirty fact catalog tests are discarded. |
+| GI-DIRTY-19 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.ts` | DISCARD | Dirty fact extraction changes are discarded. |
+| GI-DIRTY-20 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.test.ts` | DISCARD | Dirty fact extraction tests are discarded. |
+| GI-DIRTY-21 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.ts` | DISCARD | Dirty fact runtime changes are discarded. |
+| GI-DIRTY-22 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.test.ts` | DISCARD | Dirty fact runtime tests are discarded. |
+| GI-DIRTY-23 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts` | DISCARD | Dirty fact runtime integration artifact is discarded. |
+| GI-DIRTY-24 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.ts` | DISCARD | Dirty Fact Store changes are discarded. |
+| GI-DIRTY-25 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.test.ts` | DISCARD | Dirty Fact Store tests are discarded. |
+| GI-DIRTY-26 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-issue-registry.ts` | DISCARD | Dirty issue registry changes are discarded. |
+| GI-DIRTY-27 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-issue-registry.test.ts` | DISCARD | Dirty issue registry tests are discarded. |
+| GI-DIRTY-28 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.ts` | DISCARD | Dirty impact-analysis changes are discarded. |
+| GI-DIRTY-29 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.test.ts` | DISCARD | Dirty impact-analysis tests are discarded. |
+| GI-DIRTY-30 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.ts` | DISCARD | Dirty patch-validation changes are discarded. |
+| GI-DIRTY-31 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.test.ts` | DISCARD | Dirty patch-validation tests are discarded. |
+| GI-DIRTY-32 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.ts` | DISCARD | Dirty revision-batch changes are discarded. |
+| GI-DIRTY-33 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.test.ts` | DISCARD | Dirty revision-batch tests are discarded. |
+| GI-DIRTY-34 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.ts` | DISCARD | Dirty revision-publication changes are discarded. |
+| GI-DIRTY-35 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.test.ts` | DISCARD | Dirty revision-publication tests are discarded. |
+| GI-DIRTY-36 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-round-policy.ts` | DISCARD | Dirty revision-round policy changes are discarded. |
+| GI-DIRTY-37 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-round-policy.test.ts` | DISCARD | Dirty revision-round policy tests are discarded. |
+| GI-DIRTY-38 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.ts` | DISCARD | Dirty revision-stage changes are discarded. |
+| GI-DIRTY-39 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.test.ts` | DISCARD | Dirty revision-stage tests are discarded. |
+| GI-DIRTY-40 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-audit.ts` | DISCARD | Dirty semantic-audit authority changes are discarded. |
+| GI-DIRTY-41 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-audit.test.ts` | DISCARD | Dirty semantic-audit tests are discarded. |
+| GI-DIRTY-42 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-runtime.ts` | DISCARD | Dirty semantic runtime changes are discarded. |
+| GI-DIRTY-43 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-runtime.test.ts` | DISCARD | Dirty semantic runtime tests are discarded. |
+| GI-DIRTY-44 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-worker-contract.test.ts` | DISCARD | Dirty semantic worker-contract test artifact is discarded. |
+| GI-DIRTY-45 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.ts` | DISCARD | Dirty authoring-batch changes are discarded. |
+| GI-DIRTY-46 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.test.ts` | DISCARD | Dirty authoring-batch tests are discarded. |
+| GI-DIRTY-47 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-project-deterministic-rules.ts` | DISCARD | Dirty project-rule changes are discarded. |
+| GI-DIRTY-48 | `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-project-deterministic-rules.test.ts` | DISCARD | Dirty project-rule tests are discarded. |
+| GI-DIRTY-49 | `packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.test.ts` | DISCARD | Dirty recovery projector test artifact is discarded. |
+| GI-DIRTY-50 | `packages/agent-workflow-server/src/beegame/delivery-workflow/revision.ts` | DISCARD | Dirty revision authority changes are discarded. |
+| GI-DIRTY-51 | `packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts` | DISCARD | Dirty schema-evolution test artifact is discarded. |
+| GI-DIRTY-52 | `packages/agent-workflow-server/src/beegame/delivery-workflow/transition.test.ts` | DISCARD | Dirty transition test artifact is discarded. |
+| GI-DIRTY-53 | `packages/agent-workflow-server/src/beegame/complete-game-document.ts` | DISCARD | Dirty complete-document implementation is discarded. |
+| GI-DIRTY-54 | `packages/agent-workflow-server/src/beegame/complete-game-document.test.ts` | DISCARD | Dirty complete-document tests are discarded. |
+| GI-DIRTY-55 | `packages/agent-workflow-server/src/__tests__/complete-game-document-fixture.ts` | DISCARD | Dirty complete-document fixture bytes are discarded. |
+| GI-DIRTY-56 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.ts` | DISCARD | Dirty document-contract changes are discarded. |
+| GI-DIRTY-57 | `packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.test.ts` | DISCARD | Dirty document-contract tests are discarded. |
+| GI-DIRTY-58 | `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts` | DISCARD | Dirty worker-prompt changes are discarded. |
+| GI-DIRTY-59 | `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts` | DISCARD | Dirty worker-prompt tests are discarded. |
+| GI-DIRTY-60 | `packages/agent-workflow-server/src/beegame/delivery-workflow/display-progress.test.ts` | DISCARD | Dirty progress-display test artifact is discarded. |
+| GI-DIRTY-61 | `packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.test.ts` | DISCARD | Dirty workflow-message test artifact is discarded. |
+
+Every dirty Reviewer and Revision artifact listed above is `DISCARD`; any
+future Reviewer/Revision behavior, output, or interface must be independently
+`REPROVE`d from the stable baseline. None is `KEEP` or `ADAPT`. Implementation
+records and their design ideas have separate IDs because §9.2 allows a sound
+idea to be refined while its implementation is discarded. Reviewer/Revision
+outputs and interfaces are discarded/reproved, not migrated.
 
 Phase 1 integrates all Game IR core modules as isolated, tested code, but they
 remain unreachable: no production imports, markers, compatibility layer,
