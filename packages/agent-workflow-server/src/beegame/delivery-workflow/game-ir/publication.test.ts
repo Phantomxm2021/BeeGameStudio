@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -620,6 +621,30 @@ describe('atomic Game IR publication and recovery', () => {
       /journal|symlink|path/i,
     )
     expect(await readFile(externalJournal, 'utf8')).toBe(journalBytes)
+    expect(await readdir(external)).toEqual(['publication-1.json'])
+  })
+
+  test('recovery rejects an external journal ancestor before consulting its target', async () => {
+    const value = await setup()
+    const prepared = await prepareGameIrPublication(value)
+    await commitGameIrPublication(value)
+    const journalPath = join(value.workspacePath, prepared.journalPath)
+    const journalDirectory = dirname(journalPath)
+    const external = await mkdtemp(
+      join(tmpdir(), 'game-ir-journal-permission-'),
+    )
+    workspaces.push(external)
+    await Bun.write(join(external, 'publication-1.json'), 'outside\n')
+    await rm(journalDirectory, { recursive: true })
+    await symlink(external, journalDirectory)
+    await chmod(external, 0o000)
+    try {
+      await expect(recoverGameIrPublication(value)).rejects.toThrow(
+        'existing path component is symlink or non-directory',
+      )
+    } finally {
+      await chmod(external, 0o700)
+    }
     expect(await readdir(external)).toEqual(['publication-1.json'])
   })
 
