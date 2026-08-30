@@ -764,6 +764,14 @@ async function controllerIssuePlan(fixture: Fixture, workspacePath: string) {
 }
 
 describe('Foundation parity against stable baseline 70df2e2c', () => {
+  test('keeps the complete 21-file Stage 3/4 protected manifest', () => {
+    expect(FOUNDATION_PROTECTED_FILES).toHaveLength(21)
+    expect(new Set(FOUNDATION_PROTECTED_FILES).size).toBe(21)
+    expect(FOUNDATION_PROTECTED_FILES.every(path => path.endsWith('.ts'))).toBe(
+      true,
+    )
+  })
+
   test('uses a repository-root baseline and protects Stage 3/4 bytes', () => {
     for (const path of FOUNDATION_PROTECTED_FILES) {
       const baseline = Bun.spawnSync([

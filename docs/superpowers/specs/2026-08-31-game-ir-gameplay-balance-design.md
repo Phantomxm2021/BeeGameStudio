@@ -1,6 +1,6 @@
 # Game IR Phase 4: Gameplay and Balance Design
 
-Status: approved for implementation
+Status: implemented; Phase 4 cross-domain and isolation completion gate recorded
 
 ## Goal
 
@@ -103,10 +103,18 @@ type GameIrDomainSourceEnvelope = Readonly<{
   taskId: string
   moduleId: 'gameplay' | 'balance'
   compileRequest: GameIrCompileRequest
+  authoritySectionIndex: readonly GameIrSourceSection[]
   sectionIndex: readonly GameIrSourceSection[]
   sectionBytes: Readonly<Record<string, string>>
 }>
 ```
+
+`authoritySectionIndex` is the complete READY-bound canonical Foundation
+Section Index; `sectionIndex` is the selected closure for the module. The
+Foundation Section Index digest authenticates the complete section set and its
+content. `canonicalizeGameIrSourceSections` is the sole Game IR source-order
+authority, so both projections retain identical full authority ordering while
+using only their fixed selected sections and exact UTF-8 bytes.
 
 The service derives the source closure from a fixed domain manifest, not from
 producer output:
@@ -131,8 +139,13 @@ content but not fixed column names. Phase 4 must not guess column roles from
 aliases, column position, or regex. A complete variable record is therefore
 semantic-owned unless the source format itself declares unambiguous row roles.
 After semantic admission, the service mechanically reparses every claimed ID,
-number, range, unit text, and source cell from exact table bytes. Verification
-does not become a second writer.
+number, range, unit text, and source cell from exact table bytes. Balance claims
+are exact `/bytes/<start>/<end>` ranges into the selected Balance source bytes;
+admission checks both the semantic literal and the UTF-8 byte slice. Verification
+does not become a second writer. Under the current non-fixed table contract the
+Balance mechanical output is intentionally empty; variables, formula AST,
+economy/progression/reward/cost relationships remain semantic-owned. Empty
+mechanical output is the current policy, not a fallback or partial projection.
 
 Phase 4 does not treat arbitrary prose, headings, Mermaid labels, or a number
 found by regex as mechanical authority. Gameplay and Balance therefore permit
@@ -390,6 +403,14 @@ Cross-module references use the existing global typed-reference closure. Phase
 directions; references to not-yet-implemented modules remain impossible rather
 than represented by placeholders.
 
+The completion gate proves both directions with the same READY receipt: Gameplay
+conditions/effects may bind typed Balance targets, and Balance reward/cost
+bindings may target typed Gameplay actions/events. Task/revision identity,
+module kind, source bytes, and projection digests are revalidated on every
+assembler call; stale or wrong-kind links fail closed. World/Scene,
+Presentation, Resource Realization, and Implementation/Verification are not
+represented until their own phases exist.
+
 ## Module assembler
 
 `assembleGameplayModule` and `assembleBalanceModule` are pure functions. Each:
@@ -522,6 +543,9 @@ Phase 4 is complete only when:
 
 Chrome acceptance remains deferred until every canonical domain module and the
 single consumer cutover are complete.
+
+Phase 4 completion does not make complete candidate publication, production
+routing, or Chrome acceptance available. Phase 5–9 remain unstarted.
 
 ## Explicit non-goals
 

@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core 已完成，但 production routing 仍不可达；Phase 4（Gameplay + Balance）及后续尚未开始
+状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）完成 cross-domain/isolation gate；Phase 5–9 尚未开始。完整 candidate publication 与 Chrome acceptance 仍不可用
 
 日期：2026-08-30
 
@@ -121,6 +121,14 @@ Stage 5 的唯一输入包含：
 - Game IR schema version；
 - compile task ID；
 - publication ID。
+
+Phase 4 的 domain source envelope 同时携带 READY-bound canonical full
+`authoritySectionIndex` 与 fixed-manifest selected `sectionIndex`。Foundation
+Section Index digest authenticates the complete section set and content; the
+shared `canonicalizeGameIrSourceSections` helper is the sole Game IR source-order
+authority. Each selected section is accompanied by exact UTF-8 bytes whose digest
+matches the authority entry. Gameplay uses GDD sections; Balance uses GDD and
+Balance sections, while both retain the same complete authority index.
 
 Stage 5 不接受旧 IR、Checklist、Manifest、实现代码、worker prose 或失败 candidate 作为业务输入。
 
@@ -406,10 +414,26 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 - 已落地 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；
 - 不实现 consumer migration，production routing 仍不可达。
 
-### Phase 4：Gameplay + Balance（未开始）
+### Phase 4：Gameplay + Balance（已完成；production routing 仍不可达）
 
-- 尚未落地 Gameplay/Balance 领域 producer、行为、状态、规则、事件、公式和数值依赖；
-- 领域 producer 落地后再验证 source coverage 和 graph closure。
+- Gameplay 与 Balance 领域 schema、semantic admission、精确 source envelope
+  和 immutable module projections 已落地；两者使用同一 READY-bound authority
+  并分别保持 fixed source closure。
+- Gameplay 可读取 typed Balance variable/formula target；Balance reward/cost
+  binding 可指向 typed Gameplay action/event。双向引用、wrong kind、stale
+  task/revision、deterministic bytes/digests 与 not-yet-implemented module
+  rejection 均由 gate tests 覆盖。
+- Balance 当前 variable/table contract 的 mechanical output 为空；variable
+  records、formula AST、economy/progression/reward/cost semantics 由 semantic
+  producer 拥有，Balance source claims 使用精确 `/bytes/<start>/<end>` ranges
+  并在 admission 时按 UTF-8 bytes 复核。空 mechanical output 是当前 policy，
+  不是 fallback。
+- AST/static detector 对新增 production files 禁止 partial candidate、
+  publication、controller/store/DeliveryRun/Foundation Issue、provider
+  dispatch 和五个 placeholder module；protected 21-file parity 与 full
+  server unreachable scan 保持通过。
+- Complete seven-module candidate、publication routing、Chrome acceptance
+  remain unavailable；Phase 5–9 remain unstarted。
 
 ### Phase 5：World + Presentation（未开始）
 
