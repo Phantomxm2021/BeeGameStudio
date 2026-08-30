@@ -608,6 +608,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
   })
   const batch = batches[0]!
   const preRevisionPlan = foundationPlan(auditFixture)
+  const preRevision = preRevisionPlan.readyState.revision
   const preRevisionReview = preRevisionPlan.readyState.review
   if (!preRevisionReview)
     throw new Error('pre-revision Foundation review authority is missing')
@@ -886,6 +887,10 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     semanticRecheckResults: [persistedSemanticResult],
     resultingIssues: [],
   })
+  if (publication.baseRevision !== preRevision)
+    throw new Error(
+      'publication lineage did not preserve the real READY revision',
+    )
   if (
     !CANONICAL_PATHS.every(
       path =>
@@ -1015,7 +1020,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     },
   }
   const revisionReadyState = parseFoundationAuditState({
-    ...postReady.readyState,
+    ...preRevisionPlan.readyState,
     status: 'revision_ready',
     revision: publishedRevision,
     documentDigests: publication.documentDigests,
@@ -1041,7 +1046,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
       })),
     },
     roundBefore: {
-      documentRevision: publication.baseRevision,
+      documentRevision: preRevision,
       issueRegistryDigest: sourceIssueRegistryDigest,
       issueAuthority: {
         kind: 'review',
@@ -1065,7 +1070,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
         bundleId: 'bundle-1',
         status: 'active',
         round: 1,
-        baseDocumentRevision: publication.baseRevision,
+        baseDocumentRevision: preRevision,
         baseDocumentDigests: CANONICAL_PATHS.map(path => ({
           path,
           digest: auditFixture.documentDigests[path]!,
@@ -1103,6 +1108,7 @@ async function issuePlan(fixture: Fixture, workspacePath: string) {
     persistedSemanticResult,
     persistedSemanticPacket,
     postReady,
+    preRevision,
     publication,
     resultingDerived: {
       documentDigests: publishedDerived.documentDigests,
@@ -1269,12 +1275,9 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
         bundle => bundle.bundleId === ready.activeBundleId,
       )
       expect(ready.status).toBe('revision_ready')
-      expect(ready.roundBefore?.documentRevision).toBe(
-        before.publication.baseRevision,
-      )
-      expect(activeBundle?.baseDocumentRevision).toBe(
-        before.publication.baseRevision,
-      )
+      expect(before.publication.baseRevision).toBe(before.preRevision)
+      expect(ready.roundBefore?.documentRevision).toBe(before.preRevision)
+      expect(activeBundle?.baseDocumentRevision).toBe(before.preRevision)
       const readyDerived = ready.derived
       if (!readyDerived)
         throw new Error('revision-ready derived evidence is missing')
