@@ -1,6 +1,6 @@
 # Game IR Phase 4: Gameplay and Balance Design
 
-Status: design approved in chat; awaiting written-spec review
+Status: approved for implementation
 
 ## Goal
 
@@ -435,8 +435,8 @@ Planned production files under `delivery-workflow/game-ir/`:
 - `balance-schema.ts`: Balance DTOs, formula/unit inference, and validator.
 - `gameplay-producer.ts`: mechanical accounting, semantic packet/result
   admission, and Gameplay assembler.
-- `balance-producer.ts`: variable-table mechanical extraction, semantic
-  packet/result admission, and Balance assembler.
+- `balance-producer.ts`: semantic variable-record admission, exact source-literal
+  mechanical reverification, and Balance assembler.
 - `domain-projection.ts`: shared producer receipt identity and disjoint-accounting
   helpers only where both domains truly use identical logic.
 
@@ -475,8 +475,9 @@ No new dependency is required.
 
 ### Balance tests
 
-- variable table extraction with units, values, bounds, and source bindings;
-- unknown/duplicate columns and partially parsed rows fail closed;
+- semantic variable records with units, values, bounds, and source bindings;
+- claimed IDs, numbers, ranges, units, and source cells that do not byte-match
+  the admitted table fail closed; no column alias or position heuristic exists;
 - formula AST evaluation and dependency reconstruction;
 - formula cycle, dangling reference, unit mismatch, invalid bounds, zero literal
   division, and non-finite value rejection;
