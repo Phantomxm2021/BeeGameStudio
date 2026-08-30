@@ -388,6 +388,7 @@ function valueAtSubject(node: BalanceSemanticNode, pointer: string): unknown {
     const index = Number(pointer.slice('/edges/'.length))
     return node.edges[index]?.targetId
   }
+  if (pointer === '/value') return node.value
   const segments = pointer
     .slice('/value/'.length)
     .split('/')

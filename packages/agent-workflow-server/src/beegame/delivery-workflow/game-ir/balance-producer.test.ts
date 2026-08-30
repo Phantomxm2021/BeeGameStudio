@@ -15,6 +15,7 @@ import {
   type BalanceModuleProjection,
 } from './balance-producer'
 import {
+  canonicalGameIrJson,
   digestGameIrValue,
   compareCodeUnits,
   type GameIrNode,
@@ -35,12 +36,18 @@ import {
   renderTestCompleteGameDocument,
 } from '../../../__tests__/complete-game-document-fixture'
 import { withTestDocumentMetadata } from '../../../__tests__/delivery-workflow-test-helpers'
+import type { GameplayModuleProjection } from './gameplay-producer'
 
 const balanceBytes = [
   '| id | baseline | range | unit |',
   '| player_hp | 10 | 0..100 | hp |',
   '| tick_rate | 2 | 1..4 | 1 |',
-  'balance.player-hp balance.tick-rate balance.unit.hp balance.unit.none balance.unit.hp balance.unit.none balance.unit.hp balance.unit.none Player HP Tick rate health hp 10 0 100 2 1 4 [] 1 1 1 1 0 0 100 100 2 4',
+  ...Array.from(
+    { length: 12 },
+    () =>
+      'balance.player-hp balance.tick-rate balance.unit.hp balance.unit.none balance.formula.double balance.economy-source balance.economy-sink balance.reward balance.cost balance.curve balance.binding balance.empty balance.missing gameplay.action.start Double HP Earn HP Spend HP Reward Cost Difficulty depends-on amount unit reward cost triggered-by Binding Player HP Tick rate health hp 10 0 100 2 1 4 [] {} café true false null 100 2 4 5 8 binary add multiply reference literal left right operator value unitReferenceIndex outputUnitReferenceIndex',
+  ),
+  `${'balance.player-hp '.repeat(12)}${'balance.unit.hp '.repeat(12)}${'balance.unit.none '.repeat(4)}binary multiply reference literal`,
 ].join('\n')
 
 function sha256(value: string): string {
@@ -115,6 +122,19 @@ function completeSource(
           ? {
               ...submission,
               executiveSummary: `${submission.executiveSummary} ${profile} ${balanceBytes}`,
+              sections: submission.sections.map(section => ({
+                ...section,
+                body: `${section.body} ${profile} ${balanceBytes}`,
+              })),
+              productionMaterials: submission.productionMaterials.map(
+                material =>
+                  'body' in material
+                    ? {
+                        ...material,
+                        body: `${material.body} ${profile} ${balanceBytes}`,
+                      }
+                    : material,
+              ),
             }
           : submission
       return [
@@ -201,14 +221,18 @@ function resignSemantic(
   return { ...body, receiptDigest: digestGameIrValue(body) }
 }
 
-function simpleNodes(): Array<{
+type BalanceTestNode = {
   id: string
   kind: string
   value: Record<string, unknown>
   references: Array<{ targetId: string; targetType: string }>
   edges: Array<{ type: string; targetId: string; targetType: string }>
-}> {
-  return [
+}
+
+function simpleNodes(
+  profile: 'zero-resource' | 'formula-dense' = 'zero-resource',
+): BalanceTestNode[] {
+  const nodes: BalanceTestNode[] = [
     {
       id: 'balance.unit.hp',
       kind: 'balance.unit',
@@ -260,28 +284,164 @@ function simpleNodes(): Array<{
       edges: [],
     },
   ]
+  if (profile === 'formula-dense')
+    nodes.push(
+      {
+        id: 'balance.formula.double',
+        kind: 'balance.formula',
+        value: {
+          label: 'Double HP',
+          expression: {
+            kind: 'binary',
+            operator: 'add',
+            left: { kind: 'reference', referenceIndex: 0 },
+            right: {
+              kind: 'binary',
+              operator: 'multiply',
+              left: { kind: 'literal', value: 2, unitReferenceIndex: 2 },
+              right: { kind: 'reference', referenceIndex: 0 },
+            },
+          },
+          outputUnitReferenceIndex: 1,
+        },
+        references: [
+          { targetId: 'balance.player-hp', targetType: 'balance.variable' },
+          { targetId: 'balance.unit.hp', targetType: 'balance.unit' },
+          { targetId: 'balance.unit.none', targetType: 'balance.unit' },
+        ],
+        edges: [
+          {
+            type: 'depends-on',
+            targetId: 'balance.player-hp',
+            targetType: 'balance.variable',
+          },
+        ],
+      },
+      {
+        id: 'balance.economy-source',
+        kind: 'balance.economy-source',
+        value: { label: 'Earn HP' },
+        references: [
+          { targetId: 'balance.player-hp', targetType: 'balance.variable' },
+          { targetId: 'balance.unit.hp', targetType: 'balance.unit' },
+        ],
+        edges: [
+          {
+            type: 'amount',
+            targetId: 'balance.player-hp',
+            targetType: 'balance.variable',
+          },
+          {
+            type: 'unit',
+            targetId: 'balance.unit.hp',
+            targetType: 'balance.unit',
+          },
+        ],
+      },
+      {
+        id: 'balance.economy-sink',
+        kind: 'balance.economy-sink',
+        value: { label: 'Spend HP' },
+        references: [
+          { targetId: 'balance.player-hp', targetType: 'balance.variable' },
+          { targetId: 'balance.unit.hp', targetType: 'balance.unit' },
+        ],
+        edges: [
+          {
+            type: 'amount',
+            targetId: 'balance.player-hp',
+            targetType: 'balance.variable',
+          },
+          {
+            type: 'unit',
+            targetId: 'balance.unit.hp',
+            targetType: 'balance.unit',
+          },
+        ],
+      },
+      {
+        id: 'balance.reward',
+        kind: 'balance.reward',
+        value: { label: 'Reward' },
+        references: [
+          { targetId: 'balance.formula.double', targetType: 'balance.formula' },
+        ],
+        edges: [
+          {
+            type: 'amount',
+            targetId: 'balance.formula.double',
+            targetType: 'balance.formula',
+          },
+        ],
+      },
+      {
+        id: 'balance.cost',
+        kind: 'balance.cost',
+        value: { label: 'Cost' },
+        references: [
+          { targetId: 'balance.player-hp', targetType: 'balance.variable' },
+        ],
+        edges: [
+          {
+            type: 'amount',
+            targetId: 'balance.player-hp',
+            targetType: 'balance.variable',
+          },
+        ],
+      },
+      {
+        id: 'balance.curve',
+        kind: 'balance.progression-curve',
+        value: {
+          label: 'Difficulty',
+          points: [
+            { input: 0, output: 1 },
+            { input: 5, output: 8 },
+          ],
+        },
+        references: [],
+        edges: [],
+      },
+    )
+  return nodes
 }
 
 function sourceClaims(
-  nodes: readonly ReturnType<typeof simpleNodes>[number][],
+  nodes: readonly BalanceTestNode[],
   currentSource: GameIrDomainSourceEnvelope = source(),
 ) {
-  const balanceSection = currentSource.sectionIndex.find(section => {
-    const bytes =
-      currentSource.sectionBytes[`${section.documentPath}#${section.sectionId}`]
-    return (
-      section.documentPath === 'docs/BALANCE_DESIGN.md' &&
-      bytes?.includes(balanceBytes.split('\n')[0]!)
-    )
-  })
-  if (!balanceSection)
+  const balanceSections = currentSource.sectionIndex.filter(
+    section => section.documentPath === 'docs/BALANCE_DESIGN.md',
+  )
+  if (balanceSections.length === 0)
     throw new Error('complete fixture balance section missing')
+  const fixtureSection = balanceSections.find(section =>
+    currentSource.sectionBytes[
+      `${section.documentPath}#${section.sectionId}`
+    ]!.includes('balance.formula.double'),
+  )
+  const sectionForLiteral = (literal: string) => {
+    const section =
+      (fixtureSection &&
+      currentSource.sectionBytes[
+        `${fixtureSection.documentPath}#${fixtureSection.sectionId}`
+      ]!.includes(literal)
+        ? fixtureSection
+        : undefined) ??
+      balanceSections.find(candidate =>
+        currentSource.sectionBytes[
+          `${candidate.documentPath}#${candidate.sectionId}`
+        ]!.includes(literal),
+      )
+    if (!section) throw new Error(`fixture literal missing: ${literal}`)
+    return section
+  }
   const claims: Array<Record<string, string>> = []
   for (const node of nodes) {
     claims.push({
       subject: `node:${node.id}#/id`,
       documentPath: 'docs/BALANCE_DESIGN.md',
-      sectionId: balanceSection.sectionId,
+      sectionId: sectionForLiteral(node.id).sectionId,
       sourcePointer: '/bytes/0/1',
       literal: node.id,
     })
@@ -291,7 +451,7 @@ function sourceClaims(
           claims.push({
             subject: `node:${node.id}#${pointer}`,
             documentPath: 'docs/BALANCE_DESIGN.md',
-            sectionId: balanceSection.sectionId,
+            sectionId: sectionForLiteral('[]').sectionId,
             sourcePointer: '/bytes/0/1',
             literal: '[]',
           })
@@ -299,37 +459,64 @@ function sourceClaims(
           value.forEach((entry, index) => leaves(entry, `${pointer}/${index}`))
         return
       }
-      if (value && typeof value === 'object')
+      if (value && typeof value === 'object') {
+        if (Object.keys(value as Record<string, unknown>).length === 0) {
+          claims.push({
+            subject: `node:${node.id}#${pointer}`,
+            documentPath: 'docs/BALANCE_DESIGN.md',
+            sectionId: sectionForLiteral('{}').sectionId,
+            sourcePointer: '/bytes/0/1',
+            literal: '{}',
+          })
+          return
+        }
         return Object.entries(value as Record<string, unknown>).forEach(
           ([key, entry]) => leaves(entry, `${pointer}/${key}`),
         )
+      }
       claims.push({
         subject: `node:${node.id}#${pointer}`,
         documentPath: 'docs/BALANCE_DESIGN.md',
-        sectionId: balanceSection.sectionId,
+        sectionId: sectionForLiteral(String(value)).sectionId,
         sourcePointer: '/bytes/0/1',
         literal: String(value),
       })
     }
-    Object.entries(node.value).forEach(([key, value]) =>
-      leaves(value, `/value/${key}`),
-    )
+    if (Object.keys(node.value).length === 0) leaves(node.value, '/value')
+    else
+      Object.entries(node.value).forEach(([key, value]) =>
+        leaves(value, `/value/${key}`),
+      )
     node.references.forEach((reference, index) =>
       claims.push({
         subject: `node:${node.id}#/references/${index}`,
         documentPath: 'docs/BALANCE_DESIGN.md',
-        sectionId: balanceSection.sectionId,
+        sectionId: sectionForLiteral(reference.targetId).sectionId,
         sourcePointer: '/bytes/0/1',
         literal: reference.targetId,
+      }),
+    )
+    node.edges.forEach((edge, index) =>
+      claims.push({
+        subject: `node:${node.id}#/edges/${index}`,
+        documentPath: 'docs/BALANCE_DESIGN.md',
+        sectionId: sectionForLiteral(edge.targetId).sectionId,
+        sourcePointer: '/bytes/0/1',
+        literal: edge.targetId,
       }),
     )
   }
   const occurrences = new Map<string, number>()
   for (const claim of claims) {
     const occurrence = occurrences.get(claim.literal) ?? 0
+    const section = currentSource.sectionIndex.find(
+      candidate =>
+        candidate.documentPath === 'docs/BALANCE_DESIGN.md' &&
+        candidate.sectionId === claim.sectionId,
+    )!
     const bytes = Buffer.from(
       currentSource.sectionBytes[
-        `${balanceSection.documentPath}#${balanceSection.sectionId}`
+        `${section.documentPath}#${section.sectionId}`
       ]!,
       'utf8',
     )
@@ -353,9 +540,134 @@ function sourceClaims(
   )
 }
 
-function validResult(currentSource: GameIrDomainSourceEnvelope = source()) {
-  const nodes = simpleNodes()
+function validResult(
+  currentSource: GameIrDomainSourceEnvelope = source(),
+  profile: 'zero-resource' | 'formula-dense' = 'zero-resource',
+  includeBinding = false,
+) {
+  const nodes = simpleNodes(profile)
+  if (includeBinding) nodes.push(bindingNode())
   return { nodes, sourceClaims: sourceClaims(nodes, currentSource) }
+}
+
+function admittedNodes(nodes: BalanceTestNode[], currentSource = source()) {
+  const mechanicalReceipt = mechanical(currentSource)
+  const packet = buildBalanceSemanticPacket({
+    source: currentSource,
+    mechanical: mechanicalReceipt,
+  })
+  const semantic = admitBalanceSemanticResult(packet, {
+    nodes,
+    sourceClaims: sourceClaims(nodes, currentSource),
+  })
+  return { currentSource, mechanicalReceipt, semantic }
+}
+
+function bindingNodes(
+  options: { triggerType?: string; includeTrigger?: boolean } = {},
+): BalanceTestNode[] {
+  const nodes = simpleNodes('formula-dense')
+  nodes.push(bindingNode(options))
+  return nodes
+}
+
+function bindingNode(
+  options: { triggerType?: string; includeTrigger?: boolean } = {},
+): BalanceTestNode {
+  return {
+    id: 'balance.binding',
+    kind: 'balance.reward-cost-binding',
+    value: { label: 'Binding' },
+    references: [
+      { targetId: 'balance.cost', targetType: 'balance.cost' },
+      { targetId: 'balance.reward', targetType: 'balance.reward' },
+      ...(options.includeTrigger === false
+        ? []
+        : [
+            {
+              targetId: 'gameplay.action.start',
+              targetType: options.triggerType ?? 'gameplay.action',
+            },
+          ]),
+    ],
+    edges: [
+      { type: 'cost', targetId: 'balance.cost', targetType: 'balance.cost' },
+      {
+        type: 'reward',
+        targetId: 'balance.reward',
+        targetType: 'balance.reward',
+      },
+      ...(options.includeTrigger === false
+        ? []
+        : [
+            {
+              type: 'triggered-by',
+              targetId: 'gameplay.action.start',
+              targetType: options.triggerType ?? 'gameplay.action',
+            },
+          ]),
+    ],
+  }
+}
+
+function gameplayProjection(
+  currentSource: GameIrDomainSourceEnvelope,
+  overrides: Partial<
+    Pick<GameplayModuleProjection, 'taskId' | 'foundationRevision'>
+  > = {},
+  kind: 'gameplay.action' | 'gameplay.event' = 'gameplay.action',
+): GameplayModuleProjection {
+  const module = {
+    moduleId: 'gameplay' as const,
+    nodes: [
+      {
+        id: 'gameplay.action.start',
+        kind,
+        producerMode: 'semantic' as const,
+        value: { label: 'Start' },
+        references: [],
+        edges: [],
+        bindings: {
+          '/id': {
+            kind: 'owner' as const,
+            documentPath: 'docs/GDD.md' as const,
+            sectionId: currentSource.sectionIndex.find(
+              section => section.documentPath === 'docs/GDD.md',
+            )!.sectionId,
+            sectionDigest: currentSource.sectionIndex.find(
+              section => section.documentPath === 'docs/GDD.md',
+            )!.digest,
+            sourcePointer: '/gameplay/action/start',
+          },
+          '/value/label': {
+            kind: 'owner' as const,
+            documentPath: 'docs/GDD.md' as const,
+            sectionId: currentSource.sectionIndex.find(
+              section => section.documentPath === 'docs/GDD.md',
+            )!.sectionId,
+            sectionDigest: currentSource.sectionIndex.find(
+              section => section.documentPath === 'docs/GDD.md',
+            )!.digest,
+            sourcePointer: '/gameplay/action/start/label',
+          },
+        },
+      },
+    ],
+  }
+  const body = {
+    schemaVersion: 'game-ir-gameplay-module.v1' as const,
+    taskId: overrides.taskId ?? currentSource.taskId,
+    foundationRevision:
+      overrides.foundationRevision ??
+      currentSource.compileRequest.foundation.foundationRevision,
+    module,
+    mechanicalReceiptDigest: '1'.repeat(64),
+    semanticReceiptDigest: '2'.repeat(64),
+  }
+  return {
+    ...body,
+    projectionDigest: digestGameIrValue(body),
+  }
 }
 
 function packetAndSource() {
@@ -507,8 +819,234 @@ describe('Balance producer admission and assembler', () => {
     ).toThrow(/mechanical|unauthorized|empty/i)
   })
 
+  test('covers typed UTF-8, repeated ranges, booleans, null, empty containers, and edges', () => {
+    const currentSource = source()
+    const nodes = simpleNodes('formula-dense')
+    nodes[2]!.value.label = 'café'
+    const result = { nodes, sourceClaims: sourceClaims(nodes, currentSource) }
+    const labelClaim = result.sourceClaims.find(
+      claim => claim.literal === 'café',
+    )!
+    expect(Number(labelClaim.sourcePointer.split('/')[2])).toBeGreaterThan(0)
+    expect(
+      Number(labelClaim.sourcePointer.split('/')[3]) -
+        Number(labelClaim.sourcePointer.split('/')[2]),
+    ).toBe(Buffer.byteLength('café', 'utf8'))
+    const repeated = result.sourceClaims.filter(
+      claim => claim.literal === 'balance.player-hp',
+    )
+    expect(
+      new Set(repeated.map(claim => claim.sourcePointer)).size,
+    ).toBeGreaterThan(1)
+    expect(() =>
+      admitBalanceSemanticResult(
+        buildBalanceSemanticPacket({
+          source: currentSource,
+          mechanical: mechanical(currentSource),
+        }),
+        { nodes, sourceClaims: sourceClaims(nodes, currentSource) },
+      ),
+    ).not.toThrow()
+
+    for (const value of [true, null, {}]) {
+      const invalidNodes = simpleNodes()
+      invalidNodes[2]!.value.label = value
+      const invalidClaims = sourceClaims(invalidNodes, currentSource)
+      const claim = invalidClaims.find(item =>
+        item.subject.endsWith('/value/label'),
+      )!
+      const oneStart = Buffer.from(balanceBytes, 'utf8').indexOf(
+        Buffer.from('1', 'utf8'),
+      )
+      const swapped = invalidClaims.map(item =>
+        item === claim
+          ? {
+              ...item,
+              sourcePointer: `/bytes/${oneStart}/${oneStart + 1}`,
+              literal: '1',
+            }
+          : item,
+      )
+      expect(() =>
+        admitBalanceSemanticResult(
+          buildBalanceSemanticPacket({
+            source: currentSource,
+            mechanical: mechanical(currentSource),
+          }),
+          { nodes: invalidNodes, sourceClaims: swapped },
+        ),
+      ).toThrow(/literal|type|semantic/i)
+    }
+
+    const emptyNodes = simpleNodes()
+    emptyNodes.push({
+      id: 'balance.empty',
+      kind: 'balance.progression-curve',
+      value: {},
+      references: [],
+      edges: [],
+    })
+    const emptyPacket = buildBalanceSemanticPacket({
+      source: currentSource,
+      mechanical: mechanical(currentSource),
+    })
+    expect(() =>
+      admitBalanceSemanticResult(emptyPacket, {
+        nodes: emptyNodes,
+        sourceClaims: sourceClaims(emptyNodes, currentSource),
+      }),
+    ).not.toThrow()
+  })
+
+  test('isolates post-admission Balance graph, unit, cycle, and unimplemented-target guards', () => {
+    const graphNodes = simpleNodes('formula-dense')
+    graphNodes.find(node => node.kind === 'balance.formula')!.edges = []
+    const graph = admittedNodes(graphNodes)
+    expect(() =>
+      assembleBalanceModule({
+        source: graph.currentSource,
+        mechanical: graph.mechanicalReceipt,
+        semantic: graph.semantic,
+      }),
+    ).toThrow(/dependency/i)
+
+    const unitNodes = simpleNodes('formula-dense')
+    const unitFormula = unitNodes.find(node => node.kind === 'balance.formula')!
+    unitFormula.value.expression = {
+      kind: 'binary',
+      operator: 'add',
+      left: { kind: 'reference', referenceIndex: 0 },
+      right: { kind: 'literal', value: 2, unitReferenceIndex: 1 },
+    }
+    unitFormula.value.outputUnitReferenceIndex = 2
+    const unit = admittedNodes(unitNodes)
+    expect(() =>
+      assembleBalanceModule({
+        source: unit.currentSource,
+        mechanical: unit.mechanicalReceipt,
+        semantic: unit.semantic,
+      }),
+    ).toThrow(/unit/i)
+
+    const cycleNodes = simpleNodes('formula-dense')
+    const formula = cycleNodes.find(node => node.kind === 'balance.formula')!
+    formula.references = [
+      { targetId: 'balance.formula.double', targetType: 'balance.formula' },
+      { targetId: 'balance.unit.hp', targetType: 'balance.unit' },
+      { targetId: 'balance.unit.none', targetType: 'balance.unit' },
+    ]
+    formula.edges = [
+      {
+        type: 'depends-on',
+        targetId: formula.id,
+        targetType: 'balance.formula',
+      },
+    ]
+    const cycle = admittedNodes(cycleNodes)
+    expect(() =>
+      assembleBalanceModule({
+        source: cycle.currentSource,
+        mechanical: cycle.mechanicalReceipt,
+        semantic: cycle.semantic,
+      }),
+    ).toThrow(/cycle/i)
+
+    const targetNodes = simpleNodes()
+    targetNodes[2]!.references = [
+      { targetId: 'balance.missing', targetType: 'balance.unit' },
+    ]
+    const target = admittedNodes(targetNodes)
+    expect(() =>
+      assembleBalanceModule({
+        source: target.currentSource,
+        mechanical: target.mechanicalReceipt,
+        semantic: target.semantic,
+      }),
+    ).toThrow(/unknown|target|implemented/i)
+  })
+
+  test('isolates missing Gameplay trigger and wrong target kind after DTO admission', () => {
+    const missing = admittedNodes(bindingNodes({ includeTrigger: false }))
+    expect(() =>
+      assembleBalanceModule({
+        source: missing.currentSource,
+        mechanical: missing.mechanicalReceipt,
+        semantic: missing.semantic,
+      }),
+    ).toThrow(/triggered-by|required|missing/i)
+
+    const wrong = admittedNodes(bindingNodes({ triggerType: 'gameplay.event' }))
+    const gameplay = gameplayProjection(wrong.currentSource)
+    expect(() =>
+      assembleBalanceModule({
+        source: wrong.currentSource,
+        mechanical: wrong.mechanicalReceipt,
+        semantic: wrong.semantic,
+        gameplay,
+      }),
+    ).toThrow(/kind|target|reference/i)
+  })
+
+  test('rejects stale Gameplay task and revision identities independently', () => {
+    const currentSource = source()
+    const admitted = admittedNodes(bindingNodes(), currentSource)
+    const staleTask = gameplayProjection(currentSource, {
+      taskId: 'other-task',
+    })
+    expect(() =>
+      assembleBalanceModule({
+        source: admitted.currentSource,
+        mechanical: admitted.mechanicalReceipt,
+        semantic: admitted.semantic,
+        gameplay: staleTask,
+      }),
+    ).toThrow(/identity|stale|task/i)
+    const staleRevision = gameplayProjection(currentSource, {
+      foundationRevision: 'other-revision',
+    })
+    expect(() =>
+      assembleBalanceModule({
+        source: admitted.currentSource,
+        mechanical: admitted.mechanicalReceipt,
+        semantic: admitted.semantic,
+        gameplay: staleRevision,
+      }),
+    ).toThrow(/identity|stale|revision/i)
+  })
+
+  test('proves source accounting and duplicate ownership guards', () => {
+    const currentSource = source()
+    const packet = buildBalanceSemanticPacket({
+      source: currentSource,
+      mechanical: mechanical(currentSource),
+    })
+    const valid = validResult(currentSource)
+    expect(() =>
+      admitBalanceSemanticResult(packet, {
+        nodes: valid.nodes,
+        sourceClaims: valid.sourceClaims.slice(1),
+      }),
+    ).toThrow(/account|claim|target/i)
+    const duplicateNodes = [...valid.nodes, { ...valid.nodes[0]! }]
+    expect(() =>
+      admitBalanceSemanticResult(packet, {
+        nodes: duplicateNodes,
+        sourceClaims: valid.sourceClaims,
+      }),
+    ).toThrow(/duplicate|unique|claim/i)
+    const duplicateClaims = [...valid.sourceClaims, valid.sourceClaims[0]!]
+    expect(() =>
+      admitBalanceSemanticResult(packet, {
+        nodes: valid.nodes,
+        sourceClaims: duplicateClaims,
+      }),
+    ).toThrow(/duplicate|sorted|account/i)
+  })
+
   test('compiles complete zero-resource and formula-dense Foundation profiles twice', () => {
     const digests: string[] = []
+    const moduleBytes: string[] = []
+    const projectionBytes: string[] = []
     for (const profile of ['zero-resource', 'formula-dense'] as const) {
       const currentSource = completeSource(profile)
       const currentMechanical = mechanical(currentSource)
@@ -518,22 +1056,46 @@ describe('Balance producer admission and assembler', () => {
       })
       const semantic = admitBalanceSemanticResult(
         packet,
-        validResult(currentSource),
+        validResult(currentSource, profile, profile === 'formula-dense'),
       )
       const first = assembleBalanceModule({
         source: currentSource,
         mechanical: currentMechanical,
         semantic,
+        ...(profile === 'formula-dense'
+          ? { gameplay: gameplayProjection(currentSource) }
+          : {}),
       })
       const second = assembleBalanceModule({
         source: currentSource,
         mechanical: currentMechanical,
         semantic,
+        ...(profile === 'formula-dense'
+          ? { gameplay: gameplayProjection(currentSource) }
+          : {}),
       })
       expect(first.projectionDigest).toBe(second.projectionDigest)
       expect(digestGameIrValue(first.module)).toBe(
         digestGameIrValue(second.module),
       )
+      expect(canonicalGameIrJson(first.module)).toBe(
+        canonicalGameIrJson(second.module),
+      )
+      expect(canonicalGameIrJson(first)).toBe(canonicalGameIrJson(second))
+      expect(
+        first.module.nodes.some(node => node.kind === 'balance.formula'),
+      ).toBe(profile === 'formula-dense')
+      expect(
+        first.module.nodes.some(node => node.kind === 'balance.economy-source'),
+      ).toBe(profile === 'formula-dense')
+      expect(
+        first.module.nodes.some(node => node.kind === 'balance.reward'),
+      ).toBe(profile === 'formula-dense')
+      expect(
+        first.module.nodes.some(
+          node => node.kind === 'balance.reward-cost-binding',
+        ),
+      ).toBe(profile === 'formula-dense')
       expect(
         new Set(
           currentSource.authoritySectionIndex.map(
@@ -549,7 +1111,11 @@ describe('Balance producer admission and assembler', () => {
         ),
       ).toBe(true)
       digests.push(first.projectionDigest)
+      moduleBytes.push(canonicalGameIrJson(first.module))
+      projectionBytes.push(canonicalGameIrJson(first))
     }
     expect(digests[0]).not.toBe(digests[1])
+    expect(moduleBytes[0]).not.toBe(moduleBytes[1])
+    expect(projectionBytes[0]).not.toBe(projectionBytes[1])
   })
 })
