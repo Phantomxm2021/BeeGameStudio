@@ -18,23 +18,78 @@ import {
   buildGameIrSemanticValidationPacket,
   type GameIrSemanticValidationPacketInput,
 } from './semantic-admission'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
 
 const receiptDigest = 'a'.repeat(64)
 const markdown = '# Core Loop\n\nThe player survives.'
+const rulesMarkdown = '# Rules\n\nThe player wins.'
 const sectionDigest = createHash('sha256').update(markdown).digest('hex')
+const rulesDigest = createHash('sha256').update(rulesMarkdown).digest('hex')
 
 const sectionIndex: readonly GameIrSourceSection[] = [
   {
-    documentPath: 'docs/GDD.md',
+    documentPath: 'docs/GDD.md' as FoundationDocumentPath,
     sectionId: 'core-loop',
     heading: 'Core Loop',
     startLine: 1,
     endLine: 3,
     digest: sectionDigest,
   },
-]
+  {
+    documentPath: 'docs/GDD.md' as FoundationDocumentPath,
+    sectionId: 'rules',
+    heading: 'Rules',
+    startLine: 4,
+    endLine: 6,
+    digest: rulesDigest,
+  },
+  ...CANONICAL_FOUNDATION_DOCUMENTS.filter(path => path !== 'docs/GDD.md')
+    .sort((left, right) => left.localeCompare(right))
+    .map((documentPath, index) => ({
+      documentPath: documentPath as FoundationDocumentPath,
+      sectionId: `section-${index}`,
+      heading: `Section ${index}`,
+      startLine: 1,
+      endLine: 3,
+      digest: createHash('sha256')
+        .update(`# ${documentPath}\n\nSource ${index}.`)
+        .digest('hex'),
+    })),
+].sort((left, right) =>
+  `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
+    `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
+  ),
+)
+
+function sectionKey(
+  ref: Pick<GameIrSourceSection, 'documentPath' | 'sectionId'>,
+): string {
+  return `${ref.documentPath}#${ref.sectionId}`
+}
+
+function sectionBytesFor(moduleId: string): Record<string, string> {
+  const module = GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.find(
+    item => item.moduleId === moduleId,
+  )!
+  return Object.fromEntries(
+    sectionIndex
+      .filter(section =>
+        module.sourceDocumentPaths.includes(section.documentPath),
+      )
+      .map(section => [
+        sectionKey(section),
+        section.documentPath === 'docs/GDD.md'
+          ? section.sectionId === 'core-loop'
+            ? markdown
+            : rulesMarkdown
+          : `# ${section.documentPath}\n\nSource ${section.sectionId.replace('section-', '')}.`,
+      ]),
+  )
+}
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -135,7 +190,7 @@ function input(
     request: request(),
     sectionIndex,
     moduleId: 'gameplay',
-    sectionBytes: { 'docs/GDD.md#core-loop': markdown },
+    sectionBytes: sectionBytesFor('gameplay'),
     ...overrides,
   } as GameIrSemanticValidationPacketInput
 }
@@ -155,6 +210,116 @@ function withPacketDigest(
 }
 
 describe('isolated Game IR semantic projection admission', () => {
+  test('service-owned validator modules declare the canonical source document scope', () => {
+    const expected: Record<string, readonly FoundationDocumentPath[]> = {
+      core: ['docs/GDD.md'],
+      gameplay: ['docs/GDD.md'],
+      balance: [
+        'docs/GDD.md',
+        'docs/BALANCE_DESIGN.md',
+      ].sort() as FoundationDocumentPath[],
+      'world-scene': [
+        'docs/GDD.md',
+        'docs/LEVEL_SCENE_DESIGN.md',
+      ].sort() as FoundationDocumentPath[],
+      presentation: [
+        'docs/GDD.md',
+        'docs/ART_DIRECTION.md',
+        'docs/UI_UX_SPEC.md',
+        'docs/AUDIO_DESIGN.md',
+      ].sort() as FoundationDocumentPath[],
+      'resource-realization': [
+        'docs/ASSET_PLAN.md',
+        'docs/TECHNICAL_DESIGN.md',
+        'docs/ART_DIRECTION.md',
+        'docs/UI_UX_SPEC.md',
+        'docs/AUDIO_DESIGN.md',
+        'docs/LEVEL_SCENE_DESIGN.md',
+      ].sort() as FoundationDocumentPath[],
+      'implementation-verification': [
+        'docs/GDD.md',
+        'docs/LEVEL_SCENE_DESIGN.md',
+        'docs/BALANCE_DESIGN.md',
+        'docs/TECHNICAL_DESIGN.md',
+      ].sort() as FoundationDocumentPath[],
+    }
+    for (const module of GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules) {
+      expect(module.sourceDocumentPaths).toEqual(
+        expected[module.moduleId as keyof typeof expected],
+      )
+      expect(Object.isFrozen(module.sourceDocumentPaths)).toBe(true)
+      expect([...module.sourceDocumentPaths]).toEqual(
+        [...module.sourceDocumentPaths].sort(),
+      )
+    }
+    expect(Object.isFrozen(GAME_IR_SEMANTIC_VALIDATOR_MANIFEST)).toBe(true)
+  })
+
+  test('validator scope cannot be shrunk to the candidate owner binding', () => {
+    const gameplay = GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.find(
+      module => module.moduleId === 'gameplay',
+    )!
+    expect(gameplay.sourceDocumentPaths).toContain('docs/GDD.md')
+    expect(gameplay.sourceDocumentPaths).toEqual(['docs/GDD.md'])
+    const sourceSection = sectionIndex.find(
+      section => section.documentPath === 'docs/GDD.md',
+    )!
+    const packetInput = input({
+      moduleId: 'gameplay',
+      sectionBytes: sectionBytesFor('gameplay'),
+    })
+    const value = buildGameIrSemanticValidationPacket(packetInput)
+    expect(value.sourceSections.map(item => sectionKey(item.ref))).toEqual([
+      'docs/GDD.md#core-loop',
+      'docs/GDD.md#rules',
+    ])
+    expect(value.sourceSections.map(item => item.bytes)).toEqual([
+      markdown,
+      rulesMarkdown,
+    ])
+    expect(value.allowedEvidencePointers).toContain(
+      `section:docs/GDD.md#rules@${rulesDigest}`,
+    )
+  })
+
+  test('rejects a packet when any manifest-required section bytes are omitted', () => {
+    expect(() =>
+      buildGameIrSemanticValidationPacket(
+        input({
+          sectionBytes: { 'docs/GDD.md#core-loop': markdown },
+        }),
+      ),
+    ).toThrow(/sectionBytes|source closure|missing/i)
+  })
+
+  test('includes every manifest document and rejects extra or missing bytes for a multi-document module', () => {
+    const value = buildGameIrSemanticValidationPacket(
+      input({ moduleId: 'balance', sectionBytes: sectionBytesFor('balance') }),
+    )
+    expect(value.sourceSections.map(item => sectionKey(item.ref))).toEqual([
+      sectionKey(
+        sectionIndex.find(
+          section => section.documentPath === 'docs/BALANCE_DESIGN.md',
+        )!,
+      ),
+      'docs/GDD.md#core-loop',
+      'docs/GDD.md#rules',
+    ])
+    const bytes = sectionBytesFor('balance')
+    delete bytes[
+      sectionKey(
+        sectionIndex.find(
+          section => section.documentPath === 'docs/BALANCE_DESIGN.md',
+        )!,
+      )
+    ]
+    expect(() =>
+      buildGameIrSemanticValidationPacket(
+        input({ moduleId: 'balance', sectionBytes: bytes }),
+      ),
+    ).toThrow(/sectionBytes|source closure|missing/i)
+  })
+
   test('fix Critical: rejects a missing or empty canonical module before packet construction', () => {
     const modules = rawCandidate().modules as unknown[]
     const missing = rawCandidate()
@@ -282,8 +447,8 @@ describe('isolated Game IR semantic projection admission', () => {
   test('fix Important: diagnostics require exact owner evidence namespace, never coarse sections', () => {
     const value = packet()
     const exact = [
-      'docs/GDD.md#core-loop/ir/gameplay',
-      'docs/GDD.md#core-loop/ir/gameplay/label',
+      'binding:docs/GDD.md#core-loop/ir/gameplay',
+      'binding:docs/GDD.md#core-loop/ir/gameplay/label',
     ]
     for (const outcome of ['FAIL', 'AMBIGUOUS'] as const) {
       const admitted = admitGameIrSemanticValidationResult(value, {
@@ -294,6 +459,14 @@ describe('isolated Game IR semantic projection admission', () => {
         evidencePointers: exact,
       })
       expect(admitted.outcome).toBe(outcome)
+      const sectionEvidence = admitGameIrSemanticValidationResult(value, {
+        outcome,
+        packetDigest: value.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'required source was not projected',
+        evidencePointers: [`section:docs/GDD.md#rules@${rulesDigest}`],
+      })
+      expect(sectionEvidence.outcome).toBe(outcome)
     }
     expect(() =>
       admitGameIrSemanticValidationResult(value, {
@@ -430,7 +603,11 @@ describe('isolated Game IR semantic projection admission', () => {
     expect(digestGameIrValue(shared.candidate)).toBe(candidateBefore)
     expect(canonical(shared.sectionIndex)).toBe(sectionIndexBefore)
     expect(sourceBytesBefore['docs/GDD.md#core-loop']).toBe(markdown)
-    expect(packetValue.sourceSections[0]!.bytes).toBe(markdown)
+    expect(
+      packetValue.sourceSections.find(
+        item => item.ref.sectionId === 'core-loop',
+      )!.bytes,
+    ).toBe(markdown)
     expect(packetValue.candidateDigest).toBe(candidateBefore)
     expect(packetValue.candidateBytes).toBe(
       canonicalGameIrJson(shared.candidate),

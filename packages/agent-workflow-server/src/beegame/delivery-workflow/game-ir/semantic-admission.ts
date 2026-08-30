@@ -29,6 +29,7 @@ export type GameIrSemanticValidatorModule = Readonly<{
     | 'resource-realization'
     | 'implementation-verification'
   checkIds: readonly string[]
+  sourceDocumentPaths: readonly FoundationDocumentPath[]
 }>
 
 export type GameIrSemanticValidatorManifest = Readonly<{
@@ -219,7 +220,11 @@ function ownerEvidencePointer(binding: {
   sectionId: string
   sourcePointer: string
 }): string {
-  return `${binding.documentPath}#${binding.sectionId}${binding.sourcePointer}`
+  return `binding:${binding.documentPath}#${binding.sectionId}${binding.sourcePointer}`
+}
+
+function sectionEvidencePointer(ref: GameIrSourceSection): string {
+  return `section:${ref.documentPath}#${ref.sectionId}@${ref.digest}`
 }
 
 function sectionOrder(
@@ -276,6 +281,11 @@ function normalizeSectionIndex(value: unknown): readonly GameIrSourceSection[] {
     if (sectionOrder(output[index - 1]!, output[index]!) >= 0)
       fail('sectionIndex must be in canonical order')
   }
+  const coveredDocuments = new Set(output.map(section => section.documentPath))
+  for (const documentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
+    if (!coveredDocuments.has(documentPath))
+      fail(`sectionIndex is missing canonical document ${documentPath}`)
+  }
   return Object.freeze(output)
 }
 
@@ -322,7 +332,37 @@ function manifestWithoutDigest(): Omit<
     const checkIds = [...COMMON_CHECK_IDS, DOMAIN_CHECK_IDS[moduleId]].sort(
       compare,
     )
-    return Object.freeze({ moduleId, checkIds: Object.freeze(checkIds) })
+    const sourceDocumentPaths = {
+      core: ['docs/GDD.md'],
+      gameplay: ['docs/GDD.md'],
+      balance: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
+      'world-scene': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+      presentation: [
+        'docs/GDD.md',
+        'docs/ART_DIRECTION.md',
+        'docs/UI_UX_SPEC.md',
+        'docs/AUDIO_DESIGN.md',
+      ],
+      'resource-realization': [
+        'docs/ASSET_PLAN.md',
+        'docs/TECHNICAL_DESIGN.md',
+        'docs/ART_DIRECTION.md',
+        'docs/UI_UX_SPEC.md',
+        'docs/AUDIO_DESIGN.md',
+        'docs/LEVEL_SCENE_DESIGN.md',
+      ],
+      'implementation-verification': [
+        'docs/GDD.md',
+        'docs/LEVEL_SCENE_DESIGN.md',
+        'docs/BALANCE_DESIGN.md',
+        'docs/TECHNICAL_DESIGN.md',
+      ],
+    }[moduleId].sort(compare) as FoundationDocumentPath[]
+    return Object.freeze({
+      moduleId,
+      checkIds: Object.freeze(checkIds),
+      sourceDocumentPaths: Object.freeze(sourceDocumentPaths),
+    })
   })
   return {
     schemaVersion: GAME_IR_SEMANTIC_VALIDATOR_MANIFEST_VERSION,
@@ -378,6 +418,7 @@ function selectedModule(
 function moduleSourceClosure(
   module: GameIrModuleCandidate,
   index: readonly GameIrSourceSection[],
+  manifest: GameIrSemanticValidatorModule,
 ): {
   sections: readonly GameIrSourceSection[]
   evidencePointers: readonly string[]
@@ -385,6 +426,10 @@ function moduleSourceClosure(
   const byKey = new Map(index.map(section => [sectionKey(section), section]))
   const sections = new Map<string, GameIrSourceSection>()
   const evidence = new Set<string>()
+  for (const ref of index) {
+    if (manifest.sourceDocumentPaths.includes(ref.documentPath))
+      sections.set(sectionKey(ref), ref)
+  }
   for (const node of module.nodes) {
     for (const binding of Object.values(node.bindings)) {
       if (binding.kind !== 'owner') continue
@@ -397,6 +442,7 @@ function moduleSourceClosure(
     }
   }
   const selected = [...sections.values()].sort(sectionOrder)
+  for (const ref of selected) evidence.add(sectionEvidencePointer(ref))
   const evidencePointers = [...evidence].sort(compare)
   if (selected.length === 0 || evidencePointers.length === 0)
     fail('selected module has no owner source closure')
@@ -452,14 +498,15 @@ export function buildGameIrSemanticValidationPacket(
   }
   const module = moduleManifest(input.moduleId)
   const selected = selectedModule(candidate, module.moduleId)
-  const closure = moduleSourceClosure(selected, fullIndex)
+  const closure = moduleSourceClosure(selected, fullIndex, module)
   const expectedByteKeys = new Set(closure.sections.map(sectionKey))
   const providedBytes = sectionBytesEntries(input.sectionBytes)
   if (
     providedBytes.length !== expectedByteKeys.size ||
     providedBytes.some(([key]) => !expectedByteKeys.has(key))
-  )
+  ) {
     fail('sectionBytes must exactly match the selected module source closure')
+  }
   const bytesByKey = new Map(providedBytes)
   const sourceSections = closure.sections.map(ref => {
     const bytes = bytesByKey.get(sectionKey(ref))
@@ -605,7 +652,7 @@ function validatePacket(packet: GameIrSemanticValidationPacket): {
     'packet checkIds',
   )
   const selected = selectedModule(candidate, module.moduleId)
-  const closure = moduleSourceClosure(selected, fullIndex)
+  const closure = moduleSourceClosure(selected, fullIndex, module)
   const sourceSections = normalizePacketSourceSections(packet.sourceSections)
   if (
     sourceSections.length !== closure.sections.length ||

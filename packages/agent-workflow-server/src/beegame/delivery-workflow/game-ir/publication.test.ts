@@ -42,16 +42,54 @@ import {
 const digest = 'a'.repeat(64)
 const markdown = '# Core Loop\n\nThe player survives.\n'
 const sectionDigest = createHash('sha256').update(markdown).digest('hex')
-const sectionIndex: readonly GameIrSourceSection[] = [
-  {
-    documentPath: 'docs/GDD.md',
-    sectionId: 'core-loop',
-    heading: 'Core Loop',
-    startLine: 1,
-    endLine: 3,
-    digest: sectionDigest,
-  },
-]
+const sectionIndex: readonly GameIrSourceSection[] =
+  CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => {
+    const bytes =
+      documentPath === 'docs/GDD.md'
+        ? markdown
+        : `# Section ${index}\n\nSource ${documentPath}.\n`
+    return {
+      documentPath,
+      sectionId:
+        documentPath === 'docs/GDD.md' ? 'core-loop' : `section-${index}`,
+      heading:
+        documentPath === 'docs/GDD.md' ? 'Core Loop' : `Section ${index}`,
+      startLine: 1,
+      endLine: 3,
+      digest: shaBytes(bytes),
+    }
+  }).sort((left, right) =>
+    `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
+      `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
+    ),
+  )
+
+function sectionKey(
+  ref: Pick<GameIrSourceSection, 'documentPath' | 'sectionId'>,
+): string {
+  return `${ref.documentPath}#${ref.sectionId}`
+}
+
+function sectionBytesFor(moduleId: string): Record<string, string> {
+  const module = GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.find(
+    item => item.moduleId === moduleId,
+  )!
+  const result = Object.fromEntries(
+    sectionIndex
+      .filter(
+        section =>
+          module.sourceDocumentPaths.includes(section.documentPath) ||
+          section.documentPath === 'docs/GDD.md',
+      )
+      .map(section => [
+        sectionKey(section),
+        section.documentPath === 'docs/GDD.md'
+          ? markdown
+          : `# Section ${CANONICAL_FOUNDATION_DOCUMENTS.indexOf(section.documentPath)}\n\nSource ${section.documentPath}.\n`,
+      ]),
+  )
+  return result
+}
 
 const publicationModulePath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -183,7 +221,7 @@ function authority(
         request: compileRequest,
         sectionIndex,
         moduleId,
-        sectionBytes: { 'docs/GDD.md#core-loop': markdown },
+        sectionBytes: sectionBytesFor(moduleId),
       })
       const result = admitGameIrSemanticValidationResult(packet, {
         outcome: 'PASS',
