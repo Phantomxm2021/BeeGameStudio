@@ -742,28 +742,28 @@ describe('atomic Game IR publication and recovery', () => {
     const readyReturn = events.findIndex(event => event.type === 'ready-return')
     expect(journalSync).toBeGreaterThanOrEqual(0)
     expect(stageWork).toBeGreaterThan(journalSync)
-    expect(
-      events.findIndex(
-        event =>
-          event.type === 'directory-sync' &&
-          event.path === join(root, '.staging', value.publicationId, 'modules'),
-      ),
-    ).toBeLessThan(renameEvent)
-    expect(
-      events.findIndex(
-        event =>
-          event.type === 'directory-sync' &&
-          event.path ===
-            join(root, '.staging', value.publicationId, 'source-maps'),
-      ),
-    ).toBeLessThan(renameEvent)
-    expect(
-      events.findIndex(
-        event =>
-          event.type === 'directory-sync' &&
-          event.path === join(root, '.staging', value.publicationId),
-      ),
-    ).toBeLessThan(renameEvent)
+    const modulesSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, '.staging', value.publicationId, 'modules'),
+    )
+    const sourceMapsSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path ===
+          join(root, '.staging', value.publicationId, 'source-maps'),
+    )
+    const stageSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, '.staging', value.publicationId),
+    )
+    expect(modulesSync).toBeGreaterThanOrEqual(0)
+    expect(sourceMapsSync).toBeGreaterThanOrEqual(0)
+    expect(stageSync).toBeGreaterThanOrEqual(0)
+    expect(modulesSync).toBeLessThan(renameEvent)
+    expect(sourceMapsSync).toBeLessThan(renameEvent)
+    expect(stageSync).toBeLessThan(renameEvent)
     const revisionsSync = events.findIndex(
       (event, index) =>
         index > renameEvent &&
@@ -776,9 +776,17 @@ describe('atomic Game IR publication and recovery', () => {
         event.type === 'directory-sync' &&
         event.path === join(root, 'revisions', 'foundation-revision-1'),
     )
+    const stagingParentSync = events.findIndex(
+      (event, index) =>
+        index > renameEvent &&
+        event.type === 'directory-sync' &&
+        event.path === join(root, '.staging'),
+    )
     expect(renameEvent).toBeGreaterThan(-1)
+    expect(stagingParentSync).toBeGreaterThan(renameEvent)
     expect(revisionsSync).toBeGreaterThan(renameEvent)
     expect(finalSync).toBeGreaterThan(renameEvent)
+    expect(stagingParentSync).toBeLessThan(readyReturn)
     expect(revisionsSync).toBeLessThan(readyReturn)
     expect(finalSync).toBeLessThan(readyReturn)
   })
@@ -788,6 +796,46 @@ describe('atomic Game IR publication and recovery', () => {
     await commitGameIrPublication(value)
     const events: { type: string; path?: string }[] = []
     await commitGameIrPublication(value, {
+      onEvent: event => events.push(event),
+    })
+    events.push({ type: 'ready-return' })
+    const root = join(
+      await realpath(value.workspacePath),
+      '.beegame/ir/game-ir.v1',
+    )
+    const readyReturn = events.findIndex(event => event.type === 'ready-return')
+    const revisionsSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, 'revisions'),
+    )
+    const finalSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, 'revisions', 'foundation-revision-1'),
+    )
+    const publicationRootSync = events.findIndex(
+      event => event.type === 'directory-sync' && event.path === root,
+    )
+    const journalSync = events.findIndex(
+      event =>
+        event.type === 'directory-sync' &&
+        event.path === join(root, '.journal'),
+    )
+    expect(publicationRootSync).toBeGreaterThanOrEqual(0)
+    expect(journalSync).toBeGreaterThanOrEqual(0)
+    expect(publicationRootSync).toBeLessThan(journalSync)
+    expect(revisionsSync).toBeGreaterThan(-1)
+    expect(finalSync).toBeGreaterThan(-1)
+    expect(revisionsSync).toBeLessThan(readyReturn)
+    expect(finalSync).toBeLessThan(readyReturn)
+  })
+
+  test('validate performs its own destination durability barrier before READY', async () => {
+    const value = await setup()
+    await commitGameIrPublication(value)
+    const events: { type: string; path?: string }[] = []
+    await validateCommittedGameIr(value, {
       onEvent: event => events.push(event),
     })
     events.push({ type: 'ready-return' })

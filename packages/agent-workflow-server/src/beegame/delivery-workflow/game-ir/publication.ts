@@ -302,7 +302,6 @@ async function durableMkdir(
   for (const part of rel.split('/').filter(Boolean)) {
     const parent = current
     current = join(current, part)
-    let created = false
     try {
       const info = await lstat(current)
       if (info.isSymbolicLink() || !info.isDirectory())
@@ -311,7 +310,6 @@ async function durableMkdir(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       try {
         await mkdir(current)
-        created = true
       } catch (mkdirError) {
         if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST')
           throw mkdirError
@@ -320,7 +318,7 @@ async function durableMkdir(
       if (info.isSymbolicLink() || !info.isDirectory())
         fail('existing path component is symlink or non-directory')
     }
-    if (created) await syncDirectory(root, parent, testHooks)
+    await syncDirectory(root, parent, testHooks)
   }
 }
 async function writePrivateFile(
@@ -1080,13 +1078,16 @@ export async function recoverGameIrPublication(
 }
 export async function validateCommittedGameIr(
   authority: GameIrPublicationAuthority,
+  testHooks?: GameIrPublicationTestHooks,
 ): Promise<GameIrReadyReceipt> {
-  const plan = withWorkspace(
-    buildPlan(authority),
-    await safeWorkspace(authority.workspacePath),
-  )
+  const plan = {
+    ...withWorkspace(
+      buildPlan(authority),
+      await safeWorkspace(authority.workspacePath),
+    ),
+    testHooks,
+  }
   await exactJournal(plan)
   if (!(await existing(plan.final))) fail('COMMITTED revision is missing')
-  await exactFiles(plan, plan.final)
-  return plan.ready
+  return ready(plan, dirname(plan.final))
 }
