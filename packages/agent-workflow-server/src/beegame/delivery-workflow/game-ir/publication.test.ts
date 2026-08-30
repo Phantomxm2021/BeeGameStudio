@@ -424,6 +424,14 @@ describe('atomic Game IR publication and recovery', () => {
     await expect(commitGameIrPublication(value)).rejects.toThrow(
       /conflict|final|authority/i,
     )
+    expect(await readFile(join(finalRoot, 'manifest.json'), 'utf8')).toBe(
+      'attacker\n',
+    )
+    expect(
+      (
+        await readdir(join(value.workspacePath, '.beegame/ir/game-ir.v1'))
+      ).sort(),
+    ).toEqual(['.journal', '.staging', 'revisions'])
     for (const artifactPath of [
       'modules/core.json',
       'source-maps/core.json',
@@ -556,14 +564,20 @@ describe('atomic Game IR publication and recovery', () => {
         }
         return value
       }
-      await commitGameIrPublication(freeze(JSON.parse(process.env.GAME_IR_AUTH)))
+      console.log(
+        JSON.stringify(
+          await commitGameIrPublication(
+            freeze(JSON.parse(process.env.GAME_IR_AUTH)),
+          ),
+        ),
+      )
     `
     const serialized = JSON.stringify(value)
     const launch = () =>
       Bun.spawn(['bun', '--eval', childScript], {
         cwd: process.cwd(),
         env: { ...process.env, GAME_IR_AUTH: serialized },
-        stdout: 'ignore',
+        stdout: 'pipe',
         stderr: 'pipe',
       })
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -580,8 +594,19 @@ describe('atomic Game IR publication and recovery', () => {
         throw new Error(errors.join('\n'))
       }
       expect(exits).toEqual([0, 0])
+      const receipts = await Promise.all(
+        children.map(child =>
+          child.stdout
+            ? new Response(child.stdout).text()
+            : Promise.reject(new Error('same-authority child stdout missing')),
+        ),
+      )
+      expect(receipts[0]).toBe(receipts[1])
     }
     await expect(validateCommittedGameIr(value)).resolves.toBeTruthy()
+    expect(
+      await readdir(join(value.workspacePath, '.beegame/ir/game-ir.v1')),
+    ).toEqual(['revisions'])
   })
 
   test('rejects an independent different authority without mixing final bytes', async () => {

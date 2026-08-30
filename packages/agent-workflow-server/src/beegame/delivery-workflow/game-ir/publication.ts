@@ -10,6 +10,7 @@ import {
   rename,
   rm,
   rmdir,
+  unlink,
 } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import {
@@ -745,16 +746,29 @@ async function exactFiles(plan: Plan, root: string): Promise<void> {
   }
 }
 async function cleanup(plan: Plan): Promise<void> {
-  await rm(plan.stage, { recursive: true, force: true })
-  await rm(plan.journal, { force: true })
+  const privateCleanup = join(plan.privateRoot, 'cleanup')
+  try {
+    await rename(plan.stage, privateCleanup)
+    await rm(privateCleanup, { recursive: true, force: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
+  }
+  try {
+    const info = await lstat(plan.journal)
+    if (info.isSymbolicLink() || !info.isFile()) return
+    if ((await readFile(plan.journal, 'utf8')) !== plan.journalBytes) return
+    await unlink(plan.journal)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
+  }
   for (const path of [
     join(plan.workspacePath, ROOT, '.staging'),
     join(plan.workspacePath, ROOT, '.journal'),
   ]) {
     try {
       if ((await readdir(path)).length === 0) await rmdir(path)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    } catch {
+      return
     }
   }
 }
@@ -832,7 +846,11 @@ async function runtimePlan(
   return { ...plan, privateRoot }
 }
 async function cleanupPrivate(plan: Plan): Promise<void> {
-  await rm(plan.privateRoot, { recursive: true, force: true })
+  try {
+    await rm(plan.privateRoot, { recursive: true, force: true })
+  } catch {
+    return
+  }
 }
 export async function prepareGameIrPublication(
   authority: GameIrPublicationAuthority,
