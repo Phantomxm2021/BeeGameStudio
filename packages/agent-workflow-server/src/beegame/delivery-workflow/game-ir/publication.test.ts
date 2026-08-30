@@ -220,13 +220,14 @@ describe('atomic Game IR publication and recovery', () => {
     const value = await setup()
     const prepared = await prepareGameIrPublication(value)
     const root = join(value.workspacePath, '.beegame/ir/game-ir.v1')
-    expect(
-      await readFile(join(value.workspacePath, prepared.journalPath), 'utf8'),
-    ).toContain('PREPARED')
+    const journalPath = join(value.workspacePath, prepared.journalPath)
+    const journalBytes = await readFile(journalPath, 'utf8')
+    expect(await readFile(journalPath, 'utf8')).toContain('PREPARED')
     expect((await readdir(root)).sort()).toEqual(['.journal', '.staging'])
     await expect(validateCommittedGameIr(value)).rejects.toThrow()
     const ready = await commitGameIrPublication(value)
-    expect(await readdir(root)).toEqual(['revisions'])
+    expect((await readdir(root)).sort()).toEqual(['.journal', 'revisions'])
+    expect(await readFile(journalPath, 'utf8')).toBe(journalBytes)
     expect(ready.committedPath).toBe(
       '.beegame/ir/game-ir.v1/revisions/foundation-revision-1/COMMITTED.json',
     )
@@ -328,9 +329,12 @@ describe('atomic Game IR publication and recovery', () => {
     const value = await setup()
     const prepared = await prepareGameIrPublication(value)
     const staging = join(value.workspacePath, prepared.preparedPath)
+    const journalPath = join(value.workspacePath, prepared.journalPath)
+    const journalBytes = await readFile(journalPath, 'utf8')
     await rm(join(staging, 'manifest.json'))
     const recovered = await recoverGameIrPublication(value)
     await expect(recoverGameIrPublication(value)).resolves.toEqual(recovered)
+    expect(await readFile(journalPath, 'utf8')).toBe(journalBytes)
 
     const interrupted = await setup()
     const interruptedPrepared = await prepareGameIrPublication(interrupted)
@@ -371,8 +375,10 @@ describe('atomic Game IR publication and recovery', () => {
     )
     await expect(recoverGameIrPublication(renamed)).resolves.toBeTruthy()
     expect(
-      await readdir(join(renamed.workspacePath, '.beegame/ir/game-ir.v1')),
-    ).toEqual(['revisions'])
+      (
+        await readdir(join(renamed.workspacePath, '.beegame/ir/game-ir.v1'))
+      ).sort(),
+    ).toEqual(['.journal', 'revisions'])
 
     const conflict = await setup()
     const conflictPrepared = await prepareGameIrPublication(conflict)
@@ -391,14 +397,16 @@ describe('atomic Game IR publication and recovery', () => {
 
     const second = await setup()
     const secondPrepared = await prepareGameIrPublication(second)
-    const journalPath = join(second.workspacePath, secondPrepared.journalPath)
-    const journal = JSON.parse(await readFile(journalPath, 'utf8')) as Record<
-      string,
-      unknown
-    >
+    const tamperedJournalPath = join(
+      second.workspacePath,
+      secondPrepared.journalPath,
+    )
+    const journal = JSON.parse(
+      await readFile(tamperedJournalPath, 'utf8'),
+    ) as Record<string, unknown>
     const entries = journal.entries as Array<Record<string, unknown>>
     entries[0] = { ...entries[0], digest: sha('coordinated') }
-    await Bun.write(journalPath, `${canonical(journal)}\n`)
+    await Bun.write(tamperedJournalPath, `${canonical(journal)}\n`)
     await Bun.write(
       join(
         second.workspacePath,
@@ -409,6 +417,19 @@ describe('atomic Game IR publication and recovery', () => {
     )
     await expect(recoverGameIrPublication(second)).rejects.toThrow(
       /authority|digest|staging|conflicting/i,
+    )
+  })
+
+  test('fails closed when a committed revision has no immutable PREPARED journal', async () => {
+    const value = await setup()
+    const prepared = await prepareGameIrPublication(value)
+    await commitGameIrPublication(value)
+    await rm(join(value.workspacePath, prepared.journalPath))
+    await expect(validateCommittedGameIr(value)).rejects.toThrow(
+      /journal|audit|authority/i,
+    )
+    await expect(recoverGameIrPublication(value)).rejects.toThrow(
+      /journal|audit|authority/i,
     )
   })
 
@@ -605,13 +626,16 @@ describe('atomic Game IR publication and recovery', () => {
     }
     await expect(validateCommittedGameIr(value)).resolves.toBeTruthy()
     expect(
-      await readdir(join(value.workspacePath, '.beegame/ir/game-ir.v1')),
-    ).toEqual(['revisions'])
+      (
+        await readdir(join(value.workspacePath, '.beegame/ir/game-ir.v1'))
+      ).sort(),
+    ).toEqual(['.journal', 'revisions'])
   })
 
   test('rejects an independent different authority without mixing final bytes', async () => {
     const value = await setup()
     const other = authority(value.workspacePath, 4, 'publication-1')
+    await prepareGameIrPublication(value)
     const modulePath = join(
       process.cwd(),
       'packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.ts',
@@ -638,13 +662,16 @@ describe('atomic Game IR publication and recovery', () => {
         stdout: 'ignore',
         stderr: 'ignore',
       })
-    const children = [launch(value), launch(other)]
+    const children = [launch(value), launch(value), launch(other)]
     const exits = await Promise.all(children.map(child => child.exited))
-    expect([...exits].sort()).toEqual([0, 1])
-    const winner = exits[0] === 0 ? value : other
-    const loser = exits[0] === 0 ? other : value
-    await expect(validateCommittedGameIr(winner)).resolves.toBeTruthy()
-    await expect(validateCommittedGameIr(loser)).rejects.toThrow()
+    expect([...exits].sort()).toEqual([0, 0, 1])
+    await expect(validateCommittedGameIr(value)).resolves.toBeTruthy()
+    await expect(validateCommittedGameIr(other)).rejects.toThrow()
+    expect(
+      (
+        await readdir(join(value.workspacePath, '.beegame/ir/game-ir.v1'))
+      ).sort(),
+    ).toEqual(['.journal', 'revisions'])
   })
 
   test('rejects strict authority descriptor and array-shape tricks', async () => {

@@ -10,7 +10,6 @@ import {
   rename,
   rm,
   rmdir,
-  unlink,
 } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import {
@@ -624,6 +623,11 @@ async function writeStage(plan: Plan): Promise<void> {
     plan.workspacePath,
     pathOf(plan.workspacePath, `${ROOT}/.journal`),
   )
+  const journalExists = await existing(plan.journal)
+  const stageExists = await existing(plan.stage)
+  const finalExists = await existing(plan.final)
+  if (!journalExists && (stageExists || finalExists))
+    fail('immutable PREPARED journal is missing')
   await installArtifact(
     plan,
     {
@@ -745,6 +749,19 @@ async function exactFiles(plan: Plan, root: string): Promise<void> {
       fail(`artifact bytes disagree for ${artifact.path}`)
   }
 }
+async function exactJournal(plan: Plan): Promise<void> {
+  try {
+    const info = await lstat(plan.journal)
+    if (info.isSymbolicLink() || !info.isFile())
+      fail('immutable PREPARED journal is not a regular file')
+    if ((await readFile(plan.journal, 'utf8')) !== plan.journalBytes)
+      fail('immutable PREPARED journal disagrees with authority')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      fail('immutable PREPARED journal is missing')
+    throw error
+  }
+}
 async function cleanup(plan: Plan): Promise<void> {
   const privateCleanup = join(plan.privateRoot, 'cleanup')
   try {
@@ -754,29 +771,25 @@ async function cleanup(plan: Plan): Promise<void> {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
   }
   try {
-    const info = await lstat(plan.journal)
-    if (info.isSymbolicLink() || !info.isFile()) return
-    if ((await readFile(plan.journal, 'utf8')) !== plan.journalBytes) return
-    await unlink(plan.journal)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return
-  }
-  for (const path of [
-    join(plan.workspacePath, ROOT, '.staging'),
-    join(plan.workspacePath, ROOT, '.journal'),
-  ]) {
-    try {
-      if ((await readdir(path)).length === 0) await rmdir(path)
-    } catch {
-      return
-    }
+    if (
+      (await readdir(join(plan.workspacePath, ROOT, '.staging'))).length === 0
+    )
+      await rmdir(join(plan.workspacePath, ROOT, '.staging'))
+  } catch {
+    return
   }
 }
 async function publish(plan: Plan): Promise<GameIrReadyReceipt> {
+  if (
+    !(await existing(plan.journal)) &&
+    ((await existing(plan.stage)) || (await existing(plan.final)))
+  )
+    fail('immutable PREPARED journal is missing')
   try {
     await writeStage(plan)
   } catch (error) {
     if (!(await existing(plan.stage)) && (await existing(plan.final))) {
+      await exactJournal(plan)
       await exactFiles(plan, plan.final)
       await cleanup(plan)
       return plan.ready
@@ -887,6 +900,7 @@ export async function validateCommittedGameIr(
     buildPlan(authority),
     await safeWorkspace(authority.workspacePath),
   )
+  await exactJournal(plan)
   if (!(await existing(plan.final))) fail('COMMITTED revision is missing')
   await exactFiles(plan, plan.final)
   return plan.ready
