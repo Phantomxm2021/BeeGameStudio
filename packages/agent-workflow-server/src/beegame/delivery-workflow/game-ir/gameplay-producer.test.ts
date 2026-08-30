@@ -313,6 +313,7 @@ function completeFixtureSource(profile: string): GameIrDomainSourceEnvelope {
         path === 'docs/GDD.md'
           ? {
               ...submission,
+              executiveSummary: `${submission.executiveSummary} Rule-driven Gameplay profile ${profile}.`,
               sections: submission.sections.map((section, index) =>
                 index === 0
                   ? {
@@ -324,7 +325,10 @@ function completeFixtureSource(profile: string): GameIrDomainSourceEnvelope {
             }
           : submission
       const authored = renderTestCompleteGameDocument(path, profileSubmission)
-      return [path, withTestDocumentMetadata(path, authored)] as const
+      // Keep every complete-fixture section in a three-digit line range so the
+      // repository's source-index comparators agree on canonical ordering.
+      const padded = `${'\n'.repeat(100)}${authored}`
+      return [path, withTestDocumentMetadata(path, padded)] as const
     }),
   ) as Record<FoundationDocumentPath, string>
   const completeIndex = [...buildFoundationSectionIndex({ documents })].sort(
@@ -334,12 +338,7 @@ function completeFixtureSource(profile: string): GameIrDomainSourceEnvelope {
         `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
       ),
   )
-  const fullIndex = completeIndex.filter(
-    (section, index, all) =>
-      all.findIndex(
-        candidate => candidate.documentPath === section.documentPath,
-      ) === index,
-  )
+  const fullIndex = completeIndex
   const documentDigests = Object.fromEntries(
     CANONICAL_FOUNDATION_DOCUMENTS.map(path => [
       path,
@@ -603,50 +602,71 @@ describe('Gameplay producer admission and assembler', () => {
       ),
     ).toThrow(/exactly account for every semantic target/i)
 
-    const extra = [
-      ...sourceClaims(nodes),
-      {
-        subject: 'node:z-extra#/id',
-        documentPath: 'docs/GDD.md',
-        sectionId: 'gameplay',
-        sourcePointer: '/extra',
-        literal: 'extra',
-      },
-    ]
+    const extra = sourceClaims(nodes)
+      .map((claim, index) =>
+        index === 0
+          ? {
+              ...claim,
+              subject: 'node:entity.player#/edges/0',
+              sourcePointer: '/gameplay/entity.player/edges/0',
+              literal: 'extra',
+            }
+          : claim,
+      )
+      .sort((left, right) =>
+        compareCodeUnits(
+          `${left.subject}\0${left.sourcePointer}\0${left.literal}`,
+          `${right.subject}\0${right.sourcePointer}\0${right.literal}`,
+        ),
+      )
     expect(() =>
       admitGameplaySemanticResult(
         packet(),
         resultValue({ sourceClaims: extra }),
       ),
-    ).toThrow(/unknown node|exactly account for every semantic target/i)
+    ).toThrow(/exactly account for every semantic target/i)
   })
 
   test('rejects duplicate IDs across mechanical and semantic receipts', () => {
     const currentSource = source()
     const currentMechanical = mechanicalWithNode(currentSource, 'entity.player')
+    const duplicatePacket = buildGameplaySemanticPacket({
+      source: currentSource,
+      mechanical: currentMechanical,
+    })
+    const admitted = admittedSemanticFor(currentSource)
+    const forgedBody = {
+      ...admitted,
+      mechanicalReceiptDigest: duplicatePacket.mechanicalReceiptDigest,
+      packetDigest: duplicatePacket.packetDigest,
+    }
+    const forged = {
+      ...forgedBody,
+      receiptDigest: digestGameIrValue(forgedBody),
+    } as GameIrDomainSemanticReceipt
     expect(() =>
-      admitGameplaySemanticResult(
-        buildGameplaySemanticPacket({
-          source: currentSource,
-          mechanical: currentMechanical,
-        }),
-        resultValue(),
-      ),
+      assembleGameplayModule({
+        source: currentSource,
+        mechanical: currentMechanical,
+        semantic: forged,
+      }),
     ).toThrow(/overlap/i)
   })
 
-  test('sorts reordered receipt input to the same canonical module bytes', () => {
+  test('canonicalizes differently ordered worker DTOs before signing', () => {
     const currentSource = source()
     const currentMechanical = mechanical(currentSource)
-    const semantic = admittedSemanticFor(currentSource)
-    const semanticBody = {
-      ...semantic,
-      nodes: [...semantic.nodes].reverse(),
-    }
-    const reordered = {
-      ...semanticBody,
-      receiptDigest: semantic.receiptDigest,
-    }
+    const currentPacket = buildGameplaySemanticPacket({
+      source: currentSource,
+      mechanical: currentMechanical,
+    })
+    const semantic = admitGameplaySemanticResult(currentPacket, resultValue())
+    const reordered = admitGameplaySemanticResult(
+      currentPacket,
+      resultValue({ nodes: [...gameplayNodes()].reverse() }),
+    )
+    expect(canonical(semantic)).toBe(canonical(reordered))
+    expect(semantic.receiptDigest).toBe(reordered.receiptDigest)
     const first = assembleGameplayModule({
       source: currentSource,
       mechanical: currentMechanical,
@@ -657,10 +677,26 @@ describe('Gameplay producer admission and assembler', () => {
       mechanical: currentMechanical,
       semantic: reordered,
     })
-    expect(digestGameIrValue(first.module)).toBe(
-      digestGameIrValue(second.module),
-    )
+    expect(canonical(first)).toBe(canonical(second))
     expect(first.projectionDigest).toBe(second.projectionDigest)
+  })
+
+  test('rejects a post-sign receipt reorder even when its digest is retained', () => {
+    const currentSource = source()
+    const currentMechanical = mechanical(currentSource)
+    const semantic = admittedSemanticFor(currentSource)
+    const reordered = {
+      ...semantic,
+      nodes: [...semantic.nodes].reverse(),
+      receiptDigest: semantic.receiptDigest,
+    }
+    expect(() =>
+      assembleGameplayModule({
+        source: currentSource,
+        mechanical: currentMechanical,
+        semantic: reordered,
+      }),
+    ).toThrow(/canonical|sorted|receipt/i)
   })
 
   test('compiles two complete Foundation fixture source profiles twice deterministically', () => {
@@ -682,9 +718,11 @@ describe('Gameplay producer admission and assembler', () => {
       expect(digestGameIrValue(first.module)).toBe(
         digestGameIrValue(second.module),
       )
+      expect(canonical(first)).toBe(canonical(second))
       expect(first.projectionDigest).toBe(second.projectionDigest)
       return first
     })
+    expect(canonical(projections[0]!)).not.toBe(canonical(projections[1]!))
     expect(digestGameIrValue(projections[0]!.module)).not.toBe(
       digestGameIrValue(projections[1]!.module),
     )
