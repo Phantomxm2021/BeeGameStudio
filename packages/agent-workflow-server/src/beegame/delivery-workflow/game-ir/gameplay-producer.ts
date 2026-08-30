@@ -564,9 +564,9 @@ export function admitGameplaySemanticResult(
   if (!isRecord(value)) fail('semantic result must be a plain object')
   exactKeys(value, ['nodes', 'sourceClaims'], 'semantic result')
   const nodes = Object.freeze(
-    strictArray(value.nodes, 'nodes').map((node, index) =>
-      normalizeNode(node, index),
-    ),
+    strictArray(value.nodes, 'nodes')
+      .map((node, index) => normalizeNode(node, index))
+      .sort((left, right) => compareCodeUnits(left.id, right.id)),
   )
   const ids = new Set<string>()
   for (const node of nodes) {
@@ -634,20 +634,22 @@ function validateSemanticReceipt(
   )
     fail('semantic receipt identity is stale or relabeled')
   const nodes = Object.freeze(
-    strictArray(receipt.nodes, 'semantic receipt nodes').map((value, index) => {
-      if (!isRecord(value))
-        fail(`semantic receipt nodes[${index}] must be an object`)
-      exactKeys(
-        value,
-        ['id', 'kind', 'value', 'references', 'edges', 'producerMode'],
-        `semantic receipt nodes[${index}]`,
-      )
-      if (value.producerMode !== 'semantic')
-        fail(`semantic receipt nodes[${index}] must be semantic`)
-      const { producerMode: _producerMode, ...rawNode } = value
-      const node = normalizeNode(rawNode, index)
-      return Object.freeze({ ...node, producerMode: 'semantic' as const })
-    }),
+    strictArray(receipt.nodes, 'semantic receipt nodes')
+      .map((value, index) => {
+        if (!isRecord(value))
+          fail(`semantic receipt nodes[${index}] must be an object`)
+        exactKeys(
+          value,
+          ['id', 'kind', 'value', 'references', 'edges', 'producerMode'],
+          `semantic receipt nodes[${index}]`,
+        )
+        if (value.producerMode !== 'semantic')
+          fail(`semantic receipt nodes[${index}] must be semantic`)
+        const { producerMode: _producerMode, ...rawNode } = value
+        const node = normalizeNode(rawNode, index)
+        return Object.freeze({ ...node, producerMode: 'semantic' as const })
+      })
+      .sort((left, right) => compareCodeUnits(left.id, right.id)),
   )
   const claims = normalizeClaims(
     receipt.sourceClaims,

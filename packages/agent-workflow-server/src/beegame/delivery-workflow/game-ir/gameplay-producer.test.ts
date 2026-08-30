@@ -25,8 +25,19 @@ import {
   type FoundationReadyReceipt,
   type GameIrCompileRequest,
 } from './contracts'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
-import { digestSectionIndex } from '../foundation-section-index'
+import {
+  CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
+} from '../types'
+import {
+  buildFoundationSectionIndex,
+  digestSectionIndex,
+} from '../foundation-section-index'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from '../../../__tests__/complete-game-document-fixture'
+import { withTestDocumentMetadata } from '../../../__tests__/delivery-workflow-test-helpers'
 
 const sectionBytes = '# Gameplay\n\nThe player wins.'
 const sectionDigest = createHash('sha256').update(sectionBytes).digest('hex')
@@ -112,6 +123,52 @@ function mechanical(
   })
 }
 
+function mechanicalWithNode(
+  currentSource: GameIrDomainSourceEnvelope,
+  id = 'mechanical.entity',
+): GameIrMechanicalProjectionReceipt {
+  const section = currentSource.sectionIndex[0]!
+  const node = {
+    id,
+    kind: 'gameplay.entity',
+    producerMode: 'mechanical' as const,
+    value: { label: 'Mechanical' },
+    references: [],
+    edges: [],
+    bindings: {
+      '/id': {
+        kind: 'owner' as const,
+        documentPath: section.documentPath,
+        sectionId: section.sectionId,
+        sectionDigest: section.digest,
+        sourcePointer: `/mechanical/${id}`,
+      },
+      '/value/label': {
+        kind: 'owner' as const,
+        documentPath: section.documentPath,
+        sectionId: section.sectionId,
+        sectionDigest: section.digest,
+        sourcePointer: `/mechanical/${id}/label`,
+      },
+    },
+  } as const
+  const body = {
+    schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
+    taskId: currentSource.taskId,
+    moduleId: currentSource.moduleId,
+    foundationRevision:
+      currentSource.compileRequest.foundation.foundationRevision,
+    sourceDigest: currentSource.sourceDigest,
+    nodes: [node],
+    verifiedClaims: [],
+    ownedTargets: [`node:${id}#/id`, `node:${id}#/value/label`],
+  }
+  return admitGameIrMechanicalProjectionReceipt(currentSource, {
+    ...body,
+    receiptDigest: digestGameIrValue(body),
+  })
+}
+
 type SemanticNode = {
   id: string
   kind: string
@@ -176,13 +233,13 @@ function gameplayNodes(): SemanticNode[] {
   ]
 }
 
-function sourceClaims(nodes: readonly SemanticNode[]) {
+function sourceClaims(nodes: readonly SemanticNode[], sectionId = 'gameplay') {
   const claims: Array<Record<string, string>> = []
   for (const node of nodes) {
     claims.push({
       subject: `node:${node.id}#/id`,
       documentPath: 'docs/GDD.md',
-      sectionId: 'gameplay',
+      sectionId,
       sourcePointer: `/gameplay/${node.id}`,
       literal: node.id,
     })
@@ -190,7 +247,7 @@ function sourceClaims(nodes: readonly SemanticNode[]) {
       claims.push({
         subject: `node:${node.id}#/value/${key}`,
         documentPath: 'docs/GDD.md',
-        sectionId: 'gameplay',
+        sectionId,
         sourcePointer: `/gameplay/${node.id}/${key}`,
         literal: String(node.value[key]),
       })
@@ -198,7 +255,7 @@ function sourceClaims(nodes: readonly SemanticNode[]) {
       claims.push({
         subject: `node:${node.id}#/edges/${index}`,
         documentPath: 'docs/GDD.md',
-        sectionId: 'gameplay',
+        sectionId,
         sourcePointer: `/gameplay/${node.id}/edges/${index}`,
         literal: node.edges[index]!.targetId,
       })
@@ -211,25 +268,126 @@ function sourceClaims(nodes: readonly SemanticNode[]) {
   )
 }
 
-function packet() {
-  const currentSource = source()
+function packetFor(currentSource: GameIrDomainSourceEnvelope) {
   return buildGameplaySemanticPacket({
     source: currentSource,
     mechanical: mechanical(currentSource),
   })
 }
 
-function resultValue(overrides: Record<string, unknown> = {}) {
+function packet() {
+  return packetFor(source())
+}
+
+function resultValue(
+  overrides: Record<string, unknown> = {},
+  sectionId = 'gameplay',
+) {
   const nodes = gameplayNodes()
   return {
     nodes,
-    sourceClaims: sourceClaims(nodes),
+    sourceClaims: sourceClaims(nodes, sectionId),
     ...overrides,
   }
 }
 
+function admittedSemanticFor(
+  currentSource: GameIrDomainSourceEnvelope,
+  sectionId = 'gameplay',
+): GameIrDomainSemanticReceipt {
+  return admitGameplaySemanticResult(
+    packetFor(currentSource),
+    resultValue({}, sectionId),
+  )
+}
+
 function admittedSemantic(): GameIrDomainSemanticReceipt {
-  return admitGameplaySemanticResult(packet(), resultValue())
+  return admittedSemanticFor(source())
+}
+
+function completeFixtureSource(profile: string): GameIrDomainSourceEnvelope {
+  const documents = Object.fromEntries(
+    CANONICAL_FOUNDATION_DOCUMENTS.map(path => {
+      const submission = completeTestSubmission(path)
+      const profileSubmission =
+        path === 'docs/GDD.md'
+          ? {
+              ...submission,
+              sections: submission.sections.map((section, index) =>
+                index === 0
+                  ? {
+                      ...section,
+                      body: `Rule-driven Gameplay profile ${profile}.`,
+                    }
+                  : section,
+              ),
+            }
+          : submission
+      const authored = renderTestCompleteGameDocument(path, profileSubmission)
+      return [path, withTestDocumentMetadata(path, authored)] as const
+    }),
+  ) as Record<FoundationDocumentPath, string>
+  const completeIndex = [...buildFoundationSectionIndex({ documents })].sort(
+    (left, right) =>
+      compareCodeUnits(
+        `${left.documentPath}\0${left.startLine}\0${left.sectionId}`,
+        `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
+      ),
+  )
+  const fullIndex = completeIndex.filter(
+    (section, index, all) =>
+      all.findIndex(
+        candidate => candidate.documentPath === section.documentPath,
+      ) === index,
+  )
+  const documentDigests = Object.fromEntries(
+    CANONICAL_FOUNDATION_DOCUMENTS.map(path => [
+      path,
+      createHash('sha256').update(documents[path]).digest('hex'),
+    ]),
+  ) as FoundationReadyReceipt['documentDigests']
+  const foundationBody: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
+    schemaVersion: 'foundation-ready-receipt.v1',
+    projectId: 'complete-fixture-project',
+    foundationRevision: `complete-${profile}`,
+    confirmedBriefDigest: 'c'.repeat(64),
+    documentDigests,
+    sectionIndexPath: '.beegame/foundation/section-index.json',
+    sectionIndexDigest: digestSectionIndex(fullIndex),
+    authority: {
+      kind: 'review',
+      reviewDigest: 'd'.repeat(64),
+      issueRegistryDigest: 'e'.repeat(64),
+    },
+  }
+  const request: GameIrCompileRequest = {
+    schemaVersion: 'game-ir-compile-request.v1',
+    taskId: `gameplay-${profile}`,
+    publicationId: `publication-${profile}`,
+    gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
+    foundation: {
+      ...foundationBody,
+      receiptDigest: digestGameIrValue(foundationBody),
+    },
+  }
+  const gddSections = fullIndex.filter(
+    section => section.documentPath === 'docs/GDD.md',
+  )
+  const sectionBytes = Object.fromEntries(
+    gddSections.map(section => [
+      `${section.documentPath}#${section.sectionId}`,
+      documents[section.documentPath]
+        .split('\n')
+        .slice(section.startLine - 1, section.endLine)
+        .join('\n'),
+    ]),
+  )
+  return buildGameIrDomainSourceEnvelope({
+    moduleId: 'gameplay',
+    request,
+    sectionIndex: fullIndex,
+    sectionBytes,
+  })
 }
 
 describe('Gameplay producer admission and assembler', () => {
@@ -357,5 +515,181 @@ describe('Gameplay producer admission and assembler', () => {
         projectionDigest: 'a'.repeat(64),
       }),
     ).toThrow(/input|field|projection/i)
+  })
+
+  test('rejects every worker-owned identity, mode, binding, and digest field', () => {
+    const cases = [
+      ['moduleId', { moduleId: 'balance' }],
+      ['foundationRevision', { foundationRevision: 'worker-revision' }],
+      [
+        'producerMode',
+        {
+          nodes: gameplayNodes().map(node => ({
+            ...node,
+            producerMode: 'semantic',
+          })),
+        },
+      ],
+      [
+        'bindings',
+        { nodes: gameplayNodes().map(node => ({ ...node, bindings: {} })) },
+      ],
+      ['sourceDigest', { sourceDigest: 'a'.repeat(64) }],
+      ['mechanicalReceiptDigest', { mechanicalReceiptDigest: 'a'.repeat(64) }],
+      ['receiptDigest', { receiptDigest: 'a'.repeat(64) }],
+    ] as const
+    for (const [field, override] of cases)
+      expect(() =>
+        admitGameplaySemanticResult(packet(), resultValue(override)),
+      ).toThrow(
+        field === 'producerMode' || field === 'bindings'
+          ? /nodes.*unknown or missing fields/i
+          : /semantic result.*unknown or missing fields/i,
+      )
+  })
+
+  test('rejects stale or relabelled packet fields before admitting a result', () => {
+    expect(() =>
+      admitGameplaySemanticResult(
+        { ...packet(), sourceDigest: 'b'.repeat(64) },
+        resultValue(),
+      ),
+    ).toThrow(/packet digest is stale/i)
+    expect(() =>
+      admitGameplaySemanticResult(
+        { ...packet(), moduleId: 'balance' as never },
+        resultValue(),
+      ),
+    ).toThrow(/packet digest is stale|moduleId/i)
+  })
+
+  test('rejects a nonexistent GDD section during exact source binding', () => {
+    const currentSource = source()
+    const currentPacket = packetFor(currentSource)
+    const invalidSection = admitGameplaySemanticResult(
+      currentPacket,
+      resultValue({}, 'does-not-exist'),
+    )
+    expect(() =>
+      assembleGameplayModule({
+        source: currentSource,
+        mechanical: mechanical(currentSource),
+        semantic: invalidSection,
+      }),
+    ).toThrow(/exact Gameplay source sections/i)
+  })
+
+  test('rejects semantic ownership overlapping mechanical ownership', () => {
+    const currentSource = source()
+    const currentMechanical = mechanicalWithNode(currentSource, 'entity.player')
+    expect(() =>
+      admitGameplaySemanticResult(
+        buildGameplaySemanticPacket({
+          source: currentSource,
+          mechanical: currentMechanical,
+        }),
+        resultValue(),
+      ),
+    ).toThrow(/overlap/i)
+  })
+
+  test('rejects extra and missing source-target accounting with dedicated errors', () => {
+    const nodes = gameplayNodes()
+    const missing = sourceClaims(nodes).slice(1)
+    expect(() =>
+      admitGameplaySemanticResult(
+        packet(),
+        resultValue({ sourceClaims: missing }),
+      ),
+    ).toThrow(/exactly account for every semantic target/i)
+
+    const extra = [
+      ...sourceClaims(nodes),
+      {
+        subject: 'node:z-extra#/id',
+        documentPath: 'docs/GDD.md',
+        sectionId: 'gameplay',
+        sourcePointer: '/extra',
+        literal: 'extra',
+      },
+    ]
+    expect(() =>
+      admitGameplaySemanticResult(
+        packet(),
+        resultValue({ sourceClaims: extra }),
+      ),
+    ).toThrow(/unknown node|exactly account for every semantic target/i)
+  })
+
+  test('rejects duplicate IDs across mechanical and semantic receipts', () => {
+    const currentSource = source()
+    const currentMechanical = mechanicalWithNode(currentSource, 'entity.player')
+    expect(() =>
+      admitGameplaySemanticResult(
+        buildGameplaySemanticPacket({
+          source: currentSource,
+          mechanical: currentMechanical,
+        }),
+        resultValue(),
+      ),
+    ).toThrow(/overlap/i)
+  })
+
+  test('sorts reordered receipt input to the same canonical module bytes', () => {
+    const currentSource = source()
+    const currentMechanical = mechanical(currentSource)
+    const semantic = admittedSemanticFor(currentSource)
+    const semanticBody = {
+      ...semantic,
+      nodes: [...semantic.nodes].reverse(),
+    }
+    const reordered = {
+      ...semanticBody,
+      receiptDigest: semantic.receiptDigest,
+    }
+    const first = assembleGameplayModule({
+      source: currentSource,
+      mechanical: currentMechanical,
+      semantic,
+    })
+    const second = assembleGameplayModule({
+      source: currentSource,
+      mechanical: currentMechanical,
+      semantic: reordered,
+    })
+    expect(digestGameIrValue(first.module)).toBe(
+      digestGameIrValue(second.module),
+    )
+    expect(first.projectionDigest).toBe(second.projectionDigest)
+  })
+
+  test('compiles two complete Foundation fixture source profiles twice deterministically', () => {
+    const projections = ['alpha', 'beta'].map(profile => {
+      const currentSource = completeFixtureSource(profile)
+      const gddSectionId = currentSource.sectionIndex[0]!.sectionId
+      const currentMechanical = mechanical(currentSource)
+      const semantic = admittedSemanticFor(currentSource, gddSectionId)
+      const first = assembleGameplayModule({
+        source: currentSource,
+        mechanical: currentMechanical,
+        semantic,
+      })
+      const second = assembleGameplayModule({
+        source: currentSource,
+        mechanical: currentMechanical,
+        semantic,
+      })
+      expect(digestGameIrValue(first.module)).toBe(
+        digestGameIrValue(second.module),
+      )
+      expect(first.projectionDigest).toBe(second.projectionDigest)
+      return first
+    })
+    expect(digestGameIrValue(projections[0]!.module)).not.toBe(
+      digestGameIrValue(projections[1]!.module),
+    )
+    expect(projections[0]!.projectionDigest).not.toBe(
+      projections[1]!.projectionDigest,
+    )
   })
 })
