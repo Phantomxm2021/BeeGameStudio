@@ -159,6 +159,7 @@ function collectAstFacts(
     ts.isForStatement(node) ||
     ts.isForInStatement(node) ||
     ts.isForOfStatement(node) ||
+    ts.isClassExpression(node) ||
     isFunctionScope(node)
   const lexicalScopeFor = (node: ts.Node): ts.Node => {
     for (let parent: ts.Node | undefined = node; parent; parent = parent.parent)
@@ -252,6 +253,10 @@ function collectAstFacts(
       node.name
     )
       addBinding(node.name, lexicalScopeFor(node.parent), 'shadow')
+    if (ts.isFunctionExpression(node) && node.name)
+      addBinding(node.name, node, 'shadow')
+    if (ts.isClassExpression(node) && node.name)
+      addBinding(node.name, node, 'shadow')
     if (ts.isImportDeclaration(node) && node.importClause) {
       const clause = node.importClause
       if (clause.name) addBinding(clause.name, file, 'shadow')
@@ -1212,6 +1217,69 @@ describe('Game IR stage boundary', () => {
         import { value as kind } from './ordinary'
         const record = { kind }
         void record
+      `),
+    ).toEqual([])
+  })
+
+  test('stops at named expression and declaration self-bindings', () => {
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        const f = function kind() {
+          return { kind }
+        }
+        void f
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        const C = class kind {
+          static read() {
+            return { kind }
+          }
+        }
+        void C
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        {
+          let kind = 'gameplay.action'
+          const record = { kind }
+          void record
+        }
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        {
+          const { kind } = ordinary
+          const record = { kind }
+          void record
+        }
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        {
+          function kind() {}
+          const record = { kind }
+          void record
+        }
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        {
+          class kind {}
+          const record = { kind }
+          void record
+        }
       `),
     ).toEqual([])
   })
