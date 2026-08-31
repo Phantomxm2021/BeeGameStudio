@@ -83,6 +83,8 @@ const forbiddenPhase5Paths =
 const forbiddenClosurePath = /(?:^|\/)world-presentation-assembler(?:\.ts)?$/
 const forbiddenPhase7ClosurePath =
   /(?:^|\/)(?:world-presentation-assembler|resource-realization-assembler)(?:\.ts)?$/
+const resourceRealizationAssemblerPath =
+  /(?:^|\/)resource-realization-assembler(?:\.ts)?$/
 const forbiddenContractPaths =
   /(?:^|\/)(?:controller|schema|recovery|foundation-(?:audit|fact|issue|revision))(?:\.ts)?$/
 const placeholderModules = new Set([
@@ -557,6 +559,7 @@ function policyViolations(
     | 'semantic'
     | 'phase6-producer'
     | 'phase7-producer'
+    | 'phase7-admission'
     | 'other',
 ): string[] {
   const violations = new Set<string>()
@@ -570,6 +573,7 @@ function policyViolations(
         policy === 'phase5' ||
         policy === 'phase6-producer' ||
         policy === 'phase7-producer' ||
+        policy === 'phase7-admission' ||
         policy === 'other') &&
         forbiddenPhase5Paths.test(entry.path))
     )
@@ -599,6 +603,34 @@ function policyViolations(
       )
         violations.add(`closure-member-call: ${entry.name}`)
   }
+  if (policy === 'phase7-admission') {
+    for (const namespaceImport of facts.namespaceImports)
+      if (resourceRealizationAssemblerPath.test(namespaceImport.path))
+        violations.add('closure-namespace-import')
+    for (const entry of facts.importBindings)
+      if (
+        resourceRealizationAssemblerPath.test(entry.path) &&
+        entry.original !== 'assembleResourceRealizationClosure' &&
+        !entry.isTypeOnly
+      )
+        violations.add(`closure-import: ${entry.original}`)
+    for (const entry of facts.imports)
+      if (
+        resourceRealizationAssemblerPath.test(entry.path) &&
+        entry.kind !== 'import'
+      )
+        violations.add(`closure-import-kind: ${entry.kind}`)
+    for (const entry of facts.memberCalls)
+      if (
+        facts.namespaceImports.some(
+          imported =>
+            imported.local === entry.receiver &&
+            resourceRealizationAssemblerPath.test(imported.path),
+        ) &&
+        entry.name !== 'assembleResourceRealizationClosure'
+      )
+        violations.add(`closure-member-call: ${entry.name}`)
+  }
   if (policy === 'contracts')
     for (const entry of facts.imports)
       if (forbiddenContractPaths.test(entry.path))
@@ -609,6 +641,7 @@ function policyViolations(
     policy === 'phase5' ||
     policy === 'phase6-producer' ||
     policy === 'phase7-producer' ||
+    policy === 'phase7-admission' ||
     policy === 'other'
   )
     for (const name of facts.apiImports) violations.add(`api-import: ${name}`)
@@ -617,7 +650,8 @@ function policyViolations(
       (policy === 'phase4' ||
         policy === 'phase5' ||
         policy === 'phase6-producer' ||
-        policy === 'phase7-producer') &&
+        policy === 'phase7-producer' ||
+        policy === 'phase7-admission') &&
       forbiddenStageCalls.has(name)
     )
       violations.add(`stage-call: ${name}`)
@@ -628,6 +662,7 @@ function policyViolations(
         policy === 'phase5' ||
         policy === 'phase6-producer' ||
         policy === 'phase7-producer' ||
+        policy === 'phase7-admission' ||
         policy === 'other')
     )
       violations.add(`api-call: ${name}`)
@@ -650,7 +685,8 @@ function policyViolations(
     if (
       (policy === 'phase5' ||
         policy === 'phase6-producer' ||
-        policy === 'phase7-producer') &&
+        policy === 'phase7-producer' ||
+        policy === 'phase7-admission') &&
       [
         'fallback',
         'compatibility',
@@ -799,6 +835,7 @@ type GameIrProductionRole =
   | 'semantic'
   | 'phase6-producer'
   | 'phase7-producer'
+  | 'phase7-admission'
   | 'other'
 
 function gameIrProductionRole(filename: string): GameIrProductionRole {
@@ -812,6 +849,7 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'resource-realization-producer.ts') return 'phase6-producer'
   if (filename === 'implementation-verification-producer.ts')
     return 'phase7-producer'
+  if (filename === 'phase7-admission.ts') return 'phase7-admission'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -1213,6 +1251,31 @@ describe('Game IR stage boundary', () => {
         'phase7-producer',
       ),
     ).toContain('path: ./resource-realization-assembler')
+  })
+
+  test('gives Phase 7 admission one replay-only Resource closure seam', () => {
+    expect(
+      policyViolations(
+        collectAstFacts(
+          "import { assembleResourceRealizationClosure } from './resource-realization-assembler'; assembleResourceRealizationClosure(input)",
+          'phase7-admission.ts',
+        ),
+        'phase7-admission',
+      ),
+    ).toEqual([])
+    const forbidden = [
+      "import * as assembler from './resource-realization-assembler'; assembler.assembleResourceRealizationClosure(input)",
+      "import { assembleResourceRealizationClosure, deriveResourcePlan } from './resource-realization-assembler'; assembleResourceRealizationClosure(input)",
+      "import { assembleWorldPresentationClosure } from './world-presentation-assembler'; assembleWorldPresentationClosure(input)",
+      "import { assembleResourceRealizationClosure } from './resource-realization-assembler'; route(input)",
+    ]
+    for (const source of forbidden)
+      expect(
+        policyViolations(
+          collectAstFacts(source, 'phase7-admission.ts'),
+          'phase7-admission',
+        ),
+      ).not.toEqual([])
   })
 
   test('rejects every Phase 6 closure namespace import, including property forwarding', () => {
@@ -1764,6 +1827,7 @@ describe('Game IR stage boundary', () => {
       'model.ts',
       'phase5-admission.ts',
       'phase6-admission.ts',
+      'phase7-admission.ts',
       'presentation-producer.ts',
       'presentation-schema.ts',
       'publication.ts',
@@ -1791,7 +1855,8 @@ describe('Game IR stage boundary', () => {
         role === 'publication' ||
         role === 'semantic' ||
         role === 'phase6-producer' ||
-        role === 'phase7-producer'
+        role === 'phase7-producer' ||
+        role === 'phase7-admission'
       )
         expect(
           policyViolations(collectAstFacts(source, filename), role),

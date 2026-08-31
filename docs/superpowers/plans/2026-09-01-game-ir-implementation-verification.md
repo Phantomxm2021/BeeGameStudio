@@ -118,11 +118,11 @@
 - Produces: `ImplementationVerificationValidationPreparationAuthority = {phase6Authority, implementationVerification: {source, mechanical, semantic}}`, `prepareImplementationVerificationSemanticValidationPacket(preparationAuthority)` and `admitImplementationVerificationSemanticValidationResult(preparationAuthority, packet, result)`.
 - Consumes: replayable Phase 6 authority and Phase 7 source/mechanical/semantic values; validation is never an input to its own packet construction.
 
-- [ ] Write one missing-interface RED, add the minimal compiling admission shell, then make one valid preparation/packet/PASS fixture GREEN.
-- [ ] Add mutations one at a time proving Phase 6 is replayed, never accepted as a detached closure, every prior node ID is service-derived and validation cannot enter preparation authority; observe assertion-specific RED before minimum GREEN.
-- [ ] Add each fixed check separately: source fidelity, projection completeness, prior closure, ownership, dependency, scenario, invariant, proof closure and forbidden actual evidence.
-- [ ] Add PASS/FAIL/AMBIGUOUS seam, evidence namespace, identity/digest tampering and expanded-graph cases individually; retain no fixed count ceiling.
-- [ ] Reconstruct packets and final invariants with shared semantic-fidelity primitives; commit `feat: admit Phase 7 semantic fidelity` after focused/cumulative gates.
+- [x] Write one missing-interface RED, add the minimal compiling admission shell, then make one valid preparation/packet/PASS fixture GREEN.
+- [x] Add mutations one at a time proving Phase 6 is replayed, never accepted as a detached closure, every prior node ID is service-derived and validation cannot enter preparation authority; observe assertion-specific RED before minimum GREEN.
+- [x] Add each fixed check separately: source fidelity, projection completeness, prior closure, ownership, dependency, scenario, invariant, proof closure and forbidden actual evidence.
+- [x] Add PASS/FAIL/AMBIGUOUS seam, evidence namespace, identity/digest tampering and expanded-graph cases individually; retain no fixed count ceiling.
+- [x] Reconstruct packets and final invariants with shared semantic-fidelity primitives; commit `feat: admit Phase 7 semantic fidelity` after focused/cumulative gates.
 
 ### Task 7: Atomic complete-candidate and publication cutover
 

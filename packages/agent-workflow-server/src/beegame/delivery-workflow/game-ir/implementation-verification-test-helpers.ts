@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import {
   admitGameIrMechanicalProjectionReceipt,
   gameIrSemanticPointerValue,
@@ -22,7 +21,6 @@ import {
   digestGameIrValue,
   type GameIrModuleCandidate,
   type GameIrNode,
-  type GameIrSourceBinding,
   type GameIrSourceSection,
 } from './model'
 import type { GameIrSemanticCandidateNode } from './semantic-fidelity'
@@ -44,17 +42,103 @@ import {
   realAuthority,
   validationAuthority as buildValidationAuthority,
 } from './resource-realization-test-helpers'
-import { digestSectionIndex } from '../foundation-section-index'
-import { receiptDigest } from './contracts'
-
-const sha256 = (value: string): string =>
-  createHash('sha256').update(value, 'utf8').digest('hex')
 
 const edge = (type: string, targetId: string, targetType: string) => ({
   type,
   targetId,
   targetType,
 })
+
+const IV_SOURCE_LITERALS = Object.freeze([
+  'implementation-verification',
+  'implementation-verification.target',
+  'implementation-verification.unit',
+  'implementation-verification.acceptance-scenario',
+  'implementation-verification.evidence-requirement',
+  'implementation-verification.invariant',
+  'target-secondary',
+  'artifact-main-2',
+  'artifact-alt',
+  'artifact-runtime',
+  'artifact-format',
+  'player-acquisition',
+  'runtime-player-model',
+  'runtime-import-ready',
+  'player-model',
+  'player',
+  'web',
+  'desktop',
+  'assets/runtime/player-model.glb',
+  'assets/runtime/player-model.png',
+  'resource',
+  'integration-test',
+  'file-inspection',
+  ...[
+    ['depends-on', 'artifact-alt', 'implementation-verification.unit'],
+    ['targets', 'target-secondary', 'implementation-verification.target'],
+    ['owned-by', 'artifact-main-2', 'implementation-verification.unit'],
+    ['owned-by', 'artifact-alt', 'implementation-verification.unit'],
+    [
+      'proved-by',
+      'player-acquisition',
+      'implementation-verification.evidence-requirement',
+    ],
+    [
+      'proved-by',
+      'runtime-player-model',
+      'implementation-verification.evidence-requirement',
+    ],
+    ['constrains', 'artifact-alt', 'implementation-verification.unit'],
+    ['constrains', 'balance-unit', 'balance.unit'],
+  ].map(([type, targetId, targetType]) =>
+    canonicalGameIrJson(edge(type!, targetId!, targetType!)),
+  ),
+  ...[
+    ['state-start', 'gameplay.state'],
+    ['balance-unit', 'balance.unit'],
+    ['world-scene-main', 'world-scene.scene'],
+    ['world-node-root', 'world-scene.node'],
+    ['presentation-screen-main', 'presentation.ui-screen'],
+    ['presentation-state-main', 'presentation.ui-state'],
+    [
+      'resource.requirement.player-model',
+      'resource-realization.logical-resource',
+    ],
+    ['profile-main', 'resource-realization.acquisition-profile'],
+    ['target-main', 'resource-realization.delivery-target'],
+    ['variant-main', 'resource-realization.variant'],
+    ['artifact-main', 'resource-realization.delivery-artifact'],
+    [
+      'resource.requirement.screen-main',
+      'resource-realization.logical-resource',
+    ],
+    ['profile-screen-main', 'resource-realization.acquisition-profile'],
+    ['variant-screen-main', 'resource-realization.variant'],
+    ['artifact-screen-main', 'resource-realization.delivery-artifact'],
+  ].flatMap(([targetId, targetType]) =>
+    ['implements', 'covers'].map(type =>
+      canonicalGameIrJson(edge(type, targetId, targetType)),
+    ),
+  ),
+  ...Array.from({ length: 24 }, (_, index) => {
+    const suffix = String(index).padStart(2, '0')
+    return [
+      `expanded-evidence-${suffix}`,
+      `expanded-scenario-${suffix}`,
+      canonicalGameIrJson(
+        edge('owned-by', 'artifact-main-2', 'implementation-verification.unit'),
+      ),
+      canonicalGameIrJson(
+        edge(
+          'proved-by',
+          `expanded-evidence-${suffix}`,
+          'implementation-verification.evidence-requirement',
+        ),
+      ),
+      canonicalGameIrJson(edge('covers', 'state-start', 'gameplay.state')),
+    ]
+  }).flat(),
+])
 
 function sortedEdges(
   edges: readonly { type: string; targetId: string; targetType: string }[],
@@ -70,6 +154,9 @@ function sortedEdges(
 function sourceFor(
   phase5Authority: ReturnType<typeof realAuthority>['phase5Authority'],
   documentPath: string,
+  resourceSource: ReturnType<
+    typeof realAuthority
+  >['resourceRealization']['source'],
 ) {
   if (documentPath === 'docs/GDD.md')
     return phase5Authority.phase4Authority.gameplay.source
@@ -77,37 +164,26 @@ function sourceFor(
     return phase5Authority.worldScene.source
   if (documentPath === 'docs/BALANCE_DESIGN.md')
     return phase5Authority.phase4Authority.balance.source
-  return realAuthority().resourceRealization.source
+  return resourceSource
 }
 
-function rebindPriorModules(
-  modules: readonly GameIrModuleCandidate[],
-  oldDigest: string,
-  newDigest: string,
-): readonly GameIrModuleCandidate[] {
-  return modules.map(module => ({
-    ...module,
-    nodes: module.nodes.map(node => ({
-      ...node,
-      bindings: Object.fromEntries(
-        Object.entries(node.bindings).map(([pointer, binding]) => [
-          pointer,
-          binding.kind === 'owner' && binding.sectionDigest === oldDigest
-            ? { ...binding, sectionDigest: newDigest }
-            : binding,
-        ]),
-      ) as Readonly<Record<string, GameIrSourceBinding>>,
-    })),
-  }))
-}
-
-function phase6Fixture(): {
+function phase6Fixture(
+  additionalTechnicalSourceLiterals: readonly string[] = [],
+): {
   closure: ResourceRealizationClosure
+  phase6Authority: ReturnType<typeof buildValidationAuthority> & {
+    resourceRealization: { validation: unknown }
+  }
   priorModules: readonly GameIrModuleCandidate[]
   phase5Authority: ReturnType<typeof realAuthority>['phase5Authority']
+  resourceSource: ReturnType<
+    typeof realAuthority
+  >['resourceRealization']['source']
   resource: ResourceRealizationSemanticReceipt
 } {
-  const projectionAuthority = realAuthority()
+  const projectionAuthority = realAuthority({
+    additionalTechnicalSourceLiterals,
+  })
   const packet =
     prepareResourceRealizationSemanticProjectionPacket(projectionAuthority)
   const resource = admitResourceRealizationSemanticResult(
@@ -145,6 +221,13 @@ function phase6Fixture(): {
   })
   return {
     closure,
+    phase6Authority: {
+      ...validationAuthority,
+      resourceRealization: {
+        ...validationAuthority.resourceRealization,
+        validation,
+      },
+    },
     priorModules: [
       closure.phase5.phase4.gameplay.module,
       closure.phase5.phase4.balance.module,
@@ -153,12 +236,14 @@ function phase6Fixture(): {
       closure.resourceRealization.module,
     ],
     phase5Authority: projectionAuthority.phase5Authority,
+    resourceSource: projectionAuthority.resourceRealization.source,
     resource,
   }
 }
 
 function ivNodes(
   priorModules: readonly GameIrModuleCandidate[],
+  expandedCount = 0,
 ): GameIrSemanticCandidateNode[] {
   const priorNodes = priorModules.flatMap(module => module.nodes)
   const target = {
@@ -269,6 +354,38 @@ function ivNodes(
       edge('proved-by', evidenceVerification.id, evidenceVerification.kind),
     ],
   }
+  const expanded = Array.from({ length: expandedCount }, (_, index) => {
+    const suffix = String(index).padStart(2, '0')
+    const evidence = {
+      id: `expanded-evidence-${suffix}`,
+      kind: 'implementation-verification.evidence-requirement',
+      value: {
+        label: 'runtime-player-model',
+        kind: 'file-inspection',
+        expected: 'runtime-import-ready',
+        artifactPaths: ['assets/runtime/player-model.png'],
+      },
+      references: [],
+      edges: [edge('owned-by', main.id, main.kind)],
+    }
+    const scenario = {
+      id: `expanded-scenario-${suffix}`,
+      kind: 'implementation-verification.acceptance-scenario',
+      value: {
+        label: 'player',
+        precondition: 'runtime-import-ready',
+        action: 'player',
+        expectedOutcome: 'runtime-import-ready',
+      },
+      references: [],
+      edges: [
+        edge('covers', 'state-start', 'gameplay.state'),
+        edge('owned-by', main.id, main.kind),
+        edge('proved-by', evidence.id, evidence.kind),
+      ],
+    }
+    return [evidence, scenario]
+  }).flat()
   return [
     target,
     main,
@@ -277,12 +394,15 @@ function ivNodes(
     evidenceVerification,
     scenario,
     invariant,
+    ...expanded,
   ].map(node => ({ ...node, edges: sortedEdges(node.edges) }))
 }
 
 function sourceAndClaims(
   phase5Authority: ReturnType<typeof realAuthority>['phase5Authority'],
-  priorModules: readonly GameIrModuleCandidate[],
+  resourceSource: ReturnType<
+    typeof realAuthority
+  >['resourceRealization']['source'],
   nodes: readonly GameIrSemanticCandidateNode[],
 ): {
   source: GameIrDomainSourceEnvelope
@@ -305,64 +425,28 @@ function sourceAndClaims(
     sectionIndex
       .filter(section => wanted.has(section.documentPath))
       .map(section => {
-        const source = sourceFor(phase5Authority, section.documentPath)
+        const source = sourceFor(
+          phase5Authority,
+          section.documentPath,
+          resourceSource,
+        )
         return [
           `${section.documentPath}#${section.sectionId}`,
           source.sectionBytes[`${section.documentPath}#${section.sectionId}`]!,
         ]
       }),
   )
-  const literals = nodes.flatMap(node =>
-    gameIrSemanticTargetPointers([node]).map(pointer => {
-      const value = gameIrSemanticPointerValue(
-        node,
-        pointer.slice(pointer.indexOf('#') + 1),
-      )
-      return typeof value === 'string' ? value : canonicalGameIrJson(value)
-    }),
-  )
-  const technicalSection = sectionIndex.find(
-    section => section.documentPath === 'docs/TECHNICAL_DESIGN.md',
-  )!
-  const technicalKey = `${technicalSection.documentPath}#${technicalSection.sectionId}`
-  const technicalBytes = `${originalBytes[technicalKey]}\n${literals.join('\n')}`
-  const augmentedIndex = sectionIndex.map(section =>
-    section === technicalSection
-      ? { ...section, digest: sha256(technicalBytes) }
-      : section,
-  )
-  const oldFoundation =
-    phase5Authority.phase4Authority.gameplay.source.compileRequest.foundation
-  const { receiptDigest: _oldReceiptDigest, ...oldFoundationBody } =
-    oldFoundation
-  const foundationBody = {
-    ...oldFoundationBody,
-    documentDigests: {
-      ...oldFoundation.documentDigests,
-      'docs/TECHNICAL_DESIGN.md': sha256(technicalBytes),
-    },
-    sectionIndexDigest: digestSectionIndex(augmentedIndex),
-  }
-  const request = {
-    ...phase5Authority.phase4Authority.gameplay.source.compileRequest,
-    foundation: {
-      ...foundationBody,
-      receiptDigest: receiptDigest(foundationBody),
-    },
-  }
+  const request = phase5Authority.phase4Authority.gameplay.source.compileRequest
   const source = buildGameIrDomainSourceEnvelope({
     moduleId: 'implementation-verification',
     request,
-    sectionIndex: augmentedIndex,
+    sectionIndex,
     sectionBytes: Object.fromEntries(
-      augmentedIndex
+      sectionIndex
         .filter(section => wanted.has(section.documentPath))
         .map(section => [
           `${section.documentPath}#${section.sectionId}`,
-          section.documentPath === technicalSection.documentPath &&
-          section.sectionId === technicalSection.sectionId
-            ? technicalBytes
-            : originalBytes[`${section.documentPath}#${section.sectionId}`]!,
+          originalBytes[`${section.documentPath}#${section.sectionId}`]!,
         ]),
     ),
   })
@@ -397,7 +481,8 @@ function sourceAndClaims(
           source.sectionBytes[
             `${candidate.documentPath}#${candidate.sectionId}`
           ]!.includes(literal),
-        )!
+        )
+        if (!section) throw new Error(`fixture literal missing: ${literal}`)
         const bytes =
           source.sectionBytes[`${section.documentPath}#${section.sectionId}`]!
         const offset = bytes.indexOf(literal)
@@ -424,29 +509,13 @@ function sourceAndClaims(
   }
 }
 
-export function implementationVerificationFixture() {
-  const phase6 = phase6Fixture()
-  const priorModules = rebindPriorModules(
-    phase6.priorModules,
-    phase6.phase5Authority.phase4Authority.gameplay.source.authoritySectionIndex.find(
-      section => section.documentPath === 'docs/TECHNICAL_DESIGN.md',
-    )!.digest,
-    // Filled after source augmentation; prior bindings are updated below.
-    '0'.repeat(64),
-  )
-  const nodes = ivNodes(priorModules)
-  const built = sourceAndClaims(phase6.phase5Authority, priorModules, nodes)
-  const oldDigest =
-    phase6.phase5Authority.phase4Authority.gameplay.source.authoritySectionIndex.find(
-      section => section.documentPath === 'docs/TECHNICAL_DESIGN.md',
-    )!.digest
-  const newDigest = built.source.authoritySectionIndex.find(
-    section => section.documentPath === 'docs/TECHNICAL_DESIGN.md',
-  )!.digest
-  const reboundPriorModules = rebindPriorModules(
-    phase6.priorModules,
-    oldDigest,
-    newDigest,
+export function implementationVerificationFixture(expandedCount = 0) {
+  const phase6 = phase6Fixture(IV_SOURCE_LITERALS)
+  const nodes = ivNodes(phase6.priorModules, expandedCount)
+  const built = sourceAndClaims(
+    phase6.phase5Authority,
+    phase6.resourceSource,
+    nodes,
   )
   const authority: ImplementationVerificationSemanticProjectionAuthority = {
     source: built.source,
@@ -466,7 +535,7 @@ export function implementationVerificationFixture() {
     authority,
     packet,
     semantic: semantic as ImplementationVerificationSemanticReceipt,
-    priorModules: reboundPriorModules,
+    priorModules: phase6.priorModules,
     nodes,
   }
 }

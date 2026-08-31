@@ -57,6 +57,7 @@ export type PresentationRequirementFixture = {
 export function realAuthority(
   options: {
     presentationRequirements?: readonly PresentationRequirementFixture[]
+    additionalTechnicalSourceLiterals?: readonly string[]
   } = {},
 ): ResourceRealizationSemanticProjectionAuthority {
   type Node = {
@@ -480,6 +481,7 @@ export function realAuthority(
   const technicalSectionBytes = [
     'technical-design-section',
     resourceSourceBytes,
+    ...(options.additionalTechnicalSourceLiterals ?? []),
   ].join('\n')
   const bytesFor = (documentPath: string): string =>
     documentPath === 'docs/ASSET_PLAN.md'
