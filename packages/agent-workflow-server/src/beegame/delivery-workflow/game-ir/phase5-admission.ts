@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   admitGameIrMechanicalProjectionReceipt,
   assertDisjointDomainTargets,
@@ -12,6 +13,15 @@ import {
   type GameIrDomainId,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
+import {
+  GAME_IR_SEMANTIC_VALIDATOR_MANIFEST,
+  sectionEvidencePointer,
+  type GameIrSemanticSourceSection,
+  type GameIrSemanticValidationResult,
+} from './semantic-admission'
+import { type GameplayModuleProjection } from './gameplay-balance-assembler'
+import { WORLD_SCENE_DOMAIN_MANIFEST } from './world-scene-schema'
+import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
 import {
   canonicalGameIrJson,
   compareCodeUnits,
@@ -77,6 +87,70 @@ export type Phase5BoundSemanticModule = Readonly<{
   mechanicalReceiptDigest: string
   semanticReceiptDigest: string
 }>
+
+export type WorldSceneSemanticValidationResult = Phase5SemanticValidationResult
+export type PresentationSemanticValidationResult =
+  Phase5SemanticValidationResult
+
+export type WorldSceneModuleProjection = Readonly<{
+  schemaVersion: 'game-ir-world-scene-module.v1'
+  taskId: string
+  foundationRevision: string
+  module: GameIrModuleCandidate & Readonly<{ moduleId: 'world-scene' }>
+  sourceDigest: string
+  mechanicalReceiptDigest: string
+  semanticReceiptDigest: string
+  semanticValidationResultDigest: string
+  projectionDigest: string
+}>
+
+type Phase5SemanticValidationPacketBase = Readonly<{
+  schemaVersion: 'game-ir-domain-semantic-validation-packet.v1'
+  taskId: string
+  foundationRevision: string
+  sourceDigest: string
+  mechanicalReceiptDigest: string
+  semanticReceiptDigest: string
+  compileRequestDigest: string
+  authoritySectionIndexDigest: string
+  sourceSections: readonly GameIrSemanticSourceSection[]
+  moduleBytes: string
+  moduleDigest: string
+  targetManifestDigest: string
+  checkIds: readonly string[]
+  requiredTargets: readonly string[]
+  allowedEvidencePointers: readonly string[]
+  packetDigest: string
+}>
+
+export type Phase5SemanticValidationPacket = Readonly<
+  Phase5SemanticValidationPacketBase &
+    (
+      | {
+          moduleId: 'world-scene'
+          externalProjections: Readonly<{
+            gameplay: GameplayModuleProjection
+          }>
+        }
+      | {
+          moduleId: 'presentation'
+          externalProjections: Readonly<{
+            gameplay: GameplayModuleProjection
+            worldScene: WorldSceneModuleProjection
+          }>
+        }
+    )
+>
+
+export type Phase5SemanticValidationResult = Readonly<
+  | {
+      outcome: 'PASS'
+      packetDigest: string
+      checkIds: readonly string[]
+      coveredTargets: readonly string[]
+    }
+  | Extract<GameIrSemanticValidationResult, { outcome: 'FAIL' | 'AMBIGUOUS' }>
+>
 
 const PHASE5_MODULE_IDS = ['presentation', 'world-scene'] as const
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -877,4 +951,979 @@ export function replayAndBindPhase5SemanticReceipt(
     mechanicalReceiptDigest: mechanical.receiptDigest,
     semanticReceiptDigest: semantic.receiptDigest,
   })
+}
+
+const VALIDATION_PACKET_SCHEMA =
+  'game-ir-domain-semantic-validation-packet.v1' as const
+
+function bytesDigest(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
+
+function sourceSectionsForPacket(
+  source: GameIrDomainSourceEnvelope,
+): readonly GameIrSemanticSourceSection[] {
+  return Object.freeze(
+    source.sectionIndex.map(ref => {
+      const bytes = source.sectionBytes[`${ref.documentPath}#${ref.sectionId}`]
+      if (bytes === undefined)
+        fail('source section bytes are missing from the fidelity packet')
+      if (bytesDigest(bytes) !== ref.digest)
+        fail('source section bytes do not match their digest')
+      return Object.freeze({ ref: Object.freeze({ ...ref }), bytes })
+    }),
+  )
+}
+
+function ownerEvidencePointers(
+  module: GameIrModuleCandidate,
+  sections: readonly GameIrSemanticSourceSection[],
+): readonly string[] {
+  const sectionKeys = new Set(
+    sections.map(
+      section => `${section.ref.documentPath}#${section.ref.sectionId}`,
+    ),
+  )
+  const pointers = module.nodes.flatMap(node =>
+    Object.entries(node.bindings).map(([pointer, binding]) => {
+      if (binding.kind !== 'owner')
+        fail('Phase 5 semantic modules may only contain owner bindings')
+      const key = `${binding.documentPath}#${binding.sectionId}`
+      const section = sections.find(
+        candidate =>
+          `${candidate.ref.documentPath}#${candidate.ref.sectionId}` === key,
+      )
+      if (
+        !sectionKeys.has(key) ||
+        section?.ref.digest !== binding.sectionDigest
+      )
+        fail('semantic owner binding is outside the selected source closure')
+      return `binding:${key}${binding.sourcePointer}`
+    }),
+  )
+  return Object.freeze([...new Set(pointers)].sort(compareCodeUnits))
+}
+
+function phase5TargetManifestDigest(moduleId: 'world-scene' | 'presentation') {
+  return digestGameIrValue(
+    moduleId === 'world-scene'
+      ? WORLD_SCENE_DOMAIN_MANIFEST
+      : PRESENTATION_DOMAIN_MANIFEST,
+  )
+}
+
+function validatorModule(moduleId: 'world-scene' | 'presentation') {
+  const module = GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.find(
+    item => item.moduleId === moduleId,
+  )
+  if (!module) fail('Phase 5 module is absent from the validator manifest')
+  return module
+}
+
+function phase5SemanticPacket(
+  source: GameIrDomainSourceEnvelope,
+  mechanical: GameIrMechanicalProjectionReceipt,
+): GameIrDomainSemanticPacket {
+  const manifest =
+    source.moduleId === 'world-scene'
+      ? WORLD_SCENE_DOMAIN_MANIFEST
+      : PRESENTATION_DOMAIN_MANIFEST
+  const allowedNodeKinds = Object.keys(manifest).sort(compareCodeUnits)
+  const allowedRelationshipTypes = [
+    ...new Set(
+      Object.values(manifest).flatMap(entry =>
+        Object.keys(entry.relationships),
+      ),
+    ),
+  ].sort(compareCodeUnits)
+  return buildGameIrDomainSemanticPacket({
+    source,
+    mechanical,
+    allowedNodeKinds,
+    allowedRelationshipTypes,
+  })
+}
+
+function externalProjection<T extends Record<string, unknown>>(
+  value: unknown,
+  source: GameIrDomainSourceEnvelope,
+  moduleId: 'gameplay' | 'world-scene',
+  schemaVersion: string,
+  expectedKeys: readonly string[],
+): T {
+  if (!isRecord(value)) fail('external projection must be a plain object')
+  exactKeys(value, expectedKeys, 'external projection')
+  if (value.schemaVersion !== schemaVersion)
+    fail('external projection schemaVersion is invalid')
+  if (value.taskId !== source.taskId)
+    fail('external projection task identity is stale')
+  if (
+    value.foundationRevision !==
+    source.compileRequest.foundation.foundationRevision
+  )
+    fail('external projection Foundation revision is stale')
+  const projectionDigest = sha256(
+    value.projectionDigest,
+    'external projection projectionDigest',
+  )
+  const module = parseGameIrModuleCandidate(value.module, {
+    request: source.compileRequest,
+    sections: source.authoritySectionIndex,
+    expectedModuleId: moduleId,
+  })
+  if (module.nodes.length === 0)
+    fail('external projection must contain its replayed module nodes')
+  sha256(
+    value.mechanicalReceiptDigest,
+    'external projection mechanicalReceiptDigest',
+  )
+  sha256(
+    value.semanticReceiptDigest,
+    'external projection semanticReceiptDigest',
+  )
+  if (moduleId === 'world-scene') {
+    sha256(value.sourceDigest, 'external projection sourceDigest')
+    sha256(
+      value.semanticValidationResultDigest,
+      'external projection validation digest',
+    )
+  }
+  const { projectionDigest: _projectionDigest, ...withoutDigest } = value
+  const body = { ...withoutDigest, module }
+  if (projectionDigest !== digestGameIrValue(body))
+    fail('external projection digest is stale or invalid')
+  return deepFreeze({ ...body, projectionDigest }) as unknown as T
+}
+
+function phase5ExternalProjections(
+  source: GameIrDomainSourceEnvelope,
+  value: unknown,
+): Phase5SemanticValidationPacket['externalProjections'] {
+  if (!isRecord(value)) fail('externalProjections must be a plain object')
+  if (source.moduleId === 'world-scene') {
+    exactKeys(value, ['gameplay'], 'world-scene externalProjections')
+    return Object.freeze({
+      gameplay: externalProjection<GameplayModuleProjection>(
+        value.gameplay,
+        source,
+        'gameplay',
+        'game-ir-gameplay-module.v1',
+        [
+          'schemaVersion',
+          'taskId',
+          'foundationRevision',
+          'module',
+          'mechanicalReceiptDigest',
+          'semanticReceiptDigest',
+          'projectionDigest',
+        ],
+      ),
+    })
+  }
+  exactKeys(
+    value,
+    ['gameplay', 'worldScene'],
+    'presentation externalProjections',
+  )
+  return Object.freeze({
+    gameplay: externalProjection<GameplayModuleProjection>(
+      value.gameplay,
+      source,
+      'gameplay',
+      'game-ir-gameplay-module.v1',
+      [
+        'schemaVersion',
+        'taskId',
+        'foundationRevision',
+        'module',
+        'mechanicalReceiptDigest',
+        'semanticReceiptDigest',
+        'projectionDigest',
+      ],
+    ),
+    worldScene: externalProjection<WorldSceneModuleProjection>(
+      value.worldScene,
+      source,
+      'world-scene',
+      'game-ir-world-scene-module.v1',
+      [
+        'schemaVersion',
+        'taskId',
+        'foundationRevision',
+        'module',
+        'sourceDigest',
+        'mechanicalReceiptDigest',
+        'semanticReceiptDigest',
+        'semanticValidationResultDigest',
+        'projectionDigest',
+      ],
+    ),
+  })
+}
+
+export function buildPhase5SemanticValidationPacket(
+  input: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: Phase5SemanticReceipt
+    module: GameIrModuleCandidate
+    externalProjections:
+      | Readonly<{ gameplay: GameplayModuleProjection }>
+      | Readonly<{
+          gameplay: GameplayModuleProjection
+          worldScene: WorldSceneModuleProjection
+        }>
+  }>,
+): Phase5SemanticValidationPacket {
+  if (!isRecord(input)) fail('validation packet input must be a plain object')
+  exactKeys(
+    input,
+    ['source', 'mechanical', 'semantic', 'module', 'externalProjections'],
+    'validation packet input',
+  )
+  const source = validateGameIrDomainSourceEnvelope(input.source)
+  if (source.moduleId !== 'world-scene' && source.moduleId !== 'presentation')
+    fail('validation packet source must be a Phase 5 module')
+  const mechanical = admitGameIrMechanicalProjectionReceipt({
+    source,
+    receipt: input.mechanical,
+  })
+  const packet = packetForSource(
+    source,
+    mechanical,
+    phase5SemanticPacket(source, mechanical),
+  )
+  const semantic = normalizeStoredReceipt(packet, input.semantic)
+  const bound = replayAndBindPhase5SemanticReceipt({
+    source,
+    mechanical,
+    packet,
+    semantic,
+  })
+  if (canonicalGameIrJson(input.module) !== canonicalGameIrJson(bound.module))
+    fail('validation packet module is detached from the admitted receipt')
+  const sourceSections = sourceSectionsForPacket(source)
+  const externalProjections = phase5ExternalProjections(
+    source,
+    input.externalProjections,
+  )
+  const manifest = validatorModule(source.moduleId)
+  const moduleBytes = canonicalGameIrJson(bound.module)
+  const requiredTargets = semanticTargets(bound.module.nodes)
+  const allowedEvidencePointers = Object.freeze(
+    [
+      ...ownerEvidencePointers(bound.module, sourceSections),
+      ...sourceSections.map(section => sectionEvidencePointer(section.ref)),
+    ].sort(compareCodeUnits),
+  )
+  const body = {
+    schemaVersion: VALIDATION_PACKET_SCHEMA,
+    taskId: source.taskId,
+    foundationRevision: source.compileRequest.foundation.foundationRevision,
+    sourceDigest: source.sourceDigest,
+    mechanicalReceiptDigest: mechanical.receiptDigest,
+    semanticReceiptDigest: semantic.receiptDigest,
+    compileRequestDigest: digestGameIrValue(source.compileRequest),
+    authoritySectionIndexDigest: digestGameIrValue(
+      source.authoritySectionIndex,
+    ),
+    sourceSections,
+    moduleBytes,
+    moduleDigest: digestGameIrValue(bound.module),
+    targetManifestDigest: phase5TargetManifestDigest(source.moduleId),
+    checkIds: Object.freeze([...manifest.checkIds]),
+    requiredTargets,
+    allowedEvidencePointers,
+    moduleId: source.moduleId,
+    externalProjections,
+  } as const
+  return deepFreeze({
+    ...body,
+    packetDigest: digestGameIrValue(body),
+  }) as Phase5SemanticValidationPacket
+}
+
+function normalizePacketModule(
+  value: unknown,
+  expectedModuleId: string,
+  requireSemantic = false,
+): GameIrModuleCandidate {
+  if (!isRecord(value)) fail('fidelity packet module must be a plain object')
+  exactKeys(value, ['moduleId', 'nodes'], 'fidelity packet module')
+  if (value.moduleId !== expectedModuleId)
+    fail('fidelity packet module ID is stale or relabeled')
+  const nodes = strictArray(value.nodes, 'fidelity packet module nodes').map(
+    (entry, index) => {
+      if (!isRecord(entry))
+        fail(`fidelity packet node[${index}] must be an object`)
+      exactKeys(
+        entry,
+        [
+          'id',
+          'kind',
+          'producerMode',
+          'value',
+          'references',
+          'edges',
+          'bindings',
+        ],
+        `fidelity packet node[${index}]`,
+      )
+      const id = safeId(entry.id, `fidelity packet node[${index}] id`)
+      const kind = text(entry.kind, `fidelity packet node[${index}] kind`)
+      const producerMode = entry.producerMode
+      if (
+        producerMode !== 'mechanical' &&
+        producerMode !== 'semantic' &&
+        producerMode !== 'derived'
+      )
+        fail(`fidelity packet node[${index}] producerMode is invalid`)
+      if (requireSemantic && producerMode !== 'semantic')
+        fail(`fidelity packet node[${index}] must be semantic`)
+      if (!isRecord(entry.value))
+        fail(`fidelity packet node[${index}] value must be an object`)
+      const valueObject = cloneJson(
+        entry.value,
+        `fidelity packet node[${index}] value`,
+      )
+      if (!isRecord(valueObject))
+        fail(`fidelity packet node[${index}] value must be an object`)
+      const references = strictArray(
+        entry.references,
+        `fidelity packet node[${index}] references`,
+      ).map((reference, referenceIndex) => {
+        if (!isRecord(reference))
+          fail(`fidelity packet node[${index}] reference must be an object`)
+        exactKeys(
+          reference,
+          ['targetId', 'targetType'],
+          `fidelity packet node[${index}] reference[${referenceIndex}]`,
+        )
+        return Object.freeze({
+          targetId: safeId(
+            reference.targetId,
+            `fidelity packet node[${index}] reference targetId`,
+          ),
+          targetType: text(
+            reference.targetType,
+            `fidelity packet node[${index}] reference targetType`,
+          ),
+        })
+      })
+      for (let index = 1; index < references.length; index += 1)
+        if (referenceOrder(references[index - 1]!, references[index]!) <= 0)
+          fail('fidelity packet references must be unique and sorted')
+      const edges = strictArray(
+        entry.edges,
+        `fidelity packet node[${index}] edges`,
+      ).map((edge, edgeIndex) => {
+        if (!isRecord(edge))
+          fail(`fidelity packet node[${index}] edge must be an object`)
+        exactKeys(
+          edge,
+          ['type', 'targetId', 'targetType'],
+          `fidelity packet node[${index}] edge[${edgeIndex}]`,
+        )
+        return Object.freeze({
+          type: text(edge.type, `fidelity packet node[${index}] edge type`),
+          targetId: safeId(
+            edge.targetId,
+            `fidelity packet node[${index}] edge targetId`,
+          ),
+          targetType: text(
+            edge.targetType,
+            `fidelity packet node[${index}] edge targetType`,
+          ),
+        })
+      })
+      for (let index = 1; index < edges.length; index += 1)
+        if (edgeOrder(edges[index - 1]!, edges[index]!) <= 0)
+          fail('fidelity packet edges must be unique and sorted')
+      if (!isRecord(entry.bindings))
+        fail(`fidelity packet node[${index}] bindings must be an object`)
+      for (const key of Reflect.ownKeys(entry.bindings)) {
+        if (typeof key !== 'string')
+          fail('fidelity packet bindings have a symbol property')
+        const descriptor = Object.getOwnPropertyDescriptor(entry.bindings, key)
+        if (!descriptor || !('value' in descriptor) || !descriptor.enumerable)
+          fail('fidelity packet bindings have a hidden or accessor property')
+      }
+      const bindings: Record<string, unknown> = {}
+      for (const [pointer, rawBinding] of Object.entries(entry.bindings)) {
+        const canonicalPointer = parseGameIrTargetPointer(pointer)
+        if (canonicalPointer !== pointer)
+          fail('fidelity packet binding pointer is not canonical')
+        if (!isRecord(rawBinding))
+          fail('fidelity packet binding must be an object')
+        if (rawBinding.kind === 'owner') {
+          exactKeys(
+            rawBinding,
+            [
+              'kind',
+              'documentPath',
+              'sectionId',
+              'sectionDigest',
+              'sourcePointer',
+            ],
+            'fidelity packet owner binding',
+          )
+          bindings[pointer] = Object.freeze({
+            kind: 'owner',
+            documentPath: text(rawBinding.documentPath, 'binding documentPath'),
+            sectionId: safeId(rawBinding.sectionId, 'binding sectionId'),
+            sectionDigest: sha256(
+              rawBinding.sectionDigest,
+              'binding sectionDigest',
+            ),
+            sourcePointer: normalizeSourcePointer(
+              rawBinding.sourcePointer,
+              'binding sourcePointer',
+            ),
+          })
+        } else if (rawBinding.kind === 'derived') {
+          exactKeys(
+            rawBinding,
+            ['kind', 'derivationRuleId', 'inputPointers'],
+            'fidelity packet derived binding',
+          )
+          const inputPointers = strictArray(
+            rawBinding.inputPointers,
+            'derived binding inputPointers',
+          ).map((pointer, pointerIndex) => {
+            try {
+              return parseGameIrTargetPointer(pointer)
+            } catch {
+              fail(`derived binding inputPointers[${pointerIndex}] is invalid`)
+            }
+          })
+          for (let index = 1; index < inputPointers.length; index += 1)
+            if (
+              compareCodeUnits(
+                inputPointers[index - 1]!,
+                inputPointers[index]!,
+              ) >= 0
+            )
+              fail('derived binding inputPointers must be unique and sorted')
+          bindings[pointer] = Object.freeze({
+            kind: 'derived',
+            derivationRuleId: safeId(
+              rawBinding.derivationRuleId,
+              'derived binding derivationRuleId',
+            ),
+            inputPointers: Object.freeze(inputPointers),
+          })
+        } else fail('fidelity packet binding kind is invalid')
+      }
+      return Object.freeze({
+        id,
+        kind,
+        producerMode,
+        value: deepFreeze(valueObject),
+        references: Object.freeze(references),
+        edges: Object.freeze(edges),
+        bindings: deepFreeze(bindings),
+      })
+    },
+  )
+  for (let index = 1; index < nodes.length; index += 1)
+    if (compareCodeUnits(nodes[index - 1]!.id, nodes[index]!.id) >= 0)
+      fail('fidelity packet module nodes must be unique and sorted')
+  if (requireSemantic) {
+    const expectedBindings = new Set(
+      semanticTargets(nodes as Phase5SemanticCandidateNode[]),
+    )
+    const actualBindings = new Set(
+      nodes.flatMap(node =>
+        Object.keys(node.bindings).map(pointer => `node:${node.id}#${pointer}`),
+      ),
+    )
+    if (
+      expectedBindings.size !== actualBindings.size ||
+      [...expectedBindings].some(target => !actualBindings.has(target))
+    )
+      fail('fidelity packet module bindings must cover every semantic target')
+    for (const node of nodes)
+      for (const binding of Object.values(node.bindings) as Array<{
+        kind: string
+      }>)
+        if (binding.kind !== 'owner')
+          fail('fidelity packet semantic module bindings must be owners')
+  }
+  return deepFreeze({
+    moduleId: expectedModuleId,
+    nodes: Object.freeze(nodes),
+  }) as unknown as GameIrModuleCandidate
+}
+
+function normalizePacketSourceSections(
+  value: unknown,
+  moduleId: 'world-scene' | 'presentation',
+): readonly GameIrSemanticSourceSection[] {
+  const manifest = validatorModule(moduleId)
+  const expectedDocuments = new Set<string>(manifest.sourceDocumentPaths)
+  const sections = strictArray(value, 'fidelity packet sourceSections').map(
+    (entry, index) => {
+      if (!isRecord(entry))
+        fail(`fidelity packet sourceSections[${index}] must be an object`)
+      exactKeys(
+        entry,
+        ['ref', 'bytes'],
+        `fidelity packet sourceSections[${index}]`,
+      )
+      if (typeof entry.bytes !== 'string')
+        fail('fidelity packet source bytes must be text')
+      if (!isRecord(entry.ref))
+        fail('fidelity packet source ref must be an object')
+      exactKeys(
+        entry.ref,
+        [
+          'documentPath',
+          'sectionId',
+          'heading',
+          'startLine',
+          'endLine',
+          'digest',
+        ],
+        'fidelity packet source ref',
+      )
+      const documentPath = text(
+        entry.ref.documentPath,
+        'source ref documentPath',
+      )
+      if (!expectedDocuments.has(documentPath))
+        fail('fidelity packet source ref is outside the module closure')
+      const sectionId = safeId(entry.ref.sectionId, 'source ref sectionId')
+      const heading = text(entry.ref.heading, 'source ref heading')
+      if (
+        typeof entry.ref.startLine !== 'number' ||
+        !Number.isSafeInteger(entry.ref.startLine) ||
+        entry.ref.startLine < 1 ||
+        typeof entry.ref.endLine !== 'number' ||
+        !Number.isSafeInteger(entry.ref.endLine) ||
+        entry.ref.endLine < entry.ref.startLine
+      )
+        fail('fidelity packet source line range is invalid')
+      const digest = sha256(entry.ref.digest, 'source ref digest')
+      if (bytesDigest(entry.bytes) !== digest)
+        fail('fidelity packet source bytes do not match their digest')
+      return Object.freeze({
+        ref: Object.freeze({
+          documentPath: documentPath as FoundationDocumentPath,
+          sectionId,
+          heading,
+          startLine: entry.ref.startLine,
+          endLine: entry.ref.endLine,
+          digest,
+        }),
+        bytes: entry.bytes,
+      })
+    },
+  )
+  const seen = new Set<string>()
+  for (const section of sections) {
+    const key = `${section.ref.documentPath}#${section.ref.sectionId}`
+    if (seen.has(key)) fail('fidelity packet sourceSections contain duplicates')
+    seen.add(key)
+  }
+  for (const documentPath of expectedDocuments)
+    if (!sections.some(section => section.ref.documentPath === documentPath))
+      fail('fidelity packet sourceSections omit a selected document')
+  for (let index = 1; index < sections.length; index += 1) {
+    const left = sections[index - 1]!.ref
+    const right = sections[index]!.ref
+    const leftKey = `${left.documentPath}\0${left.startLine}\0${left.sectionId}`
+    const rightKey = `${right.documentPath}\0${right.startLine}\0${right.sectionId}`
+    if (compareCodeUnits(leftKey, rightKey) >= 0)
+      fail('fidelity packet sourceSections are not canonical')
+  }
+  return Object.freeze(sections)
+}
+
+function normalizePacketProjection(
+  value: unknown,
+  source: Pick<GameIrDomainSourceEnvelope, 'taskId'> & {
+    foundationRevision: string
+  },
+  moduleId: 'gameplay' | 'world-scene',
+  schemaVersion: string,
+  expectedKeys: readonly string[],
+): Record<string, unknown> {
+  if (!isRecord(value))
+    fail('fidelity packet external projection must be an object')
+  exactKeys(value, expectedKeys, 'fidelity packet external projection')
+  if (value.schemaVersion !== schemaVersion || value.taskId !== source.taskId)
+    fail('fidelity packet external projection identity is stale')
+  if (value.foundationRevision !== source.foundationRevision)
+    fail('fidelity packet external projection revision is stale')
+  const module = normalizePacketModule(value.module, moduleId)
+  const { projectionDigest: _projectionDigest, ...withoutDigest } = value
+  const body: Record<string, unknown> = { ...withoutDigest, module }
+  if (moduleId === 'world-scene')
+    sha256(body.sourceDigest, 'world-scene projection sourceDigest')
+  sha256(body.mechanicalReceiptDigest, 'projection mechanicalReceiptDigest')
+  sha256(body.semanticReceiptDigest, 'projection semanticReceiptDigest')
+  if (
+    moduleId === 'world-scene' &&
+    expectedKeys.includes('semanticValidationResultDigest')
+  )
+    sha256(
+      body.semanticValidationResultDigest,
+      'world-scene projection validation digest',
+    )
+  const projectionDigest = sha256(
+    value.projectionDigest,
+    'projection projectionDigest',
+  )
+  if (projectionDigest !== digestGameIrValue(body))
+    fail('fidelity packet external projection digest is stale')
+  return deepFreeze({ ...body, projectionDigest })
+}
+
+function normalizeValidationPacket(value: unknown): {
+  packet: Phase5SemanticValidationPacket
+  module: GameIrModuleCandidate
+} {
+  if (!isRecord(value)) fail('fidelity validation packet must be an object')
+  const baseKeys = [
+    'schemaVersion',
+    'taskId',
+    'foundationRevision',
+    'sourceDigest',
+    'mechanicalReceiptDigest',
+    'semanticReceiptDigest',
+    'compileRequestDigest',
+    'authoritySectionIndexDigest',
+    'sourceSections',
+    'moduleBytes',
+    'moduleDigest',
+    'targetManifestDigest',
+    'checkIds',
+    'requiredTargets',
+    'allowedEvidencePointers',
+    'packetDigest',
+    'moduleId',
+    'externalProjections',
+  ] as const
+  exactKeys(value, [...baseKeys], 'fidelity validation packet')
+  if (value.schemaVersion !== VALIDATION_PACKET_SCHEMA)
+    fail('fidelity validation packet schemaVersion is invalid')
+  const moduleId = value.moduleId
+  if (moduleId !== 'world-scene' && moduleId !== 'presentation')
+    fail('fidelity validation packet moduleId is invalid')
+  const taskId = text(value.taskId, 'fidelity packet taskId')
+  const foundationRevision = text(
+    value.foundationRevision,
+    'fidelity packet foundationRevision',
+  )
+  const sourceDigest = sha256(
+    value.sourceDigest,
+    'fidelity packet sourceDigest',
+  )
+  const mechanicalReceiptDigest = sha256(
+    value.mechanicalReceiptDigest,
+    'fidelity packet mechanicalReceiptDigest',
+  )
+  const semanticReceiptDigest = sha256(
+    value.semanticReceiptDigest,
+    'fidelity packet semanticReceiptDigest',
+  )
+  const compileRequestDigest = sha256(
+    value.compileRequestDigest,
+    'fidelity packet compileRequestDigest',
+  )
+  const authoritySectionIndexDigest = sha256(
+    value.authoritySectionIndexDigest,
+    'fidelity packet authoritySectionIndexDigest',
+  )
+  const sourceSections = normalizePacketSourceSections(
+    value.sourceSections,
+    moduleId,
+  )
+  const moduleBytes = text(value.moduleBytes, 'fidelity packet moduleBytes')
+  let rawModule: unknown
+  try {
+    rawModule = JSON.parse(moduleBytes)
+  } catch {
+    fail('fidelity packet moduleBytes must contain JSON')
+  }
+  const module = normalizePacketModule(rawModule, moduleId, true)
+  if (canonicalGameIrJson(module) !== moduleBytes)
+    fail('fidelity packet moduleBytes are not canonical')
+  const moduleDigest = sha256(
+    value.moduleDigest,
+    'fidelity packet moduleDigest',
+  )
+  if (moduleDigest !== digestGameIrValue(module))
+    fail('fidelity packet moduleDigest is stale')
+  const manifest = validatorModule(moduleId)
+  const checkIds = exactStringCoverage(
+    value.checkIds,
+    manifest.checkIds,
+    'fidelity packet checkIds',
+  )
+  const requiredTargets = exactStringCoverage(
+    value.requiredTargets,
+    semanticTargets(module.nodes),
+    'fidelity packet requiredTargets',
+  )
+  const expectedEvidence = [
+    ...ownerEvidencePointers(module, sourceSections),
+    ...sourceSections.map(section => sectionEvidencePointer(section.ref)),
+  ].sort(compareCodeUnits)
+  const allowedEvidencePointers = exactStringCoverage(
+    value.allowedEvidencePointers,
+    expectedEvidence,
+    'fidelity packet allowedEvidencePointers',
+  )
+  const targetManifestDigest = sha256(
+    value.targetManifestDigest,
+    'fidelity packet targetManifestDigest',
+  )
+  if (targetManifestDigest !== phase5TargetManifestDigest(moduleId))
+    fail('fidelity packet target manifest digest is stale')
+  const source = { taskId, foundationRevision }
+  let externalProjections: Phase5SemanticValidationPacket['externalProjections']
+  if (moduleId === 'world-scene') {
+    if (!isRecord(value.externalProjections))
+      fail('world-scene externalProjections must be an object')
+    exactKeys(
+      value.externalProjections,
+      ['gameplay'],
+      'world-scene externalProjections',
+    )
+    externalProjections = Object.freeze({
+      gameplay: normalizePacketProjection(
+        value.externalProjections.gameplay,
+        source,
+        'gameplay',
+        'game-ir-gameplay-module.v1',
+        [
+          'schemaVersion',
+          'taskId',
+          'foundationRevision',
+          'module',
+          'mechanicalReceiptDigest',
+          'semanticReceiptDigest',
+          'projectionDigest',
+        ],
+      ) as GameplayModuleProjection,
+    })
+  } else {
+    if (!isRecord(value.externalProjections))
+      fail('presentation externalProjections must be an object')
+    exactKeys(
+      value.externalProjections,
+      ['gameplay', 'worldScene'],
+      'presentation externalProjections',
+    )
+    externalProjections = Object.freeze({
+      gameplay: normalizePacketProjection(
+        value.externalProjections.gameplay,
+        source,
+        'gameplay',
+        'game-ir-gameplay-module.v1',
+        [
+          'schemaVersion',
+          'taskId',
+          'foundationRevision',
+          'module',
+          'mechanicalReceiptDigest',
+          'semanticReceiptDigest',
+          'projectionDigest',
+        ],
+      ) as GameplayModuleProjection,
+      worldScene: normalizePacketProjection(
+        value.externalProjections.worldScene,
+        source,
+        'world-scene',
+        'game-ir-world-scene-module.v1',
+        [
+          'schemaVersion',
+          'taskId',
+          'foundationRevision',
+          'module',
+          'sourceDigest',
+          'mechanicalReceiptDigest',
+          'semanticReceiptDigest',
+          'semanticValidationResultDigest',
+          'projectionDigest',
+        ],
+      ) as WorldSceneModuleProjection,
+    })
+  }
+  const body = {
+    schemaVersion: VALIDATION_PACKET_SCHEMA,
+    taskId,
+    foundationRevision,
+    sourceDigest,
+    mechanicalReceiptDigest,
+    semanticReceiptDigest,
+    compileRequestDigest,
+    authoritySectionIndexDigest,
+    sourceSections,
+    moduleBytes,
+    moduleDigest,
+    targetManifestDigest,
+    checkIds,
+    requiredTargets,
+    allowedEvidencePointers,
+    moduleId,
+    externalProjections,
+  } as const
+  const packetDigest = sha256(
+    value.packetDigest,
+    'fidelity packet packetDigest',
+  )
+  if (packetDigest !== digestGameIrValue(body))
+    fail('fidelity validation packet digest is stale')
+  return {
+    packet: deepFreeze({
+      ...body,
+      packetDigest,
+    }) as Phase5SemanticValidationPacket,
+    module,
+  }
+}
+
+function exactStringCoverage(
+  value: unknown,
+  expected: readonly string[],
+  label: string,
+): readonly string[] {
+  const actual = strictArray(value, label)
+  if (actual.length !== expected.length)
+    fail(`${label} has incomplete or extra values`)
+  if (actual.some(entry => typeof entry !== 'string'))
+    fail(`${label} must contain strings`)
+  if (actual.some((entry, index) => entry !== expected[index]))
+    fail(`${label} must be exact canonical coverage`)
+  return Object.freeze(actual as string[])
+}
+
+export function admitPhase5SemanticValidationResult(
+  packetInput: Phase5SemanticValidationPacket,
+  value: unknown,
+): Phase5SemanticValidationResult {
+  const validated = normalizeValidationPacket(packetInput)
+  if (!isRecord(value)) fail('fidelity validation result must be an object')
+  if (value.outcome === 'PASS') {
+    exactKeys(
+      value,
+      ['outcome', 'packetDigest', 'checkIds', 'coveredTargets'],
+      'fidelity PASS result',
+    )
+    if (value.packetDigest !== validated.packet.packetDigest)
+      fail('fidelity PASS packet digest does not match packet')
+    const checkIds = exactStringCoverage(
+      value.checkIds,
+      validated.packet.checkIds,
+      'fidelity PASS checkIds',
+    )
+    const coveredTargets = exactStringCoverage(
+      value.coveredTargets,
+      validated.packet.requiredTargets,
+      'fidelity PASS coveredTargets',
+    )
+    return deepFreeze({
+      outcome: 'PASS',
+      packetDigest: validated.packet.packetDigest,
+      checkIds,
+      coveredTargets,
+    })
+  }
+  if (value.outcome !== 'FAIL' && value.outcome !== 'AMBIGUOUS')
+    fail('fidelity validation result outcome is invalid')
+  const reasonCode = value.reasonCode
+  if (
+    reasonCode !== 'projection-mismatch' &&
+    reasonCode !== 'missing-projection' &&
+    reasonCode !== 'ambiguous-projection'
+  )
+    fail('fidelity validation result reasonCode is invalid')
+  if (value.outcome === 'FAIL' && reasonCode === 'ambiguous-projection')
+    fail('FAIL result cannot use ambiguous-projection')
+  if (value.outcome === 'AMBIGUOUS' && reasonCode !== 'ambiguous-projection')
+    fail('AMBIGUOUS result must use ambiguous-projection')
+  const requiresSubject =
+    reasonCode === 'missing-projection' || reasonCode === 'ambiguous-projection'
+  exactKeys(
+    value,
+    requiresSubject
+      ? [
+          'outcome',
+          'packetDigest',
+          'reasonCode',
+          'actual',
+          'missingSubject',
+          'expectedProjection',
+          'evidencePointers',
+        ]
+      : ['outcome', 'packetDigest', 'reasonCode', 'actual', 'evidencePointers'],
+    'fidelity validation result',
+  )
+  if (value.packetDigest !== validated.packet.packetDigest)
+    fail('fidelity validation result packet digest does not match packet')
+  const evidence = strictArray(
+    value.evidencePointers,
+    'fidelity validation evidencePointers',
+  )
+  if (
+    evidence.length === 0 ||
+    evidence.some(pointer => typeof pointer !== 'string')
+  )
+    fail('fidelity validation evidencePointers must contain strings')
+  const allowed = new Set(validated.packet.allowedEvidencePointers)
+  const seen = new Set<string>()
+  for (const pointer of evidence as string[]) {
+    if (seen.has(pointer) || !allowed.has(pointer))
+      fail('fidelity validation evidence pointer is not exact coverage')
+    if (reasonCode === 'projection-mismatch' && !pointer.startsWith('binding:'))
+      fail('projection mismatch evidence must use owner bindings')
+    if (requiresSubject && !pointer.startsWith('section:'))
+      fail('missing or ambiguous evidence must use section pointers')
+    seen.add(pointer)
+  }
+  for (let index = 1; index < evidence.length; index += 1)
+    if (
+      compareCodeUnits(
+        evidence[index - 1] as string,
+        evidence[index] as string,
+      ) >= 0
+    )
+      fail('fidelity validation evidencePointers must be sorted')
+  let missingSubject: string | undefined
+  let expectedProjection: string | undefined
+  if (requiresSubject) {
+    missingSubject = text(value.missingSubject, 'fidelity missingSubject')
+    const separator = missingSubject.indexOf('#')
+    if (!missingSubject.startsWith('node:') || separator <= 'node:'.length)
+      fail('fidelity missingSubject must be node-qualified')
+    let pointer: string
+    try {
+      pointer = parseGameIrTargetPointer(missingSubject.slice(separator + 1))
+    } catch {
+      fail('fidelity missingSubject target pointer is invalid')
+    }
+    const canonical = `node:${safeId(
+      missingSubject.slice('node:'.length, separator),
+      'fidelity missingSubject node ID',
+    )}#${pointer}`
+    if (
+      canonical !== missingSubject ||
+      !validated.packet.requiredTargets.includes(canonical)
+    )
+      fail('fidelity missingSubject is not a required target')
+    expectedProjection = text(
+      value.expectedProjection,
+      'fidelity expectedProjection',
+    )
+  }
+  return deepFreeze({
+    outcome: value.outcome,
+    packetDigest: validated.packet.packetDigest,
+    reasonCode,
+    actual: text(value.actual, 'fidelity actual'),
+    ...(requiresSubject ? { missingSubject, expectedProjection } : {}),
+    evidencePointers: Object.freeze(evidence as string[]),
+  }) as Phase5SemanticValidationResult
 }

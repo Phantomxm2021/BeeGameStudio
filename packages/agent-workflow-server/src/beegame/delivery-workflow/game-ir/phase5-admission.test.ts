@@ -5,6 +5,7 @@ import {
   replayAndBindPhase5SemanticReceipt,
   type Phase5SemanticReceipt,
 } from './phase5-admission'
+import * as phase5Admission from './phase5-admission'
 import {
   admitGameIrMechanicalProjectionReceipt,
   buildGameIrDomainSemanticPacket,
@@ -28,6 +29,7 @@ import {
   type FoundationDocumentPath,
 } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
+import { WORLD_SCENE_DOMAIN_MANIFEST } from './world-scene-schema'
 
 const digest = 'a'.repeat(64)
 
@@ -162,7 +164,205 @@ function candidateInput(receipt: Phase5SemanticReceipt) {
   }
 }
 
+function fullPhase5Packet(currentSource = source()) {
+  const currentMechanical = mechanical(currentSource)
+  return buildGameIrDomainSemanticPacket({
+    source: currentSource,
+    mechanical: currentMechanical,
+    allowedNodeKinds: Object.keys(WORLD_SCENE_DOMAIN_MANIFEST).sort(),
+    allowedRelationshipTypes: [
+      ...new Set(
+        Object.values(WORLD_SCENE_DOMAIN_MANIFEST).flatMap(entry =>
+          Object.keys(entry.relationships),
+        ),
+      ),
+    ].sort(),
+  })
+}
+
+function gameplayProjection(currentSource = source()) {
+  const sectionDigest = createHash('sha256').update('bytes').digest('hex')
+  const body = {
+    schemaVersion: 'game-ir-gameplay-module.v1' as const,
+    taskId: currentSource.taskId,
+    foundationRevision:
+      currentSource.compileRequest.foundation.foundationRevision,
+    module: {
+      moduleId: 'gameplay' as const,
+      nodes: [
+        {
+          id: 'player',
+          kind: 'gameplay.entity',
+          producerMode: 'semantic' as const,
+          value: { label: 'bytes' },
+          references: [],
+          edges: [],
+          bindings: {
+            '/id': {
+              kind: 'owner' as const,
+              documentPath: 'docs/GDD.md' as const,
+              sectionId: 'section-0',
+              sectionDigest,
+              sourcePointer: '/bytes/0/5',
+            },
+            '/value/label': {
+              kind: 'owner' as const,
+              documentPath: 'docs/GDD.md' as const,
+              sectionId: 'section-0',
+              sectionDigest,
+              sourcePointer: '/bytes/0/5',
+            },
+          },
+        },
+      ],
+    },
+    mechanicalReceiptDigest: digest,
+    semanticReceiptDigest: digest,
+  }
+  return { ...body, projectionDigest: digestGameIrValue(body) }
+}
+
+function validationFixture() {
+  const currentSource = source()
+  const currentMechanical = mechanical(currentSource)
+  const currentPacket = fullPhase5Packet(currentSource)
+  const currentSemantic = admitPhase5SemanticResult(
+    currentPacket,
+    projectedInput(),
+  )
+  if ('reasonCode' in currentSemantic) throw new Error('expected receipt')
+  const bound = replayAndBindPhase5SemanticReceipt({
+    source: currentSource,
+    mechanical: currentMechanical,
+    packet: currentPacket,
+    semantic: currentSemantic,
+  })
+  const validationPacket = phase5Admission.buildPhase5SemanticValidationPacket({
+    source: currentSource,
+    mechanical: currentMechanical,
+    semantic: currentSemantic,
+    module: bound.module,
+    externalProjections: { gameplay: gameplayProjection(currentSource) },
+  })
+  return { currentSource, validationPacket }
+}
+
 describe('shared Phase 5 admission', () => {
+  test('reconstructs a fidelity packet from the complete external projection', () => {
+    const { validationPacket } = validationFixture()
+    expect(
+      validationPacket.externalProjections.gameplay.module.nodes,
+    ).toHaveLength(1)
+    expect(validationPacket.requiredTargets).toEqual([
+      'node:bytes#/id',
+      'node:bytes#/value/label',
+    ])
+    expect(validationPacket.checkIds.length).toBeGreaterThan(0)
+    expect(Object.isFrozen(validationPacket)).toBe(true)
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(
+        {
+          ...validationPacket,
+          externalProjections: {
+            gameplay: {
+              ...validationPacket.externalProjections.gameplay,
+              foundationRevision: 'stale',
+            },
+          },
+        } as never,
+        {
+          outcome: 'PASS',
+          packetDigest: validationPacket.packetDigest,
+          checkIds: validationPacket.checkIds,
+          coveredTargets: validationPacket.requiredTargets,
+        },
+      ),
+    ).toThrow(/projection|identity|stale/i)
+  })
+
+  test('admits only exact service-owned PASS coverage', () => {
+    const { validationPacket } = validationFixture()
+    const pass = phase5Admission.admitPhase5SemanticValidationResult(
+      validationPacket,
+      {
+        outcome: 'PASS',
+        packetDigest: validationPacket.packetDigest,
+        checkIds: validationPacket.checkIds,
+        coveredTargets: validationPacket.requiredTargets,
+      },
+    )
+    expect(pass).toEqual({
+      outcome: 'PASS',
+      packetDigest: validationPacket.packetDigest,
+      checkIds: validationPacket.checkIds,
+      coveredTargets: validationPacket.requiredTargets,
+    })
+    for (const mutation of [
+      { checkIds: validationPacket.checkIds.slice(1) },
+      { coveredTargets: validationPacket.requiredTargets.slice(1) },
+      {
+        coveredTargets: [
+          ...validationPacket.requiredTargets,
+          validationPacket.requiredTargets[0],
+        ],
+      },
+      { checkIds: [...validationPacket.checkIds].reverse() },
+    ]) {
+      expect(() =>
+        phase5Admission.admitPhase5SemanticValidationResult(validationPacket, {
+          outcome: 'PASS',
+          packetDigest: validationPacket.packetDigest,
+          checkIds: validationPacket.checkIds,
+          coveredTargets: validationPacket.requiredTargets,
+          ...mutation,
+        }),
+      ).toThrow(/coverage|check|target|exact/i)
+    }
+  })
+
+  test('binds mismatch evidence separately from section diagnostics', () => {
+    const { validationPacket } = validationFixture()
+    const sectionEvidence = validationPacket.allowedEvidencePointers.find(
+      pointer => pointer.startsWith('section:'),
+    )!
+    const bindingEvidence = validationPacket.allowedEvidencePointers.find(
+      pointer => pointer.startsWith('binding:'),
+    )!
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(validationPacket, {
+        outcome: 'FAIL',
+        packetDigest: validationPacket.packetDigest,
+        reasonCode: 'projection-mismatch',
+        actual: 'different',
+        evidencePointers: [sectionEvidence],
+      }),
+    ).toThrow(/owner|binding/i)
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(validationPacket, {
+        outcome: 'FAIL',
+        packetDigest: validationPacket.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'missing',
+        missingSubject: validationPacket.requiredTargets[0],
+        expectedProjection: 'node',
+        evidencePointers: [bindingEvidence],
+      }),
+    ).toThrow(/section|evidence/i)
+    const admitted = phase5Admission.admitPhase5SemanticValidationResult(
+      validationPacket,
+      {
+        outcome: 'FAIL',
+        packetDigest: validationPacket.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'missing',
+        missingSubject: validationPacket.requiredTargets[0],
+        expectedProjection: 'node',
+        evidencePointers: [sectionEvidence],
+      },
+    )
+    expect(admitted.outcome).toBe('FAIL')
+  })
+
   test('admits identity-injected semantic nodes and exact source claims', () => {
     const currentSource = source()
     const receipt = projected(currentSource)
