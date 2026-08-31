@@ -14,6 +14,14 @@ import {
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
 import {
+  RESOURCE_ASSET_KINDS,
+  RESOURCE_CAPABILITIES,
+  RESOURCE_DIMENSIONS,
+  RESOURCE_EMBEDDED_COMPONENT_KINDS,
+  RESOURCE_RELATION_KINDS,
+  RESOURCE_USAGE_TAGS,
+} from '@bee-game-studio/beegame-resource-core'
+import {
   parseResourceRealizationModule,
   RESOURCE_REALIZATION_DOMAIN_MANIFEST,
 } from './resource-realization-schema'
@@ -80,7 +88,7 @@ type MutableNode = {
 }
 
 type MutableModule = {
-  moduleId: 'resource-realization'
+  moduleId: string
   nodes: MutableNode[]
 }
 
@@ -105,6 +113,31 @@ const externalEntity: GameIrNode = {
       sectionId: resourceSection.sectionId,
       sectionDigest,
       sourcePointer: '/gameplay/player/label',
+    },
+  },
+}
+
+const externalGameplayState: GameIrNode = {
+  id: 'gameplay.state.playing',
+  kind: 'gameplay.state',
+  producerMode: 'semantic',
+  value: { label: 'Playing' },
+  references: [],
+  edges: [],
+  bindings: {
+    '/id': {
+      kind: 'owner',
+      documentPath: resourceSection.documentPath,
+      sectionId: resourceSection.sectionId,
+      sectionDigest,
+      sourcePointer: '/gameplay/state/playing',
+    },
+    '/value/label': {
+      kind: 'owner',
+      documentPath: resourceSection.documentPath,
+      sectionId: resourceSection.sectionId,
+      sectionDigest,
+      sourcePointer: '/gameplay/state/playing/label',
     },
   },
 }
@@ -275,16 +308,163 @@ function validModule(): MutableModule {
   })
 }
 
-function parseRaw(module: unknown): GameIrModuleCandidate {
+function parseRaw(
+  module: unknown,
+  externalModules: readonly unknown[] = [
+    { moduleId: 'gameplay', nodes: [externalEntity] },
+  ],
+): GameIrModuleCandidate {
   return parseResourceRealizationModule(module, {
     request: request(),
     sections: [resourceSection],
-    externalModules: [{ moduleId: 'gameplay', nodes: [externalEntity] }],
+    externalModules,
   })
 }
 
 function parse(module: MutableModule = validModule()): GameIrModuleCandidate {
   return parseRaw(bindModule(structuredClone(module) as MutableModule))
+}
+
+function presentationRequirementModule(): MutableModule {
+  const ownerBindings = (nodeId: string, pointers: string[]) =>
+    Object.fromEntries(
+      pointers.map(pointer => [
+        pointer,
+        {
+          kind: 'owner',
+          documentPath: resourceSection.documentPath,
+          sectionId: resourceSection.sectionId,
+          sectionDigest,
+          sourcePointer: `/presentation/${nodeId}${pointer}`,
+        },
+      ]),
+    )
+  return {
+    moduleId: 'presentation',
+    nodes: [
+      {
+        id: 'presentation.screen.main',
+        kind: 'presentation.ui-screen',
+        producerMode: 'semantic',
+        value: {
+          label: 'ui-asset',
+          modal: false,
+          requirements: [
+            { requirementId: 'req.ui.main', kind: 'ui', runtimeRole: 'screen' },
+          ],
+        },
+        references: [],
+        edges: [
+          {
+            type: 'driven-by',
+            targetId: 'gameplay.state.playing',
+            targetType: 'gameplay.state',
+          },
+          {
+            type: 'initial-state',
+            targetId: 'presentation.state.main',
+            targetType: 'presentation.ui-state',
+          },
+        ],
+        bindings: ownerBindings('screen.main', [
+          '/id',
+          '/value/label',
+          '/value/modal',
+          '/value/requirements/0/requirementId',
+          '/value/requirements/0/kind',
+          '/value/requirements/0/runtimeRole',
+          '/edges/0',
+          '/edges/1',
+        ]),
+      },
+      {
+        id: 'presentation.state.main',
+        kind: 'presentation.ui-state',
+        producerMode: 'semantic',
+        value: { label: 'Main state', terminal: false },
+        references: [],
+        edges: [
+          {
+            type: 'driven-by',
+            targetId: 'gameplay.state.playing',
+            targetType: 'gameplay.state',
+          },
+          {
+            type: 'screen',
+            targetId: 'presentation.screen.main',
+            targetType: 'presentation.ui-screen',
+          },
+        ],
+        bindings: ownerBindings('state.main', [
+          '/id',
+          '/value/label',
+          '/value/terminal',
+          '/edges/0',
+          '/edges/1',
+        ]),
+      },
+    ],
+  }
+}
+
+function derivedPresentationRequirementModule(): MutableModule {
+  const module = structuredClone(validModule()) as MutableModule
+  const logical = module.nodes.find(node =>
+    node.kind.endsWith('logical-resource'),
+  )!
+  const previousId = logical.id
+  logical.id = 'resource.requirement.req.ui.main'
+  logical.producerMode = 'derived'
+  logical.value = {
+    requirementId: 'req.ui.main',
+    resourceKind: 'ui-asset',
+    runtimeRole: 'screen',
+  }
+  for (const current of module.nodes)
+    current.edges = current.edges.map(edge =>
+      edge.targetId === previousId ? { ...edge, targetId: logical.id } : edge,
+    )
+  bindModule(module)
+  logical.bindings['/value/requirementId'] = {
+    kind: 'derived',
+    derivationRuleId: 'presentation-requirement-id',
+    inputs: [
+      {
+        kind: 'external',
+        moduleId: 'presentation',
+        nodeId: 'presentation.screen.main',
+        pointer: '/value/requirements/0/requirementId',
+        targetDigest: digestGameIrValue('req.ui.main'),
+      },
+    ],
+  }
+  logical.bindings['/value/resourceKind'] = {
+    kind: 'derived',
+    derivationRuleId: 'presentation-resource-kind',
+    inputs: [
+      {
+        kind: 'external',
+        moduleId: 'presentation',
+        nodeId: 'presentation.screen.main',
+        pointer: '/value/label',
+        targetDigest: digestGameIrValue('ui-asset'),
+      },
+    ],
+  }
+  logical.bindings['/value/runtimeRole'] = {
+    kind: 'derived',
+    derivationRuleId: 'presentation-runtime-role',
+    inputs: [
+      {
+        kind: 'external',
+        moduleId: 'presentation',
+        nodeId: 'presentation.screen.main',
+        pointer: '/value/requirements/0/runtimeRole',
+        targetDigest: digestGameIrValue('screen'),
+      },
+    ],
+  }
+  return module
 }
 
 describe('resource-realization schema', () => {
@@ -865,5 +1045,307 @@ describe('resource-realization schema', () => {
         }),
       ).toThrow(/source|sourcing|handoff|admitted/i)
     }
+  })
+
+  test('rejects empty asset kinds, malformed codecs, constraints, and budgets', () => {
+    const module = validModule()
+    const profile = module.nodes.find(node =>
+      node.kind.endsWith('acquisition-profile'),
+    )!
+    const artifact = module.nodes.find(node =>
+      node.kind.endsWith('delivery-artifact'),
+    )!
+    const cases: Array<[string, MutableModule]> = [
+      [
+        'assetKinds',
+        {
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === profile.id
+              ? { ...node, value: { ...node.value, assetKinds: [] } }
+              : node,
+          ),
+        },
+      ],
+      [
+        'codec object',
+        {
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === artifact.id
+              ? { ...node, value: { ...node.value, codec: {} } }
+              : node,
+          ),
+        },
+      ],
+      [
+        'codec array',
+        {
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === artifact.id
+              ? { ...node, value: { ...node.value, codec: [] } }
+              : node,
+          ),
+        },
+      ],
+      [
+        'technicalConstraints',
+        {
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === artifact.id
+              ? { ...node, value: { ...node.value, technicalConstraints: [] } }
+              : node,
+          ),
+        },
+      ],
+      [
+        'budgets',
+        {
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === artifact.id
+              ? { ...node, value: { ...node.value, budgets: [] } }
+              : node,
+          ),
+        },
+      ],
+    ]
+    for (const [label, changed] of cases)
+      expect(() => parse(changed), label).toThrow()
+  })
+
+  test('admits every legal assertion branch and rejects malformed assertion tables', () => {
+    const module = validModule()
+    const artifact = module.nodes.find(node =>
+      node.kind.endsWith('delivery-artifact'),
+    )!
+    const assertions = [
+      { name: 'a-eq-bool', assertion: { operator: 'eq', value: true } },
+      { name: 'b-eq-number', assertion: { operator: 'eq', value: 1 } },
+      { name: 'c-eq-string', assertion: { operator: 'eq', value: 'glb' } },
+      {
+        name: 'd-gte',
+        assertion: { operator: 'gte', value: 1, unit: 'count' },
+      },
+      {
+        name: 'e-lte',
+        assertion: { operator: 'lte', value: 2, unit: 'count' },
+      },
+      {
+        name: 'f-one-of-numbers',
+        assertion: { operator: 'one-of', values: [1, 2] },
+      },
+      {
+        name: 'g-one-of-strings',
+        assertion: { operator: 'one-of', values: ['glb', 'standard'] },
+      },
+      {
+        name: 'h-range',
+        assertion: { operator: 'range', min: 1, max: 2, unit: 'count' },
+      },
+    ]
+    expect(
+      parse({
+        ...module,
+        nodes: module.nodes.map(node =>
+          node.id === artifact.id
+            ? {
+                ...node,
+                value: { ...node.value, technicalConstraints: assertions },
+              }
+            : node,
+        ),
+      }).nodes,
+    ).toHaveLength(5)
+
+    const malformed = [
+      { operator: 'unknown', value: 1 },
+      { operator: 'lte', value: Number.NaN, unit: 'count' },
+      { operator: 'gte', value: Number.POSITIVE_INFINITY, unit: 'count' },
+      { operator: 'lte', value: 1 },
+      { operator: 'range', min: 2, max: 1, unit: 'count' },
+      { operator: 'range', min: Number.NaN, max: 1, unit: 'count' },
+      { operator: 'one-of', values: [] },
+      { operator: 'one-of', values: [1, '2'] },
+      { operator: 'one-of', values: [Number.NaN, 1] },
+      { operator: 'one-of', values: [2, 1] },
+      { operator: 'one-of', values: ['glb', 'glb'] },
+    ]
+    for (const assertion of malformed)
+      expect(() =>
+        parse({
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === artifact.id
+              ? {
+                  ...node,
+                  value: {
+                    ...node.value,
+                    technicalConstraints: [{ name: 'constraint', assertion }],
+                  },
+                }
+              : node,
+          ),
+        }),
+      ).toThrow()
+  })
+
+  test('rejects negative, duplicate, and unsorted budgets and constraints', () => {
+    const module = validModule()
+    const artifact = module.nodes.find(node =>
+      node.kind.endsWith('delivery-artifact'),
+    )!
+    const changes = [
+      {
+        budgets: [{ metric: 'file-size', limit: -1, unit: 'MB' }],
+      },
+      {
+        budgets: [
+          { metric: 'size', limit: 1, unit: 'MB' },
+          { metric: 'size', limit: 2, unit: 'MB' },
+        ],
+      },
+      {
+        budgets: [
+          { metric: 'size', limit: 1, unit: 'MB' },
+          { metric: 'file-size', limit: 2, unit: 'MB' },
+        ],
+      },
+      {
+        technicalConstraints: [
+          {
+            name: 'z',
+            assertion: { operator: 'gte', value: 1, unit: 'count' },
+          },
+          {
+            name: 'a',
+            assertion: { operator: 'gte', value: 1, unit: 'count' },
+          },
+        ],
+      },
+      {
+        technicalConstraints: [
+          {
+            name: 'a',
+            assertion: { operator: 'gte', value: 1, unit: 'count' },
+          },
+          {
+            name: 'a',
+            assertion: { operator: 'gte', value: 2, unit: 'count' },
+          },
+        ],
+      },
+    ]
+    for (const value of changes)
+      expect(() =>
+        parse({
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === artifact.id
+              ? { ...node, value: { ...node.value, ...value } }
+              : node,
+          ),
+        }),
+      ).toThrow()
+  })
+
+  test('accepts every entry from the shared resource vocabularies', () => {
+    const profileFields = [
+      ['dimensions', RESOURCE_DIMENSIONS],
+      ['assetKinds', RESOURCE_ASSET_KINDS],
+      ['usageTags', RESOURCE_USAGE_TAGS],
+      ['capabilities', RESOURCE_CAPABILITIES],
+    ] as const
+    for (const [field, values] of profileFields) {
+      const module = validModule()
+      const profile = module.nodes.find(node =>
+        node.kind.endsWith('acquisition-profile'),
+      )!
+      expect(() =>
+        parse({
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === profile.id
+              ? {
+                  ...node,
+                  value: { ...node.value, [field]: [...values].sort() },
+                }
+              : node,
+          ),
+        }),
+      ).not.toThrow()
+    }
+    for (const [field, values] of [
+      ['relationKinds', RESOURCE_RELATION_KINDS],
+      ['embeddedKinds', RESOURCE_EMBEDDED_COMPONENT_KINDS],
+    ] as const) {
+      const module = validModule()
+      const profile = module.nodes.find(node =>
+        node.kind.endsWith('acquisition-profile'),
+      )!
+      expect(() =>
+        parse({
+          ...module,
+          nodes: module.nodes.map(node =>
+            node.id === profile.id
+              ? {
+                  ...node,
+                  value: {
+                    ...node.value,
+                    capabilities: [],
+                    coverage: [{ [field]: [...values].sort() }],
+                  },
+                }
+              : node,
+          ),
+        }),
+      ).not.toThrow()
+    }
+  })
+
+  test('admits an expanded Resource graph without an arbitrary size limit', () => {
+    const nodes = Array.from({ length: 64 }, (_, index) => {
+      const prefix = `resource-${String(index).padStart(3, '0')}`
+      const requirementId = `${prefix}-player-model`
+      const copy = structuredClone(validModule()) as MutableModule
+      const ids = new Map<string, string>()
+      for (const current of copy.nodes) {
+        const nextId = current.kind.endsWith('logical-resource')
+          ? `resource.requirement.${requirementId}`
+          : `${prefix}.${current.id}`
+        ids.set(current.id, nextId)
+        current.id = nextId
+        if (current.kind.endsWith('logical-resource'))
+          current.value.requirementId = requirementId
+        if (current.kind.endsWith('delivery-artifact'))
+          current.value.path = `assets/runtime/${prefix}-player-model.glb`
+      }
+      for (const current of copy.nodes)
+        current.edges = current.edges.map(edge => ({
+          ...edge,
+          targetId: ids.get(edge.targetId) ?? edge.targetId,
+        }))
+      return copy.nodes.filter(
+        current => index === 0 || !current.kind.endsWith('delivery-target'),
+      )
+    }).flat()
+    expect(
+      parse({ moduleId: 'resource-realization', nodes }).nodes,
+    ).toHaveLength(257)
+  })
+
+  test('admits a logical resource derived from an exact Presentation requirement', () => {
+    const module = derivedPresentationRequirementModule()
+    expect(
+      parseRaw(module, [
+        {
+          moduleId: 'gameplay',
+          nodes: [externalEntity, externalGameplayState],
+        },
+        presentationRequirementModule(),
+      ]).nodes,
+    ).toHaveLength(5)
   })
 })

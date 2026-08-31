@@ -729,8 +729,6 @@ function targetMap(
     targets.set(node.id, node)
   }
   for (const node of priorNodes) {
-    if (!PRIOR_NODE_KINDS.has(node.kind))
-      fail(`external target ${node.id} kind is not admitted`)
     if (targets.has(node.id)) fail(`duplicate node ID ${node.id}`)
     targets.set(node.id, node)
   }
