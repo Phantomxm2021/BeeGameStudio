@@ -7,14 +7,17 @@ import {
 import {
   buildGameIrDomainSourceEnvelope,
   canonicalGameIrModuleSourceDocuments,
+  type GameIrDomainSourceEnvelope,
 } from './domain-source'
 import {
   admitGameplaySemanticResult,
   buildGameplaySemanticPacket,
+  type GameIrDomainSemanticReceipt as GameplaySemanticReceipt,
 } from './gameplay-producer'
 import {
   admitBalanceSemanticResult,
   buildBalanceSemanticPacket,
+  type GameIrDomainSemanticReceipt as BalanceSemanticReceipt,
 } from './balance-producer'
 import {
   admitWorldSceneSemanticResult,
@@ -30,11 +33,11 @@ import {
   admitPhase5SemanticValidationResult,
   buildPhase5SemanticValidationPacket,
   replayAndBindPhase5SemanticReceipt,
+  type WorldSceneModuleProjection,
 } from './phase5-admission'
+import { GAME_IR_SEMANTIC_VALIDATOR_MANIFEST } from './semantic-admission'
 import { assembleWorldPresentationClosure } from './world-presentation-assembler'
 import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
-import { parseWorldSceneModule } from './world-scene-schema'
-import { parsePresentationModule } from './presentation-schema'
 import {
   canonicalGameIrJson,
   canonicalizeGameIrSourceSections,
@@ -63,6 +66,47 @@ const edge = (type: string, targetId: string, targetType: string) => ({
 
 const gameplayNodes: Node[] = [
   {
+    id: 'action.extract',
+    kind: 'gameplay.action',
+    value: { label: 'Extract sample' },
+    references: [
+      { targetId: 'condition.ready', targetType: 'gameplay.condition' },
+      { targetId: 'effect.alarm', targetType: 'gameplay.effect' },
+      { targetId: 'event.alarm', targetType: 'gameplay.event' },
+    ],
+    edges: [
+      edge('causes', 'effect.alarm', 'gameplay.effect'),
+      edge('causes', 'event.alarm', 'gameplay.event'),
+      edge('requires', 'condition.ready', 'gameplay.condition'),
+    ],
+  },
+  {
+    id: 'capability.player-extract',
+    kind: 'gameplay.capability',
+    value: { label: 'Can extract' },
+    references: [],
+    edges: [edge('belongs-to', 'entity.player', 'gameplay.entity')],
+  },
+  {
+    id: 'condition.ready',
+    kind: 'gameplay.condition',
+    value: { expression: { kind: 'reference', referenceIndex: 0 } },
+    references: [
+      {
+        targetId: 'capability.player-extract',
+        targetType: 'gameplay.capability',
+      },
+    ],
+    edges: [],
+  },
+  {
+    id: 'effect.alarm',
+    kind: 'gameplay.effect',
+    value: { effect: { operation: 'emit', targetReferenceIndex: 0 } },
+    references: [{ targetId: 'event.alarm', targetType: 'gameplay.event' }],
+    edges: [],
+  },
+  {
     id: 'entity.player',
     kind: 'gameplay.entity',
     value: { label: 'Pilot' },
@@ -87,6 +131,30 @@ const gameplayNodes: Node[] = [
     id: 'event.alarm',
     kind: 'gameplay.event',
     value: { label: 'Alarm' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'objective.extract',
+    kind: 'gameplay.objective',
+    value: { label: 'Extract the sample' },
+    references: [],
+    edges: [
+      edge('fails-with', 'outcome.loss', 'gameplay.outcome'),
+      edge('succeeds-with', 'outcome.win', 'gameplay.outcome'),
+    ],
+  },
+  {
+    id: 'outcome.loss',
+    kind: 'gameplay.outcome',
+    value: { label: 'Loss', result: 'loss' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'outcome.win',
+    kind: 'gameplay.outcome',
+    value: { label: 'Win', result: 'win' },
     references: [],
     edges: [],
   },
@@ -324,6 +392,18 @@ const worldNodes: Node[] = [
     ],
   },
   {
+    id: 'world.ice-objective',
+    kind: 'world-scene.objective-placement',
+    value: { label: 'Sample extraction point' },
+    references: [],
+    edges: [
+      sceneEdge(world2d),
+      edge('objective', 'objective.extract', 'gameplay.objective'),
+      edge('location', 'world.ice-exit', 'world-scene.node'),
+      edge('zone', 'world.ice-danger', 'world-scene.zone'),
+    ],
+  },
+  {
     id: 'world.orbit-root',
     kind: 'world-scene.node',
     value: {
@@ -381,23 +461,10 @@ const worldNodes: Node[] = [
     edges: [sceneEdge(world3d)],
   },
 ]
-// The closure assembler intentionally narrows external targets to the kinds its
-// Presentation contract can consume. Exercise the full traversal graph at the
-// World schema boundary, while the replayed closure uses that accepted slice.
 const sortNodes = (nodes: readonly Node[]): Node[] =>
   [...nodes].sort((left, right) =>
     Buffer.from(left.id).compare(Buffer.from(right.id)),
   )
-const sortedWorldNodes = sortNodes(worldNodes)
-const closureWorldNodes = sortedWorldNodes.filter(node =>
-  new Set([
-    'world-scene.scene',
-    'world-scene.node',
-    'world-scene.zone',
-    'world-scene.entity-instance',
-    'world-scene.camera-region',
-  ]).has(node.kind),
-)
 
 const requirement = (
   requirementId: string,
@@ -461,6 +528,17 @@ const presentationNodes: Node[] = [
     edges: [
       edge('screen', 'presentation.screen-menu', 'presentation.ui-screen'),
       edge('driven-by', 'event.alarm', 'gameplay.event'),
+    ],
+  },
+  {
+    id: 'presentation.ui-action-extract',
+    kind: 'presentation.ui-action',
+    value: { label: 'Extract', input: 'button' },
+    references: [],
+    edges: [
+      edge('screen', 'presentation.screen-hud', 'presentation.ui-screen'),
+      edge('invokes', 'action.extract', 'gameplay.action'),
+      edge('available-in', 'state.explore', 'gameplay.state'),
     ],
   },
   {
@@ -554,40 +632,15 @@ const presentationNodes: Node[] = [
   {
     id: 'presentation.transition-open',
     kind: 'presentation.transition',
-    value: { label: 'Open alarm overlay', trigger: { kind: 'event' } },
+    value: { label: 'Open extraction overlay', trigger: { kind: 'action' } },
     references: [],
     edges: [
       edge('from', 'presentation.state-menu', 'presentation.ui-state'),
       edge('to', 'presentation.state-menu-open', 'presentation.ui-state'),
-      edge('on', 'event.alarm', 'gameplay.event'),
+      edge('on', 'action.extract', 'gameplay.action'),
     ],
   },
 ]
-const sortedPresentationNodes = sortNodes(presentationNodes)
-const gameplayActionTarget: Node = {
-  id: 'action.extract',
-  kind: 'gameplay.action',
-  value: { label: 'Extract sample' },
-  references: [],
-  edges: [
-    edge('requires', 'condition.ready', 'gameplay.condition'),
-    edge('causes', 'event.alarm', 'gameplay.event'),
-  ],
-}
-const richPresentationNodes = sortNodes([
-  ...presentationNodes,
-  {
-    id: 'presentation.ui-action-extract',
-    kind: 'presentation.ui-action',
-    value: { label: 'Extract', input: 'button' },
-    references: [],
-    edges: [
-      edge('screen', 'presentation.screen-hud', 'presentation.ui-screen'),
-      edge('invokes', gameplayActionTarget.id, gameplayActionTarget.kind),
-      edge('available-in', 'state.explore', 'gameplay.state'),
-    ],
-  },
-]).map(node => ({ ...node, producerMode: 'semantic' as const, bindings: {} }))
 
 function leafPointers(value: Record<string, unknown>): string[] {
   const out: string[] = []
@@ -636,12 +689,37 @@ const pointers = (node: Node) => [
   ...node.references.map((_, index) => `/references/${index}`),
   ...node.edges.map((_, index) => `/edges/${index}`),
 ]
+const candidateView = (nodes: readonly Node[]) =>
+  sortNodes(nodes).map(({ id, kind, value, references, edges }) => ({
+    id,
+    kind,
+    value,
+    references,
+    edges,
+  }))
+const closureView = (nodes: readonly GameIrNode[]) =>
+  nodes.map(({ id, kind, value, references, edges }) => ({
+    id,
+    kind,
+    value,
+    references,
+    edges,
+  }))
+const targetSubjects = (nodes: readonly Node[]) =>
+  nodes
+    .flatMap(node =>
+      pointers(node).map(pointer => `node:${node.id}#${pointer}`),
+    )
+    .sort((left, right) => Buffer.from(left).compare(Buffer.from(right)))
+const expectedCheckIds = (moduleId: 'world-scene' | 'presentation') =>
+  GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.find(
+    module => module.moduleId === moduleId,
+  )!.checkIds
 const allNodes = [
   ...gameplayNodes,
   ...balanceNodes,
   ...worldNodes,
   ...presentationNodes,
-  gameplayActionTarget,
 ]
 for (const node of allNodes) {
   ;(
@@ -711,21 +789,98 @@ const request = {
     receiptDigest: digestGameIrValue(foundationBody),
   },
 }
+type FixtureOverrides = Partial<{
+  gameplay: readonly Node[]
+  balance: readonly Node[]
+  world: readonly Node[]
+  presentation: readonly Node[]
+}>
+const baseContext = {
+  sourceBytes,
+  sourceRanges,
+  fullIndex,
+  request,
+}
+const fixtureContext = (overrides: FixtureOverrides = {}) => {
+  const modules = {
+    gameplay: overrides.gameplay ?? gameplayNodes,
+    balance: overrides.balance ?? balanceNodes,
+    world: overrides.world ?? worldNodes,
+    presentation: overrides.presentation ?? presentationNodes,
+  }
+  const nodes = [
+    ...modules.gameplay,
+    ...modules.balance,
+    ...modules.world,
+    ...modules.presentation,
+  ]
+  const ranges = new Map<string, string>()
+  let bytes = ''
+  for (const node of [...nodes].sort((a, b) =>
+    Buffer.from(a.id).compare(Buffer.from(b.id)),
+  ))
+    for (const pointer of pointers(node).sort()) {
+      const value = pointerValue(node, pointer)
+      const literal =
+        typeof value === 'string' ? value : canonicalGameIrJson(value)
+      const start = Buffer.byteLength(bytes, 'utf8')
+      bytes += `${literal}\n`
+      ranges.set(
+        `node:${node.id}#${pointer}`,
+        `/bytes/${start}/${Buffer.byteLength(bytes, 'utf8') - 1}`,
+      )
+    }
+  const index = canonicalizeGameIrSourceSections(
+    CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
+      documentPath,
+      sectionId: `profile-${index}`,
+      heading: documentPath,
+      startLine: 1,
+      endLine: bytes.split('\n').length,
+      digest: sha256(bytes),
+    })),
+  )
+  const foundation = {
+    ...foundationBody,
+    documentDigests: Object.fromEntries(
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, sha256(bytes)]),
+    ) as FoundationReadyReceipt['documentDigests'],
+    sectionIndexDigest: digestSectionIndex(index),
+  }
+  return {
+    sourceBytes: bytes,
+    sourceRanges: ranges,
+    fullIndex: index,
+    request: {
+      ...request,
+      foundation: {
+        ...foundation,
+        receiptDigest: digestGameIrValue(foundation),
+      },
+    },
+    modules,
+  }
+}
 const selectedDocs = (
   moduleId: 'gameplay' | 'balance' | 'world-scene' | 'presentation',
 ): readonly FoundationDocumentPath[] =>
   canonicalGameIrModuleSourceDocuments(moduleId)
 const source = (
   moduleId: 'gameplay' | 'balance' | 'world-scene' | 'presentation',
+  context: {
+    sourceBytes: string
+    fullIndex: typeof fullIndex
+    request: typeof request
+  } = baseContext,
 ) =>
   buildGameIrDomainSourceEnvelope({
     moduleId,
-    request,
-    sectionIndex: fullIndex,
+    request: context.request,
+    sectionIndex: context.fullIndex,
     sectionBytes: Object.fromEntries(
       selectedDocs(moduleId).map(path => [
-        `${path}#${fullIndex.find(section => section.documentPath === path)!.sectionId}`,
-        sourceBytes,
+        `${path}#${context.fullIndex.find(section => section.documentPath === path)!.sectionId}`,
+        context.sourceBytes,
       ]),
     ),
   })
@@ -748,7 +903,10 @@ const mechanical = (
     receipt: { ...body, receiptDigest: digestGameIrValue(body) },
   })
 }
-const claims = (nodes: readonly Node[]) =>
+const claims = (
+  nodes: readonly Node[],
+  ranges: ReadonlyMap<string, string> = sourceRanges,
+) =>
   nodes
     .flatMap(node =>
       pointers(node)
@@ -757,7 +915,7 @@ const claims = (nodes: readonly Node[]) =>
           subject: `node:${node.id}#${pointer}`,
           documentPath: 'docs/GDD.md' as FoundationDocumentPath,
           sectionId: 'profile-0',
-          sourcePointer: sourceRanges.get(`node:${node.id}#${pointer}`)!,
+          sourcePointer: ranges.get(`node:${node.id}#${pointer}`)!,
           literal:
             typeof pointerValue(node, pointer) === 'string'
               ? String(pointerValue(node, pointer))
@@ -772,7 +930,10 @@ const claims = (nodes: readonly Node[]) =>
 const balanceSectionId = fullIndex.find(
   section => section.documentPath === 'docs/BALANCE_DESIGN.md',
 )!.sectionId
-const balanceClaims = (nodes: readonly Node[]) =>
+const balanceClaims = (
+  nodes: readonly Node[],
+  ranges: ReadonlyMap<string, string> = sourceRanges,
+) =>
   nodes
     .flatMap(node =>
       pointers(node)
@@ -790,7 +951,7 @@ const balanceClaims = (nodes: readonly Node[]) =>
             subject: `node:${node.id}#${pointer}`,
             documentPath: 'docs/BALANCE_DESIGN.md' as FoundationDocumentPath,
             sectionId: balanceSectionId,
-            sourcePointer: sourceRanges.get(`node:${node.id}#${pointer}`)!,
+            sourcePointer: ranges.get(`node:${node.id}#${pointer}`)!,
             literal:
               typeof value === 'string' ? value : canonicalGameIrJson(value),
           }
@@ -801,9 +962,14 @@ const balanceClaims = (nodes: readonly Node[]) =>
         Buffer.from(`${b.subject}\0${b.sourcePointer}`),
       ),
     )
-function phase4Authority() {
-  const gameplaySource = source('gameplay')
-  const balanceSource = source('balance')
+function phase4Authority(
+  context: ReturnType<typeof fixtureContext> | typeof baseContext = baseContext,
+  overrides: FixtureOverrides = {},
+) {
+  const gameplaySource = source('gameplay', context)
+  const balanceSource = source('balance', context)
+  const gameplay = overrides.gameplay ?? gameplayNodes
+  const balance = overrides.balance ?? balanceNodes
   const gameplayMechanical = mechanical(gameplaySource)
   const balanceMechanical = mechanical(balanceSource)
   const gameplaySemantic = admitGameplaySemanticResult(
@@ -813,8 +979,8 @@ function phase4Authority() {
     }),
     {
       outcome: 'PROJECTED',
-      nodes: gameplayNodes,
-      sourceClaims: claims(gameplayNodes),
+      nodes: gameplay,
+      sourceClaims: claims(gameplay, context.sourceRanges),
     },
   )
   const balanceSemantic = admitBalanceSemanticResult(
@@ -824,37 +990,115 @@ function phase4Authority() {
     }),
     {
       outcome: 'PROJECTED',
-      nodes: balanceNodes,
-      sourceClaims: balanceClaims(balanceNodes),
+      nodes: balance,
+      sourceClaims: balanceClaims(balance, context.sourceRanges),
     },
   )
   return {
     gameplay: {
       source: gameplaySource,
       mechanical: gameplayMechanical,
-      semantic: gameplaySemantic as never,
+      semantic: gameplaySemantic as GameplaySemanticReceipt,
     },
     balance: {
       source: balanceSource,
       mechanical: balanceMechanical,
-      semantic: balanceSemantic as never,
+      semantic: balanceSemantic as BalanceSemanticReceipt,
     },
   }
 }
 function validationPacket(
   packet: ReturnType<typeof buildPhase5SemanticValidationPacket>,
-) {
-  return admitPhase5SemanticValidationResult(packet, {
+): Extract<
+  ReturnType<typeof admitPhase5SemanticValidationResult>,
+  { outcome: 'PASS' }
+> {
+  const result = admitPhase5SemanticValidationResult(packet, {
     outcome: 'PASS',
     packetDigest: packet.packetDigest,
     checkIds: packet.checkIds,
     coveredTargets: packet.requiredTargets,
   })
+  if (result.outcome !== 'PASS') throw new Error('fixture validation must pass')
+  return result
 }
-function authority() {
-  const phase4 = phase4Authority()
+const redigestMechanical = (
+  receipt: GameIrMechanicalProjectionReceipt,
+  patch: Record<string, unknown>,
+) => {
+  const body = { ...receipt, ...patch }
+  const { receiptDigest: _receiptDigest, ...unsigned } = body
+  return { ...unsigned, receiptDigest: digestGameIrValue(unsigned) }
+}
+const redigestSemantic = (
+  receipt: WorldSceneSemanticReceipt | PresentationSemanticReceipt,
+  patch: Record<string, unknown>,
+) => {
+  const body = { ...receipt, ...patch }
+  const { receiptDigest: _receiptDigest, ...unsigned } = body
+  return { ...unsigned, receiptDigest: digestGameIrValue(unsigned) }
+}
+function freezeFixture(value: unknown): void {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value as Record<string, unknown>))
+      freezeFixture(child)
+    Object.freeze(value)
+  }
+}
+function assertOwnerBindings(
+  nodes: readonly GameIrNode[],
+  sourceClaims: readonly {
+    subject: string
+    documentPath: FoundationDocumentPath
+    sectionId: string
+    sourcePointer: string
+    literal: string
+  }[],
+  source: GameIrDomainSourceEnvelope,
+): void {
+  const claimsBySubject = new Map(
+    sourceClaims.map(claim => [claim.subject, claim]),
+  )
+  for (const node of nodes) {
+    const nodePointers = pointers(node)
+    expect(Object.keys(node.bindings).sort()).toEqual([...nodePointers].sort())
+    for (const pointer of nodePointers) {
+      const claim = claimsBySubject.get(`node:${node.id}#${pointer}`)
+      const section = source.authoritySectionIndex.find(
+        item =>
+          item.documentPath === claim?.documentPath &&
+          item.sectionId === claim?.sectionId,
+      )
+      expect(claim).toBeDefined()
+      expect(section).toBeDefined()
+      expect(node.bindings[pointer]).toEqual({
+        kind: 'owner',
+        documentPath: claim!.documentPath,
+        sectionId: claim!.sectionId,
+        sectionDigest: section!.digest,
+        sourcePointer: claim!.sourcePointer,
+      })
+    }
+  }
+}
+function expectAssemblyError(
+  authorityInput: Parameters<typeof assembleWorldPresentationClosure>[0],
+  expectedMessage: string,
+): void {
+  let caught: unknown
+  try {
+    assembleWorldPresentationClosure(authorityInput)
+  } catch (error) {
+    caught = error
+  }
+  expect(caught).toBeInstanceOf(Error)
+  expect((caught as Error).message).toBe(expectedMessage)
+}
+function authority(overrides: FixtureOverrides = {}) {
+  const context = fixtureContext(overrides)
+  const phase4 = phase4Authority(context, overrides)
   const phase4Projection = assembleGameplayBalanceModules(phase4)
-  const worldSource = source('world-scene')
+  const worldSource = source('world-scene', context)
   const worldMechanical = mechanical(worldSource)
   const worldPacket = buildWorldSceneSemanticPacket({
     source: worldSource,
@@ -862,8 +1106,11 @@ function authority() {
   })
   const worldSemantic = admitWorldSceneSemanticResult(worldPacket, {
     outcome: 'PROJECTED',
-    nodes: closureWorldNodes,
-    sourceClaims: claims(closureWorldNodes),
+    nodes: sortNodes(overrides.world ?? worldNodes),
+    sourceClaims: claims(
+      sortNodes(overrides.world ?? worldNodes),
+      context.sourceRanges,
+    ),
   }) as WorldSceneSemanticReceipt
   const worldBound = replayAndBindPhase5SemanticReceipt({
     source: worldSource,
@@ -871,22 +1118,19 @@ function authority() {
     packet: worldPacket,
     semantic: worldSemantic,
   })
-  const worldModule = parseWorldSceneModule(
-    worldBound.module,
-    new Map(
-      phase4Projection.gameplay.module.nodes.map(node => [node.id, node]),
-    ),
-  )
-  const worldValidation = validationPacket(
-    buildPhase5SemanticValidationPacket({
-      source: worldSource,
-      mechanical: worldMechanical,
-      semantic: worldSemantic,
-      module: worldModule,
-      externalProjections: { gameplay: phase4Projection.gameplay },
-    }),
-  )
-  const presentationSource = source('presentation')
+  const worldModule: WorldSceneModuleProjection['module'] = Object.freeze({
+    ...worldBound.module,
+    moduleId: 'world-scene',
+  })
+  const worldValidationPacket = buildPhase5SemanticValidationPacket({
+    source: worldSource,
+    mechanical: worldMechanical,
+    semantic: worldSemantic,
+    module: worldModule,
+    externalProjections: { gameplay: phase4Projection.gameplay },
+  })
+  const worldValidation = validationPacket(worldValidationPacket)
+  const presentationSource = source('presentation', context)
   const presentationMechanical = mechanical(presentationSource)
   const presentationPacket = buildPresentationSemanticPacket({
     source: presentationSource,
@@ -896,8 +1140,11 @@ function authority() {
     presentationPacket,
     {
       outcome: 'PROJECTED',
-      nodes: sortedPresentationNodes,
-      sourceClaims: claims(sortedPresentationNodes),
+      nodes: sortNodes(overrides.presentation ?? presentationNodes),
+      sourceClaims: claims(
+        sortNodes(overrides.presentation ?? presentationNodes),
+        context.sourceRanges,
+      ),
     },
   ) as PresentationSemanticReceipt
   const presentationBound = replayAndBindPhase5SemanticReceipt({
@@ -906,7 +1153,10 @@ function authority() {
     packet: presentationPacket,
     semantic: presentationSemantic,
   })
-  const worldProjectionBody = {
+  const worldProjectionBody: Omit<
+    WorldSceneModuleProjection,
+    'projectionDigest'
+  > = {
     schemaVersion: 'game-ir-world-scene-module.v1' as const,
     taskId: worldSource.taskId,
     foundationRevision:
@@ -917,59 +1167,96 @@ function authority() {
     semanticReceiptDigest: worldBound.semanticReceiptDigest,
     semanticValidationResultDigest: digestGameIrValue(worldValidation),
   }
-  const worldProjection = Object.freeze({
+  const worldProjection: WorldSceneModuleProjection = Object.freeze({
     ...worldProjectionBody,
     projectionDigest: digestGameIrValue(worldProjectionBody),
   })
-  const presentationModule = parsePresentationModule(
-    presentationBound.module,
-    new Map(
-      [...phase4Projection.gameplay.module.nodes, ...worldModule.nodes].map(
-        node => [node.id, node],
-      ),
-    ),
-  )
-  const presentationValidation = validationPacket(
-    buildPhase5SemanticValidationPacket({
-      source: presentationSource,
-      mechanical: presentationMechanical,
-      semantic: presentationSemantic,
-      module: presentationModule,
-      externalProjections: {
-        gameplay: phase4Projection.gameplay,
-        worldScene: worldProjection as never,
-      },
-    }),
-  )
+  const presentationModule = presentationBound.module
+  const presentationValidationPacket = buildPhase5SemanticValidationPacket({
+    source: presentationSource,
+    mechanical: presentationMechanical,
+    semantic: presentationSemantic,
+    module: presentationModule,
+    externalProjections: {
+      gameplay: phase4Projection.gameplay,
+      worldScene: worldProjection,
+    },
+  })
+  const presentationValidation = validationPacket(presentationValidationPacket)
   return {
-    phase4Authority: phase4,
-    worldScene: {
-      source: worldSource,
-      mechanical: worldMechanical,
-      semantic: worldSemantic,
-      validation: worldValidation,
+    authority: {
+      phase4Authority: phase4,
+      worldScene: {
+        source: worldSource,
+        mechanical: worldMechanical,
+        semantic: worldSemantic,
+        validation: worldValidation,
+      },
+      presentation: {
+        source: presentationSource,
+        mechanical: presentationMechanical,
+        semantic: presentationSemantic,
+        validation: presentationValidation,
+      },
     },
-    presentation: {
-      source: presentationSource,
-      mechanical: presentationMechanical,
-      semantic: presentationSemantic,
-      validation: presentationValidation,
-    },
+    worldValidationPacket,
+    presentationValidationPacket,
   }
 }
 
 describe('Task 9 traversal/action World + Presentation profile', () => {
   test('assembles the complete nontrivial traversal/action graph with exact typed edges and requirements', () => {
     const authorityValue = authority()
-    const closure = assembleWorldPresentationClosure(authorityValue)
+    const closure = assembleWorldPresentationClosure(authorityValue.authority)
     const world = closure.worldScene.module.nodes
     const presentation = closure.presentation.module.nodes
+    expect(closureView(closure.phase4.gameplay.module.nodes)).toEqual(
+      candidateView(gameplayNodes),
+    )
+    expect(closureView(closure.phase4.balance.module.nodes)).toEqual(
+      candidateView(balanceNodes),
+    )
+    expect(closureView(world)).toEqual(candidateView(worldNodes))
+    expect(closureView(presentation)).toEqual(candidateView(presentationNodes))
     expect(
-      authorityValue.phase4Authority.gameplay.source.authoritySectionIndex,
+      closure.phase4.gameplay.module.nodes
+        .filter(node =>
+          ['gameplay.action', 'gameplay.objective'].includes(node.kind),
+        )
+        .map(node => node.id),
+    ).toEqual(['action.extract', 'objective.extract'])
+    expect(
+      authorityValue.authority.phase4Authority.gameplay.source
+        .authoritySectionIndex,
     ).toEqual(fullIndex)
     expect(
-      authorityValue.phase4Authority.gameplay.source.authoritySectionIndex,
+      authorityValue.authority.phase4Authority.gameplay.source
+        .authoritySectionIndex,
     ).toHaveLength(8)
+    expect(authorityValue.worldValidationPacket.requiredTargets).toEqual(
+      targetSubjects(worldNodes),
+    )
+    expect(authorityValue.presentationValidationPacket.requiredTargets).toEqual(
+      targetSubjects(presentationNodes),
+    )
+    expect(authorityValue.worldValidationPacket.checkIds).toEqual(
+      expectedCheckIds('world-scene'),
+    )
+    expect(authorityValue.presentationValidationPacket.checkIds).toEqual(
+      expectedCheckIds('presentation'),
+    )
+    expect(authorityValue.authority.worldScene.validation.checkIds).toEqual(
+      expectedCheckIds('world-scene'),
+    )
+    expect(authorityValue.authority.presentation.validation.checkIds).toEqual(
+      expectedCheckIds('presentation'),
+    )
+    expect(
+      authorityValue.authority.worldScene.validation.coveredTargets,
+    ).toEqual(authorityValue.worldValidationPacket.requiredTargets)
+    expect(
+      authorityValue.authority.presentation.validation.coveredTargets,
+    ).toEqual(authorityValue.presentationValidationPacket.requiredTargets)
     for (const moduleId of [
       'gameplay',
       'balance',
@@ -978,12 +1265,12 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
     ] as const) {
       const envelope =
         moduleId === 'gameplay'
-          ? authorityValue.phase4Authority.gameplay.source
+          ? authorityValue.authority.phase4Authority.gameplay.source
           : moduleId === 'balance'
-            ? authorityValue.phase4Authority.balance.source
+            ? authorityValue.authority.phase4Authority.balance.source
             : moduleId === 'world-scene'
-              ? authorityValue.worldScene.source
-              : authorityValue.presentation.source
+              ? authorityValue.authority.worldScene.source
+              : authorityValue.authority.presentation.source
       expect(Object.keys(envelope.sectionBytes).sort()).toEqual(
         selectedDocs(moduleId)
           .map(
@@ -994,24 +1281,13 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
       )
       expect(envelope.authoritySectionIndex).toEqual(fullIndex)
     }
-    const richWorld = parseWorldSceneModule(
-      { moduleId: 'world-scene', nodes: sortedWorldNodes } as never,
-      new Map(
-        closure.phase4.gameplay.module.nodes.map(node => [node.id, node]),
-      ),
-    )
-    const richPresentation = parsePresentationModule(
-      { moduleId: 'presentation', nodes: richPresentationNodes } as never,
-      new Map(
-        [
-          ...closure.phase4.gameplay.module.nodes,
-          ...closureWorldNodes,
-          gameplayActionTarget,
-        ].map(node => [node.id, node]),
-      ) as never,
-    )
     expect(
-      richWorld.nodes
+      world
+        .filter(node => node.kind === 'world-scene.scene')
+        .map(node => node.id),
+    ).toEqual([world2d, world3d])
+    expect(
+      world
         .filter(node => node.kind === 'world-scene.route')
         .map(node => node.value.waypointReferenceIndexes),
     ).toEqual([
@@ -1019,27 +1295,17 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
       [0, 1],
     ])
     expect(
-      richWorld.nodes
+      world
         .filter(node => node.kind === 'world-scene.encounter')
         .map(node => node.value.mode)
         .sort(),
     ).toEqual(['patrol', 'triggered'])
     expect(
-      richPresentation.nodes.find(
-        node => node.kind === 'presentation.ui-action',
-      )?.edges,
-    ).toContainEqual(edge('invokes', 'action.extract', 'gameplay.action'))
-    expect(
-      world
-        .filter(node => node.kind === 'world-scene.scene')
-        .map(node => node.id),
-    ).toEqual([world2d, world3d])
-    expect(
-      world.filter(node => node.kind === 'world-scene.route'),
-    ).toHaveLength(0)
-    expect(
-      world.filter(node => node.kind === 'world-scene.encounter'),
-    ).toHaveLength(0)
+      world.find(node => node.kind === 'world-scene.objective-placement')
+        ?.edges,
+    ).toContainEqual(
+      edge('objective', 'objective.extract', 'gameplay.objective'),
+    )
     expect(
       world
         .filter(node => node.kind === 'world-scene.entity-instance')
@@ -1062,8 +1328,15 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
       'presentation.ui-state',
       'presentation.ui-state',
       'presentation.transition',
+      'presentation.ui-action',
       'presentation.vfx-cue',
     ])
+    expect(
+      presentation.find(node => node.kind === 'presentation.ui-action')?.edges,
+    ).toContainEqual(edge('invokes', 'action.extract', 'gameplay.action'))
+    expect(
+      presentation.find(node => node.kind === 'presentation.transition')?.edges,
+    ).toContainEqual(edge('on', 'action.extract', 'gameplay.action'))
     expect(
       presentation.flatMap(
         node =>
@@ -1087,7 +1360,7 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
       )?.edges,
     ).toContainEqual(edge('at', 'world.ice-danger', 'world-scene.zone'))
     expect(closure.worldScene.semanticValidationResultDigest).toBe(
-      digestGameIrValue(authorityValue.worldScene.validation),
+      digestGameIrValue(authorityValue.authority.worldScene.validation),
     )
     expect(closure.worldScene.projectionDigest).toBe(
       digestGameIrValue({
@@ -1115,19 +1388,56 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           closure.presentation.semanticValidationResultDigest,
       }),
     )
-    for (const node of [
-      ...closure.phase4.gameplay.module.nodes,
-      ...closure.phase4.balance.module.nodes,
-      ...world,
-      ...presentation,
-    ]) {
-      expect(node.producerMode).toBe('semantic')
-      expect(node.bindings).toHaveProperty('/id')
-    }
+    assertOwnerBindings(
+      closure.phase4.gameplay.module.nodes,
+      authorityValue.authority.phase4Authority.gameplay.semantic.sourceClaims,
+      authorityValue.authority.phase4Authority.gameplay.source,
+    )
+    assertOwnerBindings(
+      closure.phase4.balance.module.nodes,
+      authorityValue.authority.phase4Authority.balance.semantic.sourceClaims,
+      authorityValue.authority.phase4Authority.balance.source,
+    )
+    assertOwnerBindings(
+      world,
+      authorityValue.authority.worldScene.semantic.sourceClaims,
+      authorityValue.authority.worldScene.source,
+    )
+    assertOwnerBindings(
+      presentation,
+      authorityValue.authority.presentation.semantic.sourceClaims,
+      authorityValue.authority.presentation.source,
+    )
   })
   test('is byte-identical across replay and preserves the frozen projections', () => {
-    const first = assembleWorldPresentationClosure(authority())
-    const second = assembleWorldPresentationClosure(authority())
+    const profile = authority()
+    freezeFixture(profile)
+    const first = assembleWorldPresentationClosure(profile.authority)
+    const second = assembleWorldPresentationClosure(profile.authority)
+    expect(canonicalGameIrJson(first.phase4.gameplay.module)).toBe(
+      canonicalGameIrJson(second.phase4.gameplay.module),
+    )
+    expect(first.phase4.gameplay.projectionDigest).toBe(
+      second.phase4.gameplay.projectionDigest,
+    )
+    expect(canonicalGameIrJson(first.phase4.balance.module)).toBe(
+      canonicalGameIrJson(second.phase4.balance.module),
+    )
+    expect(first.phase4.balance.projectionDigest).toBe(
+      second.phase4.balance.projectionDigest,
+    )
+    expect(canonicalGameIrJson(first.worldScene.module)).toBe(
+      canonicalGameIrJson(second.worldScene.module),
+    )
+    expect(first.worldScene.projectionDigest).toBe(
+      second.worldScene.projectionDigest,
+    )
+    expect(canonicalGameIrJson(first.presentation.module)).toBe(
+      canonicalGameIrJson(second.presentation.module),
+    )
+    expect(first.presentation.projectionDigest).toBe(
+      second.presentation.projectionDigest,
+    )
     expect(canonicalGameIrJson(first)).toBe(canonicalGameIrJson(second))
     expect(first.closureDigest).toBe(second.closureDigest)
     expect(Object.isFrozen(first)).toBe(true)
@@ -1136,76 +1446,233 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
     expect(Object.isFrozen(first.presentation)).toBe(true)
   })
   test('fails closed for source, mechanical, typed literal, graph, identity, and forbidden-target mutations', () => {
-    const base = authority()
-    expect(() => assembleWorldPresentationClosure(base)).not.toThrow()
-    const worldNodesMissing = worldNodes.slice(0, -1)
-    const worldPacket = buildWorldSceneSemanticPacket({
-      source: base.worldScene.source,
-      mechanical: base.worldScene.mechanical,
-    })
-    const worldSemantic = admitWorldSceneSemanticResult(worldPacket, {
-      outcome: 'PROJECTED',
-      nodes: worldNodesMissing,
-      sourceClaims: claims(worldNodesMissing),
-    }) as WorldSceneSemanticReceipt
-    expect(() =>
-      assembleWorldPresentationClosure({
-        ...base,
-        worldScene: { ...base.worldScene, semantic: worldSemantic },
-      } as never),
-    ).toThrow()
-    expect(() =>
-      assembleWorldPresentationClosure({
-        ...base,
-        worldScene: {
-          ...base.worldScene,
-          mechanical: {
-            ...base.worldScene.mechanical,
-            nodes: [
-              {
-                id: 'spoof',
-                kind: 'world-scene.node',
-                value: {},
-                references: [],
-                edges: [],
-              },
-            ],
-          },
-        },
-      } as never),
-    ).toThrow()
-    const badPresentation = sortedPresentationNodes.map(node =>
-      node.id === 'presentation.transition-open'
-        ? { ...node, value: { ...node.value, trigger: { kind: 'automatic' } } }
+    const base = authority().authority
+    assembleWorldPresentationClosure(base)
+    const worldNodesMissing = sortNodes(worldNodes).map(node =>
+      node.id === 'world.ice-objective'
+        ? {
+            ...node,
+            edges: node.edges.filter(
+              candidate => candidate.type !== 'objective',
+            ),
+          }
         : node,
     )
-    const presentationPacket = buildPresentationSemanticPacket({
-      source: base.presentation.source,
-      mechanical: base.presentation.mechanical,
+    const worldGraphProfile = authority({ world: worldNodesMissing })
+    expectAssemblyError(
+      worldGraphProfile.authority,
+      'invalid World/Scene module: node world.ice-objective relationship objective must occur exactly once',
+    )
+    const worldNumeric = sortNodes(worldNodes).map(node =>
+      node.id === 'world.ice-danger'
+        ? {
+            ...node,
+            value: {
+              ...node.value,
+              shape: { kind: 'circle', radius: 0 },
+            },
+          }
+        : node,
+    )
+    const worldNumericProfile = authority({ world: worldNumeric })
+    expectAssemblyError(
+      worldNumericProfile.authority,
+      'invalid World/Scene module: node world.ice-danger shape.radius must be positive',
+    )
+    const mechanicalNodes = redigestMechanical(base.worldScene.mechanical, {
+      nodes: [{ id: 'spoof', kind: 'world-scene.node' }],
     })
-    const presentationSemantic = admitPresentationSemanticResult(
-      presentationPacket,
-      {
-        outcome: 'PROJECTED',
-        nodes: badPresentation,
-        sourceClaims: claims(badPresentation),
+    const mechanicalNodesAuthority = {
+      ...base,
+      worldScene: { ...base.worldScene, mechanical: mechanicalNodes },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      mechanicalNodesAuthority,
+      'invalid Game IR domain projection: isolated domain mechanical nodes and verifiedClaims must be empty',
+    )
+    const mechanicalClaims = redigestMechanical(base.worldScene.mechanical, {
+      verifiedClaims: ['node:spoof#/id'],
+    })
+    const mechanicalClaimsAuthority = {
+      ...base,
+      worldScene: { ...base.worldScene, mechanical: mechanicalClaims },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      mechanicalClaimsAuthority,
+      'invalid Game IR domain projection: isolated domain mechanical nodes and verifiedClaims must be empty',
+    )
+    const mechanicalOwned = redigestMechanical(base.worldScene.mechanical, {
+      ownedTargets: ['node:spoof#/id'],
+    })
+    const mechanicalOwnedAuthority = {
+      ...base,
+      worldScene: { ...base.worldScene, mechanical: mechanicalOwned },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      mechanicalOwnedAuthority,
+      'invalid Game IR domain projection: ownedTargets must exactly account for every mechanical node target',
+    )
+    const sourceKey = Object.keys(base.worldScene.source.sectionBytes)[0]!
+    const sourceBytesTampered = {
+      ...base.worldScene.source,
+      sectionBytes: {
+        ...base.worldScene.source.sectionBytes,
+        [sourceKey]: `${base.worldScene.source.sectionBytes[sourceKey]}tamper`,
       },
-    ) as PresentationSemanticReceipt
-    expect(() =>
-      assembleWorldPresentationClosure({
-        ...base,
-        presentation: { ...base.presentation, semantic: presentationSemantic },
-      } as never),
-    ).toThrow()
-    expect(() =>
-      assembleWorldPresentationClosure({
-        ...base,
-        presentation: {
-          ...base.presentation,
-          source: { ...base.presentation.source, taskId: 'other-task' },
+    }
+    const sourceBytesAuthority = {
+      ...base,
+      worldScene: { ...base.worldScene, source: sourceBytesTampered },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      sourceBytesAuthority,
+      'invalid Game IR domain source: source envelope bytes do not match docs/GDD.md#profile-0',
+    )
+    const literalClaims = base.worldScene.semantic.sourceClaims.map(
+      (claim, index) =>
+        index === 0 ? { ...claim, literal: 'wrong literal' } : claim,
+    )
+    const literalSemantic = redigestSemantic(base.worldScene.semantic, {
+      sourceClaims: literalClaims,
+    }) as WorldSceneSemanticReceipt
+    const literalAuthority = {
+      ...base,
+      worldScene: { ...base.worldScene, semantic: literalSemantic },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      literalAuthority,
+      'invalid Game IR Phase 5 admission: source literal does not match the semantic record',
+    )
+    const rangeClaims = base.worldScene.semantic.sourceClaims.map(
+      (claim, index) =>
+        index === 0 ? { ...claim, sourcePointer: '/bytes/0/0' } : claim,
+    )
+    const rangeSemantic = redigestSemantic(base.worldScene.semantic, {
+      sourceClaims: rangeClaims,
+    }) as WorldSceneSemanticReceipt
+    const rangeAuthority = {
+      ...base,
+      worldScene: { ...base.worldScene, semantic: rangeSemantic },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      rangeAuthority,
+      'invalid Game IR Phase 5 admission: sourceClaims[0].sourcePointer must contain a non-empty byte range',
+    )
+    const stalePresentationValidation = {
+      ...base.presentation.validation,
+      packetDigest: base.worldScene.validation.packetDigest,
+    }
+    const stalePresentationAuthority = {
+      ...base,
+      presentation: {
+        ...base.presentation,
+        validation: stalePresentationValidation,
+      },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      stalePresentationAuthority,
+      'invalid Game IR Phase 5 admission: fidelity PASS packet digest does not match packet',
+    )
+    const badPresentation = sortNodes(presentationNodes).map(node =>
+      node.id === 'presentation.transition-open'
+        ? { ...node, value: { ...node.value, trigger: { kind: 'foobar' } } }
+        : node,
+    )
+    const badPresentationProfile = authority({ presentation: badPresentation })
+    expectAssemblyError(
+      badPresentationProfile.authority,
+      'invalid Presentation module: node presentation.transition-open trigger kind is invalid',
+    )
+    const badUiAction = sortNodes(presentationNodes).map(node =>
+      node.id === 'presentation.ui-action-extract'
+        ? { ...node, value: { ...node.value, input: 'joystick' } }
+        : node,
+    )
+    const badUiActionProfile = authority({ presentation: badUiAction })
+    expectAssemblyError(
+      badUiActionProfile.authority,
+      'invalid Presentation module: node presentation.ui-action-extract input is invalid',
+    )
+    const badRequirement = sortNodes(presentationNodes).map(node =>
+      node.id === 'presentation.screen-hud'
+        ? {
+            ...node,
+            value: {
+              ...node.value,
+              requirements: [requirement('req.ui.hud', 'audio', 'cue')],
+            },
+          }
+        : node,
+    )
+    const badRequirementProfile = authority({ presentation: badRequirement })
+    expectAssemblyError(
+      badRequirementProfile.authority,
+      'invalid Presentation module: node presentation.screen-hud requirement policy does not match',
+    )
+    const presentationIdentityAuthority = {
+      ...base,
+      presentation: {
+        ...base.presentation,
+        source: { ...base.presentation.source, taskId: 'other-task' },
+      },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      presentationIdentityAuthority,
+      'invalid Game IR domain source: source envelope taskId does not match compile request',
+    )
+    const gameplayIdentityAuthority = {
+      ...base,
+      phase4Authority: {
+        ...base.phase4Authority,
+        gameplay: {
+          ...base.phase4Authority.gameplay,
+          source: {
+            ...base.phase4Authority.gameplay.source,
+            taskId: 'other-task',
+          },
         },
-      } as never),
-    ).toThrow()
+      },
+    } as Parameters<typeof assembleWorldPresentationClosure>[0]
+    expectAssemblyError(
+      gameplayIdentityAuthority,
+      'invalid Game IR domain source: source envelope taskId does not match compile request',
+    )
+    const changedGameplay = gameplayNodes.map(node =>
+      node.id === 'entity.player'
+        ? { ...node, value: { ...node.value, label: 'PiloT' } }
+        : node,
+    )
+    const changedGameplayProfile = authority({ gameplay: changedGameplay })
+    assembleWorldPresentationClosure(changedGameplayProfile.authority)
+    const staleWorldValidationAuthority = {
+      ...changedGameplayProfile.authority,
+      worldScene: {
+        ...changedGameplayProfile.authority.worldScene,
+        validation: base.worldScene.validation,
+      },
+    }
+    expectAssemblyError(
+      staleWorldValidationAuthority,
+      'invalid Game IR Phase 5 admission: fidelity PASS packet digest does not match packet',
+    )
+    const changedWorld = worldNodes.map(node =>
+      node.id === world2d
+        ? { ...node, value: { ...node.value, label: 'Ice shElf' } }
+        : node,
+    )
+    const changedWorldProfile = authority({ world: changedWorld })
+    assembleWorldPresentationClosure(changedWorldProfile.authority)
+    const stalePresentationWorldAuthority = {
+      ...changedWorldProfile.authority,
+      presentation: {
+        ...changedWorldProfile.authority.presentation,
+        validation: base.presentation.validation,
+      },
+    }
+    expectAssemblyError(
+      stalePresentationWorldAuthority,
+      'invalid Game IR Phase 5 admission: fidelity PASS packet digest does not match packet',
+    )
     const forbidden = presentationNodes.map(node =>
       node.id === 'presentation.camera-follow'
         ? {
@@ -1214,27 +1681,18 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
               candidate.type === 'region'
                 ? {
                     ...candidate,
-                    targetId: 'balance.energy',
-                    targetType: 'balance.variable',
+                    targetId: 'entity.player',
+                    targetType: 'gameplay.entity',
                   }
                 : candidate,
             ),
           }
         : node,
     )
-    const forbiddenSemantic = admitPresentationSemanticResult(
-      presentationPacket,
-      {
-        outcome: 'PROJECTED',
-        nodes: forbidden,
-        sourceClaims: claims(forbidden),
-      },
-    ) as PresentationSemanticReceipt
-    expect(() =>
-      assembleWorldPresentationClosure({
-        ...base,
-        presentation: { ...base.presentation, semantic: forbiddenSemantic },
-      } as never),
-    ).toThrow()
+    const forbiddenProfile = authority({ presentation: forbidden })
+    expectAssemblyError(
+      forbiddenProfile.authority,
+      'invalid Presentation module: node presentation.camera-follow role region has wrong target kind',
+    )
   })
 })
