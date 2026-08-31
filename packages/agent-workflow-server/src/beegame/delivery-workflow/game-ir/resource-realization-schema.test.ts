@@ -347,7 +347,7 @@ function presentationRequirementModule(): MutableModule {
         kind: 'presentation.ui-screen',
         producerMode: 'semantic',
         value: {
-          label: 'ui-asset',
+          label: 'Main screen',
           modal: false,
           requirements: [
             { requirementId: 'req.ui.main', kind: 'ui', runtimeRole: 'screen' },
@@ -420,6 +420,15 @@ function derivedPresentationRequirementModule(): MutableModule {
     resourceKind: 'ui-asset',
     runtimeRole: 'screen',
   }
+  logical.edges = logical.edges.map(edge =>
+    edge.type === 'required-by'
+      ? {
+          ...edge,
+          targetId: 'presentation.screen.main',
+          targetType: 'presentation.ui-screen',
+        }
+      : edge,
+  )
   for (const current of module.nodes)
     current.edges = current.edges.map(edge =>
       edge.targetId === previousId ? { ...edge, targetId: logical.id } : edge,
@@ -446,8 +455,8 @@ function derivedPresentationRequirementModule(): MutableModule {
         kind: 'external',
         moduleId: 'presentation',
         nodeId: 'presentation.screen.main',
-        pointer: '/value/label',
-        targetDigest: digestGameIrValue('ui-asset'),
+        pointer: '/value/requirements/0/kind',
+        targetDigest: digestGameIrValue('ui'),
       },
     ],
   }
@@ -1347,5 +1356,24 @@ describe('resource-realization schema', () => {
         presentationRequirementModule(),
       ]).nodes,
     ).toHaveLength(5)
+  })
+
+  test('rejects a tampered Presentation requirement kind digest', () => {
+    const module = derivedPresentationRequirementModule()
+    const logical = module.nodes.find(node =>
+      node.kind.endsWith('logical-resource'),
+    )!
+    const binding = logical.bindings['/value/resourceKind']!
+    const input = (binding.inputs as Array<Record<string, unknown>>)[0]!
+    input.targetDigest = digestGameIrValue('vfx')
+    expect(() =>
+      parseRaw(module, [
+        {
+          moduleId: 'gameplay',
+          nodes: [externalEntity, externalGameplayState],
+        },
+        presentationRequirementModule(),
+      ]),
+    ).toThrow(/wrong target digest|digest/i)
   })
 })
