@@ -77,6 +77,7 @@
 **Files:**
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/implementation-verification-schema.ts`
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/implementation-verification-schema.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts` (production-file classification only; Task 7 later replaces the old semantic/core policies atomically)
 
 **Interfaces:**
 - Produces: `IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST`, five node-kind/value types and `parseImplementationVerificationModule(value, {request, sections, priorModules})`.
