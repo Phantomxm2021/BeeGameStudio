@@ -30,6 +30,24 @@ const role = (
   cardinality: 'exactly-one' | 'at-least-one' | 'zero-or-more',
 ) =>
   Object.freeze({ targetKinds: Object.freeze([...targetKinds]), cardinality })
+const IMPLEMENTATION_VERIFICATION_PRIOR_NODE_KINDS = Object.freeze(
+  [
+    ...Object.keys(GAMEPLAY_DOMAIN_MANIFEST),
+    ...Object.keys(BALANCE_DOMAIN_MANIFEST),
+    ...Object.keys(WORLD_SCENE_DOMAIN_MANIFEST),
+    ...Object.keys(PRESENTATION_DOMAIN_MANIFEST),
+    ...Object.keys(RESOURCE_REALIZATION_DOMAIN_MANIFEST),
+  ].sort(compareCodeUnits),
+)
+const IMPLEMENTATION_VERIFICATION_UNIT_TARGET_KINDS = Object.freeze(
+  ['implementation-verification.unit'].sort(compareCodeUnits),
+)
+const IMPLEMENTATION_VERIFICATION_CONSTRAINT_TARGET_KINDS = Object.freeze(
+  [
+    ...IMPLEMENTATION_VERIFICATION_PRIOR_NODE_KINDS,
+    'implementation-verification.unit',
+  ].sort(compareCodeUnits),
+)
 export const IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST = Object.freeze({
   'implementation-verification.target': Object.freeze({
     valueFields: Object.freeze([
@@ -44,8 +62,14 @@ export const IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST = Object.freeze({
     valueFields: Object.freeze(['label', 'responsibility', 'ownedPaths']),
     relationships: Object.freeze({
       targets: role(['implementation-verification.target'], 'exactly-one'),
-      implements: role([], 'at-least-one'),
-      'depends-on': role(['implementation-verification.unit'], 'zero-or-more'),
+      implements: role(
+        IMPLEMENTATION_VERIFICATION_PRIOR_NODE_KINDS,
+        'at-least-one',
+      ),
+      'depends-on': role(
+        IMPLEMENTATION_VERIFICATION_UNIT_TARGET_KINDS,
+        'zero-or-more',
+      ),
     }),
   }),
   'implementation-verification.acceptance-scenario': Object.freeze({
@@ -56,7 +80,10 @@ export const IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST = Object.freeze({
       'expectedOutcome',
     ]),
     relationships: Object.freeze({
-      covers: role([], 'at-least-one'),
+      covers: role(
+        IMPLEMENTATION_VERIFICATION_PRIOR_NODE_KINDS,
+        'at-least-one',
+      ),
       'owned-by': role(['implementation-verification.unit'], 'exactly-one'),
       'proved-by': role(
         ['implementation-verification.evidence-requirement'],
@@ -67,7 +94,10 @@ export const IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST = Object.freeze({
   'implementation-verification.invariant': Object.freeze({
     valueFields: Object.freeze(['label', 'assertion', 'scope']),
     relationships: Object.freeze({
-      constrains: role([], 'at-least-one'),
+      constrains: role(
+        IMPLEMENTATION_VERIFICATION_CONSTRAINT_TARGET_KINDS,
+        'at-least-one',
+      ),
       'proved-by': role(
         ['implementation-verification.evidence-requirement'],
         'at-least-one',
@@ -129,13 +159,7 @@ const PRIOR_SEQUENCE = [
 const LOCAL_KINDS = new Set(
   Object.keys(IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST),
 )
-const PRIOR_KINDS = new Set([
-  ...Object.keys(GAMEPLAY_DOMAIN_MANIFEST),
-  ...Object.keys(BALANCE_DOMAIN_MANIFEST),
-  ...Object.keys(WORLD_SCENE_DOMAIN_MANIFEST),
-  ...Object.keys(PRESENTATION_DOMAIN_MANIFEST),
-  ...Object.keys(RESOURCE_REALIZATION_DOMAIN_MANIFEST),
-])
+const PRIOR_KINDS = new Set(IMPLEMENTATION_VERIFICATION_PRIOR_NODE_KINDS)
 const ALL_KINDS = new Set([...LOCAL_KINDS, ...PRIOR_KINDS])
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const EVIDENCE_KINDS = new Set([
@@ -424,6 +448,8 @@ function parseCurrent(
       fail(`node ${node.id} has an unknown kind`)
     if (node.producerMode !== 'semantic')
       fail(`node ${node.id} must be semantic-owned`)
+    if (node.references.length !== 0)
+      fail(`node ${node.id} references must be empty; use manifest edges`)
     for (const item of node.edges) {
       const target = targets.get(item.targetId)
       if (
@@ -513,13 +539,7 @@ function validate(
       const rule = descriptor(node.kind).relationships[item.type]
       if (!rule)
         fail(`node ${node.id} has unknown relationship role ${item.type}`)
-      const allowed = rule.targetKinds.length
-        ? rule.targetKinds
-        : item.type === 'implements' || item.type === 'covers'
-          ? [...PRIOR_KINDS]
-          : item.type === 'constrains'
-            ? [...PRIOR_KINDS, 'implementation-verification.unit']
-            : []
+      const allowed = rule.targetKinds
       if (!allowed.includes(item.targetType))
         fail(`node ${node.id} role ${item.type} has wrong target kind`)
       const key = `${item.type}\0${item.targetId}\0${item.targetType}`
@@ -629,20 +649,9 @@ function validate(
     fail('every prior node must be scenario-covered or invariant-constrained')
   const supported = new Set<string>()
   for (const subject of [...scenarios, ...invariants]) {
-    const owner = edge(subject, 'owned-by')[0]?.targetId
-    if (owner)
+    for (const owner of requiredOwners(subject))
       for (const id of support(owner, local as ReadonlyMap<string, ParsedNode>))
         supported.add(id)
-    else
-      for (const item of edge(subject, 'constrains'))
-        if (
-          local.get(item.targetId)?.kind === 'implementation-verification.unit'
-        )
-          for (const id of support(
-            item.targetId,
-            local as ReadonlyMap<string, ParsedNode>,
-          ))
-            supported.add(id)
   }
   if (units.some(unit => !supported.has(unit.id)))
     fail('unit is orphaned from scenario/invariant support')
