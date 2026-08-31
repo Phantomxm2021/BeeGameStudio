@@ -42,16 +42,30 @@ const digest = 'a'.repeat(64)
 function source(
   bytes = 'bytes',
   moduleId: 'gameplay' | 'world-scene' | 'presentation' = 'world-scene',
+  extraSelectedSection = false,
 ): GameIrDomainSourceEnvelope {
-  const sectionIndex: readonly GameIrSourceSection[] =
-    CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
+  const sectionIndex: readonly GameIrSourceSection[] = [
+    ...CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
       documentPath,
       sectionId: `section-${index}`,
       heading: `Section ${index}`,
       startLine: 1,
       endLine: 1,
       digest: createHash('sha256').update(bytes).digest('hex'),
-    }))
+    })),
+    ...(extraSelectedSection
+      ? [
+          {
+            documentPath: 'docs/GDD.md' as const,
+            sectionId: 'section-extra',
+            heading: 'Extra section',
+            startLine: 2,
+            endLine: 2,
+            digest: createHash('sha256').update(bytes).digest('hex'),
+          },
+        ]
+      : []),
+  ]
   const foundation: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
     schemaVersion: 'foundation-ready-receipt.v1',
     projectId: 'project-1',
@@ -78,25 +92,27 @@ function source(
       receiptDigest: digestGameIrValue(foundation),
     },
   }
+  const selectedPaths =
+    moduleId === 'gameplay'
+      ? ['docs/GDD.md']
+      : moduleId === 'world-scene'
+        ? ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']
+        : [
+            'docs/GDD.md',
+            'docs/ART_DIRECTION.md',
+            'docs/UI_UX_SPEC.md',
+            'docs/AUDIO_DESIGN.md',
+          ]
   return buildGameIrDomainSourceEnvelope({
     request: requestBody,
     sectionIndex,
-    sectionBytes: Object.fromEntries(
-      (moduleId === 'gameplay'
-        ? ['docs/GDD.md']
-        : moduleId === 'world-scene'
-          ? ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']
-          : [
-              'docs/GDD.md',
-              'docs/ART_DIRECTION.md',
-              'docs/UI_UX_SPEC.md',
-              'docs/AUDIO_DESIGN.md',
-            ]
-      ).map(path => [
+    sectionBytes: Object.fromEntries([
+      ...selectedPaths.map(path => [
         `${path}#section-${CANONICAL_FOUNDATION_DOCUMENTS.indexOf(path as FoundationDocumentPath)}`,
         bytes,
       ]),
-    ),
+      ...(extraSelectedSection ? [['docs/GDD.md#section-extra', bytes]] : []),
+    ]),
     moduleId,
   })
 }
@@ -302,8 +318,9 @@ function projectedInputFor(moduleId: 'world-scene' | 'presentation') {
 
 function validationFixture(
   moduleId: 'world-scene' | 'presentation' = 'world-scene',
+  extraSelectedSection = false,
 ) {
-  const currentSource = source('bytes', moduleId)
+  const currentSource = source('bytes', moduleId, extraSelectedSection)
   const currentMechanical = mechanical(currentSource)
   const currentPacket = fullPhase5Packet(currentSource)
   const currentSemantic = admitPhase5SemanticResult(
@@ -333,7 +350,23 @@ function validationFixture(
     module: bound.module,
     externalProjections,
   })
-  return { currentSource, validationPacket }
+  return {
+    currentSource,
+    validationPacket,
+    builderInput: {
+      source: currentSource,
+      mechanical: currentMechanical,
+      semantic: currentSemantic,
+      module: bound.module,
+      externalProjections,
+    },
+  }
+}
+
+function expectDeepFrozen(value: unknown): void {
+  if (value === null || typeof value !== 'object') return
+  expect(Object.isFrozen(value)).toBe(true)
+  for (const nested of Object.values(value)) expectDeepFrozen(nested)
 }
 
 function repack(
@@ -644,7 +677,102 @@ describe('shared Phase 5 admission', () => {
           checkIds: validationPacket.checkIds,
           coveredTargets: validationPacket.requiredTargets,
         }),
-      ).toThrow(/authority|index|canonical|document|member|digest|section/i)
+      ).toThrow(
+        /authority|index|canonical|document|member|digest|section|closure/i,
+      )
+    }
+    const extraAuthoritySection = {
+      documentPath: 'docs/GDD.md' as const,
+      sectionId: 'section-extra-authority',
+      heading: 'Extra authority section',
+      startLine: 99,
+      endLine: 99,
+      digest,
+    }
+    const withDistinctExtra = [
+      authority[0]!,
+      extraAuthoritySection,
+      ...authority.slice(1),
+    ]
+    const staleAuthorityDigest = repackValidation(validationPacket, {
+      authoritySectionIndex: withDistinctExtra,
+    })
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(
+        staleAuthorityDigest as never,
+        {
+          outcome: 'PASS',
+          packetDigest: staleAuthorityDigest.packetDigest,
+          checkIds: validationPacket.checkIds,
+          coveredTargets: validationPacket.requiredTargets,
+        },
+      ),
+    ).toThrow(/authority|index|digest/i)
+  })
+
+  test('requires exact selected source closure and excludes authority-only evidence', () => {
+    const { validationPacket } = validationFixture('world-scene', true)
+    expect(validationPacket.sourceSections).toHaveLength(3)
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(validationPacket, {
+        outcome: 'PASS',
+        packetDigest: validationPacket.packetDigest,
+        checkIds: validationPacket.checkIds,
+        coveredTargets: validationPacket.requiredTargets,
+      }),
+    ).not.toThrow()
+
+    const extraRef = validationPacket.sourceSections.find(
+      section => section.ref.sectionId === 'section-extra',
+    )!.ref
+    const withoutExtra = repackValidation(validationPacket, {
+      sourceSections: validationPacket.sourceSections.filter(
+        section => section.ref.sectionId !== extraRef.sectionId,
+      ),
+      allowedEvidencePointers: validationPacket.allowedEvidencePointers.filter(
+        pointer => !pointer.includes(`#${extraRef.sectionId}@`),
+      ),
+    })
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(withoutExtra, {
+        outcome: 'PASS',
+        packetDigest: withoutExtra.packetDigest,
+        checkIds: withoutExtra.checkIds,
+        coveredTargets: withoutExtra.requiredTargets,
+      }),
+    ).toThrow(/closure|selected|source|section/i)
+
+    const authorityOnly = validationPacket.authoritySectionIndex.find(
+      section => section.documentPath === 'docs/ART_DIRECTION.md',
+    )!
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(validationPacket, {
+        outcome: 'FAIL',
+        packetDigest: validationPacket.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'missing',
+        missingSubject: validationPacket.requiredTargets[0],
+        expectedProjection: 'node',
+        evidencePointers: [
+          `section:${authorityOnly.documentPath}#${authorityOnly.sectionId}@${authorityOnly.digest}`,
+        ],
+      }),
+    ).toThrow(/evidence|coverage|section/i)
+  })
+
+  test('rejects caller-supplied derived packet fields at the builder boundary', () => {
+    const { builderInput } = validationFixture()
+    for (const field of [
+      { checkIds: [] },
+      { targetManifestDigest: digest },
+      { authoritySectionIndex: [] },
+    ]) {
+      expect(() =>
+        phase5Admission.buildPhase5SemanticValidationPacket({
+          ...builderInput,
+          ...field,
+        } as never),
+      ).toThrow(/unknown|missing|field|key/i)
     }
   })
 
@@ -666,6 +794,11 @@ describe('shared Phase 5 admission', () => {
           ],
           edges: [
             {
+              type: 'alpha',
+              targetId: 'scene',
+              targetType: 'world-scene.scene',
+            },
+            {
               type: 'root',
               targetId: 'scene',
               targetType: 'world-scene.scene',
@@ -676,6 +809,7 @@ describe('shared Phase 5 admission', () => {
             '/references/0': owner,
             '/references/1': owner,
             '/edges/0': owner,
+            '/edges/1': owner,
           },
         },
       ],
@@ -711,6 +845,27 @@ describe('shared Phase 5 admission', () => {
         },
       ),
     ).toThrow(/sorted|reference/i)
+    const descendingEdges = {
+      ...validModule,
+      nodes: [
+        {
+          ...validModule.nodes[0],
+          edges: [...(validModule.nodes[0]!.edges as unknown[])].reverse(),
+        },
+      ],
+    }
+    const descendingEdgesPacket = repack(validationPacket, descendingEdges)
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(
+        descendingEdgesPacket,
+        {
+          outcome: 'PASS',
+          packetDigest: descendingEdgesPacket.packetDigest,
+          checkIds: descendingEdgesPacket.checkIds,
+          coveredTargets: descendingEdgesPacket.requiredTargets,
+        },
+      ),
+    ).toThrow(/sorted|edge/i)
     for (const mutation of [
       {
         ...validModule,
@@ -720,6 +875,11 @@ describe('shared Phase 5 admission', () => {
             edges: [
               {
                 type: 'reference',
+                targetId: 'scene',
+                targetType: 'world-scene.scene',
+              },
+              {
+                type: 'root',
                 targetId: 'scene',
                 targetType: 'world-scene.scene',
               },
@@ -1528,5 +1688,76 @@ describe('shared Phase 5 admission', () => {
         },
       ),
     ).toThrow(/digest|identity|packet|module/i)
+  })
+
+  test('rejects a current module relabel after its inner digests are recomputed', () => {
+    const { validationPacket } = validationFixture()
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(validationPacket, {
+        outcome: 'PASS',
+        packetDigest: validationPacket.packetDigest,
+        checkIds: validationPacket.checkIds,
+        coveredTargets: validationPacket.requiredTargets,
+      }),
+    ).not.toThrow()
+    const module = JSON.parse(validationPacket.moduleBytes) as Record<
+      string,
+      unknown
+    >
+    const relabeledModule = { ...module, moduleId: 'presentation' }
+    const relabeledPacket = repackValidation(validationPacket, {
+      moduleBytes: canonicalGameIrJson(relabeledModule),
+      moduleDigest: digestGameIrValue(relabeledModule),
+    })
+    expect(relabeledPacket.moduleId).toBe('world-scene')
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(relabeledPacket, {
+        outcome: 'PASS',
+        packetDigest: relabeledPacket.packetDigest,
+        checkIds: relabeledPacket.checkIds,
+        coveredTargets: relabeledPacket.requiredTargets,
+      }),
+    ).toThrow(/module|expected|identity|Core/i)
+  })
+
+  test('deep-freezes deterministic packet and PASS, FAIL, and AMBIGUOUS results', () => {
+    const first = validationFixture().validationPacket
+    const second = validationFixture().validationPacket
+    expect(canonicalGameIrJson(first)).toBe(canonicalGameIrJson(second))
+    expect(first.packetDigest).toBe(second.packetDigest)
+    expectDeepFrozen(first)
+    const pass = phase5Admission.admitPhase5SemanticValidationResult(first, {
+      outcome: 'PASS',
+      packetDigest: first.packetDigest,
+      checkIds: first.checkIds,
+      coveredTargets: first.requiredTargets,
+    })
+    expectDeepFrozen(pass)
+    const selectedEvidence = first.allowedEvidencePointers.find(pointer =>
+      pointer.startsWith('section:'),
+    )!
+    const fail = phase5Admission.admitPhase5SemanticValidationResult(first, {
+      outcome: 'FAIL',
+      packetDigest: first.packetDigest,
+      reasonCode: 'missing-projection',
+      actual: 'missing',
+      missingSubject: first.requiredTargets[0],
+      expectedProjection: 'node',
+      evidencePointers: [selectedEvidence],
+    })
+    expectDeepFrozen(fail)
+    const ambiguous = phase5Admission.admitPhase5SemanticValidationResult(
+      first,
+      {
+        outcome: 'AMBIGUOUS',
+        packetDigest: first.packetDigest,
+        reasonCode: 'ambiguous-projection',
+        actual: 'ambiguous',
+        missingSubject: first.requiredTargets[0],
+        expectedProjection: 'node',
+        evidencePointers: [selectedEvidence],
+      },
+    )
+    expectDeepFrozen(ambiguous)
   })
 })

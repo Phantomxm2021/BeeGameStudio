@@ -1417,21 +1417,6 @@ function sameSourceSection(
   )
 }
 
-function assertSelectedSectionsInAuthority(
-  sections: readonly GameIrSemanticSourceSection[],
-  authority: readonly GameIrSourceSection[],
-): void {
-  for (const section of sections) {
-    const match = authority.find(
-      candidate =>
-        candidate.documentPath === section.ref.documentPath &&
-        candidate.sectionId === section.ref.sectionId,
-    )
-    if (!match || !sameSourceSection(section.ref, match))
-      fail('fidelity packet selected source section is not an authority member')
-  }
-}
-
 function normalizePacketProjection(
   value: unknown,
   source: Pick<GameIrDomainSourceEnvelope, 'taskId'> & {
@@ -1598,7 +1583,22 @@ function normalizeValidationPacket(value: unknown): {
     value.sourceSections,
     moduleId,
   )
-  assertSelectedSectionsInAuthority(sourceSections, authoritySectionIndex)
+  const expectedSelectedSections = authoritySectionIndex.filter(section =>
+    validatorModule(moduleId).sourceDocumentPaths.includes(
+      section.documentPath,
+    ),
+  )
+  if (
+    sourceSections.length !== expectedSelectedSections.length ||
+    sourceSections.some(
+      (section, index) =>
+        !sameSourceSection(
+          section.ref,
+          expectedSelectedSections[index] as GameIrSourceSection,
+        ),
+    )
+  )
+    fail('fidelity packet selected source closure is not exact')
   const moduleBytes = text(value.moduleBytes, 'fidelity packet moduleBytes')
   let rawModule: unknown
   try {
