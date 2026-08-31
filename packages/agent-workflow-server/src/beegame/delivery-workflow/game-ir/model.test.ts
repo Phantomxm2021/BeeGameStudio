@@ -144,6 +144,11 @@ function derivedCandidate(
 ): GameIrCandidate {
   const base = candidate()
   const node = base.modules[0]!.nodes[0]!
+  const anchor = {
+    ...node,
+    id: 'zz-anchor',
+    value: { health: 1, state: { initial: 'ready' } },
+  }
   return candidate({
     modules: [
       {
@@ -154,7 +159,19 @@ function derivedCandidate(
             producerMode: 'derived',
             value: { score: 3 },
             bindings: {
-              '/id': node.bindings['/id']!,
+              '/id': {
+                kind: 'derived',
+                derivationRuleId: 'identity-from-anchor',
+                inputs: [
+                  {
+                    kind: 'external',
+                    moduleId: 'gameplay',
+                    nodeId: 'zz-anchor',
+                    pointer: '/id',
+                    targetDigest: digestGameIrValue('zz-anchor'),
+                  },
+                ],
+              },
               '/value/score': {
                 kind: 'derived',
                 derivationRuleId: 'score-from-id',
@@ -163,6 +180,7 @@ function derivedCandidate(
             },
             ...overrides,
           },
+          anchor,
         ],
       },
     ],
@@ -215,7 +233,19 @@ describe('Game IR core candidate and source authority', () => {
     }
     const localModule = derivedCandidate({
       bindings: {
-        '/id': source.bindings['/id']!,
+        '/id': {
+          kind: 'derived',
+          derivationRuleId: 'identity-from-balance',
+          inputs: [
+            {
+              kind: 'external',
+              moduleId: 'balance',
+              nodeId: 'balance-source',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(9),
+            },
+          ],
+        },
         '/value/score': {
           kind: 'derived',
           derivationRuleId: 'score-from-balance',
@@ -293,7 +323,19 @@ describe('Game IR core candidate and source authority', () => {
     const derived = derivedCandidate({
       value: { score: 3, other: 4 },
       bindings: {
-        '/id': source.bindings['/id']!,
+        '/id': {
+          kind: 'derived',
+          derivationRuleId: 'identity-from-balance',
+          inputs: [
+            {
+              kind: 'external',
+              moduleId: 'balance',
+              nodeId: 'balance-source',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(9),
+            },
+          ],
+        },
         '/value/score': {
           kind: 'derived',
           derivationRuleId: 'ordered-inputs',
@@ -363,7 +405,19 @@ describe('Game IR core candidate and source authority', () => {
           id: 'gameplay-derived',
           value: { score: 3 },
           bindings: {
-            '/id': source.bindings['/id']!,
+            '/id': {
+              kind: 'derived',
+              derivationRuleId: 'gameplay-id-from-balance',
+              inputs: [
+                {
+                  kind: 'external',
+                  moduleId: 'balance',
+                  nodeId: 'balance-derived',
+                  pointer: '/value/score',
+                  targetDigest: digestGameIrValue(4),
+                },
+              ],
+            },
             '/value/score': {
               kind: 'derived',
               derivationRuleId: 'gameplay-from-balance',
@@ -390,7 +444,19 @@ describe('Game IR core candidate and source authority', () => {
           producerMode: 'derived' as const,
           value: { score: 4 },
           bindings: {
-            '/id': source.bindings['/id']!,
+            '/id': {
+              kind: 'derived' as const,
+              derivationRuleId: 'balance-id-from-gameplay',
+              inputs: [
+                {
+                  kind: 'external' as const,
+                  moduleId: 'gameplay' as const,
+                  nodeId: 'gameplay-derived',
+                  pointer: '/value/score',
+                  targetDigest: digestGameIrValue(3),
+                },
+              ],
+            },
             '/value/score': {
               kind: 'derived' as const,
               derivationRuleId: 'balance-from-gameplay',
@@ -438,7 +504,19 @@ describe('Game IR core candidate and source authority', () => {
       producerMode: 'derived' as const,
       value: { score: 3 },
       bindings: {
-        '/id': ownerNode.bindings['/id']!,
+        '/id': {
+          kind: 'derived' as const,
+          derivationRuleId: 'identity-from-source',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'source-node',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(9),
+            },
+          ],
+        },
         '/value/score': {
           kind: 'derived' as const,
           derivationRuleId: 'same-module-copy',
@@ -481,7 +559,19 @@ describe('Game IR core candidate and source authority', () => {
       producerMode: 'derived' as const,
       value: { score: 3 },
       bindings: {
-        '/id': ownerNode.bindings['/id']!,
+        '/id': {
+          kind: 'derived' as const,
+          derivationRuleId: 'identity-from-source',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'source-node',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(9),
+            },
+          ],
+        },
         '/value/score': {
           kind: 'derived' as const,
           derivationRuleId: 'external-target',
@@ -519,6 +609,19 @@ describe('Game IR core candidate and source authority', () => {
           ...derivedNode,
           bindings: {
             ...derivedNode.bindings,
+            '/id': {
+              kind: 'derived' as const,
+              derivationRuleId: 'identity-from-source',
+              inputs: [
+                {
+                  kind: 'external' as const,
+                  moduleId: 'balance' as const,
+                  nodeId: 'source-node',
+                  pointer: '/value/health',
+                  targetDigest: digestGameIrValue(9),
+                },
+              ],
+            },
             '/value/score': {
               ...derivedNode.bindings['/value/score'],
               inputs: [
@@ -550,6 +653,19 @@ describe('Game IR core candidate and source authority', () => {
           ...derivedNode,
           bindings: {
             ...derivedNode.bindings,
+            '/id': {
+              kind: 'derived' as const,
+              derivationRuleId: 'self-id',
+              inputs: [
+                {
+                  kind: 'external' as const,
+                  moduleId: 'gameplay' as const,
+                  nodeId: 'derived-node',
+                  pointer: '/value/score',
+                  targetDigest: digestGameIrValue(3),
+                },
+              ],
+            },
             '/value/score': {
               ...derivedNode.bindings['/value/score'],
               inputs: [
@@ -582,7 +698,19 @@ describe('Game IR core candidate and source authority', () => {
       ...derivedNode,
       id: 'cycle-a',
       bindings: {
-        '/id': ownerNode.bindings['/id']!,
+        '/id': {
+          kind: 'derived' as const,
+          derivationRuleId: 'cycle-a-id',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'cycle-b',
+              pointer: '/value/score',
+              targetDigest: digestGameIrValue(4),
+            },
+          ],
+        },
         '/value/score': {
           kind: 'derived' as const,
           derivationRuleId: 'cycle-a',
@@ -603,7 +731,19 @@ describe('Game IR core candidate and source authority', () => {
       id: 'cycle-b',
       value: { score: 4 },
       bindings: {
-        '/id': ownerNode.bindings['/id']!,
+        '/id': {
+          kind: 'derived' as const,
+          derivationRuleId: 'cycle-b-id',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'cycle-a',
+              pointer: '/value/score',
+              targetDigest: digestGameIrValue(3),
+            },
+          ],
+        },
         '/value/score': {
           kind: 'derived' as const,
           derivationRuleId: 'cycle-b',
@@ -681,14 +821,25 @@ describe('Game IR core candidate and source authority', () => {
 
   test('rejects a cycle that mixes local and external dependency edges', () => {
     const ownerNode = candidate().modules[0]!.nodes[0]!
-    const owner = ownerNode.bindings['/id']!
     const gameplayNode = {
       ...ownerNode,
       id: 'gameplay-node',
       producerMode: 'derived' as const,
       value: { first: 1, second: 2 },
       bindings: {
-        '/id': owner,
+        '/id': {
+          kind: 'derived' as const,
+          derivationRuleId: 'gameplay-id-from-balance',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'balance' as const,
+              nodeId: 'balance-node',
+              pointer: '/value/score',
+              targetDigest: digestGameIrValue(3),
+            },
+          ],
+        },
         '/value/first': {
           kind: 'derived' as const,
           derivationRuleId: 'first-from-second',
@@ -715,7 +866,19 @@ describe('Game IR core candidate and source authority', () => {
       producerMode: 'derived' as const,
       value: { score: 3 },
       bindings: {
-        '/id': owner,
+        '/id': {
+          kind: 'derived' as const,
+          derivationRuleId: 'balance-id-from-gameplay',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'gameplay-node',
+              pointer: '/value/first',
+              targetDigest: digestGameIrValue(1),
+            },
+          ],
+        },
         '/value/score': {
           kind: 'derived' as const,
           derivationRuleId: 'score-from-gameplay',
@@ -755,7 +918,19 @@ describe('Game IR core candidate and source authority', () => {
       producerMode: 'derived' as const,
       value: { score: 4 },
       bindings: {
-        '/id': currentNode.bindings['/id']!,
+        '/id': {
+          kind: 'derived' as const,
+          derivationRuleId: 'identity-from-current',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'player',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(3),
+            },
+          ],
+        },
         '/value/score': {
           kind: 'derived' as const,
           derivationRuleId: 'balance-from-gameplay',
@@ -1334,6 +1509,131 @@ describe('Game IR core candidate and source authority', () => {
     ).toBeTruthy()
   })
 
+  test('uses the producer mode for identity and structural binding targets', () => {
+    const source = candidate().modules[0]!.nodes[0]!
+    const externalNode = {
+      ...source,
+      id: 'balance-source',
+      value: { health: 9, state: { initial: 'ready' } },
+    }
+    const externalModule = { moduleId: 'balance', nodes: [externalNode] }
+    const externalIdInput = {
+      kind: 'external' as const,
+      moduleId: 'balance' as const,
+      nodeId: 'balance-source',
+      pointer: '/id',
+      targetDigest: digestGameIrValue('balance-source'),
+    }
+    const derivedNode = derivedCandidate({
+      edges: [
+        { type: 'uses', targetId: 'balance-source', targetType: 'entity' },
+      ],
+      bindings: {
+        '/id': {
+          kind: 'derived',
+          derivationRuleId: 'identity-from-balance',
+          inputs: [externalIdInput],
+        },
+        '/value/score': {
+          kind: 'derived',
+          derivationRuleId: 'score-from-identity',
+          inputs: [{ kind: 'local', pointer: '/id' }],
+        },
+        '/edges/0': {
+          kind: 'derived',
+          derivationRuleId: 'edge-from-balance',
+          inputs: [externalIdInput],
+        },
+      },
+    }).modules[0]!.nodes[0]!
+    expect(() =>
+      parseGameIrModuleCandidate(
+        { moduleId: 'gameplay', nodes: [derivedNode] },
+        {
+          request: request(),
+          sections,
+          externalModules: [externalModule],
+        },
+      ),
+    ).not.toThrow()
+
+    expect(() =>
+      parseGameIrModuleCandidate(
+        {
+          moduleId: 'gameplay',
+          nodes: [
+            {
+              ...derivedNode,
+              bindings: {
+                ...derivedNode.bindings,
+                '/id': source.bindings['/id']!,
+              },
+            },
+          ],
+        },
+        { request: request(), sections, externalModules: [externalModule] },
+      ),
+    ).toThrow(/identity|derived|binding/)
+    expect(() =>
+      parseGameIrModuleCandidate(
+        {
+          moduleId: 'gameplay',
+          nodes: [
+            {
+              ...derivedNode,
+              bindings: {
+                ...derivedNode.bindings,
+                '/edges/0': source.bindings['/id']!,
+              },
+            },
+          ],
+        },
+        { request: request(), sections, externalModules: [externalModule] },
+      ),
+    ).toThrow(/edge|derived|binding/)
+    expect(() =>
+      parseGameIrModuleCandidate(
+        {
+          moduleId: 'gameplay',
+          nodes: [
+            {
+              ...derivedNode,
+              references: [
+                { targetId: 'balance-source', targetType: 'entity' },
+              ],
+              bindings: {
+                ...derivedNode.bindings,
+                '/references/0': source.bindings['/id']!,
+              },
+            },
+          ],
+        },
+        { request: request(), sections, externalModules: [externalModule] },
+      ),
+    ).toThrow(/reference|derived|binding/)
+
+    const semanticNode = source
+    expect(() =>
+      parseGameIrModuleCandidate(
+        {
+          moduleId: 'gameplay',
+          nodes: [
+            {
+              ...semanticNode,
+              bindings: {
+                ...semanticNode.bindings,
+                '/id': {
+                  ...derivedNode.bindings['/id']!,
+                },
+              },
+            },
+          ],
+        },
+        { request: request(), sections, externalModules: [externalModule] },
+      ),
+    ).toThrow(/identity|owner|binding/)
+  })
+
   test('requires every derived dependency chain to reach owner evidence', () => {
     const node = derivedCandidate().modules[0]!.nodes[0]!
     expect(() =>
@@ -1508,7 +1808,7 @@ describe('Game IR core candidate and source authority', () => {
     const emptyDerived = derivedCandidate({
       value: { empty: {} },
       bindings: {
-        '/id': baseNode.bindings['/id']!,
+        '/id': derivedCandidate().modules[0]!.nodes[0]!.bindings['/id']!,
         '/value/empty': {
           kind: 'derived',
           derivationRuleId: 'empty-from-id',

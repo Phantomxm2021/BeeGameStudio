@@ -434,44 +434,72 @@ function derivedPresentationRequirementModule(): MutableModule {
       edge.targetId === previousId ? { ...edge, targetId: logical.id } : edge,
     )
   bindModule(module)
-  logical.bindings['/value/requirementId'] = {
-    kind: 'derived',
-    derivationRuleId: 'presentation-requirement-id',
-    inputs: [
-      {
-        kind: 'external',
-        moduleId: 'presentation',
-        nodeId: 'presentation.screen.main',
-        pointer: '/value/requirements/0/requirementId',
-        targetDigest: digestGameIrValue('req.ui.main'),
-      },
-    ],
-  }
-  logical.bindings['/value/resourceKind'] = {
-    kind: 'derived',
-    derivationRuleId: 'presentation-resource-kind',
-    inputs: [
-      {
-        kind: 'external',
-        moduleId: 'presentation',
-        nodeId: 'presentation.screen.main',
-        pointer: '/value/requirements/0/kind',
-        targetDigest: digestGameIrValue('ui'),
-      },
-    ],
-  }
-  logical.bindings['/value/runtimeRole'] = {
-    kind: 'derived',
-    derivationRuleId: 'presentation-runtime-role',
-    inputs: [
-      {
-        kind: 'external',
-        moduleId: 'presentation',
-        nodeId: 'presentation.screen.main',
-        pointer: '/value/requirements/0/runtimeRole',
-        targetDigest: digestGameIrValue('screen'),
-      },
-    ],
+  logical.bindings = {
+    '/id': {
+      kind: 'derived',
+      derivationRuleId: 'presentation-requirement-node-id',
+      inputs: [
+        {
+          kind: 'external',
+          moduleId: 'presentation',
+          nodeId: 'presentation.screen.main',
+          pointer: '/id',
+          targetDigest: digestGameIrValue('presentation.screen.main'),
+        },
+      ],
+    },
+    '/value/requirementId': {
+      kind: 'derived',
+      derivationRuleId: 'presentation-requirement-id',
+      inputs: [
+        {
+          kind: 'external',
+          moduleId: 'presentation',
+          nodeId: 'presentation.screen.main',
+          pointer: '/value/requirements/0/requirementId',
+          targetDigest: digestGameIrValue('req.ui.main'),
+        },
+      ],
+    },
+    '/value/resourceKind': {
+      kind: 'derived',
+      derivationRuleId: 'presentation-resource-kind',
+      inputs: [
+        {
+          kind: 'external',
+          moduleId: 'presentation',
+          nodeId: 'presentation.screen.main',
+          pointer: '/value/requirements/0/kind',
+          targetDigest: digestGameIrValue('ui'),
+        },
+      ],
+    },
+    '/value/runtimeRole': {
+      kind: 'derived',
+      derivationRuleId: 'presentation-runtime-role',
+      inputs: [
+        {
+          kind: 'external',
+          moduleId: 'presentation',
+          nodeId: 'presentation.screen.main',
+          pointer: '/value/requirements/0/runtimeRole',
+          targetDigest: digestGameIrValue('screen'),
+        },
+      ],
+    },
+    '/edges/0': {
+      kind: 'derived',
+      derivationRuleId: 'presentation-requirement-owner-edge',
+      inputs: [
+        {
+          kind: 'external',
+          moduleId: 'presentation',
+          nodeId: 'presentation.screen.main',
+          pointer: '/id',
+          targetDigest: digestGameIrValue('presentation.screen.main'),
+        },
+      ],
+    },
   }
   return module
 }
@@ -957,7 +985,19 @@ describe('resource-realization schema', () => {
       references: [],
       edges: [],
       bindings: {
-        '/id': externalEntity.bindings['/id']!,
+        '/id': {
+          kind: 'derived',
+          derivationRuleId: 'id-from-player-label',
+          inputs: [
+            {
+              kind: 'external',
+              moduleId: 'gameplay',
+              nodeId: externalEntity.id,
+              pointer: '/value/label',
+              targetDigest: digestGameIrValue('Player'),
+            },
+          ],
+        },
         '/value/value': {
           kind: 'derived',
           derivationRuleId: 'health-from-player',
@@ -1375,5 +1415,88 @@ describe('resource-realization schema', () => {
         presentationRequirementModule(),
       ]),
     ).toThrow(/wrong target digest|digest/i)
+  })
+
+  test('requires every derived Presentation binding to preserve its rule and target leaf', () => {
+    const cases = [
+      {
+        label: 'target prefix',
+        pointer: '/id',
+        mutate: (binding: Record<string, unknown>) => ({
+          ...binding,
+          inputs: [
+            {
+              ...(binding.inputs as Array<Record<string, unknown>>)[0]!,
+              nodeId: 'presentation.screen.other',
+            },
+          ],
+        }),
+      },
+      {
+        label: 'target value digest',
+        pointer: '/value/resourceKind',
+        mutate: (binding: Record<string, unknown>) => ({
+          ...binding,
+          inputs: [
+            {
+              ...(binding.inputs as Array<Record<string, unknown>>)[0]!,
+              targetDigest: digestGameIrValue('vfx'),
+            },
+          ],
+        }),
+      },
+      {
+        label: 'target pointer',
+        pointer: '/value/runtimeRole',
+        mutate: (binding: Record<string, unknown>) => ({
+          ...binding,
+          inputs: [
+            {
+              ...(binding.inputs as Array<Record<string, unknown>>)[0]!,
+              pointer: '/value/requirements/0/kind',
+            },
+          ],
+        }),
+      },
+      {
+        label: 'target digest',
+        pointer: '/value/requirementId',
+        mutate: (binding: Record<string, unknown>) => ({
+          ...binding,
+          inputs: [
+            {
+              ...(binding.inputs as Array<Record<string, unknown>>)[0]!,
+              targetDigest: digestGameIrValue('wrong-requirement'),
+            },
+          ],
+        }),
+      },
+      {
+        label: 'owner edge binding',
+        pointer: '/edges/0',
+        mutate: (binding: Record<string, unknown>) => ({
+          ...binding,
+          kind: 'owner',
+        }),
+      },
+    ] as const
+    for (const scenario of cases) {
+      const module = derivedPresentationRequirementModule()
+      const logical = module.nodes.find(node =>
+        node.kind.endsWith('logical-resource'),
+      )!
+      logical.bindings[scenario.pointer] = scenario.mutate(
+        logical.bindings[scenario.pointer]!,
+      )
+      expect(() =>
+        parseRaw(module, [
+          {
+            moduleId: 'gameplay',
+            nodes: [externalEntity, externalGameplayState],
+          },
+          presentationRequirementModule(),
+        ]),
+      ).toThrow(/binding|derived|digest|target|producer/i)
+    }
   })
 })

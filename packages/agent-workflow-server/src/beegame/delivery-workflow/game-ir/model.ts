@@ -656,9 +656,13 @@ function parseNode(
     parsedBindings[pointer] = parsed
   }
 
+  const expectedBindingKind =
+    value.producerMode === 'derived' ? 'derived' : 'owner'
   const idBinding = parsedBindings['/id']
-  if (!idBinding || idBinding.kind !== 'owner')
-    fail(`node ${id} identity must have exactly one owner binding`)
+  if (!idBinding || idBinding.kind !== expectedBindingKind)
+    fail(
+      `node ${id} identity must have exactly one ${expectedBindingKind} binding`,
+    )
   const leaves = valueLeafPointers(value.value)
   const leafSet = new Set(leaves)
   for (const pointer of Object.keys(parsedBindings)) {
@@ -680,9 +684,9 @@ function parseNode(
       const binding = parsedBindings[pointer]
       if (!binding)
         fail(`node ${id} ${collection} entry ${index} has no binding`)
-      if (binding.kind !== 'owner')
+      if (binding.kind !== expectedBindingKind)
         fail(
-          `node ${id} ${collection} entry ${index} must have an owner binding`,
+          `node ${id} ${collection} entry ${index} must have a ${expectedBindingKind} binding`,
         )
     })
   }
