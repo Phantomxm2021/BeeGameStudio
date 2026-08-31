@@ -162,19 +162,6 @@ function candidateInput(receipt: Phase5SemanticReceipt) {
   }
 }
 
-function reissuedReceipt(
-  currentPacket: ReturnType<typeof packet>,
-  receipt: Phase5SemanticReceipt,
-  mutate: (claim: Phase5SemanticReceipt['sourceClaims'][number]) => object,
-): Phase5SemanticReceipt {
-  const result = admitPhase5SemanticResult(currentPacket, {
-    ...candidateInput(receipt),
-    sourceClaims: receipt.sourceClaims.map(claim => mutate(claim)),
-  })
-  if ('reasonCode' in result) throw new Error('expected projected receipt')
-  return result
-}
-
 describe('shared Phase 5 admission', () => {
   test('admits identity-injected semantic nodes and exact source claims', () => {
     const currentSource = source()
@@ -195,21 +182,17 @@ describe('shared Phase 5 admission', () => {
   })
 
   test('rejects worker producerMode and bindings as independent mutations', () => {
-    const validWorkerNode = {
-      id: 'bytes',
-      kind: 'world-scene.scene',
-      value: { label: 'bytes' },
-      references: [],
-      edges: [],
-    }
+    const validWorkerDto = projectedInput()
+    expect(() =>
+      admitPhase5SemanticResult(packet(), validWorkerDto),
+    ).not.toThrow()
     for (const mutation of [{ producerMode: 'semantic' }, { bindings: {} }]) {
       expect(() =>
         admitPhase5SemanticResult(packet(), {
-          outcome: 'PROJECTED',
-          nodes: [{ ...validWorkerNode, ...mutation }],
-          sourceClaims: [],
+          ...validWorkerDto,
+          nodes: [{ ...validWorkerDto.nodes[0], ...mutation }],
         }),
-      ).toThrow(/unknown|missing|producerMode|binding/i)
+      ).toThrow(/unknown or missing fields/i)
     }
   })
 
@@ -452,13 +435,23 @@ describe('shared Phase 5 admission', () => {
         semantic: baseline,
       }).module.nodes[0]?.value,
     ).toEqual({ label: 'bytes' })
+    const tamperedBody = {
+      ...baseline,
+      nodes: [{ ...baseline.nodes[0]!, value: { label: 'other' } }],
+    }
+    const { receiptDigest: _ignored, ...withoutDigest } = tamperedBody
+    const tampered = {
+      ...tamperedBody,
+      receiptDigest: digestGameIrValue(withoutDigest),
+    }
     expect(() =>
-      reissuedReceipt(currentPacket, baseline, claim =>
-        claim.subject === 'node:bytes#/value/label'
-          ? { ...claim, literal: 'other' }
-          : claim,
-      ),
-    ).toThrow(/literal|semantic|match|type/i)
+      replayAndBindPhase5SemanticReceipt({
+        source: currentSource,
+        mechanical: mechanical(currentSource),
+        packet: currentPacket,
+        semantic: tampered,
+      }),
+    ).toThrow(/source literal does not match the semantic record/i)
   })
 
   test('canonicalizes node order while requiring canonical claim order', () => {
