@@ -130,3 +130,32 @@ verification/re-review pending.
 - Own GREEN verification: focused 75/75 with 280 assertions and full Game IR
   197/197 with 912 assertions are implementation evidence only; independent
   final verification/re-review remains pending.
+
+Final broad review: rejected the prior Phase 4 completion claim with two
+Critical, five Important, and three Minor findings covering mechanical/final
+assembly authority, diagnostic admission, manifest/source authority, masked
+tests, boundary coverage, and API shape.
+
+Final broad review correction: commit `34aec734` (`fix: close Phase 4 projection
+authority`) addressed the complete recorded finding set and left independent
+final re-review pending.
+
+Scoped final re-review: found two residual Important issues: generic diagnostic
+admission could bypass producer packet/source validation and its evidence was
+not bound to the exact selected source closure; Balance optional
+`minimum`/`maximum` fields remained outside the sole domain manifest.
+
+Scoped final re-review correction: commit `00dd8eea` (`fix: bind Phase 4
+diagnostic evidence`) removed the shared final admission authority, bound
+canonical evidence to the packet source closure, and made Balance optional
+value fields manifest-owned with completeness/drift coverage.
+
+Root final verification: clean. Game IR 197/197 with 912 assertions across 14
+files; exact Foundation suite 263/263 with 1439 assertions across 21 files;
+protected parity plus full-server unreachable scan 10/10 with 131 assertions;
+root and server typechecks passed; exact Biome checked 27 files; `git diff
+--check` passed; worktree was clean.
+
+Phase 4: accepted after independent final review and root verification. Phase
+5–9 remain unstarted. Complete candidate assembly/publication, production
+routing/persistence, and Chrome acceptance remain unavailable.

@@ -1,6 +1,6 @@
 # Game IR Phase 4: Gameplay and Balance Design
 
-Status: final root-cause correction implemented and verified; independent final re-review pending
+Status: accepted after independent final review and root verification
 
 ## Goal
 
@@ -527,9 +527,8 @@ No new dependency is required.
 
 ## Acceptance gate
 
-Phase 4 root-cause correction is implemented and automated verification is
-complete. Independent final re-review remains pending. Review approval requires
-all of the following completion-gate conditions:
+Phase 4 is accepted after independent final review and root verification. The
+following completion-gate conditions are satisfied:
 
 - Gameplay and Balance schemas cover every capability listed in the authority
   document;
@@ -549,10 +548,9 @@ single consumer cutover are complete.
 
 The prior Phase 4 approval was withdrawn after final review found unresolved
 authority, diagnostic, manifest, and test-isolation defects. The correction is
-implemented and verified; independent final re-review remains pending.
-Complete candidate publication, production routing, or Chrome acceptance remain
-unavailable.
-Phase 5–9 remain unstarted.
+implemented, independently reviewed, and root-verified; Phase 4 is accepted.
+Phase 5–9 remain unstarted. Complete candidate assembly/publication, production
+routing/persistence, and Chrome acceptance remain unavailable.
 
 ## Explicit non-goals
 

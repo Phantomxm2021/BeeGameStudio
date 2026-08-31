@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）最终根因纠偏 implementation 与 automated verification 已完成，independent final re-review pending；Phase 5–9 尚未开始。完整 candidate publication 与 Chrome acceptance 仍不可用
+状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）已通过 independent final review 与 root verification 并 accepted；Phase 5–9 尚未开始。完整 candidate assembly/publication、production routing/persistence 与 Chrome acceptance 仍不可用
 
 日期：2026-08-30
 
@@ -414,11 +414,10 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 - 已落地 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；
 - 不实现 consumer migration，production routing 仍不可达。
 
-### Phase 4：Gameplay + Balance（root-cause correction implemented and verified；independent final re-review pending）
+### Phase 4：Gameplay + Balance（accepted after independent final review and root verification）
 
-The final-review findings have been corrected and automated verification is
-complete. Independent final re-review remains pending. Production routing
-remains unreachable.
+The final-review findings have been corrected, independently reviewed, and
+root-verified. Phase 4 is accepted. Production routing remains unreachable.
 
 - Gameplay 与 Balance 领域 schema、semantic admission、精确 source envelope
   和 immutable module projections 已落地；同一 pair assembler 每次重验两侧
@@ -438,8 +437,9 @@ remains unreachable.
   publication、controller/store/DeliveryRun/Foundation Issue、provider
   dispatch 和五个 placeholder module；protected 21-file parity 与 full
   server unreachable scan 保持通过。
-- Complete seven-module candidate、publication routing、Chrome acceptance
-  remain unavailable；Phase 5–9 remain unstarted。
+- Complete seven-module candidate assembly/publication、production
+  routing/persistence、Chrome acceptance remain unavailable；Phase 5–9 remain
+  unstarted。
 
 ### Phase 5：World + Presentation（未开始）
 

@@ -1,7 +1,6 @@
 # Task 7 report: Phase 4 cross-domain and isolation completion gate
 
-Status: final targeted correction implementation fixed; independent final
-verification/re-review pending. Independent review owns the terminal status.
+Status: Phase 4 accepted after independent final review and root verification.
 The earlier completion-gate implementation was committed with subject `test:
 prove isolated Game IR gameplay and balance`.
 
@@ -37,9 +36,9 @@ regression proves every admitted fixture field is declared, every optional
 field is also a declared value field, and omitted bounds remain valid.
 
 The focused RED run was **49 pass, 6 expected fail, 194 assertions**. The final
-focused GREEN run is **75 pass, 0 fail, 280 assertions** across four files.
-These are implementation-team verification results only; independent final
-verification/re-review remains pending.
+focused GREEN run is **75 pass, 0 fail, 280 assertions** across four files. The
+root final verification independently reran the full required matrix recorded
+above.
 
 `gameplay-balance.integration.test.ts` builds Gameplay and Balance source
 envelopes from one READY receipt and the same complete canonical authority
@@ -65,9 +64,9 @@ Both design documents now describe strict empty mechanical authority for both
 domains, the semantic result/diagnostic union, one canonical domain manifest
 per domain, source scope derived from the validated envelope, and the sole
 paired final assembler. Implementation and automated verification are complete;
-independent final re-review is pending. Phase 5–9 remain unstarted. Complete
-candidate publication, production routing, and Chrome acceptance remain
-unavailable.
+independent final review and root verification are complete, and Phase 4 is
+accepted. Phase 5–9 remain unstarted. Complete candidate assembly/publication,
+production routing/persistence, and Chrome acceptance remain unavailable.
 
 ## Self-review
 
@@ -79,9 +78,10 @@ unavailable.
 
 ## Concerns
 
-No implementation or automated-verification concern remains in the authorized
-Phase 4 correction scope. Independent final re-review remains pending; this
-report does not confer review approval.
+No implementation, review, or verification concern remains in the authorized
+Phase 4 scope. Phase 4 is accepted. Phase 5–9 and complete candidate
+assembly/publication, production routing/persistence, and Chrome acceptance
+remain outside this completed phase.
 
 ## Final root-cause correction evidence
 
