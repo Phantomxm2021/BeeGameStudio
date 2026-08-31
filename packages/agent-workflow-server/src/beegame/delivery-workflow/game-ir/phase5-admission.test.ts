@@ -194,24 +194,23 @@ describe('shared Phase 5 admission', () => {
     expect(Object.isFrozen(bound.module)).toBe(true)
   })
 
-  test('rejects worker identity or binding fields', () => {
-    expect(() =>
-      admitPhase5SemanticResult(packet(), {
-        outcome: 'PROJECTED',
-        nodes: [
-          {
-            id: 'bytes',
-            kind: 'world-scene.scene',
-            producerMode: 'semantic',
-            value: { label: 'bytes' },
-            references: [],
-            edges: [],
-            bindings: {},
-          },
-        ],
-        sourceClaims: [],
-      }),
-    ).toThrow(/unknown|missing|producerMode|binding/i)
+  test('rejects worker producerMode and bindings as independent mutations', () => {
+    const validWorkerNode = {
+      id: 'bytes',
+      kind: 'world-scene.scene',
+      value: { label: 'bytes' },
+      references: [],
+      edges: [],
+    }
+    for (const mutation of [{ producerMode: 'semantic' }, { bindings: {} }]) {
+      expect(() =>
+        admitPhase5SemanticResult(packet(), {
+          outcome: 'PROJECTED',
+          nodes: [{ ...validWorkerNode, ...mutation }],
+          sourceClaims: [],
+        }),
+      ).toThrow(/unknown|missing|producerMode|binding/i)
+    }
   })
 
   test('treats empty packet allow-lists as allow-none', () => {
@@ -439,6 +438,27 @@ describe('shared Phase 5 admission', () => {
         }),
       ).toThrow(/literal|semantic|match/i)
     }
+  })
+
+  test('rejects an independent string literal mismatch after valid replay', () => {
+    const currentSource = source()
+    const currentPacket = packet(currentSource)
+    const baseline = projected(currentSource, currentPacket)
+    expect(
+      replayAndBindPhase5SemanticReceipt({
+        source: currentSource,
+        mechanical: mechanical(currentSource),
+        packet: currentPacket,
+        semantic: baseline,
+      }).module.nodes[0]?.value,
+    ).toEqual({ label: 'bytes' })
+    expect(() =>
+      reissuedReceipt(currentPacket, baseline, claim =>
+        claim.subject === 'node:bytes#/value/label'
+          ? { ...claim, literal: 'other' }
+          : claim,
+      ),
+    ).toThrow(/literal|semantic|match|type/i)
   })
 
   test('canonicalizes node order while requiring canonical claim order', () => {
