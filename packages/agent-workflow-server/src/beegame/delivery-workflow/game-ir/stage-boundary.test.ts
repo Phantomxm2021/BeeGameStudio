@@ -568,6 +568,9 @@ function policyViolations(
     )
       violations.add(`path: ${entry.path}`)
   if (policy === 'phase6-producer') {
+    for (const namespaceImport of facts.namespaceImports)
+      if (forbiddenClosurePath.test(namespaceImport.path))
+        violations.add('closure-namespace-import')
     for (const entry of facts.importBindings)
       if (
         forbiddenClosurePath.test(entry.path) &&
@@ -1135,6 +1138,36 @@ describe('Game IR stage boundary', () => {
           'phase6-producer',
         ),
       ).toEqual(expect.arrayContaining([expect.stringMatching(/closure-/)]))
+  })
+
+  test('rejects every Phase 6 closure namespace import, including property forwarding', () => {
+    const forbiddenNamespaceUses = [
+      `import * as assembler from './world-presentation-assembler'
+       const { assembleWorldPresentationClosure: invoke } = assembler
+       void invoke`,
+      `import * as assembler from './world-presentation-assembler'
+       const forwarded = assembler.assembleWorldPresentationClosure
+       void forwarded`,
+      `import * as assembler from './world-presentation-assembler'
+       void assembler.assembleWorldPresentationClosure`,
+    ]
+    for (const source of forbiddenNamespaceUses)
+      expect(
+        policyViolations(
+          collectAstFacts(source, 'resource-realization-producer.ts'),
+          'phase6-producer',
+        ),
+      ).toContain('closure-namespace-import')
+
+    expect(
+      policyViolations(
+        collectAstFacts(
+          "import { assembleWorldPresentationClosure as invoke } from './world-presentation-assembler'; invoke(input)",
+          'resource-realization-producer.ts',
+        ),
+        'phase6-producer',
+      ),
+    ).not.toContain('closure-namespace-import')
   })
 
   test('rejects aliased future module and kind values only at sensitive properties', () => {
