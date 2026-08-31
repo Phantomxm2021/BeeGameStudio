@@ -37,6 +37,7 @@ import {
 } from './contracts'
 import {
   parseGameIrCandidate,
+  digestGameIrValue,
   type GameIrCandidate,
   type GameIrSourceSection,
 } from './model'
@@ -169,7 +170,10 @@ function shaBytes(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
+function rawCandidate(
+  extraNodeCount = 3,
+  externalDerived = false,
+): Record<string, unknown> {
   return {
     schemaVersion: GAME_IR_SCHEMA_VERSION,
     taskId: 'compile-task-1',
@@ -223,7 +227,18 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                     '/value/score': {
                       kind: 'derived',
                       derivationRuleId: `score-${extraId}`,
-                      inputs: [{ kind: 'local', pointer: '/id' }],
+                      inputs:
+                        externalDerived && index === 0
+                          ? [
+                              {
+                                kind: 'external',
+                                moduleId: 'core',
+                                nodeId: 'core.root',
+                                pointer: '/value/label',
+                                targetDigest: digestGameIrValue('core'),
+                              },
+                            ]
+                          : [{ kind: 'local', pointer: '/id' }],
                     },
                     '/edges/0': {
                       kind: 'owner',
@@ -291,12 +306,16 @@ function authority(
   workspacePath: string,
   extraNodeCount = 3,
   publicationId = 'publication-1',
+  externalDerived = false,
 ): GameIrPublicationAuthority {
   const compileRequest = request(publicationId)
-  const candidate = parseGameIrCandidate(rawCandidate(extraNodeCount), {
-    request: compileRequest,
-    sections: sectionIndex,
-  })
+  const candidate = parseGameIrCandidate(
+    rawCandidate(extraNodeCount, externalDerived),
+    {
+      request: compileRequest,
+      sections: sectionIndex,
+    },
+  )
   const admissions = GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.map(
     ({ moduleId }) => {
       const packet = buildGameIrSemanticValidationPacket({
@@ -329,10 +348,18 @@ function authority(
 }
 
 const workspaces: string[] = []
-async function setup(extraNodeCount = 3): Promise<GameIrPublicationAuthority> {
+async function setup(
+  extraNodeCount = 3,
+  externalDerived = false,
+): Promise<GameIrPublicationAuthority> {
   const workspacePath = await mkdtemp(join(tmpdir(), 'game-ir-publication-'))
   workspaces.push(workspacePath)
-  return authority(workspacePath, extraNodeCount)
+  return authority(
+    workspacePath,
+    extraNodeCount,
+    'publication-1',
+    externalDerived,
+  )
 }
 afterEach(async () => {
   await Promise.all(
@@ -415,6 +442,29 @@ describe('atomic Game IR publication and recovery', () => {
     expect(firstRelationshipTypes).toEqual(['blocks', 'requires', 'z', 'ä'])
     expect(ready.dependencyGraphDigest).toBe(shaBytes(dependencyGraphBytes))
     await expect(validateCommittedGameIr(value)).resolves.toEqual(ready)
+  })
+
+  test('publishes an external derived dependency endpoint', async () => {
+    const value = await setup(3, true)
+    const ready = await commitGameIrPublication(value)
+    const graphPath = join(
+      value.workspacePath,
+      ready.committedPath.replace(/COMMITTED\.json$/, 'dependency-graph.json'),
+    )
+    const dependencyGraph = JSON.parse(await readFile(graphPath, 'utf8')) as {
+      edges: readonly Record<string, unknown>[]
+    }
+    expect(
+      dependencyGraph.edges.find(
+        edge =>
+          edge.kind === 'derived' &&
+          edge.from === 'gameplay/gameplay.extra-0/value/score',
+      ),
+    ).toMatchObject({
+      kind: 'derived',
+      from: 'gameplay/gameplay.extra-0/value/score',
+      to: 'core/core.root/value/label',
+    })
   })
 
   test('uses real packet/result admission and rejects digest-only, stale, missing, and ambiguous evidence', async () => {

@@ -421,6 +421,332 @@ describe('Game IR core candidate and source authority', () => {
     ).toThrow(/cycle/i)
   })
 
+  test('admits a same-module external reference to a different node', () => {
+    const ownerNode = candidate().modules[0]!.nodes[0]!
+    const sourceNode = {
+      ...ownerNode,
+      id: 'source-node',
+      value: { health: 9 },
+      bindings: {
+        '/id': ownerNode.bindings['/id']!,
+        '/value/health': ownerNode.bindings['/value/health']!,
+      },
+    }
+    const derivedNode = {
+      ...ownerNode,
+      id: 'derived-node',
+      producerMode: 'derived' as const,
+      value: { score: 3 },
+      bindings: {
+        '/id': ownerNode.bindings['/id']!,
+        '/value/score': {
+          kind: 'derived' as const,
+          derivationRuleId: 'same-module-copy',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'source-node',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(9),
+            },
+          ],
+        },
+      },
+    }
+    expect(
+      parseGameIrCandidate(
+        {
+          schemaVersion: GAME_IR_SCHEMA_VERSION,
+          taskId: 'compile-task-1',
+          foundationRevision: 'foundation-revision-1',
+          modules: [{ moduleId: 'gameplay', nodes: [derivedNode, sourceNode] }],
+        },
+        { request: request(), sections },
+      ),
+    ).toBeTruthy()
+    expect(
+      parseGameIrModuleCandidate(
+        { moduleId: 'gameplay', nodes: [derivedNode, sourceNode] },
+        { request: request(), sections },
+      ),
+    ).toBeTruthy()
+  })
+
+  test('rejects missing, non-leaf, self, and unavailable external targets', () => {
+    const ownerNode = candidate().modules[0]!.nodes[0]!
+    const derivedNode = {
+      ...ownerNode,
+      id: 'derived-node',
+      producerMode: 'derived' as const,
+      value: { score: 3 },
+      bindings: {
+        '/id': ownerNode.bindings['/id']!,
+        '/value/score': {
+          kind: 'derived' as const,
+          derivationRuleId: 'external-target',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'balance' as const,
+              nodeId: 'missing-node',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(9),
+            },
+          ],
+        },
+      },
+    }
+    const localModule = { moduleId: 'gameplay', nodes: [derivedNode] }
+    expect(() =>
+      parseGameIrModuleCandidate(localModule, { request: request(), sections }),
+    ).toThrow(/module|node|external/i)
+
+    const sourceNode = {
+      ...ownerNode,
+      id: 'source-node',
+      value: { health: 9 },
+      bindings: {
+        '/id': ownerNode.bindings['/id']!,
+        '/value/health': ownerNode.bindings['/value/health']!,
+      },
+    }
+    const external = { moduleId: 'balance', nodes: [sourceNode] }
+    const nonLeaf = {
+      ...localModule,
+      nodes: [
+        {
+          ...derivedNode,
+          bindings: {
+            ...derivedNode.bindings,
+            '/value/score': {
+              ...derivedNode.bindings['/value/score'],
+              inputs: [
+                {
+                  kind: 'external' as const,
+                  moduleId: 'balance' as const,
+                  nodeId: 'source-node',
+                  pointer: '/value',
+                  targetDigest: digestGameIrValue({ health: 9 }),
+                },
+              ],
+            },
+          },
+        },
+      ],
+    }
+    expect(() =>
+      parseGameIrModuleCandidate(nonLeaf, {
+        request: request(),
+        sections,
+        externalModules: [external],
+      }),
+    ).toThrow(/leaf/i)
+
+    const self = {
+      ...localModule,
+      nodes: [
+        {
+          ...derivedNode,
+          bindings: {
+            ...derivedNode.bindings,
+            '/value/score': {
+              ...derivedNode.bindings['/value/score'],
+              inputs: [
+                {
+                  kind: 'external' as const,
+                  moduleId: 'gameplay' as const,
+                  nodeId: 'derived-node',
+                  pointer: '/value/score',
+                  targetDigest: digestGameIrValue(3),
+                },
+              ],
+            },
+          },
+        },
+      ],
+    }
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          schemaVersion: GAME_IR_SCHEMA_VERSION,
+          taskId: 'compile-task-1',
+          foundationRevision: 'foundation-revision-1',
+          modules: [self],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/self|cycle/i)
+
+    const cycleA = {
+      ...derivedNode,
+      id: 'cycle-a',
+      bindings: {
+        '/id': ownerNode.bindings['/id']!,
+        '/value/score': {
+          kind: 'derived' as const,
+          derivationRuleId: 'cycle-a',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'cycle-b',
+              pointer: '/value/score',
+              targetDigest: digestGameIrValue(4),
+            },
+          ],
+        },
+      },
+    }
+    const cycleB = {
+      ...derivedNode,
+      id: 'cycle-b',
+      value: { score: 4 },
+      bindings: {
+        '/id': ownerNode.bindings['/id']!,
+        '/value/score': {
+          kind: 'derived' as const,
+          derivationRuleId: 'cycle-b',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'cycle-a',
+              pointer: '/value/score',
+              targetDigest: digestGameIrValue(3),
+            },
+          ],
+        },
+      },
+    }
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          schemaVersion: GAME_IR_SCHEMA_VERSION,
+          taskId: 'compile-task-1',
+          foundationRevision: 'foundation-revision-1',
+          modules: [{ moduleId: 'gameplay', nodes: [cycleA, cycleB] }],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/cycle/i)
+
+    expect(() =>
+      parseGameIrModuleCandidate(localModule, {
+        request: request(),
+        sections,
+        externalModules: [external],
+      }),
+    ).toThrow(/missing|node|external/i)
+    expect(() =>
+      parseGameIrModuleCandidate(
+        {
+          ...localModule,
+          moduleId: 'gameplay',
+        },
+        {
+          request: request(),
+          sections,
+          externalModules: [{ ...external, moduleId: 'unknown-module' }],
+        },
+      ),
+    ).toThrow(/expected|canonical|module/i)
+    expect(() =>
+      parseGameIrModuleCandidate(localModule, {
+        request: request(),
+        sections,
+        externalModules: [{ ...external, moduleId: 'gameplay' }],
+      }),
+    ).toThrow(/duplicate|module/i)
+    expect(() =>
+      parseGameIrModuleCandidate(candidate().modules[0]!, {
+        request: request(),
+        sections,
+        externalModules: [
+          { ...external, moduleId: 'balance', nodes: [ownerNode] },
+        ],
+      }),
+    ).toThrow(/duplicate|node/i)
+    expect(() =>
+      parseGameIrModuleCandidate(localModule, {
+        request: request(),
+        sections: [
+          { ...sections[0]!, heading: 'wrong complete index' },
+          sections[1]!,
+        ],
+        externalModules: [external],
+      }),
+    ).toThrow(/section|index|digest/i)
+  })
+
+  test('rejects a cycle that mixes local and external dependency edges', () => {
+    const ownerNode = candidate().modules[0]!.nodes[0]!
+    const owner = ownerNode.bindings['/id']!
+    const gameplayNode = {
+      ...ownerNode,
+      id: 'gameplay-node',
+      producerMode: 'derived' as const,
+      value: { first: 1, second: 2 },
+      bindings: {
+        '/id': owner,
+        '/value/first': {
+          kind: 'derived' as const,
+          derivationRuleId: 'first-from-second',
+          inputs: [{ kind: 'local' as const, pointer: '/value/second' }],
+        },
+        '/value/second': {
+          kind: 'derived' as const,
+          derivationRuleId: 'second-from-balance',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'balance' as const,
+              nodeId: 'balance-node',
+              pointer: '/value/score',
+              targetDigest: digestGameIrValue(3),
+            },
+          ],
+        },
+      },
+    }
+    const balanceNode = {
+      ...ownerNode,
+      id: 'balance-node',
+      producerMode: 'derived' as const,
+      value: { score: 3 },
+      bindings: {
+        '/id': owner,
+        '/value/score': {
+          kind: 'derived' as const,
+          derivationRuleId: 'score-from-gameplay',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'gameplay-node',
+              pointer: '/value/first',
+              targetDigest: digestGameIrValue(1),
+            },
+          ],
+        },
+      },
+    }
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          schemaVersion: GAME_IR_SCHEMA_VERSION,
+          taskId: 'compile-task-1',
+          foundationRevision: 'foundation-revision-1',
+          modules: [
+            { moduleId: 'balance', nodes: [balanceNode] },
+            { moduleId: 'gameplay', nodes: [gameplayNode] },
+          ],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/cycle/i)
+  })
+
   test('rejects isolated modules with stale source bindings', () => {
     const rawGameplayModule = candidate().modules[0]!
     const node = rawGameplayModule.nodes[0]!

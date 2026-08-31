@@ -739,7 +739,6 @@ function parseGameIrModuleCandidateInternal(
 
 type ModuleSet = Readonly<{
   modules: readonly GameIrModuleCandidate[]
-  externalModuleIds?: ReadonlySet<string>
   validateRelations?: boolean
 }>
 
@@ -755,11 +754,7 @@ function dependencyEndpointKey(
   return `${moduleId}\0${nodeId}\0${pointer}`
 }
 
-function validateModuleSet({
-  modules,
-  externalModuleIds,
-  validateRelations,
-}: ModuleSet): void {
+function validateModuleSet({ modules, validateRelations }: ModuleSet): void {
   const modulesById = new Map<string, GameIrModuleCandidate>()
   const nodesByKey = new Map<string, GameIrNode>()
   const nodesById = new Map<string, GameIrNode>()
@@ -820,22 +815,14 @@ function validateModuleSet({
       let targetModuleId = ownerModuleId
       let targetNodeId = ownerNode.id
       if (input.kind === 'external') {
-        if (input.moduleId === ownerModuleId)
-          fail(
-            `node ${ownerNode.id} external input may not target its own module`,
-          )
+        if (input.moduleId === ownerModuleId && input.nodeId === ownerNode.id)
+          fail(`node ${ownerNode.id} external input may not target itself`)
         targetModuleId = input.moduleId
         targetNodeId = input.nodeId
       }
       const targetModule = modulesById.get(targetModuleId)
       if (!targetModule)
         fail(`node ${ownerNode.id} derived input targets an unknown module`)
-      if (externalModuleIds && input.kind === 'external') {
-        if (!externalModuleIds.has(input.moduleId))
-          fail(
-            `node ${ownerNode.id} derived input targets an unavailable external module`,
-          )
-      }
       const targetNode = nodesByKey.get(
         moduleNodeKey(targetModuleId, targetNodeId),
       )
@@ -889,7 +876,6 @@ export function parseGameIrModuleCandidate(
   })
   validateModuleSet({
     modules: [local, ...externalModules],
-    externalModuleIds: new Set(externalModules.map(module => module.moduleId)),
     validateRelations: false,
   })
   return deepFreeze(local)
