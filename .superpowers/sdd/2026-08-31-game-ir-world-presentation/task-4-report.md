@@ -23,14 +23,22 @@
 
 ## Fix round 2 evidence
 
-- Replaced the enum sentinel checks with table-driven acceptance of every approved input/channel/mode/VFX/transition value, while retaining an independent invalid-value rejection for each enum.
-- Requirement coverage now verifies a legal owner baseline, omission of the optional key with exact logical output, global duplicate across two otherwise-valid owners, unsorted distinct IDs, policy mismatch, unknown artifact key, non-owner requirements, and a filename-shaped safe identifier (`assets.ui.screen.v1`) with no artifact inference.
+- Replaced the enum sentinel checks with table-driven acceptance of every approved input/channel/mode/VFX value and each non-automatic transition variant, while retaining an independent invalid-value rejection for each enum. Legal automatic-transition acceptance was not yet covered and is closed in round 3.
+- Requirement coverage added mutation cases for a legal owner baseline, omission of the optional key, global duplicate across two otherwise-valid owners, unsorted distinct IDs, policy mismatch, unknown artifact key, non-owner requirements, and a filename-shaped safe identifier (`assets.ui.screen.v1`). Round 3 corrects the returned-output assertions for omission and the explicit baseline/result evidence for the filename-shaped identifier.
 - Backlink coverage now uses a valid two-screen/two-state baseline and changes only the initial state's required `screen` target to the other legal screen; the exact `initial state does not point back` guard is asserted.
 - Final focused result: 14 pass, 0 fail, 174 expect calls. No production defect was exposed; production remains unchanged.
 
+## Fix round 3 evidence
+
+- Added a truly legal automatic transition fixture: the unchanged module parses first, then only the transition trigger and its `on` edge are changed, and the parsed output is asserted to contain `trigger: { kind: 'automatic' }`.
+- Requirements now parse the original owner fixture and assert its returned logical requirement. The omission case clones the fixture, deletes only `requirements`, parses the clone, and asserts the returned owner value omits the key. The filename-shaped identifier case parses a normal baseline first, then asserts the mutated returned value remains a three-field logical requirement with no artifact inference.
+- Retained the valid double-screen/double-state backlink baseline and the single `screen`-target mutation with the exact `initial state does not point back` matcher.
+- No production defect was exposed; production remains unchanged.
+- Final focused result: 14 pass, 0 fail, 176 expect calls.
+
 ## Verification
 
-- Focused test: 14 pass, 0 fail, 174 assertions.
+- Focused test: 14 pass, 0 fail, 176 assertions.
 - Server typecheck: `cd packages/agent-workflow-server && bun run typecheck` → exit 0.
 - Biome: checked both Task4 files with no fixes required.
 - `git diff --check` → clean.
@@ -49,5 +57,7 @@ Original implementation: `b3ca881c feat: validate Game IR presentation graphs`
 Fix-round test commit: `acc69262 test: strengthen Presentation schema audit coverage`
 
 Fix-round 2 test commit: `8becaca6 test: close Presentation schema audit gaps`
+
+Fix-round 3 test commit: `1320dee3 test: prove legal automatic Presentation transitions`
 
 This report update is a separate evidence commit.
