@@ -329,17 +329,28 @@ self-attest.
 
 Checklist remains the sole delivery-completeness document and is not ingested
 as Phase 7 source. Implementation/Verification nodes are execution semantics,
-not a replacement Checklist or task graph. Phase 8 may derive a read-only
-crosswalk from Checklist source tags to admitted owner bindings and then feed
-the implementation planner. Phase 7 freezes unit `ownedPaths`, `depends-on`
-and required Resource Realization edges as the only ownership/dependency input;
-Phase 8 must not re-author those facts. Phase 8 separately defines the exact
-single-track projection into the production task contract, removes the old
-artifact/verification count caps and decides whether one admitted unit maps to
-one or more execution attempts without changing ownership. It may attach
-Checklist IDs by the read-only source-tag crosswalk, but it may not reassign
-paths, invent dependencies, re-author Checklist text or create a second
-Checklist ID authority.
+not a replacement Checklist or task graph. The current Checklist source tag
+identifies only a document block; one block may produce several observable
+checkboxes and several Phase 7 scenarios/units. It is therefore insufficient
+to select an owner mechanically. Phase 7 does not claim a Checklist-to-scenario
+crosswalk.
+
+Phase 7 freezes unit `ownedPaths`, `depends-on` and required Resource
+Realization edges as the only ownership/dependency input; Phase 8 must not
+re-author those facts. Phase 8 separately defines the exact single-track
+projection into the production task contract, removes the old
+artifact/verification count caps and introduces one unique admitted
+Checklist-to-scenario bridge that fails closed on missing or ambiguous
+mapping. First-match selection and broadcasting one block tag to every possible
+owner are forbidden.
+
+Resource task IDs are likewise not Game IR node IDs. Phase 8 may obtain actual
+Manifest `resourceIds` only through the admitted chain
+`resource-realization.logical-resource.value.requirementId ->
+ResourceInventoryReceipt.bindings -> Manifest resourceId`. It may not cast an
+arbitrary Resource Realization `implements` target into a resource ID. Phase 8
+decides whether one admitted unit maps to one or more execution attempts
+without changing ownership, paths or dependencies.
 
 ## 10. File boundary
 
