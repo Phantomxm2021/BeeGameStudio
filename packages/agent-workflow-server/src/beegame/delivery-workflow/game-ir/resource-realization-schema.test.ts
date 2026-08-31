@@ -184,6 +184,7 @@ function bindNode(nodeValue: MutableNode): void {
   const pointers = [
     '/id',
     ...valueLeafPointers(nodeValue.value),
+    ...nodeValue.references.map((_, index) => `/references/${index}`),
     ...nodeValue.edges.map((_, index) => `/edges/${index}`),
   ]
   nodeValue.bindings = Object.fromEntries(
@@ -198,6 +199,153 @@ function bindNode(nodeValue: MutableNode): void {
       },
     ]),
   )
+}
+
+function priorNode(
+  id: string,
+  kind: string,
+  value: Record<string, unknown>,
+  references: MutableNode['references'] = [],
+  edges: MutableNode['edges'] = [],
+): MutableNode {
+  return {
+    id,
+    kind,
+    producerMode: 'semantic',
+    value,
+    references,
+    edges,
+    bindings: {},
+  }
+}
+
+function completePriorModules(): MutableModule[] {
+  const gameplay = bindModule({
+    moduleId: 'gameplay',
+    nodes: [
+      priorNode('gameplay.player', 'gameplay.entity', { label: 'Player' }),
+      priorNode('gameplay.state.playing', 'gameplay.state', {
+        label: 'Playing',
+        initial: true,
+        terminal: 'none',
+      }),
+    ],
+  })
+  const balance = bindModule({
+    moduleId: 'balance',
+    nodes: [
+      priorNode('balance.unit.base', 'balance.unit', {
+        symbol: 'u',
+        dimensions: [],
+        scale: { numerator: 1, denominator: 1 },
+      }),
+      priorNode(
+        'balance.variable.score',
+        'balance.variable',
+        { label: 'Score', baseline: 0, unitReferenceIndex: 0 },
+        [{ targetId: 'balance.unit.base', targetType: 'balance.unit' }],
+      ),
+    ],
+  })
+  const world = bindModule({
+    moduleId: 'world-scene',
+    nodes: [
+      priorNode(
+        'world-scene.node.root',
+        'world-scene.node',
+        {
+          label: 'Root',
+          nodeType: 'container',
+          transform: {
+            dimensions: '2d',
+            space: 'world',
+            position: { x: 0, y: 0 },
+            rotationRadians: 0,
+            scale: { x: 1, y: 1 },
+          },
+        },
+        [],
+        [
+          {
+            type: 'scene',
+            targetId: 'world-scene.scene.main',
+            targetType: 'world-scene.scene',
+          },
+        ],
+      ),
+      priorNode(
+        'world-scene.scene.main',
+        'world-scene.scene',
+        {
+          label: 'Main',
+          coordinateConvention: {
+            dimensions: '2d',
+            xDirection: 'right',
+            yDirection: 'up',
+            distanceUnit: 'meter',
+          },
+        },
+        [],
+        [
+          {
+            type: 'root',
+            targetId: 'world-scene.node.root',
+            targetType: 'world-scene.node',
+          },
+        ],
+      ),
+    ],
+  })
+  const presentation = bindModule({
+    moduleId: 'presentation',
+    nodes: [
+      priorNode(
+        'presentation.screen.main',
+        'presentation.ui-screen',
+        { label: 'Main', modal: false },
+        [],
+        [
+          {
+            type: 'driven-by',
+            targetId: 'gameplay.state.playing',
+            targetType: 'gameplay.state',
+          },
+          {
+            type: 'initial-state',
+            targetId: 'presentation.state.main',
+            targetType: 'presentation.ui-state',
+          },
+        ],
+      ),
+      priorNode(
+        'presentation.state.main',
+        'presentation.ui-state',
+        { label: 'Main', terminal: false },
+        [],
+        [
+          {
+            type: 'driven-by',
+            targetId: 'gameplay.state.playing',
+            targetType: 'gameplay.state',
+          },
+          {
+            type: 'screen',
+            targetId: 'presentation.screen.main',
+            targetType: 'presentation.ui-screen',
+          },
+        ],
+      ),
+    ],
+  })
+  return [gameplay, balance, world, presentation]
+}
+
+function completePriorModulesWithPresentation(
+  presentation: MutableModule,
+): MutableModule[] {
+  const modules = completePriorModules()
+  modules[3] = bindModule(structuredClone(presentation) as MutableModule)
+  return modules
 }
 
 function bindModule(module: MutableModule): MutableModule {
@@ -310,9 +458,7 @@ function validModule(): MutableModule {
 
 function parseRaw(
   module: unknown,
-  externalModules: readonly unknown[] = [
-    { moduleId: 'gameplay', nodes: [externalEntity] },
-  ],
+  externalModules: readonly unknown[] = completePriorModules(),
 ): GameIrModuleCandidate {
   return parseResourceRealizationModule(module, {
     request: request(),
@@ -986,52 +1132,93 @@ describe('resource-realization schema', () => {
 
   test('closes a dependency between raw prior modules through one Core parse', () => {
     const module = validModule()
-    const balanceNode: GameIrNode = {
-      id: 'balance.variable.player-health',
-      kind: 'balance.variable',
-      producerMode: 'derived',
-      value: { value: 3 },
-      references: [],
-      edges: [],
-      bindings: {
-        '/id': {
-          kind: 'derived',
-          derivationRuleId: 'id-from-player-label',
-          inputs: [
+    expect(parseRaw(module, completePriorModules()).nodes).toHaveLength(5)
+  })
+
+  test('rejects a cross-label prior module instead of matching node kind alone', () => {
+    const module = validModule()
+    const priors = completePriorModules()
+    priors[1] = bindModule({
+      moduleId: 'balance',
+      nodes: [
+        priorNode('balance.state.playing', 'gameplay.state', {
+          label: 'Playing',
+          initial: true,
+          terminal: 'none',
+        }),
+      ],
+    })
+    expect(() => parseRaw(module, priors)).toThrow(/balance|kind|domain/i)
+  })
+
+  test('re-admits each prior module with its domain value and edge schema', () => {
+    const module = validModule()
+    const malformedValue = bindModule({
+      moduleId: 'balance',
+      nodes: [
+        priorNode('balance.unit.base', 'balance.unit', {
+          symbol: 'u',
+          dimensions: 'not-an-array',
+          scale: { numerator: 1, denominator: 1 },
+        }),
+      ],
+    })
+    const malformedEdge = bindModule({
+      moduleId: 'balance',
+      nodes: [
+        priorNode(
+          'balance.unit.base',
+          'balance.unit',
+          {
+            symbol: 'u',
+            dimensions: [],
+            scale: { numerator: 1, denominator: 1 },
+          },
+          [],
+          [
             {
-              kind: 'external',
-              moduleId: 'gameplay',
-              nodeId: externalEntity.id,
-              pointer: '/value/label',
-              targetDigest: digestGameIrValue('Player'),
+              type: 'forged-role',
+              targetId: 'gameplay.player',
+              targetType: 'gameplay.entity',
             },
           ],
-        },
-        '/value/value': {
-          kind: 'derived',
-          derivationRuleId: 'health-from-player',
-          inputs: [
-            {
-              kind: 'external',
-              moduleId: 'gameplay',
-              nodeId: externalEntity.id,
-              pointer: '/value/label',
-              targetDigest: digestGameIrValue('Player'),
-            },
-          ],
-        },
-      },
+        ),
+      ],
+    })
+    for (const malformed of [malformedValue, malformedEdge]) {
+      const priors = completePriorModules()
+      priors[1] = malformed
+      expect(() => parseRaw(module, priors)).toThrow(
+        /balance|value|edge|role|schema/i,
+      )
     }
-    expect(
-      parseResourceRealizationModule(module, {
-        request: request(),
-        sections: [resourceSection],
-        externalModules: [
-          { moduleId: 'gameplay', nodes: [externalEntity] },
-          { moduleId: 'balance', nodes: [balanceNode] },
-        ],
-      }).nodes,
-    ).toHaveLength(5)
+  })
+
+  test('requires every prior module exactly once', () => {
+    const module = validModule()
+    expect(() =>
+      parseRaw(module, [
+        { moduleId: 'gameplay', nodes: [externalEntity] },
+        { moduleId: 'balance', nodes: [externalGameplayState] },
+        {
+          moduleId: 'world-scene',
+          nodes: [{ ...externalEntity, id: 'world-scene.foreign' }],
+        },
+      ]),
+    ).toThrow(/prior|sequence|missing|exact/i)
+  })
+
+  test('requires the canonical prior module order', () => {
+    const module = validModule()
+    const [gameplay, balance, world, presentation] = completePriorModules()
+    expect(() =>
+      parseRaw(module, [balance, gameplay, world, presentation]),
+    ).toThrow(/prior|sequence|order/i)
+  })
+
+  test('admits a complete canonical Phase 5 prior sequence', () => {
+    const module = validModule()
+    expect(parseRaw(module, completePriorModules()).nodes).toHaveLength(5)
   })
 
   test('rejects duplicate artifact paths, missing target cardinality, and invalid sourcing policy', () => {
@@ -1397,13 +1584,10 @@ describe('resource-realization schema', () => {
   test('admits a logical resource derived from an exact Presentation requirement', () => {
     const module = derivedPresentationRequirementModule()
     expect(
-      parseRaw(module, [
-        {
-          moduleId: 'gameplay',
-          nodes: [externalEntity, externalGameplayState],
-        },
-        presentationRequirementModule(),
-      ]).nodes,
+      parseRaw(
+        module,
+        completePriorModulesWithPresentation(presentationRequirementModule()),
+      ).nodes,
     ).toHaveLength(5)
   })
 
@@ -1416,13 +1600,10 @@ describe('resource-realization schema', () => {
     const input = (binding.inputs as Array<Record<string, unknown>>)[0]!
     input.targetDigest = digestGameIrValue('vfx')
     expect(() =>
-      parseRaw(module, [
-        {
-          moduleId: 'gameplay',
-          nodes: [externalEntity, externalGameplayState],
-        },
-        presentationRequirementModule(),
-      ]),
+      parseRaw(
+        module,
+        completePriorModulesWithPresentation(presentationRequirementModule()),
+      ),
     ).toThrow(/wrong target digest|digest/i)
   })
 
@@ -1498,13 +1679,10 @@ describe('resource-realization schema', () => {
         logical.bindings[scenario.pointer]!,
       )
       expect(() =>
-        parseRaw(module, [
-          {
-            moduleId: 'gameplay',
-            nodes: [externalEntity, externalGameplayState],
-          },
-          presentationRequirementModule(),
-        ]),
+        parseRaw(
+          module,
+          completePriorModulesWithPresentation(presentationRequirementModule()),
+        ),
       ).toThrow(/binding|derived|digest|target|producer/i)
     }
   })

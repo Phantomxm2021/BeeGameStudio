@@ -6,9 +6,15 @@ import {
   RESOURCE_RELATION_KINDS,
   RESOURCE_USAGE_TAGS,
 } from '@bee-game-studio/beegame-resource-core'
-import { BALANCE_DOMAIN_MANIFEST } from './balance-schema'
-import { GAMEPLAY_DOMAIN_MANIFEST } from './gameplay-schema'
-import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
+import { BALANCE_DOMAIN_MANIFEST, parseBalanceModule } from './balance-schema'
+import {
+  GAMEPLAY_DOMAIN_MANIFEST,
+  parseGameplayModule,
+} from './gameplay-schema'
+import {
+  PRESENTATION_DOMAIN_MANIFEST,
+  parsePresentationModule,
+} from './presentation-schema'
 import {
   compareCodeUnits,
   parseGameIrModuleSet,
@@ -17,7 +23,10 @@ import {
   type GameIrNode,
 } from './model'
 import type { GameIrCompileRequest } from './contracts'
-import { WORLD_SCENE_DOMAIN_MANIFEST } from './world-scene-schema'
+import {
+  WORLD_SCENE_DOMAIN_MANIFEST,
+  parseWorldSceneModule,
+} from './world-scene-schema'
 import { createSemanticFidelityPrimitives } from './semantic-fidelity'
 
 export type ResourceRealizationResourceKind =
@@ -82,20 +91,21 @@ const LOCAL_KINDS = Object.freeze([
   'resource-realization.delivery-artifact',
 ] as const)
 
-const PRIOR_MANIFESTS = [
-  GAMEPLAY_DOMAIN_MANIFEST,
-  BALANCE_DOMAIN_MANIFEST,
-  WORLD_SCENE_DOMAIN_MANIFEST,
-  PRESENTATION_DOMAIN_MANIFEST,
-] as const
-const PRIOR_MODULE_IDS = new Set([
+const PRIOR_MODULE_SEQUENCE = Object.freeze([
   'gameplay',
   'balance',
   'world-scene',
   'presentation',
-])
-const PRIOR_NODE_KINDS = new Set<string>(
-  PRIOR_MANIFESTS.flatMap(manifest => Object.keys(manifest)),
+] as const)
+const PHASE5_TARGET_NODE_KINDS = Object.freeze(
+  [
+    ...new Set([
+      ...Object.keys(GAMEPLAY_DOMAIN_MANIFEST),
+      ...Object.keys(BALANCE_DOMAIN_MANIFEST),
+      ...Object.keys(WORLD_SCENE_DOMAIN_MANIFEST),
+      ...Object.keys(PRESENTATION_DOMAIN_MANIFEST),
+    ]),
+  ].sort(compareCodeUnits),
 )
 
 /** The sole Resource Realization authority for its node and relationship shape. */
@@ -109,10 +119,7 @@ export const RESOURCE_REALIZATION_DOMAIN_MANIFEST: Readonly<
       'runtimeRole',
     ]),
     relationships: Object.freeze({
-      'required-by': role(
-        [...PRIOR_NODE_KINDS].sort(compareCodeUnits),
-        'at-least-one',
-      ),
+      'required-by': role(PHASE5_TARGET_NODE_KINDS, 'at-least-one'),
     }),
   }),
   'resource-realization.acquisition-profile': Object.freeze({
@@ -741,24 +748,93 @@ function targetMap(
   return targets
 }
 
-function priorNodesFromSet(
-  modules: readonly GameIrModuleCandidate[],
-): GameIrNode[] {
-  const priorNodes: GameIrNode[] = []
-  const priorIds = new Set<string>()
-  for (const prior of modules) {
-    if (!PRIOR_MODULE_IDS.has(prior.moduleId))
-      fail(`external module ${prior.moduleId} is not an admitted prior module`)
+function manifestTargetKinds(
+  manifest:
+    | Readonly<Record<string, ResourceRealizationManifestEntry>>
+    | Readonly<
+        Record<
+          string,
+          {
+            relationships: Readonly<
+              Record<string, { targetKinds: readonly string[] }>
+            >
+          }
+        >
+      >,
+): ReadonlySet<string> {
+  const targetKinds = new Set<string>()
+  for (const descriptor of Object.values(manifest))
+    for (const relationship of Object.values(descriptor.relationships))
+      relationship.targetKinds.forEach(kind => targetKinds.add(kind))
+  return targetKinds
+}
+
+function priorTargetKinds(
+  moduleId: GameIrModuleCandidate['moduleId'],
+): ReadonlySet<string> {
+  if (moduleId === 'gameplay')
+    return new Set(Object.keys(BALANCE_DOMAIN_MANIFEST))
+  const manifests = {
+    balance: BALANCE_DOMAIN_MANIFEST,
+    'world-scene': WORLD_SCENE_DOMAIN_MANIFEST,
+    presentation: PRESENTATION_DOMAIN_MANIFEST,
+  } as const
+  const localKinds = new Set(
+    Object.keys(
+      moduleId === 'balance'
+        ? BALANCE_DOMAIN_MANIFEST
+        : moduleId === 'world-scene'
+          ? WORLD_SCENE_DOMAIN_MANIFEST
+          : PRESENTATION_DOMAIN_MANIFEST,
+    ),
+  )
+  const kinds = manifestTargetKinds(manifests[moduleId])
+  return new Set([...kinds].filter(kind => !localKinds.has(kind)))
+}
+
+function readOnlyPriorTargetMap(
+  moduleId: GameIrModuleCandidate['moduleId'],
+  modules: ReadonlyMap<string, GameIrModuleCandidate>,
+): ReadonlyMap<string, GameIrNode> {
+  const allowedKinds = priorTargetKinds(moduleId)
+  const targets = new Map<string, GameIrNode>()
+  for (const [priorId, prior] of modules) {
+    if (priorId === moduleId) continue
     for (const node of prior.nodes) {
-      if (!PRIOR_NODE_KINDS.has(node.kind))
-        fail(`external target ${node.id} kind is not admitted`)
-      if (priorIds.has(node.id))
+      if (!allowedKinds.has(node.kind)) continue
+      if (targets.has(node.id))
         fail(`duplicate external target node ID ${node.id}`)
-      priorIds.add(node.id)
-      priorNodes.push(node)
+      targets.set(node.id, node)
     }
   }
-  return priorNodes
+  return targets
+}
+
+function admitPriorModules(
+  modules: readonly GameIrModuleCandidate[],
+): readonly GameIrModuleCandidate[] {
+  if (modules.length !== PRIOR_MODULE_SEQUENCE.length)
+    fail('external modules must contain the complete Phase 5 prior sequence')
+  const rawModules = new Map(modules.map(module => [module.moduleId, module]))
+  const admitted = new Map<string, GameIrModuleCandidate>()
+  for (const [index, module] of modules.entries()) {
+    const expected = PRIOR_MODULE_SEQUENCE[index]
+    if (module.moduleId !== expected)
+      fail(
+        `external modules must follow the canonical prior sequence: expected ${expected}`,
+      )
+    const externalTargets = readOnlyPriorTargetMap(module.moduleId, rawModules)
+    const typed =
+      module.moduleId === 'gameplay'
+        ? parseGameplayModule(module, externalTargets)
+        : module.moduleId === 'balance'
+          ? parseBalanceModule(module, externalTargets)
+          : module.moduleId === 'world-scene'
+            ? parseWorldSceneModule(module, externalTargets)
+            : parsePresentationModule(module, externalTargets)
+    admitted.set(module.moduleId, typed)
+  }
+  return [...admitted.values()]
 }
 
 function validateEdges(
@@ -936,7 +1012,8 @@ export function parseResourceRealizationModule(
     externalModules: input.externalModules,
   })
   const candidateModule = moduleSet.current
-  const priorNodes = priorNodesFromSet(moduleSet.external)
+  const priorModules = admitPriorModules(moduleSet.external)
+  const priorNodes = priorModules.flatMap(module => module.nodes)
   const targets = targetMap(candidateModule.nodes, priorNodes)
   const targetNodes = candidateModule.nodes.filter(
     node => node.kind === 'resource-realization.delivery-target',
