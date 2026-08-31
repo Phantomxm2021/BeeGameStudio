@@ -455,8 +455,8 @@ describe('shared Phase 5 admission', () => {
       'phase6-admission.ts',
       'resource-realization-producer.ts',
     ]) {
-      expect(readFileSync(join(directory, filename), 'utf8')).not.toMatch(
-        /from ['"]\.\/semantic-admission['"]/,
+      expect(readFileSync(join(directory, filename), 'utf8')).not.toContain(
+        'semantic-admission',
       )
     }
   })

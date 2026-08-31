@@ -13,13 +13,13 @@ import {
 } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import {
+  GAME_IR_CANONICAL_MODULE_IDS,
   GAME_IR_PUBLICATION_ROOT,
   GAME_IR_SCHEMA_VERSION,
   gameIrCommittedPath,
   gameIrRevisionPath,
   parseGameIrCompileRequest,
   parseGameIrReadyReceipt,
-  type GameIrCompileRequest,
   type GameIrReadyReceipt,
 } from './contracts'
 import {
@@ -27,39 +27,23 @@ import {
   canonicalGameIrJson,
   compareCodeUnits,
   digestGameIrValue,
-  parseGameIrCandidate,
   type GameIrCandidate,
   type GameIrModuleCandidate,
-  type GameIrSourceSection,
 } from './model'
 import {
-  GAME_IR_SEMANTIC_VALIDATOR_MANIFEST,
-  admitGameIrSemanticValidationResult,
-  type GameIrSemanticValidationPacket,
-  type GameIrSemanticValidationResult,
-} from './semantic-admission'
+  assembleImplementationVerificationClosure,
+  type GameIrPublishedModuleEvidence,
+  type ImplementationVerificationAssemblyAuthority,
+} from './implementation-verification-assembler'
 import { digestSectionIndex } from '../foundation-section-index'
 
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
-const MODULES = GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.map(
-  item => item.moduleId,
-)
-const MODULE_SET = new Set(MODULES)
 const publicationLocks = new Map<string, Promise<unknown>>()
-
-export type GameIrPublicationAdmission = Readonly<{
-  moduleId: string
-  packet: GameIrSemanticValidationPacket
-  result: GameIrSemanticValidationResult
-}>
 
 export type GameIrPublicationAuthority = Readonly<{
   workspacePath: string
   publicationId: string
-  compileRequest: GameIrCompileRequest
-  candidate: GameIrCandidate
-  sectionIndex: readonly GameIrSourceSection[]
-  admissions: readonly GameIrPublicationAdmission[]
+  phase7Authority: ImplementationVerificationAssemblyAuthority
 }>
 
 export type GameIrPublicationPrepared = Readonly<{
@@ -81,7 +65,6 @@ export type GameIrPublicationTestHooks = Readonly<{
 
 type Artifact = Readonly<{ path: string; bytes: string; digest: string }>
 type Plan = Readonly<{
-  authority: GameIrPublicationAuthority
   workspacePath: string
   revision: string
   publicationId: string
@@ -204,15 +187,6 @@ function strictAuthorityValue(
       seen,
     )
   }
-}
-function frozen(value: unknown, seen = new Set<object>()): boolean {
-  if (value === null || typeof value !== 'object') return true
-  if (seen.has(value)) return true
-  if (!Object.isFrozen(value)) return false
-  seen.add(value)
-  return Object.values(value as Record<string, unknown>).every(child =>
-    frozen(child, seen),
-  )
 }
 function pathOf(workspace: string, relativePath: string): string {
   const result = resolve(workspace, relativePath)
@@ -457,62 +431,75 @@ function graph(candidate: GameIrCandidate): Record<string, unknown> {
   }
 }
 
-function validateAdmissions(
-  authority: GameIrPublicationAuthority,
-  request: GameIrCompileRequest,
-  candidate: GameIrCandidate,
-): readonly GameIrPublicationAdmission[] {
-  if (
-    !Array.isArray(authority.admissions) ||
-    authority.admissions.length !== MODULES.length
-  )
-    fail('semantic admission coverage is incomplete')
-  const admitted: GameIrPublicationAdmission[] = []
-  for (let i = 0; i < MODULES.length; i += 1) {
-    const admission = authority.admissions[i]
-    if (!admission || admission.moduleId !== MODULES[i])
-      fail('semantic admission modules are not canonical and sorted')
-    object(admission as unknown, 'semantic admission')
-    exact(
-      admission as unknown as Record<string, unknown>,
-      ['moduleId', 'packet', 'result'],
-      'semantic admission',
-    )
-    const packet = admission.packet
-    const result = admitGameIrSemanticValidationResult(packet, admission.result)
-    if (result.outcome !== 'PASS' || packet.moduleId !== admission.moduleId)
-      fail(`semantic module ${admission.moduleId} is not admitted PASS`)
-    if (
-      packet.taskId !== request.taskId ||
-      packet.publicationId !== request.publicationId ||
-      packet.foundationRevision !== request.foundation.foundationRevision ||
-      packet.foundationReceiptDigest !== request.foundation.receiptDigest
-    )
-      fail('semantic packet identity is stale')
-    const authoritySectionIndexDigest = digestSectionIndex(
-      authority.sectionIndex,
-    )
-    if (
-      request.foundation.sectionIndexDigest !== authoritySectionIndexDigest ||
-      packet.sectionIndexDigest !== authoritySectionIndexDigest ||
-      canonicalGameIrJson(packet.sectionIndex) !==
-        canonicalGameIrJson(authority.sectionIndex)
-    )
-      fail(
-        'semantic packet Section Index is detached from publication authority',
-      )
-    if (
-      packet.candidateBytes !== canonicalGameIrJson(candidate) ||
-      packet.candidateDigest !== digestGameIrValue(candidate) ||
-      canonicalGameIrJson(packet.compileRequest) !==
-        canonicalGameIrJson(request)
-    )
-      fail('semantic packet is detached from authority')
-    admitted.push(
-      Object.freeze({ moduleId: admission.moduleId, packet, result }),
-    )
-  }
-  return Object.freeze(admitted)
+function publicationEvidence(
+  authority: ImplementationVerificationAssemblyAuthority,
+  closure: ReturnType<typeof assembleImplementationVerificationClosure>,
+): readonly GameIrPublishedModuleEvidence[] {
+  const phase4 = authority.phase6Authority.phase5Authority.phase4Authority
+  const phase5 = authority.phase6Authority.phase5Authority
+  const phase6 = authority.phase6Authority
+  const entries: GameIrPublishedModuleEvidence[] = [
+    {
+      phase: 'phase4',
+      moduleId: 'balance',
+      sourceDigest: phase4.balance.source.sourceDigest,
+      mechanicalReceiptDigest: phase4.balance.mechanical.receiptDigest,
+      semanticReceiptDigest: phase4.balance.semantic.receiptDigest,
+      projectionDigest: closure.phase6.phase5.phase4.balance.projectionDigest,
+    },
+    {
+      phase: 'phase4',
+      moduleId: 'gameplay',
+      sourceDigest: phase4.gameplay.source.sourceDigest,
+      mechanicalReceiptDigest: phase4.gameplay.mechanical.receiptDigest,
+      semanticReceiptDigest: phase4.gameplay.semantic.receiptDigest,
+      projectionDigest: closure.phase6.phase5.phase4.gameplay.projectionDigest,
+    },
+    {
+      phase: 'phase7',
+      moduleId: 'implementation-verification',
+      sourceDigest: authority.implementationVerification.source.sourceDigest,
+      mechanicalReceiptDigest:
+        authority.implementationVerification.mechanical.receiptDigest,
+      semanticReceiptDigest:
+        authority.implementationVerification.semantic.receiptDigest,
+      semanticValidationResultDigest:
+        closure.implementationVerification.semanticValidationResultDigest,
+      projectionDigest: closure.implementationVerification.projectionDigest,
+    },
+    {
+      phase: 'phase5',
+      moduleId: 'presentation',
+      sourceDigest: phase5.presentation.source.sourceDigest,
+      mechanicalReceiptDigest: phase5.presentation.mechanical.receiptDigest,
+      semanticReceiptDigest: phase5.presentation.semantic.receiptDigest,
+      semanticValidationResultDigest:
+        closure.phase6.phase5.presentation.semanticValidationResultDigest,
+      projectionDigest: closure.phase6.phase5.presentation.projectionDigest,
+    },
+    {
+      phase: 'phase6',
+      moduleId: 'resource-realization',
+      sourceDigest: phase6.resourceRealization.source.sourceDigest,
+      mechanicalReceiptDigest:
+        phase6.resourceRealization.mechanical.receiptDigest,
+      semanticReceiptDigest: phase6.resourceRealization.semantic.receiptDigest,
+      semanticValidationResultDigest:
+        closure.phase6.resourceRealization.semanticValidationResultDigest,
+      projectionDigest: closure.phase6.resourceRealization.projectionDigest,
+    },
+    {
+      phase: 'phase5',
+      moduleId: 'world-scene',
+      sourceDigest: phase5.worldScene.source.sourceDigest,
+      mechanicalReceiptDigest: phase5.worldScene.mechanical.receiptDigest,
+      semanticReceiptDigest: phase5.worldScene.semantic.receiptDigest,
+      semanticValidationResultDigest:
+        closure.phase6.phase5.worldScene.semanticValidationResultDigest,
+      projectionDigest: closure.phase6.phase5.worldScene.projectionDigest,
+    },
+  ]
+  return Object.freeze(entries)
 }
 
 function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
@@ -520,66 +507,39 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   object(authorityInput as unknown, 'publication authority')
   exact(
     authorityInput as unknown as Record<string, unknown>,
-    [
-      'workspacePath',
-      'publicationId',
-      'compileRequest',
-      'candidate',
-      'sectionIndex',
-      'admissions',
-    ],
+    ['workspacePath', 'publicationId', 'phase7Authority'],
     'publication authority',
   )
   safe(authorityInput.publicationId, 'publicationId')
-  const request = parseGameIrCompileRequest(authorityInput.compileRequest)
+  const closure = assembleImplementationVerificationClosure(
+    authorityInput.phase7Authority,
+  )
+  const request = parseGameIrCompileRequest(
+    authorityInput.phase7Authority.phase6Authority.phase5Authority
+      .phase4Authority.gameplay.source.compileRequest,
+  )
   if (request.publicationId !== authorityInput.publicationId)
     fail('publicationId does not match compile request')
+  const sectionIndex = Object.freeze(
+    canonicalizeGameIrSourceSections(
+      authorityInput.phase7Authority.phase6Authority.phase5Authority
+        .phase4Authority.gameplay.source.authoritySectionIndex,
+    ),
+  )
   if (
-    digestSectionIndex(authorityInput.sectionIndex) !==
-    request.foundation.sectionIndexDigest
+    digestSectionIndex(sectionIndex) !== request.foundation.sectionIndexDigest
   )
     fail(
       'publication authority Section Index does not match Foundation receipt',
     )
   safe(request.foundation.foundationRevision, 'foundationRevision')
-  if (
-    !frozen(authorityInput.candidate) ||
-    !frozen(authorityInput.sectionIndex) ||
-    !frozen(authorityInput.admissions)
-  )
-    fail('authority inputs must be immutable')
-  const candidate = parseGameIrCandidate(authorityInput.candidate, {
-    request,
-    sections: authorityInput.sectionIndex,
-  })
-  const sectionIndex = Object.freeze(
-    canonicalizeGameIrSourceSections(authorityInput.sectionIndex),
-  )
-  if (
-    candidate.modules.length !== MODULES.length ||
-    candidate.modules.some(
-      (module, i) =>
-        module.moduleId !== MODULES[i] || !MODULE_SET.has(module.moduleId),
-    )
-  )
+  const candidate = closure.candidate
+  if (candidate.modules.length !== GAME_IR_CANONICAL_MODULE_IDS.length)
     fail('candidate canonical module coverage is invalid')
-  const admissions = validateAdmissions(
-    { ...authorityInput, sectionIndex },
-    request,
-    candidate,
-  )
-  const authority: GameIrPublicationAuthority = {
-    workspacePath: authorityInput.workspacePath,
-    publicationId: authorityInput.publicationId,
-    compileRequest: request,
-    candidate,
-    sectionIndex,
-    admissions,
-  }
-  const workspacePath = resolve(authority.workspacePath)
+  const workspacePath = resolve(authorityInput.workspacePath)
   const revision = request.foundation.foundationRevision
-  const preparedPath = `${GAME_IR_PUBLICATION_ROOT}/.staging/${authority.publicationId}`
-  const journalPath = `${GAME_IR_PUBLICATION_ROOT}/.journal/${authority.publicationId}.json`
+  const preparedPath = `${GAME_IR_PUBLICATION_ROOT}/.staging/${authorityInput.publicationId}`
+  const journalPath = `${GAME_IR_PUBLICATION_ROOT}/.journal/${authorityInput.publicationId}.json`
   const stage = pathOf(workspacePath, preparedPath)
   const journal = pathOf(workspacePath, journalPath)
   const final = pathOf(workspacePath, gameIrRevisionPath(revision))
@@ -607,15 +567,14 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   }
   const dependency = json('dependency-graph.json', graph(candidate))
   const compileRequestDigest = sha(canonicalGameIrJson(request))
-  const semanticEvidence = admissions.map(admission => ({
-    moduleId: admission.moduleId,
-    packetDigest: admission.packet.packetDigest,
-    result: admission.result,
-  }))
+  const semanticEvidence = publicationEvidence(
+    authorityInput.phase7Authority,
+    closure,
+  )
   const manifest = json('manifest.json', {
     schemaVersion: 'game-ir-manifest.v1',
     gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
-    publicationId: authority.publicationId,
+    publicationId: authorityInput.publicationId,
     foundationRevision: revision,
     foundationReceiptDigest: request.foundation.receiptDigest,
     compileRequestDigest,
@@ -635,10 +594,10 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   const artifacts = [...modules, ...sourceMaps, dependency, manifest]
   const authorityDigest = sha(
     canonicalGameIrJson({
-      publicationId: authority.publicationId,
+      publicationId: authorityInput.publicationId,
       compileRequest: request,
       candidateDigest,
-      sectionIndex: authority.sectionIndex,
+      sectionIndex,
       semanticEvidence,
       artifacts: artifacts.map(item => ({
         path: item.path,
@@ -653,7 +612,7 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     manifestDigest: manifest.digest,
     candidateDigest,
     compileRequestDigest,
-    publicationId: authority.publicationId,
+    publicationId: authorityInput.publicationId,
     foundationRevision: revision,
     foundationReceiptDigest: request.foundation.receiptDigest,
     moduleDigests,
@@ -663,7 +622,7 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
   const ready = parseGameIrReadyReceipt({
     schemaVersion: 'game-ir-ready-receipt.v1',
     taskId: request.taskId,
-    publicationId: authority.publicationId,
+    publicationId: authorityInput.publicationId,
     gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
     foundationRevision: revision,
     foundationReceiptDigest: request.foundation.receiptDigest,
@@ -677,7 +636,7 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     path: item.path,
     digest: item.digest,
   }))
-  const journalBytes = `${canonicalGameIrJson({ schemaVersion: 'game-ir-publication-journal.v1', status: 'PREPARED', authorityDigest, publicationId: authority.publicationId, foundationRevision: revision, foundationReceiptDigest: request.foundation.receiptDigest, compileRequestDigest, candidateDigest, entries })}\n`
+  const journalBytes = `${canonicalGameIrJson({ schemaVersion: 'game-ir-publication-journal.v1', status: 'PREPARED', authorityDigest, publicationId: authorityInput.publicationId, foundationRevision: revision, foundationReceiptDigest: request.foundation.receiptDigest, compileRequestDigest, candidateDigest, entries })}\n`
   const prepared = {
     preparedPath,
     journalPath,
@@ -685,10 +644,9 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     authorityDigest,
   }
   return {
-    authority,
     workspacePath,
     revision,
-    publicationId: authority.publicationId,
+    publicationId: authorityInput.publicationId,
     stage,
     journal,
     final,

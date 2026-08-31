@@ -10,7 +10,6 @@ export const GAME_IR_PUBLICATION_ROOT =
   `.beegame/ir/${GAME_IR_SCHEMA_VERSION}` as const
 export const GAME_IR_CANONICAL_MODULE_IDS = Object.freeze([
   'balance',
-  'core',
   'gameplay',
   'implementation-verification',
   'presentation',

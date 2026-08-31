@@ -85,6 +85,22 @@ const forbiddenPhase7ClosurePath =
   /(?:^|\/)(?:world-presentation-assembler|resource-realization-assembler)(?:\.ts)?$/
 const resourceRealizationAssemblerPath =
   /(?:^|\/)resource-realization-assembler(?:\.ts)?$/
+const implementationVerificationAssemblerPath =
+  /(?:^|\/)implementation-verification-assembler(?:\.ts)?$/
+const modelPath = /(?:^|\/)model(?:\.ts)?$/
+const phase7AssemblerModelRuntime = new Set([
+  'canonicalGameIrJson',
+  'digestGameIrValue',
+  'parseGameIrCandidate',
+])
+const publicationModelRuntime = new Set([
+  'canonicalGameIrJson',
+  'canonicalizeGameIrSourceSections',
+  'compareCodeUnits',
+  'digestGameIrValue',
+])
+const publicationConstructionPath =
+  /(?:^|\/)(?:domain-(?:source|projection)|phase[4567]-admission|(?:gameplay|balance|world-scene|presentation|resource-realization|implementation-verification)-(?:producer|schema)|(?:gameplay-balance|world-presentation|resource-realization|implementation-verification)-assembler)(?:\.ts)?$/
 const forbiddenContractPaths =
   /(?:^|\/)(?:controller|schema|recovery|foundation-(?:audit|fact|issue|revision))(?:\.ts)?$/
 const placeholderModules = new Set([
@@ -560,6 +576,7 @@ function policyViolations(
     | 'phase6-producer'
     | 'phase7-producer'
     | 'phase7-admission'
+    | 'phase7-assembler'
     | 'other',
 ): string[] {
   const violations = new Set<string>()
@@ -574,6 +591,8 @@ function policyViolations(
         policy === 'phase6-producer' ||
         policy === 'phase7-producer' ||
         policy === 'phase7-admission' ||
+        policy === 'phase7-assembler' ||
+        policy === 'publication' ||
         policy === 'other') &&
         forbiddenPhase5Paths.test(entry.path))
     )
@@ -631,6 +650,86 @@ function policyViolations(
       )
         violations.add(`closure-member-call: ${entry.name}`)
   }
+  if (policy === 'phase7-assembler') {
+    for (const namespaceImport of facts.namespaceImports) {
+      if (resourceRealizationAssemblerPath.test(namespaceImport.path))
+        violations.add('closure-namespace-import')
+      if (modelPath.test(namespaceImport.path))
+        violations.add('model-namespace-import')
+    }
+    const allowedCandidateBindings = new Set(
+      facts.importBindings
+        .filter(
+          entry =>
+            modelPath.test(entry.path) &&
+            entry.original === 'parseGameIrCandidate' &&
+            !entry.isTypeOnly,
+        )
+        .map(entry => entry.local),
+    )
+    for (const entry of facts.importBindings) {
+      if (resourceRealizationAssemblerPath.test(entry.path)) {
+        if (
+          !entry.isTypeOnly &&
+          entry.original !== 'assembleResourceRealizationClosure'
+        )
+          violations.add(`closure-import: ${entry.original}`)
+      } else if (
+        modelPath.test(entry.path) &&
+        !entry.isTypeOnly &&
+        !phase7AssemblerModelRuntime.has(entry.original)
+      ) {
+        violations.add(`model-import: ${entry.original}`)
+      }
+    }
+    for (const entry of facts.imports)
+      if (
+        (resourceRealizationAssemblerPath.test(entry.path) ||
+          modelPath.test(entry.path)) &&
+        entry.kind !== 'import'
+      )
+        violations.add(`restricted-import-kind: ${entry.kind}`)
+    for (const name of facts.calls)
+      if (
+        name === 'parseGameIrCandidate' &&
+        !allowedCandidateBindings.has(name)
+      )
+        violations.add(`restricted-call: ${name}`)
+  }
+  if (policy === 'publication') {
+    for (const entry of facts.imports)
+      if (
+        publicationConstructionPath.test(entry.path) &&
+        !implementationVerificationAssemblerPath.test(entry.path)
+      )
+        violations.add(`publication-construction-path: ${entry.path}`)
+    for (const namespaceImport of facts.namespaceImports)
+      if (
+        implementationVerificationAssemblerPath.test(namespaceImport.path) ||
+        modelPath.test(namespaceImport.path)
+      )
+        violations.add('publication-namespace-import')
+    for (const entry of facts.importBindings)
+      if (implementationVerificationAssemblerPath.test(entry.path)) {
+        if (
+          !entry.isTypeOnly &&
+          entry.original !== 'assembleImplementationVerificationClosure'
+        )
+          violations.add(`publication-assembler-import: ${entry.original}`)
+      } else if (
+        modelPath.test(entry.path) &&
+        !entry.isTypeOnly &&
+        !publicationModelRuntime.has(entry.original)
+      ) {
+        violations.add(`publication-model-import: ${entry.original}`)
+      }
+    for (const entry of facts.imports)
+      if (
+        implementationVerificationAssemblerPath.test(entry.path) &&
+        entry.kind !== 'import'
+      )
+        violations.add(`publication-assembler-import-kind: ${entry.kind}`)
+  }
   if (policy === 'contracts')
     for (const entry of facts.imports)
       if (forbiddenContractPaths.test(entry.path))
@@ -642,17 +741,35 @@ function policyViolations(
     policy === 'phase6-producer' ||
     policy === 'phase7-producer' ||
     policy === 'phase7-admission' ||
+    policy === 'phase7-assembler' ||
+    policy === 'publication' ||
     policy === 'other'
   )
-    for (const name of facts.apiImports) violations.add(`api-import: ${name}`)
+    for (const name of facts.apiImports) {
+      if (
+        policy === 'phase7-assembler' &&
+        facts.importBindings.some(
+          binding =>
+            binding.local === name &&
+            binding.original === 'parseGameIrCandidate' &&
+            modelPath.test(binding.path) &&
+            !binding.isTypeOnly,
+        )
+      )
+        continue
+      violations.add(`api-import: ${name}`)
+    }
   for (const name of facts.calls) {
     if (
       (policy === 'phase4' ||
         policy === 'phase5' ||
         policy === 'phase6-producer' ||
         policy === 'phase7-producer' ||
-        policy === 'phase7-admission') &&
-      forbiddenStageCalls.has(name)
+        policy === 'phase7-admission' ||
+        policy === 'phase7-assembler' ||
+        policy === 'publication') &&
+      forbiddenStageCalls.has(name) &&
+      !(policy === 'publication' && name === 'publish')
     )
       violations.add(`stage-call: ${name}`)
     if (
@@ -663,9 +780,30 @@ function policyViolations(
         policy === 'phase6-producer' ||
         policy === 'phase7-producer' ||
         policy === 'phase7-admission' ||
+        policy === 'phase7-assembler' ||
+        policy === 'publication' ||
         policy === 'other')
-    )
+    ) {
+      if (
+        policy === 'publication' &&
+        (name === 'prepareGameIrPublication' ||
+          name === 'commitGameIrPublication')
+      )
+        continue
+      if (
+        policy === 'phase7-assembler' &&
+        name === 'parseGameIrCandidate' &&
+        facts.importBindings.some(
+          binding =>
+            binding.local === name &&
+            binding.original === 'parseGameIrCandidate' &&
+            modelPath.test(binding.path) &&
+            !binding.isTypeOnly,
+        )
+      )
+        continue
       violations.add(`api-call: ${name}`)
+    }
     if (
       (policy === 'phase5' ||
         policy === 'other' ||
@@ -686,7 +824,9 @@ function policyViolations(
       (policy === 'phase5' ||
         policy === 'phase6-producer' ||
         policy === 'phase7-producer' ||
-        policy === 'phase7-admission') &&
+        policy === 'phase7-admission' ||
+        policy === 'phase7-assembler' ||
+        policy === 'publication') &&
       [
         'fallback',
         'compatibility',
@@ -836,12 +976,12 @@ type GameIrProductionRole =
   | 'phase6-producer'
   | 'phase7-producer'
   | 'phase7-admission'
+  | 'phase7-assembler'
   | 'other'
 
 function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'contracts.ts') return 'contracts'
   if (filename === 'publication.ts') return 'publication'
-  if (filename === 'semantic-admission.ts') return 'semantic'
   if (filename === 'resource-realization-schema.ts') return 'semantic'
   if (filename === 'implementation-verification-schema.ts') return 'semantic'
   if (filename === 'phase6-admission.ts') return 'phase6-producer'
@@ -850,6 +990,8 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'implementation-verification-producer.ts')
     return 'phase7-producer'
   if (filename === 'phase7-admission.ts') return 'phase7-admission'
+  if (filename === 'implementation-verification-assembler.ts')
+    return 'phase7-assembler'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -1278,6 +1420,91 @@ describe('Game IR stage boundary', () => {
       ).not.toEqual([])
   })
 
+  test('gives the Phase 7 assembler one closure and candidate seam', () => {
+    expect(
+      policyViolations(
+        collectAstFacts(
+          `import { assembleResourceRealizationClosure } from './resource-realization-assembler'
+           import { parseGameIrCandidate } from './model'
+           import type { ResourceRealizationClosure } from './resource-realization-assembler'
+           assembleResourceRealizationClosure(input)
+           parseGameIrCandidate(input)
+           void (null as ResourceRealizationClosure | null)`,
+          'implementation-verification-assembler.ts',
+        ),
+        'phase7-assembler',
+      ),
+    ).toEqual([])
+    const forbidden = [
+      `import * as resource from './resource-realization-assembler'
+       resource.assembleResourceRealizationClosure(input)`,
+      `import { assembleResourceRealizationClosure as replay, deriveResourcePlan } from './resource-realization-assembler'
+       replay(input)`,
+      `import * as model from './model'
+       model.parseGameIrCandidate(input)`,
+      `import { compareCodeUnits as compare } from './model'
+       compare(input, input)`,
+      `import { assembleResourceRealizationClosure } from './resource-realization-assembler'
+       assembleResourceRealizationClosure(input)
+       const publication = prepareGameIrPublication(input)`,
+      `import { publish } from './publication'
+       publish(input)`,
+      `const fallback = true
+       const compatibility = true
+       const legacy = true
+       const migration = true
+       const dualWrite = true
+       void [fallback, compatibility, legacy, migration, dualWrite]`,
+    ]
+    for (const source of forbidden)
+      expect(
+        policyViolations(
+          collectAstFacts(source, 'implementation-verification-assembler.ts'),
+          'phase7-assembler',
+        ),
+      ).not.toEqual([])
+  })
+
+  test('keeps publication on the sole Phase 7 assembler seam', () => {
+    expect(
+      policyViolations(
+        collectAstFacts(
+          `import { assembleImplementationVerificationClosure } from './implementation-verification-assembler'
+           assembleImplementationVerificationClosure(authority)`,
+          'publication.ts',
+        ),
+        'publication',
+      ),
+    ).toEqual([])
+    const forbidden = [
+      `import { assembleResourceRealizationClosure } from './resource-realization-assembler'
+       assembleResourceRealizationClosure(authority)`,
+      `import { assembleResourceRealizationClosure as replay } from './resource-realization-assembler'
+       replay(authority)`,
+      `import * as resource from './resource-realization-assembler'
+       resource.assembleResourceRealizationClosure(authority)`,
+      `import { parseGameIrCandidate } from './model'
+       parseGameIrCandidate(candidate)`,
+      `import * as model from './model'
+       model.parseGameIrCandidate(candidate)`,
+      `import { route } from '../routes'
+       route(candidate)
+       const fallback = true
+       const compatibility = true
+       const legacy = true
+       const migration = true
+       const dualWrite = true
+       void [fallback, compatibility, legacy, migration, dualWrite]`,
+    ]
+    for (const source of forbidden)
+      expect(
+        policyViolations(
+          collectAstFacts(source, 'publication.ts'),
+          'publication',
+        ),
+      ).not.toEqual([])
+  })
+
   test('rejects every Phase 6 closure namespace import, including property forwarding', () => {
     const forbiddenNamespaceUses = [
       `import * as assembler from './world-presentation-assembler'
@@ -1629,7 +1856,7 @@ describe('Game IR stage boundary', () => {
     ).toEqual([])
     expect(
       futureModuleLiteralViolations(
-        'semantic-admission.ts',
+        'implementation-verification-assembler.ts',
         `const MODULE_DESCRIPTORS = { 'implementation-verification': {} }`,
       ),
     ).toEqual(['future-module-literal: implementation-verification'])
@@ -1705,30 +1932,6 @@ describe('Game IR stage boundary', () => {
          preparePresentationSemanticValidationPacket(input)`,
         'consumer.ts',
       ),
-    ).toEqual([])
-  })
-
-  test('binds semantic future derivation to the canonical source helper and descriptor enumeration', async () => {
-    const source = await readFile(
-      join(dirname(fileURLToPath(import.meta.url)), 'semantic-admission.ts'),
-      'utf8',
-    )
-    const facts = collectAstFacts(source, 'semantic-admission.ts')
-    expect(
-      facts.importBindings.some(
-        binding =>
-          binding.path === './domain-source' &&
-          binding.original === 'canonicalGameIrModuleSourceDocuments' &&
-          binding.local === 'canonicalGameIrModuleSourceDocuments',
-      ),
-    ).toBe(true)
-    expect(facts.calls).toContain('canonicalGameIrModuleSourceDocuments')
-    expect(facts.memberCalls).toContainEqual({
-      receiver: 'Object',
-      name: 'keys',
-    })
-    expect(
-      futureModuleLiteralViolations('semantic-admission.ts', source),
     ).toEqual([])
   })
 
@@ -1822,6 +2025,7 @@ describe('Game IR stage boundary', () => {
       'gameplay-balance-assembler.ts',
       'gameplay-producer.ts',
       'gameplay-schema.ts',
+      'implementation-verification-assembler.ts',
       'implementation-verification-producer.ts',
       'implementation-verification-schema.ts',
       'model.ts',
@@ -1834,7 +2038,6 @@ describe('Game IR stage boundary', () => {
       'resource-realization-assembler.ts',
       'resource-realization-producer.ts',
       'resource-realization-schema.ts',
-      'semantic-admission.ts',
       'semantic-fidelity.ts',
       'world-presentation-assembler.ts',
       'world-scene-producer.ts',
@@ -1856,7 +2059,8 @@ describe('Game IR stage boundary', () => {
         role === 'semantic' ||
         role === 'phase6-producer' ||
         role === 'phase7-producer' ||
-        role === 'phase7-admission'
+        role === 'phase7-admission' ||
+        role === 'phase7-assembler'
       )
         expect(
           policyViolations(collectAstFacts(source, filename), role),

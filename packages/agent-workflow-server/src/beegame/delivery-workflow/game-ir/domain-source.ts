@@ -55,7 +55,6 @@ export type GameIrDomainSourceInput = Readonly<{
 export const GAME_IR_MODULE_SOURCE_DOCUMENTS: Readonly<
   Record<GameIrModuleId, readonly FoundationDocumentPath[]>
 > = Object.freeze({
-  core: Object.freeze(['docs/GDD.md'] as const),
   gameplay: Object.freeze(['docs/GDD.md'] as const),
   balance: Object.freeze(['docs/GDD.md', 'docs/BALANCE_DESIGN.md'] as const),
   'world-scene': Object.freeze([

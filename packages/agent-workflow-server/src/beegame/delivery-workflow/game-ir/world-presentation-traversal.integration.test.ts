@@ -33,7 +33,6 @@ import {
   admitPhase5SemanticValidationResult,
   type Phase5SemanticValidationPacket,
 } from './phase5-admission'
-import { GAME_IR_SEMANTIC_VALIDATOR_MANIFEST } from './semantic-admission'
 import {
   assembleWorldPresentationClosure,
   preparePresentationSemanticValidationPacket,
@@ -713,9 +712,14 @@ const targetSubjects = (nodes: readonly Node[]) =>
     )
     .sort((left, right) => Buffer.from(left).compare(Buffer.from(right)))
 const expectedCheckIds = (moduleId: 'world-scene' | 'presentation') =>
-  GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.find(
-    module => module.moduleId === moduleId,
-  )!.checkIds
+  [
+    'projection.fidelity',
+    'projection.completeness',
+    'projection.source-bounds',
+    'projection.ambiguity',
+    'projection.cross-module-invariants',
+    moduleId === 'world-scene' ? 'domain.world-scene' : 'domain.presentation',
+  ].sort((left, right) => Buffer.from(left).compare(Buffer.from(right)))
 const allNodes = [
   ...gameplayNodes,
   ...balanceNodes,

@@ -250,7 +250,6 @@ describe('isolated Game IR contracts', () => {
   test('requires the complete V1 canonical module digest set', () => {
     expect(GAME_IR_CANONICAL_MODULE_IDS).toEqual([
       'balance',
-      'core',
       'gameplay',
       'implementation-verification',
       'presentation',

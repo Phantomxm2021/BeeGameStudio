@@ -170,31 +170,26 @@ describe('Game IR domain source closure', () => {
     expect(resource.sectionIndex.map(section => section.documentPath)).toEqual([
       ...canonicalGameIrModuleSourceDocuments('resource-realization'),
     ])
-    for (const moduleId of ['core']) {
-      expect(isGameIrDomainId(moduleId)).toBe(false)
-      expect(() =>
-        buildGameIrDomainSourceEnvelope({
-          moduleId,
-          request: request(),
-          sectionIndex,
-          sectionBytes: sourceBytes(
-            GAME_IR_MODULE_SOURCE_DOCUMENTS[moduleId as GameIrModuleId]!,
-          ),
-        } as never),
-      ).toThrow(/moduleId|domain/i)
-      expect(() =>
-        validateGameIrDomainSourceEnvelope({
-          ...gameplay,
-          moduleId,
-        } as never),
-      ).toThrow(/moduleId|domain/i)
-    }
+    expect(isGameIrDomainId('core')).toBe(false)
+    expect(() =>
+      buildGameIrDomainSourceEnvelope({
+        moduleId: 'core',
+        request: request(),
+        sectionIndex,
+        sectionBytes: {},
+      } as never),
+    ).toThrow(/moduleId|domain/i)
+    expect(() =>
+      validateGameIrDomainSourceEnvelope({
+        ...gameplay,
+        moduleId: 'core',
+      } as never),
+    ).toThrow(/moduleId|domain/i)
   })
 
   test('owns the exact canonical source documents for every module', () => {
     const expected: Record<GameIrModuleId, readonly FoundationDocumentPath[]> =
       {
-        core: ['docs/GDD.md'],
         gameplay: ['docs/GDD.md'],
         balance: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
         'world-scene': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
