@@ -10,7 +10,7 @@ import {
 } from './domain-source'
 import {
   admitGameplaySemanticResult,
-  assembleGameplayModule,
+  prepareGameplayModule,
   buildGameplaySemanticPacket,
   type GameIrDomainSemanticReceipt,
 } from './gameplay-producer'
@@ -117,55 +117,9 @@ function mechanical(
     verifiedClaims: [],
     ownedTargets: [],
   }
-  return admitGameIrMechanicalProjectionReceipt(currentSource, {
-    ...body,
-    receiptDigest: digestGameIrValue(body),
-  })
-}
-
-function mechanicalWithNode(
-  currentSource: GameIrDomainSourceEnvelope,
-  id = 'mechanical.entity',
-): GameIrMechanicalProjectionReceipt {
-  const section = currentSource.sectionIndex[0]!
-  const node = {
-    id,
-    kind: 'gameplay.entity',
-    producerMode: 'mechanical' as const,
-    value: { label: 'Mechanical' },
-    references: [],
-    edges: [],
-    bindings: {
-      '/id': {
-        kind: 'owner' as const,
-        documentPath: section.documentPath,
-        sectionId: section.sectionId,
-        sectionDigest: section.digest,
-        sourcePointer: `/mechanical/${id}`,
-      },
-      '/value/label': {
-        kind: 'owner' as const,
-        documentPath: section.documentPath,
-        sectionId: section.sectionId,
-        sectionDigest: section.digest,
-        sourcePointer: `/mechanical/${id}/label`,
-      },
-    },
-  } as const
-  const body = {
-    schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
-    taskId: currentSource.taskId,
-    moduleId: currentSource.moduleId,
-    foundationRevision:
-      currentSource.compileRequest.foundation.foundationRevision,
-    sourceDigest: currentSource.sourceDigest,
-    nodes: [node],
-    verifiedClaims: [],
-    ownedTargets: [`node:${id}#/id`, `node:${id}#/value/label`],
-  }
-  return admitGameIrMechanicalProjectionReceipt(currentSource, {
-    ...body,
-    receiptDigest: digestGameIrValue(body),
+  return admitGameIrMechanicalProjectionReceipt({
+    source: currentSource,
+    receipt: { ...body, receiptDigest: digestGameIrValue(body) },
   })
 }
 
@@ -285,6 +239,7 @@ function resultValue(
 ) {
   const nodes = gameplayNodes()
   return {
+    outcome: 'PROJECTED' as const,
     nodes,
     sourceClaims: sourceClaims(nodes, sectionId),
     ...overrides,
@@ -295,10 +250,12 @@ function admittedSemanticFor(
   currentSource: GameIrDomainSourceEnvelope,
   sectionId = 'gameplay',
 ): GameIrDomainSemanticReceipt {
-  return admitGameplaySemanticResult(
+  const result = admitGameplaySemanticResult(
     packetFor(currentSource),
     resultValue({}, sectionId),
   )
+  if (result.outcome !== 'PROJECTED') throw new Error('expected projection')
+  return result
 }
 
 function admittedSemantic(): GameIrDomainSemanticReceipt {
@@ -388,7 +345,73 @@ function completeFixtureSource(
   }
 }
 
-describe('Gameplay producer admission and assembler', () => {
+describe('Gameplay producer admission and Core preparation', () => {
+  test.each([
+    ['FAIL', 'missing-projection'],
+    ['AMBIGUOUS', 'ambiguous-projection'],
+  ] as const)('admits a packet-bound %s projection diagnostic', (outcome, reasonCode) => {
+    const currentPacket = packet()
+    const admitted = admitGameplaySemanticResult(currentPacket, {
+      outcome,
+      reasonCode,
+      actual: 'No unique source-backed value exists.',
+      missingSubject: 'node:condition.can-jump#/value/expression',
+      expectedProjection: 'One source-backed condition expression.',
+      evidencePointers: [`section:docs/GDD.md#gameplay@${sectionDigest}`],
+    })
+    expect(admitted).toMatchObject({
+      outcome,
+      reasonCode,
+      packetDigest: currentPacket.packetDigest,
+      sourceDigest: currentPacket.sourceDigest,
+      taskId: currentPacket.taskId,
+      moduleId: 'gameplay',
+    })
+    expect(Object.isFrozen(admitted)).toBe(true)
+  })
+
+  test('rejects relabeled or non-node-qualified Gameplay diagnostics', () => {
+    const currentPacket = packet()
+    for (const value of [
+      {
+        outcome: 'FAIL',
+        reasonCode: 'missing-projection',
+        actual: 'Missing.',
+        missingSubject: 'condition.can-jump#/value/expression',
+        expectedProjection: 'Condition.',
+        evidencePointers: [`section:docs/GDD.md#gameplay@${sectionDigest}`],
+      },
+      {
+        outcome: 'AMBIGUOUS',
+        reasonCode: 'missing-projection',
+        actual: 'Ambiguous.',
+        missingSubject: 'node:condition.can-jump#/value/expression',
+        expectedProjection: 'Condition.',
+        evidencePointers: [`section:docs/GDD.md#gameplay@${sectionDigest}`],
+      },
+      {
+        outcome: 'FAIL',
+        reasonCode: 'missing-projection',
+        actual: 'Missing.',
+        missingSubject: 'node:condition.can-jump#/value/expression',
+        expectedProjection: 'Condition.',
+        evidencePointers: [],
+      },
+      {
+        outcome: 'FAIL',
+        reasonCode: 'missing-projection',
+        actual: 'Missing.',
+        missingSubject: 'node:condition.can-jump#/value/expression',
+        expectedProjection: 'Condition.',
+        evidencePointers: [`section:docs/GDD.md#gameplay@${sectionDigest}`],
+        taskId: 'worker-task',
+      },
+    ])
+      expect(() => admitGameplaySemanticResult(currentPacket, value)).toThrow(
+        /diagnostic|subject|reason|outcome/i,
+      )
+  })
+
   test('builds a service-owned packet from source and mechanical receipt', () => {
     const value = packet()
     expect(value.moduleId).toBe('gameplay')
@@ -437,13 +460,20 @@ describe('Gameplay producer admission and assembler', () => {
   })
 
   test('rejects source claims outside exact Gameplay source scope and missing claims', () => {
+    const currentSource = source()
+    const currentMechanical = mechanical(currentSource)
     const outside = sourceClaims(gameplayNodes())
     outside[0]!.documentPath = 'docs/BALANCE_DESIGN.md'
+    const outsideReceipt = admitGameplaySemanticResult(
+      packetFor(currentSource),
+      resultValue({ sourceClaims: outside }),
+    )
     expect(() =>
-      admitGameplaySemanticResult(
-        packet(),
-        resultValue({ sourceClaims: outside }),
-      ),
+      prepareGameplayModule({
+        source: currentSource,
+        mechanical: currentMechanical,
+        semantic: outsideReceipt,
+      }),
     ).toThrow(/source|document|scope/i)
 
     const claims = sourceClaims(gameplayNodes()).slice(1)
@@ -455,42 +485,24 @@ describe('Gameplay producer admission and assembler', () => {
     ).toThrow(/claim|binding|complete|missing/i)
   })
 
-  test('assembles deterministically and rejects a DTO-valid but unreachable graph', () => {
+  test('prepares a deterministic, canonically ordered Core module', () => {
     const currentSource = source()
     const currentMechanical = mechanical(currentSource)
     const semantic = admittedSemantic()
-    const first = assembleGameplayModule({
+    const first = prepareGameplayModule({
       source: currentSource,
       mechanical: currentMechanical,
       semantic,
     })
-    const second = assembleGameplayModule({
+    const second = prepareGameplayModule({
       source: currentSource,
       mechanical: currentMechanical,
       semantic,
     })
-    expect(first.projectionDigest).toBe(second.projectionDigest)
+    expect(digestGameIrValue(first)).toBe(digestGameIrValue(second))
     expect(first.module.nodes.map(node => node.id)).toEqual(
       [...first.module.nodes.map(node => node.id)].sort(compareCodeUnits),
     )
-
-    const unreachableNodes = gameplayNodes().filter(
-      node => node.id !== 'transition.finish',
-    )
-    const unreachable = admitGameplaySemanticResult(
-      packet(),
-      resultValue({
-        nodes: unreachableNodes,
-        sourceClaims: sourceClaims(unreachableNodes),
-      }),
-    )
-    expect(() =>
-      assembleGameplayModule({
-        source: currentSource,
-        mechanical: currentMechanical,
-        semantic: unreachable,
-      }),
-    ).toThrow(/unreachable/i)
   })
 
   test('rejects stale semantic receipts and caller projection digests', () => {
@@ -498,14 +510,14 @@ describe('Gameplay producer admission and assembler', () => {
     const currentMechanical = mechanical(currentSource)
     const semantic = admittedSemantic()
     expect(() =>
-      assembleGameplayModule({
+      prepareGameplayModule({
         source: currentSource,
         mechanical: currentMechanical,
         semantic: { ...semantic, sourceDigest: 'b'.repeat(64) },
       }),
     ).toThrow(/source|stale|digest/i)
     expect(() =>
-      assembleGameplayModule({
+      prepareGameplayModule({
         source: currentSource,
         mechanical: currentMechanical,
         semantic,
@@ -569,26 +581,12 @@ describe('Gameplay producer admission and assembler', () => {
       resultValue({}, 'does-not-exist'),
     )
     expect(() =>
-      assembleGameplayModule({
+      prepareGameplayModule({
         source: currentSource,
         mechanical: mechanical(currentSource),
         semantic: invalidSection,
       }),
     ).toThrow(/exact Gameplay source sections/i)
-  })
-
-  test('rejects semantic ownership overlapping mechanical ownership', () => {
-    const currentSource = source()
-    const currentMechanical = mechanicalWithNode(currentSource, 'entity.player')
-    expect(() =>
-      admitGameplaySemanticResult(
-        buildGameplaySemanticPacket({
-          source: currentSource,
-          mechanical: currentMechanical,
-        }),
-        resultValue(),
-      ),
-    ).toThrow(/overlap/i)
   })
 
   test('rejects extra and missing source-target accounting with dedicated errors', () => {
@@ -626,32 +624,6 @@ describe('Gameplay producer admission and assembler', () => {
     ).toThrow(/exactly account for every semantic target/i)
   })
 
-  test('rejects duplicate IDs across mechanical and semantic receipts', () => {
-    const currentSource = source()
-    const currentMechanical = mechanicalWithNode(currentSource, 'entity.player')
-    const duplicatePacket = buildGameplaySemanticPacket({
-      source: currentSource,
-      mechanical: currentMechanical,
-    })
-    const admitted = admittedSemanticFor(currentSource)
-    const forgedBody = {
-      ...admitted,
-      mechanicalReceiptDigest: duplicatePacket.mechanicalReceiptDigest,
-      packetDigest: duplicatePacket.packetDigest,
-    }
-    const forged = {
-      ...forgedBody,
-      receiptDigest: digestGameIrValue(forgedBody),
-    } as GameIrDomainSemanticReceipt
-    expect(() =>
-      assembleGameplayModule({
-        source: currentSource,
-        mechanical: currentMechanical,
-        semantic: forged,
-      }),
-    ).toThrow(/overlap/i)
-  })
-
   test('canonicalizes differently ordered worker DTOs before signing', () => {
     const currentSource = source()
     const currentMechanical = mechanical(currentSource)
@@ -666,18 +638,18 @@ describe('Gameplay producer admission and assembler', () => {
     )
     expect(canonical(semantic)).toBe(canonical(reordered))
     expect(semantic.receiptDigest).toBe(reordered.receiptDigest)
-    const first = assembleGameplayModule({
+    const first = prepareGameplayModule({
       source: currentSource,
       mechanical: currentMechanical,
       semantic,
     })
-    const second = assembleGameplayModule({
+    const second = prepareGameplayModule({
       source: currentSource,
       mechanical: currentMechanical,
       semantic: reordered,
     })
     expect(canonical(first)).toBe(canonical(second))
-    expect(first.projectionDigest).toBe(second.projectionDigest)
+    expect(digestGameIrValue(first)).toBe(digestGameIrValue(second))
   })
 
   test('rejects a post-sign receipt reorder even when its digest is retained', () => {
@@ -690,7 +662,7 @@ describe('Gameplay producer admission and assembler', () => {
       receiptDigest: semantic.receiptDigest,
     }
     expect(() =>
-      assembleGameplayModule({
+      prepareGameplayModule({
         source: currentSource,
         mechanical: currentMechanical,
         semantic: reordered,
@@ -745,12 +717,12 @@ describe('Gameplay producer admission and assembler', () => {
       return currentSource.sectionIndex.map(section => {
         const currentMechanical = mechanical(currentSource)
         const semantic = admittedSemanticFor(currentSource, section.sectionId)
-        const first = assembleGameplayModule({
+        const first = prepareGameplayModule({
           source: currentSource,
           mechanical: currentMechanical,
           semantic,
         })
-        const second = assembleGameplayModule({
+        const second = prepareGameplayModule({
           source: currentSource,
           mechanical: currentMechanical,
           semantic,
@@ -759,7 +731,7 @@ describe('Gameplay producer admission and assembler', () => {
           digestGameIrValue(second.module),
         )
         expect(canonical(first)).toBe(canonical(second))
-        expect(first.projectionDigest).toBe(second.projectionDigest)
+        expect(digestGameIrValue(first)).toBe(digestGameIrValue(second))
         return first
       })
     })
@@ -771,9 +743,9 @@ describe('Gameplay producer admission and assembler', () => {
       projections[1]!.map(projection => digestGameIrValue(projection.module)),
     )
     expect(
-      projections[0]!.map(projection => projection.projectionDigest),
+      projections[0]!.map(projection => digestGameIrValue(projection)),
     ).not.toEqual(
-      projections[1]!.map(projection => projection.projectionDigest),
+      projections[1]!.map(projection => digestGameIrValue(projection)),
     )
   })
 })

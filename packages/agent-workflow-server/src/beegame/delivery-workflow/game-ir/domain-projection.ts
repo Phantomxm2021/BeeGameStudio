@@ -1,9 +1,15 @@
 import {
   compareCodeUnits,
   digestGameIrValue,
-  parseGameIrModuleCandidate,
+  parseGameIrTargetPointer,
   type GameIrNode,
 } from './model'
+import {
+  GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES,
+  GAME_IR_SEMANTIC_FAILURE_REASON_CODES,
+  type GameIrSemanticAmbiguousReasonCode,
+  type GameIrSemanticFailureReasonCode,
+} from './semantic-admission'
 import {
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainId,
@@ -39,6 +45,25 @@ export type GameIrDomainSemanticPacket = Readonly<{
   allowedRelationshipTypes: readonly string[]
   forbiddenTargets: readonly string[]
   packetDigest: string
+}>
+
+export type GameIrDomainSemanticDiagnostic = Readonly<{
+  schemaVersion: 'game-ir-domain-semantic-diagnostic.v1'
+  outcome: 'FAIL' | 'AMBIGUOUS'
+  taskId: string
+  moduleId: GameIrDomainId
+  foundationRevision: string
+  sourceDigest: string
+  mechanicalReceiptDigest: string
+  packetDigest: string
+  reasonCode:
+    | Extract<GameIrSemanticFailureReasonCode, 'missing-projection'>
+    | GameIrSemanticAmbiguousReasonCode
+  actual: string
+  missingSubject: string
+  expectedProjection: string
+  evidencePointers: readonly string[]
+  diagnosticDigest: string
 }>
 
 type MechanicalReceiptInput = Readonly<{
@@ -137,57 +162,11 @@ function deepFreeze<T>(value: T): T {
   return value
 }
 
-function normalizeNodes(
-  value: unknown,
-  source: GameIrDomainSourceEnvelope,
-): readonly GameIrNode[] {
-  const raw = strictArray(value, 'nodes')
-  const parsed = parseGameIrModuleCandidate(
-    { moduleId: source.moduleId, nodes: raw },
-    {
-      request: source.compileRequest,
-      sections: source.authoritySectionIndex,
-      expectedModuleId: source.moduleId,
-    },
-  )
-  if (parsed.nodes.some(node => node.producerMode !== 'mechanical'))
-    fail('nodes must be mechanically produced')
-  return Object.freeze(parsed.nodes.map(node => deepFreeze(node)))
-}
-
 type VerifiedClaim = Readonly<{
   subject: string
   sourcePointer: string
   literal: string
 }>
-
-function normalizeClaims(value: unknown): readonly VerifiedClaim[] {
-  const raw = strictArray(value, 'verifiedClaims')
-  const claims = raw.map((entry, index) => {
-    if (!isRecord(entry))
-      fail(`verifiedClaims[${index}] must be a plain object`)
-    exactKeys(
-      entry,
-      ['subject', 'sourcePointer', 'literal'],
-      `verifiedClaims[${index}]`,
-    )
-    return {
-      subject: text(entry.subject, `verifiedClaims[${index}].subject`),
-      sourcePointer: text(
-        entry.sourcePointer,
-        `verifiedClaims[${index}].sourcePointer`,
-      ),
-      literal: text(entry.literal, `verifiedClaims[${index}].literal`),
-    }
-  })
-  for (let index = 1; index < claims.length; index += 1) {
-    const previous = `${claims[index - 1]!.subject}\0${claims[index - 1]!.sourcePointer}\0${claims[index - 1]!.literal}`
-    const current = `${claims[index]!.subject}\0${claims[index]!.sourcePointer}\0${claims[index]!.literal}`
-    if (compareCodeUnits(previous, current) >= 0)
-      fail('verifiedClaims must be unique and sorted')
-  }
-  return Object.freeze(claims.map(claim => Object.freeze(claim)))
-}
 
 function normalizeTargets(value: unknown, label: string): readonly string[] {
   const raw = strictArray(value, label)
@@ -197,6 +176,87 @@ function normalizeTargets(value: unknown, label: string): readonly string[] {
       fail(`${label} must be unique and sorted`)
   }
   return Object.freeze([...targets])
+}
+
+function canonicalDiagnosticSubject(value: unknown): string {
+  const subject = text(value, 'semantic diagnostic missingSubject')
+  const separator = subject.indexOf('#')
+  if (!subject.startsWith('node:') || separator <= 'node:'.length)
+    fail('semantic diagnostic missingSubject must be node-qualified')
+  const nodeId = subject.slice('node:'.length, separator)
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(nodeId))
+    fail('semantic diagnostic missingSubject has an invalid node ID')
+  const pointerText = subject.slice(separator + 1)
+  let pointer: string
+  try {
+    pointer = parseGameIrTargetPointer(pointerText)
+  } catch {
+    fail('semantic diagnostic missingSubject has an invalid target pointer')
+  }
+  if (pointer !== pointerText)
+    fail('semantic diagnostic missingSubject is not canonical')
+  return `node:${nodeId}#${pointer}`
+}
+
+export function admitGameIrDomainSemanticDiagnostic(
+  packet: GameIrDomainSemanticPacket,
+  value: unknown,
+): GameIrDomainSemanticDiagnostic {
+  if (!isRecord(value)) fail('semantic diagnostic must be a plain object')
+  exactKeys(
+    value,
+    [
+      'outcome',
+      'reasonCode',
+      'actual',
+      'missingSubject',
+      'expectedProjection',
+      'evidencePointers',
+    ],
+    'semantic diagnostic',
+  )
+  const outcome = value.outcome
+  const reasonCode = value.reasonCode
+  let admittedReasonCode: GameIrDomainSemanticDiagnostic['reasonCode']
+  if (outcome === 'FAIL') {
+    if (reasonCode !== GAME_IR_SEMANTIC_FAILURE_REASON_CODES[1])
+      fail('semantic diagnostic outcome and reasonCode do not match')
+    admittedReasonCode = reasonCode
+  } else if (outcome === 'AMBIGUOUS') {
+    if (reasonCode !== GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES[0])
+      fail('semantic diagnostic outcome and reasonCode do not match')
+    admittedReasonCode = reasonCode
+  } else {
+    fail('semantic diagnostic outcome and reasonCode do not match')
+  }
+  const evidencePointers = normalizeTargets(
+    value.evidencePointers,
+    'semantic diagnostic evidencePointers',
+  )
+  if (evidencePointers.length === 0)
+    fail('semantic diagnostic evidencePointers must not be empty')
+  const body: Omit<GameIrDomainSemanticDiagnostic, 'diagnosticDigest'> = {
+    schemaVersion: 'game-ir-domain-semantic-diagnostic.v1',
+    outcome,
+    taskId: packet.taskId,
+    moduleId: packet.moduleId,
+    foundationRevision: packet.foundationRevision,
+    sourceDigest: packet.sourceDigest,
+    mechanicalReceiptDigest: packet.mechanicalReceiptDigest,
+    packetDigest: packet.packetDigest,
+    reasonCode: admittedReasonCode,
+    actual: text(value.actual, 'semantic diagnostic actual'),
+    missingSubject: canonicalDiagnosticSubject(value.missingSubject),
+    expectedProjection: text(
+      value.expectedProjection,
+      'semantic diagnostic expectedProjection',
+    ),
+    evidencePointers,
+  }
+  return deepFreeze({
+    ...body,
+    diagnosticDigest: digestGameIrValue(body),
+  })
 }
 
 function mechanicalNodeTargets(
@@ -230,14 +290,12 @@ function receiptBody(
 }
 
 export function admitGameIrMechanicalProjectionReceipt(
-  sourceOrInput: GameIrDomainSourceEnvelope | MechanicalReceiptInput,
-  value?: unknown,
+  input: MechanicalReceiptInput,
 ): GameIrMechanicalProjectionReceipt {
-  const source =
-    'source' in sourceOrInput ? sourceOrInput.source : sourceOrInput
-  const raw = 'source' in sourceOrInput ? sourceOrInput.receipt : value
-  if (raw === undefined) fail('mechanical receipt is required')
-  const validatedSource = validateGameIrDomainSourceEnvelope(source)
+  if (!isRecord(input)) fail('mechanical receipt input must be a plain object')
+  exactKeys(input, ['source', 'receipt'], 'mechanical receipt input')
+  const validatedSource = validateGameIrDomainSourceEnvelope(input.source)
+  const raw = input.receipt
   if (!isRecord(raw)) fail('mechanical receipt must be a plain object')
   exactKeys(
     raw,
@@ -278,8 +336,14 @@ export function admitGameIrMechanicalProjectionReceipt(
   )
   if (sourceDigest !== validatedSource.sourceDigest)
     fail('mechanical receipt sourceDigest does not match source')
-  const nodes = normalizeNodes(raw.nodes, validatedSource)
-  const verifiedClaims = normalizeClaims(raw.verifiedClaims)
+  const rawNodes = strictArray(raw.nodes, 'nodes')
+  const rawClaims = strictArray(raw.verifiedClaims, 'verifiedClaims')
+  if (rawNodes.length !== 0 || rawClaims.length !== 0)
+    fail(
+      'Gameplay and Balance mechanical nodes and verifiedClaims must be empty in Phase 4',
+    )
+  const nodes = Object.freeze([]) as readonly GameIrNode[]
+  const verifiedClaims = Object.freeze([]) as readonly VerifiedClaim[]
   const ownedTargets = normalizeTargets(raw.ownedTargets, 'ownedTargets')
   const expectedTargets = mechanicalNodeTargets(nodes)
   if (
@@ -319,41 +383,25 @@ export function assertDisjointDomainTargets(
 
 export function buildGameIrDomainSemanticPacket(
   input: SemanticPacketInput,
-): GameIrDomainSemanticPacket
-export function buildGameIrDomainSemanticPacket(
-  source: GameIrDomainSourceEnvelope,
-  mechanical: GameIrMechanicalProjectionReceipt,
-): GameIrDomainSemanticPacket
-export function buildGameIrDomainSemanticPacket(
-  inputOrSource: SemanticPacketInput | GameIrDomainSourceEnvelope,
-  mechanicalArgument?: GameIrMechanicalProjectionReceipt,
 ): GameIrDomainSemanticPacket {
-  const input: SemanticPacketInput =
-    mechanicalArgument === undefined
-      ? (inputOrSource as SemanticPacketInput)
-      : {
-          source: inputOrSource as GameIrDomainSourceEnvelope,
-          mechanical: mechanicalArgument,
-        }
   if (!isRecord(input)) fail('semantic packet input must be a plain object')
-  const inputKeys = Reflect.ownKeys(input)
-  for (const key of inputKeys) {
-    if (typeof key !== 'string')
-      fail('semantic packet input has a symbol property')
-  }
-  const allowedKeys = new Set([
-    'source',
-    'mechanical',
-    'allowedNodeKinds',
-    'allowedRelationshipTypes',
-  ])
-  if (inputKeys.some(key => typeof key === 'string' && !allowedKeys.has(key)))
-    fail('semantic packet input has unknown fields')
-  const source = validateGameIrDomainSourceEnvelope(input.source)
-  const mechanical = admitGameIrMechanicalProjectionReceipt(
-    source,
-    input.mechanical,
+  exactKeys(
+    input,
+    [
+      'source',
+      'mechanical',
+      ...(Object.hasOwn(input, 'allowedNodeKinds') ? ['allowedNodeKinds'] : []),
+      ...(Object.hasOwn(input, 'allowedRelationshipTypes')
+        ? ['allowedRelationshipTypes']
+        : []),
+    ],
+    'semantic packet input',
   )
+  const source = validateGameIrDomainSourceEnvelope(input.source)
+  const mechanical = admitGameIrMechanicalProjectionReceipt({
+    source,
+    receipt: input.mechanical,
+  })
   const body: Omit<GameIrDomainSemanticPacket, 'packetDigest'> = {
     schemaVersion: 'game-ir-domain-semantic-packet.v1',
     taskId: source.taskId,

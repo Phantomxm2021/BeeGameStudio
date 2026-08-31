@@ -23,6 +23,7 @@ const TASK_7_PHASE4_PRODUCTION_FILES = [
   'balance-schema.ts',
   'gameplay-producer.ts',
   'balance-producer.ts',
+  'gameplay-balance-assembler.ts',
 ] as const
 
 function task7IsolationViolations(source: string): string[] {
@@ -46,6 +47,17 @@ function task7IsolationViolations(source: string): string[] {
     'resource-realization',
     'implementation-verification',
   ])
+  const containsProvider = (expression: ts.Expression): boolean => {
+    if (ts.isIdentifier(expression)) return expression.text === 'provider'
+    if (ts.isPropertyAccessExpression(expression))
+      return (
+        expression.name.text === 'provider' ||
+        containsProvider(expression.expression)
+      )
+    if (ts.isElementAccessExpression(expression))
+      return containsProvider(expression.expression)
+    return false
+  }
   const visit = (node: ts.Node): void => {
     if (
       ts.isImportDeclaration(node) &&
@@ -73,13 +85,24 @@ function task7IsolationViolations(source: string): string[] {
       forbiddenApis.has(node.expression.text)
     )
       violations.add(`api-call: ${node.expression.text}`)
-    if (
-      ts.isPropertyAccessExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === 'provider' &&
-      node.name.text === 'dispatch'
-    )
-      violations.add('provider-dispatch: provider.dispatch')
+    if (ts.isCallExpression(node)) {
+      const expression = node.expression
+      const calledName = ts.isPropertyAccessExpression(expression)
+        ? expression.name.text
+        : ts.isElementAccessExpression(expression) &&
+            ts.isStringLiteral(expression.argumentExpression)
+          ? expression.argumentExpression.text
+          : undefined
+      if (calledName && forbiddenApis.has(calledName))
+        violations.add(`api-call: ${calledName}`)
+      const receiver =
+        ts.isPropertyAccessExpression(expression) ||
+        ts.isElementAccessExpression(expression)
+          ? expression.expression
+          : undefined
+      if (calledName === 'dispatch' && receiver && containsProvider(receiver))
+        violations.add('provider-dispatch: provider dispatch call')
+    }
     if (
       ts.isIdentifier(node) &&
       (node.text === 'DeliveryRun' || node.text === 'FoundationIssue')
@@ -235,6 +258,10 @@ describe('Game IR stage boundary', () => {
       prepareGameIrPublication(input)
       commitGameIrPublication(input)
       const result = provider.dispatch(input)
+      const namespaced = runtime.provider.dispatch(input)
+      const computed = provider['dispatch'](input)
+      const candidate = compiler.parseGameIrCandidate(input)
+      const publication = compiler['prepareGameIrPublication'](input)
       const modules = [
         { moduleId: 'core' },
         { moduleId: 'world-scene' },
@@ -249,6 +276,10 @@ describe('Game IR stage boundary', () => {
       void DeliveryRun
       void FoundationIssue
       void result
+      void namespaced
+      void computed
+      void candidate
+      void publication
       void modules
     `
     expect(task7IsolationViolations(synthetic)).toEqual([
@@ -267,7 +298,7 @@ describe('Game IR stage boundary', () => {
       'placeholder-module: presentation',
       'placeholder-module: resource-realization',
       'placeholder-module: world-scene',
-      'provider-dispatch: provider.dispatch',
+      'provider-dispatch: provider dispatch call',
     ])
     expect(
       task7IsolationViolations(`
@@ -281,6 +312,17 @@ describe('Game IR stage boundary', () => {
       task7IsolationViolations(`
         const vocabulary = "parseGameIrCandidate prepareGameIrPublication commitGameIrPublication controller store run-store delivery-run foundation-issue-registry DeliveryRun FoundationIssue provider.dispatch core world-scene presentation resource-realization implementation-verification"
         void vocabulary
+      `),
+    ).toEqual([])
+    expect(
+      task7IsolationViolations(`
+        const provider = { dispatch: handler }
+        const dispatch = provider.dispatch
+        const unrelated = service.dispatch(input)
+        const computed = provider['other'](input)
+        void dispatch
+        void unrelated
+        void computed
       `),
     ).toEqual([])
   })

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { GameIrModuleCandidate, GameIrNode } from './model'
 import {
-  BALANCE_RELATIONSHIP_ROLES,
+  BALANCE_DOMAIN_MANIFEST,
   parseBalanceModule,
   type BalanceFormulaExpression,
 } from './balance-schema'
@@ -313,6 +313,28 @@ function nodeById(module: GameIrModuleCandidate, id: string): MutableNode {
 }
 
 describe('Balance Game IR schema', () => {
+  const valueGuard = {
+    'duplicate dimensions': /duplicate dimension/i,
+    'unsorted dimensions': /sorted by base/i,
+    'non-integer exponent': /exponent.*integer/i,
+    'zero denominator': /denominator/i,
+    'non-finite value': /baseline.*finite/i,
+    'lower bound above upper bound': /minimum cannot exceed maximum/i,
+    'baseline outside bounds': /baseline is above maximum/i,
+    'missing unit reference': /unit.*reference.*range|exactly one unit/i,
+    'wrong unit reference': /unit reference must target balance\.unit/i,
+    'unknown value field': /unknown or missing fields/i,
+  } as const
+  const formulaGuard = {
+    'dangling formula reference': /unknown node missing/i,
+    'dependency cycle': /cycle/i,
+    'AST/reference mismatch': /reference index is out of range/i,
+    'add dimension mismatch': /dimension mismatch/i,
+    'output unit mismatch': /output unit/i,
+    'proven zero-literal division': /proven zero literal/i,
+    'caller-supplied dependency summary': /unknown or missing fields/i,
+  } as const
+
   test('accepts the complete balance fixture and freezes normalized output', () => {
     const parsed = parseBalanceModule(validBalanceModule(), gameplayTargets())
     expect(parsed.moduleId).toBe('balance')
@@ -324,11 +346,13 @@ describe('Balance Game IR schema', () => {
 
   test('exposes the closed relationship role manifest', () => {
     expect(
-      BALANCE_RELATIONSHIP_ROLES['balance.economy-source'].amount.targetKinds,
+      BALANCE_DOMAIN_MANIFEST['balance.economy-source'].relationships.amount
+        .targetKinds,
     ).toEqual(['balance.variable', 'balance.formula'])
     expect(
-      BALANCE_RELATIONSHIP_ROLES['balance.reward-cost-binding']['triggered-by']
-        .targetKinds,
+      BALANCE_DOMAIN_MANIFEST['balance.reward-cost-binding'].relationships[
+        'triggered-by'
+      ].targetKinds,
     ).toEqual(['gameplay.action', 'gameplay.event'])
   })
 
@@ -409,8 +433,8 @@ describe('Balance Game IR schema', () => {
   ])('rejects %s', (_name, mutate) => {
     const module = cloneModule()
     mutate(module)
-    expect(() => parseBalanceModule(module)).toThrow(
-      /balance|unit|dimension|bound|finite/i,
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(
+      valueGuard[_name as keyof typeof valueGuard],
     )
   })
 
@@ -429,6 +453,7 @@ describe('Balance Game IR schema', () => {
         formula.references[1] = ref('balance.formula.math', 'balance.formula')
         formula.edges = [
           edge('depends-on', 'balance.formula.math', 'balance.formula'),
+          edge('depends-on', 'balance.rate', 'balance.parameter'),
         ]
       },
     ],
@@ -446,18 +471,15 @@ describe('Balance Game IR schema', () => {
       (module: GameIrModuleCandidate) => {
         const formula = nodeById(module, 'balance.formula.math')
         formula.references[2] = ref('balance.hp', 'balance.variable')
+        formula.edges[0] = edge('depends-on', 'balance.hp', 'balance.variable')
       },
     ],
     [
       'output unit mismatch',
       (module: GameIrModuleCandidate) => {
-        nodeById(
-          module,
-          'balance.formula.math',
-        ).value.outputUnitReferenceIndex = 1
-        nodeById(module, 'balance.formula.math').references.push(
-          ref('balance.unit.hp', 'balance.unit'),
-        )
+        const formula = nodeById(module, 'balance.formula.math')
+        formula.references.push(ref('balance.unit.hp', 'balance.unit'))
+        formula.value.outputUnitReferenceIndex = 3
       },
     ],
     [
@@ -483,8 +505,8 @@ describe('Balance Game IR schema', () => {
   ])('rejects %s', (_name, mutate) => {
     const module = cloneModule()
     mutate(module)
-    expect(() => parseBalanceModule(module)).toThrow(
-      /formula|reference|cycle|unit|zero|depend/i,
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(
+      formulaGuard[_name as keyof typeof formulaGuard],
     )
   })
 

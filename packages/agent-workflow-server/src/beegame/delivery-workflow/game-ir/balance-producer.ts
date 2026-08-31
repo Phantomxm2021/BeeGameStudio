@@ -1,43 +1,39 @@
 import {
   admitGameIrMechanicalProjectionReceipt,
+  admitGameIrDomainSemanticDiagnostic,
   assertDisjointDomainTargets,
   buildGameIrDomainSemanticPacket,
   type GameIrDomainSemanticPacket,
+  type GameIrDomainSemanticDiagnostic,
   type GameIrMechanicalProjectionReceipt,
 } from './domain-projection'
 import {
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
-import {
-  BALANCE_RELATIONSHIP_ROLES,
-  parseBalanceModule,
-} from './balance-schema'
-import { parseGameplayModule } from './gameplay-schema'
+import { BALANCE_DOMAIN_MANIFEST } from './balance-schema'
 import {
   compareCodeUnits,
   digestGameIrValue,
   parseGameIrModuleCandidate,
   parseGameIrTargetPointer,
-  type GameIrSourceBinding,
   type GameIrModuleCandidate,
+  type GameIrSourceBinding,
   type GameIrNode,
 } from './model'
-import type { GameplayModuleProjection } from './gameplay-producer'
 
 const BALANCE_NODE_KINDS = Object.freeze(
-  Object.keys(BALANCE_RELATIONSHIP_ROLES).sort(compareCodeUnits),
+  Object.keys(BALANCE_DOMAIN_MANIFEST).sort(compareCodeUnits),
 )
 const BALANCE_RELATIONSHIP_TYPES = Object.freeze(
   [
     ...new Set(
-      Object.values(BALANCE_RELATIONSHIP_ROLES).flatMap(roles =>
-        Object.keys(roles),
+      Object.values(BALANCE_DOMAIN_MANIFEST).flatMap(node =>
+        Object.keys(node.relationships),
       ),
     ),
   ].sort(compareCodeUnits),
 )
-const BALANCE_DOCUMENTS = new Set(['docs/BALANCE_DESIGN.md', 'docs/GDD.md'])
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 type BalanceSemanticNode = Readonly<{
@@ -54,7 +50,7 @@ type BalanceSemanticNode = Readonly<{
 
 type BalanceSemanticClaim = Readonly<{
   subject: string
-  documentPath: 'docs/BALANCE_DESIGN.md' | 'docs/GDD.md'
+  documentPath: import('../types').FoundationDocumentPath
   sectionId: string
   sourcePointer: string
   literal: string
@@ -62,6 +58,7 @@ type BalanceSemanticClaim = Readonly<{
 
 export type GameIrDomainSemanticReceipt = Readonly<{
   schemaVersion: 'game-ir-domain-semantic-receipt.v1'
+  outcome: 'PROJECTED'
   taskId: string
   moduleId: 'balance'
   foundationRevision: string
@@ -74,14 +71,15 @@ export type GameIrDomainSemanticReceipt = Readonly<{
   receiptDigest: string
 }>
 
-export type BalanceModuleProjection = Readonly<{
-  schemaVersion: 'game-ir-balance-module.v1'
-  taskId: string
-  foundationRevision: string
+export type BalanceSemanticResult =
+  | GameIrDomainSemanticReceipt
+  | GameIrDomainSemanticDiagnostic
+
+export type BalanceModulePreparation = Readonly<{
+  source: GameIrDomainSourceEnvelope
   module: GameIrModuleCandidate & Readonly<{ moduleId: 'balance' }>
   mechanicalReceiptDigest: string
   semanticReceiptDigest: string
-  projectionDigest: string
 }>
 
 function fail(message: string): never {
@@ -263,9 +261,11 @@ function normalizeNode(value: unknown, index: number): BalanceSemanticNode {
         `nodes[${index}].edges[${edgeIndex}]`,
       )
       const type = text(entry.type, `nodes[${index}].edges[${edgeIndex}].type`)
-      const roles = BALANCE_RELATIONSHIP_ROLES[
-        kind as keyof typeof BALANCE_RELATIONSHIP_ROLES
-      ] as Readonly<Record<string, { targetKinds: readonly string[] }>>
+      const roles = BALANCE_DOMAIN_MANIFEST[
+        kind as keyof typeof BALANCE_DOMAIN_MANIFEST
+      ].relationships as Readonly<
+        Record<string, { targetKinds: readonly string[] }>
+      >
       const role = roles[type]
       if (!role)
         fail(`nodes[${index}] has an unknown Balance relationship role`)
@@ -436,8 +436,7 @@ function verifyClaimBytes(
       candidate.documentPath === claim.documentPath &&
       candidate.sectionId === claim.sectionId,
   )
-  if (!section || !BALANCE_DOCUMENTS.has(claim.documentPath))
-    fail(`Balance source claim lies outside exact source sections`)
+  if (!section) fail(`Balance source claim lies outside exact source sections`)
   const bytes = source.sectionBytes[`${claim.documentPath}#${claim.sectionId}`]
   if (bytes === undefined) fail('Balance source section bytes are missing')
   const range = byteRange(
@@ -493,9 +492,10 @@ function normalizeClaims(
     }
     if (pointer !== pointerText)
       fail(`sourceClaims[${index}].subject is not canonical`)
-    const documentPath = entry.documentPath
-    if (!BALANCE_DOCUMENTS.has(documentPath as string))
-      fail(`Balance source claims must lie in the Balance source closure`)
+    const documentPath = text(
+      entry.documentPath,
+      `sourceClaims[${index}].documentPath`,
+    ) as BalanceSemanticClaim['documentPath']
     const claim = Object.freeze({
       subject: `node:${nodeId}#${pointer}`,
       documentPath: documentPath as BalanceSemanticClaim['documentPath'],
@@ -616,10 +616,10 @@ export function buildBalanceSemanticPacket(input: {
   exactKeys(input, ['source', 'mechanical'], 'semantic packet input')
   const source = validateGameIrDomainSourceEnvelope(input.source)
   if (source.moduleId !== 'balance') fail('source moduleId must be balance')
-  const mechanical = admitGameIrMechanicalProjectionReceipt(
+  const mechanical = admitGameIrMechanicalProjectionReceipt({
     source,
-    input.mechanical,
-  )
+    receipt: input.mechanical,
+  })
   verifyMechanicalClaims(mechanical)
   return buildGameIrDomainSemanticPacket({
     source,
@@ -637,11 +637,30 @@ function receiptBody(
 
 export function admitBalanceSemanticResult(
   packet: GameIrDomainSemanticPacket,
+  value: Readonly<{ outcome: 'PROJECTED'; [key: string]: unknown }>,
+): GameIrDomainSemanticReceipt
+export function admitBalanceSemanticResult(
+  packet: GameIrDomainSemanticPacket,
+  value: Readonly<{
+    outcome: 'FAIL' | 'AMBIGUOUS'
+    [key: string]: unknown
+  }>,
+): GameIrDomainSemanticDiagnostic
+export function admitBalanceSemanticResult(
+  packet: GameIrDomainSemanticPacket,
   value: unknown,
-): GameIrDomainSemanticReceipt {
+): BalanceSemanticResult
+export function admitBalanceSemanticResult(
+  packet: GameIrDomainSemanticPacket,
+  value: unknown,
+): BalanceSemanticResult {
   const validatedPacket = validatePacket(packet)
   if (!isRecord(value)) fail('semantic result must be a plain object')
-  exactKeys(value, ['nodes', 'sourceClaims'], 'semantic result')
+  if (value.outcome === 'FAIL' || value.outcome === 'AMBIGUOUS')
+    return admitGameIrDomainSemanticDiagnostic(validatedPacket, value)
+  exactKeys(value, ['outcome', 'nodes', 'sourceClaims'], 'semantic result')
+  if (value.outcome !== 'PROJECTED')
+    fail('semantic result outcome must be PROJECTED, FAIL, or AMBIGUOUS')
   const nodes = Object.freeze(
     strictArray(value.nodes, 'nodes')
       .map((node, index) => normalizeNode(node, index))
@@ -661,6 +680,7 @@ export function admitBalanceSemanticResult(
   )
   const body: Omit<GameIrDomainSemanticReceipt, 'receiptDigest'> = {
     schemaVersion: 'game-ir-domain-semantic-receipt.v1',
+    outcome: 'PROJECTED',
     taskId: validatedPacket.taskId,
     moduleId: 'balance',
     foundationRevision: validatedPacket.foundationRevision,
@@ -690,6 +710,7 @@ function validateSemanticReceipt(
     receipt,
     [
       'schemaVersion',
+      'outcome',
       'taskId',
       'moduleId',
       'foundationRevision',
@@ -704,7 +725,8 @@ function validateSemanticReceipt(
   )
   if (
     receipt.schemaVersion !== 'game-ir-domain-semantic-receipt.v1' ||
-    receipt.moduleId !== 'balance'
+    receipt.moduleId !== 'balance' ||
+    receipt.outcome !== 'PROJECTED'
   )
     fail('semantic receipt schemaVersion or moduleId is invalid')
   if (
@@ -744,6 +766,7 @@ function validateSemanticReceipt(
   )
   const body: Omit<GameIrDomainSemanticReceipt, 'receiptDigest'> = {
     schemaVersion: receipt.schemaVersion,
+    outcome: 'PROJECTED',
     taskId: receipt.taskId,
     moduleId: 'balance',
     foundationRevision: receipt.foundationRevision,
@@ -757,53 +780,6 @@ function validateSemanticReceipt(
   if (receipt.receiptDigest !== digestGameIrValue(receiptBody(body)))
     fail('semantic receipt digest is stale or invalid')
   return Object.freeze({ ...body, receiptDigest: receipt.receiptDigest })
-}
-
-function gameplayTargets(
-  projection: GameplayModuleProjection,
-  source: GameIrDomainSourceEnvelope,
-  balanceTargets: ReadonlyMap<string, GameIrNode>,
-): ReadonlyMap<string, GameIrNode> {
-  if (!isRecord(projection)) fail('Gameplay projection must be a plain object')
-  exactKeys(
-    projection,
-    [
-      'schemaVersion',
-      'taskId',
-      'foundationRevision',
-      'module',
-      'mechanicalReceiptDigest',
-      'semanticReceiptDigest',
-      'projectionDigest',
-    ],
-    'Gameplay projection',
-  )
-  if (
-    projection.schemaVersion !== 'game-ir-gameplay-module.v1' ||
-    projection.taskId !== source.taskId ||
-    projection.foundationRevision !==
-      source.compileRequest.foundation.foundationRevision
-  )
-    fail('Gameplay projection identity is stale or relabeled')
-  sha256(projection.mechanicalReceiptDigest, 'Gameplay mechanicalReceiptDigest')
-  sha256(projection.semanticReceiptDigest, 'Gameplay semanticReceiptDigest')
-  const body = {
-    schemaVersion: projection.schemaVersion,
-    taskId: projection.taskId,
-    foundationRevision: projection.foundationRevision,
-    module: projection.module,
-    mechanicalReceiptDigest: projection.mechanicalReceiptDigest,
-    semanticReceiptDigest: projection.semanticReceiptDigest,
-  }
-  if (projection.projectionDigest !== digestGameIrValue(body))
-    fail('Gameplay projection digest is stale or invalid')
-  const module = parseGameIrModuleCandidate(projection.module, {
-    request: source.compileRequest,
-    sections: source.authoritySectionIndex,
-    expectedModuleId: 'gameplay',
-  })
-  const typedModule = parseGameplayModule(module, balanceTargets)
-  return new Map(typedModule.nodes.map(node => [node.id, node]))
 }
 
 function bindSemanticNodes(
@@ -832,7 +808,7 @@ function bindSemanticNodes(
       if (!claim)
         fail(`semantic source claim is missing for node:${node.id}#${pointer}`)
       const section = sections.get(`${claim.documentPath}#${claim.sectionId}`)
-      if (!section || !BALANCE_DOCUMENTS.has(claim.documentPath))
+      if (!section)
         fail('semantic source claim lies outside exact Balance source sections')
       bindings[pointer] = {
         kind: 'owner',
@@ -846,26 +822,23 @@ function bindSemanticNodes(
   })
 }
 
-export function assembleBalanceModule(input: {
+export function prepareBalanceModule(input: {
   source: GameIrDomainSourceEnvelope
   mechanical: GameIrMechanicalProjectionReceipt
   semantic: GameIrDomainSemanticReceipt
-  gameplay?: GameplayModuleProjection
-}): BalanceModuleProjection {
-  if (!isRecord(input)) fail('assembler input must be a plain object')
+}): BalanceModulePreparation {
+  if (!isRecord(input)) fail('module preparation input must be a plain object')
   exactKeys(
     input,
-    Object.hasOwn(input, 'gameplay')
-      ? ['source', 'mechanical', 'semantic', 'gameplay']
-      : ['source', 'mechanical', 'semantic'],
-    'assembler input',
+    ['source', 'mechanical', 'semantic'],
+    'module preparation input',
   )
   const source = validateGameIrDomainSourceEnvelope(input.source)
   if (source.moduleId !== 'balance') fail('source moduleId must be balance')
-  const mechanical = admitGameIrMechanicalProjectionReceipt(
+  const mechanical = admitGameIrMechanicalProjectionReceipt({
     source,
-    input.mechanical,
-  )
+    receipt: input.mechanical,
+  })
   verifyMechanicalClaims(mechanical)
   const packet = buildBalanceSemanticPacket({ source, mechanical })
   const semantic = validateSemanticReceipt(input.semantic, packet, source)
@@ -887,21 +860,11 @@ export function assembleBalanceModule(input: {
       expectedModuleId: 'balance',
     },
   )
-  const targets = input.gameplay
-    ? gameplayTargets(
-        input.gameplay,
-        source,
-        new Map(coreAdmitted.nodes.map(node => [node.id, node])),
-      )
-    : undefined
-  const module = parseBalanceModule(coreAdmitted, targets)
-  const body: Omit<BalanceModuleProjection, 'projectionDigest'> = {
-    schemaVersion: 'game-ir-balance-module.v1',
-    taskId: source.taskId,
-    foundationRevision: source.compileRequest.foundation.foundationRevision,
-    module: module as GameIrModuleCandidate & Readonly<{ moduleId: 'balance' }>,
+  return deepFreeze({
+    source,
+    module: coreAdmitted as GameIrModuleCandidate &
+      Readonly<{ moduleId: 'balance' }>,
     mechanicalReceiptDigest: mechanical.receiptDigest,
     semanticReceiptDigest: semantic.receiptDigest,
-  }
-  return deepFreeze({ ...body, projectionDigest: digestGameIrValue(body) })
+  })
 }

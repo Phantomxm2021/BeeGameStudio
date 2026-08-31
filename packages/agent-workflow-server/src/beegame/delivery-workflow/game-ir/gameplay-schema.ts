@@ -60,67 +60,76 @@ const role = (
     singleton: options.singleton === true,
   })
 
-/** Closed, service-owned relationship role and target-kind manifest. */
-export const GAMEPLAY_RELATIONSHIP_ROLES = Object.freeze({
+/** The single schema-owned authority for Gameplay kinds, values, and roles. */
+export const GAMEPLAY_DOMAIN_MANIFEST = Object.freeze({
+  'gameplay.entity': Object.freeze({
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({}),
+  }),
   'gameplay.capability': Object.freeze({
-    'belongs-to': role(['gameplay.entity'], {
-      required: true,
-      singleton: true,
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      'belongs-to': role(['gameplay.entity'], {
+        required: true,
+        singleton: true,
+      }),
     }),
   }),
   'gameplay.action': Object.freeze({
-    requires: role(['gameplay.condition'], { required: true }),
-    causes: role(['gameplay.effect', 'gameplay.event'], { required: true }),
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      requires: role(['gameplay.condition'], { required: true }),
+      causes: role(['gameplay.effect', 'gameplay.event'], { required: true }),
+    }),
   }),
   'gameplay.rule': Object.freeze({
-    'triggered-by': role(['gameplay.event'], {
-      required: true,
-      singleton: true,
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      'triggered-by': role(['gameplay.event'], {
+        required: true,
+        singleton: true,
+      }),
+      guards: role(['gameplay.condition'], { singleton: true }),
     }),
-    guards: role(['gameplay.condition'], { singleton: true }),
+  }),
+  'gameplay.condition': Object.freeze({
+    valueFields: Object.freeze(['expression']),
+    relationships: Object.freeze({}),
+  }),
+  'gameplay.effect': Object.freeze({
+    valueFields: Object.freeze(['effect']),
+    relationships: Object.freeze({}),
+  }),
+  'gameplay.event': Object.freeze({
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({}),
+  }),
+  'gameplay.state': Object.freeze({
+    valueFields: Object.freeze(['label', 'initial', 'terminal']),
+    relationships: Object.freeze({}),
   }),
   'gameplay.transition': Object.freeze({
-    from: role(['gameplay.state'], { required: true, singleton: true }),
-    to: role(['gameplay.state'], { required: true, singleton: true }),
-    on: role(['gameplay.event', 'gameplay.condition'], { singleton: true }),
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      from: role(['gameplay.state'], { required: true, singleton: true }),
+      to: role(['gameplay.state'], { required: true, singleton: true }),
+      on: role(['gameplay.event', 'gameplay.condition'], { singleton: true }),
+    }),
   }),
   'gameplay.objective': Object.freeze({
-    'succeeds-with': role(['gameplay.outcome'], { singleton: true }),
-    'fails-with': role(['gameplay.outcome'], { singleton: true }),
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      'succeeds-with': role(['gameplay.outcome'], { singleton: true }),
+      'fails-with': role(['gameplay.outcome'], { singleton: true }),
+    }),
+  }),
+  'gameplay.outcome': Object.freeze({
+    valueFields: Object.freeze(['label', 'result']),
+    relationships: Object.freeze({}),
   }),
 } as const)
 
-/** Alias kept explicit for consumers that only need singleton role rules. */
-export const GAMEPLAY_SINGLETON_ROLES = Object.freeze({
-  'gameplay.capability': Object.freeze({
-    'belongs-to': Object.freeze(['gameplay.entity']),
-  }),
-  'gameplay.transition': Object.freeze({
-    from: Object.freeze(['gameplay.state']),
-    to: Object.freeze(['gameplay.state']),
-    on: Object.freeze(['gameplay.event', 'gameplay.condition']),
-  }),
-  'gameplay.objective': Object.freeze({
-    'succeeds-with': Object.freeze(['gameplay.outcome']),
-    'fails-with': Object.freeze(['gameplay.outcome']),
-  }),
-} as const)
-
-const VALUE_FIELDS = Object.freeze({
-  'gameplay.entity': Object.freeze(['label']),
-  'gameplay.capability': Object.freeze(['label']),
-  'gameplay.action': Object.freeze(['label']),
-  'gameplay.rule': Object.freeze(['label']),
-  'gameplay.condition': Object.freeze(['expression']),
-  'gameplay.effect': Object.freeze(['effect']),
-  'gameplay.event': Object.freeze(['label']),
-  'gameplay.state': Object.freeze(['label', 'initial', 'terminal']),
-  'gameplay.transition': Object.freeze(['label']),
-  'gameplay.objective': Object.freeze(['label']),
-  'gameplay.outcome': Object.freeze(['label', 'result']),
-} as const)
-
-const NODE_KINDS = new Set(Object.keys(VALUE_FIELDS))
+const NODE_KINDS = new Set(Object.keys(GAMEPLAY_DOMAIN_MANIFEST))
 const OUTCOME_RESULTS = new Set(['win', 'loss', 'neutral'])
 const COMPARISON_OPERATORS = new Set(['eq', 'ne', 'lt', 'lte', 'gt', 'gte'])
 const EFFECT_OPERATIONS = new Set(['set', 'add', 'remove', 'emit'])
@@ -318,7 +327,9 @@ function label(value: RecordValue, nodeId: string): string {
 
 function parseValue(node: GameIrNode): Readonly<Record<string, unknown>> {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
-  const fields = VALUE_FIELDS[node.kind as keyof typeof VALUE_FIELDS]
+  const fields =
+    GAMEPLAY_DOMAIN_MANIFEST[node.kind as keyof typeof GAMEPLAY_DOMAIN_MANIFEST]
+      .valueFields
   exactKeys(node.value, fields, `node ${node.id} value`)
   if (fields.length === 1 && fields[0] === 'label')
     return { label: label(node.value, node.id) }
@@ -448,9 +459,11 @@ function validateRoles(
   node: GameIrNode,
   targets: ReadonlyMap<string, GameIrNode>,
 ): void {
-  const manifest = GAMEPLAY_RELATIONSHIP_ROLES[
-    node.kind as keyof typeof GAMEPLAY_RELATIONSHIP_ROLES
-  ] as Readonly<Record<string, GameplayRelationshipRole>> | undefined
+  const manifest = GAMEPLAY_DOMAIN_MANIFEST[
+    node.kind as keyof typeof GAMEPLAY_DOMAIN_MANIFEST
+  ]?.relationships as
+    | Readonly<Record<string, GameplayRelationshipRole>>
+    | undefined
   const counts = new Map<string, number>()
   const seenEdges = new Set<string>()
   for (const edge of node.edges) {

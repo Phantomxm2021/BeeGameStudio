@@ -14,6 +14,7 @@ import {
   type GameIrCompileRequest,
 } from './contracts'
 import {
+  GAMEPLAY_DOMAIN_MANIFEST,
   parseGameplayModule,
   type GameplayConditionExpression,
 } from './gameplay-schema'
@@ -292,6 +293,10 @@ function cloneModule(module: MutableModule): MutableModule {
   return structuredClone(module)
 }
 
+function nodeByGameplayId(module: MutableModule, id: string): MutableNode {
+  return module.nodes.find(candidate => candidate.id === id)!
+}
+
 function admittedModule(): GameIrModuleCandidate {
   return parseGameIrModuleCandidate(validModule(), {
     request: request(),
@@ -301,6 +306,16 @@ function admittedModule(): GameIrModuleCandidate {
 }
 
 describe('Gameplay Game IR schema', () => {
+  test('exposes one closed manifest for kinds, value fields, and roles', () => {
+    expect(GAMEPLAY_DOMAIN_MANIFEST['gameplay.condition'].valueFields).toEqual([
+      'expression',
+    ])
+    expect(
+      GAMEPLAY_DOMAIN_MANIFEST['gameplay.transition'].relationships.on
+        .targetKinds,
+    ).toEqual(['gameplay.event', 'gameplay.condition'])
+  })
+
   test('accepts the complete gameplay graph and freezes the result', () => {
     const parsed = parseGameplayModule(admittedModule())
     expect(parsed.moduleId).toBe('gameplay')
@@ -399,6 +414,82 @@ describe('Gameplay Game IR schema', () => {
       edges: [edge('belongs-to', 'state.start', 'gameplay.state')],
     }
     expect(() => parseGameplayModule(wrongEdge)).toThrow(/target|role/i)
+  })
+
+  test.each([
+    ['boolean', { kind: 'boolean', value: true }],
+    ['not', { kind: 'not', operand: { kind: 'boolean', value: false } }],
+    [
+      'all',
+      {
+        kind: 'all',
+        operands: [
+          { kind: 'boolean', value: true },
+          { kind: 'reference', referenceIndex: 0 },
+        ],
+      },
+    ],
+    [
+      'any',
+      {
+        kind: 'any',
+        operands: [
+          { kind: 'boolean', value: false },
+          { kind: 'reference', referenceIndex: 0 },
+        ],
+      },
+    ],
+    [
+      'literal/literal compare',
+      {
+        kind: 'compare',
+        operator: 'eq',
+        left: { kind: 'literal', value: 1 },
+        right: { kind: 'literal', value: 1 },
+      },
+    ],
+    [
+      'reference/literal compare',
+      {
+        kind: 'compare',
+        operator: 'gt',
+        left: { kind: 'reference', referenceIndex: 0 },
+        right: { kind: 'literal', value: 0 },
+      },
+    ],
+    [
+      'literal/reference compare',
+      {
+        kind: 'compare',
+        operator: 'lt',
+        left: { kind: 'literal', value: 0 },
+        right: { kind: 'reference', referenceIndex: 0 },
+      },
+    ],
+    [
+      'reference/reference compare',
+      {
+        kind: 'compare',
+        operator: 'ne',
+        left: { kind: 'reference', referenceIndex: 0 },
+        right: { kind: 'reference', referenceIndex: 0 },
+      },
+    ],
+  ] as const)('accepts the %s condition branch', (_name, expression) => {
+    const module = cloneModule(validModule())
+    nodeByGameplayId(module, 'condition.can-jump').value = { expression }
+    expect(() => parseGameplayModule(module)).not.toThrow()
+  })
+
+  test.each([
+    ['set', { operation: 'set', targetReferenceIndex: 0, value: true }],
+    ['add', { operation: 'add', targetReferenceIndex: 0, value: 1 }],
+    ['remove', { operation: 'remove', targetReferenceIndex: 0 }],
+    ['emit', { operation: 'emit', targetReferenceIndex: 0 }],
+  ] as const)('accepts the %s effect branch', (_name, effect) => {
+    const module = cloneModule(validModule())
+    nodeByGameplayId(module, 'effect.jump').value = { effect }
+    expect(() => parseGameplayModule(module)).not.toThrow()
   })
 
   test('rejects duplicate singleton roles and incomplete transitions', () => {

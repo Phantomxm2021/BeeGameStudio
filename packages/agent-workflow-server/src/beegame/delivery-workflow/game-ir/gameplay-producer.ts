@@ -1,18 +1,17 @@
 import {
   admitGameIrMechanicalProjectionReceipt,
+  admitGameIrDomainSemanticDiagnostic,
   assertDisjointDomainTargets,
   buildGameIrDomainSemanticPacket,
   type GameIrDomainSemanticPacket,
+  type GameIrDomainSemanticDiagnostic,
   type GameIrMechanicalProjectionReceipt,
 } from './domain-projection'
 import {
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
-import {
-  GAMEPLAY_RELATIONSHIP_ROLES,
-  parseGameplayModule,
-} from './gameplay-schema'
+import { GAMEPLAY_DOMAIN_MANIFEST } from './gameplay-schema'
 import {
   compareCodeUnits,
   digestGameIrValue,
@@ -21,26 +20,17 @@ import {
   type GameIrModuleCandidate,
   type GameIrNode,
 } from './model'
+import type { FoundationDocumentPath } from '../types'
 
-const GAMEPLAY_NODE_KINDS = Object.freeze([
-  'gameplay.action',
-  'gameplay.capability',
-  'gameplay.condition',
-  'gameplay.effect',
-  'gameplay.entity',
-  'gameplay.event',
-  'gameplay.objective',
-  'gameplay.outcome',
-  'gameplay.rule',
-  'gameplay.state',
-  'gameplay.transition',
-] as const)
+const GAMEPLAY_NODE_KINDS = Object.freeze(
+  Object.keys(GAMEPLAY_DOMAIN_MANIFEST).sort(compareCodeUnits),
+)
 
 const GAMEPLAY_RELATIONSHIP_TYPES = Object.freeze(
   [
     ...new Set(
-      Object.values(GAMEPLAY_RELATIONSHIP_ROLES).flatMap(roles =>
-        Object.keys(roles),
+      Object.values(GAMEPLAY_DOMAIN_MANIFEST).flatMap(node =>
+        Object.keys(node.relationships),
       ),
     ),
   ].sort(compareCodeUnits),
@@ -65,7 +55,7 @@ type GameplayAdmittedNode = GameplaySemanticNode &
 
 type GameplaySourceClaim = Readonly<{
   subject: string
-  documentPath: 'docs/GDD.md'
+  documentPath: FoundationDocumentPath
   sectionId: string
   sourcePointer: string
   literal: string
@@ -73,6 +63,7 @@ type GameplaySourceClaim = Readonly<{
 
 export type GameIrDomainSemanticReceipt = Readonly<{
   schemaVersion: 'game-ir-domain-semantic-receipt.v1'
+  outcome: 'PROJECTED'
   taskId: string
   moduleId: 'gameplay'
   foundationRevision: string
@@ -84,14 +75,15 @@ export type GameIrDomainSemanticReceipt = Readonly<{
   receiptDigest: string
 }>
 
-export type GameplayModuleProjection = Readonly<{
-  schemaVersion: 'game-ir-gameplay-module.v1'
-  taskId: string
-  foundationRevision: string
+export type GameplaySemanticResult =
+  | GameIrDomainSemanticReceipt
+  | GameIrDomainSemanticDiagnostic
+
+export type GameplayModulePreparation = Readonly<{
+  source: GameIrDomainSourceEnvelope
   module: GameIrModuleCandidate & Readonly<{ moduleId: 'gameplay' }>
   mechanicalReceiptDigest: string
   semanticReceiptDigest: string
-  projectionDigest: string
 }>
 
 function fail(message: string): never {
@@ -278,9 +270,9 @@ function normalizeNode(value: unknown, index: number): GameplaySemanticNode {
         `nodes[${index}].edges[${edgeIndex}]`,
       )
       const type = text(entry.type, `nodes[${index}].edges[${edgeIndex}].type`)
-      const roles = GAMEPLAY_RELATIONSHIP_ROLES[
-        kind as keyof typeof GAMEPLAY_RELATIONSHIP_ROLES
-      ] as
+      const roles = GAMEPLAY_DOMAIN_MANIFEST[
+        kind as keyof typeof GAMEPLAY_DOMAIN_MANIFEST
+      ]?.relationships as
         | Readonly<Record<string, { targetKinds: readonly string[] }>>
         | undefined
       const role = roles?.[type]
@@ -423,12 +415,13 @@ function normalizeClaims(
     }
     if (pointer !== pointerText)
       fail(`sourceClaims[${index}].subject is not canonical`)
-    const documentPath = entry.documentPath
-    if (documentPath !== 'docs/GDD.md')
-      fail('Gameplay source claims must lie in docs/GDD.md')
+    const documentPath = text(
+      entry.documentPath,
+      `sourceClaims[${index}].documentPath`,
+    ) as FoundationDocumentPath
     return Object.freeze({
       subject: `node:${nodeId}#${pointer}`,
-      documentPath: 'docs/GDD.md' as const,
+      documentPath,
       sectionId: safeId(entry.sectionId, `sourceClaims[${index}].sectionId`),
       sourcePointer: normalizeSourcePointer(
         entry.sourcePointer,
@@ -538,10 +531,10 @@ export function buildGameplaySemanticPacket(input: {
   exactKeys(input, ['source', 'mechanical'], 'semantic packet input')
   const source = validateGameIrDomainSourceEnvelope(input.source)
   if (source.moduleId !== 'gameplay') fail('source moduleId must be gameplay')
-  const mechanical = admitGameIrMechanicalProjectionReceipt(
+  const mechanical = admitGameIrMechanicalProjectionReceipt({
     source,
-    input.mechanical,
-  )
+    receipt: input.mechanical,
+  })
   return buildGameIrDomainSemanticPacket({
     source,
     mechanical,
@@ -558,11 +551,30 @@ function receiptBody(
 
 export function admitGameplaySemanticResult(
   packet: GameIrDomainSemanticPacket,
+  value: Readonly<{ outcome: 'PROJECTED'; [key: string]: unknown }>,
+): GameIrDomainSemanticReceipt
+export function admitGameplaySemanticResult(
+  packet: GameIrDomainSemanticPacket,
+  value: Readonly<{
+    outcome: 'FAIL' | 'AMBIGUOUS'
+    [key: string]: unknown
+  }>,
+): GameIrDomainSemanticDiagnostic
+export function admitGameplaySemanticResult(
+  packet: GameIrDomainSemanticPacket,
   value: unknown,
-): GameIrDomainSemanticReceipt {
+): GameplaySemanticResult
+export function admitGameplaySemanticResult(
+  packet: GameIrDomainSemanticPacket,
+  value: unknown,
+): GameplaySemanticResult {
   const validatedPacket = validatePacket(packet)
   if (!isRecord(value)) fail('semantic result must be a plain object')
-  exactKeys(value, ['nodes', 'sourceClaims'], 'semantic result')
+  if (value.outcome === 'FAIL' || value.outcome === 'AMBIGUOUS')
+    return admitGameIrDomainSemanticDiagnostic(validatedPacket, value)
+  exactKeys(value, ['outcome', 'nodes', 'sourceClaims'], 'semantic result')
+  if (value.outcome !== 'PROJECTED')
+    fail('semantic result outcome must be PROJECTED, FAIL, or AMBIGUOUS')
   const nodes = Object.freeze(
     strictArray(value.nodes, 'nodes')
       .map((node, index) => normalizeNode(node, index))
@@ -586,6 +598,7 @@ export function admitGameplaySemanticResult(
   )
   const body: Omit<GameIrDomainSemanticReceipt, 'receiptDigest'> = {
     schemaVersion: 'game-ir-domain-semantic-receipt.v1',
+    outcome: 'PROJECTED',
     taskId: validatedPacket.taskId,
     moduleId: 'gameplay',
     foundationRevision: validatedPacket.foundationRevision,
@@ -610,6 +623,7 @@ function validateSemanticReceipt(
     receipt,
     [
       'schemaVersion',
+      'outcome',
       'taskId',
       'moduleId',
       'foundationRevision',
@@ -624,6 +638,8 @@ function validateSemanticReceipt(
   )
   if (receipt.schemaVersion !== 'game-ir-domain-semantic-receipt.v1')
     fail('semantic receipt schemaVersion is invalid')
+  if (receipt.outcome !== 'PROJECTED')
+    fail('semantic receipt outcome is not PROJECTED')
   if (
     receipt.taskId !== packet.taskId ||
     receipt.moduleId !== 'gameplay' ||
@@ -659,6 +675,7 @@ function validateSemanticReceipt(
   )
   const body: Omit<GameIrDomainSemanticReceipt, 'receiptDigest'> = {
     schemaVersion: receipt.schemaVersion,
+    outcome: 'PROJECTED',
     taskId: receipt.taskId,
     moduleId: 'gameplay',
     foundationRevision: receipt.foundationRevision,
@@ -674,30 +691,23 @@ function validateSemanticReceipt(
   return Object.freeze({ ...body, receiptDigest: receipt.receiptDigest })
 }
 
-function assembleInputKeys(input: Record<string, unknown>): void {
-  exactKeys(
-    input,
-    Object.hasOwn(input, 'externalTargets')
-      ? ['source', 'mechanical', 'semantic', 'externalTargets']
-      : ['source', 'mechanical', 'semantic'],
-    'assembler input',
-  )
-}
-
-export function assembleGameplayModule(input: {
+export function prepareGameplayModule(input: {
   source: GameIrDomainSourceEnvelope
   mechanical: GameIrMechanicalProjectionReceipt
   semantic: GameIrDomainSemanticReceipt
-  externalTargets?: ReadonlyMap<string, GameIrNode>
-}): GameplayModuleProjection {
-  if (!isRecord(input)) fail('assembler input must be a plain object')
-  assembleInputKeys(input)
+}): GameplayModulePreparation {
+  if (!isRecord(input)) fail('module preparation input must be a plain object')
+  exactKeys(
+    input,
+    ['source', 'mechanical', 'semantic'],
+    'module preparation input',
+  )
   const source = validateGameIrDomainSourceEnvelope(input.source)
   if (source.moduleId !== 'gameplay') fail('source moduleId must be gameplay')
-  const mechanical = admitGameIrMechanicalProjectionReceipt(
+  const mechanical = admitGameIrMechanicalProjectionReceipt({
     source,
-    input.mechanical,
-  )
+    receipt: input.mechanical,
+  })
   const packet = buildGameplaySemanticPacket({ source, mechanical })
   const semantic = validateSemanticReceipt(input.semantic, packet)
   const sourceSections = new Map(
@@ -725,7 +735,7 @@ export function assembleGameplayModule(input: {
       const section = sourceSections.get(
         `${claim.documentPath}#${claim.sectionId}`,
       )
-      if (!section || claim.documentPath !== 'docs/GDD.md')
+      if (!section)
         fail(
           `semantic source claim lies outside exact Gameplay source sections`,
         )
@@ -765,18 +775,11 @@ export function assembleGameplayModule(input: {
       expectedModuleId: 'gameplay',
     },
   )
-  const module = parseGameplayModule(coreAdmitted, input.externalTargets)
-  const projectionBody: Omit<GameplayModuleProjection, 'projectionDigest'> = {
-    schemaVersion: 'game-ir-gameplay-module.v1',
-    taskId: source.taskId,
-    foundationRevision: source.compileRequest.foundation.foundationRevision,
-    module: module as GameIrModuleCandidate &
+  return Object.freeze({
+    source,
+    module: coreAdmitted as GameIrModuleCandidate &
       Readonly<{ moduleId: 'gameplay' }>,
     mechanicalReceiptDigest: mechanical.receiptDigest,
     semanticReceiptDigest: semantic.receiptDigest,
-  }
-  return Object.freeze({
-    ...projectionBody,
-    projectionDigest: digestGameIrValue(projectionBody),
   })
 }

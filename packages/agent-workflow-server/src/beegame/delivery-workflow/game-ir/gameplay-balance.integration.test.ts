@@ -7,14 +7,13 @@ import {
 import { buildGameIrDomainSourceEnvelope } from './domain-source'
 import {
   admitGameplaySemanticResult,
-  assembleGameplayModule,
   buildGameplaySemanticPacket,
 } from './gameplay-producer'
 import {
   admitBalanceSemanticResult,
-  assembleBalanceModule,
   buildBalanceSemanticPacket,
 } from './balance-producer'
+import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
@@ -50,7 +49,13 @@ function balanceBytes(): string {
   return output
 }
 
-function readyRequest(): GameIrCompileRequest {
+function readyRequest(
+  overrides: Readonly<{
+    taskId?: string
+    foundationRevision?: string
+    reviewDigest?: string
+  }> = {},
+): GameIrCompileRequest {
   const documentDigests = Object.fromEntries(
     CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, sha256(path)]),
   ) as Record<FoundationDocumentPath, string>
@@ -82,20 +87,20 @@ function readyRequest(): GameIrCompileRequest {
   const foundationBody: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
     schemaVersion: 'foundation-ready-receipt.v1',
     projectId: 'phase-4-gate',
-    foundationRevision: 'foundation-ready-1',
+    foundationRevision: overrides.foundationRevision ?? 'foundation-ready-1',
     confirmedBriefDigest: sha256('brief'),
     documentDigests,
     sectionIndexPath: '.beegame/foundation/section-index.json',
     sectionIndexDigest: digestSectionIndex(fullIndex),
     authority: {
       kind: 'review',
-      reviewDigest: sha256('review'),
+      reviewDigest: overrides.reviewDigest ?? sha256('review'),
       issueRegistryDigest: sha256('issues'),
     },
   }
   return {
     schemaVersion: 'game-ir-compile-request.v1',
-    taskId: 'phase-4-gate-task',
+    taskId: overrides.taskId ?? 'phase-4-gate-task',
     publicationId: 'phase-4-gate-publication',
     gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
     foundation: {
@@ -105,8 +110,7 @@ function readyRequest(): GameIrCompileRequest {
   }
 }
 
-function sourcePair() {
-  const request = readyRequest()
+function sourcePair(request = readyRequest()) {
   const fullIndex = canonicalizeGameIrSourceSections(
     CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
       documentPath,
@@ -164,9 +168,12 @@ function emptyMechanical(
     verifiedClaims: [],
     ownedTargets: [],
   }
-  return admitGameIrMechanicalProjectionReceipt(source, {
-    ...body,
-    receiptDigest: digestGameIrValue(body),
+  return admitGameIrMechanicalProjectionReceipt({
+    source,
+    receipt: {
+      ...body,
+      receiptDigest: digestGameIrValue(body),
+    },
   })
 }
 
@@ -454,6 +461,47 @@ function balanceClaims() {
   )
 }
 
+function pairInputs(
+  sources = sourcePair(),
+  overrides: Readonly<{
+    gameplayNodes?: readonly Record<string, unknown>[]
+    balanceNodes?: readonly Record<string, unknown>[]
+  }> = {},
+) {
+  const gameplayMechanical = emptyMechanical(sources.gameplay)
+  const balanceMechanical = emptyMechanical(sources.balance)
+  const gameplayPacket = buildGameplaySemanticPacket({
+    source: sources.gameplay,
+    mechanical: gameplayMechanical,
+  })
+  const balancePacket = buildBalanceSemanticPacket({
+    source: sources.balance,
+    mechanical: balanceMechanical,
+  })
+  const gameplaySemantic = admitGameplaySemanticResult(gameplayPacket, {
+    outcome: 'PROJECTED',
+    nodes: overrides.gameplayNodes ?? gameplayNodes,
+    sourceClaims: gameplayClaims(),
+  })
+  const balanceSemantic = admitBalanceSemanticResult(balancePacket, {
+    outcome: 'PROJECTED',
+    nodes: overrides.balanceNodes ?? balanceNodes,
+    sourceClaims: balanceClaims(),
+  })
+  return {
+    gameplay: {
+      source: sources.gameplay,
+      mechanical: gameplayMechanical,
+      semantic: gameplaySemantic,
+    },
+    balance: {
+      source: sources.balance,
+      mechanical: balanceMechanical,
+      semantic: balanceSemantic,
+    },
+  }
+}
+
 describe('Phase 4 Gameplay and Balance cross-domain completion gate', () => {
   test('builds a deterministic pair from one READY authority and closes typed references in both directions', () => {
     const first = sourcePair()
@@ -467,74 +515,21 @@ describe('Phase 4 Gameplay and Balance cross-domain completion gate', () => {
     expect(first.gameplay.sourceDigest).toBe(second.gameplay.sourceDigest)
     expect(first.balance.sourceDigest).toBe(second.balance.sourceDigest)
 
-    const gameplayMechanical = emptyMechanical(first.gameplay)
-    const gameplayPacket = buildGameplaySemanticPacket({
-      source: first.gameplay,
-      mechanical: gameplayMechanical,
-    })
-    const gameplaySemantic = admitGameplaySemanticResult(gameplayPacket, {
-      nodes: gameplayNodes,
-      sourceClaims: gameplayClaims(),
-    })
-    const balanceTargets = new Map([
-      [
-        'balance.player-hp',
-        {
-          id: 'balance.player-hp',
-          kind: 'balance.variable',
-          value: { label: 'Player HP', baseline: 100, unitReferenceIndex: 0 },
-          references: [
-            { targetId: 'balance.unit.hp', targetType: 'balance.unit' },
-          ],
-          edges: [],
-          bindings: {},
-          producerMode: 'semantic' as const,
-        },
-      ],
-    ])
-    const gameplay = assembleGameplayModule({
-      source: first.gameplay,
-      mechanical: gameplayMechanical,
-      semantic: gameplaySemantic,
-      externalTargets: balanceTargets,
-    })
-
-    const balanceMechanical = emptyMechanical(first.balance)
-    const balancePacket = buildBalanceSemanticPacket({
-      source: first.balance,
-      mechanical: balanceMechanical,
-    })
-    const balanceSemantic = admitBalanceSemanticResult(balancePacket, {
-      nodes: balanceNodes,
-      sourceClaims: balanceClaims(),
-    })
-    const balance = assembleBalanceModule({
-      source: first.balance,
-      mechanical: balanceMechanical,
-      semantic: balanceSemantic,
-      gameplay,
-    })
-    const boundGameplay = assembleGameplayModule({
-      source: first.gameplay,
-      mechanical: gameplayMechanical,
-      semantic: gameplaySemantic,
-      externalTargets: new Map(
-        balance.module.nodes.map(node => [node.id, node]),
-      ),
-    })
-    const boundBalance = assembleBalanceModule({
-      source: first.balance,
-      mechanical: balanceMechanical,
-      semantic: balanceSemantic,
-      gameplay: boundGameplay,
-    })
-    expect(boundGameplay.projectionDigest).toBe(gameplay.projectionDigest)
-    expect(boundBalance.projectionDigest).toBe(balance.projectionDigest)
+    const inputs = pairInputs(first)
+    const pair = assembleGameplayBalanceModules(inputs)
+    const { gameplay, balance } = pair
     expect(() =>
-      admitGameplaySemanticResult(gameplayPacket, {
-        nodes: [{ ...gameplayNodes[0], kind: 'world-scene.entity' }],
-        sourceClaims: [],
-      }),
+      admitGameplaySemanticResult(
+        buildGameplaySemanticPacket({
+          source: inputs.gameplay.source,
+          mechanical: inputs.gameplay.mechanical,
+        }),
+        {
+          outcome: 'PROJECTED',
+          nodes: [{ ...gameplayNodes[0], kind: 'world-scene.entity' }],
+          sourceClaims: [],
+        },
+      ),
     ).toThrow(/unknown Gameplay kind/)
     expect(
       gameplay.module.nodes.find(node => node.id === 'condition.has-health')
@@ -546,49 +541,127 @@ describe('Phase 4 Gameplay and Balance cross-domain completion gate', () => {
         ?.edges.at(-1)?.targetType,
     ).toBe('gameplay.action')
 
-    const repeatGameplay = assembleGameplayModule({
-      source: first.gameplay,
-      mechanical: gameplayMechanical,
-      semantic: gameplaySemantic,
-      externalTargets: balanceTargets,
-    })
-    const repeatBalance = assembleBalanceModule({
-      source: first.balance,
-      mechanical: balanceMechanical,
-      semantic: balanceSemantic,
-      gameplay,
-    })
-    expect(gameplay.projectionDigest).toBe(repeatGameplay.projectionDigest)
-    expect(balance.projectionDigest).toBe(repeatBalance.projectionDigest)
+    const repeat = assembleGameplayBalanceModules(inputs)
+    expect(gameplay.projectionDigest).toBe(repeat.gameplay.projectionDigest)
+    expect(balance.projectionDigest).toBe(repeat.balance.projectionDigest)
 
     expect(() =>
-      assembleGameplayModule({
-        source: first.gameplay,
-        mechanical: gameplayMechanical,
-        semantic: gameplaySemantic,
-        externalTargets: new Map([
-          ['balance.player-hp', { ...gameplay.module.nodes[0]! }],
-        ]),
-      }),
-    ).toThrow(/external target/)
-    expect(() =>
-      assembleBalanceModule({
-        source: first.balance,
-        mechanical: balanceMechanical,
-        semantic: balanceSemantic,
-        gameplay: { ...gameplay, taskId: 'stale-task' },
-      }),
-    ).toThrow(/stale or relabeled/)
-    expect(() =>
-      assembleBalanceModule({
-        source: first.balance,
-        mechanical: balanceMechanical,
-        semantic: balanceSemantic,
+      (assembleGameplayBalanceModules as (...args: unknown[]) => unknown)({
         gameplay: {
-          ...gameplay,
-          module: { ...gameplay.module, moduleId: 'balance' as 'gameplay' },
+          source: first.gameplay,
+          mechanical: inputs.gameplay.mechanical,
+          semantic: inputs.gameplay.semantic,
+        },
+        balance: new Map([['balance.player-hp', balance.module.nodes[0]!]]),
+      }),
+    ).toThrow(/balance|input|plain object|field/i)
+    expect(() =>
+      assembleGameplayBalanceModules({
+        gameplay: {
+          source: first.gameplay,
+          mechanical: inputs.gameplay.mechanical,
+          semantic: inputs.gameplay.semantic,
+        },
+        balance: {
+          source: { ...first.balance, taskId: 'stale-task' },
+          mechanical: inputs.balance.mechanical,
+          semantic: inputs.balance.semantic,
         },
       }),
-    ).toThrow(/stale or relabeled|module ID|digest/)
+    ).toThrow(/task|stale|identity|source/i)
+    expect(() =>
+      assembleGameplayBalanceModules({
+        gameplay: {
+          source: first.gameplay,
+          mechanical: inputs.gameplay.mechanical,
+          semantic: inputs.gameplay.semantic,
+        },
+        balance: {
+          source: sourcePair().balance,
+          mechanical: inputs.balance.mechanical,
+          semantic: { ...inputs.balance.semantic, taskId: 'stale-task' },
+        },
+      }),
+    ).toThrow(/stale|identity|task|receipt/i)
+  })
+
+  test('revalidates both typed maps and one exact task, revision, and READY identity on every call', () => {
+    const baseline = pairInputs()
+    const otherTask = pairInputs(
+      sourcePair(readyRequest({ taskId: 'other-task' })),
+    )
+    expect(() =>
+      assembleGameplayBalanceModules({
+        gameplay: baseline.gameplay,
+        balance: otherTask.balance,
+      }),
+    ).toThrow(/same taskId|task/i)
+
+    const otherRevision = pairInputs(
+      sourcePair(readyRequest({ foundationRevision: 'other-revision' })),
+    )
+    expect(() =>
+      assembleGameplayBalanceModules({
+        gameplay: baseline.gameplay,
+        balance: otherRevision.balance,
+      }),
+    ).toThrow(/Foundation revision|revision/i)
+
+    const otherReady = pairInputs(
+      sourcePair(readyRequest({ reviewDigest: sha256('other-review') })),
+    )
+    expect(() =>
+      assembleGameplayBalanceModules({
+        gameplay: baseline.gameplay,
+        balance: otherReady.balance,
+      }),
+    ).toThrow(/READY source identity/i)
+
+    const wrongGameplayNodes = gameplayNodes.map(node => ({
+      ...node,
+      references: node.references.map(reference =>
+        reference.targetId === 'balance.player-hp'
+          ? { ...reference, targetType: 'balance.parameter' }
+          : reference,
+      ),
+      edges: node.edges.map(edge => ({ ...edge })),
+    }))
+    expect(() =>
+      assembleGameplayBalanceModules(
+        pairInputs(sourcePair(), { gameplayNodes: wrongGameplayNodes }),
+      ),
+    ).toThrow(/kind|target|reference/i)
+
+    const wrongBalanceNodes = balanceNodes.map(node => ({
+      ...node,
+      references: node.references.map(reference =>
+        reference.targetId === 'action.finish'
+          ? { ...reference, targetType: 'gameplay.event' }
+          : reference,
+      ),
+      edges: node.edges.map(edge =>
+        edge.targetId === 'action.finish'
+          ? { ...edge, targetType: 'gameplay.event' }
+          : edge,
+      ),
+    }))
+    expect(() =>
+      assembleGameplayBalanceModules(
+        pairInputs(sourcePair(), { balanceNodes: wrongBalanceNodes }),
+      ),
+    ).toThrow(/kind|target|reference/i)
+
+    expect(() =>
+      assembleGameplayBalanceModules({
+        ...baseline,
+        gameplay: {
+          ...baseline.gameplay,
+          semantic: {
+            ...baseline.gameplay.semantic,
+            nodes: [...baseline.gameplay.semantic.nodes].reverse(),
+          },
+        },
+      }),
+    ).toThrow(/canonical|receipt|digest/i)
   })
 })

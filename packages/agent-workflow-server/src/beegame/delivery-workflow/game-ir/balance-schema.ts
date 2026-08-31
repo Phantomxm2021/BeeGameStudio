@@ -48,104 +48,90 @@ const role = (
     singleton: options.singleton === true,
   })
 
-/** Closed, service-owned Balance relationship role and target-kind manifest. */
-export const BALANCE_RELATIONSHIP_ROLES = Object.freeze({
-  'balance.unit': Object.freeze({}),
-  'balance.variable': Object.freeze({}),
-  'balance.parameter': Object.freeze({}),
+/** The single schema-owned authority for Balance kinds, values, and roles. */
+export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
+  'balance.unit': Object.freeze({
+    valueFields: Object.freeze(['symbol', 'dimensions', 'scale']),
+    relationships: Object.freeze({}),
+  }),
+  'balance.variable': Object.freeze({
+    valueFields: Object.freeze(['label', 'baseline', 'unitReferenceIndex']),
+    relationships: Object.freeze({}),
+  }),
+  'balance.parameter': Object.freeze({
+    valueFields: Object.freeze(['label', 'baseline', 'unitReferenceIndex']),
+    relationships: Object.freeze({}),
+  }),
   'balance.formula': Object.freeze({
-    'depends-on': role([
-      'balance.variable',
-      'balance.parameter',
-      'balance.formula',
+    valueFields: Object.freeze([
+      'label',
+      'expression',
+      'outputUnitReferenceIndex',
     ]),
+    relationships: Object.freeze({
+      'depends-on': role([
+        'balance.variable',
+        'balance.parameter',
+        'balance.formula',
+      ]),
+    }),
   }),
   'balance.economy-source': Object.freeze({
-    amount: role(['balance.variable', 'balance.formula'], {
-      required: true,
-      singleton: true,
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      amount: role(['balance.variable', 'balance.formula'], {
+        required: true,
+        singleton: true,
+      }),
+      unit: role(['balance.unit'], { required: true, singleton: true }),
     }),
-    unit: role(['balance.unit'], { required: true, singleton: true }),
   }),
   'balance.economy-sink': Object.freeze({
-    amount: role(['balance.variable', 'balance.formula'], {
-      required: true,
-      singleton: true,
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      amount: role(['balance.variable', 'balance.formula'], {
+        required: true,
+        singleton: true,
+      }),
+      unit: role(['balance.unit'], { required: true, singleton: true }),
     }),
-    unit: role(['balance.unit'], { required: true, singleton: true }),
   }),
-  'balance.progression-curve': Object.freeze({}),
+  'balance.progression-curve': Object.freeze({
+    valueFields: Object.freeze(['label', 'points']),
+    relationships: Object.freeze({}),
+  }),
   'balance.reward': Object.freeze({
-    amount: role(['balance.variable', 'balance.formula'], {
-      required: true,
-      singleton: true,
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      amount: role(['balance.variable', 'balance.formula'], {
+        required: true,
+        singleton: true,
+      }),
     }),
   }),
   'balance.cost': Object.freeze({
-    amount: role(['balance.variable', 'balance.formula'], {
-      required: true,
-      singleton: true,
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      amount: role(['balance.variable', 'balance.formula'], {
+        required: true,
+        singleton: true,
+      }),
     }),
   }),
   'balance.reward-cost-binding': Object.freeze({
-    reward: role(['balance.reward'], { required: true, singleton: true }),
-    cost: role(['balance.cost'], { required: true, singleton: true }),
-    'triggered-by': role(['gameplay.action', 'gameplay.event'], {
-      required: true,
-      singleton: true,
+    valueFields: Object.freeze(['label']),
+    relationships: Object.freeze({
+      reward: role(['balance.reward'], { required: true, singleton: true }),
+      cost: role(['balance.cost'], { required: true, singleton: true }),
+      'triggered-by': role(['gameplay.action', 'gameplay.event'], {
+        required: true,
+        singleton: true,
+      }),
     }),
   }),
 } as const)
 
-/** Alias for consumers that only need the singleton role target contract. */
-export const BALANCE_SINGLETON_ROLES = Object.freeze({
-  'balance.economy-source': Object.freeze({
-    amount: Object.freeze(['balance.variable', 'balance.formula']),
-    unit: Object.freeze(['balance.unit']),
-  }),
-  'balance.economy-sink': Object.freeze({
-    amount: Object.freeze(['balance.variable', 'balance.formula']),
-    unit: Object.freeze(['balance.unit']),
-  }),
-  'balance.reward': Object.freeze({
-    amount: Object.freeze(['balance.variable', 'balance.formula']),
-  }),
-  'balance.cost': Object.freeze({
-    amount: Object.freeze(['balance.variable', 'balance.formula']),
-  }),
-  'balance.reward-cost-binding': Object.freeze({
-    reward: Object.freeze(['balance.reward']),
-    cost: Object.freeze(['balance.cost']),
-    'triggered-by': Object.freeze(['gameplay.action', 'gameplay.event']),
-  }),
-} as const)
-
-const VALUE_FIELDS = Object.freeze({
-  'balance.unit': Object.freeze(['symbol', 'dimensions', 'scale']),
-  'balance.variable': Object.freeze([
-    'label',
-    'baseline',
-    'unitReferenceIndex',
-  ]),
-  'balance.parameter': Object.freeze([
-    'label',
-    'baseline',
-    'unitReferenceIndex',
-  ]),
-  'balance.formula': Object.freeze([
-    'label',
-    'expression',
-    'outputUnitReferenceIndex',
-  ]),
-  'balance.economy-source': Object.freeze(['label']),
-  'balance.economy-sink': Object.freeze(['label']),
-  'balance.progression-curve': Object.freeze(['label', 'points']),
-  'balance.reward': Object.freeze(['label']),
-  'balance.cost': Object.freeze(['label']),
-  'balance.reward-cost-binding': Object.freeze(['label']),
-} as const)
-
-const NODE_KINDS = new Set(Object.keys(VALUE_FIELDS))
+const NODE_KINDS = new Set(Object.keys(BALANCE_DOMAIN_MANIFEST))
 const FORMULA_OPERATORS = new Set([
   'add',
   'subtract',
@@ -430,9 +416,11 @@ function validateRoles(
   node: GameIrNode,
   targets: ReadonlyMap<string, GameIrNode>,
 ): void {
-  const manifest = BALANCE_RELATIONSHIP_ROLES[
-    node.kind as keyof typeof BALANCE_RELATIONSHIP_ROLES
-  ] as Readonly<Record<string, BalanceRelationshipRole>> | undefined
+  const manifest = BALANCE_DOMAIN_MANIFEST[
+    node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST
+  ]?.relationships as
+    | Readonly<Record<string, BalanceRelationshipRole>>
+    | undefined
   if (!manifest) fail(`node ${node.id} has an unknown kind`)
   const counts = new Map<string, number>()
   const seenEdges = new Set<string>()
@@ -488,7 +476,9 @@ function parseVariableValue(
 ): Readonly<Record<string, unknown>> {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
   const fields = [
-    ...VALUE_FIELDS[node.kind as 'balance.variable' | 'balance.parameter'],
+    ...BALANCE_DOMAIN_MANIFEST[
+      node.kind as 'balance.variable' | 'balance.parameter'
+    ].valueFields,
   ]
   if (Object.hasOwn(node.value, 'minimum')) fields.push('minimum')
   if (Object.hasOwn(node.value, 'maximum')) fields.push('maximum')
@@ -531,7 +521,7 @@ function parseFormulaValue(node: GameIrNode): {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
   exactKeys(
     node.value,
-    VALUE_FIELDS['balance.formula'],
+    BALANCE_DOMAIN_MANIFEST['balance.formula'].valueFields,
     `node ${node.id} value`,
   )
   const usedReferences = new Set<number>()
@@ -588,7 +578,11 @@ function parseValue(node: GameIrNode): {
 } {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
   if (node.kind === 'balance.unit') {
-    exactKeys(node.value, VALUE_FIELDS['balance.unit'], `node ${node.id} value`)
+    exactKeys(
+      node.value,
+      BALANCE_DOMAIN_MANIFEST['balance.unit'].valueFields,
+      `node ${node.id} value`,
+    )
     return {
       value: parseUnit(
         node.value,
@@ -609,7 +603,7 @@ function parseValue(node: GameIrNode): {
   if (node.kind === 'balance.progression-curve') {
     exactKeys(
       node.value,
-      VALUE_FIELDS['balance.progression-curve'],
+      BALANCE_DOMAIN_MANIFEST['balance.progression-curve'].valueFields,
       `node ${node.id} value`,
     )
     return {
@@ -619,7 +613,9 @@ function parseValue(node: GameIrNode): {
       },
     }
   }
-  const fields = VALUE_FIELDS[node.kind as keyof typeof VALUE_FIELDS]
+  const fields =
+    BALANCE_DOMAIN_MANIFEST[node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST]
+      .valueFields
   if (!fields) fail(`node ${node.id} has an unknown kind`)
   exactKeys(node.value, fields, `node ${node.id} value`)
   return { value: { label: text(node.value.label, `node ${node.id} label`) } }

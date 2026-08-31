@@ -1,6 +1,6 @@
 # Game IR Phase 4: Gameplay and Balance Design
 
-Status: implemented; automated verification complete; independent Task 7 review clean; Phase 4 accepted
+Status: final root-cause correction implemented and verified; independent final re-review pending
 
 ## Goal
 
@@ -28,11 +28,12 @@ The following rules are non-negotiable:
   manifest.
 - Balance reads only the receipt-bound GDD and Balance sections declared by its
   source manifest.
-- Mechanical and semantic producers own disjoint target fields.
+- Phase 4 Gameplay and Balance mechanical receipts own no nodes or verified
+  claims; semantic receipts own every domain node.
 - Neither producer may fall back to an old IR, another producer's output, prose
   defaults, project-specific keywords, or a best-effort interpretation.
-- A service-owned assembler is the only writer of the final Gameplay or Balance
-  module projection.
+- One service-owned Gameplay–Balance pair assembler is the only writer of both
+  final module projections.
 - A module projection is not a `GameIrCandidate`. The complete candidate remains
   unavailable until all seven canonical modules exist.
 - No token, duration, attempt, node, formula, transition, or file count is a
@@ -40,12 +41,13 @@ The following rules are non-negotiable:
 
 ## Alternatives considered
 
-### Selected: explicit schemas, two producer passes, one assembler
+### Selected: explicit schemas, strict producer receipts, one pair assembler
 
 Gameplay and Balance receive explicit domain DTOs and invariant validators.
-Mechanical extraction owns only canonical machine-readable material. Semantic
-projection owns the declared semantic structures. The service validates both
-receipts and assembles one module.
+Phase 4 has no declared mechanical Gameplay or Balance roles, so mechanical
+receipts are strictly empty. Semantic projection owns the declared domain
+structures. One service validates both domains together and signs both complete
+module projections only after bidirectional typed closure succeeds.
 
 This is the smallest design that produces executable semantics while preserving
 the existing single authority model.
@@ -130,33 +132,24 @@ its own evidence scope.
 
 ### Mechanical pass
 
-The mechanical pass is a pure parser. It may read explicit canonical IDs,
-enums, numbers, ranges, and paths only when the current Foundation format
-unambiguously declares their machine roles.
+The current Phase 4 source formats declare no Gameplay or Balance mechanical
+roles. Both domains therefore require `nodes`, `verifiedClaims`, and
+`ownedTargets` to be empty. Non-empty mechanical output is unauthorized and is
+rejected before semantic packet construction.
 
 The current `variable-parameter-table` contract declares required semantic
 content but not fixed column names. Phase 4 must not guess column roles from
-aliases, column position, or regex. A complete variable record is therefore
-semantic-owned unless the source format itself declares unambiguous row roles.
-After semantic admission, the service mechanically reparses every claimed ID,
-number, range, unit text, and source cell from exact table bytes. Balance claims
-are exact `/bytes/<start>/<end>` ranges into the selected Balance source bytes;
-admission checks both the semantic literal and the UTF-8 byte slice. Verification
-does not become a second writer. Under the current non-fixed table contract the
-Balance mechanical output is intentionally empty; variables, formula AST,
-economy/progression/reward/cost relationships remain semantic-owned. Empty
-mechanical output is the current policy, not a fallback or partial projection.
+aliases, column position, or regex. A complete variable record is
+semantic-owned. After semantic admission, the service reparses every claimed
+ID, number, range, unit text, and source cell from exact table bytes. Balance
+claims are exact `/bytes/<start>/<end>` ranges into selected Balance source
+bytes; admission checks both the semantic literal and the UTF-8 byte slice.
+This is evidence admission, not a second mechanical writer.
 
-Phase 4 does not treat arbitrary prose, headings, Mermaid labels, or a number
-found by regex as mechanical authority. Gameplay and Balance therefore permit
-an empty mechanical node set. This is complete accounting, not a fallback:
-semantic ownership is fixed before dispatch and is never selected because
-mechanical parsing failed.
-
-Mechanical output is a strict receipt containing complete ordered accounting,
-normalized mechanical nodes (possibly empty), verified literal claims, source
-bindings, source envelope digest, and receipt digest. Duplicate IDs, invalid
-units, ambiguous ownership, and partially verified claims fail closed.
+Phase 4 does not treat arbitrary prose, headings, Mermaid labels, or numbers
+found by regex as mechanical authority. Semantic ownership is fixed before
+dispatch and is never selected because a mechanical parser failed. The strict
+empty mechanical receipt binds source-envelope and receipt digests only.
 
 ### Semantic pass
 
@@ -170,10 +163,13 @@ and admitted mechanical receipt. It declares:
 - the fields semantic projection owns;
 - the fields semantic projection is forbidden to write.
 
-The semantic result contains strict domain records and source claims. The
-service injects task, module, revision, producer mode, and canonical binding
-identity. Worker-supplied authority, digest, fallback node, arbitrary JSON
-field, or mechanical target is rejected.
+The semantic result is a strict discriminated union. `PROJECTED` contains
+domain records and source claims. `FAIL/missing-projection` and
+`AMBIGUOUS/ambiguous-projection` contain packet-bound, node-qualified
+diagnostics with exact evidence pointers. The service injects task, module,
+revision, producer mode, and canonical binding identity. Worker-supplied
+authority, digest, fallback node, arbitrary JSON field, or mechanical target is
+rejected.
 
 An unresolved mapping returns `missing-projection` or
 `ambiguous-projection` with the existing node-qualified target subject and
@@ -186,7 +182,6 @@ For Phase 4 the ownership table is fixed:
 | Domain target | Producer |
 | --- | --- |
 | Balance variable/parameter record under the current non-fixed table header contract | semantic, followed by mechanical literal verification |
-| Future fields with explicit canonical machine roles in their Foundation format | mechanical |
 | Gameplay behavior and graph semantics | semantic |
 | Balance formula AST and dependency semantics | semantic |
 | Balance economy, progression, reward and cost relationships | semantic |
@@ -413,16 +408,16 @@ represented until their own phases exist.
 
 ## Module assembler
 
-`assembleGameplayModule` and `assembleBalanceModule` are pure functions. Each:
+`assembleGameplayBalanceModules` is the sole final projection authority. On
+every invocation it:
 
-1. reparses the source envelope and both producer receipts;
-2. verifies task, revision, module, source, and digest identity;
-3. proves complete and disjoint target accounting;
-4. merges nodes in canonical order;
-5. recomputes derived bindings and graph summaries;
-6. runs domain invariants;
-7. runs the existing Core module/candidate-compatible validation;
-8. returns a frozen projection and canonical digest.
+1. reparses both source envelopes and all four mechanical/semantic receipts;
+2. Core-admits both complete local node maps;
+3. requires one task, Foundation revision, full compile request, READY receipt,
+   and complete authority Section Index identity;
+4. constructs both opposite-domain target maps from those Core-admitted modules;
+5. typed-validates Gameplay and Balance together;
+6. signs and returns both frozen projections and canonical digests.
 
 No caller can provide merged nodes, derived fields, graph summaries, or a final
 projection digest.
@@ -455,16 +450,18 @@ Planned production files under `delivery-workflow/game-ir/`:
 - `gameplay-schema.ts`: Gameplay DTOs and invariant validator.
 - `balance-schema.ts`: Balance DTOs, formula/unit inference, and validator.
 - `gameplay-producer.ts`: mechanical accounting, semantic packet/result
-  admission, and Gameplay assembler.
+  admission, and source-bound Core preparation.
 - `balance-producer.ts`: semantic variable-record admission, exact source-literal
-  mechanical reverification, and Balance assembler.
+  reverification, and source-bound Core preparation.
+- `gameplay-balance-assembler.ts`: sole bidirectional typed validation and final
+  projection authority for the Gameplay–Balance pair.
 - `domain-projection.ts`: shared producer receipt identity and disjoint-accounting
   helpers only where both domains truly use identical logic.
 
 Dependency direction is:
 
 ```text
-contracts -> model -> domain source/schema -> domain producer -> future complete assembler
+contracts -> model -> domain source/schema -> domain producer -> Gameplay-Balance pair assembler
 ```
 
 Domain files may import Core contracts/model utilities. Core contracts and the
@@ -481,6 +478,8 @@ No new dependency is required.
 - canonical ordering and digest replay;
 - stale Foundation revision, receipt, Section Index, and source bytes rejection;
 - mechanical/semantic target overlap rejection;
+- non-empty Gameplay or Balance mechanical nodes/claims rejection;
+- strict missing/ambiguous diagnostic identity and node qualification;
 - no partial candidate or placeholder module API.
 
 ### Gameplay tests
@@ -511,6 +510,8 @@ No new dependency is required.
 - reward/cost binds to a real Gameplay action/event;
 - gameplay condition can read a typed Balance variable/formula;
 - target kind mismatch and missing cross-module target fail closed;
+- mixed task, revision, READY receipt, or full request identity fails closed;
+- a raw opposite-domain `ReadonlyMap` is not an assembly input;
 - producer output cannot write another domain's node;
 - two different complete Foundation fixtures produce valid, distinct projections;
 - zero-resource fixture remains valid because resource modules are outside this
@@ -526,8 +527,9 @@ No new dependency is required.
 
 ## Acceptance gate
 
-Phase 4 is accepted: the independent Task 7 review is clean, and the following
-completion-gate conditions are satisfied:
+Phase 4 root-cause correction is implemented and automated verification is
+complete. Independent final re-review remains pending. Review approval requires
+all of the following completion-gate conditions:
 
 - Gameplay and Balance schemas cover every capability listed in the authority
   document;
@@ -545,10 +547,11 @@ completion-gate conditions are satisfied:
 Chrome acceptance remains deferred until every canonical domain module and the
 single consumer cutover are complete.
 
-Automated Phase 4 implementation and verification are complete, and the
-independent Task 7 review is clean. This acceptance covers only the isolated
-Gameplay and Balance projections. Complete candidate publication, production
-routing, or Chrome acceptance remain unavailable.
+The prior Phase 4 approval was withdrawn after final review found unresolved
+authority, diagnostic, manifest, and test-isolation defects. The correction is
+implemented and verified; independent final re-review remains pending.
+Complete candidate publication, production routing, or Chrome acceptance remain
+unavailable.
 Phase 5–9 remain unstarted.
 
 ## Explicit non-goals

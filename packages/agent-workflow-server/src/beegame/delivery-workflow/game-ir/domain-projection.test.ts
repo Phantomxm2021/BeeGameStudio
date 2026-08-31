@@ -56,7 +56,9 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function source(): GameIrDomainSourceEnvelope {
+function source(
+  moduleId: 'gameplay' | 'balance' = 'balance',
+): GameIrDomainSourceEnvelope {
   const bytes = 'bytes'
   const sectionIndex: readonly GameIrSourceSection[] =
     CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
@@ -97,13 +99,16 @@ function source(): GameIrDomainSourceEnvelope {
     },
   }
   return buildGameIrDomainSourceEnvelope({
-    moduleId: 'balance',
+    moduleId,
     request,
     sectionIndex,
-    sectionBytes: {
-      'docs/BALANCE_DESIGN.md#section-2': bytes,
-      'docs/GDD.md#section-0': bytes,
-    },
+    sectionBytes:
+      moduleId === 'balance'
+        ? {
+            'docs/BALANCE_DESIGN.md#section-2': bytes,
+            'docs/GDD.md#section-0': bytes,
+          }
+        : { 'docs/GDD.md#section-0': bytes },
   })
 }
 
@@ -133,11 +138,69 @@ function receipt(overrides: Partial<GameIrMechanicalProjectionReceipt> = {}) {
 
 describe('Game IR domain producer contracts', () => {
   test('admits a valid empty mechanical receipt', () => {
-    const admitted = admitGameIrMechanicalProjectionReceipt(source(), receipt())
+    const admitted = admitGameIrMechanicalProjectionReceipt({
+      source: source(),
+      receipt: receipt(),
+    })
     expect(admitted.nodes).toEqual([])
     expect(admitted.verifiedClaims).toEqual([])
     expect(admitted.ownedTargets).toEqual([])
     expect(Object.isFrozen(admitted)).toBe(true)
+  })
+
+  test('rejects all Gameplay and Balance mechanical nodes and verified claims', () => {
+    const gameplaySource = source('gameplay')
+    const gameplayReceipt = receipt({
+      taskId: gameplaySource.taskId,
+      moduleId: 'gameplay',
+      sourceDigest: gameplaySource.sourceDigest,
+      nodes: [{ ...mechanicalNode, kind: 'gameplay.entity' }] as never,
+      ownedTargets: [
+        'node:balance.var.hp#/id',
+        'node:balance.var.hp#/value/baseline',
+      ],
+    })
+    expect(() =>
+      admitGameIrMechanicalProjectionReceipt({
+        source: gameplaySource,
+        receipt: gameplayReceipt,
+      }),
+    ).toThrow(/mechanical.*empty|unauthorized/i)
+
+    expect(() =>
+      admitGameIrMechanicalProjectionReceipt({
+        source: source(),
+        receipt: receipt({
+          verifiedClaims: [
+            {
+              subject: 'node:balance.var.hp#/value/baseline',
+              sourcePointer: '/bytes/0/1',
+              literal: '1',
+            },
+          ],
+        }),
+      }),
+    ).toThrow(/mechanical.*empty|unauthorized/i)
+  })
+
+  test('rejects legacy positional mechanical and semantic packet calls', () => {
+    expect(() =>
+      (
+        admitGameIrMechanicalProjectionReceipt as (
+          ...args: unknown[]
+        ) => unknown
+      )(source(), receipt()),
+    ).toThrow(/input|plain object|unknown|missing/i)
+    const mechanical = admitGameIrMechanicalProjectionReceipt({
+      source: source(),
+      receipt: receipt(),
+    })
+    expect(() =>
+      (buildGameIrDomainSemanticPacket as (...args: unknown[]) => unknown)(
+        source(),
+        mechanical,
+      ),
+    ).toThrow(/input|plain object|unknown|missing/i)
   })
 
   test('rejects stale task, revision, or source identity', () => {
@@ -147,7 +210,10 @@ describe('Game IR domain producer contracts', () => {
       { sourceDigest: 'b'.repeat(64) },
     ]) {
       expect(() =>
-        admitGameIrMechanicalProjectionReceipt(source(), receipt(overrides)),
+        admitGameIrMechanicalProjectionReceipt({
+          source: source(),
+          receipt: receipt(overrides),
+        }),
       ).toThrow(/task|revision|source|digest/i)
     }
   })
@@ -158,90 +224,19 @@ describe('Game IR domain producer contracts', () => {
       ['z', 'a'],
     ]) {
       expect(() =>
-        admitGameIrMechanicalProjectionReceipt(
-          source(),
-          receipt({ ownedTargets: targets }),
-        ),
+        admitGameIrMechanicalProjectionReceipt({
+          source: source(),
+          receipt: receipt({ ownedTargets: targets }),
+        }),
       ).toThrow(/target|duplicate|sorted|unique/i)
     }
   })
 
-  test('rejects incomplete node-to-target ownership accounting', () => {
-    expect(() =>
-      admitGameIrMechanicalProjectionReceipt(
-        source(),
-        receipt({ nodes: [mechanicalNode] as never, ownedTargets: [] }),
-      ),
-    ).toThrow(/owned|target|account/i)
-  })
-
-  test('rejects malformed nested node references, edges, and bindings', () => {
-    const nodeVariants = [
-      {
-        ...mechanicalNode,
-        references: [{ targetId: 'bad' }],
-        bindings: {
-          ...mechanicalNode.bindings,
-          '/references/0': mechanicalNode.bindings['/id'],
-        },
-        ownedTargets: [
-          'node:balance.var.hp#/id',
-          'node:balance.var.hp#/references/0',
-          'node:balance.var.hp#/value/baseline',
-        ],
-      },
-      {
-        ...mechanicalNode,
-        edges: [{ type: 'depends-on', targetId: 'bad' }],
-        bindings: {
-          ...mechanicalNode.bindings,
-          '/edges/0': mechanicalNode.bindings['/id'],
-        },
-        ownedTargets: [
-          'node:balance.var.hp#/edges/0',
-          'node:balance.var.hp#/id',
-          'node:balance.var.hp#/value/baseline',
-        ],
-      },
-      {
-        ...mechanicalNode,
-        bindings: { '/id': { kind: 'owner' } },
-        ownedTargets: ['node:balance.var.hp#/id'],
-      },
-    ]
-    for (const { ownedTargets, ...node } of nodeVariants) {
-      expect(() =>
-        admitGameIrMechanicalProjectionReceipt(
-          source(),
-          receipt({ nodes: [node] as never, ownedTargets }),
-        ),
-      ).toThrow(/invalid Game IR candidate: .*?(reference|edge|binding)/i)
-    }
-  })
-
-  test('rejects noncanonical owned target spellings', () => {
-    expect(() =>
-      admitGameIrMechanicalProjectionReceipt(
-        source(),
-        receipt({
-          nodes: [mechanicalNode] as never,
-          ownedTargets: ['balance.var.hp#/value/baseline'],
-        }),
-      ),
-    ).toThrow(/owned|target|canonical|account/i)
-  })
-
   test('rejects semantic packets that relabel source identity or mechanical ownership', () => {
-    const mechanical = admitGameIrMechanicalProjectionReceipt(
-      source(),
-      receipt({
-        nodes: [mechanicalNode],
-        ownedTargets: [
-          'node:balance.var.hp#/id',
-          'node:balance.var.hp#/value/baseline',
-        ],
-      }),
-    )
+    const mechanical = admitGameIrMechanicalProjectionReceipt({
+      source: source(),
+      receipt: receipt(),
+    })
     const packet = buildGameIrDomainSemanticPacket({
       source: source(),
       mechanical,

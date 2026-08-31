@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）implementation 与 automated verification 已完成，independent Task 7 review clean，已 accepted；Phase 5–9 尚未开始。完整 candidate publication 与 Chrome acceptance 仍不可用
+状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）最终根因纠偏 implementation 与 automated verification 已完成，independent final re-review pending；Phase 5–9 尚未开始。完整 candidate publication 与 Chrome acceptance 仍不可用
 
 日期：2026-08-30
 
@@ -414,24 +414,26 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 - 已落地 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；
 - 不实现 consumer migration，production routing 仍不可达。
 
-### Phase 4：Gameplay + Balance（implementation/automated verification complete；independent Task 7 review clean；已 accepted）
+### Phase 4：Gameplay + Balance（root-cause correction implemented and verified；independent final re-review pending）
 
-Implementation and automated verification are complete, and the independent
-Task 7 review is clean; Phase 4 is accepted. Production routing remains
-unreachable.
+The final-review findings have been corrected and automated verification is
+complete. Independent final re-review remains pending. Production routing
+remains unreachable.
 
 - Gameplay 与 Balance 领域 schema、semantic admission、精确 source envelope
-  和 immutable module projections 已落地；两者使用同一 READY-bound authority
-  并分别保持 fixed source closure。
+  和 immutable module projections 已落地；同一 pair assembler 每次重验两侧
+  receipts、Core modules、task/revision/READY identity 与完整 typed maps 后才同时签发。
 - Gameplay 可读取 typed Balance variable/formula target；Balance reward/cost
   binding 可指向 typed Gameplay action/event。双向引用、wrong kind、stale
   task/revision、deterministic bytes/digests 与 not-yet-implemented module
   rejection 均由 gate tests 覆盖。
-- Balance 当前 variable/table contract 的 mechanical output 为空；variable
-  records、formula AST、economy/progression/reward/cost semantics 由 semantic
-  producer 拥有，Balance source claims 使用精确 `/bytes/<start>/<end>` ranges
-  并在 admission 时按 UTF-8 bytes 复核。空 mechanical output 是当前 policy，
-  不是 fallback。
+- Phase 4 的 Gameplay 与 Balance mechanical nodes、verified claims 均必须为空；
+  variable records、formula AST、economy/progression/reward/cost semantics 由
+  semantic producer 拥有，Balance source claims 使用精确
+  `/bytes/<start>/<end>` ranges 并按 UTF-8 bytes 复核。空 mechanical output
+  是唯一 policy，不是 fallback。
+- Missing/ambiguous semantic projection 使用 packet/source-bound、node-qualified
+  discriminated diagnostic；不写入 Foundation state。
 - AST/static detector 对新增 production files 禁止 partial candidate、
   publication、controller/store/DeliveryRun/Foundation Issue、provider
   dispatch 和五个 placeholder module；protected 21-file parity 与 full
