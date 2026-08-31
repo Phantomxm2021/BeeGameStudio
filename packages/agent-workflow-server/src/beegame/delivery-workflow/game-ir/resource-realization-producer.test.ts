@@ -12,7 +12,7 @@ import {
   compareCodeUnits,
   digestGameIrValue,
 } from './model'
-import { realAuthority } from './resource-realization.fixtures.test'
+import { realAuthority } from './resource-realization-test-helpers'
 
 const section = {
   documentPath: 'docs/ASSET_PLAN.md' as const,
@@ -161,7 +161,7 @@ describe('Resource Realization semantic producer', () => {
     expect(first.allowedNodeKinds).toEqual(
       Object.keys(RESOURCE_REALIZATION_DOMAIN_MANIFEST).sort(),
     )
-    expect(first.sourceSections.length).toBe(6)
+    expect(first.sourceSections.length).toBe(7)
     expect(first.forbiddenPresentationRequirementIds).toEqual(
       first.presentationRequirements.map(
         requirement => requirement.requirementId,

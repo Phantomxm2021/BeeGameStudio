@@ -1,17 +1,51 @@
 import { createHash } from 'node:crypto'
-import { canonicalGameIrJson, compareCodeUnits, digestGameIrValue } from './model'
+import {
+  canonicalGameIrJson,
+  compareCodeUnits,
+  digestGameIrValue,
+} from './model'
 import { GAME_IR_SCHEMA_VERSION } from './contracts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
 import { buildGameIrDomainSourceEnvelope } from './domain-source'
 import { admitGameIrMechanicalProjectionReceipt } from './domain-projection'
-import { buildGameplaySemanticPacket, admitGameplaySemanticResult } from './gameplay-producer'
-import { buildBalanceSemanticPacket, admitBalanceSemanticResult } from './balance-producer'
-import { buildWorldSceneSemanticPacket, admitWorldSceneSemanticResult, type WorldSceneSemanticReceipt } from './world-scene-producer'
-import { buildPresentationSemanticPacket, admitPresentationSemanticResult, type PresentationSemanticReceipt } from './presentation-producer'
+import {
+  buildGameplaySemanticPacket,
+  admitGameplaySemanticResult,
+} from './gameplay-producer'
+import {
+  buildBalanceSemanticPacket,
+  admitBalanceSemanticResult,
+} from './balance-producer'
+import {
+  buildWorldSceneSemanticPacket,
+  admitWorldSceneSemanticResult,
+  type WorldSceneSemanticReceipt,
+} from './world-scene-producer'
+import {
+  buildPresentationSemanticPacket,
+  admitPresentationSemanticResult,
+  type PresentationSemanticReceipt,
+} from './presentation-producer'
 import { admitPhase5SemanticValidationResult } from './phase5-admission'
-import { preparePresentationSemanticValidationPacket, prepareWorldSceneSemanticValidationPacket } from './world-presentation-assembler'
-import type { ResourceRealizationSemanticProjectionAuthority } from './resource-realization-producer'
+import {
+  preparePresentationSemanticValidationPacket,
+  prepareWorldSceneSemanticValidationPacket,
+} from './world-presentation-assembler'
+import type {
+  ResourceRealizationSemanticProjectionAuthority,
+  ResourceRealizationSemanticProjectionPacket,
+  ResourceRealizationSemanticReceipt,
+} from './resource-realization-producer'
+import type { ResourceRealizationValidationPreparationAuthority } from './phase6-admission'
+
+export type ResourceFixtureNode = {
+  id: string
+  kind: string
+  value: Record<string, unknown>
+  references: { targetId: string; targetType: string }[]
+  edges: { type: string; targetId: string; targetType: string }[]
+}
 
 export function realAuthority(): ResourceRealizationSemanticProjectionAuthority {
   type Node = {
@@ -187,20 +221,82 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
     .join('\n')
   const resourceSourceBytes = [
     baseSourceBytes,
-    'player-model', 'resource.requirement.player-model', 'profile-main', 'target-main',
-    'profile-screen-main', 'variant-screen-main', 'artifact-screen-main',
-    'variant-main', 'artifact-main', 'model', 'player', '3D', 'character', 'agent-authored',
-    'project-license', 'art-team', 'runtime-import-ready', 'glb', 'skinned',
-    'stylized', 'desktop', 'web', 'required', 'true',
-    'assets/runtime/player-model.glb', 'assets/runtime/screen-main.svg',
-    'runtime-resource', '2D', 'ui-screen', 'ui', 'ui-states', 'svg', 'screen',
-    canonicalGameIrJson({ type: 'required-by', targetId: 'state-start', targetType: 'gameplay.state' }),
-    canonicalGameIrJson({ type: 'describes', targetId: 'resource.requirement.player-model', targetType: 'resource-realization.logical-resource' }),
-    canonicalGameIrJson({ type: 'realizes', targetId: 'resource.requirement.player-model', targetType: 'resource-realization.logical-resource' }),
-    canonicalGameIrJson({ type: 'part-of', targetId: 'variant-main', targetType: 'resource-realization.variant' }),
-    canonicalGameIrJson({ type: 'describes', targetId: 'resource.requirement.screen-main', targetType: 'resource-realization.logical-resource' }),
-    canonicalGameIrJson({ type: 'realizes', targetId: 'resource.requirement.screen-main', targetType: 'resource-realization.logical-resource' }),
-    canonicalGameIrJson({ type: 'part-of', targetId: 'variant-screen-main', targetType: 'resource-realization.variant' }),
+    'player-model',
+    'resource.requirement.player-model',
+    'profile-main',
+    'target-main',
+    'profile-screen-main',
+    'variant-screen-main',
+    'artifact-screen-main',
+    'variant-main',
+    'artifact-main',
+    'model',
+    'player',
+    '3D',
+    'character',
+    'agent-authored',
+    'project-license',
+    'art-team',
+    'runtime-import-ready',
+    'glb',
+    'skinned',
+    'stylized',
+    'desktop',
+    'web',
+    'required',
+    'true',
+    'assets/runtime/player-model.glb',
+    'assets/runtime/screen-main.svg',
+    'assets/runtime/../evil.glb',
+    'assets/runtime/player-model.txt',
+    'target-secondary',
+    'observed',
+    'actualResource',
+    '角色',
+    'ui-asset',
+    canonicalGameIrJson(['glb']),
+    'runtime-resource',
+    '2D',
+    'ui-screen',
+    'ui',
+    'ui-states',
+    'svg',
+    'screen',
+    canonicalGameIrJson({
+      type: 'required-by',
+      targetId: 'state-start',
+      targetType: 'gameplay.state',
+    }),
+    canonicalGameIrJson({
+      type: 'describes',
+      targetId: 'resource.requirement.player-model',
+      targetType: 'resource-realization.logical-resource',
+    }),
+    canonicalGameIrJson({
+      type: 'realizes',
+      targetId: 'resource.requirement.player-model',
+      targetType: 'resource-realization.logical-resource',
+    }),
+    canonicalGameIrJson({
+      type: 'part-of',
+      targetId: 'variant-main',
+      targetType: 'resource-realization.variant',
+    }),
+    canonicalGameIrJson({
+      type: 'describes',
+      targetId: 'resource.requirement.screen-main',
+      targetType: 'resource-realization.logical-resource',
+    }),
+    canonicalGameIrJson({
+      type: 'realizes',
+      targetId: 'resource.requirement.screen-main',
+      targetType: 'resource-realization.logical-resource',
+    }),
+    canonicalGameIrJson({
+      type: 'part-of',
+      targetId: 'variant-screen-main',
+      targetType: 'resource-realization.variant',
+    }),
   ].join('\n')
   const hash = (value: string): string =>
     createHash('sha256').update(value, 'utf8').digest('hex')
@@ -210,15 +306,24 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
   ])
   const bytesFor = (documentPath: string): string =>
     resourceDocuments.has(documentPath) ? resourceSourceBytes : baseSourceBytes
-  const sectionIndex = CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
+  const sectionIndex = [
+    ...CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
       documentPath,
       sectionId: `section-${index}`,
       heading: documentPath,
       startLine: 1,
       endLine: bytesFor(documentPath).split('\n').length,
       digest: hash(bytesFor(documentPath)),
-    }),
-  )
+    })),
+    {
+      documentPath: 'docs/ASSET_PLAN.md' as const,
+      sectionId: 'section-asset-extra',
+      heading: 'Asset plan details',
+      startLine: 1,
+      endLine: bytesFor('docs/ASSET_PLAN.md').split('\n').length,
+      digest: hash(bytesFor('docs/ASSET_PLAN.md')),
+    },
+  ]
   const foundationBody = {
     schemaVersion: 'foundation-ready-receipt.v1' as const,
     projectId: 'resource-producer-fixture',
@@ -454,5 +559,238 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
       source: resourceSource,
       mechanical: resourceMechanical,
     },
+  }
+}
+
+export function completeResourceInput(
+  packet: ResourceRealizationSemanticProjectionPacket,
+  sourceBytes: Readonly<Record<string, string>>,
+  artifactRuntimeRole = 'player',
+  mutate?: (nodes: ResourceFixtureNode[]) => ResourceFixtureNode[],
+) {
+  const nodes: ResourceFixtureNode[] = [
+    {
+      id: 'resource.requirement.player-model',
+      kind: 'resource-realization.logical-resource',
+      value: {
+        requirementId: 'player-model',
+        resourceKind: 'model',
+        runtimeRole: 'player',
+      },
+      references: [],
+      edges: [
+        {
+          type: 'required-by',
+          targetId: 'state-start',
+          targetType: 'gameplay.state',
+        },
+      ],
+    },
+    {
+      id: 'profile-main',
+      kind: 'resource-realization.acquisition-profile',
+      value: {
+        required: true,
+        dimensions: ['3D'],
+        assetKinds: ['model'],
+        usageTags: ['character'],
+        capabilities: ['skinned'],
+        styles: ['stylized'],
+        sourcingPolicy: {
+          allowedSourceKinds: ['agent-authored'],
+          licenseConstraints: ['project-license'],
+          responsibleParty: 'art-team',
+          handoffCriteria: ['runtime-import-ready'],
+        },
+      },
+      references: [],
+      edges: [
+        {
+          type: 'describes',
+          targetId: 'resource.requirement.player-model',
+          targetType: 'resource-realization.logical-resource',
+        },
+      ],
+    },
+    {
+      id: 'target-main',
+      kind: 'resource-realization.delivery-target',
+      value: {
+        platform: 'desktop',
+        runtime: 'web',
+        assetFormatCapabilities: ['glb', 'svg'],
+      },
+      references: [],
+      edges: [],
+    },
+    {
+      id: 'variant-main',
+      kind: 'resource-realization.variant',
+      value: { activation: { kind: 'required' } },
+      references: [],
+      edges: [
+        {
+          type: 'realizes',
+          targetId: 'resource.requirement.player-model',
+          targetType: 'resource-realization.logical-resource',
+        },
+      ],
+    },
+    {
+      id: 'artifact-main',
+      kind: 'resource-realization.delivery-artifact',
+      value: {
+        artifactClass: 'runtime-resource',
+        path: 'assets/runtime/player-model.glb',
+        format: 'glb',
+        runtimeRole: artifactRuntimeRole,
+      },
+      references: [],
+      edges: [
+        {
+          type: 'part-of',
+          targetId: 'variant-main',
+          targetType: 'resource-realization.variant',
+        },
+      ],
+    },
+    {
+      id: 'profile-screen-main',
+      kind: 'resource-realization.acquisition-profile',
+      value: {
+        required: true,
+        dimensions: ['2D'],
+        assetKinds: ['ui-screen'],
+        usageTags: ['ui'],
+        capabilities: ['ui-states'],
+        styles: ['stylized'],
+        sourcingPolicy: {
+          allowedSourceKinds: ['agent-authored'],
+          licenseConstraints: ['project-license'],
+          responsibleParty: 'art-team',
+          handoffCriteria: ['runtime-import-ready'],
+        },
+      },
+      references: [],
+      edges: [
+        {
+          type: 'describes',
+          targetId: 'resource.requirement.screen-main',
+          targetType: 'resource-realization.logical-resource',
+        },
+      ],
+    },
+    {
+      id: 'variant-screen-main',
+      kind: 'resource-realization.variant',
+      value: { activation: { kind: 'required' } },
+      references: [],
+      edges: [
+        {
+          type: 'realizes',
+          targetId: 'resource.requirement.screen-main',
+          targetType: 'resource-realization.logical-resource',
+        },
+      ],
+    },
+    {
+      id: 'artifact-screen-main',
+      kind: 'resource-realization.delivery-artifact',
+      value: {
+        artifactClass: 'runtime-resource',
+        path: 'assets/runtime/screen-main.svg',
+        format: 'svg',
+        runtimeRole: 'screen',
+      },
+      references: [],
+      edges: [
+        {
+          type: 'part-of',
+          targetId: 'variant-screen-main',
+          targetType: 'resource-realization.variant',
+        },
+      ],
+    },
+  ]
+  const candidateNodes = mutate ? mutate(structuredClone(nodes)) : nodes
+  const sectionFor = (node: (typeof nodes)[number]) => {
+    const documentPath = node.id.includes('screen')
+      ? 'docs/TECHNICAL_DESIGN.md'
+      : 'docs/ASSET_PLAN.md'
+    const sections = packet.sourceSections.filter(
+      item => item.documentPath === documentPath,
+    )
+    return sections[node.id === 'profile-main' ? 1 : 0]!
+  }
+  const literal = (node: (typeof nodes)[number], pointer: string): string => {
+    if (pointer === '/id') return node.id
+    if (pointer.startsWith('/edges/'))
+      return canonicalGameIrJson(
+        node.edges[Number(pointer.slice('/edges/'.length))],
+      )
+    let current: unknown = node.value
+    for (const part of pointer.slice('/value/'.length).split('/'))
+      current = (current as Record<string, unknown>)[part]
+    return typeof current === 'string' ? current : canonicalGameIrJson(current)
+  }
+  const leaves = (value: unknown, pointer: string, output: string[]): void => {
+    if (Array.isArray(value))
+      value.forEach((item, index) =>
+        leaves(item, `${pointer}/${index}`, output),
+      )
+    else if (value && typeof value === 'object')
+      Object.entries(value).forEach(([key, item]) =>
+        leaves(item, `${pointer}/${key}`, output),
+      )
+    else output.push(pointer)
+  }
+  const pointers = (node: (typeof nodes)[number]) => {
+    const output = ['/id']
+    const valuePointers: string[] = []
+    leaves(node.value, '/value', valuePointers)
+    output.push(
+      ...valuePointers,
+      ...node.edges.map((_, index) => `/edges/${index}`),
+    )
+    return output
+  }
+  const claims = candidateNodes
+    .flatMap(node => {
+      const section = sectionFor(node)
+      const bytes = sourceBytes[`${section.documentPath}#${section.sectionId}`]!
+      return pointers(node).map(pointer => {
+        const value = literal(node, pointer)
+        const start = bytes.indexOf(value)
+        if (start < 0) throw new Error(`fixture literal missing: ${value}`)
+        const startBytes = Buffer.byteLength(bytes.slice(0, start), 'utf8')
+        return {
+          subject: `node:${node.id}#${pointer}`,
+          documentPath: section.documentPath,
+          sectionId: section.sectionId,
+          sourcePointer: `/bytes/${startBytes}/${startBytes + Buffer.byteLength(value, 'utf8')}`,
+          literal: value,
+        }
+      })
+    })
+    .sort((left, right) =>
+      compareCodeUnits(
+        `${left.subject}\0${left.sourcePointer}\0${left.literal}`,
+        `${right.subject}\0${right.sourcePointer}\0${right.literal}`,
+      ),
+    )
+  return {
+    outcome: 'PROJECTED' as const,
+    nodes: candidateNodes,
+    sourceClaims: claims,
+  }
+}
+
+export function validationAuthority(
+  authority: ResourceRealizationSemanticProjectionAuthority,
+  semantic: ResourceRealizationSemanticReceipt,
+): ResourceRealizationValidationPreparationAuthority {
+  return {
+    phase5Authority: authority.phase5Authority,
+    resourceRealization: { ...authority.resourceRealization, semantic },
   }
 }
