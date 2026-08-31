@@ -227,6 +227,46 @@ function makeFixture(name: string): Fixture {
   }
 }
 
+function readOnlyCompileBoundaryEvidence(
+  plan: Awaited<ReturnType<typeof controllerIssuePlan>>,
+  projectId: string,
+) {
+  const receipt = projectFoundationReadyReceipt({
+    state: plan.readyState,
+    projectId,
+    confirmedBriefDigest: sha256('{"game":"bee"}'),
+  })
+  return {
+    receipt,
+    request: parseGameIrCompileRequest({
+      schemaVersion: 'game-ir-compile-request.v1',
+      taskId: 'foundation-issue.compile',
+      publicationId: 'foundation-issue.publication',
+      gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
+      foundation: receipt,
+    }),
+  }
+}
+
+function parityStateBytes(
+  plan: Awaited<ReturnType<typeof controllerIssuePlan>>,
+): string {
+  return JSON.stringify(
+    stableEvidence({
+      preRevision: plan.preRevision,
+      preReview: plan.preReview,
+      preDerived: plan.preDerived,
+      readyState: plan.readyState,
+      publication: plan.publication,
+      revisionTask: plan.revisionTask,
+      semanticTask: plan.semanticTask,
+      semanticResult: plan.semanticResult,
+      bundle: plan.bundle,
+      readyBundle: plan.readyBundle,
+    }),
+  )
+}
+
 function factPacketResults(
   packet: FoundationFactPacket,
   documents: ReadonlyMap<string, string>,
@@ -1009,6 +1049,40 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
       await rm(secondWorkspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps Foundation planning byte-identical across the read-only Phase 5 boundary', async () => {
+    const fixture = makeFixture('issue')
+    const documents = fixture.issueDocuments ?? fixture.documents
+    const serializedDocumentsBefore = JSON.stringify([...documents])
+    const firstWorkspace = await mkdtemp(join('/tmp', 'game-ir-parity-'))
+    const secondWorkspace = await mkdtemp(join('/tmp', 'game-ir-parity-'))
+    try {
+      const before = await controllerIssuePlan(fixture, firstWorkspace)
+      const beforeStateBytes = parityStateBytes(before)
+      const beforeBoundary = readOnlyCompileBoundaryEvidence(
+        before,
+        'project-issue',
+      )
+      expect(beforeBoundary.request.foundation).toEqual(beforeBoundary.receipt)
+      expect(JSON.stringify([...documents])).toBe(serializedDocumentsBefore)
+
+      const after = await controllerIssuePlan(fixture, secondWorkspace)
+      const afterStateBytes = parityStateBytes(after)
+      const afterBoundary = readOnlyCompileBoundaryEvidence(
+        after,
+        'project-issue',
+      )
+
+      expect(afterStateBytes).toBe(beforeStateBytes)
+      expect(after.identity).toEqual(before.identity)
+      expect(afterBoundary.receipt).toEqual(beforeBoundary.receipt)
+      expect(afterBoundary.request).toEqual(beforeBoundary.request)
+      expect(JSON.stringify([...documents])).toBe(serializedDocumentsBefore)
+    } finally {
+      await rm(firstWorkspace, { recursive: true, force: true })
+      await rm(secondWorkspace, { recursive: true, force: true })
     }
   })
 
