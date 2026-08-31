@@ -119,26 +119,21 @@ function validateAuthorityShape(
   )
 }
 
-function profileFor(
-  logical: GameIrNode,
-  nodes: readonly GameIrNode[],
-): GameIrNode {
-  const matches = nodes.filter(
-    node =>
-      node.kind === 'resource-realization.acquisition-profile' &&
-      node.edges.some(
-        edge => edge.type === 'describes' && edge.targetId === logical.id,
-      ),
-  )
-  if (matches.length !== 1)
-    fail(`logical resource ${logical.id} must have one profile`)
-  return matches[0]!
-}
-
 function deriveResourcePlan(
   module: GameIrModuleCandidate,
 ): ResourcePlanProjection {
   const nodes = module.nodes
+  const profiles = new Map<string, GameIrNode>()
+  for (const node of nodes) {
+    if (node.kind !== 'resource-realization.acquisition-profile') continue
+    const edge = node.edges.find(item => item.type === 'describes')
+    if (!edge) {
+      fail(`acquisition profile ${node.id} must describe a logical resource`)
+    }
+    if (profiles.has(edge.targetId))
+      fail(`logical resource ${edge.targetId} must have one profile`)
+    profiles.set(edge.targetId, node)
+  }
   const target = nodes.find(
     node => node.kind === 'resource-realization.delivery-target',
   )
@@ -157,7 +152,10 @@ function deriveResourcePlan(
     .filter(node => node.kind === 'resource-realization.logical-resource')
     .map(logical => {
       const value = logical.value
-      const profile = profileFor(logical, nodes).value
+      const profileNode = profiles.get(logical.id)
+      if (!profileNode)
+        fail(`logical resource ${logical.id} must have one profile`)
+      const profile = profileNode.value
       const acquisitionProfile: ResourceAcquisitionProfile = {
         dimensions: [
           ...(profile.dimensions as ResourceAcquisitionProfile['dimensions']),
