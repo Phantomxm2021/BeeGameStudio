@@ -74,6 +74,11 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     Readonly<{
       valueFields: readonly string[]
       relationships: Readonly<Record<string, WorldSceneRelationshipRole>>
+      references?: Readonly<{
+        targetKinds: readonly string[]
+        unique: boolean
+        sorted: boolean
+      }>
     }>
   >
 > = Object.freeze({
@@ -110,6 +115,11 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     valueFields: Object.freeze(['label', 'closed', 'waypointReferenceIndexes']),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
+    }),
+    references: Object.freeze({
+      targetKinds: Object.freeze(['world-scene.node']),
+      unique: true,
+      sorted: true,
     }),
   }),
   'world-scene.spawn': Object.freeze({
@@ -162,19 +172,22 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
 type RecordValue = Record<string, unknown>
 type ParsedNode = GameIrNode & { value: Readonly<Record<string, unknown>> }
 const NODE_KINDS = new Set(Object.keys(WORLD_SCENE_DOMAIN_MANIFEST))
-const EXTERNAL_KINDS = new Set([
-  'gameplay.entity',
-  'gameplay.event',
-  'gameplay.state',
-  'gameplay.objective',
-])
 const NODE_TYPES = new Set(['container', 'anchor', 'volume', 'visual'])
 const SPAWN_POLICIES = new Set(['once', 'wave', 'repeat'])
 const ENCOUNTER_MODES = new Set(['triggered', 'patrol', 'scripted'])
 const RESET_POLICIES = new Set(['restart', 'last-checkpoint', 'manual'])
 const AXES = new Set(['+x', '-x', '+y', '-y', '+z', '-z'])
 const DIMENSION_2D_GEOMETRY = new Set(['rectangle', 'circle', 'capsule-2d'])
-const WORLD_KINDS = new Set(NODE_KINDS)
+
+function manifestTargetKinds(): ReadonlySet<string> {
+  const targetKinds = new Set<string>()
+  for (const descriptor of Object.values(WORLD_SCENE_DOMAIN_MANIFEST)) {
+    for (const relationship of Object.values(descriptor.relationships))
+      relationship.targetKinds.forEach(kind => targetKinds.add(kind))
+    descriptor.references?.targetKinds.forEach(kind => targetKinds.add(kind))
+  }
+  return targetKinds
+}
 
 function fail(message: string): never {
   throw new Error(`invalid World/Scene module: ${message}`)
@@ -558,8 +571,11 @@ function targetMap(
     for (const [id, node] of externalTargets) {
       if (!node || id !== node.id)
         fail(`external target key does not match node ${id}`)
-      if (!EXTERNAL_KINDS.has(node.kind))
-        fail(`external target ${id} is not an allowed Gameplay node`)
+      if (
+        node.kind.startsWith('gameplay.') &&
+        !manifestTargetKinds().has(node.kind)
+      )
+        fail(`external target ${id} is not admitted by the World manifest`)
       if (targets.has(id)) fail(`duplicate node ID ${id}`)
       targets.set(id, node)
     }
@@ -583,7 +599,11 @@ function validateReferences(
       fail(
         `node ${node.id} reference target kind does not match ${reference.targetId}`,
       )
-    if (reference.targetType !== 'world-scene.node')
+    if (
+      !WORLD_SCENE_DOMAIN_MANIFEST[
+        'world-scene.route'
+      ].references?.targetKinds.includes(reference.targetType)
+    )
       fail(`node ${node.id} route reference must target a World node`)
     const key = `${reference.targetId}\0${reference.targetType}`
     if (seen.has(key)) fail(`node ${node.id} has duplicate route reference`)
@@ -792,7 +812,7 @@ function validateGraph(nodes: readonly ParsedNode[]): void {
       for (const edge of node.edges) {
         if (
           edge.targetType === 'world-scene.scene' ||
-          !WORLD_KINDS.has(edge.targetType)
+          !NODE_KINDS.has(edge.targetType)
         )
           continue
         const target = local.get(edge.targetId)

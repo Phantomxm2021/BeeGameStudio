@@ -277,6 +277,25 @@ function set3d(value: Record<string, unknown>): void {
   }
 }
 
+function threeDimensionalModule(): MutableModule {
+  const module = validModule()
+  nodeById(module, 'scene.main').value.coordinateConvention = {
+    dimensions: '3d',
+    handedness: 'right',
+    upAxis: '+y',
+    forwardAxis: '+z',
+    distanceUnit: 'meter',
+  }
+  nodeById(module, 'node.root').value.transform = {
+    dimensions: '3d',
+    space: 'world',
+    position: { x: 0, y: 0, z: 0 },
+    rotation: { x: 0, y: 0, z: 0, w: 1 },
+    scale: { x: 1, y: 1, z: 1 },
+  }
+  return module
+}
+
 describe('World/Scene Game IR schema', () => {
   test('exposes the closed ten-kind manifest', () => {
     expect(Object.keys(WORLD_SCENE_DOMAIN_MANIFEST)).toHaveLength(10)
@@ -289,6 +308,13 @@ describe('World/Scene Game IR schema', () => {
         },
       },
     })
+    expect(WORLD_SCENE_DOMAIN_MANIFEST['world-scene.route'].references).toEqual(
+      {
+        targetKinds: ['world-scene.node'],
+        unique: true,
+        sorted: true,
+      },
+    )
   })
 
   test('accepts a minimal world scene and freezes the result', () => {
@@ -301,29 +327,29 @@ describe('World/Scene Game IR schema', () => {
   })
 
   test('rejects a zero quaternion or non-positive scale', () => {
-    const zeroQuaternion = cloneModule(validModule())
-    const root = zeroQuaternion.nodes[1]!
-    root.value.transform = {
-      dimensions: '3d',
-      space: 'world',
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0, w: 0 },
-      scale: { x: 1, y: 1, z: 1 },
-    }
-    zeroQuaternion.nodes[0]!.value.coordinateConvention = {
-      dimensions: '3d',
-      handedness: 'right',
-      upAxis: '+y',
-      forwardAxis: '+z',
-      distanceUnit: 'meter',
-    }
-    expect(() => parseWorldSceneModule(admitted(zeroQuaternion))).toThrow()
+    const zeroQuaternion = threeDimensionalModule()
+    expect(() => parseWorldSceneModule(admitted(zeroQuaternion))).not.toThrow()
+    const zeroQuaternionMutation = cloneModule(zeroQuaternion)
+    const rootTransform = nodeById(zeroQuaternionMutation, 'node.root').value
+      .transform as { rotation: Record<string, number> }
+    rootTransform.rotation = { x: 0, y: 0, z: 0, w: 0 }
+    expect(() =>
+      parseWorldSceneModule(admitted(zeroQuaternionMutation)),
+    ).toThrow('rotation quaternion must be non-zero')
 
-    const nonPositiveScale = cloneModule(validModule())
+    const nonPositiveScale = validModule()
+    expect(() =>
+      parseWorldSceneModule(admitted(nonPositiveScale)),
+    ).not.toThrow()
+    const nonPositiveScaleMutation = cloneModule(nonPositiveScale)
     ;(
-      nonPositiveScale.nodes[0]!.value.transform as { scale: { x: number } }
+      nodeById(nonPositiveScaleMutation, 'node.root').value.transform as {
+        scale: { x: number }
+      }
     ).scale.x = 0
-    expect(() => parseWorldSceneModule(admitted(nonPositiveScale))).toThrow()
+    expect(() =>
+      parseWorldSceneModule(admitted(nonPositiveScaleMutation)),
+    ).toThrow('scale must be positive')
   })
 
   test('accepts every node kind, value union, external Gameplay target, and route revisit', () => {
@@ -485,18 +511,39 @@ describe('World/Scene Game IR schema', () => {
 
   test('guards roots, parent closure, cycles, orphan nodes, cross-scene links, and singleton edges', () => {
     const noRoot = richModule()
-    nodeById(noRoot, 'scene.main').edges = []
     expect(() =>
       parseWorldSceneModule(admitted(noRoot), externalTargets()),
-    ).toThrow(/root/i)
+    ).not.toThrow()
+    const noRootMutation = cloneModule(noRoot)
+    nodeById(noRootMutation, 'scene.main').edges = []
+    expect(() =>
+      parseWorldSceneModule(admitted(noRootMutation), externalTargets()),
+    ).toThrow('relationship root must occur exactly once')
 
     const cycle = richModule()
-    nodeById(cycle, 'node.root').edges.push(
-      edge('parent', 'node.anchor', 'world-scene.node'),
-    )
     expect(() =>
       parseWorldSceneModule(admitted(cycle), externalTargets()),
-    ).toThrow(/root|cycle|parent/i)
+    ).not.toThrow()
+    const cycleMutation = cloneModule(cycle)
+    nodeById(cycleMutation, 'node.anchor').edges = nodeById(
+      cycleMutation,
+      'node.anchor',
+    ).edges.map(edgeValue =>
+      edgeValue.type === 'parent'
+        ? edge('parent', 'node.visual', 'world-scene.node')
+        : edgeValue,
+    )
+    nodeById(cycleMutation, 'node.visual').edges = nodeById(
+      cycleMutation,
+      'node.visual',
+    ).edges.map(edgeValue =>
+      edgeValue.type === 'parent'
+        ? edge('parent', 'node.anchor', 'world-scene.node')
+        : edgeValue,
+    )
+    expect(() =>
+      parseWorldSceneModule(admitted(cycleMutation), externalTargets()),
+    ).toThrow('parent hierarchy contains a cycle')
 
     const orphan = richModule()
     nodeById(orphan, 'node.visual').edges = nodeById(
@@ -660,13 +707,22 @@ describe('World/Scene Game IR schema', () => {
       parseWorldSceneModule(admitted(dangling), externalTargets()),
     ).toThrow(/unknown|target/i)
     const forbidden = richModule()
-    nodeById(forbidden, 'spawn.hero').edges[2] = edge(
+    expect(() =>
+      parseWorldSceneModule(admitted(forbidden), externalTargets()),
+    ).not.toThrow()
+    const forbiddenMutation = cloneModule(forbidden)
+    nodeById(forbiddenMutation, 'spawn.hero').edges[2] = edge(
       'entity',
       'balance.score',
       'balance.variable',
     )
+    const targetsWithBalance = new Map(externalTargets())
+    targetsWithBalance.set('balance.score', {
+      id: 'balance.score',
+      kind: 'balance.variable',
+    } as GameIrNode)
     expect(() =>
-      parseWorldSceneModule(admitted(forbidden), externalTargets()),
-    ).toThrow(/kind|Gameplay|target/i)
+      parseWorldSceneModule(admitted(forbiddenMutation), targetsWithBalance),
+    ).toThrow('role entity has wrong target kind')
   })
 })
