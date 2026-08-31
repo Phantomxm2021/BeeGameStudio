@@ -140,6 +140,57 @@ Rules:
   that repeats a Presentation-owned `requirementId` is rejected rather than
   merged or preferred.
 
+The accepted Core binding shape currently supports only local
+`inputPointers`. Phase 6 replaces that pre-production shape rather than adding
+an alias or fallback. A derived binding uses one canonical `inputs` array:
+
+```ts
+type GameIrDerivedInput =
+  | { kind: 'local'; pointer: string }
+  | {
+      kind: 'external'
+      moduleId: GameIrModuleId
+      nodeId: string
+      pointer: string
+      targetDigest: string
+    }
+```
+
+Local inputs preserve Core cycle/owner closure. External inputs are admitted
+only against raw prior modules rebuilt by the higher-phase assembler. Core
+re-admits those modules with the same compile request and the same complete,
+receipt-bound authority Section Index, proves global ID
+disjointness and builds the target map internally. A frozen object or
+caller-built map is never admission evidence. This Core primitive proves
+structure only; Phase 5 authority remains exclusively with the higher Phase 6
+entry that replays `assembleWorldPresentationClosure`. Current-candidate nodes
+cannot be smuggled in as prior targets.
+
+Core resolves one exact target leaf for every input. A local target resolves
+within the current node. An external target resolves by
+`(moduleId, nodeId, pointer)`. `/references/<index>` and `/edges/<index>` name
+the complete canonical entry; value pointers must terminate at a real leaf.
+For every external input, `targetDigest` is exactly
+`digestGameIrValue(resolveTargetLeaf(targetNode, pointer))`. Missing targets,
+non-leaf targets and digest mismatches are rejected.
+
+Input identity and order use one code-unit key: local is
+`local\0<pointer>`; external is
+`external\0<moduleId>\0<nodeId>\0<pointer>`. The digest is evidence, not a
+second identity. The complete candidate parser builds one dependency graph
+over local and external input endpoints, rejects self, same-module and
+cross-module cycles, and proves that every derived chain terminates at an owner
+binding. A standalone module parse accepts raw external modules, re-admits them
+with the same compile request and complete receipt-bound authority Section
+Index, and applies the same disjointness and reachability proof.
+
+Publication writes this sole `inputs` shape to the source map. Graph endpoint
+bytes use the existing string format: local
+`to = currentModuleId + "/" + currentNodeId + input.pointer`; external
+`to = input.moduleId + "/" + input.nodeId + input.pointer`. The old
+`inputPointers` reader, writer and fixtures are deleted everywhere in Game IR;
+there is no compatibility reader or fallback.
+
 ### 4.3 `resource-realization.acquisition-profile`
 
 Value:
@@ -393,10 +444,11 @@ There is no merge preference. Ownership overlap is an error.
 ## 6. References, closure and invariants
 
 The Phase 6 schema manifest is the sole node/field/relationship authority.
-Allowed external `required-by` targets are canonical node kinds from Core,
-Gameplay, Balance, World/Scene and Presentation. The exact allow-list is
-derived from the imported accepted manifests, not repeated as a loose string
-list.
+Allowed external `required-by` targets are canonical node kinds from Gameplay,
+Balance, World/Scene and Presentation. The current Core phase is shared model
+infrastructure and has no domain node manifest, so it contributes no target
+kinds; Phase 6 does not invent them. The exact allow-list is derived from the
+imported accepted domain manifests, not repeated as a loose string list.
 
 Admission proves:
 

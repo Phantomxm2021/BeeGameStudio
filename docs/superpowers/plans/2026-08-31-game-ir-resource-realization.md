@@ -52,7 +52,34 @@ RED assertions:
 Implementation: extend the domain ID union/set without introducing a generic
 unknown domain or caller-selected source scope.
 
-## Task 3: strict Resource Realization schema
+## Task 3: replace local-only derived bindings
+
+Files:
+
+- modify `model.ts` / `model.test.ts`
+- modify `publication.ts` / `publication.test.ts`
+- update only affected isolated Game IR fixtures
+
+RED assertions prove exact local/external input discriminants; rejection of
+old `inputPointers`; external target/module/node/pointer/digest validation;
+the exact leaf-digest rule; the single canonical identity/order key; and
+publication source-map plus graph endpoints. They also prove rejection without
+exact re-admitted raw prior modules, current-module/external overlap, external
+self-cycles, same-module cross-node cycles, mixed local/external cycles and
+cross-module cycles, while every admitted derived chain terminates at an owner.
+Existing Phase 5 canonical production outputs remain unchanged because its
+admitted production nodes are owner-bound.
+
+Implementation replaces the pre-production derived binding schema with one
+`inputs` array. Do not support both spellings. The full candidate parser uses
+one dependency graph. The standalone module primitive receives raw external
+modules, re-runs Core admission with the same compile request and the same
+complete receipt-bound authority Section Index, proves disjointness and builds its target map
+internally. It never accepts a caller-built target map. This low-level verifier
+proves structure only; the Phase 6 high-level entry must obtain those modules
+by replaying `assembleWorldPresentationClosure` and remains the sole authority.
+
+## Task 4: strict Resource Realization schema
 
 Files:
 
@@ -74,8 +101,14 @@ path/format mismatch, invalid codec shape and non-canonical arrays.
 
 Implementation: one manifest and one parser; reuse Core parsing, canonical
 comparison and source-binding validation. Do not build a second generic parser.
+The parser must first Core-admit the candidate with the real compile request,
+the complete receipt-bound authority Section Index and assembler-rebuilt raw
+prior modules, then apply only
+Resource Realization invariants. Delete the weaker domain-only parse route.
+Fixtures use complete owner or derived bindings; empty/opaque bindings never
+form a second admission track.
 
-## Task 4: producer and empty mechanical ownership
+## Task 5: producer and empty mechanical ownership
 
 Files:
 
@@ -92,7 +125,7 @@ targets. Caller-supplied target/forbidden lists are rejected by shape.
 Implementation: reuse the shared domain semantic packet machinery. Extend only
 the type boundaries required for the new canonical domain.
 
-## Task 5: Phase 6 fidelity admission
+## Task 6: Phase 6 fidelity admission
 
 Files:
 
@@ -108,7 +141,7 @@ unique paths and forbidden actual-resource facts.
 Implementation: compose the extracted shared packet/admission protocol and add
 only Phase 6 invariants. Do not copy Phase 5 protocol or relax its contracts.
 
-## Task 6: sole replaying assembler
+## Task 7: sole replaying assembler
 
 Files:
 
@@ -125,7 +158,7 @@ Implementation exports only
 `prepareResourceRealizationSemanticValidationPacket` and
 `assembleResourceRealizationClosure` as high-level operations.
 
-## Task 7: complete profiles and parity
+## Task 8: complete profiles and parity
 
 Files:
 
@@ -142,7 +175,7 @@ Also prove repeated assembly byte/digest determinism, input mutation cannot
 change a frozen closure, Presentation `ui -> ui-asset` derivation, and complete
 alternative groups plus mechanically evaluable conditional predicates.
 
-## Task 8: whole-phase deletion and boundary audit
+## Task 9: whole-phase deletion and boundary audit
 
 Mechanically scan Phase 6 changed production paths and their reachable Game IR
 call graph for old resource Game IR symbols, detached
@@ -169,7 +202,7 @@ against the design. Any Critical, Important or Minor correctness/boundary gap
 returns to the responsible Luna high implementation task, followed by full
 re-verification. Only an empty audit accepts Phase 6.
 
-## Task 9: status only
+## Task 10: status only
 
 After acceptance, update the roadmap/progress ledger to record Phase 6 as
 implemented and accepted, with exact commits and verification evidence. Do not
