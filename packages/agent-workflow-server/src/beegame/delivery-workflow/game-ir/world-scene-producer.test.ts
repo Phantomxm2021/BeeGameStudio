@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
 import {
   admitGameIrMechanicalProjectionReceipt,
+  type GameIrDomainSemanticPacket,
   type GameIrMechanicalProjectionReceipt,
 } from './domain-projection'
 import {
@@ -324,6 +325,17 @@ function reissueReceipt(
   } as Phase5SemanticReceipt
 }
 
+function reissuePacket(
+  packet: GameIrDomainSemanticPacket,
+  patch: Record<string, unknown>,
+): GameIrDomainSemanticPacket {
+  const { packetDigest: _packetDigest, ...body } = { ...packet, ...patch }
+  return {
+    ...body,
+    packetDigest: digestGameIrValue(body),
+  } as GameIrDomainSemanticPacket
+}
+
 describe('World/Scene semantic producer wrapper', () => {
   test('derives exact GDD/Level closure and all kinds/roles from the manifest', () => {
     const {
@@ -367,15 +379,45 @@ describe('World/Scene semantic producer wrapper', () => {
     }
   })
 
-  test('rejects stale or relabelled packets and preserves empty mechanical policy', () => {
+  test('rejects a stale packet digest in shared admission', () => {
     const { packet: currentPacket } = packet()
     expect(() =>
       admitWorldSceneSemanticResult(
-        { ...currentPacket, moduleId: 'presentation' } as typeof currentPacket,
+        { ...currentPacket, packetDigest: 'b'.repeat(64) },
         resultInput(),
       ),
-    ).toThrow()
+    ).toThrow('semantic packet digest is stale or invalid')
     expect(currentPacket.forbiddenTargets).toEqual([])
+  })
+
+  test('admits a structurally valid relabel before the World identity narrowing rejects it', () => {
+    const { packet: currentPacket } = packet()
+    const relabelled = reissuePacket(currentPacket, {
+      moduleId: 'presentation',
+    })
+    expect(() =>
+      admitWorldSceneSemanticResult(relabelled, resultInput()),
+    ).toThrow('invalid World/Scene semantic result module')
+  })
+
+  test('lets shared admission reject hidden packet fields before any wrapper narrowing', () => {
+    const { packet: currentPacket } = packet()
+    const descriptors: PropertyDescriptorMap =
+      Object.getOwnPropertyDescriptors(currentPacket)
+    descriptors.moduleId = {
+      configurable: true,
+      enumerable: true,
+      get() {
+        throw new Error('raw packet read')
+      },
+    }
+    const accessorPacket = Object.create(
+      Object.getPrototypeOf(currentPacket),
+      descriptors,
+    ) as typeof currentPacket
+    expect(() =>
+      admitWorldSceneSemanticResult(accessorPacket, resultInput()),
+    ).toThrow('invalid Game IR Phase 5 admission')
   })
 
   test('admits missing and ambiguous diagnostics only with exact section evidence', () => {
@@ -410,16 +452,79 @@ describe('World/Scene semantic producer wrapper', () => {
     ).toThrow()
   })
 
+  test('rejects fidelity-only binding evidence in producer diagnostics', () => {
+    const fixture = replayFixture()
+    const claim = fixture.semantic.sourceClaims.find(
+      entry => entry.subject === 'node:scene#/id',
+    )!
+    const bindingPointer = `binding:${claim.documentPath}#${claim.sectionId}${claim.sourcePointer}`
+    expect(() =>
+      admitWorldSceneSemanticResult(fixture.currentPacket, {
+        outcome: 'FAIL',
+        reasonCode: 'missing-projection',
+        actual: 'not declared',
+        missingSubject: 'node:scene#/value/label',
+        expectedProjection: 'scene label',
+        evidencePointers: [bindingPointer],
+      }),
+    ).toThrow('outside the exact source closure')
+  })
+
   test('accepts a graph beyond ordinary size without a business cap', () => {
     const graph = Array.from({ length: 256 }, (_, index) => ({
       id: `node-${index}`,
       kind: 'world-scene.node',
-      value: { label: 'scene' },
+      value: { label: `node-${index}` },
       references: [],
       edges: [],
     }))
-    expect(graph.length).toBeGreaterThan(100)
-    expect(canonicalGameIrJson(graph[0])).toContain('world-scene.node')
+    const bytes = [...new Set(graph.flatMap(node => [node.id]))].join('|')
+    const currentSource = source(bytes)
+    const currentMechanical = mechanical(currentSource)
+    const currentPacket = buildWorldSceneSemanticPacket({
+      source: currentSource,
+      mechanical: currentMechanical,
+    })
+    const sourceClaims = graph.flatMap(node => [
+      {
+        subject: `node:${node.id}#/id`,
+        documentPath: 'docs/GDD.md' as const,
+        sectionId: 'section-0',
+        sourcePointer: `/bytes/${bytes.indexOf(node.id)}/${
+          bytes.indexOf(node.id) + Buffer.byteLength(node.id)
+        }`,
+        literal: node.id,
+      },
+      {
+        subject: `node:${node.id}#/value/label`,
+        documentPath: 'docs/GDD.md' as const,
+        sectionId: 'section-0',
+        sourcePointer: `/bytes/${bytes.indexOf(node.id)}/${
+          bytes.indexOf(node.id) + Buffer.byteLength(node.id)
+        }`,
+        literal: node.id,
+      },
+    ])
+    const admitted = admitWorldSceneSemanticResult(currentPacket, {
+      outcome: 'PROJECTED',
+      nodes: graph,
+      sourceClaims: sourceClaims.sort((left, right) =>
+        left.subject.localeCompare(right.subject),
+      ),
+    })
+    if ('reasonCode' in admitted)
+      throw new Error('expected World/Scene receipt')
+    const bound = replayAndBindPhase5SemanticReceipt({
+      source: currentSource,
+      mechanical: currentMechanical,
+      packet: currentPacket,
+      semantic: admitted,
+    })
+    expect(admitted.nodes).toHaveLength(256)
+    expect(bound.module.nodes).toHaveLength(256)
+    expect(canonicalGameIrJson(bound.module.nodes[0])).toContain(
+      'world-scene.node',
+    )
   })
 
   test('replays transform, geometry, route index, reference, and edge claims at the shared boundary', () => {
@@ -433,8 +538,27 @@ describe('World/Scene semantic producer wrapper', () => {
     const route = bound.module.nodes.find(node => node.id === 'route')!
     const child = bound.module.nodes.find(node => node.id === 'child')!
     const zone = bound.module.nodes.find(node => node.id === 'zone')!
-    expect(child.value).toHaveProperty('transform')
-    expect(zone.value).toHaveProperty('shape')
+    expect(child.value).toEqual({
+      label: 'child',
+      transform: {
+        dimensions: '2d',
+        space: 'world',
+        position: { x: 1, y: 2 },
+        rotationRadians: 0.5,
+        scale: { x: 1, y: 1 },
+      },
+    })
+    expect(zone.value).toEqual({
+      label: 'zone',
+      shape: { kind: 'circle', radius: 2 },
+      transform: {
+        dimensions: '2d',
+        space: 'world',
+        position: { x: 0, y: 0 },
+        rotationRadians: 0,
+        scale: { x: 1, y: 1 },
+      },
+    })
     expect(route.value).toEqual({
       label: 'route',
       closed: true,
@@ -449,6 +573,46 @@ describe('World/Scene semantic producer wrapper', () => {
     expect(Object.keys(child.bindings)).toContain('/value/transform/position/x')
     expect(Object.keys(route.bindings)).toContain('/references/1')
     expect(Object.keys(route.bindings)).toContain('/edges/0')
+    const assertOwnerBindings = (
+      nodeId: string,
+      pointers: readonly string[],
+    ): void => {
+      const node = bound.module.nodes.find(entry => entry.id === nodeId)!
+      for (const pointer of pointers) {
+        const claim = fixture.semantic.sourceClaims.find(
+          entry => entry.subject === `node:${nodeId}#${pointer}`,
+        )!
+        const section = fixture.currentSource.sectionIndex.find(
+          entry =>
+            entry.documentPath === claim.documentPath &&
+            entry.sectionId === claim.sectionId,
+        )!
+        expect(node.bindings[pointer]).toEqual({
+          kind: 'owner',
+          documentPath: claim.documentPath,
+          sectionId: claim.sectionId,
+          sectionDigest: section.digest,
+          sourcePointer: claim.sourcePointer,
+        })
+      }
+    }
+    assertOwnerBindings('child', [
+      '/value/transform/position/x',
+      '/value/transform/position/y',
+    ])
+    assertOwnerBindings('zone', [
+      '/value/shape/kind',
+      '/value/shape/radius',
+      '/value/transform/position/x',
+    ])
+    assertOwnerBindings('route', [
+      '/value/waypointReferenceIndexes/0',
+      '/value/waypointReferenceIndexes/1',
+      '/value/waypointReferenceIndexes/2',
+      '/references/0',
+      '/references/1',
+      '/edges/0',
+    ])
   })
 
   test('rejects UTF-8 range and edge-role tampering in the shared replay helper', () => {

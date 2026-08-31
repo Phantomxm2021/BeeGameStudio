@@ -36,22 +36,6 @@ function manifestRelationshipTypes(): readonly string[] {
   )
 }
 
-function assertWorldScenePacket(packet: GameIrDomainSemanticPacket): void {
-  if (packet.moduleId !== 'world-scene')
-    throw new Error('invalid World/Scene semantic packet module')
-  const nodeKinds = manifestNodeKinds()
-  const relationshipTypes = manifestRelationshipTypes()
-  if (
-    packet.allowedNodeKinds.length !== nodeKinds.length ||
-    packet.allowedNodeKinds.some((kind, index) => kind !== nodeKinds[index]) ||
-    packet.allowedRelationshipTypes.length !== relationshipTypes.length ||
-    packet.allowedRelationshipTypes.some(
-      (relationship, index) => relationship !== relationshipTypes[index],
-    )
-  )
-    throw new Error('invalid World/Scene semantic packet manifest identity')
-}
-
 export function buildWorldSceneSemanticPacket(
   input: Readonly<{
     source: GameIrDomainSourceEnvelope
@@ -72,7 +56,6 @@ export function admitWorldSceneSemanticResult(
   packet: GameIrDomainSemanticPacket,
   value: unknown,
 ): WorldSceneSemanticResult {
-  assertWorldScenePacket(packet)
   const result = admitPhase5SemanticResult(packet, value)
   if (result.moduleId !== 'world-scene')
     throw new Error('invalid World/Scene semantic result module')
