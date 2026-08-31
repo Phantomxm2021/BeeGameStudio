@@ -1,6 +1,6 @@
 # Game IR Phase 5: World/Scene and Presentation Design
 
-Status: Proposed / awaiting user review
+Status: Approved
 
 Date: 2026-08-31
 
