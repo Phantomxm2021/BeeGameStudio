@@ -6,6 +6,66 @@ const phase5 = createSemanticFidelityPrimitives(
 )
 
 describe('shared semantic fidelity primitives', () => {
+  test('admission preserves Phase 5 evidence-kind boundaries', () => {
+    const admit = phase5.admitValidationResult
+    const policy = {
+      packetDigest: 'a'.repeat(64),
+      checkIds: ['check.one'],
+      coveredTargets: ['node:scene#/id'],
+      requiredTargets: ['node:scene#/id'],
+      allowedEvidencePointers: [
+        'binding:docs/GDD.md#rules/bytes/0/1',
+        'section:docs/GDD.md#rules@' + 'b'.repeat(64),
+      ],
+      evidenceKindPolicy: {
+        projectionMismatch: 'binding' as const,
+        projectionIdentity: 'section' as const,
+      },
+    }
+    expect(() =>
+      admit(
+        {
+          outcome: 'FAIL',
+          packetDigest: policy.packetDigest,
+          reasonCode: 'projection-mismatch',
+          actual: 'different',
+          evidencePointers: [policy.allowedEvidencePointers[1]],
+        },
+        policy,
+      ),
+    ).toThrow(/binding|evidence/i)
+    expect(() =>
+      admit(
+        {
+          outcome: 'FAIL',
+          packetDigest: policy.packetDigest,
+          reasonCode: 'missing-projection',
+          actual: 'missing',
+          missingSubject: policy.coveredTargets[0],
+          expectedProjection: 'node',
+          evidencePointers: [policy.allowedEvidencePointers[0]],
+        },
+        policy,
+      ),
+    ).toThrow(/section|evidence/i)
+    expect(
+      admit(
+        {
+          outcome: 'PASS',
+          packetDigest: policy.packetDigest,
+          checkIds: policy.checkIds,
+          coveredTargets: policy.coveredTargets,
+        },
+        policy,
+      ),
+    ).toEqual({
+      outcome: 'PASS',
+      packetDigest: policy.packetDigest,
+      checkIds: policy.checkIds,
+      coveredTargets: policy.coveredTargets,
+    })
+  })
+
   test('enforces exact keys and preserves the canonical error contract', () => {
     expect(() =>
       phase5.exactKeys({ value: 1, extra: true }, ['value'], 'candidate'),

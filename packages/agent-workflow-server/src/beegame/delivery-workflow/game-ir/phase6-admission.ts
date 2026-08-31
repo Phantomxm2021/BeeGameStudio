@@ -10,7 +10,7 @@ import {
 import {
   admitGameIrMechanicalProjectionReceipt,
   gameIrSemanticTargetPointers,
-  gameIrSemanticValueLeafPointers,
+  verifyGameIrSemanticClaimLiteral,
   type GameIrMechanicalProjectionReceipt,
 } from './domain-projection'
 import {
@@ -22,7 +22,6 @@ import {
   compareCodeUnits,
   digestGameIrValue,
   parseGameIrModuleCandidate,
-  parseGameIrTargetPointer,
   type GameIrModuleCandidate,
   type GameIrNode,
   type GameIrSourceSection,
@@ -40,21 +39,16 @@ import {
   type GameIrSemanticSourceSection,
 } from './semantic-admission'
 import { assembleWorldPresentationClosure } from './world-presentation-assembler'
-import { createSemanticFidelityPrimitives } from './semantic-fidelity'
+import {
+  createSemanticFidelityPrimitives,
+  verifyGameIrSemanticClaimBytes,
+} from './semantic-fidelity'
 import type { WorldPresentationAssemblyAuthority } from './world-presentation-assembler'
 
 const fidelity = createSemanticFidelityPrimitives(
   'invalid Game IR Phase 6 admission',
 )
-const {
-  exactKeys,
-  strictArray,
-  text,
-  safeId,
-  deepFreeze,
-  exactStringCoverage,
-  normalizeSourcePointer,
-} = fidelity
+const { exactKeys, deepFreeze } = fidelity
 
 const CHECK_IDS = Object.freeze([
   'projection.fidelity',
@@ -169,84 +163,6 @@ function sameIdentity(
   return canonicalGameIrJson(left) === canonicalGameIrJson(right)
 }
 
-function valueAt(
-  node: Pick<GameIrNode, 'id' | 'value' | 'references' | 'edges'>,
-  pointer: string,
-): unknown {
-  if (pointer === '/id') return node.id
-  if (pointer.startsWith('/references/'))
-    return node.references[Number(pointer.slice('/references/'.length))]
-  if (pointer.startsWith('/edges/'))
-    return node.edges[Number(pointer.slice('/edges/'.length))]
-  let current: unknown = node.value
-  for (const segment of pointer.slice('/value/'.length).split('/')) {
-    if (current === null || typeof current !== 'object') return undefined
-    current = (current as Record<string, unknown>)[segment]
-  }
-  return current
-}
-
-function nodePointers(
-  node: Pick<GameIrNode, 'id' | 'value' | 'references' | 'edges'>,
-): readonly string[] {
-  return [
-    '/id',
-    ...gameIrSemanticValueLeafPointers(node.value),
-    ...node.references.map((_, index) => `/references/${index}`),
-    ...node.edges.map((_, index) => `/edges/${index}`),
-  ]
-}
-
-function verifyClaimBytes(
-  source: GameIrDomainSourceEnvelope,
-  claim: Readonly<{
-    documentPath: string
-    sectionId: string
-    sourcePointer: string
-    literal: string
-  }>,
-): void {
-  const section = source.sectionIndex.find(
-    candidate =>
-      candidate.documentPath === claim.documentPath &&
-      candidate.sectionId === claim.sectionId,
-  )
-  if (!section)
-    fail('semantic source claim lies outside selected source closure')
-  const bytesText =
-    source.sectionBytes[`${claim.documentPath}#${claim.sectionId}`]
-  if (bytesText === undefined)
-    fail('semantic source claim section bytes are missing')
-  const pointer = normalizeSourcePointer(
-    claim.sourcePointer,
-    'source claim pointer',
-  )
-  const [, , startText, endText] = pointer.split('/')
-  const start = Number(startText)
-  const end = Number(endText)
-  const bytes = Buffer.from(bytesText, 'utf8')
-  if (end > bytes.length) fail('semantic source claim pointer is out of bounds')
-  const boundary = (offset: number) =>
-    offset === 0 || offset === bytes.length || (bytes[offset]! & 0xc0) !== 0x80
-  if (!boundary(start) || !boundary(end))
-    fail('semantic source claim pointer is not UTF-8 aligned')
-  let literal: string
-  try {
-    literal = new TextDecoder('utf-8', { fatal: true }).decode(
-      bytes.subarray(start, end),
-    )
-  } catch {
-    fail('semantic source claim bytes are not valid UTF-8')
-  }
-  if (literal !== claim.literal)
-    fail('semantic source claim literal does not match exact source bytes')
-  if (
-    section.digest !==
-    createHash('sha256').update(bytesText, 'utf8').digest('hex')
-  )
-    fail('semantic source section bytes have a stale digest')
-}
-
 function bindSemanticNodes(
   source: GameIrDomainSourceEnvelope,
   receipt: ResourceRealizationSemanticReceipt,
@@ -256,21 +172,28 @@ function bindSemanticNodes(
   )
   return receipt.nodes.map(node => {
     const bindings: Record<string, GameIrSourceBinding> = {}
-    for (const pointer of nodePointers(node)) {
+    for (const subject of gameIrSemanticTargetPointers([node])) {
+      const pointer = subject.slice(`node:${node.id}#`.length)
       const claim = claims.get(`node:${node.id}#${pointer}`)
       if (!claim)
         fail(`semantic source claim is missing for node:${node.id}#${pointer}`)
-      if (
-        claim.literal !== canonicalGameIrJson(valueAt(node, pointer)) &&
-        !(
-          typeof valueAt(node, pointer) === 'string' &&
-          claim.literal === valueAt(node, pointer)
+      try {
+        verifyGameIrSemanticClaimLiteral(
+          claim,
+          node,
+          pointer,
+          'invalid Game IR Phase 6 admission',
         )
-      )
+      } catch {
         fail(
           `semantic source claim literal is detached from node:${node.id}#${pointer}`,
         )
-      verifyClaimBytes(source, claim)
+      }
+      verifyGameIrSemanticClaimBytes(
+        source,
+        claim,
+        'invalid Game IR Phase 6 admission',
+      )
       const section = source.sectionIndex.find(
         item =>
           item.documentPath === claim.documentPath &&
@@ -632,105 +555,26 @@ export function admitResourceRealizationSemanticValidationResult(
   const packet = prepareResourceRealizationSemanticValidationPacket(authority)
   if (canonicalGameIrJson(packet) !== canonicalGameIrJson(packetInput))
     fail('validation packet is stale, relabeled, or detached from authority')
-  if (!isRecord(value)) fail('validation result must be a plain object')
-  if (value.outcome === 'PASS') {
-    exactKeys(
-      value,
-      ['outcome', 'packetDigest', 'checkIds', 'coveredTargets'],
-      'fidelity PASS result',
-    )
-    if (value.packetDigest !== packet.packetDigest)
-      fail('fidelity PASS packet digest does not match packet')
-    return deepFreeze({
-      outcome: 'PASS',
-      packetDigest: packet.packetDigest,
-      checkIds: exactStringCoverage(
-        value.checkIds,
-        packet.checkIds,
-        'fidelity PASS checkIds',
-      ),
-      coveredTargets: exactStringCoverage(
-        value.coveredTargets,
-        packet.requiredTargets,
-        'fidelity PASS coveredTargets',
-      ),
-    })
-  }
-  if (value.outcome !== 'FAIL' && value.outcome !== 'AMBIGUOUS')
-    fail('validation result outcome is invalid')
-  const ambiguous = value.outcome === 'AMBIGUOUS'
-  const reasonCode = value.reasonCode
-  if (
-    ambiguous
-      ? reasonCode !== 'ambiguous-projection'
-      : reasonCode !== 'projection-mismatch' &&
-        reasonCode !== 'missing-projection'
-  )
-    fail('validation result reasonCode is invalid')
-  const needsSubject =
-    reasonCode === 'missing-projection' || reasonCode === 'ambiguous-projection'
-  exactKeys(
-    value,
-    needsSubject
-      ? [
-          'outcome',
-          'packetDigest',
-          'reasonCode',
-          'actual',
-          'missingSubject',
-          'expectedProjection',
-          'evidencePointers',
-        ]
-      : ['outcome', 'packetDigest', 'reasonCode', 'actual', 'evidencePointers'],
-    'fidelity failure result',
-  )
-  if (value.packetDigest !== packet.packetDigest)
-    fail('fidelity failure packet digest does not match packet')
-  const evidence = strictArray(
-    value.evidencePointers,
-    'fidelity evidencePointers',
-  )
-  if (
-    evidence.length === 0 ||
-    evidence.some(pointer => typeof pointer !== 'string')
-  )
-    fail('fidelity evidencePointers must contain strings')
-  const allowed = new Set(packet.allowedEvidencePointers)
-  for (let index = 0; index < evidence.length; index += 1) {
-    const pointer = evidence[index] as string
-    if (
-      !allowed.has(pointer) ||
-      (index > 0 &&
-        compareCodeUnits(evidence[index - 1] as string, pointer) >= 0)
-    )
-      fail('fidelity evidencePointers are not exact sorted coverage')
-  }
-  const output: RecordValue = {
-    outcome: value.outcome,
+  return fidelity.admitValidationResult(value, {
     packetDigest: packet.packetDigest,
-    reasonCode,
-    actual: text(value.actual, 'fidelity actual'),
-    evidencePointers: Object.freeze(evidence as string[]),
-  }
-  if (needsSubject) {
-    const missingSubject = text(value.missingSubject, 'fidelity missingSubject')
-    const separator = missingSubject.indexOf('#')
-    if (!missingSubject.startsWith('node:') || separator <= 'node:'.length)
-      fail('fidelity missingSubject must be node-qualified')
-    const pointer = parseGameIrTargetPointer(
-      missingSubject.slice(separator + 1),
-    )
-    const canonical = `node:${safeId(missingSubject.slice('node:'.length, separator), 'fidelity missingSubject node ID')}#${pointer}`
-    if (
-      canonical !== missingSubject ||
-      !packet.requiredTargets.includes(canonical)
-    )
-      fail('fidelity missingSubject is not a required target')
-    output.missingSubject = missingSubject
-    output.expectedProjection = text(
-      value.expectedProjection,
-      'fidelity expectedProjection',
-    )
-  }
-  return deepFreeze(output) as ResourceRealizationSemanticValidationResult
+    checkIds: packet.checkIds,
+    coveredTargets: packet.requiredTargets,
+    requiredTargets: packet.requiredTargets,
+    allowedEvidencePointers: packet.allowedEvidencePointers,
+    evidenceKindPolicy: {
+      projectionMismatch: 'any',
+      projectionIdentity: 'any',
+    },
+    messages: {
+      resultObject: 'validation result must be a plain object',
+      failureResultLabel: 'fidelity failure result',
+      failurePacketDigest:
+        'fidelity failure packet digest does not match packet',
+      evidenceLabel: 'fidelity evidencePointers',
+      evidenceStrings: 'fidelity evidencePointers must contain strings',
+      evidenceCoverage:
+        'fidelity evidencePointers are not exact sorted coverage',
+      evidenceSort: 'fidelity evidencePointers are not exact sorted coverage',
+    },
+  }) as ResourceRealizationSemanticValidationResult
 }

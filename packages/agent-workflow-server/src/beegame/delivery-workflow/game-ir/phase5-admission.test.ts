@@ -445,6 +445,18 @@ function repackExternalProjection(
 }
 
 describe('shared Phase 5 admission', () => {
+  test('preserves the exact validation-result object error contract', () => {
+    const { validationPacket } = validationFixture()
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(
+        validationPacket,
+        null,
+      ),
+    ).toThrow(
+      'invalid Game IR Phase 5 admission: fidelity validation result must be an object',
+    )
+  })
+
   test('reconstructs a fidelity packet from the complete external projection', () => {
     const { currentSource, validationPacket } = validationFixture()
     const packetWithAuthority = validationPacket as typeof validationPacket & {

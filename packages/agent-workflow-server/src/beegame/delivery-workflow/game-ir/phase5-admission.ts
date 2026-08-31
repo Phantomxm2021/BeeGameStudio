@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import {
   admitGameIrMechanicalProjectionReceipt,
   admitGameIrDomainSemanticResult,
-  gameIrSemanticPointerValue,
   gameIrSemanticTargetPointers,
   gameIrSemanticValueLeafPointers,
   verifyGameIrSemanticClaimLiteral,
@@ -33,7 +32,6 @@ import {
   compareCodeUnits,
   digestGameIrValue,
   parseGameIrModuleCandidate,
-  parseGameIrTargetPointer,
   type GameIrModuleCandidate,
   type GameIrSourceSection,
   canonicalizeGameIrSourceSections,
@@ -50,6 +48,7 @@ import {
 import { digestSectionIndex } from '../foundation-section-index'
 import {
   createSemanticFidelityPrimitives,
+  verifyGameIrSemanticClaimBytes,
   type GameIrSemanticCandidateNode,
   type GameIrSemanticSourceClaim,
 } from './semantic-fidelity'
@@ -162,6 +161,9 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const SHA256 = /^[a-f0-9]{64}$/
 const JSON_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
 const FOUNDATION_DOCUMENT_SET = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
+const fidelity = createSemanticFidelityPrimitives(
+  'invalid Game IR Phase 5 admission',
+)
 const {
   exactKeys,
   strictArray,
@@ -169,9 +171,8 @@ const {
   safeId,
   sha256,
   deepFreeze,
-  normalizeSourcePointer,
   exactStringCoverage,
-} = createSemanticFidelityPrimitives('invalid Game IR Phase 5 admission')
+} = fidelity
 
 function fail(message: string): never {
   throw new Error(`invalid Game IR Phase 5 admission: ${message}`)
@@ -234,43 +235,6 @@ function normalizeStoredReceipt(
   }) as Phase5SemanticReceipt
 }
 
-function verifyClaimBytes(
-  source: GameIrDomainSourceEnvelope,
-  claim: GameIrDomainSourceClaim,
-): void {
-  const section = source.sectionIndex.find(
-    candidate =>
-      candidate.documentPath === claim.documentPath &&
-      candidate.sectionId === claim.sectionId,
-  )
-  if (!section)
-    fail('source claim lies outside the exact selected source closure')
-  const bytesText =
-    source.sectionBytes[`${claim.documentPath}#${claim.sectionId}`]
-  if (bytesText === undefined) fail('source section bytes are missing')
-  const bytes = Buffer.from(bytesText, 'utf8')
-  const pointer = normalizeSourcePointer(claim.sourcePointer, 'source pointer')
-  const [, , startText, endText] = pointer.split('/')
-  const start = Number(startText)
-  const end = Number(endText)
-  if (end > bytes.length)
-    fail('source pointer is outside selected source bytes')
-  const boundary = (offset: number): boolean =>
-    offset === 0 || offset === bytes.length || (bytes[offset]! & 0xc0) !== 0x80
-  if (!boundary(start) || !boundary(end))
-    fail('source pointer does not lie on UTF-8 code-point boundaries')
-  let literal: string
-  try {
-    literal = new TextDecoder('utf-8', { fatal: true }).decode(
-      bytes.subarray(start, end),
-    )
-  } catch {
-    fail('source byte range is not valid UTF-8')
-  }
-  if (literal !== claim.literal)
-    fail('source byte range does not exactly match its literal')
-}
-
 export function replayAndBindPhase5SemanticReceipt(
   input: Readonly<{
     source: GameIrDomainSourceEnvelope
@@ -314,7 +278,23 @@ export function replayAndBindPhase5SemanticReceipt(
       pointer,
       'invalid Game IR Phase 5 admission',
     )
-    verifyClaimBytes(source, claim)
+    verifyGameIrSemanticClaimBytes(
+      source,
+      claim,
+      'invalid Game IR Phase 5 admission',
+      {
+        sourcePointerLabel: 'source pointer',
+        outsideClosure:
+          'source claim lies outside the exact selected source closure',
+        bytesMissing: 'source section bytes are missing',
+        pointerOutsideBytes: 'source pointer is outside selected source bytes',
+        pointerUnaligned:
+          'source pointer does not lie on UTF-8 code-point boundaries',
+        invalidUtf8: 'source byte range is not valid UTF-8',
+        literalMismatch: 'source byte range does not exactly match its literal',
+        verifySectionDigest: false,
+      },
+    )
   }
   const claimsBySubject = new Map(
     semantic.sourceClaims.map(claim => [claim.subject, claim]),
@@ -1180,125 +1160,18 @@ export function admitPhase5SemanticValidationResult(
   value: unknown,
 ): Phase5SemanticValidationResult {
   const validated = normalizeValidationPacket(packetInput)
-  if (!isRecord(value)) fail('fidelity validation result must be an object')
-  if (value.outcome === 'PASS') {
-    exactKeys(
-      value,
-      ['outcome', 'packetDigest', 'checkIds', 'coveredTargets'],
-      'fidelity PASS result',
-    )
-    if (value.packetDigest !== validated.packet.packetDigest)
-      fail('fidelity PASS packet digest does not match packet')
-    const checkIds = exactStringCoverage(
-      value.checkIds,
-      validated.packet.checkIds,
-      'fidelity PASS checkIds',
-    )
-    const coveredTargets = exactStringCoverage(
-      value.coveredTargets,
-      validated.packet.requiredTargets,
-      'fidelity PASS coveredTargets',
-    )
-    return deepFreeze({
-      outcome: 'PASS',
-      packetDigest: validated.packet.packetDigest,
-      checkIds,
-      coveredTargets,
-    })
-  }
-  if (value.outcome !== 'FAIL' && value.outcome !== 'AMBIGUOUS')
-    fail('fidelity validation result outcome is invalid')
-  const reasonCode = value.reasonCode
-  if (
-    reasonCode !== 'projection-mismatch' &&
-    reasonCode !== 'missing-projection' &&
-    reasonCode !== 'ambiguous-projection'
-  )
-    fail('fidelity validation result reasonCode is invalid')
-  if (value.outcome === 'FAIL' && reasonCode === 'ambiguous-projection')
-    fail('FAIL result cannot use ambiguous-projection')
-  if (value.outcome === 'AMBIGUOUS' && reasonCode !== 'ambiguous-projection')
-    fail('AMBIGUOUS result must use ambiguous-projection')
-  const requiresSubject =
-    reasonCode === 'missing-projection' || reasonCode === 'ambiguous-projection'
-  exactKeys(
-    value,
-    requiresSubject
-      ? [
-          'outcome',
-          'packetDigest',
-          'reasonCode',
-          'actual',
-          'missingSubject',
-          'expectedProjection',
-          'evidencePointers',
-        ]
-      : ['outcome', 'packetDigest', 'reasonCode', 'actual', 'evidencePointers'],
-    'fidelity validation result',
-  )
-  if (value.packetDigest !== validated.packet.packetDigest)
-    fail('fidelity validation result packet digest does not match packet')
-  const evidence = strictArray(
-    value.evidencePointers,
-    'fidelity validation evidencePointers',
-  )
-  if (
-    evidence.length === 0 ||
-    evidence.some(pointer => typeof pointer !== 'string')
-  )
-    fail('fidelity validation evidencePointers must contain strings')
-  const allowed = new Set(validated.packet.allowedEvidencePointers)
-  const seen = new Set<string>()
-  for (const pointer of evidence as string[]) {
-    if (seen.has(pointer) || !allowed.has(pointer))
-      fail('fidelity validation evidence pointer is not exact coverage')
-    if (reasonCode === 'projection-mismatch' && !pointer.startsWith('binding:'))
-      fail('projection mismatch evidence must use owner bindings')
-    if (requiresSubject && !pointer.startsWith('section:'))
-      fail('missing or ambiguous evidence must use section pointers')
-    seen.add(pointer)
-  }
-  for (let index = 1; index < evidence.length; index += 1)
-    if (
-      compareCodeUnits(
-        evidence[index - 1] as string,
-        evidence[index] as string,
-      ) >= 0
-    )
-      fail('fidelity validation evidencePointers must be sorted')
-  let missingSubject: string | undefined
-  let expectedProjection: string | undefined
-  if (requiresSubject) {
-    missingSubject = text(value.missingSubject, 'fidelity missingSubject')
-    const separator = missingSubject.indexOf('#')
-    if (!missingSubject.startsWith('node:') || separator <= 'node:'.length)
-      fail('fidelity missingSubject must be node-qualified')
-    let pointer: string
-    try {
-      pointer = parseGameIrTargetPointer(missingSubject.slice(separator + 1))
-    } catch {
-      fail('fidelity missingSubject target pointer is invalid')
-    }
-    const canonical = `node:${safeId(
-      missingSubject.slice('node:'.length, separator),
-      'fidelity missingSubject node ID',
-    )}#${pointer}`
-    if (
-      canonical !== missingSubject ||
-      !validated.packet.requiredTargets.includes(canonical)
-    )
-      fail('fidelity missingSubject is not a required target')
-    expectedProjection = text(
-      value.expectedProjection,
-      'fidelity expectedProjection',
-    )
-  }
-  return deepFreeze({
-    outcome: value.outcome,
+  return fidelity.admitValidationResult(value, {
     packetDigest: validated.packet.packetDigest,
-    reasonCode,
-    actual: text(value.actual, 'fidelity actual'),
-    ...(requiresSubject ? { missingSubject, expectedProjection } : {}),
-    evidencePointers: Object.freeze([...(evidence as string[])]),
+    checkIds: validated.packet.checkIds,
+    coveredTargets: validated.packet.requiredTargets,
+    requiredTargets: validated.packet.requiredTargets,
+    allowedEvidencePointers: validated.packet.allowedEvidencePointers,
+    evidenceKindPolicy: {
+      projectionMismatch: 'binding',
+      projectionIdentity: 'section',
+    },
+    messages: {
+      resultObject: 'fidelity validation result must be an object',
+    },
   }) as Phase5SemanticValidationResult
 }
