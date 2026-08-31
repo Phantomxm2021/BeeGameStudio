@@ -671,6 +671,7 @@ type Phase5SemanticValidationPacketBase = Readonly<{
   semanticReceiptDigest: string
   compileRequestDigest: string
   authoritySectionIndexDigest: string
+  authoritySectionIndex: readonly GameIrSourceSection[]
   sourceSections: readonly GameIrSemanticSourceSection[]
   moduleBytes: string
   moduleDigest: string
@@ -721,6 +722,12 @@ type PresentationSemanticValidationResult = Phase5SemanticValidationResult
 `moduleDigest` is `digestGameIrValue` of that module. `packetDigest` is
 `digestGameIrValue` of every packet field except itself, including the full
 external projections rather than caller-supplied projection digests. The
+`authoritySectionIndex` is the deep-frozen, complete eight-document
+`GameIrSourceSection` index derived from the validated source envelope; it
+contains no section bytes. `authoritySectionIndexDigest` remains its
+`digestGameIrValue` digest, while `sourceSections` remains the selected
+module-local section refs together with their exact bytes for claims and
+evidence. The
 service owns the ordered `checkIds`. `requiredTargets` is the complete
 canonical set of node identities, value leaves, references, and edges in the
 admitted module. `allowedEvidencePointers` is derived only from exact owner
@@ -829,7 +836,11 @@ Tests must cover:
   exact binding evidence; evidence-form crossover is rejected;
 - validation packet reconstruction, exact ordered PASS coverage, missing or
   extra check/target coverage, digest-only or boolean PASS, relabeling, stale
-  external projection digest, and FAIL/AMBIGUOUS closure rejection;
+  external projection digest, and FAIL/AMBIGUOUS closure rejection. World and
+  Presentation packet tests independently cover their full authority index,
+  selected source bytes, receipt identities, and evidence namespaces; no
+  branch may expand selected source/evidence scope or equate an external
+  projection's own source/receipt digests with consumer identities;
 - World parent cycle, missing root, multiple roots, orphan node, cross-scene
   membership, dangling/wrong-kind typed refs, duplicate singleton edge, route
   with fewer than two ordered waypoints, index out of range, unused route

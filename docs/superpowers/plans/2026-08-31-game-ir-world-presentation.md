@@ -517,6 +517,7 @@ type Phase5SemanticValidationPacketBase = Readonly<{
   semanticReceiptDigest: string
   compileRequestDigest: string
   authoritySectionIndexDigest: string
+  authoritySectionIndex: readonly GameIrSourceSection[]
   sourceSections: readonly GameIrSemanticSourceSection[]
   moduleBytes: string
   moduleDigest: string
@@ -559,11 +560,11 @@ export function admitPhase5SemanticValidationResult(
 ): Phase5SemanticValidationResult
 ```
 
-These types match design §7.1 exactly. `GameplayModuleProjection` is imported from the accepted Phase 4 assembler; `WorldSceneModuleProjection` has one definition here and is later re-exported by the sole writer. No reduced projection alias or synthetic top-level module ID is introduced. The builder derives `moduleId` from the semantic receipt, obtains the ordered check IDs from the matching entry in `GAME_IR_SEMANTIC_VALIDATOR_MANIFEST`, imports the corresponding domain manifest and derives its digest internally, validates the exact external projection branch, and includes the full projections in `packetDigest`. Callers cannot pass check IDs or a target-manifest digest.
+These types match design §7.1 exactly. `GameplayModuleProjection` is imported from the accepted Phase 4 assembler; `WorldSceneModuleProjection` has one definition here and is later re-exported by the sole writer. No reduced projection alias or synthetic top-level module ID is introduced. The builder derives `moduleId` from the semantic receipt, obtains the ordered check IDs from the matching entry in `GAME_IR_SEMANTIC_VALIDATOR_MANIFEST`, imports the corresponding domain manifest and derives its digest internally, validates the exact external projection branch, and includes the full projections in `packetDigest`. `authoritySectionIndex` is the deep-frozen complete eight-document `GameIrSourceSection` index derived from the validated source envelope and carries no bytes; `sourceSections` remains the selected byte-bearing closure. Callers cannot pass check IDs, a target-manifest digest, or an authority index.
 
 - [ ] **Step 1: Write packet reconstruction assertion-level RED tests**
 
-Cover exact keys, both discriminated branches, full external projection fields, wrong/missing/extra external projection, stale Phase 4/World projection, module relabeling, compile/authority digest changes, caller-supplied check/manifest fields, canonical module bytes, target coverage, and evidence reconstruction.
+Cover exact keys, both discriminated branches, full external projection fields, wrong/missing/extra external projection, stale Phase 4/World projection, module relabeling, compile/authority digest changes, caller-supplied check/manifest/index fields, canonical module bytes, target coverage, evidence reconstruction, and authority-index missing/extra/duplicate/reordered/malformed/digest/member mutations. Use independent World and Presentation fixtures with real external source/receipt identities; selected source/evidence closure must not expand to the full index.
 
 Run: `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/phase5-admission.test.ts`
 
@@ -575,7 +576,7 @@ Reject boolean/digest-only PASS, partial/extra/duplicate/reordered check or targ
 
 - [ ] **Step 3: Implement service-owned packet/result admission**
 
-Do not accept `checkIds`, `targetManifestDigest`, detached module digests, or maps from callers. Derive required targets from `/id`, every value leaf, reference, and edge; derive exact owner/section evidence from bindings/source; freeze every nested result.
+Do not accept `checkIds`, `targetManifestDigest`, detached module digests, authority-index overrides, or maps from callers. Normalize the complete eight-document authority index with Core's `digestSectionIndex` for the compile-request context and `digestGameIrValue` for packet identity; require every selected ref to be an exact index member. Derive required targets from `/id`, every value leaf, reference, and edge; derive exact owner/section evidence from selected bindings/source; freeze every nested result. External projections retain their own source/receipt/validation digests and are Core-replayed independently; do not compare them to consumer identities. Task 8 supplies the upstream replay authority.
 
 - [ ] **Step 4: Verify and commit**
 
@@ -791,6 +792,14 @@ const worldValidationPacket = buildPhase5SemanticValidationPacket({
 ```
 
 Pass `authority.worldScene.validation` separately. Never spread an authority branch into a strict builder. After exact World PASS, freeze the sole World projection; only then replay/bind/parse/fidelity-admit Presentation using `{ gameplay: phase4.gameplay, worldScene }`.
+
+Both Phase 5 source envelopes retain the complete eight-document
+`authoritySectionIndex` for replay. Task 8 passes that full index to Core for
+each current and external module; only each module's selected `sourceSections`
+carry bytes and contribute owner/section evidence. Task 8 must replay each
+external Gameplay/World projection against its own source and receipt
+authority and must not infer validity by equating those projection digests to
+the consumer packet's identities.
 
 - [ ] **Step 4: Compute sole projections and closure**
 
