@@ -86,3 +86,45 @@ exit 0
 
 Phase 5 domain-specific schema manifests, semantic producers, fidelity
 validators, and closure assembly remain intentionally out of scope for Task 2.
+
+## Reviewer fix round 1
+
+### Changes
+
+- Made empty semantic packet allow-lists mean allow-none; empty node/edge
+  projections remain valid, while any node or edge is rejected when its kind
+  or relationship is not explicitly listed.
+- Reworked the edge-role mutation test to use a self-targeting Core-admitted
+  edge and two allowed roles, proving the untampered receipt replays before
+  changing only the role and asserting the exact typed-literal mismatch.
+- Added baseline-first table coverage for non-empty/unsorted/duplicate
+  mechanical ownership, hidden/accessor DTOs, duplicate/omitted/unsorted
+  claims, canonical node ordering, all malformed range classes (including
+  split UTF-8 code points), primitive and ID literal mismatches, reference
+  target tampering, and recomputed packet relabeling.
+
+### Verification
+
+```text
+$ bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-projection.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/phase5-admission.test.ts
+21 pass
+0 fail
+83 expect() calls
+
+$ bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir
+215 pass
+0 fail
+2 snapshots
+1031 expect() calls
+
+$ (cd packages/agent-workflow-server && bun run typecheck)
+$ ./node_modules/.bin/biome check [the four task files]
+$ git diff --check
+exit 0
+```
+
+### Fix commits
+
+- `9f3ce636 fix: enforce Phase 5 packet node policy`
+- `69580cd6 docs: update Phase 5 admission commit`
+- `b53b5323 fix: close Phase 5 admission review gaps`
