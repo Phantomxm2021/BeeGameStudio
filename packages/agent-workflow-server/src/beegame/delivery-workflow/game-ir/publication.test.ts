@@ -223,7 +223,7 @@ function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
                     '/value/score': {
                       kind: 'derived',
                       derivationRuleId: `score-${extraId}`,
-                      inputPointers: ['/id'],
+                      inputs: [{ kind: 'local', pointer: '/id' }],
                     },
                     '/edges/0': {
                       kind: 'owner',
@@ -391,6 +391,13 @@ describe('atomic Game IR publication and recovery', () => {
     const dependencyGraph = JSON.parse(dependencyGraphBytes) as {
       edges: readonly Record<string, unknown>[]
     }
+    expect(
+      dependencyGraph.edges.find(edge => edge.kind === 'derived'),
+    ).toMatchObject({
+      kind: 'derived',
+      from: 'gameplay/gameplay.extra-0/value/score',
+      to: 'gameplay/gameplay.extra-0/id',
+    })
     expect(dependencyGraph.edges.some(edge => edge.type === 'requires')).toBe(
       true,
     )

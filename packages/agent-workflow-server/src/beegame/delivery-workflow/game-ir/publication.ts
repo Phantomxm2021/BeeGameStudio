@@ -421,10 +421,13 @@ function graph(candidate: GameIrCandidate): Record<string, unknown> {
     module.nodes.flatMap(node => [
       ...Object.entries(node.bindings).flatMap(([pointer, binding]) =>
         binding.kind === 'derived'
-          ? binding.inputPointers.map(input => ({
+          ? binding.inputs.map(input => ({
               kind: 'derived',
               from: `${module.moduleId}/${node.id}${pointer}`,
-              to: `${module.moduleId}/${node.id}${input}`,
+              to:
+                input.kind === 'local'
+                  ? `${module.moduleId}/${node.id}${input.pointer}`
+                  : `${input.moduleId}/${input.nodeId}${input.pointer}`,
             }))
           : [],
       ),

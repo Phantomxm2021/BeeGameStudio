@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
+  GAME_IR_CANONICAL_MODULE_IDS,
   parseGameIrCompileRequest,
   type GameIrCompileRequest,
   type GameIrModuleId,
@@ -24,7 +25,20 @@ export type GameIrSourceBinding =
   | Readonly<{
       kind: 'derived'
       derivationRuleId: string
-      inputPointers: readonly string[]
+      inputs: readonly GameIrDerivedInput[]
+    }>
+
+export type GameIrDerivedInput =
+  | Readonly<{
+      kind: 'local'
+      pointer: string
+    }>
+  | Readonly<{
+      kind: 'external'
+      moduleId: GameIrModuleId
+      nodeId: string
+      pointer: string
+      targetDigest: string
     }>
 
 export type GameIrReference = Readonly<{
@@ -138,6 +152,19 @@ function safeId(value: unknown, label: string): string {
   const text = nonEmptyText(value, label)
   if (!SAFE_ID.test(text)) fail(`${label} is not a safe identifier`)
   return text
+}
+
+function safeModuleId(value: unknown, label: string): GameIrModuleId {
+  const moduleId = safeId(value, label)
+  if (!GAME_IR_CANONICAL_MODULE_IDS.includes(moduleId as GameIrModuleId))
+    fail(`${label} is not a canonical module ID`)
+  return moduleId as GameIrModuleId
+}
+
+function derivedInputKey(input: GameIrDerivedInput): string {
+  return input.kind === 'local'
+    ? `local\0${input.pointer}`
+    : `external\0${input.moduleId}\0${input.nodeId}\0${input.pointer}`
 }
 
 function digest(value: unknown, label: string): string {
@@ -424,30 +451,64 @@ function sourceBinding(
   if (value.kind === 'derived') {
     exactKeys(
       value,
-      ['kind', 'derivationRuleId', 'inputPointers'],
+      ['kind', 'derivationRuleId', 'inputs'],
       `derived binding ${pointer}`,
     )
     const derivationRuleId = safeId(
       value.derivationRuleId,
       `derived binding ${pointer} derivationRuleId`,
     )
-    if (!Array.isArray(value.inputPointers) || value.inputPointers.length === 0)
-      fail(`derived binding ${pointer} inputPointers must not be empty`)
-    const inputPointers: string[] = []
-    for (const input of value.inputPointers) {
-      if (!isSafeJsonPointer(input))
-        fail(`derived binding ${pointer} contains an unsafe input pointer`)
-      inputPointers.push(input)
-    }
-    for (let index = 1; index < inputPointers.length; index += 1) {
-      if (
-        compareCodeUnits(inputPointers[index - 1]!, inputPointers[index]!) >= 0
-      )
-        fail(
-          `derived binding ${pointer} inputPointers must be unique and sorted`,
+    if (!Array.isArray(value.inputs) || value.inputs.length === 0)
+      fail(`derived binding ${pointer} inputs must not be empty`)
+    const inputs: GameIrDerivedInput[] = []
+    for (const input of value.inputs) {
+      if (!isRecord(input))
+        fail(`derived binding ${pointer} input must be an object`)
+      if (input.kind === 'local') {
+        exactKeys(
+          input,
+          ['kind', 'pointer'],
+          `derived binding ${pointer} local input`,
         )
+        inputs.push({
+          kind: 'local',
+          pointer: parseGameIrTargetPointer(input.pointer),
+        })
+        continue
+      }
+      if (input.kind === 'external') {
+        exactKeys(
+          input,
+          ['kind', 'moduleId', 'nodeId', 'pointer', 'targetDigest'],
+          `derived binding ${pointer} external input`,
+        )
+        inputs.push({
+          kind: 'external',
+          moduleId: safeModuleId(
+            input.moduleId,
+            `derived binding ${pointer} external moduleId`,
+          ),
+          nodeId: safeId(
+            input.nodeId,
+            `derived binding ${pointer} external nodeId`,
+          ),
+          pointer: parseGameIrTargetPointer(input.pointer),
+          targetDigest: digest(
+            input.targetDigest,
+            `derived binding ${pointer} external targetDigest`,
+          ),
+        })
+        continue
+      }
+      fail(`derived binding ${pointer} input has an unknown kind`)
     }
-    return { kind: 'derived', derivationRuleId, inputPointers }
+    for (let index = 1; index < inputs.length; index += 1) {
+      const previous = derivedInputKey(inputs[index - 1]!)
+      const current = derivedInputKey(inputs[index]!)
+      if (compareCodeUnits(previous, current) >= 0)
+        fail(`derived binding ${pointer} inputs must be unique and sorted`)
+    }
+    return { kind: 'derived', derivationRuleId, inputs }
   }
   fail(`binding ${pointer} has an unknown kind`)
 }
@@ -483,35 +544,41 @@ function valueLeafPointers(value: RecordValue): string[] {
   return leaves
 }
 
-function localTargetExists(node: GameIrNode, pointer: string): boolean {
+export function resolveTargetLeaf(node: GameIrNode, pointer: string): unknown {
+  const normalized = parseGameIrTargetPointer(pointer)
   const segments = pointerSegments(pointer)
-  if (segments.length === 1 && segments[0] === 'id') return true
+  if (segments.length === 1 && segments[0] === 'id') return node.id
   if (
     segments.length === 2 &&
     (segments[0] === 'references' || segments[0] === 'edges') &&
     /^(0|[1-9]\d*)$/.test(segments[1]!)
   ) {
     const entries = segments[0] === 'references' ? node.references : node.edges
-    return Number(segments[1]) < entries.length
+    const entry = entries[Number(segments[1])]
+    if (!entry) fail(`target ${normalized} does not exist on node ${node.id}`)
+    return entry
   }
   if (segments.length === 1 && segments[0] === 'value')
-    return Object.keys(node.value).length === 0
-  if (segments.length < 2 || segments[0] !== 'value') return false
+    if (Object.keys(node.value).length === 0) return node.value
+    else fail(`target ${normalized} is not a leaf on node ${node.id}`)
+  if (segments.length < 2 || segments[0] !== 'value')
+    fail(`target ${normalized} does not exist on node ${node.id}`)
   let current: unknown = node.value
   for (const segment of segments.slice(1)) {
     if (Array.isArray(current)) {
       if (!/^\d+$/.test(segment) || Number(segment) >= current.length)
-        return false
+        fail(`target ${normalized} does not exist on node ${node.id}`)
       current = current[Number(segment)]
     } else if (isRecord(current) && Object.hasOwn(current, segment)) {
       current = current[segment]
-    } else return false
+    } else fail(`target ${normalized} does not exist on node ${node.id}`)
   }
-  return (
-    (!Array.isArray(current) && !isRecord(current)) ||
-    (Array.isArray(current) && current.length === 0) ||
-    (isRecord(current) && Object.keys(current).length === 0)
+  if (
+    (Array.isArray(current) && current.length > 0) ||
+    (isRecord(current) && Object.keys(current).length > 0)
   )
+    fail(`target ${normalized} is not a leaf on node ${node.id}`)
+  return current
 }
 
 function parseNode(
@@ -628,29 +695,6 @@ function parseNode(
     edges,
     bindings: parsedBindings,
   }
-  const states = new Map<string, 'visiting' | 'done'>()
-  const reachesOwner = (pointer: string): boolean => {
-    const normalized = localPointer(pointer)
-    if (normalized === '/id') return true
-    if (!localTargetExists(parsedNode, normalized))
-      fail(`node ${id} derived input ${pointer} does not target a local leaf`)
-    const binding = parsedBindings[normalized]
-    if (!binding) fail(`node ${id} derived input ${pointer} has no binding`)
-    if (binding.kind === 'owner') return true
-    if (states.get(normalized) === 'visiting')
-      fail(`node ${id} derived bindings contain a dependency cycle`)
-    if (states.get(normalized) === 'done') return true
-    states.set(normalized, 'visiting')
-    for (const input of binding.inputPointers) reachesOwner(input)
-    states.set(normalized, 'done')
-    return true
-  }
-  for (const pointer of leaves) {
-    const binding = parsedBindings[pointer]!
-    if (binding.kind === 'derived') {
-      for (const input of binding.inputPointers) reachesOwner(input)
-    }
-  }
   return parsedNode
 }
 
@@ -678,6 +722,7 @@ type ModuleInput = Readonly<{
   request: GameIrCompileRequest
   sections: readonly GameIrSourceSection[]
   expectedModuleId?: GameIrModuleId
+  externalModules?: readonly unknown[]
 }>
 
 function parseGameIrModuleCandidateInternal(
@@ -692,6 +737,132 @@ function parseGameIrModuleCandidateInternal(
   return module
 }
 
+type ModuleSet = Readonly<{
+  modules: readonly GameIrModuleCandidate[]
+  externalModuleIds?: ReadonlySet<string>
+  validateRelations?: boolean
+}>
+
+function moduleNodeKey(moduleId: string, nodeId: string): string {
+  return `${moduleId}\0${nodeId}`
+}
+
+function dependencyEndpointKey(
+  moduleId: string,
+  nodeId: string,
+  pointer: string,
+): string {
+  return `${moduleId}\0${nodeId}\0${pointer}`
+}
+
+function validateModuleSet({
+  modules,
+  externalModuleIds,
+  validateRelations,
+}: ModuleSet): void {
+  const modulesById = new Map<string, GameIrModuleCandidate>()
+  const nodesByKey = new Map<string, GameIrNode>()
+  const nodesById = new Map<string, GameIrNode>()
+  for (const module of modules) {
+    if (modulesById.has(module.moduleId))
+      fail(`duplicate module ID ${module.moduleId}`)
+    modulesById.set(module.moduleId, module)
+    for (const node of module.nodes) {
+      const key = moduleNodeKey(module.moduleId, node.id)
+      if (nodesByKey.has(key)) fail(`duplicate node ID ${node.id}`)
+      if (nodesById.has(node.id))
+        fail(`duplicate node ID ${node.id} across modules`)
+      nodesByKey.set(key, node)
+      nodesById.set(node.id, node)
+    }
+  }
+  if (validateRelations) {
+    for (const module of modules) {
+      for (const node of module.nodes) {
+        for (const reference of node.references) {
+          const target = nodesById.get(reference.targetId)
+          if (!target) fail(`reference ${node.id} targets an unknown node`)
+          if (target.kind !== reference.targetType)
+            fail(`reference ${node.id} target type does not match target node`)
+        }
+        for (const edge of node.edges) {
+          const target = nodesById.get(edge.targetId)
+          if (!target) fail(`edge ${node.id} targets an unknown node`)
+          if (target.kind !== edge.targetType)
+            fail(`edge ${node.id} target type does not match target node`)
+        }
+      }
+    }
+  }
+
+  const states = new Map<string, 'visiting' | 'done'>()
+  const visit = (
+    ownerModuleId: string,
+    ownerNode: GameIrNode,
+    pointer: string,
+  ): void => {
+    const normalized = parseGameIrTargetPointer(pointer)
+    const key = dependencyEndpointKey(ownerModuleId, ownerNode.id, normalized)
+    const state = states.get(key)
+    if (state === 'visiting')
+      fail(`derived bindings contain a dependency cycle at ${key}`)
+    if (state === 'done') return
+    const binding = ownerNode.bindings[normalized]
+    if (!binding)
+      fail(`node ${ownerNode.id} derived input ${pointer} has no binding`)
+    resolveTargetLeaf(ownerNode, normalized)
+    if (binding.kind === 'owner') {
+      states.set(key, 'done')
+      return
+    }
+    states.set(key, 'visiting')
+    for (const input of binding.inputs) {
+      let targetModuleId = ownerModuleId
+      let targetNodeId = ownerNode.id
+      if (input.kind === 'external') {
+        if (input.moduleId === ownerModuleId)
+          fail(
+            `node ${ownerNode.id} external input may not target its own module`,
+          )
+        targetModuleId = input.moduleId
+        targetNodeId = input.nodeId
+      }
+      const targetModule = modulesById.get(targetModuleId)
+      if (!targetModule)
+        fail(`node ${ownerNode.id} derived input targets an unknown module`)
+      if (externalModuleIds && input.kind === 'external') {
+        if (!externalModuleIds.has(input.moduleId))
+          fail(
+            `node ${ownerNode.id} derived input targets an unavailable external module`,
+          )
+      }
+      const targetNode = nodesByKey.get(
+        moduleNodeKey(targetModuleId, targetNodeId),
+      )
+      if (!targetNode)
+        fail(`node ${ownerNode.id} derived input targets an unknown node`)
+      const leaf = resolveTargetLeaf(targetNode, input.pointer)
+      if (input.kind === 'external') {
+        const actualDigest = digestGameIrValue(leaf)
+        if (actualDigest !== input.targetDigest)
+          fail(
+            `node ${ownerNode.id} external input has the wrong target digest`,
+          )
+      }
+      visit(targetModuleId, targetNode, input.pointer)
+    }
+    states.set(key, 'done')
+  }
+
+  for (const module of modules) {
+    for (const node of module.nodes) {
+      for (const [pointer, binding] of Object.entries(node.bindings)) {
+        if (binding.kind === 'derived') visit(module.moduleId, node, pointer)
+      }
+    }
+  }
+}
+
 export function parseGameIrModuleCandidate(
   value: unknown,
   input: ModuleInput,
@@ -701,12 +872,27 @@ export function parseGameIrModuleCandidate(
     normalizeSourceSections(input.sections),
     request,
   )
-  return parseGameIrModuleCandidateInternal(
+  const local = parseGameIrModuleCandidateInternal(
     normalizeJsonValue(value, 'module'),
     sections,
     request,
     input.expectedModuleId,
   )
+  const externalModules = (input.externalModules ?? []).map((module, index) => {
+    const parsed = parseGameIrModuleCandidateInternal(
+      normalizeJsonValue(module, `external module ${index}`),
+      sections,
+      request,
+    )
+    safeModuleId(parsed.moduleId, `external module ${index} moduleId`)
+    return parsed
+  })
+  validateModuleSet({
+    modules: [local, ...externalModules],
+    externalModuleIds: new Set(externalModules.map(module => module.moduleId)),
+    validateRelations: false,
+  })
+  return deepFreeze(local)
 }
 
 function referenceOrder(left: GameIrReference, right: GameIrReference): number {
@@ -770,30 +956,7 @@ export function parseGameIrCandidate(
     )
       fail('module IDs must be unique and sorted')
   }
-  const nodes = new Map<string, GameIrNode>()
-  for (const module of modules) {
-    for (const node of module.nodes) {
-      if (nodes.has(node.id))
-        fail(`duplicate node ID ${node.id} across modules`)
-      nodes.set(node.id, node)
-    }
-  }
-  for (const module of modules) {
-    for (const node of module.nodes) {
-      for (const reference of node.references) {
-        const target = nodes.get(reference.targetId)
-        if (!target) fail(`reference ${node.id} targets an unknown node`)
-        if (target.kind !== reference.targetType)
-          fail(`reference ${node.id} target type does not match target node`)
-      }
-      for (const edge of node.edges) {
-        const target = nodes.get(edge.targetId)
-        if (!target) fail(`edge ${node.id} targets an unknown node`)
-        if (target.kind !== edge.targetType)
-          fail(`edge ${node.id} target type does not match target node`)
-      }
-    }
-  }
+  validateModuleSet({ modules, validateRelations: true })
   return deepFreeze({
     schemaVersion: 'game-ir.v1',
     taskId,

@@ -910,7 +910,7 @@ describe('shared Phase 5 admission', () => {
               '/value/label': {
                 kind: 'derived',
                 derivationRuleId: 'cycle',
-                inputPointers: ['/value/label'],
+                inputs: [{ kind: 'local', pointer: '/value/label' }],
               },
             },
           },

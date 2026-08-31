@@ -158,7 +158,7 @@ function derivedCandidate(
               '/value/score': {
                 kind: 'derived',
                 derivationRuleId: 'score-from-id',
-                inputPointers: ['/id'],
+                inputs: [{ kind: 'local', pointer: '/id' }],
               },
             },
             ...overrides,
@@ -196,6 +196,229 @@ describe('Game IR core candidate and source authority', () => {
         expectedModuleId: 'balance',
       }),
     ).toThrow(/module/i)
+  })
+
+  test('admits derived inputs from a raw prior module with an exact leaf digest', () => {
+    const source = candidate().modules[0]!.nodes[0]!
+    const externalNode = {
+      ...source,
+      id: 'balance-source',
+      value: { health: 9 },
+      bindings: {
+        '/id': source.bindings['/id']!,
+        '/value/health': source.bindings['/value/health']!,
+      },
+    }
+    const externalModule = {
+      moduleId: 'balance',
+      nodes: [externalNode],
+    }
+    const localModule = derivedCandidate({
+      bindings: {
+        '/id': source.bindings['/id']!,
+        '/value/score': {
+          kind: 'derived',
+          derivationRuleId: 'score-from-balance',
+          inputs: [
+            {
+              kind: 'external',
+              moduleId: 'balance',
+              nodeId: 'balance-source',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(9),
+            },
+          ],
+        },
+      },
+    }).modules[0]!
+    expect(
+      parseGameIrModuleCandidate(localModule, {
+        request: request(),
+        sections,
+        externalModules: [externalModule],
+      }),
+    ).toBeTruthy()
+    expect(() =>
+      parseGameIrModuleCandidate(localModule, {
+        request: request(),
+        sections,
+        externalModules: [externalModule],
+      }),
+    ).not.toThrow()
+    expect(() =>
+      parseGameIrModuleCandidate(
+        {
+          ...localModule,
+          nodes: [
+            {
+              ...localModule.nodes[0]!,
+              bindings: {
+                ...localModule.nodes[0]!.bindings,
+                '/value/score': {
+                  ...(localModule.nodes[0]!.bindings['/value/score'] as object),
+                  inputs: [
+                    {
+                      kind: 'external',
+                      moduleId: 'balance',
+                      nodeId: 'balance-source',
+                      pointer: '/value/health',
+                      targetDigest: digestGameIrValue(8),
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+        { request: request(), sections, externalModules: [externalModule] },
+      ),
+    ).toThrow(/digest/i)
+  })
+
+  test('requires canonical input ordering and rejects a cross-module dependency cycle', () => {
+    const source = candidate().modules[0]!.nodes[0]!
+    const externalNode = {
+      ...source,
+      id: 'balance-source',
+      value: { health: 9 },
+      bindings: {
+        '/id': source.bindings['/id']!,
+        '/value/health': source.bindings['/value/health']!,
+      },
+    }
+    const external = {
+      moduleId: 'balance',
+      nodes: [externalNode],
+    }
+    const derived = derivedCandidate({
+      value: { score: 3, other: 4 },
+      bindings: {
+        '/id': source.bindings['/id']!,
+        '/value/score': {
+          kind: 'derived',
+          derivationRuleId: 'ordered-inputs',
+          inputs: [
+            {
+              kind: 'external',
+              moduleId: 'balance',
+              nodeId: 'balance-source',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(9),
+            },
+            { kind: 'local', pointer: '/id' },
+          ],
+        },
+        '/value/other': {
+          kind: 'derived',
+          derivationRuleId: 'other-from-id',
+          inputs: [{ kind: 'local', pointer: '/id' }],
+        },
+      },
+    }).modules[0]!
+    expect(
+      parseGameIrModuleCandidate(derived, {
+        request: request(),
+        sections,
+        externalModules: [external],
+      }),
+    ).toBeTruthy()
+
+    const reversed = {
+      ...derived,
+      nodes: [
+        {
+          ...derived.nodes[0]!,
+          bindings: {
+            ...derived.nodes[0]!.bindings,
+            '/value/score': {
+              ...(derived.nodes[0]!.bindings['/value/score'] as object),
+              inputs: [
+                { kind: 'local', pointer: '/id' },
+                {
+                  kind: 'external',
+                  moduleId: 'balance',
+                  nodeId: 'balance-source',
+                  pointer: '/value/health',
+                  targetDigest: digestGameIrValue(9),
+                },
+              ],
+            },
+          },
+        },
+      ],
+    }
+    expect(() =>
+      parseGameIrModuleCandidate(reversed, {
+        request: request(),
+        sections,
+        externalModules: [external],
+      }),
+    ).toThrow(/sorted|unique/i)
+
+    const gameplayCycle = {
+      ...derived,
+      nodes: [
+        {
+          ...derived.nodes[0]!,
+          id: 'gameplay-derived',
+          value: { score: 3 },
+          bindings: {
+            '/id': source.bindings['/id']!,
+            '/value/score': {
+              kind: 'derived',
+              derivationRuleId: 'gameplay-from-balance',
+              inputs: [
+                {
+                  kind: 'external',
+                  moduleId: 'balance',
+                  nodeId: 'balance-derived',
+                  pointer: '/value/score',
+                  targetDigest: digestGameIrValue(4),
+                },
+              ],
+            },
+          },
+        },
+      ],
+    }
+    const balanceCycle = {
+      moduleId: 'balance',
+      nodes: [
+        {
+          ...source,
+          id: 'balance-derived',
+          producerMode: 'derived' as const,
+          value: { score: 4 },
+          bindings: {
+            '/id': source.bindings['/id']!,
+            '/value/score': {
+              kind: 'derived' as const,
+              derivationRuleId: 'balance-from-gameplay',
+              inputs: [
+                {
+                  kind: 'external' as const,
+                  moduleId: 'gameplay' as const,
+                  nodeId: 'gameplay-derived',
+                  pointer: '/value/score',
+                  targetDigest: digestGameIrValue(3),
+                },
+              ],
+            },
+          },
+        },
+      ],
+    }
+    expect(() =>
+      parseGameIrCandidate(
+        {
+          schemaVersion: GAME_IR_SCHEMA_VERSION,
+          taskId: 'compile-task-1',
+          foundationRevision: 'foundation-revision-1',
+          modules: [balanceCycle, gameplayCycle],
+        },
+        { request: request(), sections },
+      ),
+    ).toThrow(/cycle/i)
   })
 
   test('rejects isolated modules with stale source bindings', () => {
@@ -590,6 +813,21 @@ describe('Game IR core candidate and source authority', () => {
     const node = candidate().modules[0]!.nodes[0]!
     expect(() =>
       parseGameIrCandidate(
+        derivedCandidate({
+          bindings: {
+            '/id': node.bindings['/id']!,
+            '/value/score': {
+              kind: 'derived',
+              derivationRuleId: 'legacy-input-pointers',
+              inputPointers: ['/id'],
+            } as never,
+          },
+        }),
+        { request: request(), sections },
+      ),
+    ).toThrow(/unknown|missing|inputs/i)
+    expect(() =>
+      parseGameIrCandidate(
         candidate({
           modules: [
             {
@@ -602,7 +840,10 @@ describe('Game IR core candidate and source authority', () => {
                     '/value/state/initial': {
                       kind: 'derived',
                       derivationRuleId: 'initial-state',
-                      inputPointers: ['/value/health', '/value/health'],
+                      inputs: [
+                        { kind: 'local', pointer: '/value/health' },
+                        { kind: 'local', pointer: '/value/health' },
+                      ],
                     },
                   },
                 },
@@ -700,7 +941,7 @@ describe('Game IR core candidate and source authority', () => {
                     '/value/health': {
                       kind: 'derived',
                       derivationRuleId: 'health-copy',
-                      inputPointers: ['/id'],
+                      inputs: [{ kind: 'local', pointer: '/id' }],
                     },
                   },
                 },
@@ -740,7 +981,7 @@ describe('Game IR core candidate and source authority', () => {
             '/value/score': {
               kind: 'derived',
               derivationRuleId: 'self',
-              inputPointers: ['/value/score'],
+              inputs: [{ kind: 'local', pointer: '/value/score' }],
             },
           },
         }),
@@ -755,12 +996,12 @@ describe('Game IR core candidate and source authority', () => {
         '/value/first': {
           kind: 'derived',
           derivationRuleId: 'cycle-a',
-          inputPointers: ['/value/second'],
+          inputs: [{ kind: 'local', pointer: '/value/second' }],
         },
         '/value/second': {
           kind: 'derived',
           derivationRuleId: 'cycle-b',
-          inputPointers: ['/value/first'],
+          inputs: [{ kind: 'local', pointer: '/value/first' }],
         },
       },
     })
@@ -777,12 +1018,12 @@ describe('Game IR core candidate and source authority', () => {
             '/value/source': {
               kind: 'derived',
               derivationRuleId: 'source-from-id',
-              inputPointers: ['/id'],
+              inputs: [{ kind: 'local', pointer: '/id' }],
             },
             '/value/score': {
               kind: 'derived',
               derivationRuleId: 'score-from-source',
-              inputPointers: ['/value/source'],
+              inputs: [{ kind: 'local', pointer: '/value/source' }],
             },
           },
         }),
@@ -908,7 +1149,7 @@ describe('Game IR core candidate and source authority', () => {
         '/value/empty': {
           kind: 'derived',
           derivationRuleId: 'empty-from-id',
-          inputPointers: ['/id'],
+          inputs: [{ kind: 'local', pointer: '/id' }],
         },
       },
     })
