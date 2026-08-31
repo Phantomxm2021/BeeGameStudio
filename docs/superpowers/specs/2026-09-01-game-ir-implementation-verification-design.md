@@ -151,9 +151,9 @@ Relationships:
 - `owned-by`: exactly one implementation unit;
 - `proved-by`: at least one evidence requirement.
 
-This is not a Checklist line and does not copy Checklist prose. Phase 8 may
-mechanically relate a Checklist source tag to this node's owner binding, but
-Checklist remains its own raw-Markdown authority.
+This is not a Checklist line and does not copy Checklist prose. Checklist
+remains its own raw-Markdown authority; the unique Checklist-to-scenario bridge
+is deferred to Phase 8 admission as defined in section 9.
 
 ### 4.4 `implementation-verification.invariant`
 
@@ -315,11 +315,22 @@ derive the compile request, Section Index, candidate and module fidelity
 evidence internally. No caller-supplied `candidate`, `compileRequest`,
 `sectionIndex` or `admissions` field remains.
 
-The old generic `semantic-admission.ts` exists only to serve that detached
-publication route. Phase 7 deletes the generic packet/result admission API.
-Neutral diagnostic reason codes and evidence-pointer parsing still used by
-domain projection move once into `semantic-fidelity.ts`; no alias or forwarding
-wrapper remains.
+The old generic packet/result admission in `semantic-admission.ts` exists only
+to serve that detached publication route. Phase 7 deletes that API and its
+tests. Before deleting the file, all live shared imports are moved exactly
+once:
+
+- `GameIrSemanticSourceSection`, diagnostic reason-code types and
+  `sectionEvidencePointer` move to neutral `semantic-fidelity.ts`;
+- `domain-projection.ts`, Phase 5/6 admission and Resource producer import those
+  neutral primitives directly;
+- Phase 5 replaces `GAME_IR_SEMANTIC_VALIDATOR_MANIFEST` lookup with its own
+  fixed World/Presentation validator descriptors derived from the canonical
+  domain source-document manifest, Phase 5 target manifests and Phase 5 check
+  IDs.
+
+No generic six-domain validator manifest, alias or forwarding wrapper remains.
+Each real phase owns only its actual module/check descriptors.
 
 Publication remains unreachable from production routing. Recovery rebuilds
 from the same external Phase 7 authority; committed bytes and journals never
