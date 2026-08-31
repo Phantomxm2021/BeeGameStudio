@@ -946,7 +946,8 @@ Phase 5 does not include:
 - interpreting labels, filenames, headings, common keywords, or model
   preferences as machine-readable role or cross-domain binding.
 
-This document remains Proposed / awaiting user review until reviewed and
-explicitly accepted. Phase 5–9 status, production reachability, publication,
-and Chrome acceptance must remain accurately unstarted/deferred in the parent
+This Phase 5 design is approved. Its implementation becomes accepted only
+after the implementation plan is complete, independently reviewed, and
+root-verified. Production reachability, complete candidate publication,
+Chrome acceptance, and Phase 6–9 remain pending/deferred in the parent
 roadmap.
