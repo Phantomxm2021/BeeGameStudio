@@ -42,6 +42,7 @@ const PHASE5_PRODUCTION_FILES = [
 type AstFacts = Readonly<{
   imports: readonly { kind: string; path: string }[]
   importBindings: readonly { original: string; local: string; path: string }[]
+  namespaceImports: readonly { local: string; path: string }[]
   closureAliases: readonly string[]
   variableDeclarations: readonly string[]
   memberCalls: readonly { receiver: string; name: string }[]
@@ -50,6 +51,11 @@ type AstFacts = Readonly<{
   providerDispatch: boolean
   identifiers: readonly string[]
   properties: readonly { key?: string; value: string }[]
+  objectLiterals: readonly {
+    keys: readonly string[]
+    schemaVersion?: string
+    isDigestInput: boolean
+  }[]
   strings: readonly {
     value: string
     isPropertyName: boolean
@@ -109,6 +115,7 @@ function collectAstFacts(
     local: string
     path: string
   }> = []
+  const namespaceImports: Array<{ local: string; path: string }> = []
   const closureAliases: string[] = []
   const variableDeclarations: string[] = []
   const memberCalls: Array<{ receiver: string; name: string }> = []
@@ -116,6 +123,11 @@ function collectAstFacts(
   const calls: string[] = []
   const identifiers: string[] = []
   const properties: Array<{ key?: string; value: string }> = []
+  const objectLiterals: Array<{
+    keys: string[]
+    schemaVersion?: string
+    isDigestInput: boolean
+  }> = []
   const strings: Array<{
     value: string
     isPropertyName: boolean
@@ -165,6 +177,14 @@ function collectAstFacts(
           if (original === 'assembleWorldPresentationClosure')
             closureAliases.push(local)
         }
+      else if (
+        node.importClause?.namedBindings &&
+        ts.isNamespaceImport(node.importClause.namedBindings)
+      )
+        namespaceImports.push({
+          local: node.importClause.namedBindings.name.text,
+          path: node.moduleSpecifier.text,
+        })
     }
     if (
       ts.isExportDeclaration(node) &&
@@ -246,6 +266,30 @@ function collectAstFacts(
     }
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name))
       variableDeclarations.push(node.name.text)
+    if (ts.isObjectLiteralExpression(node)) {
+      const entries = node.properties.filter(ts.isPropertyAssignment)
+      const keys = entries.flatMap(entry => {
+        if (ts.isIdentifier(entry.name) || ts.isStringLiteral(entry.name))
+          return [entry.name.text]
+        return []
+      })
+      const schemaVersion = entries.find(
+        entry =>
+          (ts.isIdentifier(entry.name) || ts.isStringLiteral(entry.name)) &&
+          entry.name.text === 'schemaVersion' &&
+          ts.isStringLiteral(entry.initializer),
+      )
+      objectLiterals.push({
+        keys,
+        isDigestInput:
+          ts.isCallExpression(node.parent) &&
+          ts.isIdentifier(node.parent.expression) &&
+          node.parent.expression.text === 'digestGameIrValue',
+        ...(schemaVersion && ts.isStringLiteral(schemaVersion.initializer)
+          ? { schemaVersion: schemaVersion.initializer.text }
+          : {}),
+      })
+    }
     if (ts.isIdentifier(node)) identifiers.push(node.text)
     if (ts.isPropertyAssignment(node) && ts.isStringLiteral(node.initializer))
       properties.push({
@@ -268,6 +312,7 @@ function collectAstFacts(
   return {
     imports,
     importBindings,
+    namespaceImports,
     closureAliases,
     variableDeclarations,
     memberCalls,
@@ -276,6 +321,7 @@ function collectAstFacts(
     providerDispatch,
     identifiers,
     properties,
+    objectLiterals,
     strings,
   }
 }
@@ -433,12 +479,53 @@ function futureModuleLiteralViolations(
 function stagedCallerViolations(source: string, filename: string): string[] {
   const facts = collectAstFacts(source, filename)
   const violations = new Set<string>()
-  if (facts.calls.includes('buildPhase5SemanticValidationPacket'))
-    violations.add('call: buildPhase5SemanticValidationPacket')
-  if (facts.identifiers.includes('WorldSceneModuleProjection'))
-    violations.add('type: WorldSceneModuleProjection')
-  for (const name of facts.variableDeclarations)
-    if (/projection/i.test(name)) violations.add(`variable: ${name}`)
+  const allowedGenericBuilderFile =
+    filename === 'world-presentation-assembler.ts' ||
+    filename === 'phase5-admission.test.ts'
+  if (!allowedGenericBuilderFile) {
+    const genericBuilder = 'buildPhase5SemanticValidationPacket'
+    const importedAliases = facts.importBindings
+      .filter(binding => binding.original === genericBuilder)
+      .map(binding => binding.local)
+    if (
+      facts.calls.some(
+        name => name === genericBuilder || importedAliases.includes(name),
+      )
+    )
+      violations.add(`call: ${genericBuilder}`)
+    for (const namespaceImport of facts.namespaceImports)
+      if (
+        facts.memberCalls.some(
+          call =>
+            call.receiver === namespaceImport.local &&
+            call.name === genericBuilder,
+        )
+      )
+        violations.add(`call: ${genericBuilder}`)
+    if (facts.identifiers.includes('WorldSceneModuleProjection'))
+      violations.add('type: WorldSceneModuleProjection')
+    if (facts.identifiers.includes('PresentationModuleProjection'))
+      violations.add('type: PresentationModuleProjection')
+    for (const object of facts.objectLiterals) {
+      const hasProjectionDigest = object.keys.includes('projectionDigest')
+      const hasProjectionSchema =
+        object.schemaVersion === 'game-ir-world-scene-module.v1' ||
+        object.schemaVersion === 'game-ir-presentation-module.v1'
+      const hasProjectionSignature =
+        [
+          'module',
+          'sourceDigest',
+          'mechanicalReceiptDigest',
+          'semanticReceiptDigest',
+          'semanticValidationResultDigest',
+        ].filter(key => object.keys.includes(key)).length >= 2
+      if (
+        (hasProjectionSchema && hasProjectionDigest) ||
+        (hasProjectionSignature && !object.isDigestInput)
+      )
+        violations.add('object: hand-built module projection')
+    }
+  }
   return [...violations].sort()
 }
 
@@ -834,6 +921,67 @@ describe('Game IR stage boundary', () => {
       futureModuleLiteralViolations(
         'consumer.ts',
         `// 'resource-realization'\nconst text = "implementation-verification"`,
+      ),
+    ).toEqual([])
+  })
+
+  test('rejects aliased builders and hand-built projections by AST facts', () => {
+    expect(
+      stagedCallerViolations(
+        `import { buildPhase5SemanticValidationPacket as makePacket } from './phase5-admission'
+         makePacket(input)`,
+        'consumer.ts',
+      ),
+    ).toEqual(['call: buildPhase5SemanticValidationPacket'])
+    expect(
+      stagedCallerViolations(
+        `import * as assembler from './phase5-admission'
+         assembler.buildPhase5SemanticValidationPacket(input)`,
+        'consumer.ts',
+      ),
+    ).toEqual(['call: buildPhase5SemanticValidationPacket'])
+    expect(
+      stagedCallerViolations(
+        `const anonymous = {
+          schemaVersion: 'game-ir-world-scene-module.v1',
+          module: value,
+          projectionDigest: digest,
+        }`,
+        'consumer.ts',
+      ),
+    ).toEqual(['object: hand-built module projection'])
+    expect(
+      stagedCallerViolations(
+        `const unnamed = {
+          module: value,
+          sourceDigest: source,
+          mechanicalReceiptDigest: mechanical,
+          semanticReceiptDigest: semantic,
+        }`,
+        'consumer.ts',
+      ),
+    ).toEqual(['object: hand-built module projection'])
+    expect(
+      stagedCallerViolations(
+        `type LocalAlias = WorldSceneModuleProjection
+         type AnotherAlias = PresentationModuleProjection`,
+        'consumer.ts',
+      ),
+    ).toEqual([
+      'type: PresentationModuleProjection',
+      'type: WorldSceneModuleProjection',
+    ])
+    expect(
+      stagedCallerViolations(
+        `import {
+          prepareWorldSceneSemanticValidationPacket,
+          preparePresentationSemanticValidationPacket,
+        } from './world-presentation-assembler'
+         // buildPhase5SemanticValidationPacket('comment')
+         const text = 'WorldSceneModuleProjection'
+         prepareWorldSceneSemanticValidationPacket(input)
+         preparePresentationSemanticValidationPacket(input)`,
+        'consumer.ts',
       ),
     ).toEqual([])
   })

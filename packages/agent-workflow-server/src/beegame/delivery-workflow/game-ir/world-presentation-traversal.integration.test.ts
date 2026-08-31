@@ -1095,6 +1095,19 @@ function expectAssemblyError(
   expect(caught).toBeInstanceOf(Error)
   expect((caught as Error).message).toBe(expectedMessage)
 }
+function expectAuthorityError(
+  buildAuthority: () => unknown,
+  expectedMessage: string,
+): void {
+  let caught: unknown
+  try {
+    buildAuthority()
+  } catch (error) {
+    caught = error
+  }
+  expect(caught).toBeInstanceOf(Error)
+  expect((caught as Error).message).toBe(expectedMessage)
+}
 function authority(overrides: FixtureOverrides = {}) {
   const context = fixtureContext(overrides)
   const phase4 = phase4Authority(context, overrides)
@@ -1429,7 +1442,8 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           }
         : node,
     )
-    expect(() => authority({ world: worldNodesMissing })).toThrow(
+    expectAuthorityError(
+      () => authority({ world: worldNodesMissing }),
       'invalid World/Scene module: node world.ice-objective relationship objective must occur exactly once',
     )
     const worldNumeric = sortNodes(worldNodes).map(node =>
@@ -1443,7 +1457,8 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           }
         : node,
     )
-    expect(() => authority({ world: worldNumeric })).toThrow(
+    expectAuthorityError(
+      () => authority({ world: worldNumeric }),
       'invalid World/Scene module: node world.ice-danger shape.radius must be positive',
     )
     const mechanicalNodes = redigestMechanical(base.worldScene.mechanical, {
@@ -1545,7 +1560,8 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
         ? { ...node, value: { ...node.value, trigger: { kind: 'foobar' } } }
         : node,
     )
-    expect(() => authority({ presentation: badPresentation })).toThrow(
+    expectAuthorityError(
+      () => authority({ presentation: badPresentation }),
       'invalid Presentation module: node presentation.transition-open trigger kind is invalid',
     )
     const badUiAction = sortNodes(presentationNodes).map(node =>
@@ -1553,7 +1569,8 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
         ? { ...node, value: { ...node.value, input: 'joystick' } }
         : node,
     )
-    expect(() => authority({ presentation: badUiAction })).toThrow(
+    expectAuthorityError(
+      () => authority({ presentation: badUiAction }),
       'invalid Presentation module: node presentation.ui-action-extract input is invalid',
     )
     const badRequirement = sortNodes(presentationNodes).map(node =>
@@ -1567,7 +1584,8 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           }
         : node,
     )
-    expect(() => authority({ presentation: badRequirement })).toThrow(
+    expectAuthorityError(
+      () => authority({ presentation: badRequirement }),
       'invalid Presentation module: node presentation.screen-hud requirement policy does not match',
     )
     const presentationIdentityAuthority = {
@@ -1650,7 +1668,8 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           }
         : node,
     )
-    expect(() => authority({ presentation: forbidden })).toThrow(
+    expectAuthorityError(
+      () => authority({ presentation: forbidden }),
       'invalid Presentation module: node presentation.camera-follow role region has wrong target kind',
     )
   })
