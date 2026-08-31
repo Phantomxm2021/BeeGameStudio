@@ -93,6 +93,17 @@ function admitted(module: MutableModule): GameIrModuleCandidate {
   return module as unknown as GameIrModuleCandidate
 }
 
+function expectExactError(action: () => unknown, message: string): void {
+  let thrown: unknown
+  try {
+    action()
+  } catch (error) {
+    thrown = error
+  }
+  expect(thrown).toBeInstanceOf(Error)
+  expect((thrown as Error).message).toBe(message)
+}
+
 function richModule(): MutableModule {
   const module = validModule()
   module.nodes.push(
@@ -326,6 +337,73 @@ describe('World/Scene Game IR schema', () => {
     expect(Object.isFrozen(parsed)).toBe(true)
     expect(Object.isFrozen(parsed.nodes)).toBe(true)
     expect(Object.isFrozen(parsed.nodes[0]!.value)).toBe(true)
+  })
+
+  test('enforces the exact admitted module and semantic node envelopes', () => {
+    const valid = validModule()
+    const parsed = parseWorldSceneModule(admitted(valid))
+    expect(parsed.nodes.map(node => node.id)).toEqual([
+      'node.root',
+      'scene.main',
+    ])
+    expect(Object.isFrozen(parsed)).toBe(true)
+    expect(Object.isFrozen(parsed.nodes)).toBe(true)
+
+    const unknownModuleField = cloneModule(valid) as MutableModule &
+      Record<string, unknown>
+    unknownModuleField.extra = true
+    expectExactError(
+      () => parseWorldSceneModule(admitted(unknownModuleField)),
+      'invalid World/Scene module: module has unknown or missing fields',
+    )
+
+    const unknownNodeField = cloneModule(valid)
+    ;(unknownNodeField.nodes[0] as unknown as Record<string, unknown>).extra =
+      true
+    expectExactError(
+      () => parseWorldSceneModule(admitted(unknownNodeField)),
+      'invalid World/Scene module: node node.root has unknown or missing fields',
+    )
+
+    const hiddenNodeField = cloneModule(valid)
+    Object.defineProperty(hiddenNodeField.nodes[0], 'hidden', {
+      value: true,
+      enumerable: false,
+    })
+    expectExactError(
+      () => parseWorldSceneModule(admitted(hiddenNodeField)),
+      'invalid World/Scene module: node node.root has a non-JSON property',
+    )
+
+    const accessorNodeField = cloneModule(valid)
+    Object.defineProperty(accessorNodeField.nodes[0], 'accessor', {
+      get: () => true,
+      enumerable: true,
+    })
+    expectExactError(
+      () => parseWorldSceneModule(admitted(accessorNodeField)),
+      'invalid World/Scene module: node node.root has a non-JSON property',
+    )
+
+    const symbolNodeField = cloneModule(valid)
+    Object.defineProperty(symbolNodeField.nodes[0], Symbol('extra'), {
+      value: true,
+      enumerable: true,
+    })
+    expectExactError(
+      () => parseWorldSceneModule(admitted(symbolNodeField)),
+      'invalid World/Scene module: node node.root has an unknown symbol key',
+    )
+
+    for (const producerMode of ['mechanical', 'derived'] as const) {
+      const mutation = cloneModule(valid)
+      ;(mutation.nodes[0] as unknown as Record<string, unknown>).producerMode =
+        producerMode
+      expectExactError(
+        () => parseWorldSceneModule(admitted(mutation)),
+        `invalid World/Scene module: node node.root producerMode must be semantic`,
+      )
+    }
   })
 
   test('rejects a zero quaternion or non-positive scale', () => {

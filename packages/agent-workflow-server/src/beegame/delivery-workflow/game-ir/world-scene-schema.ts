@@ -846,26 +846,41 @@ export function parseWorldSceneModule(
   module: GameIrModuleCandidate,
   externalTargets?: ReadonlyMap<string, GameIrNode>,
 ): GameIrModuleCandidate {
-  if (
-    !module ||
-    typeof module !== 'object' ||
-    module.moduleId !== 'world-scene'
-  )
-    fail('module ID must be world-scene')
+  if (!isRecord(module)) fail('module must be an object')
+  exactKeys(module, ['moduleId', 'nodes'], 'module')
+  if (module.moduleId !== 'world-scene') fail('module ID must be world-scene')
   if (!Array.isArray(module.nodes)) fail('module nodes must be an array')
   const targets = targetMap(module.nodes, externalTargets)
   const parsed: ParsedNode[] = []
   for (let index = 0; index < module.nodes.length; index += 1) {
     const node = module.nodes[index]!
     if (!isRecord(node)) fail(`node ${index} must be an object`)
-    const admittedNode = node as unknown as GameIrNode
-    if (typeof admittedNode.id !== 'string' || admittedNode.id.length === 0)
+    const idDescriptor = Object.getOwnPropertyDescriptor(node, 'id')
+    const nodeId =
+      idDescriptor && 'value' in idDescriptor ? idDescriptor.value : undefined
+    if (typeof nodeId !== 'string' || nodeId.length === 0)
       fail(`node ${index} has an invalid ID`)
+    exactKeys(
+      node,
+      [
+        'id',
+        'kind',
+        'producerMode',
+        'value',
+        'references',
+        'edges',
+        'bindings',
+      ],
+      `node ${nodeId}`,
+    )
+    const admittedNode = node as unknown as GameIrNode
     if (
       typeof admittedNode.kind !== 'string' ||
       !NODE_KINDS.has(admittedNode.kind)
     )
       fail(`node ${admittedNode.id} has an unknown kind`)
+    if (admittedNode.producerMode !== 'semantic')
+      fail(`node ${admittedNode.id} producerMode must be semantic`)
     if (
       !Array.isArray(admittedNode.references) ||
       !Array.isArray(admittedNode.edges)

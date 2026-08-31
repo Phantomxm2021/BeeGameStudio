@@ -134,6 +134,43 @@ function collectAstFacts(
     isPropertyValue: boolean
     declarationName?: string
   }> = []
+  type ConstStringBinding =
+    | { kind: 'literal'; value: string }
+    | { kind: 'alias'; name: string }
+    | null
+  const constStringBindings = new Map<string, ConstStringBinding>()
+  const collectConstStringBindings = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      ts.isVariableDeclarationList(node.parent) &&
+      (node.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
+      const initializer = node.initializer
+      constStringBindings.set(
+        node.name.text,
+        initializer && ts.isStringLiteral(initializer)
+          ? { kind: 'literal', value: initializer.text }
+          : initializer && ts.isIdentifier(initializer)
+            ? { kind: 'alias', name: initializer.text }
+            : null,
+      )
+    }
+    ts.forEachChild(node, collectConstStringBindings)
+  }
+  collectConstStringBindings(file)
+  const resolveConstString = (
+    name: string,
+    resolving = new Set<string>(),
+  ): string | undefined => {
+    if (resolving.has(name)) return undefined
+    const binding = constStringBindings.get(name)
+    if (!binding) return undefined
+    if (binding.kind === 'literal') return binding.value
+    const next = new Set(resolving)
+    next.add(name)
+    return resolveConstString(binding.name, next)
+  }
   let providerDispatch = false
   const containsProvider = (expression: ts.Expression): boolean => {
     if (ts.isIdentifier(expression)) return expression.text === 'provider'
@@ -291,11 +328,24 @@ function collectAstFacts(
       })
     }
     if (ts.isIdentifier(node)) identifiers.push(node.text)
-    if (ts.isPropertyAssignment(node) && ts.isStringLiteral(node.initializer))
-      properties.push({
-        key: ts.isIdentifier(node.name) ? node.name.text : undefined,
-        value: node.initializer.text,
-      })
+    if (ts.isPropertyAssignment(node)) {
+      const key = ts.isIdentifier(node.name)
+        ? node.name.text
+        : ts.isStringLiteral(node.name)
+          ? node.name.text
+          : undefined
+      const value = ts.isStringLiteral(node.initializer)
+        ? node.initializer.text
+        : ts.isIdentifier(node.initializer)
+          ? resolveConstString(node.initializer.text)
+          : undefined
+      if (key !== undefined && value !== undefined)
+        properties.push({ key, value })
+    }
+    if (ts.isShorthandPropertyAssignment(node)) {
+      const value = resolveConstString(node.name.text)
+      if (value !== undefined) properties.push({ key: node.name.text, value })
+    }
     if (ts.isStringLiteral(node))
       strings.push({
         value: node.text,
@@ -832,6 +882,71 @@ describe('Game IR stage boundary', () => {
       'forbidden-strategy: legacy',
       'forbidden-strategy: migration',
     ])
+  })
+
+  test('rejects aliased future module and kind values only at sensitive properties', () => {
+    for (const moduleId of [
+      'resource-realization',
+      'implementation-verification',
+    ]) {
+      expect(
+        task11Phase5IsolationViolations(`
+          const future = '${moduleId}'
+          const moduleIdValue = future
+          const record = { moduleId: moduleIdValue }
+        `),
+      ).toEqual([`future-module: ${moduleId}`])
+      expect(
+        task11Phase5IsolationViolations(`
+          const future = '${moduleId}'
+          const moduleId = future
+          const record = { moduleId }
+        `),
+      ).toEqual([`future-module: ${moduleId}`])
+      expect(
+        task11Phase4IsolationViolations(`
+          const future = '${moduleId}'
+          const moduleId = future
+          const record = { moduleId }
+        `),
+      ).toEqual([`phase5-construction: ${moduleId}`])
+    }
+    for (const kind of [
+      'resource-realization.logical-resource',
+      'implementation-verification.target',
+    ]) {
+      expect(
+        task11Phase5IsolationViolations(`
+          const future = '${kind}'
+          const kindValue = future
+          const record = { kind: kindValue }
+        `),
+      ).toEqual([`future-node: ${kind}`])
+      expect(
+        task11Phase5IsolationViolations(`
+          const future = '${kind}'
+          const kind = future
+          const record = { kind }
+        `),
+      ).toEqual([`future-node: ${kind}`])
+      expect(
+        task11Phase4IsolationViolations(`
+          const future = '${kind}'
+          const kind = future
+          const record = { kind }
+        `),
+      ).toEqual([`phase5-construction: ${kind}`])
+    }
+    expect(
+      task11Phase5IsolationViolations(`
+        const ordinary = 'ordinary'
+        const moduleId = ordinary
+        const kind = ordinary
+        const record = { moduleId: moduleId, kind }
+        const unused = 'resource-realization'
+        // kind: 'implementation-verification.target'
+      `),
+    ).toEqual([])
   })
 
   test('splits accepted Phase 4 isolation from Phase 5 module construction', () => {

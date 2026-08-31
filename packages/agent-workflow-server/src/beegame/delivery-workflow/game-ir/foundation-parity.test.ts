@@ -1565,7 +1565,7 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       )
       const afterSnapshot = JSON.stringify({
         state: parityStateBytes(before),
-        documents: [...documentsBefore],
+        documents: [...documentsAfter],
       })
       expect(afterSnapshot).toBe(beforeSnapshot)
       expect([...documentsAfter]).toEqual([...documentsBefore])
