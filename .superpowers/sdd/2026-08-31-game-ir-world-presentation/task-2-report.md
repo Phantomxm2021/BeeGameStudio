@@ -79,7 +79,7 @@ exit 0
 
 ## Commit
 
-`b5bbe154 feat: replay Phase 5 semantic receipts`
+`d21c3cd5 feat: replay Phase 5 semantic receipts`
 
 ## Concerns
 
