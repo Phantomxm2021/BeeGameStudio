@@ -1,6 +1,7 @@
 import {
   admitGameIrMechanicalProjectionReceipt,
   admitGameIrDomainSemanticResult,
+  normalizeGameIrDomainSemanticReceipt,
   type GameIrDomainSemanticPacket,
   type GameIrDomainSemanticReceipt,
   type GameIrDomainSemanticDiagnostic,
@@ -545,6 +546,30 @@ function validateSemanticTargets(
   }
 }
 
+function validateAdmittedSemanticResult<
+  Result extends ResourceRealizationSemanticResult,
+>(packet: ResourceRealizationSemanticProjectionPacket, result: Result): Result {
+  if (result.outcome !== 'PROJECTED') return result
+  validateSemanticTargets(packet, result.nodes)
+  for (const node of result.nodes) {
+    if (packet.forbiddenTargets.includes(node.id))
+      fail(
+        `semantic result targets a forbidden Presentation logical ID ${node.id}`,
+      )
+    if (
+      node.kind === 'resource-realization.logical-resource' &&
+      typeof node.value.requirementId === 'string' &&
+      packet.forbiddenPresentationRequirementIds.includes(
+        node.value.requirementId,
+      )
+    )
+      fail(
+        `semantic result shadows Presentation requirement ${node.value.requirementId}`,
+      )
+  }
+  return result
+}
+
 function buildPacket(
   closure: ReturnType<typeof assembleWorldPresentationClosure>,
   source: GameIrDomainSourceEnvelope,
@@ -744,24 +769,31 @@ export function admitResourceRealizationSemanticResult(
       receiptAuthorityDigest: packet.packetDigest,
     },
   )
-  if (result.outcome === 'PROJECTED') {
-    validateSemanticTargets(packet, result.nodes)
-    for (const node of result.nodes) {
-      if (packet.forbiddenTargets.includes(node.id))
-        fail(
-          `semantic result targets a forbidden Presentation logical ID ${node.id}`,
-        )
-      if (
-        node.kind === 'resource-realization.logical-resource' &&
-        typeof node.value.requirementId === 'string' &&
-        packet.forbiddenPresentationRequirementIds.includes(
-          node.value.requirementId,
-        )
-      )
-        fail(
-          `semantic result shadows Presentation requirement ${node.value.requirementId}`,
-        )
-    }
-  }
-  return result as ResourceRealizationSemanticResult
+  const admitted = validateAdmittedSemanticResult(
+    packet,
+    result as ResourceRealizationSemanticResult,
+  )
+  return admitted
+}
+
+export function replayResourceRealizationSemanticReceipt(
+  authority: ResourceRealizationSemanticProjectionAuthority,
+  packet: ResourceRealizationSemanticProjectionPacket,
+  receipt: unknown,
+): ResourceRealizationSemanticReceipt {
+  const expectedPacket =
+    prepareResourceRealizationSemanticProjectionPacket(authority)
+  if (canonicalGameIrJson(expectedPacket) !== canonicalGameIrJson(packet))
+    fail('semantic packet is stale, relabeled, or detached from authority')
+  if (!isRecord(packet)) fail('semantic packet must be a plain object')
+  const normalized = normalizeGameIrDomainSemanticReceipt(
+    semanticAdmissionPacket(packet),
+    receipt,
+    {
+      errorPrefix: 'invalid Resource Realization producer',
+      allowedModuleIds: ['resource-realization'],
+      receiptAuthorityDigest: packet.packetDigest,
+    },
+  ) as ResourceRealizationSemanticReceipt
+  return validateAdmittedSemanticResult(packet, normalized)
 }

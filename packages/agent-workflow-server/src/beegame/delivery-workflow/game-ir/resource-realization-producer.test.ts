@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   admitResourceRealizationSemanticResult,
   prepareResourceRealizationSemanticProjectionPacket,
+  replayResourceRealizationSemanticReceipt,
   type ResourceRealizationSemanticProjectionPacket,
   type ResourceRealizationSemanticProjectionAuthority,
 } from './resource-realization-producer'
@@ -641,6 +642,47 @@ describe('Resource Realization semantic producer', () => {
     expect(receipt.nodes[0]?.value.label).toBe('Profile')
   })
 
+  test('replays a stored receipt through the exact outer packet and shared invariants', () => {
+    const fixture = realResourceFixture()
+    const input = bindSourceEvidence(projectedInput(), fixture.packet)
+    const receipt = admitResourceRealizationSemanticResult(
+      fixture.authority,
+      fixture.packet,
+      input,
+    )
+    expect(receipt.outcome).toBe('PROJECTED')
+    if (receipt.outcome !== 'PROJECTED') return
+    const replayed = replayResourceRealizationSemanticReceipt(
+      fixture.authority,
+      fixture.packet,
+      receipt,
+    )
+    expect(replayed).toEqual(receipt)
+    expect(Object.isFrozen(replayed)).toBe(true)
+
+    expect(() =>
+      replayResourceRealizationSemanticReceipt(
+        fixture.authority,
+        fixture.packet,
+        { ...receipt, extra: true } as never,
+      ),
+    ).toThrow(/receipt|unknown|field/)
+    expect(() =>
+      replayResourceRealizationSemanticReceipt(
+        fixture.authority,
+        fixture.packet,
+        { ...receipt, receiptDigest: 'e'.repeat(64) },
+      ),
+    ).toThrow(/receipt.*digest|stale|invalid/)
+    expect(() =>
+      replayResourceRealizationSemanticReceipt(
+        fixture.authority,
+        { ...fixture.packet, packetDigest: 'd'.repeat(64) },
+        receipt,
+      ),
+    ).toThrow(/packet|authority|stale|detached/)
+  })
+
   test('rejects missing or tampered Presentation leaf authority before projection', () => {
     const authority = realAuthority()
     const semantic = authority.phase5Authority.presentation.semantic
@@ -873,6 +915,14 @@ describe('Resource Realization semantic producer', () => {
     expect(
       result.nodes.flatMap(node => node.edges).map(edge => edge.type),
     ).toEqual(['describes', 'realizes'])
+    const replayed = replayResourceRealizationSemanticReceipt(
+      fixture.authority,
+      fixture.packet,
+      result,
+    )
+    expect(replayed.nodes.flatMap(node => node.edges)).toEqual(
+      result.nodes.flatMap(node => node.edges),
+    )
   })
 
   test('rejects worker derived logical output, Presentation shadowing, and unknown semantic vocabulary', () => {
@@ -990,6 +1040,58 @@ describe('Resource Realization semantic producer', () => {
         input,
       ),
     ).toThrow(/authority|stale|detached/)
+
+    const logical = admitResourceRealizationSemanticResult(
+      fixture.authority,
+      fixture.packet,
+      bindSourceEvidence(projectedLogicalInput(), fixture.packet),
+    )
+    expect(logical.outcome).toBe('PROJECTED')
+    if (logical.outcome !== 'PROJECTED') return
+    const recomputeReceipt = (
+      nodes: typeof logical.nodes,
+      sourceClaims: typeof logical.sourceClaims,
+    ) => {
+      const { receiptDigest: _receiptDigest, ...body } = logical
+      const changed = { ...body, nodes, sourceClaims }
+      return { ...changed, receiptDigest: digestGameIrValue(changed) }
+    }
+    const shadowId = 'resource.requirement.screen-main'
+    const idShadow = recomputeReceipt(
+      logical.nodes.map(node => ({ ...node, id: shadowId })),
+      logical.sourceClaims.map(claim => ({
+        ...claim,
+        subject: claim.subject.replace('logical-main', shadowId),
+        literal: claim.subject.endsWith('#/id') ? shadowId : claim.literal,
+      })),
+    )
+    expect(() =>
+      replayResourceRealizationSemanticReceipt(
+        fixture.authority,
+        fixture.packet,
+        idShadow,
+      ),
+    ).toThrow(/forbidden|shadow|overlap/)
+
+    const requirementShadow = recomputeReceipt(
+      logical.nodes.map(node => ({
+        ...node,
+        value: { ...node.value, requirementId: 'screen-main' },
+      })),
+      logical.sourceClaims.map(claim => ({
+        ...claim,
+        literal: claim.subject.endsWith('#/value/requirementId')
+          ? 'screen-main'
+          : claim.literal,
+      })),
+    )
+    expect(() =>
+      replayResourceRealizationSemanticReceipt(
+        fixture.authority,
+        fixture.packet,
+        requirementShadow,
+      ),
+    ).toThrow(/forbidden|shadow|overlap/)
   })
 
   test('binds structured diagnostics to the fixed source evidence closure', () => {
