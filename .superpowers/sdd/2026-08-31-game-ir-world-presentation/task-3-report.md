@@ -2,7 +2,8 @@
 
 ## Status
 
-DONE. Base was `ca2edea5` (Phase 5 Task 2 complete). This task only adds the
+DONE. The original base was `ca2edea5` (Phase 5 Task 2 complete); this fix
+round is based on `ba39d91c` (round 1). This task only adds the
 World/Scene schema and its tests; no Reviewer, Revision, Foundation,
 provider, route, persistence, or other production behavior was changed.
 
@@ -61,14 +62,12 @@ Balance targets.
 
 ## Fix round 1 audit corrections
 
-Sol's review found one authority gap and three multi-cause mutation tests. The
-route descriptor now owns `references.targetKinds: ['world-scene.node']` plus
-`unique`/`sorted` metadata; route reference validation reads that metadata,
-and relationship target kinds remain manifest-derived. The redundant
-`EXTERNAL_KINDS` and `WORLD_KINDS` tables were removed. External target maps
-are only resolution input; every used edge/reference is still admitted solely
-through manifest target kinds, so a supplied Balance target reaches the exact
-wrong-kind guard rather than being reported as dangling.
+Sol's round 1 review found one authority gap and three multi-cause mutation
+tests. Round 1 moved route `targetKinds`, `unique`, and `sorted` into manifest
+metadata and removed the redundant `EXTERNAL_KINDS` and `WORLD_KINDS` tables,
+but it did not yet close the route index/coverage metadata or the strict
+local/external boundary. Its cycle and Balance tests also still changed more
+than one causal input, so round 1 was not treated as final evidence.
 
 The original pre-implementation zero-quaternion RED above was not valid
 behavior evidence: the throwing parser made that assertion pass for the wrong
@@ -83,35 +82,74 @@ bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/wo
 
 The guard was restored immediately. The corrected test now first proves the
 legal 3D baseline parses, changes only the quaternion to all zero, and asserts
-the exact guard message. The parent-cycle test first proves a rich legal
-baseline, then changes only two non-root parent edges so the root remains
-valid, and asserts `parent hierarchy contains a cycle`. The forbidden-target
-test first proves its baseline, supplies an actual `balance.variable` target,
-changes only the spawn edge target kind, and asserts `role entity has wrong
-target kind`. Route metadata was likewise first removed temporarily to record
-an assertion RED (`references` was `undefined` and legal routes then failed),
-then restored.
+the exact guard message. The round 1 cycle test still changed two parent edges
+and the Balance test changed both the edge and external target; those are
+explicitly corrected below. Route metadata was likewise first removed
+temporarily to record an assertion RED (`references` was `undefined` and legal
+routes then failed), then restored.
 
 The corrected fix-round GREEN is:
 
 ```text
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/world-scene-schema.test.ts
-→ 16 pass, 0 fail, 56 expect() calls
+→ 16 pass, 0 fail, 56 expect() calls (round 1 snapshot)
 (cd packages/agent-workflow-server && bun run typecheck)
 → tsc --noEmit passed
 Biome check on both Task 3 TypeScript files → passed
 git diff --check → passed
 ```
 
+### Fix round 2 evidence
+
+Before implementing the round 2 changes, the newly wired assertions were run
+against the round 1 implementation (assertion-level RED, with no compile or
+import failure involved):
+
+```text
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/world-scene-schema.test.ts -t "exposes the closed ten-kind manifest|external World targets|malformed external kinds|forbidden external kind"
+→ 4 fail: route metadata lacked minTraversalLength/requireAllReferences;
+  an external World target was accepted; malformed kind leaked
+  `node.kind.startsWith is not a function`; Balance reached the edge
+  wrong-kind guard instead of the forbidden external-kind guard.
+```
+
+Round 2 then made `validateReferences` consume the current kind's complete
+reference metadata, including route traversal minimum and coverage policy. The
+allowed external set is now derived from all manifest relationship/reference
+target kinds minus `NODE_KINDS`; there is no prefix heuristic. External maps
+reject local World kinds, malformed kinds, and non-manifest kinds before graph
+resolution, while local World targets are resolved only from local nodes.
+The cycle regression now has a legal root-plus-two-non-root baseline and
+changes only one parent target to form the two-node cycle. The Gameplay
+regression keeps the legal external entity ID and edge unchanged and changes
+only that target node's kind to `balance.variable`.
+
+After implementation, the focused suite passed:
+
+```text
+bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/world-scene-schema.test.ts
+→ 19 pass, 0 fail, 60 expect() calls
+(cd packages/agent-workflow-server && bun run typecheck)
+→ tsc --noEmit passed
+Biome check on both Task 3 TypeScript files → passed
+git diff --check → passed
+```
+
+## Commit
+
+The three files in this report are intended to ship together as one
+independent reviewable commit (`fix: enforce world scene target boundaries`);
+the final commit hash is returned in the handoff.
+
 ## Boundary decisions / self-review
 
 - Reused `GameIrNode`, `GameIrReference`, `GameIrRelationshipEdge`, and
   `compareCodeUnits` from Core; no second role/cardinality authority exists.
-- Only the four explicitly allowed Phase 4 Gameplay target kinds can be
-  referenced/admitted through the manifest. A supplied non-Gameplay target is
-  merely resolution input so a used wrong-kind edge gets the precise manifest
-  role error; Balance, Presentation, Resource, and Implementation facts never
-  enter the parsed module.
+- External target kinds are derived from the manifest and the local
+  `NODE_KINDS` set. The four Gameplay kinds admitted by this manifest are
+  accepted; local World kinds supplied through `externalTargets` and
+  non-manifest kinds such as Balance are rejected with controlled schema
+  errors. World targets are always resolved from the local module node map.
 - Transform `space` remains the closed `local | world` value; the parser
   requires world space for scene roots and leaves source-supported non-root
   choices to the source-bound admission layer because this API has no separate

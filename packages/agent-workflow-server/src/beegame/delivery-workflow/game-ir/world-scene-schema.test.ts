@@ -313,6 +313,8 @@ describe('World/Scene Game IR schema', () => {
         targetKinds: ['world-scene.node'],
         unique: true,
         sorted: true,
+        minTraversalLength: 2,
+        requireAllReferences: true,
       },
     )
   })
@@ -382,6 +384,61 @@ describe('World/Scene Game IR schema', () => {
     expect(
       parsed.nodes.find(node => node.id === 'route.patrol')?.edges,
     ).toEqual([edge('scene', 'scene.main', 'world-scene.scene')])
+  })
+
+  test('rejects external World targets instead of supplementing local nodes', () => {
+    const baseline = richModule()
+    const baselineTargets = externalTargets()
+    expect(() =>
+      parseWorldSceneModule(admitted(baseline), baselineTargets),
+    ).not.toThrow()
+    const mutation = cloneModule(baseline)
+    nodeById(mutation, 'spawn.hero').edges[1] = edge(
+      'location',
+      'external.node',
+      'world-scene.node',
+    )
+    const targets = new Map(baselineTargets)
+    targets.set('external.node', {
+      id: 'external.node',
+      kind: 'world-scene.node',
+    } as GameIrNode)
+    expect(() => parseWorldSceneModule(admitted(mutation), targets)).toThrow(
+      'external target external.node cannot supply a local World kind',
+    )
+  })
+
+  test('rejects malformed external kinds with a schema error', () => {
+    const baseline = richModule()
+    const targets = externalTargets()
+    expect(() =>
+      parseWorldSceneModule(admitted(baseline), targets),
+    ).not.toThrow()
+    const malformed = new Map(targets)
+    malformed.set('malformed.target', {
+      id: 'malformed.target',
+      kind: 42,
+    } as unknown as GameIrNode)
+    expect(() => parseWorldSceneModule(admitted(baseline), malformed)).toThrow(
+      'external target malformed.target kind must be text',
+    )
+  })
+
+  test('rejects a forbidden external kind after a legal Gameplay baseline', () => {
+    const baseline = richModule()
+    const targets = externalTargets()
+    expect(() =>
+      parseWorldSceneModule(admitted(baseline), targets),
+    ).not.toThrow()
+    const mutation = new Map(targets)
+    const entity = mutation.get('gameplay.entity.hero')!
+    mutation.set('gameplay.entity.hero', {
+      ...entity,
+      kind: 'balance.variable',
+    } as GameIrNode)
+    expect(() => parseWorldSceneModule(admitted(baseline), mutation)).toThrow(
+      'external target gameplay.entity.hero kind is forbidden by the World manifest',
+    )
   })
 
   test.each([
@@ -521,6 +578,14 @@ describe('World/Scene Game IR schema', () => {
     ).toThrow('relationship root must occur exactly once')
 
     const cycle = richModule()
+    nodeById(cycle, 'node.visual').edges = nodeById(
+      cycle,
+      'node.visual',
+    ).edges.map(edgeValue =>
+      edgeValue.type === 'parent'
+        ? edge('parent', 'node.anchor', 'world-scene.node')
+        : edgeValue,
+    )
     expect(() =>
       parseWorldSceneModule(admitted(cycle), externalTargets()),
     ).not.toThrow()
@@ -531,14 +596,6 @@ describe('World/Scene Game IR schema', () => {
     ).edges.map(edgeValue =>
       edgeValue.type === 'parent'
         ? edge('parent', 'node.visual', 'world-scene.node')
-        : edgeValue,
-    )
-    nodeById(cycleMutation, 'node.visual').edges = nodeById(
-      cycleMutation,
-      'node.visual',
-    ).edges.map(edgeValue =>
-      edgeValue.type === 'parent'
-        ? edge('parent', 'node.anchor', 'world-scene.node')
         : edgeValue,
     )
     expect(() =>
@@ -706,23 +763,5 @@ describe('World/Scene Game IR schema', () => {
     expect(() =>
       parseWorldSceneModule(admitted(dangling), externalTargets()),
     ).toThrow(/unknown|target/i)
-    const forbidden = richModule()
-    expect(() =>
-      parseWorldSceneModule(admitted(forbidden), externalTargets()),
-    ).not.toThrow()
-    const forbiddenMutation = cloneModule(forbidden)
-    nodeById(forbiddenMutation, 'spawn.hero').edges[2] = edge(
-      'entity',
-      'balance.score',
-      'balance.variable',
-    )
-    const targetsWithBalance = new Map(externalTargets())
-    targetsWithBalance.set('balance.score', {
-      id: 'balance.score',
-      kind: 'balance.variable',
-    } as GameIrNode)
-    expect(() =>
-      parseWorldSceneModule(admitted(forbiddenMutation), targetsWithBalance),
-    ).toThrow('role entity has wrong target kind')
   })
 })

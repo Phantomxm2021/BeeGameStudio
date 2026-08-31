@@ -78,6 +78,8 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
         targetKinds: readonly string[]
         unique: boolean
         sorted: boolean
+        minTraversalLength: number
+        requireAllReferences: boolean
       }>
     }>
   >
@@ -120,6 +122,8 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
       targetKinds: Object.freeze(['world-scene.node']),
       unique: true,
       sorted: true,
+      minTraversalLength: 2,
+      requireAllReferences: true,
     }),
   }),
   'world-scene.spawn': Object.freeze({
@@ -187,6 +191,12 @@ function manifestTargetKinds(): ReadonlySet<string> {
     descriptor.references?.targetKinds.forEach(kind => targetKinds.add(kind))
   }
   return targetKinds
+}
+
+function manifestExternalTargetKinds(): ReadonlySet<string> {
+  return new Set(
+    [...manifestTargetKinds()].filter(kind => !NODE_KINDS.has(kind)),
+  )
 }
 
 function fail(message: string): never {
@@ -569,15 +579,16 @@ function targetMap(
   }
   if (externalTargets)
     for (const [id, node] of externalTargets) {
-      if (!node || id !== node.id)
+      if (!isRecord(node) || id !== node.id)
         fail(`external target key does not match node ${id}`)
-      if (
-        node.kind.startsWith('gameplay.') &&
-        !manifestTargetKinds().has(node.kind)
-      )
-        fail(`external target ${id} is not admitted by the World manifest`)
+      if (typeof node.kind !== 'string')
+        fail(`external target ${id} kind must be text`)
+      if (NODE_KINDS.has(node.kind))
+        fail(`external target ${id} cannot supply a local World kind`)
+      if (!manifestExternalTargetKinds().has(node.kind))
+        fail(`external target ${id} kind is forbidden by the World manifest`)
       if (targets.has(id)) fail(`duplicate node ID ${id}`)
-      targets.set(id, node)
+      targets.set(id, node as GameIrNode)
     }
   return targets
 }
@@ -585,7 +596,8 @@ function validateReferences(
   node: GameIrNode,
   targets: ReadonlyMap<string, GameIrNode>,
 ): void {
-  if (node.kind !== 'world-scene.route' && node.references.length > 0)
+  const metadata = WORLD_SCENE_DOMAIN_MANIFEST[node.kind].references
+  if (!metadata && node.references.length > 0)
     fail(`node ${node.id} has unsupported references`)
   const seen = new Set<string>()
   let previous: string | undefined
@@ -599,16 +611,17 @@ function validateReferences(
       fail(
         `node ${node.id} reference target kind does not match ${reference.targetId}`,
       )
-    if (
-      !WORLD_SCENE_DOMAIN_MANIFEST[
-        'world-scene.route'
-      ].references?.targetKinds.includes(reference.targetType)
-    )
-      fail(`node ${node.id} route reference must target a World node`)
+    if (!metadata?.targetKinds.includes(reference.targetType))
+      fail(`node ${node.id} reference target kind is not admitted`)
     const key = `${reference.targetId}\0${reference.targetType}`
-    if (seen.has(key)) fail(`node ${node.id} has duplicate route reference`)
-    if (previous !== undefined && compareCodeUnits(previous, key) >= 0)
-      fail(`node ${node.id} route references must be unique and sorted`)
+    if (metadata.unique && seen.has(key))
+      fail(`node ${node.id} references must be unique`)
+    if (
+      metadata.sorted &&
+      previous !== undefined &&
+      compareCodeUnits(previous, key) >= 0
+    )
+      fail(`node ${node.id} references must be sorted`)
     seen.add(key)
     previous = key
   }
@@ -782,14 +795,20 @@ function validateGraph(nodes: readonly ParsedNode[]): void {
     }
   }
   for (const node of nodes) {
-    if (node.kind === 'world-scene.route') {
+    const referenceMetadata = WORLD_SCENE_DOMAIN_MANIFEST[node.kind].references
+    if (referenceMetadata) {
       const id = sceneId(node)
       const indexes = node.value.waypointReferenceIndexes as readonly number[]
       const refs = node.references
-      if (indexes.length < 2)
-        fail(`route ${node.id} must have at least two waypoints`)
-      if (new Set(indexes).size !== refs.length)
-        fail(`route ${node.id} must use every declared reference`)
+      if (indexes.length < referenceMetadata.minTraversalLength)
+        fail(
+          `node ${node.id} must have at least ${referenceMetadata.minTraversalLength} waypoints`,
+        )
+      if (
+        referenceMetadata.requireAllReferences &&
+        new Set(indexes).size !== refs.length
+      )
+        fail(`node ${node.id} must use every declared reference`)
       for (const index of indexes) {
         if (index < 0 || index >= refs.length)
           fail(`route ${node.id} waypoint index is out of range`)
