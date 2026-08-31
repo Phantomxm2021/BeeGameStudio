@@ -973,6 +973,15 @@ describe('resource-realization schema', () => {
         externalModules: [{ moduleId: 'gameplay', nodes: [externalEntity] }],
       }),
     ).toThrow(/section|index|digest/i)
+    expect(() =>
+      parseResourceRealizationModule(module, {
+        request: request(),
+        sections: [resourceSection],
+        externalModules: [
+          { moduleId: 'implementation-verification', nodes: [externalEntity] },
+        ],
+      }),
+    ).toThrow(/module|prior|external/i)
   })
 
   test('closes a dependency between raw prior modules through one Core parse', () => {

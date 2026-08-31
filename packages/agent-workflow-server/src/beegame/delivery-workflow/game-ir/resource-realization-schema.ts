@@ -88,6 +88,12 @@ const PRIOR_MANIFESTS = [
   WORLD_SCENE_DOMAIN_MANIFEST,
   PRESENTATION_DOMAIN_MANIFEST,
 ] as const
+const PRIOR_MODULE_IDS = new Set([
+  'gameplay',
+  'balance',
+  'world-scene',
+  'presentation',
+])
 const PRIOR_NODE_KINDS = new Set<string>(
   PRIOR_MANIFESTS.flatMap(manifest => Object.keys(manifest)),
 )
@@ -741,6 +747,8 @@ function priorNodesFromSet(
   const priorNodes: GameIrNode[] = []
   const priorIds = new Set<string>()
   for (const prior of modules) {
+    if (!PRIOR_MODULE_IDS.has(prior.moduleId))
+      fail(`external module ${prior.moduleId} is not an admitted prior module`)
     for (const node of prior.nodes) {
       if (!PRIOR_NODE_KINDS.has(node.kind))
         fail(`external target ${node.id} kind is not admitted`)
