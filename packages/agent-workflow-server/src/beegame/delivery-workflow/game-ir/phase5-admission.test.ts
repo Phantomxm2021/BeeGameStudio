@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, test } from 'bun:test'
 import {
   admitPhase5SemanticResult,
@@ -445,6 +448,66 @@ function repackExternalProjection(
 }
 
 describe('shared Phase 5 admission', () => {
+  test('keeps Phase 5/6/Resource production isolated from generic admission', () => {
+    const directory = dirname(fileURLToPath(import.meta.url))
+    for (const filename of [
+      'phase5-admission.ts',
+      'phase6-admission.ts',
+      'resource-realization-producer.ts',
+    ]) {
+      expect(readFileSync(join(directory, filename), 'utf8')).not.toMatch(
+        /from ['"]\.\/semantic-admission['"]/,
+      )
+    }
+  })
+
+  test('characterizes Phase 5 packet identity and validator coverage', () => {
+    const { validationPacket } = validationFixture()
+    expect(validationPacket.sourceDigest).toBe(
+      'e19389cdff7e7e0918bc1f306bc91236187370200b774b004c7f53e7ec8411f2',
+    )
+    expect(validationPacket.moduleDigest).toBe(
+      '62fa55785eaab2aa6da9d73f0563a4d1bc2421cbc85475036434115950a2e750',
+    )
+    expect(validationPacket.targetManifestDigest).toBe(
+      '2a9f27385811250c75bb162e3d51f38e0cab9be942de867f0569d30b7e381a41',
+    )
+    expect(validationPacket.packetDigest).toBe(
+      'b26626cd2e2da4dc87ab78fb75ffddcaca19724087b83799ec4901492b603e50',
+    )
+    expect(validationPacket.checkIds).toEqual([
+      'domain.world-scene',
+      'projection.ambiguity',
+      'projection.completeness',
+      'projection.cross-module-invariants',
+      'projection.fidelity',
+      'projection.source-bounds',
+    ])
+    expect(validationPacket.moduleBytes).toBe(
+      '{"moduleId":"world-scene","nodes":[{"bindings":{"/id":{"documentPath":"docs/GDD.md","kind":"owner","sectionDigest":"277089d91c0bdf4f2e6862ba7e4a07605119431f5d13f726dd352b06f1b206a9","sectionId":"section-0","sourcePointer":"/bytes/0/5"},"/value/label":{"documentPath":"docs/GDD.md","kind":"owner","sectionDigest":"277089d91c0bdf4f2e6862ba7e4a07605119431f5d13f726dd352b06f1b206a9","sectionId":"section-0","sourcePointer":"/bytes/0/5"}},"edges":[],"id":"bytes","kind":"world-scene.scene","producerMode":"semantic","references":[],"value":{"label":"bytes"}}]}',
+    )
+    const presentation = validationFixture('presentation').validationPacket
+    expect(presentation.targetManifestDigest).toBe(
+      '9f85229e57daa059335a205ad049995690889f0afcfff5b8b06635f0c00c25c8',
+    )
+    expect(presentation.checkIds).toEqual([
+      'domain.presentation',
+      'projection.ambiguity',
+      'projection.completeness',
+      'projection.cross-module-invariants',
+      'projection.fidelity',
+      'projection.source-bounds',
+    ])
+    expect(
+      presentation.sourceSections.map(section => section.ref.documentPath),
+    ).toEqual([
+      'docs/ART_DIRECTION.md',
+      'docs/AUDIO_DESIGN.md',
+      'docs/GDD.md',
+      'docs/UI_UX_SPEC.md',
+    ])
+  })
+
   test('preserves the exact validation-result object error contract', () => {
     const { validationPacket } = validationFixture()
     expect(() =>

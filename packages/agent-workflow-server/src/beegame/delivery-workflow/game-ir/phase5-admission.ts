@@ -14,11 +14,11 @@ import {
   type GameIrMechanicalProjectionReceipt,
 } from './domain-projection'
 import {
+  canonicalGameIrModuleSourceDocuments,
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainId,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
-import { GAME_IR_SEMANTIC_VALIDATOR_MANIFEST } from './semantic-admission'
 import { type GameplayModuleProjection } from './gameplay-balance-assembler'
 import { WORLD_SCENE_DOMAIN_MANIFEST } from './world-scene-schema'
 import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
@@ -162,6 +162,41 @@ const {
   deepFreeze,
   exactStringCoverage,
 } = fidelity
+
+const PHASE5_COMMON_CHECK_IDS = Object.freeze([
+  'projection.fidelity',
+  'projection.completeness',
+  'projection.source-bounds',
+  'projection.ambiguity',
+  'projection.cross-module-invariants',
+] as const)
+
+type Phase5ValidatorDescriptor = Readonly<{
+  checkIds: readonly string[]
+  sourceDocumentPaths: readonly FoundationDocumentPath[]
+  targetManifest: object
+}>
+
+const PHASE5_VALIDATOR_DESCRIPTORS: Readonly<
+  Record<'world-scene' | 'presentation', Phase5ValidatorDescriptor>
+> = Object.freeze({
+  'world-scene': Object.freeze({
+    checkIds: Object.freeze(
+      [...PHASE5_COMMON_CHECK_IDS, 'domain.world-scene'].sort(compareCodeUnits),
+    ),
+    sourceDocumentPaths: canonicalGameIrModuleSourceDocuments('world-scene'),
+    targetManifest: WORLD_SCENE_DOMAIN_MANIFEST,
+  }),
+  presentation: Object.freeze({
+    checkIds: Object.freeze(
+      [...PHASE5_COMMON_CHECK_IDS, 'domain.presentation'].sort(
+        compareCodeUnits,
+      ),
+    ),
+    sourceDocumentPaths: canonicalGameIrModuleSourceDocuments('presentation'),
+    targetManifest: PRESENTATION_DOMAIN_MANIFEST,
+  }),
+})
 
 function fail(message: string): never {
   throw new Error(`invalid Game IR Phase 5 admission: ${message}`)
@@ -385,18 +420,12 @@ function ownerEvidencePointers(
 
 function phase5TargetManifestDigest(moduleId: 'world-scene' | 'presentation') {
   return digestGameIrValue(
-    moduleId === 'world-scene'
-      ? WORLD_SCENE_DOMAIN_MANIFEST
-      : PRESENTATION_DOMAIN_MANIFEST,
+    PHASE5_VALIDATOR_DESCRIPTORS[moduleId].targetManifest,
   )
 }
 
 function validatorModule(moduleId: 'world-scene' | 'presentation') {
-  const module = GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.find(
-    item => item.moduleId === moduleId,
-  )
-  if (!module) fail('Phase 5 module is absent from the validator manifest')
-  return module
+  return PHASE5_VALIDATOR_DESCRIPTORS[moduleId]
 }
 
 function phase5SemanticPacket(
