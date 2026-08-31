@@ -23,6 +23,7 @@ export type GameIrDomainId =
   | 'world-scene'
   | 'presentation'
   | 'resource-realization'
+  | 'implementation-verification'
 
 export const GAME_IR_DOMAIN_IDS = Object.freeze([
   'gameplay',
@@ -30,6 +31,7 @@ export const GAME_IR_DOMAIN_IDS = Object.freeze([
   'world-scene',
   'presentation',
   'resource-realization',
+  'implementation-verification',
 ] as const)
 
 export type GameIrDomainSourceEnvelope = Readonly<{

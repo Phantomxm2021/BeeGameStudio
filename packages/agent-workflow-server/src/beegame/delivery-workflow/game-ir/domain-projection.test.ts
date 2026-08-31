@@ -8,6 +8,7 @@ import {
 } from './domain-projection'
 import {
   buildGameIrDomainSourceEnvelope,
+  canonicalGameIrModuleSourceDocuments,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
 import { type GameIrSourceSection } from './model'
@@ -18,6 +19,7 @@ import {
 } from './contracts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
+import { sectionEvidencePointer } from './semantic-fidelity'
 
 const digest = 'a'.repeat(64)
 
@@ -57,7 +59,13 @@ function canonical(value: unknown): string {
 }
 
 function source(
-  moduleId: 'gameplay' | 'balance' | 'world-scene' | 'presentation' = 'balance',
+  moduleId:
+    | 'gameplay'
+    | 'balance'
+    | 'world-scene'
+    | 'presentation'
+    | 'resource-realization'
+    | 'implementation-verification' = 'balance',
 ): GameIrDomainSourceEnvelope {
   const bytes = 'bytes'
   const sectionIndex: readonly GameIrSourceSection[] =
@@ -103,19 +111,7 @@ function source(
     request,
     sectionIndex,
     sectionBytes: Object.fromEntries(
-      (moduleId === 'balance'
-        ? ['docs/BALANCE_DESIGN.md', 'docs/GDD.md']
-        : moduleId === 'gameplay'
-          ? ['docs/GDD.md']
-          : moduleId === 'world-scene'
-            ? ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']
-            : [
-                'docs/GDD.md',
-                'docs/ART_DIRECTION.md',
-                'docs/UI_UX_SPEC.md',
-                'docs/AUDIO_DESIGN.md',
-              ]
-      ).map(documentPath => {
+      canonicalGameIrModuleSourceDocuments(moduleId).map(documentPath => {
         const index = CANONICAL_FOUNDATION_DOCUMENTS.indexOf(
           documentPath as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
         )
@@ -204,6 +200,7 @@ describe('Game IR domain producer contracts', () => {
       'balance',
       'world-scene',
       'presentation',
+      'implementation-verification',
     ] as const) {
       const currentSource = source(moduleId)
       const admitted = admitGameIrMechanicalProjectionReceipt({
@@ -220,12 +217,34 @@ describe('Game IR domain producer contracts', () => {
     }
   })
 
+  test('keeps Implementation Verification semantic projection discriminated by its domain ID', () => {
+    const currentSource = source('implementation-verification')
+    const admitted = admitGameIrMechanicalProjectionReceipt({
+      source: currentSource,
+      receipt: receipt({
+        taskId: currentSource.taskId,
+        moduleId: currentSource.moduleId,
+        sourceDigest: currentSource.sourceDigest,
+      }),
+    })
+    const packet = buildGameIrDomainSemanticPacket({
+      source: currentSource,
+      mechanical: admitted,
+    })
+    expect(packet.moduleId).toBe('implementation-verification')
+    expect(packet.allowedEvidencePointers).toEqual(
+      currentSource.sectionIndex.map(sectionEvidencePointer).sort(),
+    )
+    expect(packet.forbiddenTargets).toEqual([])
+  })
+
   test('rejects non-empty, unsorted, and duplicate mechanical ownership', () => {
     for (const moduleId of [
       'gameplay',
       'balance',
       'world-scene',
       'presentation',
+      'implementation-verification',
     ] as const) {
       const currentSource = source(moduleId)
       expect(
@@ -242,6 +261,35 @@ describe('Game IR domain producer contracts', () => {
           }),
         ).toThrow(/target|empty|sorted|duplicate/i)
       }
+    }
+  })
+
+  test('rejects every non-empty Implementation Verification mechanical receipt', () => {
+    const currentSource = source('implementation-verification')
+    const cases = [
+      {
+        nodes: [
+          { ...mechanicalNode, kind: 'implementation-verification.target' },
+        ],
+      },
+      {
+        verifiedClaims: [
+          {
+            subject: 'node:implementation.target#/id',
+            sourcePointer: '/implementation/target',
+            literal: 'target',
+          },
+        ],
+      },
+      { ownedTargets: ['node:implementation.target#/id'] },
+    ]
+    for (const overrides of cases) {
+      expect(() =>
+        admitGameIrMechanicalProjectionReceipt({
+          source: currentSource,
+          receipt: receipt(overrides, currentSource),
+        }),
+      ).toThrow(/mechanical|empty|unauthorized|target/i)
     }
   })
 

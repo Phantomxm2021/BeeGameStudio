@@ -53,7 +53,9 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function request(): GameIrCompileRequest {
+function request(
+  boundSectionIndex: readonly GameIrSourceSection[] = sectionIndex,
+): GameIrCompileRequest {
   const withoutDigest: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
     schemaVersion: 'foundation-ready-receipt.v1',
     projectId: 'project-1',
@@ -63,7 +65,7 @@ function request(): GameIrCompileRequest {
       CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, 'b'.repeat(64)]),
     ) as FoundationReadyReceipt['documentDigests'],
     sectionIndexPath: '.beegame/foundation/section-index.json',
-    sectionIndexDigest: digestSectionIndex(sectionIndex),
+    sectionIndexDigest: digestSectionIndex(boundSectionIndex),
     authority: {
       kind: 'review',
       reviewDigest: 'c'.repeat(64),
@@ -102,6 +104,21 @@ function exactBalanceBytes(): Record<string, string> {
   }
 }
 
+function exactImplementationBytes(): Record<string, string> {
+  return Object.fromEntries(
+    sectionIndex
+      .filter(section =>
+        canonicalGameIrModuleSourceDocuments(
+          'implementation-verification',
+        ).includes(section.documentPath),
+      )
+      .map(section => [
+        `${section.documentPath}#${section.sectionId}`,
+        sectionBytes[section.documentPath]!,
+      ]),
+  )
+}
+
 function exactResourceBytes(): Record<string, string> {
   return Object.fromEntries(
     sectionIndex
@@ -125,6 +142,7 @@ describe('Game IR domain source closure', () => {
       'world-scene',
       'presentation',
       'resource-realization',
+      'implementation-verification',
     ])
     for (const moduleId of GAME_IR_DOMAIN_IDS)
       expect(isGameIrDomainId(moduleId)).toBe(true)
@@ -152,7 +170,7 @@ describe('Game IR domain source closure', () => {
     expect(resource.sectionIndex.map(section => section.documentPath)).toEqual([
       ...canonicalGameIrModuleSourceDocuments('resource-realization'),
     ])
-    for (const moduleId of ['core', 'implementation-verification']) {
+    for (const moduleId of ['core']) {
       expect(isGameIrDomainId(moduleId)).toBe(false)
       expect(() =>
         buildGameIrDomainSourceEnvelope({
@@ -331,6 +349,119 @@ describe('Game IR domain source closure', () => {
     expect(() =>
       buildGameIrDomainSourceEnvelope({ ...base, sectionBytes: mixed }),
     ).toThrow(/exact|bytes|closure/i)
+  })
+
+  test('builds Implementation Verification from every receipt-bound entry in exactly four documents', () => {
+    const envelope = buildGameIrDomainSourceEnvelope({
+      moduleId: 'implementation-verification',
+      request: request(),
+      sectionIndex,
+      sectionBytes: exactImplementationBytes(),
+    })
+
+    expect(envelope.sectionIndex.map(section => section.documentPath)).toEqual([
+      'docs/BALANCE_DESIGN.md',
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/TECHNICAL_DESIGN.md',
+    ])
+    expect(Object.keys(envelope.sectionBytes).sort()).toEqual(
+      Object.keys(exactImplementationBytes()).sort(),
+    )
+    expect(
+      envelope.sectionIndex.map(
+        section => `${section.documentPath}#${section.sectionId}`,
+      ),
+    ).toEqual(Object.keys(exactImplementationBytes()).sort())
+  })
+
+  test('retains every Implementation Verification section when a source document has multiple entries', () => {
+    const extraBytes = Object.fromEntries(
+      sectionIndex
+        .filter(section =>
+          canonicalGameIrModuleSourceDocuments(
+            'implementation-verification',
+          ).includes(section.documentPath),
+        )
+        .map(section => [
+          section.documentPath,
+          `# extra ${section.documentPath}`,
+        ]),
+    ) as Record<string, string>
+    const expandedIndex = [
+      ...sectionIndex,
+      ...sectionIndex
+        .filter(section =>
+          canonicalGameIrModuleSourceDocuments(
+            'implementation-verification',
+          ).includes(section.documentPath),
+        )
+        .map(section => ({
+          ...section,
+          sectionId: `${section.sectionId}-extra`,
+          heading: `${section.heading} extra`,
+          digest: digest(extraBytes[section.documentPath]!),
+        })),
+    ]
+    const implementationSections = expandedIndex.filter(section =>
+      canonicalGameIrModuleSourceDocuments(
+        'implementation-verification',
+      ).includes(section.documentPath),
+    )
+    const implementationBytes = Object.fromEntries(
+      implementationSections.map(section => [
+        `${section.documentPath}#${section.sectionId}`,
+        section.sectionId.endsWith('-extra')
+          ? extraBytes[section.documentPath]!
+          : sectionBytes[section.documentPath]!,
+      ]),
+    )
+    const envelope = buildGameIrDomainSourceEnvelope({
+      moduleId: 'implementation-verification',
+      request: request(expandedIndex),
+      sectionIndex: expandedIndex,
+      sectionBytes: implementationBytes,
+    })
+
+    expect(envelope.sectionIndex).toHaveLength(implementationSections.length)
+    expect(envelope.sectionIndex).toEqual(
+      implementationSections.sort((left, right) =>
+        `${left.documentPath}#${left.sectionId}`.localeCompare(
+          `${right.documentPath}#${right.sectionId}`,
+        ),
+      ),
+    )
+    expect(Object.keys(envelope.sectionBytes).sort()).toEqual(
+      Object.keys(implementationBytes).sort(),
+    )
+  })
+
+  test('rejects narrowed, extra, or altered Implementation Verification closure bytes', () => {
+    const base = {
+      moduleId: 'implementation-verification' as const,
+      request: request(),
+      sectionIndex,
+    }
+    const exact = exactImplementationBytes()
+    const missing = { ...exact }
+    delete missing['docs/TECHNICAL_DESIGN.md#section-3']
+    expect(() =>
+      buildGameIrDomainSourceEnvelope({ ...base, sectionBytes: missing }),
+    ).toThrow(/exact|missing|bytes|closure/i)
+
+    const extra = {
+      ...exact,
+      'docs/ART_DIRECTION.md#section-4': sectionBytes['docs/ART_DIRECTION.md']!,
+    }
+    expect(() =>
+      buildGameIrDomainSourceEnvelope({ ...base, sectionBytes: extra }),
+    ).toThrow(/exact|extra|bytes|closure/i)
+
+    const altered = { ...exact }
+    altered['docs/TECHNICAL_DESIGN.md#section-3'] = 'altered'
+    expect(() =>
+      buildGameIrDomainSourceEnvelope({ ...base, sectionBytes: altered }),
+    ).toThrow(/digest|bytes/i)
   })
 
   test('keeps the existing four domain envelopes byte-equivalent', () => {
