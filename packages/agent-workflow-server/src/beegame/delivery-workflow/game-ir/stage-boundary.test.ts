@@ -798,6 +798,8 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'phase6-admission.ts') return 'phase6-producer'
   if (filename === 'resource-realization-assembler.ts') return 'phase6-producer'
   if (filename === 'resource-realization-producer.ts') return 'phase6-producer'
+  if (filename === 'implementation-verification-producer.ts')
+    return 'phase6-producer'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -1688,6 +1690,7 @@ describe('Game IR stage boundary', () => {
       'gameplay-balance-assembler.ts',
       'gameplay-producer.ts',
       'gameplay-schema.ts',
+      'implementation-verification-producer.ts',
       'implementation-verification-schema.ts',
       'model.ts',
       'phase5-admission.ts',
