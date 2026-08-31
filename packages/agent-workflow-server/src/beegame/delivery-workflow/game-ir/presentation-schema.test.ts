@@ -260,6 +260,29 @@ function nodeById(module: MutableModule, id: string): MutableNode {
   return module.nodes.find(candidate => candidate.id === id)!
 }
 
+function expectSingleMutationToThrow(
+  mutate: (module: MutableModule) => void,
+  message: RegExp,
+): void {
+  expect(() =>
+    parsePresentationModule(admitted(validModule()), externalTargets()),
+  ).not.toThrow()
+  const mutation = cloneModule(validModule())
+  mutate(mutation)
+  expect(() =>
+    parsePresentationModule(admitted(mutation), externalTargets()),
+  ).toThrow(message)
+}
+
+function ownerRequirements(
+  module: MutableModule,
+  id: string,
+): Array<Record<string, unknown>> {
+  return nodeById(module, id).value.requirements as Array<
+    Record<string, unknown>
+  >
+}
+
 describe('Presentation Game IR schema', () => {
   test('exposes exactly twelve manifest kinds and manifest-owned requirement policy', () => {
     expect(Object.keys(PRESENTATION_DOMAIN_MANIFEST)).toHaveLength(12)
@@ -592,5 +615,410 @@ describe('Presentation Game IR schema', () => {
     expect(() =>
       parsePresentationModule(admitted(crossDomain), externalTargets()),
     ).toThrow(/target|entity|kind/i)
+  })
+
+  test('asserts every manifest entry, role, target list, cardinality, and policy exactly', () => {
+    const expected = {
+      'presentation.ui-screen': {
+        valueFields: ['label', 'modal'],
+        optionalValueFields: ['requirements'],
+        requirementPolicy: { kind: 'ui', runtimeRoles: ['screen'] },
+        relationships: {
+          'initial-state': {
+            targetKinds: ['presentation.ui-state'],
+            cardinality: 'exactly-one',
+          },
+          'driven-by': {
+            targetKinds: [
+              'gameplay.state',
+              'gameplay.event',
+              'world-scene.scene',
+            ],
+            cardinality: 'exactly-one',
+          },
+        },
+      },
+      'presentation.ui-state': {
+        valueFields: ['label', 'terminal'],
+        relationships: {
+          screen: {
+            targetKinds: ['presentation.ui-screen'],
+            cardinality: 'exactly-one',
+          },
+          'driven-by': {
+            targetKinds: [
+              'gameplay.state',
+              'gameplay.event',
+              'world-scene.scene',
+            ],
+            cardinality: 'exactly-one',
+          },
+        },
+      },
+      'presentation.ui-action': {
+        valueFields: ['label', 'input'],
+        relationships: {
+          screen: {
+            targetKinds: ['presentation.ui-screen'],
+            cardinality: 'exactly-one',
+          },
+          invokes: {
+            targetKinds: ['gameplay.action'],
+            cardinality: 'exactly-one',
+          },
+          'available-in': {
+            targetKinds: ['gameplay.state'],
+            cardinality: 'zero-or-one',
+          },
+        },
+      },
+      'presentation.feedback': {
+        valueFields: ['label', 'channel'],
+        relationships: {
+          on: {
+            targetKinds: [
+              'gameplay.event',
+              'gameplay.state',
+              'gameplay.action',
+            ],
+            cardinality: 'exactly-one',
+          },
+          screen: {
+            targetKinds: ['presentation.ui-screen'],
+            cardinality: 'zero-or-one',
+          },
+        },
+      },
+      'presentation.camera-behavior': {
+        valueFields: ['label', 'mode', 'duration'],
+        relationships: {
+          region: {
+            targetKinds: ['world-scene.camera-region'],
+            cardinality: 'exactly-one',
+          },
+          on: {
+            targetKinds: [
+              'gameplay.event',
+              'gameplay.state',
+              'gameplay.action',
+            ],
+            cardinality: 'zero-or-one',
+          },
+        },
+      },
+      'presentation.animation-clip': {
+        valueFields: ['label', 'loop', 'playbackRate'],
+        optionalValueFields: ['requirements'],
+        requirementPolicy: { kind: 'animation', runtimeRoles: ['clip'] },
+        relationships: {
+          target: {
+            targetKinds: ['world-scene.entity-instance', 'gameplay.entity'],
+            cardinality: 'exactly-one',
+          },
+        },
+      },
+      'presentation.animation-state': {
+        valueFields: ['label'],
+        relationships: {
+          clip: {
+            targetKinds: ['presentation.animation-clip'],
+            cardinality: 'exactly-one',
+          },
+          on: {
+            targetKinds: [
+              'gameplay.event',
+              'gameplay.state',
+              'gameplay.action',
+            ],
+            cardinality: 'exactly-one',
+          },
+        },
+      },
+      'presentation.vfx-cue': {
+        valueFields: ['label', 'trigger'],
+        optionalValueFields: ['requirements'],
+        requirementPolicy: { kind: 'vfx', runtimeRoles: ['effect'] },
+        relationships: {
+          on: {
+            targetKinds: [
+              'gameplay.event',
+              'gameplay.state',
+              'gameplay.action',
+            ],
+            cardinality: 'exactly-one',
+          },
+          at: {
+            targetKinds: [
+              'world-scene.node',
+              'world-scene.zone',
+              'world-scene.camera-region',
+            ],
+            cardinality: 'exactly-one',
+          },
+        },
+      },
+      'presentation.audio-event': {
+        valueFields: ['label', 'spatial'],
+        relationships: {
+          on: {
+            targetKinds: [
+              'gameplay.event',
+              'gameplay.state',
+              'gameplay.action',
+            ],
+            cardinality: 'exactly-one',
+          },
+        },
+      },
+      'presentation.audio-cue': {
+        valueFields: ['label', 'volume'],
+        optionalValueFields: ['requirements'],
+        requirementPolicy: { kind: 'audio', runtimeRoles: ['cue', 'voice'] },
+        relationships: {
+          event: {
+            targetKinds: ['presentation.audio-event'],
+            cardinality: 'exactly-one',
+          },
+          at: {
+            targetKinds: [
+              'world-scene.scene',
+              'world-scene.node',
+              'world-scene.zone',
+              'world-scene.entity-instance',
+              'world-scene.camera-region',
+            ],
+            cardinality: 'audio-event-spatial-dependent',
+          },
+        },
+      },
+      'presentation.music-state': {
+        valueFields: ['label', 'intensity'],
+        optionalValueFields: ['requirements'],
+        requirementPolicy: { kind: 'music', runtimeRoles: ['music'] },
+        relationships: {
+          on: {
+            targetKinds: [
+              'gameplay.event',
+              'gameplay.state',
+              'gameplay.action',
+            ],
+            cardinality: 'exactly-one',
+          },
+        },
+      },
+      'presentation.transition': {
+        valueFields: ['label', 'trigger'],
+        relationships: {
+          from: {
+            targetKinds: ['presentation.ui-state'],
+            cardinality: 'exactly-one',
+          },
+          to: {
+            targetKinds: ['presentation.ui-state'],
+            cardinality: 'exactly-one',
+          },
+          on: {
+            targetKinds: [
+              'gameplay.event',
+              'gameplay.action',
+              'gameplay.state',
+              'world-scene.scene',
+              'world-scene.camera-region',
+            ],
+            cardinality: 'transition-trigger-dependent',
+          },
+        },
+      },
+    } as const
+    expect(
+      Object.keys(PRESENTATION_DOMAIN_MANIFEST).sort(compareCodeUnits),
+    ).toEqual(Object.keys(expected).sort(compareCodeUnits))
+    for (const [kind, descriptor] of Object.entries(expected)) {
+      expect(PRESENTATION_DOMAIN_MANIFEST[kind]).toEqual(descriptor)
+      expect(PRESENTATION_DOMAIN_MANIFEST[kind]).not.toHaveProperty(
+        'references',
+      )
+    }
+    for (const kind of [
+      'presentation.ui-state',
+      'presentation.ui-action',
+      'presentation.feedback',
+      'presentation.camera-behavior',
+      'presentation.animation-state',
+      'presentation.audio-event',
+      'presentation.transition',
+    ])
+      expect(PRESENTATION_DOMAIN_MANIFEST[kind]).not.toHaveProperty(
+        'requirementPolicy',
+      )
+  })
+
+  test('rejects every closed enum mutation with a legal baseline first', () => {
+    const cases: Array<[string, string, unknown, RegExp]> = [
+      ['action.open', 'input', 'joystick', /input/],
+      ['feedback.hit', 'channel', 'sound', /channel/],
+      ['camera.follow', 'mode', 'orbit', /mode/],
+      ['vfx.hit', 'trigger', 'looping', /trigger/],
+      ['transition.start', 'trigger', { kind: 'other' }, /trigger/],
+    ]
+    for (const [id, field, value, message] of cases)
+      expectSingleMutationToThrow(module => {
+        nodeById(module, id).value[field] = value
+      }, message)
+  })
+
+  test('validates requirements as independent single-variable cases', () => {
+    const omitted = cloneModule(validModule())
+    delete nodeById(omitted, 'screen.home').value.requirements
+    expect(() =>
+      parsePresentationModule(admitted(omitted), externalTargets()),
+    ).not.toThrow()
+    expectSingleMutationToThrow(module => {
+      ownerRequirements(module, 'screen.home').push({
+        requirementId: 'req.ui.aaa',
+        kind: 'ui',
+        runtimeRole: 'screen',
+      })
+    }, /sorted|unique/)
+    expectSingleMutationToThrow(module => {
+      ownerRequirements(module, 'clip.hero')[0]!.requirementId = 'req.ui.home'
+    }, /unique|requirement/)
+    expectSingleMutationToThrow(module => {
+      ownerRequirements(module, 'screen.home')[0]!.runtimeRole = 'cue'
+    }, /policy|role/)
+    expectSingleMutationToThrow(module => {
+      ownerRequirements(module, 'screen.home')[0]!.fileName = 'ui.png'
+    }, /field|unknown/)
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'state.home').value.requirements = []
+    }, /field|requirement/)
+    const filenameLike = cloneModule(validModule())
+    ownerRequirements(filenameLike, 'screen.home')[0]!.requirementId =
+      'assets.ui.screen.v1'
+    expect(() =>
+      parsePresentationModule(admitted(filenameLike), externalTargets()),
+    ).not.toThrow()
+  })
+
+  test('checks UI and behavior graph guards one mutation at a time', () => {
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'screen.home').edges = nodeById(
+        module,
+        'screen.home',
+      ).edges.filter(candidate => candidate.type !== 'initial-state')
+    }, /initial|exactly|state/)
+    expectSingleMutationToThrow(module => {
+      const duplicate = cloneModule(module).nodes.find(
+        candidate => candidate.id === 'transition.start',
+      )!
+      module.nodes.push({
+        ...duplicate,
+        id: 'transition.duplicate',
+        edges: duplicate.edges.map(candidate => ({ ...candidate })),
+      })
+      module.nodes.sort((left, right) => compareCodeUnits(left.id, right.id))
+    }, /duplicate|transition/)
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'audio.cue.hit').edges = nodeById(
+        module,
+        'audio.cue.hit',
+      ).edges.map(candidate =>
+        candidate.type === 'event'
+          ? edge('event', 'audio.event.missing', 'presentation.audio-event')
+          : candidate,
+      )
+    }, /unknown|event|target/)
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'action.open').edges = nodeById(
+        module,
+        'action.open',
+      ).edges.filter(candidate => candidate.type !== 'invokes')
+    }, /invokes|exactly|action/)
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'action.open').edges = nodeById(
+        module,
+        'action.open',
+      ).edges.map(candidate =>
+        candidate.type === 'invokes'
+          ? edge('invokes', 'gameplay.event.start', 'gameplay.event')
+          : candidate,
+      )
+    }, /target|kind|action/)
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'feedback.hit').edges = nodeById(
+        module,
+        'feedback.hit',
+      ).edges.map(candidate =>
+        candidate.type === 'on'
+          ? edge('on', 'world-scene.scene.main', 'world-scene.scene')
+          : candidate,
+      )
+    }, /target|kind|on/)
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'feedback.hit').edges = nodeById(
+        module,
+        'feedback.hit',
+      ).edges.filter(candidate => candidate.type !== 'on')
+    }, /on|exactly/)
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'camera.follow').edges = [
+        edge('region', 'world-scene.zone.main', 'world-scene.zone'),
+      ]
+    }, /target|region|kind/)
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'music.playing').edges = [
+        edge('on', 'world-scene.scene.main', 'world-scene.scene'),
+      ]
+    }, /target|kind|on/)
+    const validGameplayAnimation = cloneModule(validModule())
+    nodeById(validGameplayAnimation, 'clip.hero').edges = [
+      edge('target', 'gameplay.entity.hero', 'gameplay.entity'),
+    ]
+    expect(() =>
+      parsePresentationModule(
+        admitted(validGameplayAnimation),
+        externalTargets(),
+      ),
+    ).not.toThrow()
+  })
+
+  test('checks transition discriminants and external target boundaries exactly', () => {
+    for (const [trigger, targetId, targetType] of [
+      ['event', 'gameplay.event.start', 'gameplay.event'],
+      ['action', 'gameplay.action.open', 'gameplay.action'],
+      ['state', 'gameplay.state.playing', 'gameplay.state'],
+      ['world-scene', 'world-scene.scene.main', 'world-scene.scene'],
+      ['camera-region', 'world-scene.camera.main', 'world-scene.camera-region'],
+    ] as const) {
+      expect(() =>
+        parsePresentationModule(admitted(validModule()), externalTargets()),
+      ).not.toThrow()
+      const module = cloneModule(validModule())
+      nodeById(module, 'transition.start').value.trigger = { kind: trigger }
+      nodeById(module, 'transition.start').edges[2] = edge(
+        'on',
+        targetId,
+        targetType,
+      )
+      expect(() =>
+        parsePresentationModule(admitted(module), externalTargets()),
+      ).not.toThrow()
+    }
+    for (const [id, kind] of [
+      ['presentation.injected', 'presentation.ui-state'],
+      ['resource.injected', 'resource-realization.asset'],
+      ['implementation.injected', 'implementation-verification.task'],
+    ] as const) {
+      expect(() =>
+        parsePresentationModule(admitted(validModule()), externalTargets()),
+      ).not.toThrow()
+      const targets = new Map(externalTargets())
+      targets.set(id, external(id, kind))
+      const module = cloneModule(validModule())
+      nodeById(module, 'camera.follow').edges[0] = edge('region', id, kind)
+      expect(() => parsePresentationModule(admitted(module), targets)).toThrow(
+        /forbidden|local|admitted|target/,
+      )
+    }
   })
 })
