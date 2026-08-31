@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
 import {
   GAME_IR_SCHEMA_VERSION,
+  GAME_IR_CANONICAL_MODULE_IDS,
+  type GameIrModuleId,
   type FoundationReadyReceipt,
   type GameIrCompileRequest,
 } from './contracts'
@@ -12,7 +14,9 @@ import {
 } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
 import {
+  GAME_IR_MODULE_SOURCE_DOCUMENTS,
   buildGameIrDomainSourceEnvelope,
+  canonicalGameIrModuleSourceDocuments,
   validateGameIrDomainSourceEnvelope,
 } from './domain-source'
 import { digestGameIrValue } from './model'
@@ -97,6 +101,53 @@ function exactBalanceBytes(): Record<string, string> {
 }
 
 describe('Game IR domain source closure', () => {
+  test('owns the exact canonical source documents for every module', () => {
+    const expected: Record<GameIrModuleId, readonly FoundationDocumentPath[]> =
+      {
+        core: ['docs/GDD.md'],
+        gameplay: ['docs/GDD.md'],
+        balance: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
+        'world-scene': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+        presentation: [
+          'docs/GDD.md',
+          'docs/ART_DIRECTION.md',
+          'docs/UI_UX_SPEC.md',
+          'docs/AUDIO_DESIGN.md',
+        ],
+        'resource-realization': [
+          'docs/ASSET_PLAN.md',
+          'docs/TECHNICAL_DESIGN.md',
+          'docs/ART_DIRECTION.md',
+          'docs/UI_UX_SPEC.md',
+          'docs/AUDIO_DESIGN.md',
+          'docs/LEVEL_SCENE_DESIGN.md',
+        ],
+        'implementation-verification': [
+          'docs/GDD.md',
+          'docs/LEVEL_SCENE_DESIGN.md',
+          'docs/BALANCE_DESIGN.md',
+          'docs/TECHNICAL_DESIGN.md',
+        ],
+      }
+    expect(Object.keys(GAME_IR_MODULE_SOURCE_DOCUMENTS).sort()).toEqual(
+      [...GAME_IR_CANONICAL_MODULE_IDS].sort(),
+    )
+    for (const moduleId of GAME_IR_CANONICAL_MODULE_IDS) {
+      expect(GAME_IR_MODULE_SOURCE_DOCUMENTS[moduleId]).toEqual(
+        expected[moduleId],
+      )
+      expect(Object.isFrozen(GAME_IR_MODULE_SOURCE_DOCUMENTS[moduleId])).toBe(
+        true,
+      )
+      expect(canonicalGameIrModuleSourceDocuments(moduleId)).toEqual(
+        [...expected[moduleId]].sort(),
+      )
+      expect(
+        Object.isFrozen(canonicalGameIrModuleSourceDocuments(moduleId)),
+      ).toBe(true)
+    }
+  })
+
   test('builds Gameplay from exactly every GDD Section Index entry', () => {
     const envelope = buildGameIrDomainSourceEnvelope({
       moduleId: 'gameplay',
@@ -130,6 +181,48 @@ describe('Game IR domain source closure', () => {
     expect(envelope.sectionIndex.map(section => section.documentPath)).toEqual([
       'docs/BALANCE_DESIGN.md',
       'docs/GDD.md',
+    ])
+  })
+
+  test('builds World and Presentation from their exact selected closures', () => {
+    const sourceBytes = (documents: readonly FoundationDocumentPath[]) =>
+      Object.fromEntries(
+        sectionIndex
+          .filter(section => documents.includes(section.documentPath))
+          .map(section => [
+            `${section.documentPath}#${section.sectionId}`,
+            sectionBytes[section.documentPath]!,
+          ]),
+      )
+    const world = buildGameIrDomainSourceEnvelope({
+      moduleId: 'world-scene',
+      request: request(),
+      sectionIndex,
+      sectionBytes: sourceBytes(
+        canonicalGameIrModuleSourceDocuments('world-scene'),
+      ),
+    })
+    const presentation = buildGameIrDomainSourceEnvelope({
+      moduleId: 'presentation',
+      request: request(),
+      sectionIndex,
+      sectionBytes: sourceBytes(
+        canonicalGameIrModuleSourceDocuments('presentation'),
+      ),
+    })
+
+    expect(world.authoritySectionIndex).toHaveLength(8)
+    expect(world.sectionIndex.map(section => section.documentPath)).toEqual([
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+    ])
+    expect(
+      presentation.sectionIndex.map(section => section.documentPath),
+    ).toEqual([
+      'docs/ART_DIRECTION.md',
+      'docs/AUDIO_DESIGN.md',
+      'docs/GDD.md',
+      'docs/UI_UX_SPEC.md',
     ])
   })
 

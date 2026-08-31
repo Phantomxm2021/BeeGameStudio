@@ -19,6 +19,7 @@ import {
   type FoundationDocumentPath,
 } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
+import { canonicalGameIrModuleSourceDocuments } from './domain-source'
 
 export const GAME_IR_SEMANTIC_VALIDATOR_MANIFEST_VERSION =
   'game-ir-semantic-validator-manifest.v1' as const
@@ -122,54 +123,25 @@ const COMMON_CHECK_IDS = [
 
 type GameIrSemanticModuleDescriptor = Readonly<{
   domainCheckId: string
-  sourceDocumentPaths: readonly FoundationDocumentPath[]
 }>
 
 function moduleDescriptor(
   domainCheckId: string,
-  sourceDocumentPaths: readonly FoundationDocumentPath[],
 ): GameIrSemanticModuleDescriptor {
-  return Object.freeze({
-    domainCheckId,
-    sourceDocumentPaths: Object.freeze([...sourceDocumentPaths]),
-  })
+  return Object.freeze({ domainCheckId })
 }
 
 const MODULE_DESCRIPTORS: Readonly<
   Record<GameIrModuleId, GameIrSemanticModuleDescriptor>
 > = Object.freeze({
-  core: moduleDescriptor('domain.core', ['docs/GDD.md']),
-  gameplay: moduleDescriptor('domain.gameplay', ['docs/GDD.md']),
-  balance: moduleDescriptor('domain.balance', [
-    'docs/GDD.md',
-    'docs/BALANCE_DESIGN.md',
-  ]),
-  'world-scene': moduleDescriptor('domain.world-scene', [
-    'docs/GDD.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-  ]),
-  presentation: moduleDescriptor('domain.presentation', [
-    'docs/GDD.md',
-    'docs/ART_DIRECTION.md',
-    'docs/UI_UX_SPEC.md',
-    'docs/AUDIO_DESIGN.md',
-  ]),
-  'resource-realization': moduleDescriptor('domain.resource-realization', [
-    'docs/ASSET_PLAN.md',
-    'docs/TECHNICAL_DESIGN.md',
-    'docs/ART_DIRECTION.md',
-    'docs/UI_UX_SPEC.md',
-    'docs/AUDIO_DESIGN.md',
-    'docs/LEVEL_SCENE_DESIGN.md',
-  ]),
+  core: moduleDescriptor('domain.core'),
+  gameplay: moduleDescriptor('domain.gameplay'),
+  balance: moduleDescriptor('domain.balance'),
+  'world-scene': moduleDescriptor('domain.world-scene'),
+  presentation: moduleDescriptor('domain.presentation'),
+  'resource-realization': moduleDescriptor('domain.resource-realization'),
   'implementation-verification': moduleDescriptor(
     'domain.implementation-verification',
-    [
-      'docs/GDD.md',
-      'docs/LEVEL_SCENE_DESIGN.md',
-      'docs/BALANCE_DESIGN.md',
-      'docs/TECHNICAL_DESIGN.md',
-    ],
   ),
 })
 
@@ -416,9 +388,7 @@ function manifestWithoutDigest(): Omit<
     const checkIds = [...COMMON_CHECK_IDS, descriptor.domainCheckId].sort(
       compare,
     )
-    const sourceDocumentPaths = [...descriptor.sourceDocumentPaths].sort(
-      compare,
-    )
+    const sourceDocumentPaths = canonicalGameIrModuleSourceDocuments(moduleId)
     return Object.freeze({
       moduleId,
       checkIds: Object.freeze(checkIds),

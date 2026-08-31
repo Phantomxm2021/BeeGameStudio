@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 import {
+  GAME_IR_CANONICAL_MODULE_IDS,
   parseGameIrCompileRequest,
   type GameIrCompileRequest,
+  type GameIrModuleId,
 } from './contracts'
 import {
   canonicalizeGameIrSourceSections,
@@ -15,7 +17,11 @@ import {
 } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
 
-export type GameIrDomainId = 'gameplay' | 'balance'
+export type GameIrDomainId =
+  | 'gameplay'
+  | 'balance'
+  | 'world-scene'
+  | 'presentation'
 
 export type GameIrDomainSourceEnvelope = Readonly<{
   schemaVersion: 'game-ir-domain-source.v1'
@@ -35,10 +41,47 @@ export type GameIrDomainSourceInput = Readonly<{
   sectionBytes: Readonly<Record<string, string>> | ReadonlyMap<string, string>
 }>
 
-const DOMAIN_SOURCE_DOCUMENTS = Object.freeze({
-  gameplay: Object.freeze(['docs/GDD.md']),
-  balance: Object.freeze(['docs/BALANCE_DESIGN.md', 'docs/GDD.md']),
-} as const)
+export const GAME_IR_MODULE_SOURCE_DOCUMENTS: Readonly<
+  Record<GameIrModuleId, readonly FoundationDocumentPath[]>
+> = Object.freeze({
+  core: Object.freeze(['docs/GDD.md'] as const),
+  gameplay: Object.freeze(['docs/GDD.md'] as const),
+  balance: Object.freeze(['docs/GDD.md', 'docs/BALANCE_DESIGN.md'] as const),
+  'world-scene': Object.freeze([
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+  ] as const),
+  presentation: Object.freeze([
+    'docs/GDD.md',
+    'docs/ART_DIRECTION.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/AUDIO_DESIGN.md',
+  ] as const),
+  'resource-realization': Object.freeze([
+    'docs/ASSET_PLAN.md',
+    'docs/TECHNICAL_DESIGN.md',
+    'docs/ART_DIRECTION.md',
+    'docs/UI_UX_SPEC.md',
+    'docs/AUDIO_DESIGN.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+  ] as const),
+  'implementation-verification': Object.freeze([
+    'docs/GDD.md',
+    'docs/LEVEL_SCENE_DESIGN.md',
+    'docs/BALANCE_DESIGN.md',
+    'docs/TECHNICAL_DESIGN.md',
+  ] as const),
+})
+
+export function canonicalGameIrModuleSourceDocuments(
+  moduleId: GameIrModuleId,
+): readonly FoundationDocumentPath[] {
+  if (!Object.hasOwn(GAME_IR_MODULE_SOURCE_DOCUMENTS, moduleId))
+    fail('moduleId must be canonical')
+  return Object.freeze(
+    [...GAME_IR_MODULE_SOURCE_DOCUMENTS[moduleId]].sort(compareCodeUnits),
+  )
+}
 
 const SHA256 = /^[a-f0-9]{64}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -281,8 +324,8 @@ export function buildGameIrDomainSourceEnvelope(
 ): GameIrDomainSourceEnvelope {
   validateSourceInputKeys(input)
   const moduleId = input.moduleId
-  if (moduleId !== 'gameplay' && moduleId !== 'balance')
-    fail('moduleId must be gameplay or balance')
+  if (!GAME_IR_CANONICAL_MODULE_IDS.includes(moduleId as GameIrModuleId))
+    fail('moduleId must be canonical')
   const request = parseGameIrCompileRequest(input.request)
   const fullIndex = normalizeSectionIndex(input.sectionIndex)
   if (fullIndex.length === 0) fail('sectionIndex must not be empty')
@@ -293,7 +336,7 @@ export function buildGameIrDomainSourceEnvelope(
   if (digestSectionIndex(fullIndex) !== request.foundation.sectionIndexDigest)
     fail('sectionIndex digest does not match the Foundation receipt')
 
-  const expectedDocuments = DOMAIN_SOURCE_DOCUMENTS[moduleId]
+  const expectedDocuments = canonicalGameIrModuleSourceDocuments(moduleId)
   const selected = fullIndex.filter(section =>
     expectedDocuments.some(
       documentPath => documentPath === section.documentPath,
@@ -358,9 +401,10 @@ export function validateGameIrDomainSourceEnvelope(
   const taskId = safeId(value.taskId, 'source envelope taskId')
   if (taskId !== request.taskId)
     fail('source envelope taskId does not match compile request')
-  const moduleId = value.moduleId
-  if (moduleId !== 'gameplay' && moduleId !== 'balance')
+  const rawModuleId = value.moduleId
+  if (!GAME_IR_CANONICAL_MODULE_IDS.includes(rawModuleId as GameIrModuleId))
     fail('source envelope moduleId is invalid')
+  const moduleId = rawModuleId as GameIrDomainId
   const authoritySectionIndex = normalizeSectionIndex(
     value.authoritySectionIndex,
     true,
@@ -381,7 +425,7 @@ export function validateGameIrDomainSourceEnvelope(
   )
     fail('authority Section Index digest does not match the Foundation receipt')
   const sections = normalizeSectionIndex(value.sectionIndex, true)
-  const expectedDocuments = DOMAIN_SOURCE_DOCUMENTS[moduleId]
+  const expectedDocuments = canonicalGameIrModuleSourceDocuments(moduleId)
   const expectedSections = authoritySectionIndex.filter(section =>
     expectedDocuments.includes(section.documentPath as never),
   )

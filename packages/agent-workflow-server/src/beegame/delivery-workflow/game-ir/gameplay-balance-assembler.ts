@@ -42,16 +42,17 @@ export type GameplayBalanceModulePair = Readonly<{
   balance: BalanceModuleProjection
 }>
 
-type GameplayInput = Readonly<{
-  source: GameIrDomainSourceEnvelope
-  mechanical: GameIrMechanicalProjectionReceipt
-  semantic: GameplaySemanticReceipt
-}>
-
-type BalanceInput = Readonly<{
-  source: GameIrDomainSourceEnvelope
-  mechanical: GameIrMechanicalProjectionReceipt
-  semantic: BalanceSemanticReceipt
+export type GameplayBalanceAssemblyAuthority = Readonly<{
+  gameplay: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: GameplaySemanticReceipt
+  }>
+  balance: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: BalanceSemanticReceipt
+  }>
 }>
 
 function fail(message: string): never {
@@ -93,7 +94,9 @@ function exactKeys(
 function validateInput(
   value: unknown,
   label: string,
-): asserts value is GameplayInput | BalanceInput {
+): asserts value is
+  | GameplayBalanceAssemblyAuthority['gameplay']
+  | GameplayBalanceAssemblyAuthority['balance'] {
   if (!isRecord(value)) fail(`${label} must be a plain object`)
   exactKeys(value, ['source', 'mechanical', 'semantic'], label)
 }
@@ -113,17 +116,16 @@ function projection<
   }) as T
 }
 
-export function assembleGameplayBalanceModules(input: {
-  gameplay: GameplayInput
-  balance: BalanceInput
-}): GameplayBalanceModulePair {
+export function assembleGameplayBalanceModules(
+  input: GameplayBalanceAssemblyAuthority,
+): GameplayBalanceModulePair {
   if (!isRecord(input)) fail('input must be a plain object')
   exactKeys(input, ['gameplay', 'balance'], 'input')
   validateInput(input.gameplay, 'gameplay input')
   validateInput(input.balance, 'balance input')
 
-  const gameplay = prepareGameplayModule(input.gameplay as GameplayInput)
-  const balance = prepareBalanceModule(input.balance as BalanceInput)
+  const gameplay = prepareGameplayModule(input.gameplay)
+  const balance = prepareBalanceModule(input.balance)
   const gameplaySource = gameplay.source
   const balanceSource = balance.source
   if (

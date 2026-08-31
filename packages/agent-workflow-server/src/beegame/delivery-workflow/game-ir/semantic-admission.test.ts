@@ -23,6 +23,7 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from '../types'
+import { canonicalGameIrModuleSourceDocuments } from './domain-source'
 import { digestSectionIndex } from '../foundation-section-index'
 
 const receiptDigest = 'a'.repeat(64)
@@ -291,6 +292,14 @@ describe('isolated Game IR semantic projection admission', () => {
       )
     }
     expect(Object.isFrozen(GAME_IR_SEMANTIC_VALIDATOR_MANIFEST)).toBe(true)
+  })
+
+  test('validator source scopes use the canonical source manifest', () => {
+    for (const module of GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules) {
+      expect(module.sourceDocumentPaths).toEqual(
+        canonicalGameIrModuleSourceDocuments(module.moduleId),
+      )
+    }
   })
 
   test('validator scope cannot be shrunk to the candidate owner binding', () => {
