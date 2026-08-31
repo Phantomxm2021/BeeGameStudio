@@ -22,12 +22,14 @@ export type GameIrDomainId =
   | 'balance'
   | 'world-scene'
   | 'presentation'
+  | 'resource-realization'
 
 export const GAME_IR_DOMAIN_IDS = Object.freeze([
   'gameplay',
   'balance',
   'world-scene',
   'presentation',
+  'resource-realization',
 ] as const)
 
 export type GameIrDomainSourceEnvelope = Readonly<{

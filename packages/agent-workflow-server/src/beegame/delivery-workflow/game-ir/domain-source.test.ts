@@ -102,13 +102,29 @@ function exactBalanceBytes(): Record<string, string> {
   }
 }
 
+function exactResourceBytes(): Record<string, string> {
+  return Object.fromEntries(
+    sectionIndex
+      .filter(section =>
+        canonicalGameIrModuleSourceDocuments('resource-realization').includes(
+          section.documentPath,
+        ),
+      )
+      .map(section => [
+        `${section.documentPath}#${section.sectionId}`,
+        sectionBytes[section.documentPath]!,
+      ]),
+  )
+}
+
 describe('Game IR domain source closure', () => {
-  test('accepts only the four isolated domain IDs at the envelope boundary', () => {
+  test('accepts only the admitted isolated domain IDs at the envelope boundary', () => {
     expect(GAME_IR_DOMAIN_IDS).toEqual([
       'gameplay',
       'balance',
       'world-scene',
       'presentation',
+      'resource-realization',
     ])
     for (const moduleId of GAME_IR_DOMAIN_IDS)
       expect(isGameIrDomainId(moduleId)).toBe(true)
@@ -127,11 +143,16 @@ describe('Game IR domain source closure', () => {
             sectionBytes[section.documentPath]!,
           ]),
       )
-    for (const moduleId of [
-      'core',
-      'resource-realization',
-      'implementation-verification',
-    ]) {
+    const resource = buildGameIrDomainSourceEnvelope({
+      moduleId: 'resource-realization',
+      request: request(),
+      sectionIndex,
+      sectionBytes: exactResourceBytes(),
+    })
+    expect(resource.sectionIndex.map(section => section.documentPath)).toEqual([
+      ...canonicalGameIrModuleSourceDocuments('resource-realization'),
+    ])
+    for (const moduleId of ['core', 'implementation-verification']) {
       expect(isGameIrDomainId(moduleId)).toBe(false)
       expect(() =>
         buildGameIrDomainSourceEnvelope({
@@ -275,6 +296,79 @@ describe('Game IR domain source closure', () => {
       'docs/GDD.md',
       'docs/UI_UX_SPEC.md',
     ])
+  })
+
+  test('requires Resource Realization to use exactly its six-document closure', () => {
+    const base = {
+      moduleId: 'resource-realization' as const,
+      request: request(),
+      sectionIndex,
+    }
+    const exact = exactResourceBytes()
+    expect(() =>
+      buildGameIrDomainSourceEnvelope({ ...base, sectionBytes: exact }),
+    ).not.toThrow()
+
+    const omitted = { ...exact }
+    delete omitted['docs/ASSET_PLAN.md#section-7']
+    expect(() =>
+      buildGameIrDomainSourceEnvelope({ ...base, sectionBytes: omitted }),
+    ).toThrow(/exact|bytes|closure/i)
+
+    const extra = {
+      ...exact,
+      'docs/GDD.md#section-0': sectionBytes['docs/GDD.md']!,
+    }
+    expect(() =>
+      buildGameIrDomainSourceEnvelope({ ...base, sectionBytes: extra }),
+    ).toThrow(/exact|bytes|closure/i)
+
+    const mixed = {
+      ...exact,
+      'docs/BALANCE_DESIGN.md#section-2':
+        sectionBytes['docs/BALANCE_DESIGN.md']!,
+    }
+    expect(() =>
+      buildGameIrDomainSourceEnvelope({ ...base, sectionBytes: mixed }),
+    ).toThrow(/exact|bytes|closure/i)
+  })
+
+  test('keeps the existing four domain envelopes byte-equivalent', () => {
+    const existing = [
+      'gameplay',
+      'balance',
+      'world-scene',
+      'presentation',
+    ] as const
+    const sourceBytes = (moduleId: GameIrModuleId) =>
+      Object.fromEntries(
+        sectionIndex
+          .filter(section =>
+            canonicalGameIrModuleSourceDocuments(moduleId).includes(
+              section.documentPath,
+            ),
+          )
+          .map(section => [
+            `${section.documentPath}#${section.sectionId}`,
+            sectionBytes[section.documentPath]!,
+          ]),
+      )
+    for (const moduleId of existing) {
+      const first = buildGameIrDomainSourceEnvelope({
+        moduleId,
+        request: request(),
+        sectionIndex,
+        sectionBytes: sourceBytes(moduleId),
+      })
+      const second = buildGameIrDomainSourceEnvelope({
+        moduleId,
+        request: request(),
+        sectionIndex: [...sectionIndex].reverse(),
+        sectionBytes: sourceBytes(moduleId),
+      })
+      expect(second.sourceDigest).toBe(first.sourceDigest)
+      expect(canonical(second)).toBe(canonical(first))
+    }
   })
 
   test('canonicalizes receipt-valid caller permutations before selecting a domain', () => {
