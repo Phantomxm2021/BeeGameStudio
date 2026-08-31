@@ -735,6 +735,34 @@ export type WorldPresentationAssemblyAuthority = Readonly<{
     validation: PresentationSemanticValidationResult
   }>
 }>
+export type WorldSceneValidationPreparationAuthority = Readonly<{
+  phase4Authority: GameplayBalanceAssemblyAuthority
+  worldScene: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: WorldSceneSemanticReceipt
+  }>
+}>
+export function prepareWorldSceneSemanticValidationPacket(
+  authority: WorldSceneValidationPreparationAuthority,
+): Extract<Phase5SemanticValidationPacket, { moduleId: 'world-scene' }>
+export type PresentationValidationPreparationAuthority = Readonly<{
+  phase4Authority: GameplayBalanceAssemblyAuthority
+  worldScene: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: WorldSceneSemanticReceipt
+    validation: WorldSceneSemanticValidationResult
+  }>
+  presentation: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: PresentationSemanticReceipt
+  }>
+}>
+export function preparePresentationSemanticValidationPacket(
+  authority: PresentationValidationPreparationAuthority,
+): Extract<Phase5SemanticValidationPacket, { moduleId: 'presentation' }>
 export type WorldPresentationClosure = Readonly<{
   schemaVersion: 'game-ir-world-presentation-closure.v1'
   taskId: string
@@ -767,31 +795,30 @@ Invalid Phase 4 must fail before World; invalid World receipt/schema/fidelity mu
 - [ ] **Step 3: Implement ordered replay with explicit fields**
 
 ```ts
-const phase4 = assembleGameplayBalanceModules(authority.phase4Authority)
-const worldPacket = buildWorldSceneSemanticPacket({
-  source: authority.worldScene.source,
-  mechanical: authority.worldScene.mechanical,
+const worldPacket = prepareWorldSceneSemanticValidationPacket({
+  phase4Authority: authority.phase4Authority,
+  worldScene: {
+    source: authority.worldScene.source,
+    mechanical: authority.worldScene.mechanical,
+    semantic: authority.worldScene.semantic,
+  },
 })
-const boundWorld = replayAndBindPhase5SemanticReceipt({
-  source: authority.worldScene.source,
-  mechanical: authority.worldScene.mechanical,
-  packet: worldPacket,
-  semantic: authority.worldScene.semantic,
-})
-const worldModule = parseWorldSceneModule(
-  boundWorld.module,
-  new Map(phase4.gameplay.module.nodes.map(node => [node.id, node])),
+const worldValidation = admitPhase5SemanticValidationResult(
+  worldPacket,
+  authority.worldScene.validation,
 )
-const worldValidationPacket = buildPhase5SemanticValidationPacket({
-  source: authority.worldScene.source,
-  mechanical: authority.worldScene.mechanical,
-  semantic: authority.worldScene.semantic,
-  module: worldModule,
-  externalProjections: { gameplay: phase4.gameplay },
+const presentationPacket = preparePresentationSemanticValidationPacket({
+  phase4Authority: authority.phase4Authority,
+  worldScene: { ...authority.worldScene, validation: worldValidation },
+  presentation: authority.presentation,
 })
 ```
 
-Pass `authority.worldScene.validation` separately. Never spread an authority branch into a strict builder. After exact World PASS, freeze the sole World projection; only then replay/bind/parse/fidelity-admit Presentation using `{ gameplay: phase4.gameplay, worldScene }`.
+The staged APIs return only module-narrowed packets. They reassemble Phase 4
+from `phase4Authority`; module, projection, map, digest, and closure writing
+remain in the one private pipeline used by the final assembler. After exact
+World PASS, that pipeline freezes the sole World projection before replaying
+Presentation.
 
 Both Phase 5 source envelopes retain the complete eight-document
 `authoritySectionIndex` for replay. Task 8 passes that full index to Core for
@@ -891,6 +918,9 @@ git commit -m "test: prove puzzle World Presentation profile"
 **Files:**
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/foundation-parity.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/world-presentation-assembler.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/world-presentation-assembler.test.ts`
+- Modify: Task 9/10 integration fixtures to use staged packet-only APIs and delete caller-owned projections
 - Modify: `docs/beegame-game-ir-stage-isolation-redesign.md`
 - Verify: `docs/superpowers/specs/2026-08-31-game-ir-world-presentation-design.md`
 
@@ -910,9 +940,14 @@ Maintain three scans:
 
 1. Protected Foundation and non-Game-IR production reject every Game IR import/identifier and the exact 21 protected production files remain byte-identical to `70df2e2c`.
 2. Accepted Phase 4 files reject World/Presentation/Resource/Implementation node or projection construction, production APIs, publication, and routes.
-3. Phase 5 files allow World/Presentation module IDs only in schema/producer/closure positions; reject Resource/Implementation node construction, complete candidate/publication, production imports/calls, fallback/compatibility/dual-write, and detached closure consumers.
+3. Phase 5 files allow World/Presentation module IDs only in schema/producer/closure positions; reject Resource/Implementation node construction, complete candidate/publication, production imports/calls, fallback/compatibility/dual-write, and detached closure consumers. The two staged packet-only APIs accept only the nested `phase4Authority` contracts and always replay a fresh Phase 4 pair internally.
 
-The literal future-module keys are allowed only inside the unique `GAME_IR_MODULE_SOURCE_DOCUMENTS` declaration and the semantic manifest derived from it. This whitelist permits no future node, candidate, producer, route, or projection. Synthetic positive/negative AST fixtures prove every whitelist/rejection; do not scan strings or comments.
+The literal future-module keys are allowed only inside the unique
+`GAME_IR_MODULE_SOURCE_DOCUMENTS` declaration. `MODULE_DESCRIPTORS` is derived
+mechanically from that source manifest and repeats no future key. This
+whitelist permits no future node, candidate, producer, route, or projection.
+Synthetic positive/negative AST fixtures prove every whitelist/rejection; do
+not scan strings or comments.
 
 - [ ] **Step 3: Update truthful design/roadmap status**
 

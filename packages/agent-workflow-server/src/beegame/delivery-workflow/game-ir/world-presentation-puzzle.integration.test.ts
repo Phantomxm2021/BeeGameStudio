@@ -38,7 +38,6 @@ import {
   preparePresentationSemanticValidationPacket,
   prepareWorldSceneSemanticValidationPacket,
 } from './world-presentation-assembler'
-import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
 import {
   canonicalGameIrJson,
   canonicalizeGameIrSourceSections,
@@ -1210,7 +1209,6 @@ const pass = (packet: Phase5SemanticValidationPacket) => {
 const makeAuthority = (overrides: Partial<Context['modules']> = {}) => {
   const context = makeContext(overrides)
   const phase4 = phase4Authority(context, overrides)
-  const phase4Projection = assembleGameplayBalanceModules(phase4)
   const worldSource = source('world-scene', context)
   const worldMechanical = mechanical(worldSource)
   const worldPacket = buildWorldSceneSemanticPacket({
@@ -1224,10 +1222,12 @@ const makeAuthority = (overrides: Partial<Context['modules']> = {}) => {
     sourceClaims: claims(sortNodes(world), context),
   }) as WorldSceneSemanticReceipt
   const worldValidationPacket = prepareWorldSceneSemanticValidationPacket({
-    source: worldSource,
-    mechanical: worldMechanical,
-    semantic: worldSemantic,
-    phase4: phase4Projection,
+    phase4Authority: phase4,
+    worldScene: {
+      source: worldSource,
+      mechanical: worldMechanical,
+      semantic: worldSemantic,
+    },
   })
   const worldValidation = pass(worldValidationPacket)
   const presentationSource = source('presentation', context)
@@ -1247,7 +1247,7 @@ const makeAuthority = (overrides: Partial<Context['modules']> = {}) => {
   ) as PresentationSemanticReceipt
   const presentationValidationPacket =
     preparePresentationSemanticValidationPacket({
-      phase4: phase4Projection,
+      phase4Authority: phase4,
       worldScene: {
         source: worldSource,
         mechanical: worldMechanical,
@@ -1721,9 +1721,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         : node,
     )
     assembleValidBaseline()
-    const missingParentProfile = makeAuthority({ world: missingParent })
     expectedError(
-      () => assembleWorldPresentationClosure(missingParentProfile.authority),
+      () => makeAuthority({ world: missingParent }),
       'invalid World/Scene module: scene world.scene-lattice must have exactly one root node',
     )
     const wrongTarget = presentationNodes.map(node =>
@@ -1739,11 +1738,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         : node,
     )
     assembleValidBaseline()
-    const wrongTargetProfile = makeAuthority({
-      presentation: sortedMutation(wrongTarget),
-    })
     expectedError(
-      () => assembleWorldPresentationClosure(wrongTargetProfile.authority),
+      () => makeAuthority({ presentation: sortedMutation(wrongTarget) }),
       'invalid Presentation module: node presentation.vfx-solve role at has wrong target kind',
     )
     const invalidRoute = worldNodes.map(node =>
@@ -1755,9 +1751,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         : node,
     )
     assembleValidBaseline()
-    const invalidRouteProfile = makeAuthority({ world: invalidRoute })
     expectedError(
-      () => assembleWorldPresentationClosure(invalidRouteProfile.authority),
+      () => makeAuthority({ world: invalidRoute }),
       'invalid World/Scene module: route world.route-east waypoint index is out of range',
     )
     const forbiddenResource = presentationNodes.map(node =>
@@ -1772,12 +1767,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         : node,
     )
     assembleValidBaseline()
-    const forbiddenResourceProfile = makeAuthority({
-      presentation: sortedMutation(forbiddenResource),
-    })
     expectedError(
-      () =>
-        assembleWorldPresentationClosure(forbiddenResourceProfile.authority),
+      () => makeAuthority({ presentation: sortedMutation(forbiddenResource) }),
       'invalid Presentation module: node presentation.feedback-rune edge targets unknown node resource.sound',
     )
   })
@@ -1799,9 +1790,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         : node,
     )
     assembleValidBaseline()
-    const badTransformProfile = makeAuthority({ world: badTransform })
     expectedError(
-      () => assembleWorldPresentationClosure(badTransformProfile.authority),
+      () => makeAuthority({ world: badTransform }),
       'invalid World/Scene module: node world.glyph-east transform.scale must be positive',
     )
     const badScreen = presentationNodes.map(node =>
@@ -1810,9 +1800,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         : node,
     )
     assembleValidBaseline()
-    const badScreenProfile = makeAuthority({ presentation: badScreen })
     expectedError(
-      () => assembleWorldPresentationClosure(badScreenProfile.authority),
+      () => makeAuthority({ presentation: badScreen }),
       'invalid Presentation module: node presentation.screen-board modal must be boolean',
     )
     const badTrigger = presentationNodes.map(node =>
@@ -1821,9 +1810,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         : node,
     )
     assembleValidBaseline()
-    const badTriggerProfile = makeAuthority({ presentation: badTrigger })
     expectedError(
-      () => assembleWorldPresentationClosure(badTriggerProfile.authority),
+      () => makeAuthority({ presentation: badTrigger }),
       'invalid Presentation module: node presentation.transition-solve trigger kind is invalid',
     )
     const badRequirement = presentationNodes.map(node =>
@@ -1844,11 +1832,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         : node,
     )
     assembleValidBaseline()
-    const badRequirementProfile = makeAuthority({
-      presentation: badRequirement,
-    })
     expectedError(
-      () => assembleWorldPresentationClosure(badRequirementProfile.authority),
+      () => makeAuthority({ presentation: badRequirement }),
       'invalid Presentation module: node presentation.clip-solve requirement policy does not match',
     )
     const context = makeContext()
@@ -1895,25 +1880,6 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     expectedError(
       () => assembleWorldPresentationClosure(mixedChangedUpstream),
       'invalid Game IR World/Presentation assembly: all modules must bind one task, revision, READY receipt, compile request, and authority index',
-    )
-    const context = makeContext()
-    const baseline = makeAuthority()
-    const phase4Projection = assembleGameplayBalanceModules(
-      baseline.authority.phase4Authority,
-    )
-    const staleExternal = {
-      ...phase4Projection.gameplay,
-      projectionDigest: 'e'.repeat(64),
-    }
-    expectedError(
-      () =>
-        prepareWorldSceneSemanticValidationPacket({
-          source: baseline.authority.worldScene.source,
-          mechanical: baseline.authority.worldScene.mechanical,
-          semantic: baseline.authority.worldScene.semantic,
-          phase4: { ...phase4Projection, gameplay: staleExternal },
-        }),
-      'invalid Game IR Phase 5 admission: external projection digest is stale or invalid',
     )
     const base = makeAuthority().authority
     assembleWorldPresentationClosure(base)

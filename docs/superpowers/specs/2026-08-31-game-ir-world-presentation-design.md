@@ -203,17 +203,20 @@ export function assembleWorldPresentationClosure(
 ): WorldPresentationClosure
 
 export type WorldSceneValidationPreparationAuthority = Readonly<{
-  source: GameIrDomainSourceEnvelope
-  mechanical: GameIrMechanicalProjectionReceipt
-  semantic: WorldSceneSemanticReceipt
-  phase4: GameplayBalanceModulePair
+  phase4Authority: GameplayBalanceAssemblyAuthority
+  worldScene: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: WorldSceneSemanticReceipt
+  }>
 }>
 
 export function prepareWorldSceneSemanticValidationPacket(
   authority: WorldSceneValidationPreparationAuthority,
-): Phase5SemanticValidationPacket
+): Extract<Phase5SemanticValidationPacket, { moduleId: 'world-scene' }>
 
 export type PresentationValidationPreparationAuthority = Readonly<{
+  phase4Authority: GameplayBalanceAssemblyAuthority
   worldScene: Readonly<{
     source: GameIrDomainSourceEnvelope
     mechanical: GameIrMechanicalProjectionReceipt
@@ -225,12 +228,11 @@ export type PresentationValidationPreparationAuthority = Readonly<{
     mechanical: GameIrMechanicalProjectionReceipt
     semantic: PresentationSemanticReceipt
   }>
-  phase4: GameplayBalanceModulePair
 }>
 
 export function preparePresentationSemanticValidationPacket(
   authority: PresentationValidationPreparationAuthority,
-): Phase5SemanticValidationPacket
+): Extract<Phase5SemanticValidationPacket, { moduleId: 'presentation' }>
 ```
 
 The authority object is exact. It has no optional Phase 4 input, raw node

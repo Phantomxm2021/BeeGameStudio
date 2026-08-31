@@ -72,13 +72,37 @@ export type WorldPresentationAssemblyAuthority = Readonly<{
 }>
 
 export type WorldSceneValidationPreparationAuthority = Readonly<{
+  phase4Authority: GameplayBalanceAssemblyAuthority
+  worldScene: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: WorldSceneSemanticReceipt
+  }>
+}>
+
+export type PresentationValidationPreparationAuthority = Readonly<{
+  phase4Authority: GameplayBalanceAssemblyAuthority
+  worldScene: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: WorldSceneSemanticReceipt
+    validation: WorldSceneSemanticValidationResult
+  }>
+  presentation: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: PresentationSemanticReceipt
+  }>
+}>
+
+type PreparedWorldAuthority = Readonly<{
   source: GameIrDomainSourceEnvelope
   mechanical: GameIrMechanicalProjectionReceipt
   semantic: WorldSceneSemanticReceipt
   phase4: GameplayBalanceModulePair
 }>
 
-export type PresentationValidationPreparationAuthority = Readonly<{
+type PreparedPresentationAuthority = Readonly<{
   worldScene: Readonly<{
     source: GameIrDomainSourceEnvelope
     mechanical: GameIrMechanicalProjectionReceipt
@@ -295,10 +319,7 @@ type PreparedWorld = Readonly<{
   packet: Phase5SemanticValidationPacket
 }>
 
-function prepareWorld(
-  authority: WorldSceneValidationPreparationAuthority,
-  parseModule: boolean,
-): PreparedWorld {
+function prepareWorld(authority: PreparedWorldAuthority): PreparedWorld {
   const source = validateGameIrDomainSourceEnvelope(authority.source)
   if (source.moduleId !== 'world-scene')
     fail('World validation preparation requires a world-scene source')
@@ -321,16 +342,14 @@ function prepareWorld(
     bound.module.nodes,
     'World/Balance',
   )
-  const module = parseModule
-    ? (parseWorldSceneModule(
-        bound.module,
-        targetMap(
-          authority.phase4.gameplay.module.nodes,
-          WORLD_SCENE_DOMAIN_MANIFEST,
-          bound.module.nodes,
-        ),
-      ) as WorldSceneModuleProjection['module'])
-    : (bound.module as WorldSceneModuleProjection['module'])
+  const module = parseWorldSceneModule(
+    bound.module,
+    targetMap(
+      authority.phase4.gameplay.module.nodes,
+      WORLD_SCENE_DOMAIN_MANIFEST,
+      bound.module.nodes,
+    ),
+  ) as WorldSceneModuleProjection['module']
   return {
     source,
     mechanical,
@@ -376,9 +395,8 @@ type PreparedPresentation = Readonly<{
 }>
 
 function preparePresentation(
-  authority: PresentationValidationPreparationAuthority,
+  authority: PreparedPresentationAuthority,
   world: WorldSceneModuleProjection,
-  parseModule: boolean,
 ): PreparedPresentation {
   const source = validateGameIrDomainSourceEnvelope(
     authority.presentation.source,
@@ -409,16 +427,14 @@ function preparePresentation(
     bound.module.nodes,
     'Presentation/World',
   )
-  const module = parseModule
-    ? (parsePresentationModule(
-        bound.module,
-        targetMap(
-          [...authority.phase4.gameplay.module.nodes, ...world.module.nodes],
-          PRESENTATION_DOMAIN_MANIFEST,
-          bound.module.nodes,
-        ),
-      ) as PresentationModuleProjection['module'])
-    : (bound.module as PresentationModuleProjection['module'])
+  const module = parsePresentationModule(
+    bound.module,
+    targetMap(
+      [...authority.phase4.gameplay.module.nodes, ...world.module.nodes],
+      PRESENTATION_DOMAIN_MANIFEST,
+      bound.module.nodes,
+    ),
+  ) as PresentationModuleProjection['module']
   return {
     source,
     mechanical,
@@ -464,8 +480,15 @@ function exactWorldPreparationShape(
     fail('World preparation authority must be an object')
   exactKeys(
     authority,
-    ['source', 'mechanical', 'semantic', 'phase4'],
+    ['phase4Authority', 'worldScene'],
     'World preparation authority',
+  )
+  if (!isPlainRecord(authority.worldScene))
+    fail('World preparation worldScene must be an object')
+  exactKeys(
+    authority.worldScene,
+    ['source', 'mechanical', 'semantic'],
+    'World preparation worldScene authority',
   )
 }
 
@@ -476,7 +499,7 @@ function exactPresentationPreparationShape(
     fail('Presentation preparation authority must be an object')
   exactKeys(
     authority,
-    ['worldScene', 'presentation', 'phase4'],
+    ['phase4Authority', 'worldScene', 'presentation'],
     'Presentation preparation authority',
   )
   if (
@@ -498,28 +521,68 @@ function exactPresentationPreparationShape(
 
 export function prepareWorldSceneSemanticValidationPacket(
   authority: WorldSceneValidationPreparationAuthority,
-): Phase5SemanticValidationPacket {
+): Extract<Phase5SemanticValidationPacket, { moduleId: 'world-scene' }> {
   exactWorldPreparationShape(authority)
-  return prepareWorld(authority, false).packet
+  const phase4 = assembleGameplayBalanceModules(authority.phase4Authority)
+  const source = validateGameIrDomainSourceEnvelope(authority.worldScene.source)
+  assertCrossSourceIdentity(authority.phase4Authority, [source])
+  return prepareWorld({
+    source,
+    mechanical: authority.worldScene.mechanical,
+    semantic: authority.worldScene.semantic,
+    phase4,
+  }).packet as Extract<
+    Phase5SemanticValidationPacket,
+    { moduleId: 'world-scene' }
+  >
 }
 
 export function preparePresentationSemanticValidationPacket(
   authority: PresentationValidationPreparationAuthority,
-): Phase5SemanticValidationPacket {
+): Extract<Phase5SemanticValidationPacket, { moduleId: 'presentation' }> {
   exactPresentationPreparationShape(authority)
-  const worldAuthority: WorldSceneValidationPreparationAuthority = {
-    source: authority.worldScene.source,
+  const phase4 = assembleGameplayBalanceModules(authority.phase4Authority)
+  const worldSource = validateGameIrDomainSourceEnvelope(
+    authority.worldScene.source,
+  )
+  const presentationSource = validateGameIrDomainSourceEnvelope(
+    authority.presentation.source,
+  )
+  assertCrossSourceIdentity(authority.phase4Authority, [
+    worldSource,
+    presentationSource,
+  ])
+  const preparedWorld = prepareWorld({
+    source: worldSource,
     mechanical: authority.worldScene.mechanical,
     semantic: authority.worldScene.semantic,
-    phase4: authority.phase4,
-  }
-  const preparedWorld = prepareWorld(worldAuthority, false)
+    phase4,
+  })
   const worldValidation = admitPhase5SemanticValidationResult(
     preparedWorld.packet,
     authority.worldScene.validation,
   )
   const world = makeWorldProjection(preparedWorld, worldValidation)
-  return preparePresentation(authority, world, false).packet
+  return preparePresentation(
+    {
+      phase4,
+      worldScene: {
+        source: worldSource,
+        mechanical: authority.worldScene.mechanical,
+        semantic: authority.worldScene.semantic,
+        validation: worldValidation,
+      },
+      presentation: {
+        source: presentationSource,
+        mechanical: authority.presentation.mechanical,
+        semantic: authority.presentation.semantic,
+      },
+    },
+    world,
+  ).packet as Extract<
+    Phase5SemanticValidationPacket,
+    { moduleId: 'presentation' }
+  >
 }
 
 export function assembleWorldPresentationClosure(
@@ -532,15 +595,12 @@ export function assembleWorldPresentationClosure(
     authority.worldScene.source,
   )
   assertCrossSourceIdentity(authority.phase4Authority, [worldSource])
-  const preparedWorld = prepareWorld(
-    {
-      source: worldSource,
-      mechanical: authority.worldScene.mechanical,
-      semantic: authority.worldScene.semantic,
-      phase4,
-    },
-    true,
-  )
+  const preparedWorld = prepareWorld({
+    source: worldSource,
+    mechanical: authority.worldScene.mechanical,
+    semantic: authority.worldScene.semantic,
+    phase4,
+  })
   const worldValidation = admitPhase5SemanticValidationResult(
     preparedWorld.packet,
     authority.worldScene.validation,
@@ -565,7 +625,6 @@ export function assembleWorldPresentationClosure(
       presentation: authority.presentation,
     },
     worldProjection,
-    true,
   )
   const presentationValidation = admitPhase5SemanticValidationResult(
     preparedPresentation.packet,

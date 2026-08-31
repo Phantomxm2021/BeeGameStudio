@@ -19,7 +19,10 @@ import {
   type FoundationDocumentPath,
 } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
-import { canonicalGameIrModuleSourceDocuments } from './domain-source'
+import {
+  canonicalGameIrModuleSourceDocuments,
+  GAME_IR_MODULE_SOURCE_DOCUMENTS,
+} from './domain-source'
 
 export const GAME_IR_SEMANTIC_VALIDATOR_MANIFEST_VERSION =
   'game-ir-semantic-validator-manifest.v1' as const
@@ -133,17 +136,14 @@ function moduleDescriptor(
 
 const MODULE_DESCRIPTORS: Readonly<
   Record<GameIrModuleId, GameIrSemanticModuleDescriptor>
-> = Object.freeze({
-  core: moduleDescriptor('domain.core'),
-  gameplay: moduleDescriptor('domain.gameplay'),
-  balance: moduleDescriptor('domain.balance'),
-  'world-scene': moduleDescriptor('domain.world-scene'),
-  presentation: moduleDescriptor('domain.presentation'),
-  'resource-realization': moduleDescriptor('domain.resource-realization'),
-  'implementation-verification': moduleDescriptor(
-    'domain.implementation-verification',
-  ),
-})
+> = Object.freeze(
+  Object.fromEntries(
+    Object.keys(GAME_IR_MODULE_SOURCE_DOCUMENTS).map(moduleId => [
+      moduleId,
+      moduleDescriptor(`domain.${moduleId}`),
+    ]),
+  ) as Record<GameIrModuleId, GameIrSemanticModuleDescriptor>,
+)
 
 const SHA256 = /^[a-f0-9]{64}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/

@@ -43,6 +43,8 @@ type AstFacts = Readonly<{
   imports: readonly { kind: string; path: string }[]
   importBindings: readonly { original: string; local: string; path: string }[]
   closureAliases: readonly string[]
+  variableDeclarations: readonly string[]
+  memberCalls: readonly { receiver: string; name: string }[]
   apiImports: readonly string[]
   calls: readonly string[]
   providerDispatch: boolean
@@ -67,6 +69,8 @@ const forbiddenPaths =
 const forbiddenPhase5Paths =
   /(?:^|\/)(?:routes?|publication|consumer|delivery)(?:\.ts)?$/
 const forbiddenClosurePath = /(?:^|\/)world-presentation-assembler(?:\.ts)?$/
+const forbiddenContractPaths =
+  /(?:^|\/)(?:controller|schema|recovery|foundation-(?:audit|fact|issue|revision))(?:\.ts)?$/
 const placeholderModules = new Set([
   'core',
   'world-scene',
@@ -106,6 +110,8 @@ function collectAstFacts(
     path: string
   }> = []
   const closureAliases: string[] = []
+  const variableDeclarations: string[] = []
+  const memberCalls: Array<{ receiver: string; name: string }> = []
   const apiImports: string[] = []
   const calls: string[] = []
   const identifiers: string[] = []
@@ -220,6 +226,14 @@ function collectAstFacts(
             ? expression.argumentExpression.text
             : undefined
       if (calledName) calls.push(calledName)
+      if (
+        ts.isPropertyAccessExpression(expression) &&
+        ts.isIdentifier(expression.expression)
+      )
+        memberCalls.push({
+          receiver: expression.expression.text,
+          name: expression.name.text,
+        })
       const receiver =
         ts.isPropertyAccessExpression(expression) ||
         ts.isElementAccessExpression(expression)
@@ -230,6 +244,8 @@ function collectAstFacts(
       if (calledName === 'assembleWorldPresentationClosure')
         calls.push(calledName)
     }
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name))
+      variableDeclarations.push(node.name.text)
     if (ts.isIdentifier(node)) identifiers.push(node.text)
     if (ts.isPropertyAssignment(node) && ts.isStringLiteral(node.initializer))
       properties.push({
@@ -253,6 +269,8 @@ function collectAstFacts(
     imports,
     importBindings,
     closureAliases,
+    variableDeclarations,
+    memberCalls,
     apiImports,
     calls,
     providerDispatch,
@@ -282,6 +300,10 @@ function policyViolations(
         forbiddenPhase5Paths.test(entry.path))
     )
       violations.add(`path: ${entry.path}`)
+  if (policy === 'contracts')
+    for (const entry of facts.imports)
+      if (forbiddenContractPaths.test(entry.path))
+        violations.add(`contract-path: ${entry.path}`)
   if (
     policy === 'task7' ||
     policy === 'phase4' ||
@@ -396,9 +418,7 @@ function futureModuleLiteralViolations(
   const allowedDeclaration =
     filename === 'domain-source.ts'
       ? 'GAME_IR_MODULE_SOURCE_DOCUMENTS'
-      : filename === 'semantic-admission.ts'
-        ? 'MODULE_DESCRIPTORS'
-        : undefined
+      : undefined
   return collectAstFacts(source, filename)
     .strings.filter(
       entry =>
@@ -408,6 +428,18 @@ function futureModuleLiteralViolations(
     )
     .map(entry => `future-module-literal: ${entry.value}`)
     .sort()
+}
+
+function stagedCallerViolations(source: string, filename: string): string[] {
+  const facts = collectAstFacts(source, filename)
+  const violations = new Set<string>()
+  if (facts.calls.includes('buildPhase5SemanticValidationPacket'))
+    violations.add('call: buildPhase5SemanticValidationPacket')
+  if (facts.identifiers.includes('WorldSceneModuleProjection'))
+    violations.add('type: WorldSceneModuleProjection')
+  for (const name of facts.variableDeclarations)
+    if (/projection/i.test(name)) violations.add(`variable: ${name}`)
+  return [...violations].sort()
 }
 
 type GameIrProductionRole =
@@ -452,11 +484,15 @@ describe('Game IR stage boundary', () => {
         join(dirname(fileURLToPath(import.meta.url)), filename),
         'utf8',
       )
-      expect(source).toContain("from '../types'")
-      expect(source).not.toMatch(
-        /from ['"].*foundation-(?:audit|fact|issue|revision)/,
-      )
-      expect(source).not.toMatch(/from ['"].*(?:controller|schema|recovery)/)
+      const facts = collectAstFacts(source, filename)
+      expect(
+        facts.importBindings.some(binding => binding.path === '../types'),
+      ).toBe(true)
+      expect(
+        policyViolations(facts, 'contracts').filter(violation =>
+          violation.startsWith('contract-path:'),
+        ),
+      ).toEqual([])
     }
   })
 
@@ -787,7 +823,7 @@ describe('Game IR stage boundary', () => {
         'semantic-admission.ts',
         `const MODULE_DESCRIPTORS = { 'implementation-verification': {} }`,
       ),
-    ).toEqual([])
+    ).toEqual(['future-module-literal: implementation-verification'])
     expect(
       futureModuleLiteralViolations(
         'consumer.ts',
@@ -817,7 +853,10 @@ describe('Game IR stage boundary', () => {
       ),
     ).toBe(true)
     expect(facts.calls).toContain('canonicalGameIrModuleSourceDocuments')
-    expect(source).toMatch(/Object\.keys\(MODULE_DESCRIPTORS\)/)
+    expect(facts.memberCalls).toContainEqual({
+      receiver: 'Object',
+      name: 'keys',
+    })
     expect(
       futureModuleLiteralViolations('semantic-admission.ts', source),
     ).toEqual([])
@@ -896,11 +935,7 @@ describe('Game IR stage boundary', () => {
         join(dirname(fileURLToPath(import.meta.url)), filename),
         'utf8',
       )
-      expect(source).not.toContain('buildPhase5SemanticValidationPacket')
-      expect(source).not.toContain('WorldSceneModuleProjection')
-      expect(source).not.toMatch(
-        /(?:const|let|var)\s+(?:world|presentation)(?:Projection|projection)\w*\s*[:=]/,
-      )
+      expect(stagedCallerViolations(source, filename)).toEqual([])
     }
   })
 

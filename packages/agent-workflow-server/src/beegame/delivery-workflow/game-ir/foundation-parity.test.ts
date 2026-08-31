@@ -79,7 +79,6 @@ import {
   admitPhase5SemanticValidationResult,
   type Phase5SemanticValidationPacket,
 } from './phase5-admission'
-import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
 import {
   assembleWorldPresentationClosure,
   preparePresentationSemanticValidationPacket,
@@ -559,16 +558,8 @@ function parityClaims(
 
 async function phase5AuthorityFromPlan(
   plan: Awaited<ReturnType<typeof controllerIssuePlan>>,
-  workspacePath: string,
+  documents: ReadonlyMap<string, string>,
 ): Promise<Parameters<typeof assembleWorldPresentationClosure>[0]> {
-  const documents = new Map(
-    await Promise.all(
-      CANONICAL_PATHS.map(
-        async path =>
-          [path, await readFile(join(workspacePath, path), 'utf8')] as const,
-      ),
-    ),
-  )
   const sectionIndex = buildFoundationSectionIndex({ documents })
   const section = sectionIndex.find(
     item =>
@@ -685,7 +676,6 @@ async function phase5AuthorityFromPlan(
       semantic: semantic('balance', balanceSource, balanceMechanical) as never,
     },
   }
-  const phase4 = assembleGameplayBalanceModules(phase4Authority)
   const worldSource = source('world-scene')
   const worldMechanical = mechanical(worldSource)
   const worldSemantic = semantic(
@@ -694,10 +684,12 @@ async function phase5AuthorityFromPlan(
     worldMechanical,
   ) as never
   const worldPacket = prepareWorldSceneSemanticValidationPacket({
-    source: worldSource,
-    mechanical: worldMechanical,
-    semantic: worldSemantic,
-    phase4,
+    phase4Authority,
+    worldScene: {
+      source: worldSource,
+      mechanical: worldMechanical,
+      semantic: worldSemantic,
+    },
   })
   const worldValidation = admitPhase5SemanticValidationResult(worldPacket, {
     outcome: 'PASS',
@@ -713,7 +705,7 @@ async function phase5AuthorityFromPlan(
     presentationMechanical,
   ) as never
   const presentationPacket = preparePresentationSemanticValidationPacket({
-    phase4,
+    phase4Authority,
     worldScene: {
       source: worldSource,
       mechanical: worldMechanical,
@@ -1557,7 +1549,7 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
         state: parityStateBytes(before),
         documents: [...documentsBefore],
       })
-      const authority = await phase5AuthorityFromPlan(before, firstWorkspace)
+      const authority = await phase5AuthorityFromPlan(before, documentsBefore)
       const beforeClosure = assembleWorldPresentationClosure(authority)
       expect(beforeClosure.closureDigest).toMatch(/^[a-f0-9]{64}$/)
       const documentsAfter = new Map(
@@ -1573,9 +1565,10 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       )
       const afterSnapshot = JSON.stringify({
         state: parityStateBytes(before),
-        documents: [...documentsAfter],
+        documents: [...documentsBefore],
       })
       expect(afterSnapshot).toBe(beforeSnapshot)
+      expect([...documentsAfter]).toEqual([...documentsBefore])
     } finally {
       await rm(firstWorkspace, { recursive: true, force: true })
     }

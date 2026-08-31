@@ -39,7 +39,6 @@ import {
   preparePresentationSemanticValidationPacket,
   prepareWorldSceneSemanticValidationPacket,
 } from './world-presentation-assembler'
-import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
 import {
   canonicalGameIrJson,
   canonicalizeGameIrSourceSections,
@@ -1099,7 +1098,6 @@ function expectAssemblyError(
 function authority(overrides: FixtureOverrides = {}) {
   const context = fixtureContext(overrides)
   const phase4 = phase4Authority(context, overrides)
-  const phase4Projection = assembleGameplayBalanceModules(phase4)
   const worldSource = source('world-scene', context)
   const worldMechanical = mechanical(worldSource)
   const worldPacket = buildWorldSceneSemanticPacket({
@@ -1115,10 +1113,12 @@ function authority(overrides: FixtureOverrides = {}) {
     ),
   }) as WorldSceneSemanticReceipt
   const worldValidationPacket = prepareWorldSceneSemanticValidationPacket({
-    source: worldSource,
-    mechanical: worldMechanical,
-    semantic: worldSemantic,
-    phase4: phase4Projection,
+    phase4Authority: phase4,
+    worldScene: {
+      source: worldSource,
+      mechanical: worldMechanical,
+      semantic: worldSemantic,
+    },
   })
   const worldValidation = validationPacket(worldValidationPacket)
   const presentationSource = source('presentation', context)
@@ -1140,7 +1140,7 @@ function authority(overrides: FixtureOverrides = {}) {
   ) as PresentationSemanticReceipt
   const presentationValidationPacket =
     preparePresentationSemanticValidationPacket({
-      phase4: phase4Projection,
+      phase4Authority: phase4,
       worldScene: {
         source: worldSource,
         mechanical: worldMechanical,
@@ -1429,9 +1429,7 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           }
         : node,
     )
-    const worldGraphProfile = authority({ world: worldNodesMissing })
-    expectAssemblyError(
-      worldGraphProfile.authority,
+    expect(() => authority({ world: worldNodesMissing })).toThrow(
       'invalid World/Scene module: node world.ice-objective relationship objective must occur exactly once',
     )
     const worldNumeric = sortNodes(worldNodes).map(node =>
@@ -1445,9 +1443,7 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           }
         : node,
     )
-    const worldNumericProfile = authority({ world: worldNumeric })
-    expectAssemblyError(
-      worldNumericProfile.authority,
+    expect(() => authority({ world: worldNumeric })).toThrow(
       'invalid World/Scene module: node world.ice-danger shape.radius must be positive',
     )
     const mechanicalNodes = redigestMechanical(base.worldScene.mechanical, {
@@ -1549,9 +1545,7 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
         ? { ...node, value: { ...node.value, trigger: { kind: 'foobar' } } }
         : node,
     )
-    const badPresentationProfile = authority({ presentation: badPresentation })
-    expectAssemblyError(
-      badPresentationProfile.authority,
+    expect(() => authority({ presentation: badPresentation })).toThrow(
       'invalid Presentation module: node presentation.transition-open trigger kind is invalid',
     )
     const badUiAction = sortNodes(presentationNodes).map(node =>
@@ -1559,9 +1553,7 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
         ? { ...node, value: { ...node.value, input: 'joystick' } }
         : node,
     )
-    const badUiActionProfile = authority({ presentation: badUiAction })
-    expectAssemblyError(
-      badUiActionProfile.authority,
+    expect(() => authority({ presentation: badUiAction })).toThrow(
       'invalid Presentation module: node presentation.ui-action-extract input is invalid',
     )
     const badRequirement = sortNodes(presentationNodes).map(node =>
@@ -1575,9 +1567,7 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           }
         : node,
     )
-    const badRequirementProfile = authority({ presentation: badRequirement })
-    expectAssemblyError(
-      badRequirementProfile.authority,
+    expect(() => authority({ presentation: badRequirement })).toThrow(
       'invalid Presentation module: node presentation.screen-hud requirement policy does not match',
     )
     const presentationIdentityAuthority = {
@@ -1660,9 +1650,7 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
           }
         : node,
     )
-    const forbiddenProfile = authority({ presentation: forbidden })
-    expectAssemblyError(
-      forbiddenProfile.authority,
+    expect(() => authority({ presentation: forbidden })).toThrow(
       'invalid Presentation module: node presentation.camera-follow role region has wrong target kind',
     )
   })
