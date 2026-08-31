@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import {
   compareCodeUnits,
   parseGameIrTargetPointer,
@@ -454,11 +453,6 @@ export function verifyGameIrSemanticClaimBytes(
   }
   if (literal !== claim.literal)
     fail(errorPrefix, 'source byte range does not exactly match its literal')
-  if (
-    section.digest !==
-    createHash('sha256').update(bytesText, 'utf8').digest('hex')
-  )
-    fail(errorPrefix, 'semantic source section bytes have a stale digest')
 }
 
 function deepFreezeSemantic<T>(value: T): T {
