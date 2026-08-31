@@ -908,6 +908,28 @@ describe('Presentation Game IR schema', () => {
         ),
       )
     }
+    const automaticBaseline = cloneModule(validModule())
+    expect(() =>
+      parsePresentationModule(admitted(automaticBaseline), externalTargets()),
+    ).not.toThrow()
+    const automatic = cloneModule(validModule())
+    const automaticTransition = nodeById(automatic, 'transition.start')
+    automaticTransition.value.trigger = { kind: 'automatic' }
+    automaticTransition.edges = automaticTransition.edges.filter(
+      candidate => candidate.type !== 'on',
+    )
+    const parsedAutomatic = parsePresentationModule(
+      admitted(automatic),
+      externalTargets(),
+    )
+    expect(
+      parsedAutomatic.nodes.find(
+        candidate => candidate.id === 'transition.start',
+      )?.value,
+    ).toEqual({
+      label: 'Start',
+      trigger: { kind: 'automatic' },
+    })
     const transitionTargets: Array<
       [PresentationTransitionTrigger['kind'], string, string]
     > = [
@@ -939,13 +961,32 @@ describe('Presentation Game IR schema', () => {
   })
 
   test('validates requirements as independent single-variable cases', () => {
+    const original = parsePresentationModule(
+      admitted(validModule()),
+      externalTargets(),
+    )
+    expect(
+      original.nodes.find(candidate => candidate.id === 'screen.home')?.value,
+    ).toEqual({
+      label: 'Home',
+      modal: false,
+      requirements: [
+        {
+          requirementId: 'req.ui.home',
+          kind: 'ui',
+          runtimeRole: 'screen',
+        },
+      ],
+    })
     const omitted = cloneModule(validModule())
     delete nodeById(omitted, 'screen.home').value.requirements
-    expect(() =>
-      parsePresentationModule(admitted(omitted), externalTargets()),
-    ).not.toThrow()
+    const parsedOmitted = parsePresentationModule(
+      admitted(omitted),
+      externalTargets(),
+    )
     expect(
-      omitted.nodes.find(candidate => candidate.id === 'screen.home')?.value,
+      parsedOmitted.nodes.find(candidate => candidate.id === 'screen.home')
+        ?.value,
     ).toEqual({
       label: 'Home',
       modal: false,
@@ -970,9 +1011,16 @@ describe('Presentation Game IR schema', () => {
       nodeById(module, 'state.home').value.requirements = []
     }, /field|requirement/)
     const filenameLike = cloneModule(validModule())
-    expect(() =>
-      parsePresentationModule(admitted(filenameLike), externalTargets()),
-    ).not.toThrow()
+    const filenameBaseline = parsePresentationModule(
+      admitted(validModule()),
+      externalTargets(),
+    )
+    expect(
+      filenameBaseline.nodes.find(candidate => candidate.id === 'screen.home')
+        ?.value,
+    ).toEqual(
+      original.nodes.find(candidate => candidate.id === 'screen.home')?.value,
+    )
     const filenameLikeId = ownerRequirements(filenameLike, 'screen.home')[0]!
     filenameLikeId.requirementId = 'assets.ui.screen.v1'
     const parsedFilenameLike = parsePresentationModule(
