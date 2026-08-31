@@ -322,30 +322,53 @@ type FixtureProfile = {
 
 const defaultProfile: FixtureProfile = { request, sectionIndex: fullIndex }
 
-function makeProfile(label: string): FixtureProfile {
+type ProfileChanges = Readonly<{
+  task?: boolean
+  foundationRevision?: boolean
+  ready?: boolean
+  compileRequest?: boolean
+  authorityIndex?: boolean
+}>
+
+function makeProfile(
+  label: string,
+  changes: ProfileChanges = {},
+): FixtureProfile {
+  const changeAll = Object.keys(changes).length === 0
+  const changeIndex = changeAll || changes.authorityIndex === true
   const sectionIndex = fullIndex.map((section, index) =>
-    index === 0
+    index === 0 && changeIndex
       ? { ...section, heading: `${section.heading}-${label}` }
       : section,
   )
   const marker = sha256(`fixture-${label}`)
   const body = {
     ...foundationBody,
-    foundationRevision: `foundation-revision-${label}`,
-    confirmedBriefDigest: marker,
+    foundationRevision:
+      changeAll || changes.foundationRevision
+        ? `foundation-revision-${label}`
+        : foundationBody.foundationRevision,
+    confirmedBriefDigest:
+      changeAll || changes.ready ? marker : foundationBody.confirmedBriefDigest,
     sectionIndexDigest: digestSectionIndex(sectionIndex),
     authority: {
       ...foundationBody.authority,
-      reviewDigest: marker,
-      issueRegistryDigest: marker,
+      reviewDigest: changeAll || changes.ready ? marker : digest,
+      issueRegistryDigest:
+        changeAll || changes.ready
+          ? marker
+          : foundationBody.authority.issueRegistryDigest,
     },
   }
   return {
     sectionIndex,
     request: {
       ...request,
-      taskId: `task8-${label}`,
-      publicationId: `task8-publication-${label}`,
+      taskId: changeAll || changes.task ? `task8-${label}` : request.taskId,
+      publicationId:
+        changeAll || changes.compileRequest
+          ? `task8-publication-${label}`
+          : request.publicationId,
       foundation: { ...body, receiptDigest: digestGameIrValue(body) },
     },
   }
@@ -634,27 +657,14 @@ function buildAuthority(
     packet: presentationPacket,
     semantic: presentationSemantic,
   })
-  const presentationValidationSemantic =
+  const presentationValidationSemantic = presentationSemantic
+  const presentationModule =
     presentationId === 'state-start'
-      ? (admitPresentationSemanticResult(presentationPacket, {
-          outcome: 'PROJECTED',
-          nodes: presentationNodes,
-          sourceClaims: claims(presentationNodes),
-        }) as PresentationSemanticReceipt)
-      : presentationSemantic
-  const presentationValidationInput =
-    presentationId === 'state-start'
-      ? replayAndBindPhase5SemanticReceipt({
-          source: presentationSource,
-          mechanical: presentationMechanical,
-          packet: presentationPacket,
-          semantic: presentationValidationSemantic,
-        }).module
-      : presentationBound.module
-  const presentationModule = parsePresentationModule(
-    presentationValidationInput,
-    new Map(phase4.gameplay.module.nodes.map(node => [node.id, node])),
-  )
+      ? (presentationBound.module as never)
+      : parsePresentationModule(
+          presentationBound.module,
+          new Map(phase4.gameplay.module.nodes.map(node => [node.id, node])),
+        )
   const presentationValidationPacket = buildPhase5SemanticValidationPacket({
     source: presentationSource,
     mechanical: presentationMechanical,
@@ -684,6 +694,41 @@ function buildAuthority(
       validation: presentationValidation,
     },
   }
+}
+
+function expectMutation(
+  mutate: (baseline: ReturnType<typeof buildAuthority>) => unknown,
+  matcher: RegExp,
+): void {
+  const baseline = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(baseline)).not.toThrow()
+  let mutated: unknown
+  try {
+    mutated = mutate(baseline)
+  } catch (error) {
+    throw new Error(
+      `baseline-derived mutation construction failed: ${String(error)}`,
+    )
+  }
+  expect(() => assembleWorldPresentationClosure(mutated as never)).toThrow(
+    matcher,
+  )
+}
+
+function reSignSemantic(
+  semantic: unknown,
+  nodes: readonly FixtureNode[],
+): Record<string, unknown> {
+  const { receiptDigest: _receiptDigest, ...body } = semantic as Record<
+    string,
+    unknown
+  >
+  const signed = {
+    ...body,
+    nodes,
+    sourceClaims: claims(nodes),
+  }
+  return { ...signed, receiptDigest: digestGameIrValue(signed) }
 }
 
 function expectDeepFrozen(value: unknown, seen = new Set<object>()): void {
@@ -754,6 +799,7 @@ test('assembles a complete authority deterministically and freezes derived proje
 
 test('rejects detached Phase 4 projection input before any Phase 5 work', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const pair = assembleGameplayBalanceModules(authority.phase4Authority)
   expect(() =>
     assembleWorldPresentationClosure({
@@ -775,8 +821,53 @@ test('rejects detached Phase 4 projection input before any Phase 5 work', () => 
   ).toThrow(/unknown or missing fields/)
 })
 
+test('rejects a detached current Phase 4 module placed in raw authority', () => {
+  expectMutation(baseline => {
+    const pair = assembleGameplayBalanceModules(baseline.phase4Authority)
+    return {
+      ...baseline,
+      phase4Authority: {
+        ...baseline.phase4Authority,
+        gameplay: {
+          ...baseline.phase4Authority.gameplay,
+          mechanical: pair.gameplay.module,
+        },
+      },
+    }
+  }, /unknown or missing fields/)
+})
+
+test('rejects forged recomputed Phase 4 projections in raw authority positions', () => {
+  expectMutation(baseline => {
+    const pair = assembleGameplayBalanceModules(baseline.phase4Authority)
+    const { projectionDigest: _projectionDigest, ...body } = pair.gameplay
+    const forgedGameplay = {
+      ...body,
+      taskId: 'forged-task',
+      projectionDigest: digestGameIrValue({ ...body, taskId: 'forged-task' }),
+    }
+    const { projectionDigest: _balanceDigest, ...balanceBody } = pair.balance
+    const forgedBalance = {
+      ...balanceBody,
+      foundationRevision: 'forged-revision',
+      projectionDigest: digestGameIrValue({
+        ...balanceBody,
+        foundationRevision: 'forged-revision',
+      }),
+    }
+    return {
+      ...baseline,
+      phase4Authority: {
+        gameplay: forgedGameplay,
+        balance: forgedBalance,
+      },
+    }
+  }, /unknown or missing fields/)
+})
+
 test('rejects Phase 4 mechanical receipt tampering for Gameplay and Balance', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   expect(() =>
     assembleWorldPresentationClosure({
       ...authority,
@@ -811,6 +902,7 @@ test('rejects Phase 4 mechanical receipt tampering for Gameplay and Balance', ()
 
 test('rejects Phase 4 semantic receipt tampering for Gameplay and Balance', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const gameplaySemantic = {
     ...(authority.phase4Authority.gameplay.semantic as unknown as Record<
       string,
@@ -853,6 +945,7 @@ test('rejects Phase 4 semantic receipt tampering for Gameplay and Balance', () =
 
 test('rejects raw Map and real digest-only Phase 4 authority branches', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   expect(() =>
     assembleWorldPresentationClosure({
       ...authority,
@@ -872,54 +965,51 @@ test('rejects raw Map and real digest-only Phase 4 authority branches', () => {
   ).toThrow(/unknown or missing fields/)
 })
 
-test('rejects World and Presentation IDs that collide with the replayed Balance namespace', () => {
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ balanceId: 'world-scene-main' }),
-    ),
-  ).toThrow(/duplicate global node ID/)
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ balanceId: 'presentation-screen-main' }),
-    ),
-  ).toThrow(/duplicate global node ID/)
-})
-
 test('rejects every global namespace pair with the exact owning guard', () => {
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ balanceId: 'state-start' }),
-    ),
-  ).toThrow(/duplicate cross-domain node ID/)
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ worldId: 'state-start' }),
-    ),
-  ).toThrow(/World\/Gameplay has duplicate global node ID/)
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ balanceId: 'world-scene-main' }),
-    ),
-  ).toThrow(/World\/Balance has duplicate global node ID/)
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ presentationId: 'state-start' }),
-    ),
-  ).toThrow(/Presentation\/Gameplay has duplicate global node ID/)
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ balanceId: 'presentation-screen-main' }),
-    ),
-  ).toThrow(/Presentation\/Balance has duplicate global node ID/)
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ worldId: 'presentation-screen-main' }),
-    ),
-  ).toThrow(/Presentation\/World has duplicate global node ID/)
+  expectMutation(baseline => {
+    const semantic = baseline.phase4Authority.balance.semantic as unknown as {
+      nodes: readonly FixtureNode[]
+    }
+    const nodes = semantic.nodes.map(node => ({ ...node, id: 'state-start' }))
+    return {
+      ...baseline,
+      phase4Authority: {
+        ...baseline.phase4Authority,
+        balance: {
+          ...baseline.phase4Authority.balance,
+          semantic: reSignSemantic(
+            baseline.phase4Authority.balance.semantic,
+            nodes,
+          ),
+        },
+      },
+    }
+  }, /duplicate cross-domain node ID state-start/)
+  expectMutation(
+    () => buildAuthority({ worldId: 'state-start' }),
+    /World\/Gameplay has duplicate global node ID state-start/,
+  )
+  expectMutation(
+    () => buildAuthority({ balanceId: 'world-scene-main' }),
+    /World\/Balance has duplicate global node ID world-scene-main/,
+  )
+  expectMutation(
+    () => buildAuthority({ presentationId: 'state-start' }),
+    /Presentation\/Gameplay has duplicate global node ID state-start/,
+  )
+  expectMutation(
+    () => buildAuthority({ balanceId: 'presentation-screen-main' }),
+    /Presentation\/Balance has duplicate global node ID presentation-screen-main/,
+  )
+  expectMutation(
+    () => buildAuthority({ worldId: 'presentation-screen-main' }),
+    /Presentation\/World has duplicate global node ID presentation-screen-main/,
+  )
 })
 
 test('rejects exact authority shape violations without accepting maps or digest-only branches', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   expect(() =>
     assembleWorldPresentationClosure({ ...authority, extra: true } as never),
   ).toThrow(/unknown or missing fields/)
@@ -964,6 +1054,7 @@ test('rejects exact authority shape violations without accepting maps or digest-
 
 test('rejects stale Phase 4 raw authority and missing World authority before Presentation', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const staleSource = {
     ...authority.phase4Authority.gameplay.source,
     sourceDigest: digest,
@@ -991,6 +1082,7 @@ test('rejects stale Phase 4 raw authority and missing World authority before Pre
 
 test('rejects stale or missing Phase 4 raw branches before World replay', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const staleBalance = {
     ...authority.phase4Authority.balance.source,
     sourceDigest: digest,
@@ -1022,48 +1114,116 @@ test('rejects stale or missing Phase 4 raw branches before World replay', () => 
 })
 
 test('rejects a fully valid mixed Phase 4 authority at the cross-source identity guard', () => {
-  const baseline = buildAuthority()
-  const alternate = buildAuthority({ profile: makeProfile('phase4-mixed') })
-  expect(() =>
-    assembleWorldPresentationClosure({
+  expectMutation(
+    baseline => ({
       ...baseline,
-      phase4Authority: alternate.phase4Authority,
+      phase4Authority: buildAuthority({
+        profile: makeProfile('phase4-mixed'),
+      }).phase4Authority,
     }),
-  ).toThrow(
     /all modules must bind one task, revision, READY receipt, compile request, and authority index/,
   )
 })
 
 test('rejects a fully valid mixed World authority at the cross-source identity guard', () => {
-  const baseline = buildAuthority()
-  const alternate = buildAuthority({ profile: makeProfile('world-mixed') })
-  expect(() =>
-    assembleWorldPresentationClosure({
+  expectMutation(
+    baseline => ({
       ...baseline,
-      worldScene: alternate.worldScene,
+      worldScene: buildAuthority({
+        profile: makeProfile('world-mixed'),
+      }).worldScene,
     }),
-  ).toThrow(
     /all modules must bind one task, revision, READY receipt, compile request, and authority index/,
   )
 })
 
 test('rejects a fully valid mixed Presentation authority at the cross-source identity guard', () => {
-  const baseline = buildAuthority()
-  const alternate = buildAuthority({
-    profile: makeProfile('presentation-mixed'),
-  })
-  expect(() =>
-    assembleWorldPresentationClosure({
+  expectMutation(
+    baseline => ({
       ...baseline,
-      presentation: alternate.presentation,
+      presentation: buildAuthority({
+        profile: makeProfile('presentation-mixed'),
+      }).presentation,
     }),
-  ).toThrow(
     /all modules must bind one task, revision, READY receipt, compile request, and authority index/,
   )
 })
 
+test('rejects a legal branch with only task identity changed', () => {
+  expectMutation(
+    baseline => ({
+      ...baseline,
+      worldScene: buildAuthority({
+        profile: makeProfile('task-only', { task: true }),
+      }).worldScene,
+    }),
+    /all modules must bind one task, revision, READY receipt, compile request, and authority index/,
+  )
+})
+
+test('rejects a legal branch with only Foundation revision changed', () => {
+  expectMutation(
+    baseline => ({
+      ...baseline,
+      worldScene: buildAuthority({
+        profile: makeProfile('revision-only', { foundationRevision: true }),
+      }).worldScene,
+    }),
+    /all modules must bind one task, revision, READY receipt, compile request, and authority index/,
+  )
+})
+
+test('rejects a legal branch with only READY receipt identity changed', () => {
+  expectMutation(
+    baseline => ({
+      ...baseline,
+      worldScene: buildAuthority({
+        profile: makeProfile('ready-only', { ready: true }),
+      }).worldScene,
+    }),
+    /all modules must bind one task, revision, READY receipt, compile request, and authority index/,
+  )
+})
+
+test('rejects a legal branch with only a non-foundation compile field changed', () => {
+  expectMutation(
+    baseline => ({
+      ...baseline,
+      worldScene: buildAuthority({
+        profile: makeProfile('compile-only', { compileRequest: true }),
+      }).worldScene,
+    }),
+    /all modules must bind one task, revision, READY receipt, compile request, and authority index/,
+  )
+})
+
+test('rejects source-level authority index tampering at source validation', () => {
+  expectMutation(baseline => {
+    const source = baseline.worldScene.source
+    const { sourceDigest: _sourceDigest, ...body } = source
+    const authoritySectionIndex = source.authoritySectionIndex.map(
+      (section, index) =>
+        index === 0
+          ? { ...section, heading: `${section.heading}-tampered` }
+          : section,
+    )
+    const tamperedBody = { ...body, authoritySectionIndex }
+    return {
+      ...baseline,
+      worldScene: {
+        ...baseline.worldScene,
+        source: {
+          ...tamperedBody,
+          sourceDigest: digestGameIrValue(tamperedBody),
+        },
+      },
+    }
+  }, /authority Section Index digest does not match the Foundation receipt/)
+})
+
 test('rejects a Phase 4 receipt failure before a simultaneous World failure', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const invalidMechanical = {
     ...authority.phase4Authority.gameplay.mechanical,
     receiptDigest: digest,
@@ -1092,6 +1252,7 @@ test('rejects a Phase 4 receipt failure before a simultaneous World failure', ()
 
 test('rejects a Phase 4 receipt failure before a simultaneous World fidelity failure', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const invalidMechanical = {
     ...authority.phase4Authority.balance.mechanical,
     receiptDigest: digest,
@@ -1118,30 +1279,29 @@ test('rejects a Phase 4 receipt failure before a simultaneous World fidelity fai
   ).toThrow(/mechanical receipt digest/)
 })
 
-test('rejects World receipt before a simultaneous Presentation receipt failure', () => {
-  const authority = buildAuthority()
-  const invalidWorldSemantic = {
-    ...(authority.worldScene.semantic as unknown as Record<string, unknown>),
-    receiptDigest: digest,
-  }
-  const invalidPresentationSemantic = {
-    ...(authority.presentation.semantic as unknown as Record<string, unknown>),
-    receiptDigest: digest,
-  }
-  expect(() =>
-    assembleWorldPresentationClosure({
-      ...authority,
-      worldScene: { ...authority.worldScene, semantic: invalidWorldSemantic },
+test('rejects World receipt before a distinct Presentation FAIL', () => {
+  expectMutation(baseline => {
+    const invalidWorldSemantic = {
+      ...(baseline.worldScene.semantic as unknown as Record<string, unknown>),
+      receiptDigest: digest,
+    }
+    const presentationFail = buildAuthority({
+      presentationValidationOutcome: 'FAIL',
+    }).presentation.validation
+    return {
+      ...baseline,
+      worldScene: { ...baseline.worldScene, semantic: invalidWorldSemantic },
       presentation: {
-        ...authority.presentation,
-        semantic: invalidPresentationSemantic,
+        ...baseline.presentation,
+        validation: presentationFail,
       },
-    } as never),
-  ).toThrow(/semantic receipt digest/)
+    }
+  }, /semantic receipt digest/)
 })
 
 test('rejects World schema before a simultaneous Presentation fidelity failure', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const invalidWorldSemantic = {
     ...(authority.worldScene.semantic as unknown as Record<string, unknown>),
     schemaVersion: 'wrong-schema',
@@ -1164,6 +1324,7 @@ test('rejects World schema before a simultaneous Presentation fidelity failure',
 
 test('rejects World fidelity before a simultaneous Presentation receipt failure', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const invalidWorldValidation = {
     ...authority.worldScene.validation,
     packetDigest: digest,
@@ -1189,6 +1350,7 @@ test('rejects World fidelity before a simultaneous Presentation receipt failure'
 
 test('rejects invalid World receipt, schema, or fidelity before Presentation admission', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const invalidReceipt = {
     ...authority.worldScene.semantic,
     receiptDigest: digest,
@@ -1223,29 +1385,105 @@ test('rejects invalid World receipt, schema, or fidelity before Presentation adm
   ).toThrow(/fidelity PASS packet digest/)
 })
 
-test('rejects rebuilt World wrong-kind and Presentation wrong-kind semantic graphs', () => {
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ worldKind: 'gameplay.state' }),
-    ),
-  ).toThrow(/nodes\[0\] has a node kind outside the semantic packet/)
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ presentationKind: 'world-scene.scene' }),
-    ),
-  ).toThrow(/nodes\[0\] has a node kind outside the semantic packet/)
+test('rejects rebuilt World and Presentation schema-invalid semantic graphs', () => {
+  expectMutation(baseline => {
+    const semantic = baseline.worldScene.semantic as unknown as {
+      nodes: readonly FixtureNode[]
+    }
+    const nodes = semantic.nodes.map(node =>
+      node.id === 'world-scene-main'
+        ? { ...node, value: { label: 'Main' } }
+        : node,
+    )
+    return {
+      ...baseline,
+      worldScene: {
+        ...baseline.worldScene,
+        semantic: reSignSemantic(baseline.worldScene.semantic, nodes),
+      },
+    }
+  }, /node world-scene-main value has unknown or missing fields/)
+  expectMutation(baseline => {
+    const semantic = baseline.presentation.semantic as unknown as {
+      nodes: readonly FixtureNode[]
+    }
+    const nodes = semantic.nodes.map((node, index) =>
+      index === 0 ? { ...node, value: { label: 'Main' } } : node,
+    )
+    return {
+      ...baseline,
+      presentation: {
+        ...baseline.presentation,
+        semantic: reSignSemantic(baseline.presentation.semantic, nodes),
+      },
+    }
+  }, /node presentation-screen-main modal must be boolean/)
+})
+
+test('rejects a source-bound World wrong-kind semantic graph', () => {
+  expectMutation(baseline => {
+    const semantic = baseline.worldScene.semantic as unknown as {
+      nodes: readonly FixtureNode[]
+    }
+    const nodes = semantic.nodes.map(node =>
+      node.id === 'world-scene-main'
+        ? { ...node, kind: 'gameplay.state' }
+        : node,
+    )
+    return {
+      ...baseline,
+      worldScene: {
+        ...baseline.worldScene,
+        semantic: reSignSemantic(baseline.worldScene.semantic, nodes),
+      },
+    }
+  }, /nodes\[1\] has a node kind outside the semantic packet/)
+})
+
+test('rejects a source-bound Presentation wrong-kind semantic graph', () => {
+  expectMutation(baseline => {
+    const semantic = baseline.presentation.semantic as unknown as {
+      nodes: readonly FixtureNode[]
+    }
+    const nodes = semantic.nodes.map((node, index) =>
+      index === 0 ? { ...node, kind: 'world-scene.scene' } : node,
+    )
+    return {
+      ...baseline,
+      presentation: {
+        ...baseline.presentation,
+        semantic: reSignSemantic(baseline.presentation.semantic, nodes),
+      },
+    }
+  }, /nodes\[0\] has a node kind outside the semantic packet/)
 })
 
 test('rejects a rebuilt Presentation forbidden external target', () => {
-  expect(() =>
-    assembleWorldPresentationClosure(
-      buildAuthority({ presentationDrivenByTargetType: 'world-scene.scene' }),
-    ),
-  ).toThrow(/edge target kind does not match/)
+  expectMutation(baseline => {
+    const semantic = baseline.presentation.semantic as unknown as {
+      nodes: readonly FixtureNode[]
+    }
+    const nodes = semantic.nodes.map(node => ({
+      ...node,
+      edges: node.edges.map(edge =>
+        edge.type === 'driven-by'
+          ? { ...edge, targetId: 'balance-unit' }
+          : edge,
+      ),
+    }))
+    return {
+      ...baseline,
+      presentation: {
+        ...baseline.presentation,
+        semantic: reSignSemantic(baseline.presentation.semantic, nodes),
+      },
+    }
+  }, /node presentation-screen-main edge targets unknown node balance-unit/)
 })
 
 test('rejects invalid Presentation receipt or fidelity only after World succeeds', () => {
   const authority = buildAuthority()
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
   const invalidReceipt = {
     ...authority.presentation.semantic,
     receiptDigest: digest,
@@ -1273,6 +1511,7 @@ test('rejects invalid Presentation receipt or fidelity only after World succeeds
 })
 
 test('rejects admitted World FAIL and AMBIGUOUS validation outcomes', () => {
+  expect(() => assembleWorldPresentationClosure(buildAuthority())).not.toThrow()
   expect(() =>
     assembleWorldPresentationClosure(
       buildAuthority({ worldValidationOutcome: 'FAIL' }),
@@ -1286,6 +1525,7 @@ test('rejects admitted World FAIL and AMBIGUOUS validation outcomes', () => {
 })
 
 test('rejects admitted Presentation FAIL and AMBIGUOUS validation outcomes', () => {
+  expect(() => assembleWorldPresentationClosure(buildAuthority())).not.toThrow()
   expect(() =>
     assembleWorldPresentationClosure(
       buildAuthority({ presentationValidationOutcome: 'FAIL' }),
@@ -1299,6 +1539,7 @@ test('rejects admitted Presentation FAIL and AMBIGUOUS validation outcomes', () 
 })
 
 test('rejects validation evidence crossing the World and Presentation source scopes', () => {
+  expect(() => assembleWorldPresentationClosure(buildAuthority())).not.toThrow()
   const worldAuthority = buildAuthority({ worldValidationOutcome: 'FAIL' })
   const worldValidation = worldAuthority.worldScene
     .validation as unknown as Record<string, unknown>
@@ -1364,33 +1605,33 @@ test('rejects stale Presentation external World validation after replaying chang
   ).toThrow(/fidelity PASS packet digest does not match packet/)
 })
 
-test('rejects incomplete PASS coverage for World and Presentation', () => {
-  const authority = buildAuthority()
-  const incompleteWorld = {
-    ...authority.worldScene.validation,
-    checkIds: [],
-    coveredTargets: [],
-  }
-  expect(() =>
-    assembleWorldPresentationClosure({
-      ...authority,
-      worldScene: { ...authority.worldScene, validation: incompleteWorld },
-    } as never),
-  ).toThrow(/PASS|coverage|check|target/)
-  const incompletePresentation = {
-    ...authority.presentation.validation,
-    checkIds: [],
-    coveredTargets: [],
-  }
-  expect(() =>
-    assembleWorldPresentationClosure({
-      ...authority,
-      presentation: {
-        ...authority.presentation,
-        validation: incompletePresentation,
+test('rejects World PASS with only checkIds coverage removed', () => {
+  expectMutation(
+    baseline => ({
+      ...baseline,
+      worldScene: {
+        ...baseline.worldScene,
+        validation: { ...baseline.worldScene.validation, checkIds: [] },
       },
-    } as never),
-  ).toThrow(/PASS|coverage|check|target/)
+    }),
+    /fidelity PASS checkIds has incomplete or extra values/,
+  )
+})
+
+test('rejects Presentation PASS with only coveredTargets coverage removed', () => {
+  expectMutation(
+    baseline => ({
+      ...baseline,
+      presentation: {
+        ...baseline.presentation,
+        validation: {
+          ...baseline.presentation.validation,
+          coveredTargets: [],
+        },
+      },
+    }),
+    /fidelity PASS coveredTargets has incomplete or extra values/,
+  )
 })
 
 test('keeps output digests mechanically tied to their exact bodies', () => {

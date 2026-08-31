@@ -43,18 +43,26 @@ namespace tests were added, the focused test passed:
 
 ```text
 bun test .../world-presentation-assembler.test.ts
-→ 30 pass, 0 fail, 170 expect() calls
+→ 39 pass, 0 fail, 217 expect() calls
 ```
 
-Round 2 extends the legal-baseline-first matrix with independent Gameplay and
+Rounds 2–4 extend the legal-baseline-first matrix with independent Gameplay and
 Balance mechanical/semantic receipt tampering, raw Map/digest-only/detached
 Phase 4 branches, complete mixed task/revision/READY/compile/index identities,
-all six global ID pairs, precise dual-failure ordering, rebuilt wrong-kind and
-forbidden-target graphs, admitted incomplete/PASS/FAIL/AMBIGUOUS fidelity,
-evidence crossover, and stale external Gameplay→World and World→Presentation
-validation packets. Every negative starts from a successful baseline and uses
-one mutation except the explicitly labelled ordering double-fault tests. No
-new production change was needed in round 2. Altered output digest assertions
+source-level Section Index tamper, all six global ID pairs, precise dual-failure
+ordering, source-bound schema-invalid and wrong-kind graphs and forbidden
+targets, admitted
+incomplete/PASS/FAIL/AMBIGUOUS fidelity, evidence crossover, and stale external
+Gameplay→World and World→Presentation validation packets. The shared
+`expectMutation` helper assembles a complete baseline before constructing each
+mutation; ordering tests intentionally construct two failures after their
+successful baseline. The ordering cases use distinct downstream failures:
+Phase 4 receipt before World receipt/fidelity, World semantic receipt before
+Presentation FAIL, World schema before Presentation fidelity, and World
+fidelity before Presentation receipt. The Section Index mismatch test stops at the source
+validator because its canonical digest is coupled to the Foundation compile
+receipt; it does not claim an independent cross-index identity guard. No new
+production change was needed in rounds 2–4. Altered output digest assertions
 are mechanical recomputation checks; the assembler does not accept a closure
 reader input.
 
@@ -62,7 +70,7 @@ reader input.
 
 ```text
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/*.test.ts
-→ 319 pass, 0 fail, 2 snapshots, 1722 expect() calls
+→ 328 pass, 0 fail, 2 snapshots, 1769 expect() calls
 
 bun run typecheck
 → tsc --noEmit passed
@@ -73,7 +81,7 @@ bun run typecheck
 ./node_modules/.bin/biome check packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir
 → 39 files checked, no errors
 
-git diff --check 802f3a16..HEAD
+git diff --check 28830442..HEAD
 → passed
 ```
 
