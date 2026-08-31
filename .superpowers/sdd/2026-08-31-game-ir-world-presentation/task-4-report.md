@@ -21,9 +21,16 @@
 - Mutation-strength check: temporarily disabled the single `allowedKeys` unknown-field guard; the focused `strict values` and `requirements` tests failed because artifact/unknown-key mutations were accepted. The guard was restored before commit.
 - No production defect was exposed, so no production file was changed in this round.
 
+## Fix round 2 evidence
+
+- Replaced the enum sentinel checks with table-driven acceptance of every approved input/channel/mode/VFX/transition value, while retaining an independent invalid-value rejection for each enum.
+- Requirement coverage now verifies a legal owner baseline, omission of the optional key with exact logical output, global duplicate across two otherwise-valid owners, unsorted distinct IDs, policy mismatch, unknown artifact key, non-owner requirements, and a filename-shaped safe identifier (`assets.ui.screen.v1`) with no artifact inference.
+- Backlink coverage now uses a valid two-screen/two-state baseline and changes only the initial state's required `screen` target to the other legal screen; the exact `initial state does not point back` guard is asserted.
+- Final focused result: 14 pass, 0 fail, 174 expect calls. No production defect was exposed; production remains unchanged.
+
 ## Verification
 
-- Focused test: 14 pass, 0 fail, 126 assertions.
+- Focused test: 14 pass, 0 fail, 174 assertions.
 - Server typecheck: `cd packages/agent-workflow-server && bun run typecheck` → exit 0.
 - Biome: checked both Task4 files with no fixes required.
 - `git diff --check` → clean.
@@ -40,5 +47,7 @@
 Original implementation: `b3ca881c feat: validate Game IR presentation graphs`
 
 Fix-round test commit: `acc69262 test: strengthen Presentation schema audit coverage`
+
+Fix-round 2 test commit: `8becaca6 test: close Presentation schema audit gaps`
 
 This report update is a separate evidence commit.
