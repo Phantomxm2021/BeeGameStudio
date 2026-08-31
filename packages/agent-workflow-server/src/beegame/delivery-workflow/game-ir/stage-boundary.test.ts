@@ -41,7 +41,12 @@ const PHASE5_PRODUCTION_FILES = [
  */
 type AstFacts = Readonly<{
   imports: readonly { kind: string; path: string }[]
-  importBindings: readonly { original: string; local: string; path: string }[]
+  importBindings: readonly {
+    original: string
+    local: string
+    path: string
+    isTypeOnly: boolean
+  }[]
   namespaceImports: readonly { local: string; path: string }[]
   closureAliases: readonly string[]
   variableDeclarations: readonly string[]
@@ -114,6 +119,7 @@ function collectAstFacts(
     original: string
     local: string
     path: string
+    isTypeOnly: boolean
   }> = []
   const namespaceImports: Array<{ local: string; path: string }> = []
   const closureAliases: string[] = []
@@ -351,6 +357,13 @@ function collectAstFacts(
       ts.isStringLiteral(node.moduleSpecifier)
     ) {
       imports.push({ kind: 'import', path: node.moduleSpecifier.text })
+      if (node.importClause?.name)
+        importBindings.push({
+          original: 'default',
+          local: node.importClause.name.text,
+          path: node.moduleSpecifier.text,
+          isTypeOnly: node.importClause.isTypeOnly,
+        })
       if (
         node.importClause?.namedBindings &&
         ts.isNamedImports(node.importClause.namedBindings)
@@ -362,6 +375,7 @@ function collectAstFacts(
             original,
             local,
             path: node.moduleSpecifier.text,
+            isTypeOnly: node.importClause.isTypeOnly || specifier.isTypeOnly,
           })
           if (forbiddenApis.has(original)) {
             apiImports.push(original)
@@ -399,6 +413,7 @@ function collectAstFacts(
           original,
           local,
           path: node.moduleSpecifier.text,
+          isTypeOnly: false,
         })
         if (forbiddenApis.has(original)) {
           apiImports.push(original)
@@ -552,6 +567,28 @@ function policyViolations(
         forbiddenPhase5Paths.test(entry.path))
     )
       violations.add(`path: ${entry.path}`)
+  if (policy === 'phase6-producer') {
+    for (const entry of facts.importBindings)
+      if (
+        forbiddenClosurePath.test(entry.path) &&
+        entry.original !== 'assembleWorldPresentationClosure' &&
+        !entry.isTypeOnly
+      )
+        violations.add(`closure-import: ${entry.original}`)
+    for (const entry of facts.imports)
+      if (forbiddenClosurePath.test(entry.path) && entry.kind !== 'import')
+        violations.add(`closure-import-kind: ${entry.kind}`)
+    for (const entry of facts.memberCalls)
+      if (
+        facts.namespaceImports.some(
+          imported =>
+            imported.local === entry.receiver &&
+            forbiddenClosurePath.test(imported.path),
+        ) &&
+        entry.name !== 'assembleWorldPresentationClosure'
+      )
+        violations.add(`closure-member-call: ${entry.name}`)
+  }
   if (policy === 'contracts')
     for (const entry of facts.imports)
       if (forbiddenContractPaths.test(entry.path))
@@ -1028,6 +1065,7 @@ describe('Game IR stage boundary', () => {
         original: 'assembleWorldPresentationClosure',
         local: 'exportClosure',
         path: './world-presentation-assembler',
+        isTypeOnly: false,
       },
     ])
     expect(
@@ -1085,6 +1123,18 @@ describe('Game IR stage boundary', () => {
         'semantic',
       ),
     ).toContain('detached-closure-consumer: closure assembler call')
+    const forbiddenClosureExports = [
+      "import { assembleWorldPresentationClosure as allowed, assembleWorldPresentationAuthority } from './world-presentation-assembler'; allowed(input)",
+      "import * as assembler from './world-presentation-assembler'; assembler.assembleWorldPresentationAuthority(input)",
+      "import * as assembler from './world-presentation-assembler'; assembler.assembleWorldPresentationClosure(input); assembler.assembleWorldPresentationAuthority(input)",
+    ]
+    for (const source of forbiddenClosureExports)
+      expect(
+        policyViolations(
+          collectAstFacts(source, 'resource-realization-producer.ts'),
+          'phase6-producer',
+        ),
+      ).toEqual(expect.arrayContaining([expect.stringMatching(/closure-/)]))
   })
 
   test('rejects aliased future module and kind values only at sensitive properties', () => {

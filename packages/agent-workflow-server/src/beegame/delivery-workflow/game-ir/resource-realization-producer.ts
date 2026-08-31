@@ -23,6 +23,7 @@ import {
   compareCodeUnits,
   canonicalizeGameIrSourceSections,
   digestGameIrValue,
+  type GameIrNode,
   type GameIrSourceSection,
 } from './model'
 import { createSemanticFidelityPrimitives } from './semantic-fidelity'
@@ -42,12 +43,27 @@ export type ResourceRealizationPresentationRequirement = Readonly<{
   ownerNodeId: string
   ownerNodeKind: string
   requirementIdPointer: string
-  evidence: Readonly<{
-    documentPath: string
-    sectionId: string
-    sectionDigest: string
-    sourcePointer: string
-  }>
+  kindPointer: string
+  runtimeRolePointer: string
+  evidence: RequirementEvidenceSet
+}>
+
+type RequirementEvidence = Readonly<{
+  documentPath: string
+  sectionId: string
+  sectionDigest: string
+  sourcePointer: string
+}>
+
+/*
+ * Every Presentation requirement leaf is independently source-bound. Keeping
+ * this as a fixed three-key record prevents a caller from collapsing the
+ * authority into one ambiguous evidence pointer.
+ */
+type RequirementEvidenceSet = Readonly<{
+  requirementId: RequirementEvidence
+  kind: RequirementEvidence
+  runtimeRole: RequirementEvidence
 }>
 
 export type ResourceRealizationPriorTarget = Readonly<{
@@ -171,6 +187,34 @@ function validateAuthorityShape(
   )
 }
 
+function requirementEvidence(
+  node: Pick<GameIrNode, 'bindings'>,
+  pointer: string,
+  requirementId: string,
+  source: GameIrDomainSourceEnvelope,
+): RequirementEvidence {
+  const binding = node.bindings[pointer]
+  if (!binding || binding.kind !== 'owner')
+    fail(
+      `Presentation requirement ${requirementId} is missing evidence for ${pointer}`,
+    )
+  const section = source.authoritySectionIndex.find(
+    entry =>
+      entry.documentPath === binding.documentPath &&
+      entry.sectionId === binding.sectionId,
+  )
+  if (!section || section.digest !== binding.sectionDigest)
+    fail(
+      `Presentation requirement ${requirementId} evidence for ${pointer} is outside authority`,
+    )
+  return {
+    documentPath: binding.documentPath,
+    sectionId: binding.sectionId,
+    sectionDigest: binding.sectionDigest,
+    sourcePointer: binding.sourcePointer,
+  }
+}
+
 function presentationRequirements(
   closure: ReturnType<typeof assembleWorldPresentationClosure>,
   source: GameIrDomainSourceEnvelope,
@@ -191,18 +235,23 @@ function presentationRequirements(
         'Presentation requirementId',
       )
       const requirementIdPointer = `/value/requirements/${index}/requirementId`
-      const binding = node.bindings[requirementIdPointer]
-      if (!binding || binding.kind !== 'owner')
-        fail(`Presentation requirement ${requirementId} is missing evidence`)
-      const section = source.authoritySectionIndex.find(
-        entry =>
-          entry.documentPath === binding.documentPath &&
-          entry.sectionId === binding.sectionId,
-      )
-      if (!section || section.digest !== binding.sectionDigest)
-        fail(
-          `Presentation requirement ${requirementId} evidence is outside authority`,
-        )
+      const kindPointer = `/value/requirements/${index}/kind`
+      const runtimeRolePointer = `/value/requirements/${index}/runtimeRole`
+      const evidence: RequirementEvidenceSet = {
+        requirementId: requirementEvidence(
+          node,
+          requirementIdPointer,
+          requirementId,
+          source,
+        ),
+        kind: requirementEvidence(node, kindPointer, requirementId, source),
+        runtimeRole: requirementEvidence(
+          node,
+          runtimeRolePointer,
+          requirementId,
+          source,
+        ),
+      }
       output.push({
         requirementId,
         kind: text(raw.kind, `Presentation requirement ${requirementId} kind`),
@@ -213,12 +262,9 @@ function presentationRequirements(
         ownerNodeId: node.id,
         ownerNodeKind: node.kind,
         requirementIdPointer,
-        evidence: {
-          documentPath: binding.documentPath,
-          sectionId: binding.sectionId,
-          sectionDigest: binding.sectionDigest,
-          sourcePointer: binding.sourcePointer,
-        },
+        kindPointer,
+        runtimeRolePointer,
+        evidence,
       })
     }
   }
@@ -343,6 +389,8 @@ function validatePacketRequirements(
         'ownerNodeId',
         'ownerNodeKind',
         'requirementIdPointer',
+        'kindPointer',
+        'runtimeRolePointer',
         'evidence',
       ],
       `semantic packet presentationRequirements[${index}]`,
@@ -351,11 +399,7 @@ function validatePacketRequirements(
       fail(
         `semantic packet presentationRequirements[${index}].evidence must be an object`,
       )
-    exactKeys(
-      entry.evidence,
-      ['documentPath', 'sectionId', 'sectionDigest', 'sourcePointer'],
-      `semantic packet presentationRequirements[${index}].evidence`,
-    )
+    const evidenceRecord = entry.evidence
     const requirementId = safeId(
       entry.requirementId,
       `semantic packet presentationRequirements[${index}].requirementId`,
@@ -364,14 +408,54 @@ function validatePacketRequirements(
       entry.requirementIdPointer,
       `semantic packet presentationRequirements[${index}].requirementIdPointer`,
     )
+    const kindPointer = text(
+      entry.kindPointer,
+      `semantic packet presentationRequirements[${index}].kindPointer`,
+    )
+    const runtimeRolePointer = text(
+      entry.runtimeRolePointer,
+      `semantic packet presentationRequirements[${index}].runtimeRolePointer`,
+    )
+    const pointerPattern = (leaf: string): RegExp =>
+      new RegExp(`^\\/value\\/requirements\\/(?:0|[1-9]\\d*)\\/${leaf}$`)
     if (
-      !/^\/value\/requirements\/(?:0|[1-9]\d*)\/requirementId$/.test(
-        requirementIdPointer,
-      )
+      !pointerPattern('requirementId').test(requirementIdPointer) ||
+      !pointerPattern('kind').test(kindPointer) ||
+      !pointerPattern('runtimeRole').test(runtimeRolePointer)
     )
       fail(
         `semantic packet presentationRequirements[${index}] has a noncanonical requirement pointer`,
       )
+    const evidence = (leaf: 'requirementId' | 'kind' | 'runtimeRole') => {
+      const rawEvidence = evidenceRecord[leaf]
+      if (!isRecord(rawEvidence))
+        fail(
+          `semantic packet presentationRequirements[${index}].evidence.${leaf} must be an object`,
+        )
+      exactKeys(
+        rawEvidence,
+        ['documentPath', 'sectionId', 'sectionDigest', 'sourcePointer'],
+        `semantic packet presentationRequirements[${index}].evidence.${leaf}`,
+      )
+      return {
+        documentPath: text(
+          rawEvidence.documentPath,
+          `semantic packet presentationRequirements[${index}].evidence.${leaf}.documentPath`,
+        ),
+        sectionId: safeId(
+          rawEvidence.sectionId,
+          `semantic packet presentationRequirements[${index}].evidence.${leaf}.sectionId`,
+        ),
+        sectionDigest: sha256(
+          rawEvidence.sectionDigest,
+          `semantic packet presentationRequirements[${index}].evidence.${leaf}.sectionDigest`,
+        ),
+        sourcePointer: text(
+          rawEvidence.sourcePointer,
+          `semantic packet presentationRequirements[${index}].evidence.${leaf}.sourcePointer`,
+        ),
+      }
+    }
     return {
       requirementId,
       kind: text(
@@ -391,23 +475,12 @@ function validatePacketRequirements(
         `semantic packet presentationRequirements[${index}].ownerNodeKind`,
       ),
       requirementIdPointer,
+      kindPointer,
+      runtimeRolePointer,
       evidence: {
-        documentPath: text(
-          entry.evidence.documentPath,
-          `semantic packet presentationRequirements[${index}].evidence.documentPath`,
-        ) as GameIrSourceSection['documentPath'],
-        sectionId: safeId(
-          entry.evidence.sectionId,
-          `semantic packet presentationRequirements[${index}].evidence.sectionId`,
-        ),
-        sectionDigest: sha256(
-          entry.evidence.sectionDigest,
-          `semantic packet presentationRequirements[${index}].evidence.sectionDigest`,
-        ),
-        sourcePointer: text(
-          entry.evidence.sourcePointer,
-          `semantic packet presentationRequirements[${index}].evidence.sourcePointer`,
-        ),
+        requirementId: evidence('requirementId'),
+        kind: evidence('kind'),
+        runtimeRole: evidence('runtimeRole'),
       },
     }
   })
@@ -448,7 +521,6 @@ function validateSemanticTargets(
       fail(`semantic result target ID overlaps an existing target ${node.id}`)
     targets.set(node.id, node.kind)
   }
-  const forbidden = new Set(packet.forbiddenTargets)
   for (const node of nodes) {
     for (const reference of node.references) {
       const expectedType = targets.get(reference.targetId)
@@ -460,10 +532,6 @@ function validateSemanticTargets(
         fail(
           `semantic result reference ${node.id} has a mismatched target type`,
         )
-      if (forbidden.has(reference.targetId))
-        fail(
-          `semantic result reference ${node.id} targets Presentation-owned data`,
-        )
     }
     for (const edge of node.edges) {
       const expectedType = targets.get(edge.targetId)
@@ -473,8 +541,6 @@ function validateSemanticTargets(
         )
       if (expectedType !== edge.targetType)
         fail(`semantic result edge ${node.id} has a mismatched target type`)
-      if (forbidden.has(edge.targetId))
-        fail(`semantic result edge ${node.id} targets Presentation-owned data`)
     }
   }
 }

@@ -594,10 +594,18 @@ describe('Resource Realization semantic producer', () => {
       ownerNodeId: 'presentation-screen-main',
       ownerNodeKind: 'presentation.ui-screen',
       requirementIdPointer: '/value/requirements/0/requirementId',
+      kindPointer: '/value/requirements/0/kind',
+      runtimeRolePointer: '/value/requirements/0/runtimeRole',
     })
-    expect(first.presentationRequirements[0]?.evidence.documentPath).toBe(
+    expect(
+      first.presentationRequirements[0]?.evidence.requirementId.documentPath,
+    ).toBe('docs/GDD.md')
+    expect(first.presentationRequirements[0]?.evidence.kind.documentPath).toBe(
       'docs/GDD.md',
     )
+    expect(
+      first.presentationRequirements[0]?.evidence.runtimeRole.documentPath,
+    ).toBe('docs/GDD.md')
     expect(first.allowedPriorNodeTargets.length).toBeGreaterThan(0)
     expect(first.allowedNodeKinds).toEqual(
       Object.keys(RESOURCE_REALIZATION_DOMAIN_MANIFEST).sort(),
@@ -631,6 +639,61 @@ describe('Resource Realization semantic producer', () => {
       ;(input.nodes[0]!.value as Record<string, unknown>).label = 'mutated'
     }).not.toThrow()
     expect(receipt.nodes[0]?.value.label).toBe('Profile')
+  })
+
+  test('rejects missing or tampered Presentation leaf authority before projection', () => {
+    const authority = realAuthority()
+    const semantic = authority.phase5Authority.presentation.semantic
+    const missingKindClaims = semantic.sourceClaims.filter(
+      claim => !claim.subject.endsWith('/kind'),
+    )
+    const missingKindBody = {
+      ...semantic,
+      sourceClaims: missingKindClaims,
+    }
+    const missingKindAuthority = {
+      ...authority,
+      phase5Authority: {
+        ...authority.phase5Authority,
+        presentation: {
+          ...authority.phase5Authority.presentation,
+          semantic: {
+            ...missingKindBody,
+            receiptDigest: digestGameIrValue(missingKindBody),
+          },
+        },
+      },
+    }
+    expect(() =>
+      prepareResourceRealizationSemanticProjectionPacket(
+        missingKindAuthority as never,
+      ),
+    ).toThrow(/claim|coverage|authority|semantic/i)
+
+    const tamperedClaims = semantic.sourceClaims.map(claim =>
+      claim.subject.endsWith('/runtimeRole')
+        ? { ...claim, literal: 'tampered-runtime-role' }
+        : claim,
+    )
+    const tamperedBody = { ...semantic, sourceClaims: tamperedClaims }
+    const tamperedAuthority = {
+      ...authority,
+      phase5Authority: {
+        ...authority.phase5Authority,
+        presentation: {
+          ...authority.phase5Authority.presentation,
+          semantic: {
+            ...tamperedBody,
+            receiptDigest: digestGameIrValue(tamperedBody),
+          },
+        },
+      },
+    }
+    expect(() =>
+      prepareResourceRealizationSemanticProjectionPacket(
+        tamperedAuthority as never,
+      ),
+    ).toThrow(/literal|claim|authority|semantic/i)
   })
 
   test('admits non-Presentation logical resources and rejects kinds or relationships outside the manifest', () => {
@@ -748,6 +811,68 @@ describe('Resource Realization semantic producer', () => {
         ),
       ),
     ).toThrow(/mismatched target type/)
+  })
+
+  test('allows typed profile and variant references to Presentation-derived logical descriptors', () => {
+    const fixture = realResourceFixture()
+    const profile = projectedInput().nodes[0]!
+    const variant = {
+      id: 'variant-main',
+      kind: 'resource-realization.variant',
+      value: { activation: { kind: 'always' } },
+      references: [],
+      edges: [
+        {
+          type: 'realizes',
+          targetId: 'resource.requirement.screen-main',
+          targetType: 'resource-realization.logical-resource',
+        },
+      ],
+    }
+    const profileEdge = {
+      type: 'describes',
+      targetId: 'resource.requirement.screen-main',
+      targetType: 'resource-realization.logical-resource',
+    }
+    const nodes = [{ ...profile, edges: [profileEdge] }, variant]
+    const claim = (subject: string, literal: string) => ({
+      subject,
+      documentPath: section.documentPath,
+      sectionId: section.sectionId,
+      sourcePointer: '/bytes/0/1',
+      literal,
+    })
+    const input = {
+      outcome: 'PROJECTED' as const,
+      nodes,
+      sourceClaims: [
+        claim('node:profile-main#/id', 'profile-main'),
+        claim('node:profile-main#/value/label', 'Profile'),
+        claim('node:profile-main#/edges/0', canonicalGameIrJson(profileEdge)),
+        claim('node:variant-main#/id', 'variant-main'),
+        claim('node:variant-main#/value/activation/kind', 'always'),
+        claim(
+          'node:variant-main#/edges/0',
+          canonicalGameIrJson(variant.edges[0]),
+        ),
+      ].sort((left, right) =>
+        compareCodeUnits(
+          `${left.subject}\0${left.sourcePointer}\0${left.literal}`,
+          `${right.subject}\0${right.sourcePointer}\0${right.literal}`,
+        ),
+      ),
+    }
+    const result = admitResourceRealizationSemanticResult(
+      fixture.authority,
+      fixture.packet,
+      bindSourceEvidence(input, fixture.packet),
+    )
+    expect(result.outcome).toBe('PROJECTED')
+    if (result.outcome !== 'PROJECTED') return
+    expect(result.nodes).toHaveLength(2)
+    expect(
+      result.nodes.flatMap(node => node.edges).map(edge => edge.type),
+    ).toEqual(['describes', 'realizes'])
   })
 
   test('rejects worker derived logical output, Presentation shadowing, and unknown semantic vocabulary', () => {
