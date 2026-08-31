@@ -55,16 +55,22 @@ parser, graph admission and publication infrastructure. It is not a seventh
 business domain.
 
 Phase 7 therefore deletes the unused canonical `core` module requirement. The
-complete V1 domain module sequence is exactly:
+complete V1 domain module set is exactly these six modules. Candidate and
+publication order is the existing code-unit order:
 
 ```text
-gameplay
 balance
-world-scene
+gameplay
+implementation-verification
 presentation
 resource-realization
-implementation-verification
+world-scene
 ```
+
+This candidate order is distinct from replay dependency order. Phase 7 replays
+Gameplay/Balance, then World/Presentation, then Resource Realization, and
+finally Implementation/Verification. No API treats dependency order as
+candidate serialization order.
 
 This is a clean pre-production schema correction. No old seven-module reader,
 alias, empty `core` module, migration or fallback remains. Existing generic
@@ -104,7 +110,8 @@ Value fields:
 
 - `label`;
 - `responsibility`: one source-authored responsibility statement;
-- `ownedPaths`: canonical sorted unique safe project-relative path prefixes.
+- `ownedPaths`: non-empty canonical sorted unique safe project-relative path
+  prefixes.
 
 Relationships:
 
@@ -113,9 +120,11 @@ Relationships:
   Presentation or Resource Realization;
 - `depends-on`: zero or more other implementation units.
 
-The unit graph must be acyclic. Two units may not own the same path prefix, and
-one prefix may not contain another unit's prefix. Units do not contain status,
-attempts, assignees, prompts or generated task IDs.
+The unit graph must be acyclic. Every owned path must equal or descend from
+exactly one target `projectRoot`. Target roots are segment-aware disjoint; unit
+paths are segment-aware disjoint across units. Thus `src/game` overlaps
+`src/game/player`, but does not overlap `src/gameplay`. Units do not contain
+status, attempts, assignees, prompts or generated task IDs.
 
 ### 4.3 `implementation-verification.acceptance-scenario`
 
@@ -182,7 +191,11 @@ It contains no `passed`, `status`, timestamps, hashes of future files or
 invented test commands. Actual test/build/runtime results remain workflow
 evidence in later stages.
 
-## 5. Graph closure
+## 5. Required prior-node coverage and graph closure
+
+The service mechanically derives `requiredPriorNodeIds` as every node ID in the
+replayed Gameplay, Balance, World/Scene, Presentation and Resource Realization
+modules. A worker cannot shrink, reorder or replace this set.
 
 The module is valid only when:
 
@@ -190,10 +203,17 @@ The module is valid only when:
 - at least one unit, acceptance scenario, invariant and evidence requirement
   exists;
 - every unit reaches the sole target;
+- the `implements` edges across all units cover every required prior node
+  exactly once, with no missing, extra or multiply owned prior node;
 - every prior-domain node required by an acceptance scenario is implemented by
   its owning unit or a transitive dependency of that unit;
+- every required prior node is covered by at least one acceptance scenario or
+  constrained by at least one invariant;
 - every scenario and invariant has at least one evidence requirement;
 - every evidence requirement proves at least one scenario or invariant;
+- evidence owned by a unit may prove only a scenario owned by that same unit,
+  or an invariant that directly constrains that unit or one of the prior nodes
+  implemented by that unit;
 - every unit owns or transitively supports at least one scenario or invariant;
 - dependency cycles, orphan nodes, duplicate IDs, duplicate/overlapping path
   ownership and duplicate relationship edges are rejected.
@@ -219,8 +239,10 @@ The producer follows the accepted pattern:
 7. return no final projection by itself.
 
 Domain validation uses the existing Gameplay, Balance, World/Scene,
-Presentation and Resource Realization parsers against one exact canonical prior
-sequence. It does not flatten their manifests into a permissive kind union.
+Presentation and Resource Realization parsers against one exact dependency
+sequence. Complete candidate serialization separately uses the code-unit order
+in section 3. The validator does not flatten prior manifests into a permissive
+kind union.
 
 ## 7. Phase 7 fidelity and assembly
 
@@ -299,8 +321,13 @@ Checklist remains the sole delivery-completeness document and is not ingested
 as Phase 7 source. Implementation/Verification nodes are execution semantics,
 not a replacement Checklist or task graph. Phase 8 may derive a read-only
 crosswalk from Checklist source tags to admitted owner bindings and then feed
-the existing atomic task planner. It may not re-author Checklist text or create
-a second checklist ID authority.
+the existing atomic task planner. Phase 8 mechanically projects exactly one
+implementation task per admitted unit: `ownedPaths` becomes write scope,
+`depends-on` becomes task dependency, and required resources come from that
+unit's Resource Realization `implements` edges. It may attach Checklist IDs by
+the read-only source-tag crosswalk, but it may not regroup units, reassign
+paths, invent dependencies, re-author Checklist text or create a second
+Checklist ID authority.
 
 ## 10. File boundary
 

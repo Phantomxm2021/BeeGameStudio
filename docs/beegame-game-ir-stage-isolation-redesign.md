@@ -314,7 +314,7 @@ Semantic Producer 只有 candidate 写权限。独立的只读 Semantic Projecti
 
 Validator 不接受可重新贴 task/revision 身份的 detached module。服务端 packet 必须绑定完整 admitted candidate、compile request、Foundation READY receipt、完整 Section Index 及所选 module 使用的精确 Markdown section bytes；section bytes 必须机械匹配 Section Index digest。固定 validator manifest 定义 V1 canonical modules、每个 module 的必检项和 service-owned `sourceDocumentPaths`。必读 source scope 是 manifest 指定文档的全部 Section Index entries 与 candidate 额外 owner bindings 的并集，不能由 candidate 单独反推；caller 必须提供该并集的精确 Markdown bytes，不能多也不能少。PASS 必须返回完整、唯一、有序的 coverage receipt。仅有 packet digest 回显的布尔 PASS 不构成 admission evidence。
 
-V1 canonical modules 为 core、gameplay、balance、world-scene、presentation、resource-realization 与 implementation-verification。模块不得缺失或为空。诊断 evidence pointer 优先精确到 owner Source Binding 的 document、section 与 sourcePointer；当诊断的正是 missing/ambiguous projection、尚不存在 binding 时，允许使用带 section digest 的 immutable `section:<document>#<section>@<digest>` pointer。裸 document/section identity 不可入场。
+V1 canonical domain modules 为 gameplay、balance、world-scene、presentation、resource-realization 与 implementation-verification；candidate/publication 按 code-unit 排序为 balance、gameplay、implementation-verification、presentation、resource-realization、world-scene。Core 是 compile request、binding、graph admission 与 publication 基础设施，不是第七个业务 module；没有独立 schema、producer 或职责的旧 `core` placeholder requirement 必须删除，不得用空 module、alias 或 derived index 恢复。六个 domain module 均不得缺失或为空。诊断 evidence pointer 优先精确到 owner Source Binding 的 document、section 与 sourcePointer；当诊断的正是 missing/ambiguous projection、尚不存在 binding 时，允许使用带 section digest 的 immutable `section:<document>#<section>@<digest>` pointer。裸 document/section identity 不可入场。
 
 同一 input 支持两个不同且无法机械区分的合法映射时，Validator 必须返回 ambiguity diagnostic，并由 Stage 5 输出 FoundationDefectReport。不得用模型偏好、默认值或首次成功输出选择业务含义。
 
@@ -339,7 +339,7 @@ Compiler 是唯一 candidate writer，Validator 是只读 admission，因此二�
 
 ### 8.6 Publication / Recovery
 
-Publication 的唯一输入是外部可重建的 `GameIrPublicationAuthority`：compile request、完整 candidate、receipt-bound Section Index，以及七个 canonical module 各自的真实 semantic packet 与 admitted PASS result。Publisher 必须重新执行 candidate 与 semantic admission；不能接受 digest-only PASS、detached module、字段 alias 或 caller 自报的 task/revision。
+Publication 的唯一输入是外部可重建的 `GameIrPublicationAuthority`：workspace、publication ID 与 replayable Phase 7 authority。Publisher 必须从该 authority 逐层重放 Phase 4–7 assembler/fidelity，自行重建 compile request、完整六-domain candidate、receipt-bound Section Index 与 validation evidence；不得接受 caller-supplied candidate、detached generic admissions、digest-only PASS、字段 alias 或 caller 自报的 task/revision。旧 generic semantic-admission publication route 在 Phase 7 删除，不保留 forwarding wrapper。
 
 服务端从该 authority 纯函数重建 module、source map、dependency graph、manifest、semantic evidence 与 COMMITTED marker 的全部 canonical bytes。Journal 只记录预期 authority/digest，不构成新的 authority；recovery 与 committed validation 必须重新接收外部 authority 并逐字节比较重建结果，不能让 journal、staging 或 final artifacts 循环自证。Publication ID 不得复用，PREPARED journal 在 READY 后作为 immutable audit evidence 保留，不执行存在 check/unlink 竞态的事后删除。
 
@@ -437,7 +437,7 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
   publication、controller/store/DeliveryRun/Foundation Issue、provider
   dispatch 和五个 placeholder module；protected 21-file parity 与 full
   server unreachable scan 保持通过。
-- Complete seven-module candidate assembly/publication、production
+- Complete six-domain candidate assembly/publication、production
   routing/persistence、Chrome acceptance remain unavailable；Phase 7–9 remain
   unstarted。Phase 5 的 World/Presentation 实现、双 profile、Foundation
   parity、AST isolation、Task 11、whole-branch independent review 与 root
@@ -504,7 +504,7 @@ Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority
 
 相同文档在 Game IR enabled/disabled 下必须产生完全相同的 Stage 3 tasks、Issue Registry、Stage 4 Patch packets、Targeted Recheck 和 Foundation READY receipt。
 
-Core Phase 已实现 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile、Foundation planning parity、Task 11 independent review、AST isolation/status gate 与最终 whole-branch/root verification 已完成并 accepted。Phase 6 Resource Realization 的唯一 schema/manifest、replaying assembler、resource-plan/profile projection、fidelity admission 与 prior schema closure 已完成并 accepted，且通过上述 Game IR、Foundation、typecheck、Biome/diff 与 Sol final evidence。Implementation/Verification 的领域 producer 仍未实现。因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；production routing 仍不可达，不得为了 parity 伪造七个同构 placeholder candidate。Task 11 parity 测试调用真实 Phase 5 closure assembler，并在调用前后重新序列化同一 Foundation documents/state；不得只比较 receipt/compile-request，也不得使用 Task 9/10 测试 helper。完整 seven-module candidate parity 与 publication 要等 Phase 7 的其余领域模块落地后再开始；Phase 8–9 分别负责 consumer migration 与真实验收。
+Core Phase 已实现 strict contracts、Foundation READY adapter、Core model、旧 generic semantic admission、publication、recovery 和 parity；Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile、Foundation planning parity、Task 11 independent review、AST isolation/status gate 与最终 whole-branch/root verification 已完成并 accepted。Phase 6 Resource Realization 的唯一 schema/manifest、replaying assembler、resource-plan/profile projection、fidelity admission 与 prior schema closure 已完成并 accepted，且通过上述 Game IR、Foundation、typecheck、Biome/diff 与 Sol final evidence。Implementation/Verification 的领域 producer 仍未实现。因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；production routing 仍不可达，不得为了 parity 伪造六个同构 placeholder candidate。Task 11 parity 测试调用真实 Phase 5 closure assembler，并在调用前后重新序列化同一 Foundation documents/state；不得只比较 receipt/compile-request，也不得使用 Task 9/10 测试 helper。完整 six-domain candidate parity、Phase 7 authority-bound publication 与旧 generic semantic-admission 删除要等 Phase 7 落地；Phase 8–9 分别负责 consumer migration 与真实验收。
 
 ### 11.2 架构边界
 
