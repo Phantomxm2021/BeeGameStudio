@@ -22,7 +22,7 @@
 
 ## TDD evidence
 
-The first focused run preceded the assembler module and failed at module
+The original focused run preceded the assembler module and failed at module
 resolution:
 
 ```text
@@ -30,19 +30,27 @@ bun test .../world-presentation-assembler.test.ts
 → Cannot find module './world-presentation-assembler'
 ```
 
-After the exact authority-shape test and implementation were added, the
-focused test passed:
+That was a missing-module setup failure, not behavioral RED. In this fix round,
+a complete legal Phase 4/World/Presentation baseline was built first. Two
+assertion-level RED cases then proved that the assembler accepted a legal
+World node relabeled to the real Balance node ID and a legal Presentation node
+relabeled to that ID. The assembler now derives Balance IDs from the replayed
+Phase 4 projection and rejects both collisions while retaining all other
+Gameplay/World/Presentation pair checks.
+
+After the exact authority-shape, ordering, digest, identity, freeze, and
+namespace tests were added, the focused test passed:
 
 ```text
 bun test .../world-presentation-assembler.test.ts
-→ 1 pass, 0 fail
+→ 10 pass, 0 fail, 128 expect() calls
 ```
 
 ## Verification
 
 ```text
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/*.test.ts
-→ 290 pass, 0 fail, 2 snapshots, 1553 expect() calls
+→ 299 pass, 0 fail, 2 snapshots, 1680 expect() calls
 
 bun run typecheck
 → tsc --noEmit passed
@@ -53,7 +61,7 @@ bun run typecheck
 ./node_modules/.bin/biome check packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir
 → 39 files checked, no errors
 
-git diff --check
+git diff --check 5fd5a8a9..HEAD
 → passed
 ```
 
@@ -62,4 +70,3 @@ git diff --check
 - `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/world-presentation-assembler.ts`
 - `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/world-presentation-assembler.test.ts`
 - `.superpowers/sdd/2026-08-31-game-ir-world-presentation/task-8-report.md`
-

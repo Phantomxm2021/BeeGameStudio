@@ -242,6 +242,11 @@ export function assembleWorldPresentationClosure(
     boundWorld.module.nodes,
     'World/Gameplay',
   )
+  assertDisjointIds(
+    phase4.balance.module.nodes,
+    boundWorld.module.nodes,
+    'World/Balance',
+  )
   const worldModule = parseWorldSceneModule(
     boundWorld.module,
     targetMap(phase4.gameplay.module.nodes),
@@ -292,6 +297,11 @@ export function assembleWorldPresentationClosure(
     phase4.gameplay.module.nodes,
     boundPresentation.module.nodes,
     'Presentation/Gameplay',
+  )
+  assertDisjointIds(
+    phase4.balance.module.nodes,
+    boundPresentation.module.nodes,
+    'Presentation/Balance',
   )
   assertDisjointIds(
     worldProjection.module.nodes,
