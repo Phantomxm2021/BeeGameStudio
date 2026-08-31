@@ -1078,56 +1078,50 @@ describe('resource-realization schema', () => {
 
   test('admits only Core-bound prior target modules and complete source evidence', () => {
     const module = validModule()
-    expect(() =>
-      parseResourceRealizationModule(bindModule(structuredClone(module)), {
-        request: request(),
-        sections: [resourceSection],
-      }),
-    ).toThrow(/target|external/i)
-    expect(() =>
-      (
-        parseResourceRealizationModule as unknown as (
-          ...args: unknown[]
-        ) => unknown
-      )(
-        bindModule(structuredClone(module)),
-        { request: request(), sections: [resourceSection] },
-        new Map([[externalEntity.id, externalEntity]]),
-      ),
-    ).toThrow(/target|external/i)
-
-    for (const externalNode of [
-      { ...externalEntity, kind: 'rogue.kind' },
-      { ...externalEntity, kind: 'resource-realization.logical-resource' },
+    const cases = [
       {
-        ...externalEntity,
-        bindings: { '/id': externalEntity.bindings['/id']! },
+        node: { ...externalEntity, kind: 'rogue.kind' },
+        pattern: /unknown kind/i,
       },
-    ]) {
-      expect(() =>
-        parseResourceRealizationModule(module, {
-          request: request(),
-          sections: [resourceSection],
-          externalModules: [{ moduleId: 'gameplay', nodes: [externalNode] }],
-        }),
-      ).toThrow(/target|kind|binding|leaf|external/i)
+      {
+        node: {
+          ...externalEntity,
+          kind: 'resource-realization.logical-resource',
+        },
+        pattern: /unknown kind/i,
+      },
+      {
+        node: {
+          ...externalEntity,
+          bindings: { '/id': externalEntity.bindings['/id']! },
+        },
+        pattern: /binding|value leaf/i,
+      },
+    ] as const
+    for (const { node: externalNode, pattern } of cases) {
+      const priors = completePriorModules()
+      priors[0] = {
+        moduleId: 'gameplay',
+        nodes: [structuredClone(externalNode) as unknown as MutableNode],
+      }
+      expect(() => parseRaw(module, priors)).toThrow(pattern)
     }
+    const forgedSections = completePriorModules()
     expect(() =>
       parseResourceRealizationModule(module, {
         request: request(),
         sections: [{ ...resourceSection, heading: 'forged index' }],
-        externalModules: [{ moduleId: 'gameplay', nodes: [externalEntity] }],
+        externalModules: forgedSections,
       }),
     ).toThrow(/section|index|digest/i)
-    expect(() =>
-      parseResourceRealizationModule(module, {
-        request: request(),
-        sections: [resourceSection],
-        externalModules: [
-          { moduleId: 'implementation-verification', nodes: [externalEntity] },
-        ],
-      }),
-    ).toThrow(/module|prior|external/i)
+    const futureModules = completePriorModules()
+    futureModules[3] = {
+      ...futureModules[3]!,
+      moduleId: 'implementation-verification',
+    }
+    expect(() => parseRaw(module, futureModules)).toThrow(
+      /prior sequence|expected presentation/i,
+    )
   })
 
   test('closes a dependency between raw prior modules through one Core parse', () => {
@@ -1175,7 +1169,7 @@ describe('resource-realization schema', () => {
         }),
       ],
     })
-    expect(() => parseRaw(module, priors)).toThrow(/balance|kind|domain/i)
+    expect(() => parseRaw(module, priors)).toThrow(/unknown kind/i)
   })
 
   test('re-admits each prior module with its domain value and edge schema', () => {
@@ -1205,19 +1199,21 @@ describe('resource-realization schema', () => {
           [
             {
               type: 'forged-role',
-              targetId: 'gameplay.player',
-              targetType: 'gameplay.entity',
+              targetId: 'balance.unit.base',
+              targetType: 'balance.unit',
             },
           ],
         ),
       ],
     })
-    for (const malformed of [malformedValue, malformedEdge]) {
+    const cases = [
+      { module: malformedValue, pattern: /dimensions/i },
+      { module: malformedEdge, pattern: /unknown relationship role/i },
+    ] as const
+    for (const { module: malformed, pattern } of cases) {
       const priors = completePriorModules()
       priors[1] = malformed
-      expect(() => parseRaw(module, priors)).toThrow(
-        /balance|value|edge|role|schema/i,
-      )
+      expect(() => parseRaw(module, priors)).toThrow(pattern)
     }
   })
 
