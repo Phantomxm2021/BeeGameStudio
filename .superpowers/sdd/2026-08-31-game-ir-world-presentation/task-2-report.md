@@ -80,6 +80,7 @@ exit 0
 ## Commit
 
 `d21c3cd5 feat: replay Phase 5 semantic receipts`
+`9f3ce636 fix: enforce Phase 5 packet node policy`
 
 ## Concerns
 
