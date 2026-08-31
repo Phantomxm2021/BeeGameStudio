@@ -47,7 +47,18 @@ export type ResourceFixtureNode = {
   edges: { type: string; targetId: string; targetType: string }[]
 }
 
-export function realAuthority(): ResourceRealizationSemanticProjectionAuthority {
+export type PresentationRequirementFixture = {
+  requirementId: string
+  kind: 'ui'
+  runtimeRole: 'screen'
+  owner?: 'main' | 'secondary'
+}
+
+export function realAuthority(
+  options: {
+    presentationRequirements?: readonly PresentationRequirementFixture[]
+  } = {},
+): ResourceRealizationSemanticProjectionAuthority {
   type Node = {
     id: string
     kind: string
@@ -123,6 +134,15 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
       ],
     },
   ]
+  const presentationRequirements = options.presentationRequirements ?? [
+    { requirementId: 'screen-main', kind: 'ui', runtimeRole: 'screen' },
+  ]
+  const mainRequirements = presentationRequirements.filter(
+    requirement => requirement.owner !== 'secondary',
+  )
+  const secondaryRequirements = presentationRequirements.filter(
+    requirement => requirement.owner === 'secondary',
+  )
   const presentationNodes: Node[] = [
     {
       id: 'presentation-screen-main',
@@ -130,9 +150,13 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
       value: {
         label: 'Main',
         modal: false,
-        requirements: [
-          { requirementId: 'screen-main', kind: 'ui', runtimeRole: 'screen' },
-        ],
+        requirements: mainRequirements.map(
+          ({ requirementId, kind, runtimeRole }) => ({
+            requirementId,
+            kind,
+            runtimeRole,
+          }),
+        ),
       },
       references: [],
       edges: [
@@ -148,6 +172,38 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
         },
       ],
     },
+    ...(secondaryRequirements.length > 0
+      ? [
+          {
+            id: 'presentation-screen-secondary',
+            kind: 'presentation.ui-screen',
+            value: {
+              label: 'Secondary',
+              modal: false,
+              requirements: secondaryRequirements.map(
+                ({ requirementId, kind, runtimeRole }) => ({
+                  requirementId,
+                  kind,
+                  runtimeRole,
+                }),
+              ),
+            },
+            references: [],
+            edges: [
+              {
+                type: 'driven-by',
+                targetId: 'state-start',
+                targetType: 'gameplay.state',
+              },
+              {
+                type: 'initial-state',
+                targetId: 'presentation-state-secondary',
+                targetType: 'presentation.ui-state',
+              },
+            ],
+          },
+        ]
+      : []),
     {
       id: 'presentation-state-main',
       kind: 'presentation.ui-state',
@@ -166,6 +222,28 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
         },
       ],
     },
+    ...(secondaryRequirements.length > 0
+      ? [
+          {
+            id: 'presentation-state-secondary',
+            kind: 'presentation.ui-state',
+            value: { label: 'Secondary', terminal: false },
+            references: [],
+            edges: [
+              {
+                type: 'driven-by',
+                targetId: 'state-start',
+                targetType: 'gameplay.state',
+              },
+              {
+                type: 'screen',
+                targetId: 'presentation-screen-secondary',
+                targetType: 'presentation.ui-screen',
+              },
+            ],
+          },
+        ]
+      : []),
   ]
   const leafPointers = (value: Record<string, unknown>): string[] => {
     const output: string[] = []
@@ -221,6 +299,27 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
     .join('\n')
   const resourceSourceBytes = [
     baseSourceBytes,
+    ...presentationRequirements.flatMap(({ requirementId }) => [
+      `profile-${requirementId}`,
+      `variant-${requirementId}`,
+      `artifact-${requirementId}`,
+      `assets/runtime/${requirementId}.svg`,
+      canonicalGameIrJson({
+        type: 'describes',
+        targetId: `resource.requirement.${requirementId}`,
+        targetType: 'resource-realization.logical-resource',
+      }),
+      canonicalGameIrJson({
+        type: 'realizes',
+        targetId: `resource.requirement.${requirementId}`,
+        targetType: 'resource-realization.logical-resource',
+      }),
+      canonicalGameIrJson({
+        type: 'part-of',
+        targetId: `variant-${requirementId}`,
+        targetType: 'resource-realization.variant',
+      }),
+    ]),
     'player-model',
     'resource.requirement.player-model',
     'profile-main',
@@ -300,28 +399,72 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
   ].join('\n')
   const hash = (value: string): string =>
     createHash('sha256').update(value, 'utf8').digest('hex')
-  const resourceDocuments = new Set([
-    'docs/ASSET_PLAN.md',
-    'docs/TECHNICAL_DESIGN.md',
-  ])
+  const assetProfileSectionBytes = [
+    'asset-plan-profile-section',
+    'profile-main',
+    'resource.requirement.player-model',
+    'model',
+    'player',
+    '3D',
+    'character',
+    'agent-authored',
+    'project-license',
+    'art-team',
+    'runtime-import-ready',
+    'skinned',
+    'stylized',
+    'true',
+    canonicalGameIrJson({
+      type: 'describes',
+      targetId: 'resource.requirement.player-model',
+      targetType: 'resource-realization.logical-resource',
+    }),
+    '角色',
+  ].join('\n')
+  const technicalSectionBytes = [
+    'technical-design-section',
+    resourceSourceBytes,
+  ].join('\n')
   const bytesFor = (documentPath: string): string =>
-    resourceDocuments.has(documentPath) ? resourceSourceBytes : baseSourceBytes
+    documentPath === 'docs/ASSET_PLAN.md'
+      ? `${resourceSourceBytes}\n${assetProfileSectionBytes}`
+      : documentPath === 'docs/TECHNICAL_DESIGN.md'
+        ? technicalSectionBytes
+        : baseSourceBytes
+  const bytesForSection = (documentPath: string, sectionId: string): string => {
+    if (documentPath === 'docs/ASSET_PLAN.md')
+      return sectionId === 'section-asset-extra'
+        ? assetProfileSectionBytes
+        : resourceSourceBytes
+    return documentPath === 'docs/TECHNICAL_DESIGN.md'
+      ? technicalSectionBytes
+      : baseSourceBytes
+  }
   const sectionIndex = [
     ...CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
       documentPath,
       sectionId: `section-${index}`,
       heading: documentPath,
       startLine: 1,
-      endLine: bytesFor(documentPath).split('\n').length,
-      digest: hash(bytesFor(documentPath)),
+      endLine:
+        documentPath === 'docs/ASSET_PLAN.md'
+          ? resourceSourceBytes.split('\n').length
+          : bytesFor(documentPath).split('\n').length,
+      digest: hash(
+        documentPath === 'docs/ASSET_PLAN.md'
+          ? resourceSourceBytes
+          : bytesFor(documentPath),
+      ),
     })),
     {
       documentPath: 'docs/ASSET_PLAN.md' as const,
       sectionId: 'section-asset-extra',
       heading: 'Asset plan details',
-      startLine: 1,
-      endLine: bytesFor('docs/ASSET_PLAN.md').split('\n').length,
-      digest: hash(bytesFor('docs/ASSET_PLAN.md')),
+      startLine: resourceSourceBytes.split('\n').length + 1,
+      endLine:
+        resourceSourceBytes.split('\n').length +
+        assetProfileSectionBytes.split('\n').length,
+      digest: hash(assetProfileSectionBytes),
     },
   ]
   const foundationBody = {
@@ -389,7 +532,7 @@ export function realAuthority(): ResourceRealizationSemanticProjectionAuthority 
           .filter(section => documents.includes(section.documentPath))
           .map(section => [
             `${section.documentPath}#${section.sectionId}`,
-            bytesFor(section.documentPath),
+            bytesForSection(section.documentPath, section.sectionId),
           ]),
       ),
     })
@@ -568,7 +711,7 @@ export function completeResourceInput(
   artifactRuntimeRole = 'player',
   mutate?: (nodes: ResourceFixtureNode[]) => ResourceFixtureNode[],
 ) {
-  const nodes: ResourceFixtureNode[] = [
+  const baseNodes: ResourceFixtureNode[] = [
     {
       id: 'resource.requirement.player-model',
       kind: 'resource-realization.logical-resource',
@@ -711,6 +854,70 @@ export function completeResourceInput(
         },
       ],
     },
+  ]
+  const presentationNodes: ResourceFixtureNode[] =
+    packet.presentationRequirements.flatMap(requirement => [
+      {
+        id: `profile-${requirement.requirementId}`,
+        kind: 'resource-realization.acquisition-profile',
+        value: {
+          required: true,
+          dimensions: ['2D'],
+          assetKinds: ['ui-screen'],
+          usageTags: ['ui'],
+          capabilities: ['ui-states'],
+          styles: ['stylized'],
+          sourcingPolicy: {
+            allowedSourceKinds: ['agent-authored'],
+            licenseConstraints: ['project-license'],
+            responsibleParty: 'art-team',
+            handoffCriteria: ['runtime-import-ready'],
+          },
+        },
+        references: [],
+        edges: [
+          {
+            type: 'describes',
+            targetId: `resource.requirement.${requirement.requirementId}`,
+            targetType: 'resource-realization.logical-resource',
+          },
+        ],
+      },
+      {
+        id: `variant-${requirement.requirementId}`,
+        kind: 'resource-realization.variant',
+        value: { activation: { kind: 'required' } },
+        references: [],
+        edges: [
+          {
+            type: 'realizes',
+            targetId: `resource.requirement.${requirement.requirementId}`,
+            targetType: 'resource-realization.logical-resource',
+          },
+        ],
+      },
+      {
+        id: `artifact-${requirement.requirementId}`,
+        kind: 'resource-realization.delivery-artifact',
+        value: {
+          artifactClass: 'runtime-resource',
+          path: `assets/runtime/${requirement.requirementId}.svg`,
+          format: 'svg',
+          runtimeRole: requirement.runtimeRole,
+        },
+        references: [],
+        edges: [
+          {
+            type: 'part-of',
+            targetId: `variant-${requirement.requirementId}`,
+            targetType: 'resource-realization.variant',
+          },
+        ],
+      },
+    ])
+  const nodes = [
+    ...baseNodes.filter(node => !node.id.includes('screen-main')),
+    ...presentationNodes,
   ]
   const candidateNodes = mutate ? mutate(structuredClone(nodes)) : nodes
   const sectionFor = (node: (typeof nodes)[number]) => {

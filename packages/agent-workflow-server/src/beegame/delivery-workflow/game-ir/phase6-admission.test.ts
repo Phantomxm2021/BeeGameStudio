@@ -10,10 +10,15 @@ import {
 import {
   completeResourceInput,
   realAuthority,
+  type PresentationRequirementFixture,
   type ResourceFixtureNode,
   validationAuthority as buildValidationAuthority,
 } from './resource-realization-test-helpers'
-import { canonicalGameIrJson, digestGameIrValue } from './model'
+import {
+  canonicalGameIrJson,
+  compareCodeUnits,
+  digestGameIrValue,
+} from './model'
 
 function validationFixture(
   mutate?: (nodes: ResourceFixtureNode[]) => ResourceFixtureNode[],
@@ -64,10 +69,6 @@ function tamperSemanticReceipt(
 
 describe('Phase 6 Resource Realization admission', () => {
   test('prepares a deterministic frozen packet with exact Presentation derivation and owner fidelity', () => {
-    const input = completeResourceInput(
-      validationInput().projectionPacket,
-      realAuthority().resourceRealization.source.sectionBytes,
-    )
     const firstInput = validationInput()
     const first = prepareResourceRealizationSemanticValidationPacket(
       firstInput.validation,
@@ -104,13 +105,67 @@ describe('Phase 6 Resource Realization admission', () => {
         runtimeRole: 'screen',
       },
     })
-    expect(Object.keys(derived.bindings).sort()).toEqual([
+    expect(Object.keys(derived.bindings).sort(compareCodeUnits)).toEqual([
       '/edges/0',
       '/id',
       '/value/requirementId',
       '/value/resourceKind',
       '/value/runtimeRole',
     ])
+    const requirement = first.presentationRequirements[0]!
+    const derivedBindingExpectations = [
+      [
+        '/id',
+        'presentation-requirement-id',
+        requirement.requirementIdPointer,
+        requirement.requirementId,
+      ],
+      [
+        '/value/requirementId',
+        'presentation-requirement-id',
+        requirement.requirementIdPointer,
+        requirement.requirementId,
+      ],
+      [
+        '/value/resourceKind',
+        'presentation-resource-kind',
+        requirement.kindPointer,
+        requirement.kind,
+      ],
+      [
+        '/value/runtimeRole',
+        'presentation-runtime-role',
+        requirement.runtimeRolePointer,
+        requirement.runtimeRole,
+      ],
+      [
+        '/edges/0',
+        'presentation-requirement-owner',
+        '/id',
+        requirement.ownerNodeId,
+      ],
+    ] as const
+    for (const [
+      pointer,
+      derivationRuleId,
+      targetPointer,
+      targetValue,
+    ] of derivedBindingExpectations) {
+      const binding = derived.bindings[pointer]!
+      expect(binding.kind).toBe('derived')
+      expect(binding.inputs).toEqual([
+        {
+          kind: 'external',
+          moduleId: 'presentation',
+          nodeId: requirement.ownerNodeId,
+          pointer: targetPointer,
+          targetDigest: digestGameIrValue(targetValue),
+        },
+      ])
+      expect((binding as { derivationRuleId?: string }).derivationRuleId).toBe(
+        derivationRuleId,
+      )
+    }
     expect(derived.edges).toEqual([
       {
         type: 'required-by',
@@ -119,20 +174,43 @@ describe('Phase 6 Resource Realization admission', () => {
       },
     ])
     expect(
-      new Set(
-        first.semanticReceiptDigest
-          ? first.presentationRequirements.map(item => item.requirementId)
-          : [],
-      ),
-    ).toEqual(new Set(['screen-main']))
+      first.presentationRequirements.map(item => item.requirementId),
+    ).toEqual(['screen-main'])
     const claimSections = new Set(
-      firstInput.semantic.sourceClaims.map(claim => claim.documentPath),
+      firstInput.semantic.sourceClaims.map(
+        claim => `${claim.documentPath}#${claim.sectionId}`,
+      ),
     )
     expect(claimSections).toEqual(
-      new Set(['docs/ASSET_PLAN.md', 'docs/TECHNICAL_DESIGN.md']),
+      new Set([
+        'docs/ASSET_PLAN.md#section-7',
+        'docs/ASSET_PLAN.md#section-asset-extra',
+        'docs/TECHNICAL_DESIGN.md#section-3',
+      ]),
+    )
+    const assetSections =
+      firstInput.validation.resourceRealization.source.sectionIndex.filter(
+        section => section.documentPath === 'docs/ASSET_PLAN.md',
+      )
+    expect(assetSections).toHaveLength(2)
+    expect(assetSections[0]!.digest).not.toBe(assetSections[1]!.digest)
+    expect(assetSections[0]!.endLine).toBeLessThan(assetSections[1]!.startLine)
+    expect(
+      firstInput.validation.resourceRealization.source.sectionBytes[
+        `${assetSections[0]!.documentPath}#${assetSections[0]!.sectionId}`
+      ],
+    ).not.toBe(
+      firstInput.validation.resourceRealization.source.sectionBytes[
+        `${assetSections[1]!.documentPath}#${assetSections[1]!.sectionId}`
+      ],
     )
 
-    input.nodes[0]!.value.runtimeRole = 'mutated-input'
+    expect(() => {
+      ;(
+        firstInput.validation.resourceRealization.semantic.nodes[0]!
+          .value as Record<string, unknown>
+      ).runtimeRole = 'mutated-input'
+    }).toThrow(/read only|frozen|assign|object/i)
     expect(canonicalGameIrJson(first)).toBe(
       canonicalGameIrJson(
         prepareResourceRealizationSemanticValidationPacket(
@@ -140,6 +218,117 @@ describe('Phase 6 Resource Realization admission', () => {
         ),
       ),
     )
+  })
+
+  test('derives zero, same-owner multi, and second-owner Presentation requirements without overlap', () => {
+    const cases: readonly [
+      string,
+      readonly PresentationRequirementFixture[],
+    ][] = [
+      ['zero', []],
+      [
+        'same-owner-two',
+        [
+          { requirementId: 'screen-hud', kind: 'ui', runtimeRole: 'screen' },
+          { requirementId: 'screen-main', kind: 'ui', runtimeRole: 'screen' },
+        ],
+      ],
+      [
+        'second-owner',
+        [
+          { requirementId: 'screen-main', kind: 'ui', runtimeRole: 'screen' },
+          {
+            requirementId: 'screen-secondary',
+            kind: 'ui',
+            runtimeRole: 'screen',
+            owner: 'secondary',
+          },
+        ],
+      ],
+    ] as const
+    for (const [label, presentationRequirements] of cases) {
+      const authority = realAuthority({ presentationRequirements })
+      const projectionPacket =
+        prepareResourceRealizationSemanticProjectionPacket(authority)
+      expect(
+        projectionPacket.presentationRequirements.map(
+          item => item.requirementId,
+        ),
+        label,
+      ).toEqual(
+        presentationRequirements
+          .map(item => item.requirementId)
+          .sort(compareCodeUnits),
+      )
+      expect(
+        projectionPacket.presentationRequirements.map(item => item.ownerNodeId),
+      ).toEqual(
+        [...presentationRequirements]
+          .sort((left, right) =>
+            compareCodeUnits(left.requirementId, right.requirementId),
+          )
+          .map(item =>
+            item.owner === 'secondary'
+              ? 'presentation-screen-secondary'
+              : 'presentation-screen-main',
+          ),
+      )
+      const semantic = admitResourceRealizationSemanticResult(
+        authority,
+        projectionPacket,
+        completeResourceInput(
+          projectionPacket,
+          authority.resourceRealization.source.sectionBytes,
+        ),
+      )
+      if (semantic.outcome !== 'PROJECTED')
+        throw new Error('expected projected')
+      const validation = buildValidationAuthority(authority, semantic)
+      const packet =
+        prepareResourceRealizationSemanticValidationPacket(validation)
+      const module = JSON.parse(packet.moduleBytes) as {
+        nodes: Array<{
+          id: string
+          kind: string
+          producerMode: string
+          edges: unknown[]
+        }>
+      }
+      for (const requirement of presentationRequirements) {
+        const id = `resource.requirement.${requirement.requirementId}`
+        expect(module.nodes.filter(node => node.id === id)).toHaveLength(1)
+        expect(
+          module.nodes.filter(
+            node => node.id === `profile-${requirement.requirementId}`,
+          ),
+        ).toHaveLength(1)
+        expect(
+          module.nodes.filter(
+            node => node.id === `variant-${requirement.requirementId}`,
+          ),
+        ).toHaveLength(1)
+        expect(
+          module.nodes.filter(
+            node => node.id === `artifact-${requirement.requirementId}`,
+          ),
+        ).toHaveLength(1)
+      }
+      expect(
+        module.nodes.filter(
+          node =>
+            node.kind === 'resource-realization.logical-resource' &&
+            node.producerMode === 'derived',
+        ),
+      ).toHaveLength(presentationRequirements.length)
+    }
+    expect(() =>
+      realAuthority({
+        presentationRequirements: [
+          { requirementId: 'duplicate', kind: 'ui', runtimeRole: 'screen' },
+          { requirementId: 'duplicate', kind: 'ui', runtimeRole: 'screen' },
+        ],
+      }),
+    ).toThrow(/duplicated|duplicate|requirement/i)
   })
 
   test('keeps the selected source closure authoritative across representative source and claim tampering', () => {
@@ -481,6 +670,9 @@ describe('Phase 6 Resource Realization admission', () => {
     const sectionEvidence = packet.allowedEvidencePointers.find(pointer =>
       pointer.startsWith('section:'),
     )!
+    const sectionEvidencePointers = packet.allowedEvidencePointers.filter(
+      pointer => pointer.startsWith('section:'),
+    )
     const bindingEvidence = packet.allowedEvidencePointers.find(pointer =>
       pointer.startsWith('binding:'),
     )!
@@ -512,13 +704,29 @@ describe('Phase 6 Resource Realization admission', () => {
       packet,
       ambiguous,
     )
+    const admittedMismatch = admitResourceRealizationSemanticValidationResult(
+      fixture.validation,
+      packet,
+      {
+        outcome: 'FAIL',
+        packetDigest: packet.packetDigest,
+        reasonCode: 'projection-mismatch',
+        actual: 'different projection bytes',
+        evidencePointers: [bindingEvidence],
+      },
+    )
     if (admittedFail.outcome !== 'FAIL') throw new Error('expected FAIL')
     if (admittedAmbiguous.outcome !== 'AMBIGUOUS')
       throw new Error('expected AMBIGUOUS')
+    if (admittedMismatch.outcome !== 'FAIL')
+      throw new Error('expected projection-mismatch FAIL')
     expect(Object.isFrozen(admittedFail)).toBe(true)
     expect(Object.isFrozen(admittedAmbiguous)).toBe(true)
+    expect(Object.isFrozen(admittedMismatch)).toBe(true)
     expect(Object.isFrozen(admittedFail.evidencePointers)).toBe(true)
     expect(Object.isFrozen(admittedAmbiguous.evidencePointers)).toBe(true)
+    expect(Object.isFrozen(admittedMismatch.evidencePointers)).toBe(true)
+    expect(admittedMismatch.reasonCode).toBe('projection-mismatch')
 
     const diagnosticCases = [
       ['wrong FAIL reason', { ...fail, reasonCode: 'ambiguous-projection' }],
@@ -533,16 +741,19 @@ describe('Phase 6 Resource Realization admission', () => {
       ],
       [
         'unsorted evidence',
-        { ...fail, evidencePointers: [bindingEvidence, sectionEvidence] },
+        {
+          ...fail,
+          evidencePointers: [
+            sectionEvidencePointers[1]!,
+            sectionEvidencePointers[0]!,
+          ],
+        },
       ],
       [
         'unallowed evidence',
         { ...fail, evidencePointers: ['outside:authority'] },
       ],
-      [
-        'wrong-kind evidence',
-        { ...fail, evidencePointers: [packet.requiredTargets[0]!] },
-      ],
+      ['wrong-kind evidence', { ...fail, evidencePointers: [bindingEvidence] }],
       [
         'invalid missingSubject',
         { ...fail, missingSubject: 'node:missing#/id' },
@@ -559,7 +770,11 @@ describe('Phase 6 Resource Realization admission', () => {
           ),
         label,
       ).toThrow(
-        /validation|reason|evidence|subject|field|canonical|allowed|FAIL|AMBIGUOUS/i,
+        label === 'unsorted evidence'
+          ? /sorted|canonical|order/i
+          : label === 'wrong-kind evidence'
+            ? /section|kind|evidence/i
+            : /validation|reason|evidence|subject|field|canonical|allowed|FAIL|AMBIGUOUS/i,
       )
   })
 
