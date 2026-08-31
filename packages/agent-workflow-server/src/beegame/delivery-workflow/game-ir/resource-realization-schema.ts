@@ -11,9 +11,12 @@ import { GAMEPLAY_DOMAIN_MANIFEST } from './gameplay-schema'
 import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
 import {
   compareCodeUnits,
+  parseGameIrModuleSet,
   type GameIrModuleCandidate,
+  type GameIrSourceSection,
   type GameIrNode,
 } from './model'
+import type { GameIrCompileRequest } from './contracts'
 import { WORLD_SCENE_DOMAIN_MANIFEST } from './world-scene-schema'
 import { createSemanticFidelityPrimitives } from './semantic-fidelity'
 
@@ -623,6 +626,7 @@ function parseArtifact(
   const segments = path.split('/')
   if (
     path.startsWith('/') ||
+    path.includes('\0') ||
     path.includes('\\') ||
     segments.some(
       segment => segment.length === 0 || segment === '.' || segment === '..',
@@ -650,7 +654,10 @@ function parseArtifact(
     const constraints = strictArray(
       node.value.technicalConstraints,
       `node ${node.id} technicalConstraints`,
-    ).map((entry, index) => {
+    )
+    if (constraints.length === 0)
+      fail(`node ${node.id} technicalConstraints must not be empty`)
+    const parsedConstraints = constraints.map((entry, index) => {
       if (!isRecord(entry))
         fail(`node ${node.id} technicalConstraints[${index}] must be an object`)
       exactKeys(
@@ -669,23 +676,22 @@ function parseArtifact(
         ),
       }
     })
-    for (let index = 1; index < constraints.length; index += 1)
+    for (let index = 1; index < parsedConstraints.length; index += 1)
       if (
         compareCodeUnits(
-          constraints[index - 1]!.name,
-          constraints[index]!.name,
+          parsedConstraints[index - 1]!.name,
+          parsedConstraints[index]!.name,
         ) >= 0
       )
         fail(
           `node ${node.id} technicalConstraints must be unique and sorted by name`,
         )
-    result.technicalConstraints = constraints
+    result.technicalConstraints = parsedConstraints
   }
   if (Object.hasOwn(node.value, 'budgets')) {
-    const budgets = strictArray(
-      node.value.budgets,
-      `node ${node.id} budgets`,
-    ).map((entry, index) => {
+    const budgets = strictArray(node.value.budgets, `node ${node.id} budgets`)
+    if (budgets.length === 0) fail(`node ${node.id} budgets must not be empty`)
+    const parsedBudgets = budgets.map((entry, index) => {
       if (!isRecord(entry))
         fail(`node ${node.id} budgets[${index}] must be an object`)
       exactKeys(
@@ -702,39 +708,51 @@ function parseArtifact(
         unit: text(entry.unit, `node ${node.id} budgets[${index}].unit`),
       }
     })
-    for (let index = 1; index < budgets.length; index += 1) {
-      const previous = `${budgets[index - 1]!.metric}\0${budgets[index - 1]!.unit}`
-      const current = `${budgets[index]!.metric}\0${budgets[index]!.unit}`
+    for (let index = 1; index < parsedBudgets.length; index += 1) {
+      const previous = `${parsedBudgets[index - 1]!.metric}\0${parsedBudgets[index - 1]!.unit}`
+      const current = `${parsedBudgets[index]!.metric}\0${parsedBudgets[index]!.unit}`
       if (compareCodeUnits(previous, current) >= 0)
         fail(`node ${node.id} budgets must be unique and sorted`)
     }
-    result.budgets = budgets
+    result.budgets = parsedBudgets
   }
   return result
 }
 
 function targetMap(
   nodes: readonly GameIrNode[],
-  externalTargets?: ReadonlyMap<string, GameIrNode>,
+  priorNodes: readonly GameIrNode[],
 ): Map<string, GameIrNode> {
   const targets = new Map<string, GameIrNode>()
   for (const node of nodes) {
     if (targets.has(node.id)) fail(`duplicate node ID ${node.id}`)
     targets.set(node.id, node)
   }
-  if (externalTargets) {
-    for (const [id, node] of externalTargets) {
-      if (!isRecord(node) || id !== node.id)
-        fail(`external target key does not match node ${id}`)
-      if (NODE_KINDS.has(node.kind) || !PRIOR_NODE_KINDS.has(node.kind))
-        fail(
-          `external target ${id} kind is forbidden by Resource Realization manifest`,
-        )
-      if (targets.has(id)) fail(`duplicate node ID ${id}`)
-      targets.set(id, node)
-    }
+  for (const node of priorNodes) {
+    if (!PRIOR_NODE_KINDS.has(node.kind))
+      fail(`external target ${node.id} kind is not admitted`)
+    if (targets.has(node.id)) fail(`duplicate node ID ${node.id}`)
+    targets.set(node.id, node)
   }
   return targets
+}
+
+function priorNodesFromSet(
+  modules: readonly GameIrModuleCandidate[],
+): GameIrNode[] {
+  const priorNodes: GameIrNode[] = []
+  const priorIds = new Set<string>()
+  for (const prior of modules) {
+    for (const node of prior.nodes) {
+      if (!PRIOR_NODE_KINDS.has(node.kind))
+        fail(`external target ${node.id} kind is not admitted`)
+      if (priorIds.has(node.id))
+        fail(`duplicate external target node ID ${node.id}`)
+      priorIds.add(node.id)
+      priorNodes.push(node)
+    }
+  }
+  return priorNodes
 }
 
 function validateEdges(
@@ -893,18 +911,27 @@ function validateGraph(
 }
 
 export function parseResourceRealizationModule(
-  module: GameIrModuleCandidate,
-  externalTargets?: ReadonlyMap<string, GameIrNode>,
+  value: unknown,
+  input: Readonly<{
+    request: GameIrCompileRequest
+    sections: readonly GameIrSourceSection[]
+    externalModules?: readonly unknown[]
+  }>,
 ): GameIrModuleCandidate {
-  if (!isRecord(module)) fail('module must be an object')
-  exactKeys(module, ['moduleId', 'nodes'], 'module')
-  const candidateModule = module as unknown as GameIrModuleCandidate
-  if (candidateModule.moduleId !== 'resource-realization')
-    fail('module ID must be resource-realization')
-  if (!Array.isArray(candidateModule.nodes))
-    fail('module nodes must be an array')
-  strictArray(candidateModule.nodes, 'module nodes')
-  const targets = targetMap(candidateModule.nodes, externalTargets)
+  if (
+    input.externalModules !== undefined &&
+    !Array.isArray(input.externalModules)
+  )
+    fail('externalModules must be an array')
+  const moduleSet = parseGameIrModuleSet(value, {
+    request: input.request,
+    sections: input.sections,
+    expectedModuleId: 'resource-realization',
+    externalModules: input.externalModules,
+  })
+  const candidateModule = moduleSet.current
+  const priorNodes = priorNodesFromSet(moduleSet.external)
+  const targets = targetMap(candidateModule.nodes, priorNodes)
   const targetNodes = candidateModule.nodes.filter(
     node => node.kind === 'resource-realization.delivery-target',
   )

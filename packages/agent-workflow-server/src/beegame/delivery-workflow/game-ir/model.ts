@@ -718,11 +718,16 @@ function parseModule(
   return { moduleId, nodes }
 }
 
-type ModuleInput = Readonly<{
+export type GameIrModuleInput = Readonly<{
   request: GameIrCompileRequest
   sections: readonly GameIrSourceSection[]
   expectedModuleId?: GameIrModuleId
   externalModules?: readonly unknown[]
+}>
+
+export type GameIrModuleSet = Readonly<{
+  current: GameIrModuleCandidate
+  external: readonly GameIrModuleCandidate[]
 }>
 
 function parseGameIrModuleCandidateInternal(
@@ -862,10 +867,10 @@ function validateModuleSet({
   }
 }
 
-export function parseGameIrModuleCandidate(
+export function parseGameIrModuleSet(
   value: unknown,
-  input: ModuleInput,
-): GameIrModuleCandidate {
+  input: GameIrModuleInput,
+): GameIrModuleSet {
   const request = parseGameIrCompileRequest(input.request)
   const sections = sourceSectionMap(
     normalizeSourceSections(input.sections),
@@ -893,7 +898,14 @@ export function parseGameIrModuleCandidate(
       externalModules.map(module => module.moduleId),
     ),
   })
-  return deepFreeze(local)
+  return deepFreeze({ current: local, external: externalModules })
+}
+
+export function parseGameIrModuleCandidate(
+  value: unknown,
+  input: GameIrModuleInput,
+): GameIrModuleCandidate {
+  return parseGameIrModuleSet(value, input).current
 }
 
 function referenceOrder(left: GameIrReference, right: GameIrReference): number {
