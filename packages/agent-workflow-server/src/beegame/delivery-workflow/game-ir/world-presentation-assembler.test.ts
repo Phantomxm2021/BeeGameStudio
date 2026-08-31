@@ -1296,7 +1296,7 @@ test('rejects World receipt before a distinct Presentation FAIL', () => {
         validation: presentationFail,
       },
     }
-  }, /semantic receipt digest/)
+  }, /^invalid Game IR Phase 5 admission: semantic receipt digest is stale or invalid$/)
 })
 
 test('rejects World schema before a simultaneous Presentation fidelity failure', () => {
