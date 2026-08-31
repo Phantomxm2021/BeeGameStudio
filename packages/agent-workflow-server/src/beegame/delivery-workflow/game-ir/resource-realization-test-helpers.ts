@@ -324,9 +324,6 @@ export function realAuthority(
     'resource.requirement.player-model',
     'profile-main',
     'target-main',
-    'profile-screen-main',
-    'variant-screen-main',
-    'artifact-screen-main',
     'variant-main',
     'artifact-main',
     'model',
@@ -345,7 +342,6 @@ export function realAuthority(
     'required',
     'true',
     'assets/runtime/player-model.glb',
-    'assets/runtime/screen-main.svg',
     'assets/runtime/../evil.glb',
     'assets/runtime/player-model.txt',
     'target-secondary',
@@ -379,21 +375,6 @@ export function realAuthority(
     canonicalGameIrJson({
       type: 'part-of',
       targetId: 'variant-main',
-      targetType: 'resource-realization.variant',
-    }),
-    canonicalGameIrJson({
-      type: 'describes',
-      targetId: 'resource.requirement.screen-main',
-      targetType: 'resource-realization.logical-resource',
-    }),
-    canonicalGameIrJson({
-      type: 'realizes',
-      targetId: 'resource.requirement.screen-main',
-      targetType: 'resource-realization.logical-resource',
-    }),
-    canonicalGameIrJson({
-      type: 'part-of',
-      targetId: 'variant-screen-main',
       targetType: 'resource-realization.variant',
     }),
   ].join('\n')
@@ -797,63 +778,6 @@ export function completeResourceInput(
         },
       ],
     },
-    {
-      id: 'profile-screen-main',
-      kind: 'resource-realization.acquisition-profile',
-      value: {
-        required: true,
-        dimensions: ['2D'],
-        assetKinds: ['ui-screen'],
-        usageTags: ['ui'],
-        capabilities: ['ui-states'],
-        styles: ['stylized'],
-        sourcingPolicy: {
-          allowedSourceKinds: ['agent-authored'],
-          licenseConstraints: ['project-license'],
-          responsibleParty: 'art-team',
-          handoffCriteria: ['runtime-import-ready'],
-        },
-      },
-      references: [],
-      edges: [
-        {
-          type: 'describes',
-          targetId: 'resource.requirement.screen-main',
-          targetType: 'resource-realization.logical-resource',
-        },
-      ],
-    },
-    {
-      id: 'variant-screen-main',
-      kind: 'resource-realization.variant',
-      value: { activation: { kind: 'required' } },
-      references: [],
-      edges: [
-        {
-          type: 'realizes',
-          targetId: 'resource.requirement.screen-main',
-          targetType: 'resource-realization.logical-resource',
-        },
-      ],
-    },
-    {
-      id: 'artifact-screen-main',
-      kind: 'resource-realization.delivery-artifact',
-      value: {
-        artifactClass: 'runtime-resource',
-        path: 'assets/runtime/screen-main.svg',
-        format: 'svg',
-        runtimeRole: 'screen',
-      },
-      references: [],
-      edges: [
-        {
-          type: 'part-of',
-          targetId: 'variant-screen-main',
-          targetType: 'resource-realization.variant',
-        },
-      ],
-    },
   ]
   const presentationNodes: ResourceFixtureNode[] =
     packet.presentationRequirements.flatMap(requirement => [
@@ -915,10 +839,7 @@ export function completeResourceInput(
         ],
       },
     ])
-  const nodes = [
-    ...baseNodes.filter(node => !node.id.includes('screen-main')),
-    ...presentationNodes,
-  ]
+  const nodes = [...baseNodes, ...presentationNodes]
   const candidateNodes = mutate ? mutate(structuredClone(nodes)) : nodes
   const sectionFor = (node: (typeof nodes)[number]) => {
     const documentPath = node.id.includes('screen')
