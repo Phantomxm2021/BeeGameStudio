@@ -31,11 +31,13 @@ import {
 } from './presentation-producer'
 import {
   admitPhase5SemanticValidationResult,
-  buildPhase5SemanticValidationPacket,
-  replayAndBindPhase5SemanticReceipt,
-  type WorldSceneModuleProjection,
+  type Phase5SemanticValidationPacket,
 } from './phase5-admission'
-import { assembleWorldPresentationClosure } from './world-presentation-assembler'
+import {
+  assembleWorldPresentationClosure,
+  preparePresentationSemanticValidationPacket,
+  prepareWorldSceneSemanticValidationPacket,
+} from './world-presentation-assembler'
 import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
 import {
   canonicalGameIrJson,
@@ -1195,9 +1197,7 @@ const phase4Authority = (
     },
   }
 }
-const pass = (
-  packet: ReturnType<typeof buildPhase5SemanticValidationPacket>,
-) => {
+const pass = (packet: Phase5SemanticValidationPacket) => {
   const result = admitPhase5SemanticValidationResult(packet, {
     outcome: 'PASS',
     packetDigest: packet.packetDigest,
@@ -1223,22 +1223,11 @@ const makeAuthority = (overrides: Partial<Context['modules']> = {}) => {
     nodes: sortNodes(world),
     sourceClaims: claims(sortNodes(world), context),
   }) as WorldSceneSemanticReceipt
-  const worldBound = replayAndBindPhase5SemanticReceipt({
-    source: worldSource,
-    mechanical: worldMechanical,
-    packet: worldPacket,
-    semantic: worldSemantic,
-  })
-  const worldModule: WorldSceneModuleProjection['module'] = Object.freeze({
-    ...worldBound.module,
-    moduleId: 'world-scene',
-  })
-  const worldValidationPacket = buildPhase5SemanticValidationPacket({
+  const worldValidationPacket = prepareWorldSceneSemanticValidationPacket({
     source: worldSource,
     mechanical: worldMechanical,
     semantic: worldSemantic,
-    module: worldModule,
-    externalProjections: { gameplay: phase4Projection.gameplay },
+    phase4: phase4Projection,
   })
   const worldValidation = pass(worldValidationPacket)
   const presentationSource = source('presentation', context)
@@ -1256,43 +1245,21 @@ const makeAuthority = (overrides: Partial<Context['modules']> = {}) => {
       sourceClaims: claims(sortNodes(presentation), context),
     },
   ) as PresentationSemanticReceipt
-  const presentationBound = replayAndBindPhase5SemanticReceipt({
-    source: presentationSource,
-    mechanical: presentationMechanical,
-    packet: presentationPacket,
-    semantic: presentationSemantic,
-  })
-  const presentationValidationPacket = buildPhase5SemanticValidationPacket({
-    source: presentationSource,
-    mechanical: presentationMechanical,
-    semantic: presentationSemantic,
-    module: presentationBound.module,
-    externalProjections: {
-      gameplay: phase4Projection.gameplay,
+  const presentationValidationPacket =
+    preparePresentationSemanticValidationPacket({
+      phase4: phase4Projection,
       worldScene: {
-        schemaVersion: 'game-ir-world-scene-module.v1',
-        taskId: worldSource.taskId,
-        foundationRevision:
-          worldSource.compileRequest.foundation.foundationRevision,
-        module: worldModule,
-        sourceDigest: worldSource.sourceDigest,
-        mechanicalReceiptDigest: worldBound.mechanicalReceiptDigest,
-        semanticReceiptDigest: worldBound.semanticReceiptDigest,
-        semanticValidationResultDigest: digestGameIrValue(worldValidation),
-        projectionDigest: digestGameIrValue({
-          schemaVersion: 'game-ir-world-scene-module.v1',
-          taskId: worldSource.taskId,
-          foundationRevision:
-            worldSource.compileRequest.foundation.foundationRevision,
-          module: worldModule,
-          sourceDigest: worldSource.sourceDigest,
-          mechanicalReceiptDigest: worldBound.mechanicalReceiptDigest,
-          semanticReceiptDigest: worldBound.semanticReceiptDigest,
-          semanticValidationResultDigest: digestGameIrValue(worldValidation),
-        }),
+        source: worldSource,
+        mechanical: worldMechanical,
+        semantic: worldSemantic,
+        validation: worldValidation,
       },
-    },
-  })
+      presentation: {
+        source: presentationSource,
+        mechanical: presentationMechanical,
+        semantic: presentationSemantic,
+      },
+    })
   const presentationValidation = pass(presentationValidationPacket)
   return {
     context,
@@ -1930,47 +1897,24 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       'invalid Game IR World/Presentation assembly: all modules must bind one task, revision, READY receipt, compile request, and authority index',
     )
     const context = makeContext()
-    const phase4 = phase4Authority(context)
-    const projection = assembleGameplayBalanceModules(phase4)
-    const worldSource = source('world-scene', context)
-    const mechanicalReceipt = mechanical(worldSource)
-    const packet = buildWorldSceneSemanticPacket({
-      source: worldSource,
-      mechanical: mechanicalReceipt,
-    })
-    const semantic = admitWorldSceneSemanticResult(packet, {
-      outcome: 'PROJECTED',
-      nodes: sortNodes(worldNodes),
-      sourceClaims: claims(worldNodes, context),
-    }) as WorldSceneSemanticReceipt
-    const bound = replayAndBindPhase5SemanticReceipt({
-      source: worldSource,
-      mechanical: mechanicalReceipt,
-      packet,
-      semantic,
-    })
-    const module = Object.freeze({
-      ...bound.module,
-      moduleId: 'world-scene' as const,
-    })
+    const baseline = makeAuthority()
+    const phase4Projection = assembleGameplayBalanceModules(
+      baseline.authority.phase4Authority,
+    )
     const staleExternal = {
-      ...projection.gameplay,
+      ...phase4Projection.gameplay,
       projectionDigest: 'e'.repeat(64),
     }
     expectedError(
       () =>
-        buildPhase5SemanticValidationPacket({
-          source: worldSource,
-          mechanical: mechanicalReceipt,
-          semantic,
-          module,
-          externalProjections: { gameplay: staleExternal },
+        prepareWorldSceneSemanticValidationPacket({
+          source: baseline.authority.worldScene.source,
+          mechanical: baseline.authority.worldScene.mechanical,
+          semantic: baseline.authority.worldScene.semantic,
+          phase4: { ...phase4Projection, gameplay: staleExternal },
         }),
       'invalid Game IR Phase 5 admission: external projection digest is stale or invalid',
     )
-  })
-
-  test('rejects source ranges, mechanical ownership, Phase 4, and identity mutations after a valid baseline', () => {
     const base = makeAuthority().authority
     assembleWorldPresentationClosure(base)
     const mechanicalNodes = redigestMechanical(base.worldScene.mechanical, {

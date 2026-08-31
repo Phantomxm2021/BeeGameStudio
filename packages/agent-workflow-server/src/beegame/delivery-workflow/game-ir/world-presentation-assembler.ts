@@ -7,6 +7,7 @@ import {
   buildPhase5SemanticValidationPacket,
   admitPhase5SemanticValidationResult,
   replayAndBindPhase5SemanticReceipt,
+  type Phase5SemanticValidationPacket,
   type WorldSceneModuleProjection,
   type WorldSceneSemanticValidationResult,
   type PresentationSemanticValidationResult,
@@ -68,6 +69,28 @@ export type WorldPresentationAssemblyAuthority = Readonly<{
     semantic: PresentationSemanticReceipt
     validation: PresentationSemanticValidationResult
   }>
+}>
+
+export type WorldSceneValidationPreparationAuthority = Readonly<{
+  source: GameIrDomainSourceEnvelope
+  mechanical: GameIrMechanicalProjectionReceipt
+  semantic: WorldSceneSemanticReceipt
+  phase4: GameplayBalanceModulePair
+}>
+
+export type PresentationValidationPreparationAuthority = Readonly<{
+  worldScene: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: WorldSceneSemanticReceipt
+    validation: WorldSceneSemanticValidationResult
+  }>
+  presentation: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: PresentationSemanticReceipt
+  }>
+  phase4: GameplayBalanceModulePair
 }>
 
 export type WorldPresentationClosure = Readonly<{
@@ -213,11 +236,23 @@ function externalTargetKinds(manifest: DomainManifest): ReadonlySet<string> {
 function targetMap(
   nodes: readonly GameIrNode[],
   manifest: DomainManifest,
+  localNodes: readonly GameIrNode[],
 ): ReadonlyMap<string, GameIrNode> {
   const allowedKinds = externalTargetKinds(manifest)
+  const localIds = new Set(localNodes.map(node => node.id))
+  const seen = new Set<string>()
   return new Map(
     nodes
-      .filter(node => allowedKinds.has(node.kind))
+      .filter(node => {
+        if (
+          !allowedKinds.has(node.kind) ||
+          localIds.has(node.id) ||
+          seen.has(node.id)
+        )
+          return false
+        seen.add(node.id)
+        return true
+      })
       .map(node => [node.id, node]),
   )
 }
@@ -251,6 +286,242 @@ function requirePass(
     fail(`semantic fidelity must be PASS, received ${result.outcome}`)
 }
 
+type PreparedWorld = Readonly<{
+  source: GameIrDomainSourceEnvelope
+  mechanical: GameIrMechanicalProjectionReceipt
+  semantic: WorldSceneSemanticReceipt
+  bound: ReturnType<typeof replayAndBindPhase5SemanticReceipt>
+  module: WorldSceneModuleProjection['module']
+  packet: Phase5SemanticValidationPacket
+}>
+
+function prepareWorld(
+  authority: WorldSceneValidationPreparationAuthority,
+  parseModule: boolean,
+): PreparedWorld {
+  const source = validateGameIrDomainSourceEnvelope(authority.source)
+  if (source.moduleId !== 'world-scene')
+    fail('World validation preparation requires a world-scene source')
+  const mechanical = authority.mechanical
+  const semantic = authority.semantic
+  const packet = buildWorldSceneSemanticPacket({ source, mechanical })
+  const bound = replayAndBindPhase5SemanticReceipt({
+    source,
+    mechanical,
+    packet,
+    semantic,
+  })
+  assertDisjointIds(
+    authority.phase4.gameplay.module.nodes,
+    bound.module.nodes,
+    'World/Gameplay',
+  )
+  assertDisjointIds(
+    authority.phase4.balance.module.nodes,
+    bound.module.nodes,
+    'World/Balance',
+  )
+  const module = parseModule
+    ? (parseWorldSceneModule(
+        bound.module,
+        targetMap(
+          authority.phase4.gameplay.module.nodes,
+          WORLD_SCENE_DOMAIN_MANIFEST,
+          bound.module.nodes,
+        ),
+      ) as WorldSceneModuleProjection['module'])
+    : (bound.module as WorldSceneModuleProjection['module'])
+  return {
+    source,
+    mechanical,
+    semantic,
+    bound,
+    module,
+    packet: buildPhase5SemanticValidationPacket({
+      source,
+      mechanical,
+      semantic,
+      module,
+      externalProjections: { gameplay: authority.phase4.gameplay },
+    }),
+  }
+}
+
+function makeWorldProjection(
+  prepared: PreparedWorld,
+  validation: WorldSceneSemanticValidationResult,
+): WorldSceneModuleProjection {
+  requirePass(validation)
+  const body = {
+    schemaVersion: 'game-ir-world-scene-module.v1' as const,
+    taskId: prepared.source.taskId,
+    foundationRevision:
+      prepared.source.compileRequest.foundation.foundationRevision,
+    module: prepared.module,
+    sourceDigest: prepared.source.sourceDigest,
+    mechanicalReceiptDigest: prepared.bound.mechanicalReceiptDigest,
+    semanticReceiptDigest: prepared.bound.semanticReceiptDigest,
+    semanticValidationResultDigest: digestGameIrValue(validation),
+  }
+  return projection<WorldSceneModuleProjection>(body)
+}
+
+type PreparedPresentation = Readonly<{
+  source: GameIrDomainSourceEnvelope
+  mechanical: GameIrMechanicalProjectionReceipt
+  semantic: PresentationSemanticReceipt
+  bound: ReturnType<typeof replayAndBindPhase5SemanticReceipt>
+  module: PresentationModuleProjection['module']
+  packet: Phase5SemanticValidationPacket
+}>
+
+function preparePresentation(
+  authority: PresentationValidationPreparationAuthority,
+  world: WorldSceneModuleProjection,
+  parseModule: boolean,
+): PreparedPresentation {
+  const source = validateGameIrDomainSourceEnvelope(
+    authority.presentation.source,
+  )
+  if (source.moduleId !== 'presentation')
+    fail('Presentation validation preparation requires a presentation source')
+  const mechanical = authority.presentation.mechanical
+  const semantic = authority.presentation.semantic
+  const packet = buildPresentationSemanticPacket({ source, mechanical })
+  const bound = replayAndBindPhase5SemanticReceipt({
+    source,
+    mechanical,
+    packet,
+    semantic,
+  })
+  assertDisjointIds(
+    authority.phase4.gameplay.module.nodes,
+    bound.module.nodes,
+    'Presentation/Gameplay',
+  )
+  assertDisjointIds(
+    authority.phase4.balance.module.nodes,
+    bound.module.nodes,
+    'Presentation/Balance',
+  )
+  assertDisjointIds(
+    world.module.nodes,
+    bound.module.nodes,
+    'Presentation/World',
+  )
+  const module = parseModule
+    ? (parsePresentationModule(
+        bound.module,
+        targetMap(
+          [...authority.phase4.gameplay.module.nodes, ...world.module.nodes],
+          PRESENTATION_DOMAIN_MANIFEST,
+          bound.module.nodes,
+        ),
+      ) as PresentationModuleProjection['module'])
+    : (bound.module as PresentationModuleProjection['module'])
+  return {
+    source,
+    mechanical,
+    semantic,
+    bound,
+    module,
+    packet: buildPhase5SemanticValidationPacket({
+      source,
+      mechanical,
+      semantic,
+      module,
+      externalProjections: {
+        gameplay: authority.phase4.gameplay,
+        worldScene: world,
+      },
+    }),
+  }
+}
+
+function makePresentationProjection(
+  prepared: PreparedPresentation,
+  validation: PresentationSemanticValidationResult,
+): PresentationModuleProjection {
+  requirePass(validation)
+  const body = {
+    schemaVersion: 'game-ir-presentation-module.v1' as const,
+    taskId: prepared.source.taskId,
+    foundationRevision:
+      prepared.source.compileRequest.foundation.foundationRevision,
+    module: prepared.module,
+    sourceDigest: prepared.source.sourceDigest,
+    mechanicalReceiptDigest: prepared.bound.mechanicalReceiptDigest,
+    semanticReceiptDigest: prepared.bound.semanticReceiptDigest,
+    semanticValidationResultDigest: digestGameIrValue(validation),
+  }
+  return projection<PresentationModuleProjection>(body)
+}
+
+function exactWorldPreparationShape(
+  authority: WorldSceneValidationPreparationAuthority,
+): void {
+  if (!isPlainRecord(authority))
+    fail('World preparation authority must be an object')
+  exactKeys(
+    authority,
+    ['source', 'mechanical', 'semantic', 'phase4'],
+    'World preparation authority',
+  )
+}
+
+function exactPresentationPreparationShape(
+  authority: PresentationValidationPreparationAuthority,
+): void {
+  if (!isPlainRecord(authority))
+    fail('Presentation preparation authority must be an object')
+  exactKeys(
+    authority,
+    ['worldScene', 'presentation', 'phase4'],
+    'Presentation preparation authority',
+  )
+  if (
+    !isPlainRecord(authority.worldScene) ||
+    !isPlainRecord(authority.presentation)
+  )
+    fail('Presentation preparation branches must be objects')
+  exactKeys(
+    authority.worldScene,
+    ['source', 'mechanical', 'semantic', 'validation'],
+    'Presentation worldScene authority',
+  )
+  exactKeys(
+    authority.presentation,
+    ['source', 'mechanical', 'semantic'],
+    'Presentation authority',
+  )
+}
+
+export function prepareWorldSceneSemanticValidationPacket(
+  authority: WorldSceneValidationPreparationAuthority,
+): Phase5SemanticValidationPacket {
+  exactWorldPreparationShape(authority)
+  return prepareWorld(authority, false).packet
+}
+
+export function preparePresentationSemanticValidationPacket(
+  authority: PresentationValidationPreparationAuthority,
+): Phase5SemanticValidationPacket {
+  exactPresentationPreparationShape(authority)
+  const worldAuthority: WorldSceneValidationPreparationAuthority = {
+    source: authority.worldScene.source,
+    mechanical: authority.worldScene.mechanical,
+    semantic: authority.worldScene.semantic,
+    phase4: authority.phase4,
+  }
+  const preparedWorld = prepareWorld(worldAuthority, false)
+  const worldValidation = admitPhase5SemanticValidationResult(
+    preparedWorld.packet,
+    authority.worldScene.validation,
+  )
+  const world = makeWorldProjection(preparedWorld, worldValidation)
+  return preparePresentation(authority, world, false).packet
+}
+
 export function assembleWorldPresentationClosure(
   authority: WorldPresentationAssemblyAuthority,
 ): WorldPresentationClosure {
@@ -261,55 +532,20 @@ export function assembleWorldPresentationClosure(
     authority.worldScene.source,
   )
   assertCrossSourceIdentity(authority.phase4Authority, [worldSource])
-
-  const worldPacket = buildWorldSceneSemanticPacket({
-    source: worldSource,
-    mechanical: authority.worldScene.mechanical,
-  })
-  const boundWorld = replayAndBindPhase5SemanticReceipt({
-    source: worldSource,
-    mechanical: authority.worldScene.mechanical,
-    packet: worldPacket,
-    semantic: authority.worldScene.semantic,
-  })
-  assertDisjointIds(
-    phase4.gameplay.module.nodes,
-    boundWorld.module.nodes,
-    'World/Gameplay',
+  const preparedWorld = prepareWorld(
+    {
+      source: worldSource,
+      mechanical: authority.worldScene.mechanical,
+      semantic: authority.worldScene.semantic,
+      phase4,
+    },
+    true,
   )
-  assertDisjointIds(
-    phase4.balance.module.nodes,
-    boundWorld.module.nodes,
-    'World/Balance',
-  )
-  const worldModule = parseWorldSceneModule(
-    boundWorld.module,
-    targetMap(phase4.gameplay.module.nodes, WORLD_SCENE_DOMAIN_MANIFEST),
-  ) as WorldSceneModuleProjection['module']
-  const worldValidationPacket = buildPhase5SemanticValidationPacket({
-    source: worldSource,
-    mechanical: authority.worldScene.mechanical,
-    semantic: authority.worldScene.semantic,
-    module: worldModule,
-    externalProjections: { gameplay: phase4.gameplay },
-  })
   const worldValidation = admitPhase5SemanticValidationResult(
-    worldValidationPacket,
+    preparedWorld.packet,
     authority.worldScene.validation,
   )
-  requirePass(worldValidation)
-  const worldProjection = projection<WorldSceneModuleProjection>({
-    schemaVersion: 'game-ir-world-scene-module.v1',
-    taskId: worldSource.taskId,
-    foundationRevision:
-      worldSource.compileRequest.foundation.foundationRevision,
-    module: worldModule,
-    sourceDigest: worldSource.sourceDigest,
-    mechanicalReceiptDigest: boundWorld.mechanicalReceiptDigest,
-    semanticReceiptDigest: boundWorld.semanticReceiptDigest,
-    semanticValidationResultDigest: digestGameIrValue(worldValidation),
-  })
-
+  const worldProjection = makeWorldProjection(preparedWorld, worldValidation)
   const presentationSource = validateGameIrDomainSourceEnvelope(
     authority.presentation.source,
   )
@@ -317,65 +553,28 @@ export function assembleWorldPresentationClosure(
     worldSource,
     presentationSource,
   ])
-
-  const presentationPacket = buildPresentationSemanticPacket({
-    source: presentationSource,
-    mechanical: authority.presentation.mechanical,
-  })
-  const boundPresentation = replayAndBindPhase5SemanticReceipt({
-    source: presentationSource,
-    mechanical: authority.presentation.mechanical,
-    packet: presentationPacket,
-    semantic: authority.presentation.semantic,
-  })
-  assertDisjointIds(
-    phase4.gameplay.module.nodes,
-    boundPresentation.module.nodes,
-    'Presentation/Gameplay',
-  )
-  assertDisjointIds(
-    phase4.balance.module.nodes,
-    boundPresentation.module.nodes,
-    'Presentation/Balance',
-  )
-  assertDisjointIds(
-    worldProjection.module.nodes,
-    boundPresentation.module.nodes,
-    'Presentation/World',
-  )
-  const presentationModule = parsePresentationModule(
-    boundPresentation.module,
-    targetMap(
-      [...phase4.gameplay.module.nodes, ...worldProjection.module.nodes],
-      PRESENTATION_DOMAIN_MANIFEST,
-    ),
-  ) as PresentationModuleProjection['module']
-  const presentationValidationPacket = buildPhase5SemanticValidationPacket({
-    source: presentationSource,
-    mechanical: authority.presentation.mechanical,
-    semantic: authority.presentation.semantic,
-    module: presentationModule,
-    externalProjections: {
-      gameplay: phase4.gameplay,
-      worldScene: worldProjection,
+  const preparedPresentation = preparePresentation(
+    {
+      phase4,
+      worldScene: {
+        source: worldSource,
+        mechanical: authority.worldScene.mechanical,
+        semantic: authority.worldScene.semantic,
+        validation: worldValidation,
+      },
+      presentation: authority.presentation,
     },
-  })
+    worldProjection,
+    true,
+  )
   const presentationValidation = admitPhase5SemanticValidationResult(
-    presentationValidationPacket,
+    preparedPresentation.packet,
     authority.presentation.validation,
   )
-  requirePass(presentationValidation)
-  const presentationProjection = projection<PresentationModuleProjection>({
-    schemaVersion: 'game-ir-presentation-module.v1',
-    taskId: presentationSource.taskId,
-    foundationRevision:
-      presentationSource.compileRequest.foundation.foundationRevision,
-    module: presentationModule,
-    sourceDigest: presentationSource.sourceDigest,
-    mechanicalReceiptDigest: boundPresentation.mechanicalReceiptDigest,
-    semanticReceiptDigest: boundPresentation.semanticReceiptDigest,
-    semanticValidationResultDigest: digestGameIrValue(presentationValidation),
-  })
+  const presentationProjectionValue = makePresentationProjection(
+    preparedPresentation,
+    presentationValidation,
+  )
 
   const sourceIdentity = identity(worldSource)
   const body = {
@@ -387,7 +586,7 @@ export function assembleWorldPresentationClosure(
     authoritySectionIndexDigest: sourceIdentity.authoritySectionIndexDigest,
     phase4,
     worldScene: worldProjection,
-    presentation: presentationProjection,
+    presentation: presentationProjectionValue,
   } as const
   return Object.freeze({ ...body, closureDigest: digestGameIrValue(body) })
 }

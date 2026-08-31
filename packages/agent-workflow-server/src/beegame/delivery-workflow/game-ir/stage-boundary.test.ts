@@ -41,6 +41,8 @@ const PHASE5_PRODUCTION_FILES = [
  */
 type AstFacts = Readonly<{
   imports: readonly { kind: string; path: string }[]
+  importBindings: readonly { original: string; local: string; path: string }[]
+  closureAliases: readonly string[]
   apiImports: readonly string[]
   calls: readonly string[]
   providerDispatch: boolean
@@ -59,10 +61,12 @@ const forbiddenApis = new Set([
   'prepareGameIrPublication',
   'commitGameIrPublication',
 ])
+const forbiddenStageCalls = new Set(['route', 'publish', 'publishGameIr'])
 const forbiddenPaths =
   /(?:^|\/)(?:controller|store|run-store|delivery-run|foundation-issue(?:-registry)?)(?:\.ts)?$/
 const forbiddenPhase5Paths =
   /(?:^|\/)(?:routes?|publication|consumer|delivery)(?:\.ts)?$/
+const forbiddenClosurePath = /(?:^|\/)world-presentation-assembler(?:\.ts)?$/
 const placeholderModules = new Set([
   'core',
   'world-scene',
@@ -96,6 +100,12 @@ function collectAstFacts(
     ts.ScriptKind.TS,
   )
   const imports: Array<{ kind: string; path: string }> = []
+  const importBindings: Array<{
+    original: string
+    local: string
+    path: string
+  }> = []
+  const closureAliases: string[] = []
   const apiImports: string[] = []
   const calls: string[] = []
   const identifiers: string[] = []
@@ -135,8 +145,19 @@ function collectAstFacts(
         ts.isNamedImports(node.importClause.namedBindings)
       )
         for (const specifier of node.importClause.namedBindings.elements) {
-          const name = specifier.propertyName?.text ?? specifier.name.text
-          if (forbiddenApis.has(name)) apiImports.push(name)
+          const original = specifier.propertyName?.text ?? specifier.name.text
+          const local = specifier.name.text
+          importBindings.push({
+            original,
+            local,
+            path: node.moduleSpecifier.text,
+          })
+          if (forbiddenApis.has(original)) {
+            apiImports.push(original)
+            if (local !== original) apiImports.push(local)
+          }
+          if (original === 'assembleWorldPresentationClosure')
+            closureAliases.push(local)
         }
     }
     if (
@@ -145,6 +166,28 @@ function collectAstFacts(
       ts.isStringLiteral(node.moduleSpecifier)
     )
       imports.push({ kind: 'export', path: node.moduleSpecifier.text })
+    if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.exportClause &&
+      ts.isNamedExports(node.exportClause)
+    )
+      for (const specifier of node.exportClause.elements) {
+        const original = specifier.propertyName?.text ?? specifier.name.text
+        const local = specifier.name.text
+        importBindings.push({
+          original,
+          local,
+          path: node.moduleSpecifier.text,
+        })
+        if (forbiddenApis.has(original)) {
+          apiImports.push(original)
+          if (local !== original) apiImports.push(local)
+        }
+        if (original === 'assembleWorldPresentationClosure')
+          closureAliases.push(local)
+      }
     if (ts.isImportEqualsDeclaration(node)) {
       const reference = node.moduleReference
       if (
@@ -176,7 +219,7 @@ function collectAstFacts(
               ts.isStringLiteral(expression.argumentExpression)
             ? expression.argumentExpression.text
             : undefined
-      if (calledName && forbiddenApis.has(calledName)) calls.push(calledName)
+      if (calledName) calls.push(calledName)
       const receiver =
         ts.isPropertyAccessExpression(expression) ||
         ts.isElementAccessExpression(expression)
@@ -208,6 +251,8 @@ function collectAstFacts(
   visit(file)
   return {
     imports,
+    importBindings,
+    closureAliases,
     apiImports,
     calls,
     providerDispatch,
@@ -219,21 +264,53 @@ function collectAstFacts(
 
 function policyViolations(
   facts: AstFacts,
-  policy: 'task7' | 'phase4' | 'phase5' | 'other',
+  policy:
+    | 'task7'
+    | 'phase4'
+    | 'phase5'
+    | 'contracts'
+    | 'publication'
+    | 'semantic'
+    | 'other',
 ): string[] {
   const violations = new Set<string>()
   for (const entry of facts.imports)
     if (
       forbiddenPaths.test(entry.path) ||
-      (policy === 'phase5' && forbiddenPhase5Paths.test(entry.path))
+      forbiddenClosurePath.test(entry.path) ||
+      ((policy === 'phase4' || policy === 'phase5' || policy === 'other') &&
+        forbiddenPhase5Paths.test(entry.path))
     )
       violations.add(`path: ${entry.path}`)
-  for (const name of facts.apiImports) violations.add(`api-import: ${name}`)
+  if (
+    policy === 'task7' ||
+    policy === 'phase4' ||
+    policy === 'phase5' ||
+    policy === 'other'
+  )
+    for (const name of facts.apiImports) violations.add(`api-import: ${name}`)
   for (const name of facts.calls) {
-    if (forbiddenApis.has(name)) violations.add(`api-call: ${name}`)
     if (
-      (policy === 'phase5' || policy === 'other') &&
-      name === 'assembleWorldPresentationClosure'
+      (policy === 'phase4' || policy === 'phase5') &&
+      forbiddenStageCalls.has(name)
+    )
+      violations.add(`stage-call: ${name}`)
+    if (
+      forbiddenApis.has(name) &&
+      (policy === 'task7' ||
+        policy === 'phase4' ||
+        policy === 'phase5' ||
+        policy === 'other')
+    )
+      violations.add(`api-call: ${name}`)
+    if (
+      (policy === 'phase5' ||
+        policy === 'other' ||
+        policy === 'contracts' ||
+        policy === 'publication' ||
+        policy === 'semantic') &&
+      (name === 'assembleWorldPresentationClosure' ||
+        facts.closureAliases.includes(name))
     )
       violations.add('detached-closure-consumer: closure assembler call')
   }
@@ -253,6 +330,11 @@ function policyViolations(
       ].includes(name)
     )
       violations.add(`forbidden-strategy: ${name}`)
+    if (
+      (policy === 'phase4' || policy === 'phase5' || policy === 'other') &&
+      /^(?:ResourceRealization|ImplementationVerification)/.test(name)
+    )
+      violations.add(`future-identifier: ${name}`)
   }
   for (const entry of facts.properties) {
     if (
@@ -280,14 +362,6 @@ function policyViolations(
         violations.add(`future-node: ${entry.value}`)
     }
   }
-  if (policy === 'phase5' || policy === 'other')
-    for (const entry of facts.strings)
-      if (
-        futureModuleIds.has(entry.value) &&
-        !entry.isPropertyName &&
-        !entry.isPropertyValue
-      )
-        violations.add(`future-module-literal: ${entry.value}`)
   return [...violations].sort()
 }
 
@@ -315,29 +389,39 @@ function task11Phase4IsolationViolations(source: string): string[] {
   )
 }
 
-function futureModuleLiteralViolations(source: string): string[] {
-  return collectAstFacts(source, 'task-11-future-module-whitelist.ts')
+function futureModuleLiteralViolations(
+  filename: string,
+  source: string,
+): string[] {
+  const allowedDeclaration =
+    filename === 'domain-source.ts'
+      ? 'GAME_IR_MODULE_SOURCE_DOCUMENTS'
+      : filename === 'semantic-admission.ts'
+        ? 'MODULE_DESCRIPTORS'
+        : undefined
+  return collectAstFacts(source, filename)
     .strings.filter(
       entry =>
         futureModuleIds.has(entry.value) &&
-        (!entry.isPropertyName ||
-          !['GAME_IR_MODULE_SOURCE_DOCUMENTS', 'MODULE_DESCRIPTORS'].includes(
-            entry.declarationName ?? '',
-          )),
+        entry.isPropertyName &&
+        entry.declarationName !== allowedDeclaration,
     )
     .map(entry => `future-module-literal: ${entry.value}`)
     .sort()
 }
 
-type GameIrProductionRole = 'phase4' | 'phase5' | 'authorized' | 'other'
+type GameIrProductionRole =
+  | 'phase4'
+  | 'phase5'
+  | 'contracts'
+  | 'publication'
+  | 'semantic'
+  | 'other'
 
 function gameIrProductionRole(filename: string): GameIrProductionRole {
-  if (
-    filename === 'contracts.ts' ||
-    filename === 'publication.ts' ||
-    filename === 'semantic-admission.ts'
-  )
-    return 'authorized'
+  if (filename === 'contracts.ts') return 'contracts'
+  if (filename === 'publication.ts') return 'publication'
+  if (filename === 'semantic-admission.ts') return 'semantic'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -576,6 +660,8 @@ describe('Game IR stage boundary', () => {
         const candidate = parseGameIrCandidate(input)
         const published = prepareGameIrPublication(candidate)
         const result = provider.dispatch(published)
+        route(published)
+        publish(published)
       `),
     ).toEqual([
       'api-call: parseGameIrCandidate',
@@ -585,6 +671,28 @@ describe('Game IR stage boundary', () => {
       'path: ../routes',
       'path: ./publication',
       'provider-dispatch: provider dispatch call',
+      'stage-call: publish',
+      'stage-call: route',
+    ])
+    expect(
+      task11Phase5IsolationViolations(`
+        import { assembleWorldPresentationClosure as invokeClosure } from './world-presentation-assembler'
+        invokeClosure(authority)
+      `),
+    ).toEqual([
+      'detached-closure-consumer: closure assembler call',
+      'path: ./world-presentation-assembler',
+    ])
+    expect(
+      collectAstFacts(
+        "export { assembleWorldPresentationClosure as exportClosure } from './world-presentation-assembler'",
+      ).importBindings,
+    ).toEqual([
+      {
+        original: 'assembleWorldPresentationClosure',
+        local: 'exportClosure',
+        path: './world-presentation-assembler',
+      },
     ])
     expect(
       task11Phase5IsolationViolations(`
@@ -641,29 +749,78 @@ describe('Game IR stage boundary', () => {
         const presentation = { moduleId: 'presentation' }
       `),
     ).toEqual([])
+    expect(
+      task11Phase4IsolationViolations(`
+        import { route } from '../routes'
+        import { publish } from './publication'
+        route(input)
+        publish(input)
+      `),
+    ).toEqual([
+      'path: ../routes',
+      'path: ./publication',
+      'stage-call: publish',
+      'stage-call: route',
+    ])
+    expect(
+      task11Phase5IsolationViolations(`
+        function ResourceRealizationProducer() { return null }
+        type ImplementationVerificationProjection = unknown
+        const candidate: ResourceRealizationCandidate = {}
+      `),
+    ).toEqual([
+      'future-identifier: ImplementationVerificationProjection',
+      'future-identifier: ResourceRealizationCandidate',
+      'future-identifier: ResourceRealizationProducer',
+    ])
   })
 
   test('allows future module keys only in service-owned manifest declarations', () => {
     expect(
       futureModuleLiteralViolations(
+        'domain-source.ts',
         `const GAME_IR_MODULE_SOURCE_DOCUMENTS = { 'resource-realization': [] }`,
       ),
     ).toEqual([])
     expect(
       futureModuleLiteralViolations(
+        'semantic-admission.ts',
         `const MODULE_DESCRIPTORS = { 'implementation-verification': {} }`,
       ),
     ).toEqual([])
     expect(
       futureModuleLiteralViolations(
+        'consumer.ts',
         `const future = 'resource-realization'; const node = { kind: 'implementation-verification.node' }`,
       ),
-    ).toEqual(['future-module-literal: resource-realization'])
+    ).toEqual([])
     expect(
       futureModuleLiteralViolations(
+        'consumer.ts',
         `// 'resource-realization'\nconst text = "implementation-verification"`,
       ),
-    ).toEqual(['future-module-literal: implementation-verification'])
+    ).toEqual([])
+  })
+
+  test('binds semantic future derivation to the canonical source helper and descriptor enumeration', async () => {
+    const source = await readFile(
+      join(dirname(fileURLToPath(import.meta.url)), 'semantic-admission.ts'),
+      'utf8',
+    )
+    const facts = collectAstFacts(source, 'semantic-admission.ts')
+    expect(
+      facts.importBindings.some(
+        binding =>
+          binding.path === './domain-source' &&
+          binding.original === 'canonicalGameIrModuleSourceDocuments' &&
+          binding.local === 'canonicalGameIrModuleSourceDocuments',
+      ),
+    ).toBe(true)
+    expect(facts.calls).toContain('canonicalGameIrModuleSourceDocuments')
+    expect(source).toMatch(/Object\.keys\(MODULE_DESCRIPTORS\)/)
+    expect(
+      futureModuleLiteralViolations('semantic-admission.ts', source),
+    ).toEqual([])
   })
 
   test('scans every Phase 4 production file from its UTF-8 source', async () => {
@@ -729,6 +886,24 @@ describe('Game IR stage boundary', () => {
     ).toEqual([])
   })
 
+  test('keeps integration callers on staged preparation and out of projection construction', async () => {
+    for (const filename of [
+      'foundation-parity.test.ts',
+      'world-presentation-traversal.integration.test.ts',
+      'world-presentation-puzzle.integration.test.ts',
+    ]) {
+      const source = await readFile(
+        join(dirname(fileURLToPath(import.meta.url)), filename),
+        'utf8',
+      )
+      expect(source).not.toContain('buildPhase5SemanticValidationPacket')
+      expect(source).not.toContain('WorldSceneModuleProjection')
+      expect(source).not.toMatch(
+        /(?:const|let|var)\s+(?:world|presentation)(?:Projection|projection)\w*\s*[:=]/,
+      )
+    }
+  })
+
   test('discovers and classifies every non-test Game IR production file', async () => {
     const sourceFiles = await readGameIrProductionSourceFiles()
     expect(sourceFiles.map(file => file.filename)).toEqual([
@@ -760,13 +935,19 @@ describe('Game IR stage boundary', () => {
           task11Phase5IsolationViolations(source, filename),
           filename,
         ).toEqual([])
-      if (role === 'other')
+      if (
+        role === 'other' ||
+        role === 'contracts' ||
+        role === 'publication' ||
+        role === 'semantic'
+      )
         expect(
-          policyViolations(collectAstFacts(source, filename), 'other'),
+          policyViolations(collectAstFacts(source, filename), role),
           filename,
         ).toEqual([])
-      if (role !== 'authorized')
-        expect(futureModuleLiteralViolations(source), filename).toEqual([])
+      expect(futureModuleLiteralViolations(filename, source), filename).toEqual(
+        [],
+      )
     }
   })
 

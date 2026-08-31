@@ -158,9 +158,15 @@ adapter is outside Phase 5.
 
 ## 4. Phase 5 API and four-domain decision
 
-### 4.1 Selected design: one Phase 5 closure API over replayable authority
+### 4.1 Selected design: one final closure API with staged read-only preparation
 
-Phase 5 exposes one final projection API:
+Phase 5 exposes one final projection/closure API and two narrowly scoped,
+read-only validation-packet preparation APIs. The latter were added during the
+Task 11 integration audit: the original contract exposed the final assembler
+but no public way for a real controller-bound integration to prepare the two
+validation packets without constructing projections outside the assembler.
+They prepare only the module-narrowed packet; module and projection preparation
+remain private to this file.
 
 ```ts
 export type GameplayBalanceAssemblyAuthority = Readonly<{
@@ -195,6 +201,36 @@ export type WorldPresentationAssemblyAuthority = Readonly<{
 export function assembleWorldPresentationClosure(
   authority: WorldPresentationAssemblyAuthority,
 ): WorldPresentationClosure
+
+export type WorldSceneValidationPreparationAuthority = Readonly<{
+  source: GameIrDomainSourceEnvelope
+  mechanical: GameIrMechanicalProjectionReceipt
+  semantic: WorldSceneSemanticReceipt
+  phase4: GameplayBalanceModulePair
+}>
+
+export function prepareWorldSceneSemanticValidationPacket(
+  authority: WorldSceneValidationPreparationAuthority,
+): Phase5SemanticValidationPacket
+
+export type PresentationValidationPreparationAuthority = Readonly<{
+  worldScene: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: WorldSceneSemanticReceipt
+    validation: WorldSceneSemanticValidationResult
+  }>
+  presentation: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: PresentationSemanticReceipt
+  }>
+  phase4: GameplayBalanceModulePair
+}>
+
+export function preparePresentationSemanticValidationPacket(
+  authority: PresentationValidationPreparationAuthority,
+): Phase5SemanticValidationPacket
 ```
 
 The authority object is exact. It has no optional Phase 4 input, raw node
@@ -274,8 +310,10 @@ authority replay.
 The closure assembler is the sole Phase 5 writer of
 `WorldSceneModuleProjection`, `PresentationModuleProjection`, and
 `WorldPresentationClosure`. Domain producers may expose only the existing
-packet builder and semantic-result admission functions. Any internal module
-preparation functions remain private to the closure assembler; there is no
+packet builder and semantic-result admission functions. The two staged APIs
+above expose only validation-packet preparation and never a module, projection,
+receipt wrapper, digest, map, or draft. All module/projection construction and
+final signing remain private to the same closure assembler pipeline; there is no
 second public World writer, Presentation writer, or four-domain candidate
 writer.
 

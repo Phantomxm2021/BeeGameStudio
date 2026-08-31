@@ -48,12 +48,7 @@ import type {
   FoundationRevisionSemanticRecheckTask,
   WorkerDispatchRequest,
 } from '../types'
-import {
-  GAME_IR_SCHEMA_VERSION,
-  parseGameIrCompileRequest,
-  receiptDigest,
-  type FoundationReadyReceipt,
-} from './contracts'
+import { GAME_IR_SCHEMA_VERSION, parseGameIrCompileRequest } from './contracts'
 import { projectFoundationReadyReceipt } from './foundation-ready-adapter'
 import {
   admitGameIrMechanicalProjectionReceipt,
@@ -61,38 +56,35 @@ import {
 } from './domain-projection'
 import {
   buildGameIrDomainSourceEnvelope,
+  canonicalGameIrModuleSourceDocuments,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
 import {
   admitGameplaySemanticResult,
   buildGameplaySemanticPacket,
-  type GameIrDomainSemanticReceipt as GameplaySemanticReceipt,
 } from './gameplay-producer'
 import {
   admitBalanceSemanticResult,
   buildBalanceSemanticPacket,
-  type GameIrDomainSemanticReceipt as BalanceSemanticReceipt,
 } from './balance-producer'
 import {
   buildWorldSceneSemanticPacket,
   admitWorldSceneSemanticResult,
-  type WorldSceneSemanticReceipt,
 } from './world-scene-producer'
 import {
   buildPresentationSemanticPacket,
   admitPresentationSemanticResult,
-  type PresentationSemanticReceipt,
 } from './presentation-producer'
 import {
-  buildPhase5SemanticValidationPacket,
   admitPhase5SemanticValidationResult,
-  replayAndBindPhase5SemanticReceipt,
-  type WorldSceneModuleProjection,
+  type Phase5SemanticValidationPacket,
 } from './phase5-admission'
-import { parseWorldSceneModule } from './world-scene-schema'
-import { parsePresentationModule } from './presentation-schema'
 import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
-import { assembleWorldPresentationClosure } from './world-presentation-assembler'
+import {
+  assembleWorldPresentationClosure,
+  preparePresentationSemanticValidationPacket,
+  prepareWorldSceneSemanticValidationPacket,
+} from './world-presentation-assembler'
 import {
   canonicalGameIrJson,
   digestGameIrValue,
@@ -243,12 +235,17 @@ function fixtureDocuments(variant: string): Map<string, string> {
       ]
     }),
   )
-  if (variant === 'issue')
+  if (variant === 'issue' || variant === 'parity-issue')
     documents.set(
       'docs/ASSET_PLAN.md',
       documents
         .get('docs/ASSET_PLAN.md')!
         .replace('asset.boss.count: 3', 'asset.boss.count: 4'),
+    )
+  if (variant === 'parity-issue')
+    documents.set(
+      'docs/GDD.md',
+      appendParitySourceBlock(documents.get('docs/GDD.md')!),
     )
   return documents
 }
@@ -265,9 +262,13 @@ const CANONICAL_PATHS = [
 ] as const
 
 function makeFixture(name: string): Fixture {
-  const documents = fixtureDocuments(name === 'issue' ? 'rules' : name)
+  const documents = fixtureDocuments(
+    name === 'issue' || name === 'parity-issue' ? 'rules' : name,
+  )
   const issueDocuments =
-    name === 'issue' ? fixtureDocuments('issue') : undefined
+    name === 'issue' || name === 'parity-issue'
+      ? fixtureDocuments(name === 'parity-issue' ? 'parity-issue' : 'issue')
+      : undefined
   return {
     name,
     revision: `foundation-${name}`,
@@ -296,446 +297,442 @@ function parityStateBytes(
 }
 
 type MinimalSemanticNode = Omit<GameIrNode, 'producerMode' | 'bindings'>
+type ParityNode = Omit<GameIrNode, 'producerMode' | 'bindings'>
 
-const MINIMAL_SECTION_ID = 'foundation-section'
-const MINIMAL_TASK_ID = 'phase5-parity-task'
-const MINIMAL_FOUNDATION_REVISION = 'phase5-parity-foundation'
+const PARITY_NODES: Readonly<{
+  gameplay: readonly ParityNode[]
+  balance: readonly ParityNode[]
+  world: readonly ParityNode[]
+  presentation: readonly ParityNode[]
+}> = {
+  gameplay: [
+    {
+      id: 'entity.player',
+      kind: 'gameplay.entity',
+      value: { label: 'Player' },
+      references: [],
+      edges: [],
+    },
+    {
+      id: 'state.playing',
+      kind: 'gameplay.state',
+      value: { label: 'Playing', initial: true, terminal: 'none' },
+      references: [],
+      edges: [],
+    },
+  ],
+  balance: [
+    {
+      id: 'balance.unit.hp',
+      kind: 'balance.unit',
+      value: {
+        symbol: 'HP',
+        dimensions: [],
+        scale: { numerator: 1, denominator: 1 },
+      },
+      references: [],
+      edges: [],
+    },
+  ],
+  world: [
+    {
+      id: 'world.node.root',
+      kind: 'world-scene.node',
+      value: {
+        label: 'Root',
+        nodeType: 'container',
+        transform: {
+          dimensions: '3d',
+          space: 'world',
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+          scale: { x: 1, y: 1, z: 1 },
+        },
+      },
+      references: [],
+      edges: [
+        {
+          type: 'scene',
+          targetId: 'world.scene.main',
+          targetType: 'world-scene.scene',
+        },
+      ],
+    },
+    {
+      id: 'world.scene.main',
+      kind: 'world-scene.scene',
+      value: {
+        label: 'Main Scene',
+        coordinateConvention: {
+          dimensions: '3d',
+          handedness: 'right',
+          upAxis: '+y',
+          forwardAxis: '+z',
+          distanceUnit: 'meter',
+        },
+      },
+      references: [],
+      edges: [
+        {
+          type: 'root',
+          targetId: 'world.node.root',
+          targetType: 'world-scene.node',
+        },
+      ],
+    },
+  ],
+  presentation: [
+    {
+      id: 'presentation.screen.main',
+      kind: 'presentation.ui-screen',
+      value: { label: 'Main Screen', modal: false },
+      references: [],
+      edges: [
+        {
+          type: 'driven-by',
+          targetId: 'state.playing',
+          targetType: 'gameplay.state',
+        },
+        {
+          type: 'initial-state',
+          targetId: 'presentation.state.main',
+          targetType: 'presentation.ui-state',
+        },
+      ],
+    },
+    {
+      id: 'presentation.state.main',
+      kind: 'presentation.ui-state',
+      value: { label: 'Main', terminal: false },
+      references: [],
+      edges: [
+        {
+          type: 'driven-by',
+          targetId: 'state.playing',
+          targetType: 'gameplay.state',
+        },
+        {
+          type: 'screen',
+          targetId: 'presentation.screen.main',
+          targetType: 'presentation.ui-screen',
+        },
+      ],
+    },
+  ],
+}
 
-function minimalLeafPointers(value: Record<string, unknown>): string[] {
-  const output: string[] = []
-  const encode = (key: string) =>
+function parityPointers(node: ParityNode): string[] {
+  const escape = (key: string) =>
     key.replaceAll('~', '~0').replaceAll('/', '~1')
-  const visit = (entry: unknown, pointer: string): void => {
-    if (Array.isArray(entry)) {
-      if (entry.length === 0) output.push(pointer)
-      else entry.forEach((child, index) => visit(child, `${pointer}/${index}`))
+  const pointers: string[] = ['/id']
+  const visit = (value: unknown, pointer: string): void => {
+    if (Array.isArray(value)) {
+      if (value.length === 0) pointers.push(pointer)
+      else value.forEach((entry, index) => visit(entry, pointer + '/' + index))
       return
     }
-    if (entry && typeof entry === 'object') {
-      const entries = Object.entries(entry as Record<string, unknown>)
-      if (entries.length === 0) output.push(pointer)
+    if (value && typeof value === 'object') {
+      const entries = Object.entries(value as Record<string, unknown>)
+      if (entries.length === 0) pointers.push(pointer)
       else
-        entries.forEach(([key, child]) =>
-          visit(child, `${pointer}/${encode(key)}`),
+        entries.forEach(([key, entry]) =>
+          visit(entry, pointer + '/' + escape(key)),
         )
       return
     }
-    output.push(pointer)
+    pointers.push(pointer)
   }
-  const entries = Object.entries(value)
-  if (entries.length === 0) output.push('/value')
-  else entries.forEach(([key, child]) => visit(child, `/value/${encode(key)}`))
-  return output
+  visit(node.value, '/value')
+  node.references.forEach((_, index) => pointers.push('/references/' + index))
+  node.edges.forEach((_, index) => pointers.push('/edges/' + index))
+  return pointers
 }
 
-function minimalPointerValue(
-  node: MinimalSemanticNode,
-  pointer: string,
-): unknown {
+function parityPointerValue(node: ParityNode, pointer: string): unknown {
   if (pointer === '/id') return node.id
   if (pointer.startsWith('/references/'))
     return node.references[Number(pointer.slice('/references/'.length))]
   if (pointer.startsWith('/edges/'))
     return node.edges[Number(pointer.slice('/edges/'.length))]
-  let current: unknown = node.value
+  let value: unknown = node.value
   for (const segment of pointer
     .slice('/value/'.length)
     .split('/')
     .map(entry => entry.replaceAll('~1', '/').replaceAll('~0', '~'))) {
-    if (current && typeof current === 'object')
-      current = (current as Record<string, unknown>)[segment]
-    else return undefined
+    if (!value || typeof value !== 'object') return undefined
+    value = (value as Record<string, unknown>)[segment]
   }
-  return current
+  return value
 }
 
-function minimalNodePointers(node: MinimalSemanticNode): string[] {
-  return [
-    '/id',
-    ...minimalLeafPointers(node.value),
-    ...node.references.map((_, index) => `/references/${index}`),
-    ...node.edges.map((_, index) => `/edges/${index}`),
-  ]
-}
-
-function minimalLiteral(value: unknown): string {
+function parityLiteral(value: unknown): string {
   return typeof value === 'string' ? value : canonicalGameIrJson(value)
 }
 
-function minimalNodes(): Readonly<{
-  gameplay: readonly MinimalSemanticNode[]
-  balance: readonly MinimalSemanticNode[]
-  world: readonly MinimalSemanticNode[]
-  presentation: readonly MinimalSemanticNode[]
-}> {
-  return {
-    gameplay: [
-      {
-        id: 'entity.player',
-        kind: 'gameplay.entity',
-        value: { label: 'Player' },
-        references: [],
-        edges: [],
-      },
-      {
-        id: 'state.playing',
-        kind: 'gameplay.state',
-        value: { label: 'Playing', initial: true, terminal: 'none' },
-        references: [],
-        edges: [],
-      },
-    ],
-    balance: [
-      {
-        id: 'balance.unit.hp',
-        kind: 'balance.unit',
-        value: {
-          symbol: 'HP',
-          dimensions: [],
-          scale: { numerator: 1, denominator: 1 },
-        },
-        references: [],
-        edges: [],
-      },
-    ],
-    world: [
-      {
-        id: 'world.scene.main',
-        kind: 'world-scene.scene',
-        value: {
-          label: 'Main Scene',
-          coordinateConvention: {
-            dimensions: '3d',
-            handedness: 'right',
-            upAxis: '+y',
-            forwardAxis: '+z',
-            distanceUnit: 'meter',
-          },
-        },
-        references: [],
-        edges: [
-          {
-            type: 'root',
-            targetId: 'world.node.root',
-            targetType: 'world-scene.node',
-          },
-        ],
-      },
-      {
-        id: 'world.node.root',
-        kind: 'world-scene.node',
-        value: {
-          label: 'Root',
-          nodeType: 'container',
-          transform: {
-            dimensions: '3d',
-            space: 'world',
-            position: { x: 0, y: 0, z: 0 },
-            rotation: { x: 0, y: 0, z: 0, w: 1 },
-            scale: { x: 1, y: 1, z: 1 },
-          },
-        },
-        references: [],
-        edges: [
-          {
-            type: 'scene',
-            targetId: 'world.scene.main',
-            targetType: 'world-scene.scene',
-          },
-        ],
-      },
-    ],
-    presentation: [
-      {
-        id: 'presentation.screen.main',
-        kind: 'presentation.ui-screen',
-        value: { label: 'Main Screen', modal: false },
-        references: [],
-        edges: [
-          {
-            type: 'driven-by',
-            targetId: 'state.playing',
-            targetType: 'gameplay.state',
-          },
-          {
-            type: 'initial-state',
-            targetId: 'presentation.state.main',
-            targetType: 'presentation.ui-state',
-          },
-        ],
-      },
-      {
-        id: 'presentation.state.main',
-        kind: 'presentation.ui-state',
-        value: { label: 'Main', terminal: false },
-        references: [],
-        edges: [
-          {
-            type: 'driven-by',
-            targetId: 'state.playing',
-            targetType: 'gameplay.state',
-          },
-          {
-            type: 'screen',
-            targetId: 'presentation.screen.main',
-            targetType: 'presentation.ui-screen',
-          },
-        ],
-      },
-    ],
-  }
+function paritySequence(): readonly { subject: string; literal: string }[] {
+  return Object.values(PARITY_NODES)
+    .flatMap(nodes =>
+      nodes.flatMap(node =>
+        parityPointers(node)
+          .sort()
+          .map(pointer => ({
+            subject: 'node:' + node.id + '#' + pointer,
+            literal: parityLiteral(parityPointerValue(node, pointer)),
+          })),
+      ),
+    )
+    .sort((left, right) => left.subject.localeCompare(right.subject))
 }
 
-function minimalPhase5Authority() {
-  const nodes = minimalNodes()
-  const allNodes = [
-    ...nodes.gameplay,
-    ...nodes.balance,
-    ...nodes.world,
-    ...nodes.presentation,
-  ]
-  const ranges = new Map<string, string>()
-  let sourceBytes = ''
-  for (const node of allNodes) {
-    for (const pointer of minimalNodePointers(node).sort()) {
-      const literal = minimalLiteral(minimalPointerValue(node, pointer))
-      const start = Buffer.byteLength(sourceBytes, 'utf8')
-      sourceBytes += `${literal}\n`
-      const end = start + Buffer.byteLength(literal, 'utf8')
-      ranges.set(`node:${node.id}#${pointer}`, `/bytes/${start}/${end}`)
-    }
-  }
-  const sectionIndex = CANONICAL_FOUNDATION_DOCUMENTS.map(
-    (documentPath, index) => ({
-      documentPath,
-      sectionId: `${MINIMAL_SECTION_ID}-${index}`,
-      heading: `Foundation ${index}`,
-      startLine: 1,
-      endLine: 1,
-      digest: sha256(sourceBytes),
-    }),
+function appendParitySourceBlock(markdown: string): string {
+  const marker = '<!-- game-ir-parity-source -->'
+  const block =
+    marker +
+    '\n' +
+    paritySequence()
+      .map(entry => 'parity literal: ' + entry.literal)
+      .join('\n') +
+    '\n'
+  const sectionMarker = '<!-- beegame-section:states_flow -->'
+  const start = markdown.indexOf(sectionMarker)
+  if (start < 0)
+    throw new Error('parity fixture is missing the states_flow section')
+  const next = markdown.indexOf(
+    '\n<!-- beegame-section:',
+    start + sectionMarker.length,
   )
-  const foundationBody: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
-    schemaVersion: 'foundation-ready-receipt.v1',
-    projectId: 'phase5-parity-project',
-    foundationRevision: MINIMAL_FOUNDATION_REVISION,
-    confirmedBriefDigest: sha256('phase5-parity-brief'),
-    documentDigests: Object.fromEntries(
-      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, sha256(sourceBytes)]),
-    ) as FoundationReadyReceipt['documentDigests'],
-    sectionIndexPath: '.beegame/foundation/section-index.json',
-    sectionIndexDigest: digestSectionIndex(sectionIndex),
-    authority: {
-      kind: 'review',
-      reviewDigest: sha256('phase5-parity-review'),
-      issueRegistryDigest: sha256('phase5-parity-issues'),
-    },
+  const insertAt = next < 0 ? markdown.length : next + 1
+  return markdown.slice(0, insertAt) + block + markdown.slice(insertAt)
+}
+
+function parityRanges(sectionBytes: string): ReadonlyMap<string, string> {
+  const ranges = new Map<string, string>()
+  let cursor = sectionBytes.indexOf('<!-- game-ir-parity-source -->')
+  if (cursor < 0)
+    throw new Error('parity source marker is missing from states_flow')
+  for (const entry of paritySequence()) {
+    const start = sectionBytes.indexOf(entry.literal, cursor)
+    if (start < 0)
+      throw new Error('parity literal is missing: ' + entry.subject)
+    const end = start + entry.literal.length
+    ranges.set(
+      entry.subject,
+      '/bytes/' +
+        Buffer.byteLength(sectionBytes.slice(0, start), 'utf8') +
+        '/' +
+        Buffer.byteLength(sectionBytes.slice(0, end), 'utf8'),
+    )
+    cursor = end
   }
+  return ranges
+}
+
+function parityClaims(
+  nodes: readonly ParityNode[],
+  sectionBytes: string,
+): readonly Record<string, unknown>[] {
+  const ranges = parityRanges(sectionBytes)
+  return nodes
+    .flatMap(node =>
+      parityPointers(node)
+        .sort()
+        .map(pointer => ({
+          subject: 'node:' + node.id + '#' + pointer,
+          documentPath: 'docs/GDD.md' as FoundationDocumentPath,
+          sectionId: 'states_flow',
+          sourcePointer: ranges.get('node:' + node.id + '#' + pointer)!,
+          literal: parityLiteral(parityPointerValue(node, pointer)),
+        })),
+    )
+    .sort((left, right) =>
+      (
+        left.subject +
+        '\0' +
+        left.sourcePointer +
+        '\0' +
+        left.literal
+      ).localeCompare(
+        right.subject + '\0' + right.sourcePointer + '\0' + right.literal,
+      ),
+    )
+}
+
+async function phase5AuthorityFromPlan(
+  plan: Awaited<ReturnType<typeof controllerIssuePlan>>,
+  workspacePath: string,
+): Promise<Parameters<typeof assembleWorldPresentationClosure>[0]> {
+  const documents = new Map(
+    await Promise.all(
+      CANONICAL_PATHS.map(
+        async path =>
+          [path, await readFile(join(workspacePath, path), 'utf8')] as const,
+      ),
+    ),
+  )
+  const sectionIndex = buildFoundationSectionIndex({ documents })
+  const section = sectionIndex.find(
+    item =>
+      item.documentPath === 'docs/GDD.md' && item.sectionId === 'states_flow',
+  )
+  if (!section) throw new Error('real parity fixture is missing states_flow')
+  const sectionBytes = sectionText(documents, section)
+  const confirmedBriefDigest = sha256('{"game":"bee"}')
+  const foundation = projectFoundationReadyReceipt({
+    state: plan.readyState,
+    projectId: 'project-parity-issue',
+    confirmedBriefDigest,
+  })
   const request = parseGameIrCompileRequest({
     schemaVersion: 'game-ir-compile-request.v1',
-    taskId: MINIMAL_TASK_ID,
+    taskId: 'phase5-parity-task',
     publicationId: 'phase5-parity-publication',
     gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
-    foundation: {
-      ...foundationBody,
-      receiptDigest: receiptDigest(foundationBody),
-    },
+    foundation,
   })
   const source = (
     moduleId: 'gameplay' | 'balance' | 'world-scene' | 'presentation',
-  ) => {
-    const paths = {
-      gameplay: ['docs/GDD.md'],
-      balance: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
-      'world-scene': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
-      presentation: [
-        'docs/GDD.md',
-        'docs/ART_DIRECTION.md',
-        'docs/UI_UX_SPEC.md',
-        'docs/AUDIO_DESIGN.md',
-      ],
-    }[moduleId]
+  ): GameIrDomainSourceEnvelope => {
+    const selected = new Set(canonicalGameIrModuleSourceDocuments(moduleId))
     return buildGameIrDomainSourceEnvelope({
       moduleId,
       request,
       sectionIndex,
       sectionBytes: Object.fromEntries(
-        paths.map(path => [
-          `${path}#${MINIMAL_SECTION_ID}-${CANONICAL_FOUNDATION_DOCUMENTS.indexOf(path as never)}`,
-          sourceBytes,
-        ]),
+        sectionIndex
+          .filter(item => selected.has(item.documentPath))
+          .map(item => [
+            item.documentPath + '#' + item.sectionId,
+            sectionText(documents, item),
+          ]),
       ),
     })
   }
-  const mechanical = (currentSource: GameIrDomainSourceEnvelope) => {
+  const mechanical = (
+    current: GameIrDomainSourceEnvelope,
+  ): GameIrMechanicalProjectionReceipt => {
     const body = {
       schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
-      taskId: currentSource.taskId,
-      moduleId: currentSource.moduleId,
-      foundationRevision: MINIMAL_FOUNDATION_REVISION,
-      sourceDigest: currentSource.sourceDigest,
+      taskId: current.taskId,
+      moduleId: current.moduleId,
+      foundationRevision: current.compileRequest.foundation.foundationRevision,
+      sourceDigest: current.sourceDigest,
       nodes: [],
       verifiedClaims: [],
       ownedTargets: [],
     }
     return admitGameIrMechanicalProjectionReceipt({
-      source: currentSource,
+      source: current,
       receipt: { ...body, receiptDigest: digestGameIrValue(body) },
     })
   }
-  const claims = (moduleNodes: readonly MinimalSemanticNode[]) =>
-    moduleNodes
-      .flatMap(node =>
-        minimalNodePointers(node).map(pointer => ({
-          subject: `node:${node.id}#${pointer}`,
-          documentPath: 'docs/GDD.md' as FoundationDocumentPath,
-          sectionId: `${MINIMAL_SECTION_ID}-0`,
-          sourcePointer: ranges.get(`node:${node.id}#${pointer}`)!,
-          literal: minimalLiteral(minimalPointerValue(node, pointer)),
-        })),
+  const semantic = (
+    moduleId: 'gameplay' | 'balance' | 'world-scene' | 'presentation',
+    current: GameIrDomainSourceEnvelope,
+    currentMechanical: GameIrMechanicalProjectionReceipt,
+  ) => {
+    const key = moduleId === 'world-scene' ? 'world' : moduleId
+    const nodes = PARITY_NODES[key] as readonly ParityNode[]
+    const sourceClaims = parityClaims(nodes, sectionBytes)
+    if (moduleId === 'gameplay')
+      return admitGameplaySemanticResult(
+        buildGameplaySemanticPacket({
+          source: current,
+          mechanical: currentMechanical,
+        }),
+        { outcome: 'PROJECTED', nodes, sourceClaims },
       )
-      .sort((left, right) =>
-        `${left.subject}\0${left.sourcePointer}\0${left.literal}`.localeCompare(
-          `${right.subject}\0${right.sourcePointer}\0${right.literal}`,
-        ),
+    if (moduleId === 'balance')
+      return admitBalanceSemanticResult(
+        buildBalanceSemanticPacket({
+          source: current,
+          mechanical: currentMechanical,
+        }),
+        { outcome: 'PROJECTED', nodes, sourceClaims },
       )
+    if (moduleId === 'world-scene')
+      return admitWorldSceneSemanticResult(
+        buildWorldSceneSemanticPacket({
+          source: current,
+          mechanical: currentMechanical,
+        }),
+        { outcome: 'PROJECTED', nodes, sourceClaims },
+      )
+    return admitPresentationSemanticResult(
+      buildPresentationSemanticPacket({
+        source: current,
+        mechanical: currentMechanical,
+      }),
+      { outcome: 'PROJECTED', nodes, sourceClaims },
+    )
+  }
   const gameplaySource = source('gameplay')
   const balanceSource = source('balance')
   const gameplayMechanical = mechanical(gameplaySource)
   const balanceMechanical = mechanical(balanceSource)
-  const gameplaySemantic = admitGameplaySemanticResult(
-    buildGameplaySemanticPacket({
-      source: gameplaySource,
-      mechanical: gameplayMechanical,
-    }),
-    {
-      outcome: 'PROJECTED',
-      nodes: nodes.gameplay,
-      sourceClaims: claims(nodes.gameplay),
-    },
-  ) as GameplaySemanticReceipt
-  const balanceSemantic = admitBalanceSemanticResult(
-    buildBalanceSemanticPacket({
-      source: balanceSource,
-      mechanical: balanceMechanical,
-    }),
-    {
-      outcome: 'PROJECTED',
-      nodes: nodes.balance,
-      sourceClaims: claims(nodes.balance),
-    },
-  ) as BalanceSemanticReceipt
   const phase4Authority = {
     gameplay: {
       source: gameplaySource,
       mechanical: gameplayMechanical,
-      semantic: gameplaySemantic,
+      semantic: semantic(
+        'gameplay',
+        gameplaySource,
+        gameplayMechanical,
+      ) as never,
     },
     balance: {
       source: balanceSource,
       mechanical: balanceMechanical,
-      semantic: balanceSemantic,
+      semantic: semantic('balance', balanceSource, balanceMechanical) as never,
     },
   }
   const phase4 = assembleGameplayBalanceModules(phase4Authority)
   const worldSource = source('world-scene')
   const worldMechanical = mechanical(worldSource)
-  const worldSemantic = admitWorldSceneSemanticResult(
-    buildWorldSceneSemanticPacket({
-      source: worldSource,
-      mechanical: worldMechanical,
-    }),
-    {
-      outcome: 'PROJECTED',
-      nodes: nodes.world,
-      sourceClaims: claims(nodes.world),
-    },
-  ) as WorldSceneSemanticReceipt
-  const worldBound = replayAndBindPhase5SemanticReceipt({
-    source: worldSource,
-    mechanical: worldMechanical,
-    packet: buildWorldSceneSemanticPacket({
-      source: worldSource,
-      mechanical: worldMechanical,
-    }),
-    semantic: worldSemantic,
-  })
-  const worldModule = parseWorldSceneModule(worldBound.module, new Map())
-  const worldValidationPacket = buildPhase5SemanticValidationPacket({
+  const worldSemantic = semantic(
+    'world-scene',
+    worldSource,
+    worldMechanical,
+  ) as never
+  const worldPacket = prepareWorldSceneSemanticValidationPacket({
     source: worldSource,
     mechanical: worldMechanical,
     semantic: worldSemantic,
-    module: worldModule,
-    externalProjections: { gameplay: phase4.gameplay },
+    phase4,
   })
-  const worldValidation = admitPhase5SemanticValidationResult(
-    worldValidationPacket,
-    {
-      outcome: 'PASS',
-      packetDigest: worldValidationPacket.packetDigest,
-      checkIds: worldValidationPacket.checkIds,
-      coveredTargets: worldValidationPacket.requiredTargets,
-    },
-  )
-  const worldProjectionBody = {
-    schemaVersion: 'game-ir-world-scene-module.v1' as const,
-    taskId: worldSource.taskId,
-    foundationRevision: MINIMAL_FOUNDATION_REVISION,
-    module: worldModule,
-    sourceDigest: worldSource.sourceDigest,
-    mechanicalReceiptDigest: worldBound.mechanicalReceiptDigest,
-    semanticReceiptDigest: worldBound.semanticReceiptDigest,
-    semanticValidationResultDigest: digestGameIrValue(worldValidation),
-  }
-  const worldProjection = Object.freeze({
-    ...worldProjectionBody,
-    projectionDigest: digestGameIrValue(worldProjectionBody),
-  }) as WorldSceneModuleProjection
+  const worldValidation = admitPhase5SemanticValidationResult(worldPacket, {
+    outcome: 'PASS',
+    packetDigest: worldPacket.packetDigest,
+    checkIds: worldPacket.checkIds,
+    coveredTargets: worldPacket.requiredTargets,
+  })
   const presentationSource = source('presentation')
   const presentationMechanical = mechanical(presentationSource)
-  const presentationPacket = buildPresentationSemanticPacket({
-    source: presentationSource,
-    mechanical: presentationMechanical,
-  })
-  const presentationSemantic = admitPresentationSemanticResult(
-    presentationPacket,
-    {
-      outcome: 'PROJECTED',
-      nodes: nodes.presentation,
-      sourceClaims: claims(nodes.presentation),
+  const presentationSemantic = semantic(
+    'presentation',
+    presentationSource,
+    presentationMechanical,
+  ) as never
+  const presentationPacket = preparePresentationSemanticValidationPacket({
+    phase4,
+    worldScene: {
+      source: worldSource,
+      mechanical: worldMechanical,
+      semantic: worldSemantic,
+      validation: worldValidation,
     },
-  ) as PresentationSemanticReceipt
-  const presentationBound = replayAndBindPhase5SemanticReceipt({
-    source: presentationSource,
-    mechanical: presentationMechanical,
-    packet: presentationPacket,
-    semantic: presentationSemantic,
-  })
-  const presentationModule = parsePresentationModule(
-    presentationBound.module,
-    new Map(
-      [...phase4.gameplay.module.nodes, ...worldProjection.module.nodes].map(
-        node => [node.id, node],
-      ),
-    ),
-  )
-  const presentationValidationPacket = buildPhase5SemanticValidationPacket({
-    source: presentationSource,
-    mechanical: presentationMechanical,
-    semantic: presentationSemantic,
-    module: presentationModule,
-    externalProjections: {
-      gameplay: phase4.gameplay,
-      worldScene: worldProjection,
+    presentation: {
+      source: presentationSource,
+      mechanical: presentationMechanical,
+      semantic: presentationSemantic,
     },
   })
   const presentationValidation = admitPhase5SemanticValidationResult(
-    presentationValidationPacket,
+    presentationPacket,
     {
       outcome: 'PASS',
-      packetDigest: presentationValidationPacket.packetDigest,
-      checkIds: presentationValidationPacket.checkIds,
-      coveredTargets: presentationValidationPacket.requiredTargets,
+      packetDigest: presentationPacket.packetDigest,
+      checkIds: presentationPacket.checkIds,
+      coveredTargets: presentationPacket.requiredTargets,
     },
   )
   return {
@@ -1541,33 +1538,46 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
   })
 
   test('keeps Foundation planning byte-identical across the read-only Phase 5 boundary', async () => {
-    const fixture = makeFixture('issue')
-    const documents = fixture.issueDocuments ?? fixture.documents
-    const serializedDocumentsBefore = JSON.stringify([...documents])
+    const fixture = makeFixture('parity-issue')
     const firstWorkspace = await mkdtemp(join('/tmp', 'game-ir-parity-'))
-    const secondWorkspace = await mkdtemp(join('/tmp', 'game-ir-parity-'))
     try {
       const before = await controllerIssuePlan(fixture, firstWorkspace)
-      const beforeStateBytes = parityStateBytes(before)
-      const beforeClosure = assembleWorldPresentationClosure(
-        minimalPhase5Authority(),
+      const documentsBefore = new Map(
+        await Promise.all(
+          CANONICAL_PATHS.map(
+            async path =>
+              [
+                path,
+                await readFile(join(firstWorkspace, path), 'utf8'),
+              ] as const,
+          ),
+        ),
       )
+      const beforeSnapshot = JSON.stringify({
+        state: parityStateBytes(before),
+        documents: [...documentsBefore],
+      })
+      const authority = await phase5AuthorityFromPlan(before, firstWorkspace)
+      const beforeClosure = assembleWorldPresentationClosure(authority)
       expect(beforeClosure.closureDigest).toMatch(/^[a-f0-9]{64}$/)
-      expect(JSON.stringify([...documents])).toBe(serializedDocumentsBefore)
-
-      const after = await controllerIssuePlan(fixture, secondWorkspace)
-      const afterStateBytes = parityStateBytes(after)
-      const afterClosure = assembleWorldPresentationClosure(
-        minimalPhase5Authority(),
+      const documentsAfter = new Map(
+        await Promise.all(
+          CANONICAL_PATHS.map(
+            async path =>
+              [
+                path,
+                await readFile(join(firstWorkspace, path), 'utf8'),
+              ] as const,
+          ),
+        ),
       )
-
-      expect(afterStateBytes).toBe(beforeStateBytes)
-      expect(after.identity).toEqual(before.identity)
-      expect(afterClosure).toEqual(beforeClosure)
-      expect(JSON.stringify([...documents])).toBe(serializedDocumentsBefore)
+      const afterSnapshot = JSON.stringify({
+        state: parityStateBytes(before),
+        documents: [...documentsAfter],
+      })
+      expect(afterSnapshot).toBe(beforeSnapshot)
     } finally {
       await rm(firstWorkspace, { recursive: true, force: true })
-      await rm(secondWorkspace, { recursive: true, force: true })
     }
   })
 

@@ -448,6 +448,9 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
 - 已落地 scene graph、instances、routes、encounters、UI、Audio、Animation
   和 VFX binding；World/Presentation 通过唯一 closure assembler 只读重放
   Phase 4 authority，并完成 traversal 与 puzzle 两个完整 profile。
+- Task 11 integration audit 补充了同一 assembler 内的两个只读 staged
+  validation-packet preparation API；它们不暴露 module、projection、digest
+  或 draft，最终 projection/closure writer 仍唯一且私有。
 - 已实现 Foundation planning parity、21-file protected baseline 与分层 AST
   isolation；本阶段仍未接入 production routing、publication、consumer 或
   Chrome。Task 11 independent review 与 status gate 尚未完成，不得宣称

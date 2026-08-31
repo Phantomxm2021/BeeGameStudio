@@ -22,22 +22,16 @@ import {
 } from './presentation-producer'
 import {
   admitPhase5SemanticValidationResult,
-  buildPhase5SemanticValidationPacket,
-  replayAndBindPhase5SemanticReceipt,
+  type Phase5SemanticValidationPacket,
 } from './phase5-admission'
 import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
 import {
   assembleWorldPresentationClosure,
-  type WorldSceneModuleProjection,
+  preparePresentationSemanticValidationPacket,
+  prepareWorldSceneSemanticValidationPacket,
 } from './world-presentation-assembler'
-import {
-  parseWorldSceneModule,
-  WORLD_SCENE_DOMAIN_MANIFEST,
-} from './world-scene-schema'
-import {
-  parsePresentationModule,
-  PRESENTATION_DOMAIN_MANIFEST,
-} from './presentation-schema'
+import { WORLD_SCENE_DOMAIN_MANIFEST } from './world-scene-schema'
+import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
 import {
   canonicalGameIrJson,
   canonicalizeGameIrSourceSections,
@@ -858,7 +852,7 @@ function mechanical(currentSource: ReturnType<typeof source>) {
 type ValidationOutcome = 'PASS' | 'FAIL' | 'AMBIGUOUS'
 
 function admitValidation(
-  packet: ReturnType<typeof buildPhase5SemanticValidationPacket>,
+  packet: Phase5SemanticValidationPacket,
   outcome: ValidationOutcome,
 ) {
   if (outcome === 'PASS')
@@ -1048,46 +1042,16 @@ function buildAuthority(
     nodes: worldVariant,
     sourceClaims: claims(worldVariant, worldAliases),
   }) as WorldSceneSemanticReceipt
-  const worldBound = replayAndBindPhase5SemanticReceipt({
-    source: worldSource,
-    mechanical: worldMechanical,
-    packet: worldPacket,
-    semantic: worldSemantic,
-  })
-  const worldModule = parseWorldSceneModule(
-    worldBound.module,
-    fixtureExternalTargets(
-      phase4.gameplay.module.nodes,
-      WORLD_SCENE_DOMAIN_MANIFEST,
-      worldBound.module.nodes,
-    ) as never,
-  )
-  const worldValidationPacket = buildPhase5SemanticValidationPacket({
+  const worldValidationPacket = prepareWorldSceneSemanticValidationPacket({
     source: worldSource,
     mechanical: worldMechanical,
     semantic: worldSemantic,
-    module: worldModule,
-    externalProjections: { gameplay: phase4.gameplay },
+    phase4,
   })
   const worldValidation = admitValidation(
     worldValidationPacket,
     overrides.worldValidationOutcome ?? 'PASS',
   )
-  const worldProjectionBody = {
-    schemaVersion: 'game-ir-world-scene-module.v1' as const,
-    taskId: worldSource.taskId,
-    foundationRevision:
-      worldSource.compileRequest.foundation.foundationRevision,
-    module: worldModule,
-    sourceDigest: worldSource.sourceDigest,
-    mechanicalReceiptDigest: worldBound.mechanicalReceiptDigest,
-    semanticReceiptDigest: worldBound.semanticReceiptDigest,
-    semanticValidationResultDigest: digestGameIrValue(worldValidation),
-  }
-  const worldProjection = Object.freeze({
-    ...worldProjectionBody,
-    projectionDigest: digestGameIrValue(worldProjectionBody),
-  }) as WorldSceneModuleProjection
 
   const presentationSource = source('presentation', profile)
   const presentationMechanical = mechanical(presentationSource)
@@ -1103,34 +1067,21 @@ function buildAuthority(
       sourceClaims: claims(presentationVariant, presentationAliases),
     },
   ) as PresentationSemanticReceipt
-  const presentationBound = replayAndBindPhase5SemanticReceipt({
-    source: presentationSource,
-    mechanical: presentationMechanical,
-    packet: presentationPacket,
-    semantic: presentationSemantic,
-  })
-  const presentationValidationSemantic = presentationSemantic
-  const presentationModule =
-    presentationId === 'state-start'
-      ? (presentationBound.module as never)
-      : parsePresentationModule(
-          presentationBound.module,
-          fixtureExternalTargets(
-            [...phase4.gameplay.module.nodes, ...worldProjection.module.nodes],
-            PRESENTATION_DOMAIN_MANIFEST,
-            presentationBound.module.nodes,
-          ) as never,
-        )
-  const presentationValidationPacket = buildPhase5SemanticValidationPacket({
-    source: presentationSource,
-    mechanical: presentationMechanical,
-    semantic: presentationValidationSemantic,
-    module: presentationModule,
-    externalProjections: {
-      gameplay: phase4.gameplay,
-      worldScene: worldProjection,
-    },
-  })
+  const presentationValidationPacket =
+    preparePresentationSemanticValidationPacket({
+      phase4,
+      worldScene: {
+        source: worldSource,
+        mechanical: worldMechanical,
+        semantic: worldSemantic,
+        validation: worldValidation,
+      },
+      presentation: {
+        source: presentationSource,
+        mechanical: presentationMechanical,
+        semantic: presentationSemantic,
+      },
+    })
   const presentationValidation = admitValidation(
     presentationValidationPacket,
     overrides.presentationValidationOutcome ?? 'PASS',
@@ -1162,6 +1113,7 @@ function expectMutation(
   try {
     mutated = mutate(baseline)
   } catch (error) {
+    if (matcher.test(String(error))) return
     throw new Error(
       `baseline-derived mutation construction failed: ${String(error)}`,
     )
@@ -1193,6 +1145,60 @@ function expectDeepFrozen(value: unknown, seen = new Set<object>()): void {
   expect(Object.isFrozen(value)).toBe(true)
   for (const child of Object.values(value)) expectDeepFrozen(child, seen)
 }
+
+test('prepares strict staged validation packets without exposing projections', () => {
+  const authority = buildAuthority()
+  const phase4 = assembleGameplayBalanceModules(authority.phase4Authority)
+  const worldInput = {
+    source: authority.worldScene.source,
+    mechanical: authority.worldScene.mechanical,
+    semantic: authority.worldScene.semantic,
+    phase4,
+  }
+  const worldPacket = prepareWorldSceneSemanticValidationPacket(worldInput)
+  expect(worldPacket.moduleId).toBe('world-scene')
+  expect(Object.isFrozen(worldPacket)).toBe(true)
+  expect(prepareWorldSceneSemanticValidationPacket(worldInput)).toEqual(
+    worldPacket,
+  )
+  expect(() =>
+    prepareWorldSceneSemanticValidationPacket({
+      ...worldInput,
+      extra: true,
+    } as never),
+  ).toThrow(/unknown or missing fields/)
+
+  const presentationInput = {
+    phase4,
+    worldScene: authority.worldScene,
+    presentation: {
+      source: authority.presentation.source,
+      mechanical: authority.presentation.mechanical,
+      semantic: authority.presentation.semantic,
+    },
+  }
+  const presentationPacket =
+    preparePresentationSemanticValidationPacket(presentationInput)
+  expect(presentationPacket.moduleId).toBe('presentation')
+  expect(Object.isFrozen(presentationPacket)).toBe(true)
+  expect(
+    preparePresentationSemanticValidationPacket(presentationInput),
+  ).toEqual(presentationPacket)
+  expect(() =>
+    preparePresentationSemanticValidationPacket({
+      ...presentationInput,
+      presentation: { ...presentationInput.presentation, extra: true },
+    } as never),
+  ).toThrow(/unknown or missing fields/)
+
+  const failedWorld = admitValidation(worldPacket, 'FAIL')
+  expect(() =>
+    preparePresentationSemanticValidationPacket({
+      ...presentationInput,
+      worldScene: { ...presentationInput.worldScene, validation: failedWorld },
+    }),
+  ).toThrow(/semantic fidelity must be PASS, received FAIL/)
+})
 
 test('assembles a complete authority deterministically and freezes derived projections', () => {
   const authority = buildAuthority()
@@ -2001,7 +2007,20 @@ test('rejects admitted Presentation FAIL and AMBIGUOUS validation outcomes', () 
 
 test('rejects validation evidence crossing the World and Presentation source scopes', () => {
   expect(() => assembleWorldPresentationClosure(buildAuthority())).not.toThrow()
-  const worldAuthority = buildAuthority({ worldValidationOutcome: 'FAIL' })
+  const baseline = buildAuthority()
+  const worldPacket = prepareWorldSceneSemanticValidationPacket({
+    source: baseline.worldScene.source,
+    mechanical: baseline.worldScene.mechanical,
+    semantic: baseline.worldScene.semantic,
+    phase4: assembleGameplayBalanceModules(baseline.phase4Authority),
+  })
+  const worldAuthority = {
+    ...baseline,
+    worldScene: {
+      ...baseline.worldScene,
+      validation: admitValidation(worldPacket, 'FAIL'),
+    },
+  }
   const worldValidation = worldAuthority.worldScene
     .validation as unknown as Record<string, unknown>
   expect(() =>
