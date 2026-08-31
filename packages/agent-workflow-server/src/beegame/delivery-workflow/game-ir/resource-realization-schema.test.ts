@@ -1132,7 +1132,34 @@ describe('resource-realization schema', () => {
 
   test('closes a dependency between raw prior modules through one Core parse', () => {
     const module = validModule()
-    expect(parseRaw(module, completePriorModules()).nodes).toHaveLength(5)
+    const balanceNode = priorNode(
+      'balance.variable.player-health',
+      'balance.variable',
+      { label: 'Player health', baseline: 3, unitReferenceIndex: 0 },
+      [{ targetId: 'balance.unit.base', targetType: 'balance.unit' }],
+    )
+    bindModule({ moduleId: 'balance', nodes: [balanceNode] })
+    balanceNode.producerMode = 'derived'
+    for (const pointer of Object.keys(balanceNode.bindings))
+      balanceNode.bindings[pointer] = {
+        kind: 'derived',
+        derivationRuleId: 'from-player-label',
+        inputs: [
+          {
+            kind: 'external',
+            moduleId: 'gameplay',
+            nodeId: externalEntity.id,
+            pointer: '/value/label',
+            targetDigest: digestGameIrValue('Player'),
+          },
+        ],
+      }
+    const priors = completePriorModules()
+    priors[1]!.nodes.push(balanceNode)
+    priors[1]!.nodes.sort((left, right) =>
+      left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+    )
+    expect(parseRaw(module, priors).nodes).toHaveLength(5)
   })
 
   test('rejects a cross-label prior module instead of matching node kind alone', () => {

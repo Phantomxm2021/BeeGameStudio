@@ -97,6 +97,24 @@ const PRIOR_MODULE_SEQUENCE = Object.freeze([
   'world-scene',
   'presentation',
 ] as const)
+type Phase5PriorModuleId = (typeof PRIOR_MODULE_SEQUENCE)[number]
+type RelationshipManifest = Readonly<
+  Record<
+    string,
+    Readonly<{
+      relationships: Readonly<
+        Record<string, Readonly<{ targetKinds: readonly string[] }>>
+      >
+    }>
+  >
+>
+const PRIOR_DOMAIN_MANIFESTS: Readonly<
+  Record<Exclude<Phase5PriorModuleId, 'gameplay'>, RelationshipManifest>
+> = Object.freeze({
+  balance: BALANCE_DOMAIN_MANIFEST,
+  'world-scene': WORLD_SCENE_DOMAIN_MANIFEST,
+  presentation: PRESENTATION_DOMAIN_MANIFEST,
+})
 const PHASE5_TARGET_NODE_KINDS = Object.freeze(
   [
     ...new Set([
@@ -749,18 +767,7 @@ function targetMap(
 }
 
 function manifestTargetKinds(
-  manifest:
-    | Readonly<Record<string, ResourceRealizationManifestEntry>>
-    | Readonly<
-        Record<
-          string,
-          {
-            relationships: Readonly<
-              Record<string, { targetKinds: readonly string[] }>
-            >
-          }
-        >
-      >,
+  manifest: RelationshipManifest,
 ): ReadonlySet<string> {
   const targetKinds = new Set<string>()
   for (const descriptor of Object.values(manifest))
@@ -769,31 +776,17 @@ function manifestTargetKinds(
   return targetKinds
 }
 
-function priorTargetKinds(
-  moduleId: GameIrModuleCandidate['moduleId'],
-): ReadonlySet<string> {
+function priorTargetKinds(moduleId: Phase5PriorModuleId): ReadonlySet<string> {
   if (moduleId === 'gameplay')
     return new Set(Object.keys(BALANCE_DOMAIN_MANIFEST))
-  const manifests = {
-    balance: BALANCE_DOMAIN_MANIFEST,
-    'world-scene': WORLD_SCENE_DOMAIN_MANIFEST,
-    presentation: PRESENTATION_DOMAIN_MANIFEST,
-  } as const
-  const localKinds = new Set(
-    Object.keys(
-      moduleId === 'balance'
-        ? BALANCE_DOMAIN_MANIFEST
-        : moduleId === 'world-scene'
-          ? WORLD_SCENE_DOMAIN_MANIFEST
-          : PRESENTATION_DOMAIN_MANIFEST,
-    ),
-  )
-  const kinds = manifestTargetKinds(manifests[moduleId])
+  const manifest = PRIOR_DOMAIN_MANIFESTS[moduleId]
+  const localKinds = new Set(Object.keys(manifest))
+  const kinds = manifestTargetKinds(manifest)
   return new Set([...kinds].filter(kind => !localKinds.has(kind)))
 }
 
 function readOnlyPriorTargetMap(
-  moduleId: GameIrModuleCandidate['moduleId'],
+  moduleId: Phase5PriorModuleId,
   modules: ReadonlyMap<string, GameIrModuleCandidate>,
 ): ReadonlyMap<string, GameIrNode> {
   const allowedKinds = priorTargetKinds(moduleId)
