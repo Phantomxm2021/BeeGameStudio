@@ -8,8 +8,9 @@ This design is subordinate to
 `docs/beegame-game-ir-stage-isolation-redesign.md` and the accepted Phase 4
 design in `docs/superpowers/specs/2026-08-31-game-ir-gameplay-balance-design.md`.
 It defines only the isolated `world-scene` and `presentation` domain modules.
-It is a design specification, not an implementation plan, and does not claim
-that Phase 5 is accepted.
+It is a design specification, not an implementation plan. Phase 5 acceptance
+was established separately by completion of the binding plan, independent
+whole-branch review, and root verification.
 
 ## 1. Goal and boundary
 
@@ -1003,8 +1004,7 @@ Phase 5 does not include:
 - interpreting labels, filenames, headings, common keywords, or model
   preferences as machine-readable role or cross-domain binding.
 
-This Phase 5 design is approved. Its implementation becomes accepted only
-after the implementation plan is complete, independently reviewed, and
-root-verified. Production reachability, complete candidate publication,
-Chrome acceptance, and Phase 6–9 remain pending/deferred in the parent
-roadmap.
+This Phase 5 design and implementation are accepted: the binding plan is
+complete, the whole branch was independently reviewed, and root verification
+passed. Production reachability, complete candidate publication, Chrome
+acceptance, and Phase 6–9 remain pending/deferred in the parent roadmap.

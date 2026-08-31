@@ -1,5 +1,7 @@
 # Game IR World/Presentation Implementation Plan
 
+**Status:** Complete — independently reviewed and root-verified on the isolated Phase 5 branch. Production routing, publication, consumers, Chrome acceptance, and Phase 6–9 remain out of scope and pending.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add isolated, immutable, source-bound World/Scene and Presentation Game IR projections and one replayable closure without making production routing or complete candidate publication reachable.
