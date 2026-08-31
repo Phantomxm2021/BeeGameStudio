@@ -253,6 +253,22 @@ describe('Phase 6 Resource Realization admission', () => {
       },
     )
     expect(result.outcome).toBe('PASS')
+    const sectionEvidence = packet.allowedEvidencePointers.find(pointer =>
+      pointer.startsWith('section:'),
+    )!
+    expect(() =>
+      admitResourceRealizationSemanticValidationResult(
+        validationAuthority,
+        packet,
+        {
+          outcome: 'FAIL',
+          packetDigest: packet.packetDigest,
+          reasonCode: 'projection-mismatch',
+          actual: 'different',
+          evidencePointers: [sectionEvidence],
+        },
+      ),
+    ).toThrow(/owner bindings|binding/i)
   })
 
   test('rejects a packet when its source bytes or module bytes are detached', () => {

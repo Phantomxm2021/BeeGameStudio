@@ -53,22 +53,8 @@ export type SemanticValidationResult = Readonly<
 export type SemanticValidationResultPolicy = Readonly<{
   packetDigest: string
   checkIds: readonly string[]
-  coveredTargets: readonly string[]
   requiredTargets: readonly string[]
   allowedEvidencePointers: readonly string[]
-  evidenceKindPolicy: Readonly<{
-    projectionMismatch: 'binding' | 'section' | 'any'
-    projectionIdentity: 'binding' | 'section' | 'any'
-  }>
-  messages?: Readonly<{
-    resultObject?: string
-    failureResultLabel?: string
-    failurePacketDigest?: string
-    evidenceLabel?: string
-    evidenceStrings?: string
-    evidenceCoverage?: string
-    evidenceSort?: string
-  }>
 }>
 
 export type SemanticSourceClaimAuthority = Readonly<{
@@ -78,18 +64,6 @@ export type SemanticSourceClaimAuthority = Readonly<{
     digest: string
   }>[]
   sectionBytes: Readonly<Record<string, string>>
-}>
-
-export type SemanticSourceClaimBytePolicy = Readonly<{
-  sourcePointerLabel?: string
-  outsideClosure?: string
-  bytesMissing?: string
-  pointerOutsideBytes?: string
-  pointerUnaligned?: string
-  invalidUtf8?: string
-  literalMismatch?: string
-  staleDigest?: string
-  verifySectionDigest?: boolean
 }>
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -290,20 +264,8 @@ function admitSemanticValidationResult(
   errorPrefix: string,
 ): SemanticValidationResult {
   const failResult = (message: string): never => fail(errorPrefix, message)
-  const messages = {
-    resultObject: 'validation result must be an object',
-    failureResultLabel: 'fidelity validation result',
-    failurePacketDigest:
-      'fidelity validation result packet digest does not match packet',
-    evidenceLabel: 'fidelity validation evidencePointers',
-    evidenceStrings:
-      'fidelity validation evidencePointers must contain strings',
-    evidenceCoverage:
-      'fidelity validation evidence pointer is not exact coverage',
-    evidenceSort: 'fidelity validation evidencePointers must be sorted',
-    ...policy.messages,
-  }
-  if (!isPlainRecord(value)) failResult(messages.resultObject)
+  if (!isPlainRecord(value))
+    failResult('fidelity validation result must be an object')
   const result = value as Record<string, unknown>
   if (result.outcome === 'PASS') {
     exactSemanticKeys(
@@ -322,7 +284,7 @@ function admitSemanticValidationResult(
     )
     const coveredTargets = exactSemanticStringCoverage(
       result.coveredTargets,
-      policy.coveredTargets,
+      policy.requiredTargets,
       'fidelity PASS coveredTargets',
       errorPrefix,
     )
@@ -361,39 +323,33 @@ function admitSemanticValidationResult(
           'evidencePointers',
         ]
       : ['outcome', 'packetDigest', 'reasonCode', 'actual', 'evidencePointers'],
-    messages.failureResultLabel,
+    'fidelity validation result',
     errorPrefix,
   )
   if (result.packetDigest !== policy.packetDigest)
-    failResult(messages.failurePacketDigest)
+    failResult('fidelity validation result packet digest does not match packet')
   const evidence = strictSemanticArray(
     result.evidencePointers,
-    messages.evidenceLabel,
+    'fidelity validation evidencePointers',
     errorPrefix,
   )
   if (
     evidence.length === 0 ||
     evidence.some(pointer => typeof pointer !== 'string')
   )
-    failResult(messages.evidenceStrings)
+    failResult('fidelity validation evidencePointers must contain strings')
   const allowed = new Set(policy.allowedEvidencePointers)
-  const expectedKind =
-    reasonCode === 'projection-mismatch'
-      ? policy.evidenceKindPolicy.projectionMismatch
-      : policy.evidenceKindPolicy.projectionIdentity
-  const prefix =
-    expectedKind === 'binding'
-      ? 'binding:'
-      : expectedKind === 'section'
-        ? 'section:'
-        : undefined
   const seen = new Set<string>()
   for (const pointer of evidence as string[]) {
     if (seen.has(pointer) || !allowed.has(pointer))
-      failResult(messages.evidenceCoverage)
-    if (prefix && !pointer.startsWith(prefix))
+      failResult('fidelity validation evidence pointer is not exact coverage')
+    if (
+      !pointer.startsWith(
+        reasonCode === 'projection-mismatch' ? 'binding:' : 'section:',
+      )
+    )
       failResult(
-        expectedKind === 'binding'
+        reasonCode === 'projection-mismatch'
           ? 'projection mismatch evidence must use owner bindings'
           : 'missing or ambiguous evidence must use section pointers',
       )
@@ -406,7 +362,7 @@ function admitSemanticValidationResult(
         evidence[index] as string,
       ) >= 0
     )
-      failResult(messages.evidenceSort)
+      failResult('fidelity validation evidencePointers must be sorted')
   let missingSubject: string | undefined
   let expectedProjection: string | undefined
   if (requiresSubject) {
@@ -455,60 +411,54 @@ export function verifyGameIrSemanticClaimBytes(
   authority: SemanticSourceClaimAuthority,
   claim: GameIrSemanticSourceClaim,
   errorPrefix = 'invalid Game IR semantic fidelity',
-  policy: SemanticSourceClaimBytePolicy = {},
 ): void {
-  const messages = {
-    sourcePointerLabel: 'source claim pointer',
-    outsideClosure:
-      'semantic source claim lies outside selected source closure',
-    bytesMissing: 'semantic source claim section bytes are missing',
-    pointerOutsideBytes: 'semantic source claim pointer is out of bounds',
-    pointerUnaligned: 'semantic source claim pointer is not UTF-8 aligned',
-    invalidUtf8: 'semantic source claim bytes are not valid UTF-8',
-    literalMismatch:
-      'semantic source claim literal does not match exact source bytes',
-    staleDigest: 'semantic source section bytes have a stale digest',
-    verifySectionDigest: true,
-    ...policy,
-  }
   const section = authority.sectionIndex.find(
     candidate =>
       candidate.documentPath === claim.documentPath &&
       candidate.sectionId === claim.sectionId,
   )
-  if (!section) fail(errorPrefix, messages.outsideClosure)
+  if (!section)
+    fail(
+      errorPrefix,
+      'source claim lies outside the exact selected source closure',
+    )
   const bytesText =
     authority.sectionBytes[`${claim.documentPath}#${claim.sectionId}`]
-  if (bytesText === undefined) fail(errorPrefix, messages.bytesMissing)
+  if (bytesText === undefined)
+    fail(errorPrefix, 'source section bytes are missing')
   const pointer = normalizeSemanticSourcePointer(
     claim.sourcePointer,
-    messages.sourcePointerLabel,
+    'source pointer',
     errorPrefix,
   )
   const [, , startText, endText] = pointer.split('/')
   const start = Number(startText)
   const end = Number(endText)
   const bytes = Buffer.from(bytesText, 'utf8')
-  if (end > bytes.length) fail(errorPrefix, messages.pointerOutsideBytes)
+  if (end > bytes.length)
+    fail(errorPrefix, 'source pointer is outside selected source bytes')
   const boundary = (offset: number) =>
     offset === 0 || offset === bytes.length || (bytes[offset]! & 0xc0) !== 0x80
   if (!boundary(start) || !boundary(end))
-    fail(errorPrefix, messages.pointerUnaligned)
+    fail(
+      errorPrefix,
+      'source pointer does not lie on UTF-8 code-point boundaries',
+    )
   let literal: string
   try {
     literal = new TextDecoder('utf-8', { fatal: true }).decode(
       bytes.subarray(start, end),
     )
   } catch {
-    fail(errorPrefix, messages.invalidUtf8)
+    fail(errorPrefix, 'source byte range is not valid UTF-8')
   }
-  if (literal !== claim.literal) fail(errorPrefix, messages.literalMismatch)
+  if (literal !== claim.literal)
+    fail(errorPrefix, 'source byte range does not exactly match its literal')
   if (
-    messages.verifySectionDigest &&
     section.digest !==
-      createHash('sha256').update(bytesText, 'utf8').digest('hex')
+    createHash('sha256').update(bytesText, 'utf8').digest('hex')
   )
-    fail(errorPrefix, messages.staleDigest)
+    fail(errorPrefix, 'semantic source section bytes have a stale digest')
 }
 
 function deepFreezeSemantic<T>(value: T): T {

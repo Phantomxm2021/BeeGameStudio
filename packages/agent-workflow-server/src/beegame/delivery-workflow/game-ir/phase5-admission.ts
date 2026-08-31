@@ -22,7 +22,6 @@ import {
   GAME_IR_SEMANTIC_VALIDATOR_MANIFEST,
   sectionEvidencePointer,
   type GameIrSemanticSourceSection,
-  type GameIrSemanticValidationResult,
 } from './semantic-admission'
 import { type GameplayModuleProjection } from './gameplay-balance-assembler'
 import { WORLD_SCENE_DOMAIN_MANIFEST } from './world-scene-schema'
@@ -51,6 +50,7 @@ import {
   verifyGameIrSemanticClaimBytes,
   type GameIrSemanticCandidateNode,
   type GameIrSemanticSourceClaim,
+  type SemanticValidationResult,
 } from './semantic-fidelity'
 
 /*
@@ -92,6 +92,7 @@ export type Phase5BoundSemanticModule = Readonly<{
   semanticReceiptDigest: string
 }>
 
+export type Phase5SemanticValidationResult = SemanticValidationResult
 export type WorldSceneSemanticValidationResult = Phase5SemanticValidationResult
 export type PresentationSemanticValidationResult =
   Phase5SemanticValidationResult
@@ -145,16 +146,6 @@ export type Phase5SemanticValidationPacket = Readonly<
           }>
         }
     )
->
-
-export type Phase5SemanticValidationResult = Readonly<
-  | {
-      outcome: 'PASS'
-      packetDigest: string
-      checkIds: readonly string[]
-      coveredTargets: readonly string[]
-    }
-  | Extract<GameIrSemanticValidationResult, { outcome: 'FAIL' | 'AMBIGUOUS' }>
 >
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -282,18 +273,6 @@ export function replayAndBindPhase5SemanticReceipt(
       source,
       claim,
       'invalid Game IR Phase 5 admission',
-      {
-        sourcePointerLabel: 'source pointer',
-        outsideClosure:
-          'source claim lies outside the exact selected source closure',
-        bytesMissing: 'source section bytes are missing',
-        pointerOutsideBytes: 'source pointer is outside selected source bytes',
-        pointerUnaligned:
-          'source pointer does not lie on UTF-8 code-point boundaries',
-        invalidUtf8: 'source byte range is not valid UTF-8',
-        literalMismatch: 'source byte range does not exactly match its literal',
-        verifySectionDigest: false,
-      },
     )
   }
   const claimsBySubject = new Map(
@@ -1163,15 +1142,7 @@ export function admitPhase5SemanticValidationResult(
   return fidelity.admitValidationResult(value, {
     packetDigest: validated.packet.packetDigest,
     checkIds: validated.packet.checkIds,
-    coveredTargets: validated.packet.requiredTargets,
     requiredTargets: validated.packet.requiredTargets,
     allowedEvidencePointers: validated.packet.allowedEvidencePointers,
-    evidenceKindPolicy: {
-      projectionMismatch: 'binding',
-      projectionIdentity: 'section',
-    },
-    messages: {
-      resultObject: 'fidelity validation result must be an object',
-    },
   }) as Phase5SemanticValidationResult
 }

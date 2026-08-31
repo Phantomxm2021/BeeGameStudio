@@ -42,6 +42,7 @@ import { assembleWorldPresentationClosure } from './world-presentation-assembler
 import {
   createSemanticFidelityPrimitives,
   verifyGameIrSemanticClaimBytes,
+  type SemanticValidationResult,
 } from './semantic-fidelity'
 import type { WorldPresentationAssemblyAuthority } from './world-presentation-assembler'
 
@@ -68,32 +69,8 @@ const CHECK_IDS = Object.freeze([
 
 type RecordValue = Record<string, unknown>
 
-export type ResourceRealizationSemanticValidationResult = Readonly<
-  | {
-      outcome: 'PASS'
-      packetDigest: string
-      checkIds: readonly string[]
-      coveredTargets: readonly string[]
-    }
-  | {
-      outcome: 'FAIL'
-      packetDigest: string
-      reasonCode: 'projection-mismatch' | 'missing-projection'
-      actual: string
-      missingSubject?: string
-      expectedProjection?: string
-      evidencePointers: readonly string[]
-    }
-  | {
-      outcome: 'AMBIGUOUS'
-      packetDigest: string
-      reasonCode: 'ambiguous-projection'
-      actual: string
-      missingSubject: string
-      expectedProjection: string
-      evidencePointers: readonly string[]
-    }
->
+export type ResourceRealizationSemanticValidationResult =
+  SemanticValidationResult
 
 export type ResourceRealizationValidationPreparationAuthority = Readonly<{
   phase5Authority: WorldPresentationAssemblyAuthority
@@ -558,23 +535,7 @@ export function admitResourceRealizationSemanticValidationResult(
   return fidelity.admitValidationResult(value, {
     packetDigest: packet.packetDigest,
     checkIds: packet.checkIds,
-    coveredTargets: packet.requiredTargets,
     requiredTargets: packet.requiredTargets,
     allowedEvidencePointers: packet.allowedEvidencePointers,
-    evidenceKindPolicy: {
-      projectionMismatch: 'any',
-      projectionIdentity: 'any',
-    },
-    messages: {
-      resultObject: 'validation result must be a plain object',
-      failureResultLabel: 'fidelity failure result',
-      failurePacketDigest:
-        'fidelity failure packet digest does not match packet',
-      evidenceLabel: 'fidelity evidencePointers',
-      evidenceStrings: 'fidelity evidencePointers must contain strings',
-      evidenceCoverage:
-        'fidelity evidencePointers are not exact sorted coverage',
-      evidenceSort: 'fidelity evidencePointers are not exact sorted coverage',
-    },
   }) as ResourceRealizationSemanticValidationResult
 }

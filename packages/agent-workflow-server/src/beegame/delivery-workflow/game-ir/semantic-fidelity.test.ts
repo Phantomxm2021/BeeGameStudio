@@ -11,16 +11,11 @@ describe('shared semantic fidelity primitives', () => {
     const policy = {
       packetDigest: 'a'.repeat(64),
       checkIds: ['check.one'],
-      coveredTargets: ['node:scene#/id'],
       requiredTargets: ['node:scene#/id'],
       allowedEvidencePointers: [
         'binding:docs/GDD.md#rules/bytes/0/1',
         'section:docs/GDD.md#rules@' + 'b'.repeat(64),
       ],
-      evidenceKindPolicy: {
-        projectionMismatch: 'binding' as const,
-        projectionIdentity: 'section' as const,
-      },
     }
     expect(() =>
       admit(
@@ -41,7 +36,7 @@ describe('shared semantic fidelity primitives', () => {
           packetDigest: policy.packetDigest,
           reasonCode: 'missing-projection',
           actual: 'missing',
-          missingSubject: policy.coveredTargets[0],
+          missingSubject: policy.requiredTargets[0],
           expectedProjection: 'node',
           evidencePointers: [policy.allowedEvidencePointers[0]],
         },
@@ -54,7 +49,7 @@ describe('shared semantic fidelity primitives', () => {
           outcome: 'PASS',
           packetDigest: policy.packetDigest,
           checkIds: policy.checkIds,
-          coveredTargets: policy.coveredTargets,
+          coveredTargets: policy.requiredTargets,
         },
         policy,
       ),
@@ -62,7 +57,7 @@ describe('shared semantic fidelity primitives', () => {
       outcome: 'PASS',
       packetDigest: policy.packetDigest,
       checkIds: policy.checkIds,
-      coveredTargets: policy.coveredTargets,
+      coveredTargets: policy.requiredTargets,
     })
   })
 
