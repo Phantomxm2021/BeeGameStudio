@@ -743,6 +743,7 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'contracts.ts') return 'contracts'
   if (filename === 'publication.ts') return 'publication'
   if (filename === 'semantic-admission.ts') return 'semantic'
+  if (filename === 'resource-realization-schema.ts') return 'semantic'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -1554,6 +1555,7 @@ describe('Game IR stage boundary', () => {
       'presentation-producer.ts',
       'presentation-schema.ts',
       'publication.ts',
+      'resource-realization-schema.ts',
       'semantic-admission.ts',
       'semantic-fidelity.ts',
       'world-presentation-assembler.ts',
