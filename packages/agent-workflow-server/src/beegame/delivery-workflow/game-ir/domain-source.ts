@@ -23,6 +23,13 @@ export type GameIrDomainId =
   | 'world-scene'
   | 'presentation'
 
+export const GAME_IR_DOMAIN_IDS = Object.freeze([
+  'gameplay',
+  'balance',
+  'world-scene',
+  'presentation',
+] as const)
+
 export type GameIrDomainSourceEnvelope = Readonly<{
   schemaVersion: 'game-ir-domain-source.v1'
   taskId: string
@@ -72,6 +79,12 @@ export const GAME_IR_MODULE_SOURCE_DOCUMENTS: Readonly<
     'docs/TECHNICAL_DESIGN.md',
   ] as const),
 })
+
+const GAME_IR_DOMAIN_ID_SET = new Set<string>(GAME_IR_DOMAIN_IDS)
+
+export function isGameIrDomainId(value: unknown): value is GameIrDomainId {
+  return typeof value === 'string' && GAME_IR_DOMAIN_ID_SET.has(value)
+}
 
 export function canonicalGameIrModuleSourceDocuments(
   moduleId: GameIrModuleId,
@@ -324,8 +337,7 @@ export function buildGameIrDomainSourceEnvelope(
 ): GameIrDomainSourceEnvelope {
   validateSourceInputKeys(input)
   const moduleId = input.moduleId
-  if (!GAME_IR_CANONICAL_MODULE_IDS.includes(moduleId as GameIrModuleId))
-    fail('moduleId must be canonical')
+  if (!isGameIrDomainId(moduleId)) fail('moduleId must be an isolated domain')
   const request = parseGameIrCompileRequest(input.request)
   const fullIndex = normalizeSectionIndex(input.sectionIndex)
   if (fullIndex.length === 0) fail('sectionIndex must not be empty')
@@ -402,9 +414,9 @@ export function validateGameIrDomainSourceEnvelope(
   if (taskId !== request.taskId)
     fail('source envelope taskId does not match compile request')
   const rawModuleId = value.moduleId
-  if (!GAME_IR_CANONICAL_MODULE_IDS.includes(rawModuleId as GameIrModuleId))
+  if (!isGameIrDomainId(rawModuleId))
     fail('source envelope moduleId is invalid')
-  const moduleId = rawModuleId as GameIrDomainId
+  const moduleId = rawModuleId
   const authoritySectionIndex = normalizeSectionIndex(
     value.authoritySectionIndex,
     true,

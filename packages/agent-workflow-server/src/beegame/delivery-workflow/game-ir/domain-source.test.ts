@@ -14,9 +14,11 @@ import {
 } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
 import {
+  GAME_IR_DOMAIN_IDS,
   GAME_IR_MODULE_SOURCE_DOCUMENTS,
   buildGameIrDomainSourceEnvelope,
   canonicalGameIrModuleSourceDocuments,
+  isGameIrDomainId,
   validateGameIrDomainSourceEnvelope,
 } from './domain-source'
 import { digestGameIrValue } from './model'
@@ -101,6 +103,55 @@ function exactBalanceBytes(): Record<string, string> {
 }
 
 describe('Game IR domain source closure', () => {
+  test('accepts only the four isolated domain IDs at the envelope boundary', () => {
+    expect(GAME_IR_DOMAIN_IDS).toEqual([
+      'gameplay',
+      'balance',
+      'world-scene',
+      'presentation',
+    ])
+    for (const moduleId of GAME_IR_DOMAIN_IDS)
+      expect(isGameIrDomainId(moduleId)).toBe(true)
+    const gameplay = buildGameIrDomainSourceEnvelope({
+      moduleId: 'gameplay',
+      request: request(),
+      sectionIndex,
+      sectionBytes: exactGameplayBytes(),
+    })
+    const sourceBytes = (documents: readonly FoundationDocumentPath[]) =>
+      Object.fromEntries(
+        sectionIndex
+          .filter(section => documents.includes(section.documentPath))
+          .map(section => [
+            `${section.documentPath}#${section.sectionId}`,
+            sectionBytes[section.documentPath]!,
+          ]),
+      )
+    for (const moduleId of [
+      'core',
+      'resource-realization',
+      'implementation-verification',
+    ]) {
+      expect(isGameIrDomainId(moduleId)).toBe(false)
+      expect(() =>
+        buildGameIrDomainSourceEnvelope({
+          moduleId,
+          request: request(),
+          sectionIndex,
+          sectionBytes: sourceBytes(
+            GAME_IR_MODULE_SOURCE_DOCUMENTS[moduleId as GameIrModuleId]!,
+          ),
+        } as never),
+      ).toThrow(/moduleId|domain/i)
+      expect(() =>
+        validateGameIrDomainSourceEnvelope({
+          ...gameplay,
+          moduleId,
+        } as never),
+      ).toThrow(/moduleId|domain/i)
+    }
+  })
+
   test('owns the exact canonical source documents for every module', () => {
     const expected: Record<GameIrModuleId, readonly FoundationDocumentPath[]> =
       {

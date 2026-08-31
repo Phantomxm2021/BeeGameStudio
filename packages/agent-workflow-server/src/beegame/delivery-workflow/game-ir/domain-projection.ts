@@ -12,6 +12,7 @@ import {
   type GameIrSemanticFailureReasonCode,
 } from './semantic-admission'
 import {
+  isGameIrDomainId,
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainId,
   type GameIrDomainSourceEnvelope,
@@ -328,9 +329,11 @@ export function admitGameIrMechanicalProjectionReceipt(
     fail('mechanical receipt schemaVersion is invalid')
   const taskId = text(raw.taskId, 'mechanical receipt taskId')
   const rawModuleId = raw.moduleId
+  if (!isGameIrDomainId(rawModuleId))
+    fail('mechanical receipt moduleId is invalid')
   if (rawModuleId !== validatedSource.moduleId)
     fail('mechanical receipt moduleId does not match source')
-  const moduleId = rawModuleId as GameIrDomainId
+  const moduleId = rawModuleId
   if (taskId !== validatedSource.taskId)
     fail('mechanical receipt taskId does not match source')
   const foundationRevision = text(
