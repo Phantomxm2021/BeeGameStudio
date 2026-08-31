@@ -43,6 +43,8 @@ The following rules are mandatory:
   evidence count is a business admission limit.
 - There is no fallback, compatibility reader, partial publication, dual write,
   caller-built target map or caller-supplied complete candidate.
+- Publication accepts replayable Phase 7 authority, never a caller candidate or
+  detached per-module admission array.
 
 ## 3. Correct canonical module set
 
@@ -260,11 +262,36 @@ Section Index for all six modules and calls the existing Core candidate parser
 once across the entire module set. The candidate is canonical, deeply frozen
 and byte/digest deterministic.
 
-Phase 7 adds an isolated publication integration test that passes the
-recomputed candidate and external Foundation authority to the existing
-`prepareGameIrPublication` and `commitGameIrPublication`. Publication remains
-unreachable from production routing. Recovery must rebuild from the same
-external Phase 7 authority; committed bytes and journals never self-attest.
+The pre-production publication authority currently accepts a caller candidate
+and a second array of generic semantic-admission results. That route predates
+the real Phase 4-7 replaying authorities and would become a parallel admission
+track if retained. Phase 7 deletes it rather than adapting it.
+
+The sole publication authority becomes:
+
+```ts
+type GameIrPublicationAuthority = Readonly<{
+  workspacePath: string
+  publicationId: string
+  phase7Authority: ImplementationVerificationAssemblyAuthority
+}>
+```
+
+`prepareGameIrPublication`, `commitGameIrPublication`, validation and recovery
+all replay `assembleImplementationVerificationClosure(phase7Authority)` and
+derive the compile request, Section Index, candidate and module fidelity
+evidence internally. No caller-supplied `candidate`, `compileRequest`,
+`sectionIndex` or `admissions` field remains.
+
+The old generic `semantic-admission.ts` exists only to serve that detached
+publication route. Phase 7 deletes the generic packet/result admission API.
+Neutral diagnostic reason codes and evidence-pointer parsing still used by
+domain projection move once into `semantic-fidelity.ts`; no alias or forwarding
+wrapper remains.
+
+Publication remains unreachable from production routing. Recovery rebuilds
+from the same external Phase 7 authority; committed bytes and journals never
+self-attest.
 
 ## 9. Checklist boundary
 
@@ -285,7 +312,8 @@ New production files remain inside the isolated Game IR directory:
 - `implementation-verification-assembler.ts`.
 
 Existing edits are limited to domain-neutral Game IR contracts/source IDs,
-candidate/publication canonical module coverage and isolated tests/helpers.
+candidate/publication canonical module coverage, removal of the obsolete
+generic semantic-admission route and isolated tests/helpers.
 Foundation Reviewer, Revision, controller, state, recovery, resource workflow,
 Checklist implementation, Manifest, Content, UI and production routing are
 protected.
@@ -303,6 +331,8 @@ Acceptance requires:
 - exact source bytes, owner claims, identity and validator coverage;
 - complete six-module candidate parsing and deterministic publication/recovery
   integration;
+- deletion of caller candidate/admissions publication and the unused generic
+  semantic-admission production route;
 - Foundation byte/state parity and protected-path identity;
 - AST isolation proving no production caller or protected import;
 - full Game IR and Foundation gates, root/server typecheck, Biome and
