@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）与 Phase 5（World + Presentation）均已完成 implementation plan、independent final review 与 root verification，并 accepted；Phase 6–9 pending。完整 candidate assembly/publication、production routing/persistence 与 Chrome acceptance 仍不可用
+状态：设计已确认；Phase 3 Core、Phase 4（Gameplay + Balance）、Phase 5（World + Presentation）与 Phase 6（Resource Realization）均已完成 implementation plan、independent final review 与 root verification，并 accepted；Phase 7–9 pending。完整 candidate assembly/publication、production routing/persistence 与 Chrome acceptance 仍不可用
 
 日期：2026-08-30
 
@@ -438,10 +438,11 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
   dispatch 和五个 placeholder module；protected 21-file parity 与 full
   server unreachable scan 保持通过。
 - Complete seven-module candidate assembly/publication、production
-  routing/persistence、Chrome acceptance remain unavailable；Phase 6–9 remain
+  routing/persistence、Chrome acceptance remain unavailable；Phase 7–9 remain
   unstarted。Phase 5 的 World/Presentation 实现、双 profile、Foundation
   parity、AST isolation、Task 11、whole-branch independent review 与 root
-  verification 已全部完成并 accepted。
+  verification 已全部完成并 accepted；Phase 6 Resource Realization 也已
+  完成并 accepted。Phase 7–9 仍未开始。
 
 ### Phase 5：World + Presentation（已 accepted）
 
@@ -456,11 +457,29 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
   root verification；本阶段仍未接入 production routing、publication、
   consumer 或 Chrome。
 
-### Phase 6：Resource Realization（未开始）
+### Phase 6：Resource Realization（已 implemented and accepted）
 
-- 落地 logical requirement、variant、delivery artifacts 与 runtime binding；
-- 支持一资源多文件；
-- 验证技术约束和 budget。
+- Resource Realization manifest/schema 是 logical requirement、variant、delivery
+  artifact、runtime binding、resource-plan projection、共享资源词汇、技术约束
+  与 budget 的唯一 authority；不引入第二套 schema 或兼容 admission。
+- 唯一 replaying assembler 重建并绑定完整 Phase 5 closure，派生 exact
+  Presentation requirements 与 resource-plan/Curator-policy projection，再由
+  Phase 6 fidelity admission 重放 receipt、source bytes、profiles、delivery
+  target 与所有 closure invariants。
+- prior schema closure 要求 Phase 5 priors
+  `gameplay → balance → world-scene → presentation` exactly once、exact order、无
+  missing/extra；每个 prior 重新通过既有 domain parser，并使用排除自身的只读
+  cross-domain target map，同时保留 Core 的全局 binding、cycle 与 disjointness
+  admission。
+- 已覆盖 semantic 与 Presentation profiles、conditional predicate、multi-file
+  delivery、expanded graph、重复 assembly byte/digest determinism 与 frozen
+  closure；Phase 6 production routing、publication、consumer migration 与
+  Chrome 仍不可达。
+- 验证证据：Game IR `435/435`，Foundation `263/263`；root 与 server
+  `typecheck`、Biome、`git diff --check` 均通过；Sol final audit 为
+  `0 Critical / 0 Important / 0 Minor`。关键 commits：
+  `8407707bf`、`fba39debb`、`d78c33147`、`57ed546ab`、`42d9f8fdc`、
+  `a440659d5`、`818051606`。
 
 ### Phase 7：Implementation + Verification（未开始）
 
@@ -485,7 +504,7 @@ Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority
 
 相同文档在 Game IR enabled/disabled 下必须产生完全相同的 Stage 3 tasks、Issue Registry、Stage 4 Patch packets、Targeted Recheck 和 Foundation READY receipt。
 
-Core Phase 已实现 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile、Foundation planning parity、Task 11 independent review、AST isolation/status gate 与最终 whole-branch/root verification 已完成并 accepted。Resource Realization、Implementation/Verification 的领域 producer 仍未实现。因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；production routing 仍不可达，不得为了 parity 伪造七个同构 placeholder candidate。Task 11 parity 测试调用真实 Phase 5 closure assembler，并在调用前后重新序列化同一 Foundation documents/state；不得只比较 receipt/compile-request，也不得使用 Task 9/10 测试 helper。完整 seven-module candidate parity 与 publication 要等 Phase 6–7 的其余领域模块落地后再开始；Phase 8–9 分别负责 consumer migration 与真实验收。
+Core Phase 已实现 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile、Foundation planning parity、Task 11 independent review、AST isolation/status gate 与最终 whole-branch/root verification 已完成并 accepted。Phase 6 Resource Realization 的唯一 schema/manifest、replaying assembler、resource-plan/profile projection、fidelity admission 与 prior schema closure 已完成并 accepted，且通过上述 Game IR、Foundation、typecheck、Biome/diff 与 Sol final evidence。Implementation/Verification 的领域 producer 仍未实现。因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；production routing 仍不可达，不得为了 parity 伪造七个同构 placeholder candidate。Task 11 parity 测试调用真实 Phase 5 closure assembler，并在调用前后重新序列化同一 Foundation documents/state；不得只比较 receipt/compile-request，也不得使用 Task 9/10 测试 helper。完整 seven-module candidate parity 与 publication 要等 Phase 7 的其余领域模块落地后再开始；Phase 8–9 分别负责 consumer migration 与真实验收。
 
 ### 11.2 架构边界
 
