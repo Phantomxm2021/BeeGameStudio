@@ -256,7 +256,26 @@ kind union.
 
 ## 7. Phase 7 fidelity and assembly
 
-The Phase 7 authority is:
+Validation packet preparation is deliberately separated from final assembly.
+The preparation authority is:
+
+```ts
+type ImplementationVerificationValidationPreparationAuthority = Readonly<{
+  phase6Authority: ResourceRealizationAssemblyAuthority
+  implementationVerification: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: ImplementationVerificationSemanticReceipt
+  }>
+}>
+```
+
+Packet preparation consumes only this authority. Result admission consumes the
+same preparation authority plus the reconstructed packet and the proposed
+result. A validation result must never participate in construction of the
+packet that it claims to validate.
+
+The final Phase 7 assembly authority adds the admitted validation result:
 
 ```ts
 type ImplementationVerificationAssemblyAuthority = Readonly<{
@@ -314,6 +333,54 @@ all replay `assembleImplementationVerificationClosure(phase7Authority)` and
 derive the compile request, Section Index, candidate and module fidelity
 evidence internally. No caller-supplied `candidate`, `compileRequest`,
 `sectionIndex` or `admissions` field remains.
+
+Published semantic evidence is a derived view of the replayed phase closures,
+not a new admission protocol. Its closed shape is:
+
+```ts
+type GameIrPublishedModuleEvidence =
+  | Readonly<{
+      phase: 'phase4'
+      moduleId: 'gameplay' | 'balance'
+      sourceDigest: string
+      mechanicalReceiptDigest: string
+      semanticReceiptDigest: string
+      projectionDigest: string
+    }>
+  | Readonly<{
+      phase: 'phase5'
+      moduleId: 'world-scene' | 'presentation'
+      sourceDigest: string
+      mechanicalReceiptDigest: string
+      semanticReceiptDigest: string
+      semanticValidationResultDigest: string
+      projectionDigest: string
+    }>
+  | Readonly<{
+      phase: 'phase6'
+      moduleId: 'resource-realization'
+      sourceDigest: string
+      mechanicalReceiptDigest: string
+      semanticReceiptDigest: string
+      semanticValidationResultDigest: string
+      projectionDigest: string
+    }>
+  | Readonly<{
+      phase: 'phase7'
+      moduleId: 'implementation-verification'
+      sourceDigest: string
+      mechanicalReceiptDigest: string
+      semanticReceiptDigest: string
+      semanticValidationResultDigest: string
+      projectionDigest: string
+    }>
+```
+
+The array contains exactly six entries in canonical module order. Every field
+is copied from the replayed authority/source and admitted module projection;
+Phase 4 has no invented validation result. Publication tests must reconstruct
+these bytes independently and reject missing, duplicated, relabelled or
+homogenized generic packet/result evidence.
 
 The old generic packet/result admission in `semantic-admission.ts` exists only
 to serve that detached publication route. Phase 7 deletes that API and its

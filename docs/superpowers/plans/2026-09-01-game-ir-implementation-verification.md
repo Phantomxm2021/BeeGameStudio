@@ -22,24 +22,23 @@
 
 ---
 
-### Task 1: Canonical six-domain contract and neutral fidelity primitives
+### Task 1: Neutral fidelity primitives without a canonical cutover
 
 **Files:**
-- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.ts`
-- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-fidelity.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-fidelity.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-projection.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-admission.ts`
+- Modify import-only consumers in Phase 5/6 and Resource producer.
 
 **Interfaces:**
-- Produces: six-value `GAME_IR_CANONICAL_MODULE_IDS`; neutral `GameIrSemanticSourceSection`, diagnostic reason-code types and `sectionEvidencePointer` exports.
-- Preserves: compile request/receipt/candidate schema versions and canonical JSON/digest rules.
+- Produces: neutral `GameIrSemanticSourceSection`, diagnostic reason-code types and `sectionEvidencePointer` exports.
+- Preserves: current canonical module set and generic publication behavior until the atomic Task 7 cutover.
 
-- [ ] Write RED tests proving `core` is rejected, the exact six IDs are code-unit sorted, and the moved fidelity primitives preserve existing bytes/errors.
-- [ ] Run the focused contracts/fidelity tests and record the expected old seven-module failure.
-- [ ] Delete `core` from the canonical IDs and move the live shared primitives without aliases or forwarding exports.
-- [ ] Update domain-projection imports only; do not delete generic semantic admission yet.
-- [ ] Run focused tests, root/server typecheck and Biome; commit `refactor: canonicalize six Game IR domains`.
+- [ ] Add characterization tests for exact source-section/evidence pointer/reason-code bytes and errors.
+- [ ] Move the definitions to semantic fidelity and update every live production/test import in the same change; generic semantic admission imports them internally but does not re-export them.
+- [ ] Prove no duplicate definitions or forwarding exports remain and all existing Game IR tests/typechecks stay green.
+- [ ] Commit `refactor: neutralize Game IR fidelity primitives`.
 
 ### Task 2: Phase 5 descriptor localization and generic admission dependency removal
 
@@ -51,7 +50,7 @@
 
 **Interfaces:**
 - Produces: Phase 5-local World/Presentation validator descriptors derived from canonical source documents, domain manifests and Phase 5 check IDs.
-- Removes: all production imports from `semantic-admission.ts` except publication, which Task 8 deletes.
+- Removes: all production imports from `semantic-admission.ts` except publication, which the atomic Task 7 cutover deletes.
 
 - [ ] Add characterization tests for Phase 5 packet bytes, manifest digests, checks and diagnostic errors.
 - [ ] Add a RED static assertion that Phase 5/6/Resource production files do not import generic semantic admission.
@@ -83,12 +82,12 @@
 - Produces: `IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST`, five node-kind/value types and `parseImplementationVerificationModule(value, {request, sections, priorModules})`.
 - Consumes: exact Phase 6 prior sequence and existing five domain parsers.
 
-- [ ] Build one complete valid fixture with one target, multiple units, scenarios, invariants and evidence requirements.
-- [ ] Write RED matrix tests for exact fields/unions, non-empty roots/paths, safe paths, canonical arrays and forbidden status/result/command fields.
-- [ ] Write RED prior-admission tests for complete/order-exact modules, cross-label and malformed same-kind values/edges.
-- [ ] Write RED graph tests for exact-once prior ownership, full prior scenario/invariant coverage, unit dependency cycles, segment-aware root/path overlap and orphan closure.
-- [ ] Write RED proof tests for same-unit, multi-evidence and integration-unit dependency closure; reject irrelevant or incomplete proof owners.
-- [ ] Implement one explicit manifest/parser using existing Core and domain parsers; no meta-schema or fixed count ceiling.
+- [ ] Write one missing-interface RED, then add the minimal compiling manifest/parser shell and make one complete valid fixture GREEN before adding negative cases.
+- [ ] Add each exact-field/union, non-empty root/path, safe-path, canonical-array and forbidden status/result/command mutation one at a time; observe an assertion-specific RED and implement the minimum GREEN.
+- [ ] Add prior-admission mutations one at a time for complete/order-exact modules, exact moduleId-to-domain-parser binding and malformed same-kind values/edges. Keep the raw full prior map for parser identity, filter external targets per domain, prove existing legal cross-domain targets/edges remain accepted, then prove Core global closure across all six modules.
+- [ ] Add graph mutations one at a time for exact-once prior ownership, full prior scenario/invariant coverage, unit dependency cycles, segment-aware root/path overlap and orphan closure.
+- [ ] Add proof mutations one at a time for same-unit, multi-evidence and integration-unit dependency closure; reject irrelevant or incomplete proof owners while the valid fixture remains GREEN.
+- [ ] Keep one explicit parser using existing Core and domain parsers; no meta-schema or fixed count ceiling.
 - [ ] Run focused tests, typecheck and Biome; commit `feat: add implementation verification schema`.
 
 ### Task 5: Producer and semantic receipt
@@ -101,9 +100,10 @@
 - Produces: service-built semantic packet, semantic receipt/diagnostic replay and a Core-admitted candidate module; never a final projection.
 - Consumes: exact source envelope, empty mechanical receipt and manifest kinds/roles.
 
-- [ ] Write RED tests for exact packet shape, allowed kinds/roles/evidence namespace and forbidden caller identity/bindings/module fields.
-- [ ] Write RED tests for direct owner claims, exact UTF-8 literals, missing/ambiguous diagnostics, hidden/accessor keys and stale packet/receipt replay.
-- [ ] Implement the minimal producer wrapper with existing domain-projection and semantic-fidelity primitives.
+- [ ] Write one missing-interface RED, add the minimal compiling producer shell, then make one valid packet/receipt replay fixture GREEN.
+- [ ] Add exact packet-shape, allowed-kind/role/evidence-namespace and forbidden caller identity/bindings/module mutations one at a time through assertion-specific RED to minimum GREEN.
+- [ ] Add direct owner claim, exact UTF-8 literal, missing/ambiguous diagnostic, hidden/accessor key and stale packet/receipt replay mutations one at a time.
+- [ ] Keep the producer wrapper minimal and reuse existing domain-projection and semantic-fidelity primitives.
 - [ ] Run producer/schema/cumulative Phase 4–6 tests; commit `feat: add implementation verification producer`.
 
 ### Task 6: Phase 7 fidelity admission
@@ -113,48 +113,48 @@
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/phase7-admission.test.ts`
 
 **Interfaces:**
-- Produces: `prepareImplementationVerificationSemanticValidationPacket(authority)` and `admitImplementationVerificationSemanticValidationResult(authority, packet, result)`.
-- Consumes: replayable Phase 6 authority and Phase 7 source/mechanical/semantic values.
+- Produces: `ImplementationVerificationValidationPreparationAuthority = {phase6Authority, implementationVerification: {source, mechanical, semantic}}`, `prepareImplementationVerificationSemanticValidationPacket(preparationAuthority)` and `admitImplementationVerificationSemanticValidationResult(preparationAuthority, packet, result)`.
+- Consumes: replayable Phase 6 authority and Phase 7 source/mechanical/semantic values; validation is never an input to its own packet construction.
 
-- [ ] Write RED tests proving Phase 6 is replayed, never accepted as a detached closure, and every prior node ID is service-derived.
-- [ ] Cover exact fixed checks: source fidelity, projection completeness, prior closure, ownership, dependency, scenario, invariant, proof closure and forbidden actual evidence.
-- [ ] Cover PASS/FAIL/AMBIGUOUS exact seams, evidence namespaces, identity/digest tampering, expanded graphs and no fixed count ceiling.
-- [ ] Implement packet reconstruction and final invariants using shared semantic-fidelity primitives; commit `feat: admit Phase 7 semantic fidelity` after focused/cumulative gates.
+- [ ] Write one missing-interface RED, add the minimal compiling admission shell, then make one valid preparation/packet/PASS fixture GREEN.
+- [ ] Add mutations one at a time proving Phase 6 is replayed, never accepted as a detached closure, every prior node ID is service-derived and validation cannot enter preparation authority; observe assertion-specific RED before minimum GREEN.
+- [ ] Add each fixed check separately: source fidelity, projection completeness, prior closure, ownership, dependency, scenario, invariant, proof closure and forbidden actual evidence.
+- [ ] Add PASS/FAIL/AMBIGUOUS seam, evidence namespace, identity/digest tampering and expanded-graph cases individually; retain no fixed count ceiling.
+- [ ] Reconstruct packets and final invariants with shared semantic-fidelity primitives; commit `feat: admit Phase 7 semantic fidelity` after focused/cumulative gates.
 
-### Task 7: Sole Phase 7 assembler and complete candidate
+### Task 7: Atomic complete-candidate and publication cutover
 
 **Files:**
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/implementation-verification-assembler.ts`
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/implementation-verification-assembler.test.ts`
-
-**Interfaces:**
-- Produces: `assembleImplementationVerificationClosure(authority): ImplementationVerificationClosure` containing replayed Phase 6 closure, Phase 7 projection, complete six-domain candidate and digests.
-- Consumes: only `ImplementationVerificationAssemblyAuthority`.
-
-- [ ] Write RED authority-shape tests rejecting caller module, prior closure, candidate, Section Index and digest fields.
-- [ ] Write RED candidate tests for exact six modules in code-unit order, non-empty modules, global ID/reference/edge/derived closure and one compile identity.
-- [ ] Implement the sole assembler: replay Phase 6, rebuild/admit Phase 7, call Core complete-candidate parser once, deep-freeze and digest.
-- [ ] Add determinism, input-mutation, full-prior coverage and expanded-profile tests; commit `feat: assemble complete Game IR candidate`.
-
-### Task 8: Authority-bound publication cutover and old-track deletion
-
-**Files:**
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/contracts.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-source.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/domain-source.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/publication.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-boundary.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/world-presentation-traversal.integration.test.ts`
 - Delete: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-admission.ts`
 - Delete: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/semantic-admission.test.ts`
 
 **Interfaces:**
+- Produces: `assembleImplementationVerificationClosure(authority): ImplementationVerificationClosure` with replayed Phase 6, Phase 7 projection, complete six-domain candidate and digests.
 - Produces: `GameIrPublicationAuthority = {workspacePath, publicationId, phase7Authority}`; existing prepare/commit/validate/recover functions replay Phase 7 internally.
-- Removes: caller `compileRequest`, `candidate`, `sectionIndex`, `admissions` and every generic semantic-admission API.
+- Produces: exact six-entry `GameIrPublishedModuleEvidence` discriminated by Phase 4/5/6/7 and derived only from replayed source/projection digests; Phase 4 contains no invented validation result.
+- Removes atomically: canonical `core`, caller `compileRequest/candidate/sectionIndex/admissions`, every generic semantic-admission API and all imports/tests for that file.
 
-- [ ] Rewrite publication fixtures around real Phase 7 authority; observe RED where old caller candidate/admissions are still accepted.
-- [ ] Add rejection tests for all deleted fields, detached candidate/result relabeling and staged/journal self-attestation.
+- [ ] Write one missing-interface RED for the assembler, add its minimal compiling shell and make one complete six-module candidate fixture GREEN before mutation cases.
+- [ ] Add authority mutations one at a time rejecting caller module, prior closure, candidate, Section Index and digest fields; add candidate mutations for exact code-unit order, non-empty modules and global ID/reference/edge/derived closure.
+- [ ] Rewrite one publication fixture around real Phase 7 authority and make its derived six-entry Phase 4/5/6/7 evidence GREEN; independently reconstruct exact evidence bytes from replayed authorities/projections.
+- [ ] Add mutations one at a time rejecting old caller fields, detached candidate/result relabeling, missing/duplicate/relabelled/generic-homogenized evidence and staged/journal self-attestation.
+- [ ] In one implementation change, delete canonical `core`, update all closed module/source maps, implement the sole assembler and call Core complete-candidate parsing once.
 - [ ] Cut publication planning to the sole assembler and derive every artifact/manifest/graph/marker byte internally.
-- [ ] Delete generic semantic admission and update AST/static gates to require zero production/test imports.
-- [ ] Run publication crash/concurrency/symlink/FIFO/recovery suite and complete Game IR tests; commit `refactor: bind Game IR publication to Phase 7 authority`.
+- [ ] Delete generic semantic admission and update stage-boundary/traversal/static gates to require zero source or test imports and no `core` module literals outside explicit rejection evidence.
+- [ ] Run assembler determinism/mutation/expanded tests, publication crash/concurrency/symlink/FIFO/recovery, complete Game IR, root/server typecheck and Biome before committing.
+- [ ] Commit the atomic green cutover as `feat: publish complete Game IR from Phase 7 authority`.
 
-### Task 9: Profiles, Foundation parity and phase-boundary audit
+### Task 8: Profiles, Foundation parity and phase-boundary audit
 
 **Files:**
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/implementation-verification-profiles.integration.test.ts`
@@ -170,7 +170,7 @@
 - [ ] Update AST boundaries for six canonical domains, no `core`, no generic semantic admission, exactly one Phase 7 assembler/publication path and no protected imports/callers.
 - [ ] Run the complete Game IR suite, Foundation 21-file gate, root/server typecheck, Biome, `git diff --check` and protected-path diff; commit `test: close Phase 7 isolation and parity`.
 
-### Task 10: Whole-phase deletion audit and acceptance status
+### Task 9: Whole-phase deletion audit and acceptance status
 
 **Files:**
 - Modify only if audit finds a real defect: files in the Phase 7 Game IR boundary.
