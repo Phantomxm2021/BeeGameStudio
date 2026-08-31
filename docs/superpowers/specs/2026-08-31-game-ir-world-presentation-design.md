@@ -265,6 +265,12 @@ field and the four complete module projections. These unkeyed digests detect
 stale or mutated values but confer no independent trust; downstream trust
 comes from authority replay. The closure is not a publication receipt.
 
+At the packet boundary, result admission can reject stale or mismatched
+self-consistency, but it cannot prevent an actor who can recompute the
+complete unkeyed authority and packet digests from producing a self-consistent
+detached packet. Trust remains with service-owned construction and upstream
+authority replay.
+
 The closure assembler is the sole Phase 5 writer of
 `WorldSceneModuleProjection`, `PresentationModuleProjection`, and
 `WorldPresentationClosure`. Domain producers may expose only the existing

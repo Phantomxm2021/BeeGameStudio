@@ -576,7 +576,7 @@ Reject boolean/digest-only PASS, partial/extra/duplicate/reordered check or targ
 
 - [ ] **Step 3: Implement service-owned packet/result admission**
 
-Do not accept `checkIds`, `targetManifestDigest`, detached module digests, authority-index overrides, or maps from callers. Normalize the complete eight-document authority index with Core's `digestSectionIndex` for the compile-request context and `digestGameIrValue` for packet identity; require every selected ref to be an exact index member. Derive required targets from `/id`, every value leaf, reference, and edge; derive exact owner/section evidence from selected bindings/source; freeze every nested result. External projections retain their own source/receipt/validation digests and are Core-replayed independently; do not compare them to consumer identities. Task 8 supplies the upstream replay authority.
+Do not accept `checkIds`, `targetManifestDigest`, detached module digests, authority-index overrides, or maps from callers. Normalize the complete eight-document authority index with Core's `digestSectionIndex` for the compile-request context and `digestGameIrValue` for packet identity; filter that index through the validator manifest's canonical document paths and require the packet's selected refs to equal the resulting closure exactly, including order and every ref field. Derive required targets from `/id`, every value leaf, reference, and edge; derive exact owner/section evidence from selected bindings/source; freeze every nested result. External projections retain their own source/receipt/validation digests and are Core-replayed independently; do not compare them to consumer identities. Task 8 supplies the upstream replay authority.
 
 - [ ] **Step 4: Verify and commit**
 
