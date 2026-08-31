@@ -71,7 +71,6 @@ changed in this fix round.
   baseline and append-inserted receipts and compares their complete claim
   identities, including exact byte ranges. Because the
   service contract makes Phase 5 mechanical ownership unconditionally empty,
-  service contract makes Phase 5 mechanical ownership unconditionally empty,
   a synthetic mechanical/semantic overlap cannot reach disjointness; the test
   proves the earlier policy guard on the shared replay path instead.
 - No claim parser, UTF-8 decoder, binding loop, receipt digest algorithm,
