@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE (fix round 2/5)
+DONE (fix round 3/5)
 
 ## Scope
 
@@ -38,7 +38,21 @@ reordered/malformed/member-mutated authority indexes, selected-closure
 membership, and recomputed-digest Core-invalid external projections. GREEN
 now exercises real independent Gameplay and World source/receipt identities;
 external projection digests remain self-authenticating fields and are not
-compared with consumer packet identities.
+compared with consumer packet identities. The round-2 evidence overstated the
+multi-edge and selected-closure guarantees: its legal graph had only one edge
+and closure checking was membership-only. Round 3 records the behavioral
+correction below rather than counting that overclaim as evidence.
+
+Round 3 added an assertion-level RED where a valid same-document extra
+selected section was removed, its evidence removed, and the packet digest
+recomputed; the old admission accepted it. The focused test then turned GREEN
+after exact manifest-derived closure reconstruction. It also adds a true legal
+two-reference/two-edge baseline, independent reference and edge reorder
+guards, builder caller-field guards, inner-digest/relabel coverage, distinct
+extra-authority stale-digest coverage, and recursive freeze/determinism
+assertions. No claim is made that an unkeyed digest prevents an actor with
+authority to recompute the complete packet from making a self-consistent
+detached packet; that remains outside this service-owned boundary.
 
 ## Implementation
 
@@ -51,9 +65,10 @@ compared with consumer packet identities.
   full authority index.
 - Added the complete deep-frozen eight-document authority index to the packet;
   result admission strictly normalizes it, recomputes its
-  `digestGameIrValue` digest, and requires every selected source ref to be an
-  exact member. Synthetic Core parse requests use `digestSectionIndex` for the
-  full index.
+  `digestGameIrValue` digest, filters it through the Core validator manifest's
+  canonical document paths, and requires packet selected refs to equal that
+  derived closure exactly in count, order, and every field. Synthetic Core
+  parse requests use `digestSectionIndex` for the full index.
 - Kept external projection source/receipt/validation digests format-checked
   and independently replayed, without comparing them to consumer identities.
 - Kept Task5-specific logic limited to packet identity, full external
@@ -63,18 +78,17 @@ compared with consumer packet identities.
 
 ## Verification
 
-- Focused Task5: `22 pass, 0 fail` (100 assertions).
-- Focused Task5 + Task2 regression: `31 pass, 0 fail` (147 assertions).
-- Full Game IR suite: `258 pass, 0 fail` (2 snapshots, 1331 assertions).
+- Focused Task5: `26 pass, 0 fail` (150 assertions).
+- Focused Task5 + Task2 regression (`semantic-admission.test.ts`): `45 pass, 0 fail` (266 assertions).
+- Full Game IR suite: `262 pass, 0 fail` (2 snapshots, 1381 assertions).
 - Server typecheck: `tsc --noEmit` passed.
 - Biome check passed for both Task5 files.
 - `git diff --check` passed.
 
 ## Commit
 
-Round-2 commits are split into documentation, implementation/tests, and this
-report evidence as requested; final hashes are reported after fresh full
-verification.
+Round-3 commits are split into documentation, implementation/tests, and this
+report evidence; final hashes are reported after fresh full verification.
 
 ## Self-review
 
