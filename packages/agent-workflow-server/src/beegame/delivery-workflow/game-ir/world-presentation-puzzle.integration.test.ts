@@ -1322,17 +1322,15 @@ const closure = (overrides: Partial<Context['modules']> = {}) =>
 const assembleValidBaseline = (): void => {
   assembleWorldPresentationClosure(makeAuthority().authority)
 }
-const expectedError = (
-  input: Parameters<typeof assembleWorldPresentationClosure>[0],
-  message: string,
-) => {
+const expectedError = (operation: () => unknown, message: string) => {
   let thrown: unknown
   try {
-    assembleWorldPresentationClosure(input)
+    operation()
   } catch (error) {
     thrown = error
   }
-  expect(thrown).toBeInstanceOf(Error)
+  if (!(thrown instanceof Error))
+    throw new Error('expected operation to throw an Error')
   expect((thrown as Error).message).toBe(message)
 }
 const assertOwnerBindings = (
@@ -1757,9 +1755,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     )
     assembleValidBaseline()
     const missingParentProfile = makeAuthority({ world: missingParent })
-    expect(() =>
-      assembleWorldPresentationClosure(missingParentProfile.authority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(missingParentProfile.authority),
       'invalid World/Scene module: scene world.scene-lattice must have exactly one root node',
     )
     const wrongTarget = presentationNodes.map(node =>
@@ -1778,9 +1775,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     const wrongTargetProfile = makeAuthority({
       presentation: sortedMutation(wrongTarget),
     })
-    expect(() =>
-      assembleWorldPresentationClosure(wrongTargetProfile.authority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(wrongTargetProfile.authority),
       'invalid Presentation module: node presentation.vfx-solve role at has wrong target kind',
     )
     const invalidRoute = worldNodes.map(node =>
@@ -1793,9 +1789,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     )
     assembleValidBaseline()
     const invalidRouteProfile = makeAuthority({ world: invalidRoute })
-    expect(() =>
-      assembleWorldPresentationClosure(invalidRouteProfile.authority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(invalidRouteProfile.authority),
       'invalid World/Scene module: route world.route-east waypoint index is out of range',
     )
     const forbiddenResource = presentationNodes.map(node =>
@@ -1813,9 +1808,9 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     const forbiddenResourceProfile = makeAuthority({
       presentation: sortedMutation(forbiddenResource),
     })
-    expect(() =>
-      assembleWorldPresentationClosure(forbiddenResourceProfile.authority),
-    ).toThrow(
+    expectedError(
+      () =>
+        assembleWorldPresentationClosure(forbiddenResourceProfile.authority),
       'invalid Presentation module: node presentation.feedback-rune edge targets unknown node resource.sound',
     )
   })
@@ -1838,9 +1833,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     )
     assembleValidBaseline()
     const badTransformProfile = makeAuthority({ world: badTransform })
-    expect(() =>
-      assembleWorldPresentationClosure(badTransformProfile.authority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(badTransformProfile.authority),
       'invalid World/Scene module: node world.glyph-east transform.scale must be positive',
     )
     const badScreen = presentationNodes.map(node =>
@@ -1850,9 +1844,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     )
     assembleValidBaseline()
     const badScreenProfile = makeAuthority({ presentation: badScreen })
-    expect(() =>
-      assembleWorldPresentationClosure(badScreenProfile.authority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(badScreenProfile.authority),
       'invalid Presentation module: node presentation.screen-board modal must be boolean',
     )
     const badTrigger = presentationNodes.map(node =>
@@ -1862,9 +1855,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     )
     assembleValidBaseline()
     const badTriggerProfile = makeAuthority({ presentation: badTrigger })
-    expect(() =>
-      assembleWorldPresentationClosure(badTriggerProfile.authority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(badTriggerProfile.authority),
       'invalid Presentation module: node presentation.transition-solve trigger kind is invalid',
     )
     const badRequirement = presentationNodes.map(node =>
@@ -1888,9 +1880,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     const badRequirementProfile = makeAuthority({
       presentation: badRequirement,
     })
-    expect(() =>
-      assembleWorldPresentationClosure(badRequirementProfile.authority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(badRequirementProfile.authority),
       'invalid Presentation module: node presentation.clip-solve requirement policy does not match',
     )
     const context = makeContext()
@@ -1898,7 +1889,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       ...context,
       sourceBytes: `${context.sourceBytes}tamper\n`,
     }
-    expect(() => source('world-scene', changed)).toThrow(
+    expectedError(
+      () => source('world-scene', changed),
       'invalid Game IR domain source: Markdown bytes do not match Section Index digest for docs/GDD.md#puzzle-0',
     )
   })
@@ -1916,7 +1908,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
           }
         : node,
     )
-    expect(() => closure({ world: detached })).toThrow(
+    expectedError(
+      () => closure({ world: detached }),
       'invalid Game IR Phase 5 admission: nodes[8] has a relationship type outside the semantic packet',
     )
     const changedGameplay = makeAuthority({
@@ -1932,9 +1925,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       presentation: makeAuthority().authority.presentation,
     }
     assembleValidBaseline()
-    expect(() =>
-      assembleWorldPresentationClosure(mixedChangedUpstream),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(mixedChangedUpstream),
       'invalid Game IR World/Presentation assembly: all modules must bind one task, revision, READY receipt, compile request, and authority index',
     )
     const context = makeContext()
@@ -1965,15 +1957,15 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       ...projection.gameplay,
       projectionDigest: 'e'.repeat(64),
     }
-    expect(() =>
-      buildPhase5SemanticValidationPacket({
-        source: worldSource,
-        mechanical: mechanicalReceipt,
-        semantic,
-        module,
-        externalProjections: { gameplay: staleExternal },
-      }),
-    ).toThrow(
+    expectedError(
+      () =>
+        buildPhase5SemanticValidationPacket({
+          source: worldSource,
+          mechanical: mechanicalReceipt,
+          semantic,
+          module,
+          externalProjections: { gameplay: staleExternal },
+        }),
       'invalid Game IR Phase 5 admission: external projection digest is stale or invalid',
     )
   })
@@ -1997,7 +1989,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       ...base,
       worldScene: { ...base.worldScene, mechanical: mechanicalNodes },
     }
-    expect(() => assembleWorldPresentationClosure(mechanicalAuthority)).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(mechanicalAuthority),
       'invalid Game IR domain projection: isolated domain mechanical nodes and verifiedClaims must be empty',
     )
     const mechanicalClaims = redigestMechanical(base.worldScene.mechanical, {
@@ -2016,9 +2009,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         mechanical: mechanicalClaims,
       },
     }
-    expect(() =>
-      assembleWorldPresentationClosure(mechanicalClaimsAuthority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(mechanicalClaimsAuthority),
       'invalid Game IR domain projection: isolated domain mechanical nodes and verifiedClaims must be empty',
     )
     const mechanicalTargets = redigestMechanical(base.worldScene.mechanical, {
@@ -2031,9 +2023,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         mechanical: mechanicalTargets,
       },
     }
-    expect(() =>
-      assembleWorldPresentationClosure(mechanicalTargetsAuthority),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(mechanicalTargetsAuthority),
       'invalid Game IR domain projection: ownedTargets must exactly account for every mechanical node target',
     )
     const rangeClaims = base.worldScene.semantic.sourceClaims.map(
@@ -2047,7 +2038,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       ...base,
       worldScene: { ...base.worldScene, semantic: rangeSemantic },
     }
-    expect(() => assembleWorldPresentationClosure(rangeAuthority)).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(rangeAuthority),
       'invalid Game IR Phase 5 admission: sourceClaims[0].sourcePointer must contain a non-empty byte range',
     )
     const literalClaims = base.presentation.semantic.sourceClaims.map(
@@ -2061,7 +2053,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       ...base,
       presentation: { ...base.presentation, semantic: literalSemantic },
     }
-    expect(() => assembleWorldPresentationClosure(literalAuthority)).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(literalAuthority),
       'invalid Game IR Phase 5 admission: source literal does not match the semantic record',
     )
     const gameplayIdentity = {
@@ -2077,7 +2070,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         },
       },
     }
-    expect(() => assembleWorldPresentationClosure(gameplayIdentity)).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(gameplayIdentity),
       'invalid Game IR domain source: source envelope taskId does not match compile request',
     )
     const presentationIdentity = {
@@ -2087,9 +2081,8 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         source: { ...base.presentation.source, taskId: 'other-puzzle-task' },
       },
     }
-    expect(() =>
-      assembleWorldPresentationClosure(presentationIdentity),
-    ).toThrow(
+    expectedError(
+      () => assembleWorldPresentationClosure(presentationIdentity),
       'invalid Game IR domain source: source envelope taskId does not match compile request',
     )
   })

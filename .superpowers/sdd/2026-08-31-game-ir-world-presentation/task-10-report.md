@@ -30,11 +30,14 @@ authority, validation, replay, and closure APIs.
 
 ## Verification
 
-- Focused integration test: 8 pass, 0 fail, 1,015 assertions.
+- Focused Task10 integration test: 8 pass, 0 fail, 1,016 assertions.
+- Focused Task9+Task10 integration tests: 11 pass, 0 fail, 2,233 assertions.
 - Full Game IR suite: 340 pass, 0 fail, 4,003 assertions (2 snapshots).
 - Root and package typechecks: passed.
 - Biome check over `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir`: passed.
 - `git diff --check`: passed.
+- Task10 negative assertions use the exact-message helper; no `toThrow(`
+  matcher remains in the Task10 integration test.
 
 ## Assertion-level RED evidence
 
