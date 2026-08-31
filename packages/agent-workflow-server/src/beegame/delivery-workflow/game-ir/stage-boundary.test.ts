@@ -537,13 +537,14 @@ function policyViolations(
     | 'contracts'
     | 'publication'
     | 'semantic'
+    | 'phase6'
     | 'other',
 ): string[] {
   const violations = new Set<string>()
   for (const entry of facts.imports)
     if (
       forbiddenPaths.test(entry.path) ||
-      forbiddenClosurePath.test(entry.path) ||
+      (forbiddenClosurePath.test(entry.path) && policy !== 'phase6') ||
       ((policy === 'phase4' || policy === 'phase5' || policy === 'other') &&
         forbiddenPhase5Paths.test(entry.path))
     )
@@ -737,6 +738,7 @@ type GameIrProductionRole =
   | 'contracts'
   | 'publication'
   | 'semantic'
+  | 'phase6'
   | 'other'
 
 function gameIrProductionRole(filename: string): GameIrProductionRole {
@@ -744,6 +746,7 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'publication.ts') return 'publication'
   if (filename === 'semantic-admission.ts') return 'semantic'
   if (filename === 'resource-realization-schema.ts') return 'semantic'
+  if (filename === 'resource-realization-producer.ts') return 'phase6'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -1555,6 +1558,7 @@ describe('Game IR stage boundary', () => {
       'presentation-producer.ts',
       'presentation-schema.ts',
       'publication.ts',
+      'resource-realization-producer.ts',
       'resource-realization-schema.ts',
       'semantic-admission.ts',
       'semantic-fidelity.ts',
@@ -1575,7 +1579,8 @@ describe('Game IR stage boundary', () => {
         role === 'other' ||
         role === 'contracts' ||
         role === 'publication' ||
-        role === 'semantic'
+        role === 'semantic' ||
+        role === 'phase6'
       )
         expect(
           policyViolations(collectAstFacts(source, filename), role),
