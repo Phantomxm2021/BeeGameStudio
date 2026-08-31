@@ -123,8 +123,31 @@ $ git diff --check
 exit 0
 ```
 
+Fix commit: `bbb74fb1 test: close Phase 5 review round two`.
+
 ### Fix commits
 
 - `9f3ce636 fix: enforce Phase 5 packet node policy`
 - `69580cd6 docs: update Phase 5 admission commit`
 - `b53b5323 fix: close Phase 5 admission review gaps`
+
+## Reviewer fix round 2
+
+- Added an independent valid-baseline-first string literal mismatch test. It
+  reissues the receipt digest while preserving the exact byte range and all
+  other fields, then hits the semantic string-literal guard.
+- Split worker DTO coverage into two independent mutations: one adds only
+  `producerMode`, and one adds only `bindings`; both are rejected by strict
+  exact-key validation.
+
+```text
+$ bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/phase5-admission.test.ts
+13 pass
+0 fail
+39 expect() calls
+
+$ (cd packages/agent-workflow-server && bun run typecheck)
+$ ./node_modules/.bin/biome check [the four task files]
+$ git diff --check
+exit 0
+```
