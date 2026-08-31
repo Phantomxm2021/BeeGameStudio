@@ -740,6 +740,7 @@ function parseGameIrModuleCandidateInternal(
 type ModuleSet = Readonly<{
   modules: readonly GameIrModuleCandidate[]
   validateRelations?: boolean
+  rawExternalModuleIds?: ReadonlySet<string>
 }>
 
 function moduleNodeKey(moduleId: string, nodeId: string): string {
@@ -754,7 +755,11 @@ function dependencyEndpointKey(
   return `${moduleId}\0${nodeId}\0${pointer}`
 }
 
-function validateModuleSet({ modules, validateRelations }: ModuleSet): void {
+function validateModuleSet({
+  modules,
+  validateRelations,
+  rawExternalModuleIds,
+}: ModuleSet): void {
   const modulesById = new Map<string, GameIrModuleCandidate>()
   const nodesByKey = new Map<string, GameIrNode>()
   const nodesById = new Map<string, GameIrNode>()
@@ -817,6 +822,13 @@ function validateModuleSet({ modules, validateRelations }: ModuleSet): void {
       if (input.kind === 'external') {
         if (input.moduleId === ownerModuleId && input.nodeId === ownerNode.id)
           fail(`node ${ownerNode.id} external input may not target itself`)
+        if (
+          rawExternalModuleIds?.has(ownerModuleId) &&
+          !rawExternalModuleIds.has(input.moduleId)
+        )
+          fail(
+            `raw prior module ${ownerModuleId} may not depend on current module ${input.moduleId}`,
+          )
         targetModuleId = input.moduleId
         targetNodeId = input.nodeId
       }
@@ -877,6 +889,9 @@ export function parseGameIrModuleCandidate(
   validateModuleSet({
     modules: [local, ...externalModules],
     validateRelations: false,
+    rawExternalModuleIds: new Set(
+      externalModules.map(module => module.moduleId),
+    ),
   })
   return deepFreeze(local)
 }

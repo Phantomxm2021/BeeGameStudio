@@ -747,6 +747,43 @@ describe('Game IR core candidate and source authority', () => {
     ).toThrow(/cycle/i)
   })
 
+  test('rejects a raw prior module that depends backward on the current local module', () => {
+    const currentNode = candidate().modules[0]!.nodes[0]!
+    const rawPriorNode = {
+      ...currentNode,
+      id: 'balance-derived',
+      producerMode: 'derived' as const,
+      value: { score: 4 },
+      bindings: {
+        '/id': currentNode.bindings['/id']!,
+        '/value/score': {
+          kind: 'derived' as const,
+          derivationRuleId: 'balance-from-gameplay',
+          inputs: [
+            {
+              kind: 'external' as const,
+              moduleId: 'gameplay' as const,
+              nodeId: 'player',
+              pointer: '/value/health',
+              targetDigest: digestGameIrValue(3),
+            },
+          ],
+        },
+      },
+    }
+    expect(() =>
+      parseGameIrModuleCandidate(currentNodeModule(), {
+        request: request(),
+        sections,
+        externalModules: [{ moduleId: 'balance', nodes: [rawPriorNode] }],
+      }),
+    ).toThrow(/prior|direction|external|dependency/i)
+
+    function currentNodeModule() {
+      return candidate().modules[0]!
+    }
+  })
+
   test('rejects isolated modules with stale source bindings', () => {
     const rawGameplayModule = candidate().modules[0]!
     const node = rawGameplayModule.nodes[0]!
