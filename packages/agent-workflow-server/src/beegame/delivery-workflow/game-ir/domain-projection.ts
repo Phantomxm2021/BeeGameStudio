@@ -354,9 +354,7 @@ export function admitGameIrMechanicalProjectionReceipt(
   const rawNodes = strictArray(raw.nodes, 'nodes')
   const rawClaims = strictArray(raw.verifiedClaims, 'verifiedClaims')
   if (rawNodes.length !== 0 || rawClaims.length !== 0)
-    fail(
-      'Gameplay and Balance mechanical nodes and verifiedClaims must be empty in Phase 4',
-    )
+    fail('isolated domain mechanical nodes and verifiedClaims must be empty')
   const nodes = Object.freeze([]) as readonly GameIrNode[]
   const verifiedClaims = Object.freeze([]) as readonly VerifiedClaim[]
   const ownedTargets = normalizeTargets(raw.ownedTargets, 'ownedTargets')

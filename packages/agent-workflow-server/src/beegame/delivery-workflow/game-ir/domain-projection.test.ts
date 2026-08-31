@@ -57,7 +57,7 @@ function canonical(value: unknown): string {
 }
 
 function source(
-  moduleId: 'gameplay' | 'balance' = 'balance',
+  moduleId: 'gameplay' | 'balance' | 'world-scene' | 'presentation' = 'balance',
 ): GameIrDomainSourceEnvelope {
   const bytes = 'bytes'
   const sectionIndex: readonly GameIrSourceSection[] =
@@ -102,13 +102,26 @@ function source(
     moduleId,
     request,
     sectionIndex,
-    sectionBytes:
-      moduleId === 'balance'
-        ? {
-            'docs/BALANCE_DESIGN.md#section-2': bytes,
-            'docs/GDD.md#section-0': bytes,
-          }
-        : { 'docs/GDD.md#section-0': bytes },
+    sectionBytes: Object.fromEntries(
+      (moduleId === 'balance'
+        ? ['docs/BALANCE_DESIGN.md', 'docs/GDD.md']
+        : moduleId === 'gameplay'
+          ? ['docs/GDD.md']
+          : moduleId === 'world-scene'
+            ? ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']
+            : [
+                'docs/GDD.md',
+                'docs/ART_DIRECTION.md',
+                'docs/UI_UX_SPEC.md',
+                'docs/AUDIO_DESIGN.md',
+              ]
+      ).map(documentPath => {
+        const index = CANONICAL_FOUNDATION_DOCUMENTS.indexOf(
+          documentPath as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
+        )
+        return [`${documentPath}#section-${index}`, bytes]
+      }),
+    ),
   })
 }
 
@@ -181,6 +194,28 @@ describe('Game IR domain producer contracts', () => {
         }),
       }),
     ).toThrow(/mechanical.*empty|unauthorized/i)
+  })
+
+  test('accepts empty mechanical receipts for every isolated domain', () => {
+    for (const moduleId of [
+      'gameplay',
+      'balance',
+      'world-scene',
+      'presentation',
+    ] as const) {
+      const currentSource = source(moduleId)
+      const admitted = admitGameIrMechanicalProjectionReceipt({
+        source: currentSource,
+        receipt: receipt({
+          taskId: currentSource.taskId,
+          moduleId,
+          sourceDigest: currentSource.sourceDigest,
+        }),
+      })
+      expect(admitted.nodes).toEqual([])
+      expect(admitted.verifiedClaims).toEqual([])
+      expect(admitted.ownedTargets).toEqual([])
+    }
   })
 
   test('rejects legacy positional mechanical and semantic packet calls', () => {
