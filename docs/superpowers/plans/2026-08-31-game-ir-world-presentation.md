@@ -973,7 +973,7 @@ Run: `./node_modules/.bin/biome check packages/agent-workflow-server/src/beegame
 
 Run: `rg -n "^Status: Approved$|Proposed / awaiting user review|Phase 5.*未开始|Phase 5.*unstarted" docs/superpowers/specs/2026-08-31-game-ir-world-presentation-design.md docs/beegame-game-ir-stage-isolation-redesign.md`
 
-Expected: exactly one approved header, no Proposed footer, and roadmap wording distinguishes approved design from pending implementation acceptance/production reachability.
+Expected: exactly one approved header, no Proposed footer, and roadmap wording distinguishes accepted Phase 5 from pending production reachability, publication, consumers, Chrome acceptance, and Phase 6–9.
 
 Run: `git diff --check`
 
