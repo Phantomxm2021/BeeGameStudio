@@ -44,46 +44,6 @@ import { createHash } from 'node:crypto'
 const section = {
   documentPath: 'docs/ASSET_PLAN.md' as const,
   sectionId: 'section-1',
-  heading: 'Resources',
-  startLine: 1,
-  endLine: 2,
-  digest: 'a'.repeat(64),
-}
-
-function packet(): ResourceRealizationSemanticProjectionPacket {
-  const relationshipTypes = [
-    ...new Set(
-      Object.values(RESOURCE_REALIZATION_DOMAIN_MANIFEST).flatMap(entry =>
-        Object.keys(entry.relationships),
-      ),
-    ),
-  ].sort()
-  const body = {
-    schemaVersion:
-      'game-ir-resource-realization-semantic-projection-packet.v1' as const,
-    taskId: 'task',
-    moduleId: 'resource-realization' as const,
-    foundationRevision: 'foundation',
-    sourceDigest: 'a'.repeat(64),
-    mechanicalReceiptDigest: 'b'.repeat(64),
-    presentationRequirements: [],
-    presentationRequirementsDigest: digestGameIrValue([]),
-    allowedPriorNodeTargets: [],
-    sourceSections: [section],
-    allowedNodeKinds: Object.keys(RESOURCE_REALIZATION_DOMAIN_MANIFEST).sort(),
-    allowedRelationshipTypes: relationshipTypes,
-    forbiddenPresentationRequirementIds: [],
-    forbiddenTargets: [],
-  }
-  return Object.freeze({ ...body, packetDigest: digestGameIrValue(body) })
-}
-
-function withPacketBody(
-  changes: Partial<ResourceRealizationSemanticProjectionPacket>,
-): ResourceRealizationSemanticProjectionPacket {
-  const base = packet()
-  const { packetDigest: _packetDigest, ...body } = { ...base, ...changes }
-  return Object.freeze({ ...body, packetDigest: digestGameIrValue(body) })
 }
 
 function projectedInput() {
@@ -101,15 +61,15 @@ function projectedInput() {
     sourceClaims: [
       {
         subject: 'node:profile-main#/id',
-        documentPath: section.documentPath,
-        sectionId: section.sectionId,
+        documentPath: 'docs/ASSET_PLAN.md',
+        sectionId: 'section-1',
         sourcePointer: '/bytes/0/1',
         literal: 'profile-main',
       },
       {
         subject: 'node:profile-main#/value/label',
-        documentPath: section.documentPath,
-        sectionId: section.sectionId,
+        documentPath: 'docs/ASSET_PLAN.md',
+        sectionId: 'section-1',
         sourcePointer: '/bytes/0/1',
         literal: 'Profile',
       },
@@ -588,6 +548,27 @@ function realAuthority(): ResourceRealizationSemanticProjectionAuthority {
   }
 }
 
+function realResourceFixture() {
+  const authority = realAuthority()
+  const packet = prepareResourceRealizationSemanticProjectionPacket(authority)
+  return { authority, packet }
+}
+
+function bindSourceEvidence<T extends { sourceClaims: readonly unknown[] }>(
+  input: T,
+  packet: ResourceRealizationSemanticProjectionPacket,
+): T {
+  const section = packet.sourceSections[0]!
+  return {
+    ...input,
+    sourceClaims: input.sourceClaims.map(claim => ({
+      ...(claim as Record<string, unknown>),
+      documentPath: section.documentPath,
+      sectionId: section.sectionId,
+    })),
+  }
+}
+
 describe('Resource Realization semantic producer', () => {
   test('rejects a detached or incomplete authority before building a packet', () => {
     expect(() =>
@@ -633,10 +614,16 @@ describe('Resource Realization semantic producer', () => {
   })
 
   test('uses the shared strict admission and returns an immutable detached receipt', () => {
-    const input = projectedInput()
-    const receipt = admitResourceRealizationSemanticResult(packet(), input)
+    const fixture = realResourceFixture()
+    const input = bindSourceEvidence(projectedInput(), fixture.packet)
+    const receipt = admitResourceRealizationSemanticResult(
+      fixture.authority,
+      fixture.packet,
+      input,
+    )
     expect(receipt.outcome).toBe('PROJECTED')
     if (receipt.outcome !== 'PROJECTED') return
+    expect(receipt.packetDigest).toBe(fixture.packet.packetDigest)
     expect(Object.isFrozen(receipt)).toBe(true)
     expect(Object.isFrozen(receipt.nodes[0])).toBe(true)
     expect(receipt.nodes[0]?.producerMode).toBe('semantic')
@@ -647,103 +634,125 @@ describe('Resource Realization semantic producer', () => {
   })
 
   test('admits non-Presentation logical resources and rejects kinds or relationships outside the manifest', () => {
+    const fixture = realResourceFixture()
     const logical = admitResourceRealizationSemanticResult(
-      packet(),
-      projectedLogicalInput(),
+      fixture.authority,
+      fixture.packet,
+      bindSourceEvidence(projectedLogicalInput(), fixture.packet),
     )
     expect(logical.outcome).toBe('PROJECTED')
     if (logical.outcome !== 'PROJECTED') return
     expect(logical.nodes[0]?.kind).toBe('resource-realization.logical-resource')
 
     expect(() =>
-      admitResourceRealizationSemanticResult(packet(), {
-        ...projectedLogicalInput(),
-        nodes: [
-          {
-            ...projectedLogicalInput().nodes[0],
-            kind: 'presentation.ui-screen',
-          },
-        ],
-      }),
+      admitResourceRealizationSemanticResult(
+        fixture.authority,
+        fixture.packet,
+        {
+          ...projectedLogicalInput(),
+          nodes: [
+            {
+              ...projectedLogicalInput().nodes[0],
+              kind: 'presentation.ui-screen',
+            },
+          ],
+        },
+      ),
     ).toThrow(/kind|semantic packet/)
     expect(() =>
-      admitResourceRealizationSemanticResult(packet(), {
-        ...projectedLogicalInput(),
-        nodes: [
-          {
-            ...projectedLogicalInput().nodes[0],
-            edges: [
-              {
-                type: 'driven-by',
-                targetId: 'state-start',
-                targetType: 'gameplay.state',
-              },
-            ],
-          },
-        ],
-      }),
+      admitResourceRealizationSemanticResult(
+        fixture.authority,
+        fixture.packet,
+        {
+          ...projectedLogicalInput(),
+          nodes: [
+            {
+              ...projectedLogicalInput().nodes[0],
+              edges: [
+                {
+                  type: 'driven-by',
+                  targetId: 'state-start',
+                  targetType: 'gameplay.state',
+                },
+              ],
+            },
+          ],
+        },
+      ),
     ).toThrow(/relationship|edge|sourceClaims/)
   })
 
   test('accepts every worker-owned semantic relationship through the shared admission seam', () => {
+    const fixture = realResourceFixture()
     const base = projectedInput()
-    const edge = {
-      type: 'describes',
-      targetId: 'logical-main',
-      targetType: 'resource-realization.logical-resource',
-    }
-    const input = {
-      ...base,
-      nodes: [{ ...base.nodes[0], edges: [edge] }],
-      sourceClaims: [
-        ...base.sourceClaims,
-        {
-          subject: 'node:profile-main#/edges/0',
-          documentPath: section.documentPath,
-          sectionId: section.sectionId,
-          sourcePointer: '/bytes/0/1',
-          literal: canonicalGameIrJson(edge),
-        },
-      ].sort((left, right) =>
-        compareCodeUnits(
-          `${left.subject}\0${left.sourcePointer}\0${left.literal}`,
-          `${right.subject}\0${right.sourcePointer}\0${right.literal}`,
+    const inputWithEdge = (targetId: string, targetType: string) => {
+      const edge = { type: 'describes', targetId, targetType }
+      return {
+        ...base,
+        nodes: [{ ...base.nodes[0], edges: [edge] }],
+        sourceClaims: [
+          ...base.sourceClaims,
+          {
+            subject: 'node:profile-main#/edges/0',
+            documentPath: section.documentPath,
+            sectionId: section.sectionId,
+            sourcePointer: '/bytes/0/1',
+            literal: canonicalGameIrJson(edge),
+          },
+        ].sort((left, right) =>
+          compareCodeUnits(
+            `${left.subject}\0${left.sourcePointer}\0${left.literal}`,
+            `${right.subject}\0${right.sourcePointer}\0${right.literal}`,
+          ),
         ),
-      ),
+      }
     }
-    const result = admitResourceRealizationSemanticResult(packet(), input)
+    const input = inputWithEdge('state-start', 'gameplay.state')
+    const result = admitResourceRealizationSemanticResult(
+      fixture.authority,
+      fixture.packet,
+      bindSourceEvidence(input, fixture.packet),
+    )
     expect(result.outcome).toBe('PROJECTED')
     if (result.outcome !== 'PROJECTED') return
     expect(result.nodes[0]?.edges[0]?.type).toBe('describes')
+    const local = admitResourceRealizationSemanticResult(
+      fixture.authority,
+      fixture.packet,
+      bindSourceEvidence(
+        inputWithEdge(
+          'profile-main',
+          'resource-realization.acquisition-profile',
+        ),
+        fixture.packet,
+      ),
+    )
+    expect(local.outcome).toBe('PROJECTED')
+    expect(() =>
+      admitResourceRealizationSemanticResult(
+        fixture.authority,
+        fixture.packet,
+        bindSourceEvidence(
+          inputWithEdge('missing-node', 'gameplay.state'),
+          fixture.packet,
+        ),
+      ),
+    ).toThrow(/unknown node/)
+    expect(() =>
+      admitResourceRealizationSemanticResult(
+        fixture.authority,
+        fixture.packet,
+        bindSourceEvidence(
+          inputWithEdge('profile-main', 'gameplay.state'),
+          fixture.packet,
+        ),
+      ),
+    ).toThrow(/mismatched target type/)
   })
 
   test('rejects worker derived logical output, Presentation shadowing, and unknown semantic vocabulary', () => {
+    const fixture = realResourceFixture()
     const logical = projectedLogicalInput()
-    const presentationRequirement = {
-      requirementId: 'screen-main',
-      kind: 'ui',
-      runtimeRole: 'screen',
-      ownerNodeId: 'presentation-screen-main',
-      ownerNodeKind: 'presentation.ui-screen',
-      requirementIdPointer: '/value/requirements/0/requirementId',
-      evidence: {
-        documentPath: section.documentPath,
-        sectionId: section.sectionId,
-        sectionDigest: section.digest,
-        sourcePointer: '/bytes/0/1',
-      },
-    }
-    const shadowPacket = withPacketBody({
-      presentationRequirements: [presentationRequirement],
-      presentationRequirementsDigest: digestGameIrValue([
-        presentationRequirement,
-      ]),
-      forbiddenPresentationRequirementIds: ['screen-main'],
-      forbiddenTargets: [
-        'node:resource.requirement.screen-main#/id',
-        'resource.requirement.screen-main',
-      ],
-    })
     const cases = [
       {
         label: 'derived logical producer mode',
@@ -755,7 +764,6 @@ describe('Resource Realization semantic producer', () => {
       },
       {
         label: 'Presentation requirement shadow',
-        packet: shadowPacket,
         value: {
           ...logical,
           nodes: [
@@ -814,57 +822,67 @@ describe('Resource Realization semantic producer', () => {
     for (const scenario of cases) {
       expect(() =>
         admitResourceRealizationSemanticResult(
-          'packet' in scenario ? scenario.packet : packet(),
-          scenario.value,
+          fixture.authority,
+          fixture.packet,
+          bindSourceEvidence(scenario.value, fixture.packet),
         ),
       ).toThrow(scenario.pattern)
     }
   })
 
   test('rejects Presentation-owned logical IDs and stale packet digests', () => {
-    const shadowPacket = withPacketBody({
-      forbiddenPresentationRequirementIds: ['screen.asset'],
-      forbiddenTargets: ['resource.requirement.screen.asset'],
-    })
-    expect(() =>
-      admitResourceRealizationSemanticResult(shadowPacket, {
-        ...projectedInput(),
-        nodes: [
-          {
-            ...projectedInput().nodes[0],
-            id: 'resource.requirement.screen.asset',
-          },
-        ],
-        sourceClaims: projectedInput().sourceClaims.map(claim => ({
-          ...claim,
-          subject: claim.subject.replace(
-            'profile-main',
-            'resource.requirement.screen.asset',
-          ),
-          literal: claim.subject.endsWith('#/id')
-            ? 'resource.requirement.screen.asset'
-            : claim.literal,
-        })),
-      }),
-    ).toThrow(/forbidden|shadow/)
+    const fixture = realResourceFixture()
+    const input = bindSourceEvidence(projectedInput(), fixture.packet)
     expect(() =>
       admitResourceRealizationSemanticResult(
-        { ...packet(), packetDigest: 'c'.repeat(64) },
-        projectedInput(),
+        fixture.authority,
+        fixture.packet,
+        {
+          ...input,
+          nodes: [
+            {
+              ...input.nodes[0],
+              id: 'resource.requirement.screen-main',
+            },
+          ],
+          sourceClaims: input.sourceClaims.map(claim => ({
+            ...claim,
+            subject: claim.subject.replace(
+              'profile-main',
+              'resource.requirement.screen-main',
+            ),
+            literal: claim.subject.endsWith('#/id')
+              ? 'resource.requirement.screen-main'
+              : claim.literal,
+          })),
+        },
       ),
-    ).toThrow(/digest/)
+    ).toThrow(/forbidden|shadow|overlap/)
+    expect(() =>
+      admitResourceRealizationSemanticResult(
+        fixture.authority,
+        { ...fixture.packet, packetDigest: 'c'.repeat(64) },
+        input,
+      ),
+    ).toThrow(/authority|stale|detached/)
   })
 
   test('binds structured diagnostics to the fixed source evidence closure', () => {
-    const evidence = `section:${section.documentPath}#${section.sectionId}@${section.digest}`
-    const diagnostic = admitResourceRealizationSemanticResult(packet(), {
-      outcome: 'FAIL',
-      reasonCode: 'missing-projection',
-      actual: 'No resource profile was projected',
-      missingSubject: 'node:profile-main#/id',
-      expectedProjection: 'an acquisition profile',
-      evidencePointers: [evidence],
-    })
+    const fixture = realResourceFixture()
+    const evidenceSection = fixture.packet.sourceSections[0]!
+    const evidence = `section:${evidenceSection.documentPath}#${evidenceSection.sectionId}@${evidenceSection.digest}`
+    const diagnostic = admitResourceRealizationSemanticResult(
+      fixture.authority,
+      fixture.packet,
+      {
+        outcome: 'FAIL',
+        reasonCode: 'missing-projection',
+        actual: 'No resource profile was projected',
+        missingSubject: 'node:profile-main#/id',
+        expectedProjection: 'an acquisition profile',
+        evidencePointers: [evidence],
+      },
+    )
     expect(diagnostic.outcome).toBe('FAIL')
     expect(Object.isFrozen(diagnostic)).toBe(true)
   })
@@ -910,6 +928,7 @@ describe('Resource Realization semantic producer', () => {
     const { packetDigest: _packetDigest, ...packetBody } = prepared
     expect(() =>
       admitResourceRealizationSemanticResult(
+        authority,
         {
           ...packetBody,
           allowedNodeKinds: [...prepared.allowedNodeKinds, 'rogue.kind'],
@@ -918,21 +937,25 @@ describe('Resource Realization semantic producer', () => {
             allowedNodeKinds: [...prepared.allowedNodeKinds, 'rogue.kind'],
           }),
         },
-        projectedInput(),
+        bindSourceEvidence(projectedInput(), prepared),
       ),
-    ).toThrow(/manifest|canonical|kind/i)
+    ).toThrow(/stale|detached|authority/i)
     const evidence = `section:${prepared.sourceSections[0]!.documentPath}#${prepared.sourceSections[0]!.sectionId}@${prepared.sourceSections[0]!.digest}`
-    const ambiguous = admitResourceRealizationSemanticResult(prepared, {
-      outcome: 'AMBIGUOUS',
-      reasonCode: 'ambiguous-projection',
-      actual: 'two candidates',
-      missingSubject: 'node:profile-main#/id',
-      expectedProjection: 'one profile',
-      evidencePointers: [evidence],
-    })
+    const ambiguous = admitResourceRealizationSemanticResult(
+      authority,
+      prepared,
+      {
+        outcome: 'AMBIGUOUS',
+        reasonCode: 'ambiguous-projection',
+        actual: 'two candidates',
+        missingSubject: 'node:profile-main#/id',
+        expectedProjection: 'one profile',
+        evidencePointers: [evidence],
+      },
+    )
     expect(ambiguous.outcome).toBe('AMBIGUOUS')
     expect(() =>
-      admitResourceRealizationSemanticResult(prepared, {
+      admitResourceRealizationSemanticResult(authority, prepared, {
         outcome: 'AMBIGUOUS',
         reasonCode: 'ambiguous-projection',
         actual: 'two candidates',
@@ -996,9 +1019,9 @@ describe('Resource Realization semantic producer', () => {
   })
 
   test('rejects recomputed descriptor, catalog, forbidden, source, and manifest packet mutations', () => {
-    const prepared = prepareResourceRealizationSemanticProjectionPacket(
-      realAuthority(),
-    )
+    const authority = realAuthority()
+    const prepared =
+      prepareResourceRealizationSemanticProjectionPacket(authority)
     const recompute = (
       changes: Partial<ResourceRealizationSemanticProjectionPacket>,
     ): ResourceRealizationSemanticProjectionPacket => {
@@ -1008,23 +1031,30 @@ describe('Resource Realization semantic producer', () => {
     }
     const cases = [
       {
-        label: 'descriptor digest mismatch',
+        label: 'full-recomputed descriptor substitution',
         packet: recompute({
           presentationRequirements: prepared.presentationRequirements.map(
             requirement => ({ ...requirement, kind: 'tampered' }),
           ),
+          presentationRequirementsDigest: digestGameIrValue(
+            prepared.presentationRequirements.map(requirement => ({
+              ...requirement,
+              kind: 'tampered',
+            })),
+          ),
         }),
-        pattern: /requirement digest/,
+        pattern: /stale|detached|authority/,
       },
       {
-        label: 'duplicate prior target',
+        label: 'full-recomputed unique prior catalog substitution',
         packet: recompute({
-          allowedPriorNodeTargets: [
-            ...prepared.allowedPriorNodeTargets,
-            prepared.allowedPriorNodeTargets[0]!,
-          ],
+          allowedPriorNodeTargets: prepared.allowedPriorNodeTargets
+            .map((target, index) =>
+              index === 0 ? { ...target, id: 'rogue-prior-target' } : target,
+            )
+            .sort((left, right) => compareCodeUnits(left.id, right.id)),
         }),
-        pattern: /priorNodeTargets|unique|sorted/,
+        pattern: /stale|detached|authority/,
       },
       {
         label: 'forbidden target mismatch',
@@ -1033,17 +1063,18 @@ describe('Resource Realization semantic producer', () => {
             compareCodeUnits,
           ),
         }),
-        pattern: /forbidden targets/,
+        pattern: /stale|detached|authority/,
       },
       {
-        label: 'duplicate source section',
+        label: 'full-recomputed canonical source substitution',
         packet: recompute({
-          sourceSections: [
-            ...prepared.sourceSections,
-            prepared.sourceSections[0]!,
-          ],
+          sourceSections: prepared.sourceSections.map((section, index) =>
+            index === 0
+              ? { ...section, sectionId: 'replacement-section' }
+              : section,
+          ),
         }),
-        pattern: /source sections|sourceSections|duplicate/,
+        pattern: /stale|detached|authority/,
       },
       {
         label: 'relationship manifest mutation',
@@ -1053,33 +1084,38 @@ describe('Resource Realization semantic producer', () => {
             'rogue-relation',
           ].sort(compareCodeUnits),
         }),
-        pattern: /manifest|relationships|canonical/,
+        pattern: /stale|detached|authority/,
       },
     ] as const
     for (const scenario of cases) {
       expect(() =>
         admitResourceRealizationSemanticResult(
+          authority,
           scenario.packet,
-          projectedInput(),
+          bindSourceEvidence(projectedInput(), prepared),
         ),
       ).toThrow(scenario.pattern)
     }
 
     const evidence = `section:${prepared.sourceSections[0]!.documentPath}#${prepared.sourceSections[0]!.sectionId}@${prepared.sourceSections[0]!.digest}`
     for (const outcome of ['FAIL', 'AMBIGUOUS'] as const) {
-      const diagnostic = admitResourceRealizationSemanticResult(prepared, {
-        outcome,
-        reasonCode:
-          outcome === 'FAIL' ? 'missing-projection' : 'ambiguous-projection',
-        actual: 'projection diagnostic',
-        missingSubject: 'node:profile-main#/id',
-        expectedProjection: 'one profile',
-        evidencePointers: [evidence],
-      })
+      const diagnostic = admitResourceRealizationSemanticResult(
+        authority,
+        prepared,
+        {
+          outcome,
+          reasonCode:
+            outcome === 'FAIL' ? 'missing-projection' : 'ambiguous-projection',
+          actual: 'projection diagnostic',
+          missingSubject: 'node:profile-main#/id',
+          expectedProjection: 'one profile',
+          evidencePointers: [evidence],
+        },
+      )
       expect(diagnostic.packetDigest).toBe(prepared.packetDigest)
     }
     expect(() =>
-      admitResourceRealizationSemanticResult(prepared, {
+      admitResourceRealizationSemanticResult(authority, prepared, {
         outcome: 'FAIL',
         reasonCode: 'missing-projection',
         actual: 'projection diagnostic',

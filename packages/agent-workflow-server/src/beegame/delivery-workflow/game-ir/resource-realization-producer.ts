@@ -19,6 +19,7 @@ import {
   type ResourceRealizationResourceKind,
 } from './resource-realization-schema'
 import {
+  canonicalGameIrJson,
   compareCodeUnits,
   canonicalizeGameIrSourceSections,
   digestGameIrValue,
@@ -252,12 +253,6 @@ function priorTargets(
   return Object.freeze(output.map(entry => Object.freeze(entry)))
 }
 
-function packetBody(
-  packet: Omit<ResourceRealizationSemanticProjectionPacket, 'packetDigest'>,
-): Omit<ResourceRealizationSemanticProjectionPacket, 'packetDigest'> {
-  return packet
-}
-
 function packetDigestBody(
   packet: ResourceRealizationSemanticProjectionPacket,
 ): Omit<ResourceRealizationSemanticProjectionPacket, 'packetDigest'> {
@@ -427,6 +422,63 @@ function validatePacketRequirements(
   return requirements
 }
 
+function validateSemanticTargets(
+  packet: ResourceRealizationSemanticProjectionPacket,
+  nodes: readonly {
+    id: string
+    kind: string
+    references: readonly { targetId: string; targetType: string }[]
+    edges: readonly { targetId: string; targetType: string }[]
+  }[],
+): void {
+  const targets = new Map<string, string>()
+  for (const target of packet.allowedPriorNodeTargets) {
+    if (targets.has(target.id))
+      fail(`semantic result target catalog duplicates ${target.id}`)
+    targets.set(target.id, target.kind)
+  }
+  for (const requirement of packet.presentationRequirements) {
+    const descriptorId = `resource.requirement.${requirement.requirementId}`
+    if (targets.has(descriptorId))
+      fail(`semantic result target catalog overlaps ${descriptorId}`)
+    targets.set(descriptorId, 'resource-realization.logical-resource')
+  }
+  for (const node of nodes) {
+    if (targets.has(node.id))
+      fail(`semantic result target ID overlaps an existing target ${node.id}`)
+    targets.set(node.id, node.kind)
+  }
+  const forbidden = new Set(packet.forbiddenTargets)
+  for (const node of nodes) {
+    for (const reference of node.references) {
+      const expectedType = targets.get(reference.targetId)
+      if (!expectedType)
+        fail(
+          `semantic result reference ${node.id} targets an unknown node ${reference.targetId}`,
+        )
+      if (expectedType !== reference.targetType)
+        fail(
+          `semantic result reference ${node.id} has a mismatched target type`,
+        )
+      if (forbidden.has(reference.targetId))
+        fail(
+          `semantic result reference ${node.id} targets Presentation-owned data`,
+        )
+    }
+    for (const edge of node.edges) {
+      const expectedType = targets.get(edge.targetId)
+      if (!expectedType)
+        fail(
+          `semantic result edge ${node.id} targets an unknown node ${edge.targetId}`,
+        )
+      if (expectedType !== edge.targetType)
+        fail(`semantic result edge ${node.id} has a mismatched target type`)
+      if (forbidden.has(edge.targetId))
+        fail(`semantic result edge ${node.id} targets Presentation-owned data`)
+    }
+  }
+}
+
 function buildPacket(
   closure: ReturnType<typeof assembleWorldPresentationClosure>,
   source: GameIrDomainSourceEnvelope,
@@ -463,7 +515,7 @@ function buildPacket(
   }
   return deepFreeze({
     ...body,
-    packetDigest: digestGameIrValue(packetBody(body)),
+    packetDigest: digestGameIrValue(body),
   })
 }
 
@@ -489,8 +541,8 @@ export function prepareResourceRealizationSemanticProjectionPacket(
 function semanticAdmissionPacket(
   packet: ResourceRealizationSemanticProjectionPacket,
 ): GameIrDomainSemanticPacket {
-  return {
-    schemaVersion: 'game-ir-domain-semantic-packet.v1',
+  const body = {
+    schemaVersion: 'game-ir-domain-semantic-packet.v1' as const,
     taskId: packet.taskId,
     moduleId: packet.moduleId,
     foundationRevision: packet.foundationRevision,
@@ -502,14 +554,19 @@ function semanticAdmissionPacket(
       .map(sectionEvidencePointer)
       .sort(compareCodeUnits),
     forbiddenTargets: packet.forbiddenTargets,
-    packetDigest: packet.packetDigest,
   }
+  return { ...body, packetDigest: digestGameIrValue(body) }
 }
 
 export function admitResourceRealizationSemanticResult(
+  authority: ResourceRealizationSemanticProjectionAuthority,
   packet: ResourceRealizationSemanticProjectionPacket,
   value: unknown,
 ): ResourceRealizationSemanticResult {
+  const canonicalPacket =
+    prepareResourceRealizationSemanticProjectionPacket(authority)
+  if (canonicalGameIrJson(canonicalPacket) !== canonicalGameIrJson(packet))
+    fail('semantic packet is stale, relabeled, or detached from authority')
   if (!isRecord(packet)) fail('semantic packet must be a plain object')
   exactKeys(
     packet,
@@ -618,10 +675,11 @@ export function admitResourceRealizationSemanticResult(
     {
       errorPrefix: 'invalid Resource Realization producer',
       allowedModuleIds: ['resource-realization'],
-      validatePacketDigest: false,
+      receiptAuthorityDigest: packet.packetDigest,
     },
   )
   if (result.outcome === 'PROJECTED') {
+    validateSemanticTargets(packet, result.nodes)
     for (const node of result.nodes) {
       if (packet.forbiddenTargets.includes(node.id))
         fail(

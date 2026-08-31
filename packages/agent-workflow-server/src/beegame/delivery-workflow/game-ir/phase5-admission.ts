@@ -216,6 +216,7 @@ export function admitPhase5SemanticResult(
   const result = admitGameIrDomainSemanticResult(packetInput, value, {
     errorPrefix: 'invalid Game IR Phase 5 admission',
     allowedModuleIds: ['world-scene', 'presentation'],
+    receiptAuthorityDigest: packetInput.packetDigest,
   })
   if (result.moduleId !== 'world-scene' && result.moduleId !== 'presentation')
     fail('semantic result moduleId is not a Phase 5 module')
@@ -229,6 +230,7 @@ function normalizeStoredReceipt(
   return normalizeGameIrDomainSemanticReceipt(packet, value, {
     errorPrefix: 'invalid Game IR Phase 5 admission',
     allowedModuleIds: ['world-scene', 'presentation'],
+    receiptAuthorityDigest: packet.packetDigest,
   }) as Phase5SemanticReceipt
 }
 
@@ -297,6 +299,7 @@ export function replayAndBindPhase5SemanticReceipt(
     {
       errorPrefix: 'invalid Game IR Phase 5 admission',
       allowedModuleIds: ['world-scene', 'presentation'],
+      receiptAuthorityDigest: packet.packetDigest,
     },
   ) as Phase5SemanticReceipt
   const nodesById = new Map(semantic.nodes.map(node => [node.id, node]))

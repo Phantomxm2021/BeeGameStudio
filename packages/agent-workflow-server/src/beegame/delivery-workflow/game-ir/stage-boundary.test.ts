@@ -537,15 +537,18 @@ function policyViolations(
     | 'contracts'
     | 'publication'
     | 'semantic'
-    | 'phase6'
+    | 'phase6-producer'
     | 'other',
 ): string[] {
   const violations = new Set<string>()
   for (const entry of facts.imports)
     if (
       forbiddenPaths.test(entry.path) ||
-      (forbiddenClosurePath.test(entry.path) && policy !== 'phase6') ||
-      ((policy === 'phase4' || policy === 'phase5' || policy === 'other') &&
+      (forbiddenClosurePath.test(entry.path) && policy !== 'phase6-producer') ||
+      ((policy === 'phase4' ||
+        policy === 'phase5' ||
+        policy === 'phase6-producer' ||
+        policy === 'other') &&
         forbiddenPhase5Paths.test(entry.path))
     )
       violations.add(`path: ${entry.path}`)
@@ -557,12 +560,15 @@ function policyViolations(
     policy === 'task7' ||
     policy === 'phase4' ||
     policy === 'phase5' ||
+    policy === 'phase6-producer' ||
     policy === 'other'
   )
     for (const name of facts.apiImports) violations.add(`api-import: ${name}`)
   for (const name of facts.calls) {
     if (
-      (policy === 'phase4' || policy === 'phase5') &&
+      (policy === 'phase4' ||
+        policy === 'phase5' ||
+        policy === 'phase6-producer') &&
       forbiddenStageCalls.has(name)
     )
       violations.add(`stage-call: ${name}`)
@@ -571,6 +577,7 @@ function policyViolations(
       (policy === 'task7' ||
         policy === 'phase4' ||
         policy === 'phase5' ||
+        policy === 'phase6-producer' ||
         policy === 'other')
     )
       violations.add(`api-call: ${name}`)
@@ -591,7 +598,7 @@ function policyViolations(
     if (name === 'DeliveryRun' || name === 'FoundationIssue')
       violations.add(`identifier: ${name}`)
     if (
-      policy === 'phase5' &&
+      (policy === 'phase5' || policy === 'phase6-producer') &&
       [
         'fallback',
         'compatibility',
@@ -738,7 +745,7 @@ type GameIrProductionRole =
   | 'contracts'
   | 'publication'
   | 'semantic'
-  | 'phase6'
+  | 'phase6-producer'
   | 'other'
 
 function gameIrProductionRole(filename: string): GameIrProductionRole {
@@ -746,7 +753,7 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'publication.ts') return 'publication'
   if (filename === 'semantic-admission.ts') return 'semantic'
   if (filename === 'resource-realization-schema.ts') return 'semantic'
-  if (filename === 'resource-realization-producer.ts') return 'phase6'
+  if (filename === 'resource-realization-producer.ts') return 'phase6-producer'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -1038,6 +1045,46 @@ describe('Game IR stage boundary', () => {
       'forbidden-strategy: legacy',
       'forbidden-strategy: migration',
     ])
+  })
+
+  test('keeps the Phase 6 closure exception single-purpose and rejects fallback paths', () => {
+    const synthetic = `
+      import { assembleWorldPresentationClosure } from './world-presentation-assembler'
+      import { parseGameIrCandidate } from './model'
+      import { route } from './routes'
+      assembleWorldPresentationClosure(input)
+      parseGameIrCandidate(input)
+      route(input)
+      const fallback = true
+      const compatibility = true
+      void fallback
+      void compatibility
+    `
+    const producerViolations = policyViolations(
+      collectAstFacts(synthetic, 'resource-realization-producer.ts'),
+      'phase6-producer',
+    )
+    expect(producerViolations).toEqual(
+      expect.arrayContaining([
+        'api-call: parseGameIrCandidate',
+        'path: ./routes',
+        'stage-call: route',
+        'forbidden-strategy: fallback',
+        'forbidden-strategy: compatibility',
+      ]),
+    )
+    expect(producerViolations).not.toContain(
+      'detached-closure-consumer: closure assembler call',
+    )
+    expect(
+      policyViolations(
+        collectAstFacts(
+          "import { assembleWorldPresentationClosure } from './world-presentation-assembler'; assembleWorldPresentationClosure(input)",
+          'semantic.ts',
+        ),
+        'semantic',
+      ),
+    ).toContain('detached-closure-consumer: closure assembler call')
   })
 
   test('rejects aliased future module and kind values only at sensitive properties', () => {
@@ -1580,7 +1627,7 @@ describe('Game IR stage boundary', () => {
         role === 'contracts' ||
         role === 'publication' ||
         role === 'semantic' ||
-        role === 'phase6'
+        role === 'phase6-producer'
       )
         expect(
           policyViolations(collectAstFacts(source, filename), role),

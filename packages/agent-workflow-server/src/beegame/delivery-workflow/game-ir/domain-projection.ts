@@ -470,7 +470,7 @@ export function buildGameIrDomainSemanticPacket(
 type SemanticResultAdmissionOptions = Readonly<{
   errorPrefix?: string
   allowedModuleIds?: readonly GameIrDomainId[]
-  validatePacketDigest?: boolean
+  receiptAuthorityDigest: string
 }>
 
 const FOUNDATION_DOCUMENT_SET = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
@@ -482,18 +482,6 @@ function semanticResultAdmissionFail(
   message: string,
 ): never {
   throw new Error(`${errorPrefix}: ${message}`)
-}
-
-function semanticResultIsRecord(
-  value: unknown,
-): value is Record<string, unknown> {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    (Object.getPrototypeOf(value) === Object.prototype ||
-      Object.getPrototypeOf(value) === null)
-  )
 }
 
 export function gameIrSemanticValueLeafPointers(
@@ -558,7 +546,7 @@ export function gameIrSemanticPointerValue(
   let current: unknown = node.value
   for (const segment of segments) {
     if (Array.isArray(current)) current = current[Number(segment)]
-    else if (semanticResultIsRecord(current)) current = current[segment]
+    else if (isRecord(current)) current = current[segment]
     else return undefined
   }
   return current
@@ -626,7 +614,7 @@ function semanticResultNormalizeNode(
   errorPrefix: string,
 ): GameIrSemanticCandidateNode {
   const { exactKeys, strictArray, text, safeId, deepFreeze } = primitives
-  if (!semanticResultIsRecord(value))
+  if (!isRecord(value))
     semanticResultAdmissionFail(
       errorPrefix,
       `nodes[${index}] must be an object`,
@@ -643,7 +631,7 @@ function semanticResultNormalizeNode(
       errorPrefix,
       `nodes[${index}] has a node kind outside the semantic packet`,
     )
-  if (!semanticResultIsRecord(value.value))
+  if (!isRecord(value.value))
     semanticResultAdmissionFail(
       errorPrefix,
       `nodes[${index}].value must be an object`,
@@ -664,7 +652,7 @@ function semanticResultNormalizeNode(
     value.references,
     `nodes[${index}].references`,
   ).map((entry, referenceIndex) => {
-    if (!semanticResultIsRecord(entry))
+    if (!isRecord(entry))
       semanticResultAdmissionFail(
         errorPrefix,
         `nodes[${index}].references[${referenceIndex}] must be an object`,
@@ -700,7 +688,7 @@ function semanticResultNormalizeNode(
   }
   const edges = strictArray(value.edges, `nodes[${index}].edges`).map(
     (entry, edgeIndex) => {
-      if (!semanticResultIsRecord(entry))
+      if (!isRecord(entry))
         semanticResultAdmissionFail(
           errorPrefix,
           `nodes[${index}].edges[${edgeIndex}] must be an object`,
@@ -754,13 +742,13 @@ export function normalizeGameIrDomainSemanticPacket(
   packetInput: GameIrDomainSemanticPacket,
   options: Pick<
     SemanticResultAdmissionOptions,
-    'errorPrefix' | 'allowedModuleIds' | 'validatePacketDigest'
+    'errorPrefix' | 'allowedModuleIds'
   > = {},
 ): GameIrDomainSemanticPacket {
   const errorPrefix = options.errorPrefix ?? 'invalid Game IR domain projection'
   const primitives = createSemanticFidelityPrimitives(errorPrefix)
   const { exactKeys, strictArray, text, sha256, deepFreeze } = primitives
-  if (!semanticResultIsRecord(packetInput))
+  if (!isRecord(packetInput))
     semanticResultAdmissionFail(
       errorPrefix,
       'semantic packet must be a plain object',
@@ -847,10 +835,7 @@ export function normalizeGameIrDomainSemanticPacket(
     packetInput.packetDigest,
     'semantic packet packetDigest',
   )
-  if (
-    options.validatePacketDigest !== false &&
-    packetDigest !== digestGameIrValue(body)
-  )
+  if (packetDigest !== digestGameIrValue(body))
     semanticResultAdmissionFail(
       errorPrefix,
       'semantic packet digest is stale or invalid',
@@ -861,17 +846,21 @@ export function normalizeGameIrDomainSemanticPacket(
 export function admitGameIrDomainSemanticResult(
   packetInput: GameIrDomainSemanticPacket,
   value: unknown,
-  options: SemanticResultAdmissionOptions = {},
+  options: SemanticResultAdmissionOptions,
 ): GameIrDomainSemanticResult {
   const errorPrefix = options.errorPrefix ?? 'invalid Game IR domain projection'
   const primitives = createSemanticFidelityPrimitives(errorPrefix)
-  const { exactKeys, strictArray, text, safeId, deepFreeze } = primitives
+  const { exactKeys, strictArray, text, safeId, deepFreeze, sha256 } =
+    primitives
+  const receiptAuthorityDigest = sha256(
+    options.receiptAuthorityDigest,
+    'semantic result receiptAuthorityDigest',
+  )
   const packet = normalizeGameIrDomainSemanticPacket(packetInput, {
     errorPrefix,
     allowedModuleIds: options.allowedModuleIds,
-    validatePacketDigest: options.validatePacketDigest,
   })
-  if (!semanticResultIsRecord(value))
+  if (!isRecord(value))
     semanticResultAdmissionFail(
       errorPrefix,
       'semantic result must be a plain object',
@@ -888,7 +877,7 @@ export function admitGameIrDomainSemanticResult(
       foundationRevision: packet.foundationRevision,
       sourceDigest: packet.sourceDigest,
       mechanicalReceiptDigest: packet.mechanicalReceiptDigest,
-      packetDigest: packet.packetDigest,
+      packetDigest: receiptAuthorityDigest,
       ...diagnostic,
     }
     return deepFreeze({
@@ -924,7 +913,7 @@ export function admitGameIrDomainSemanticResult(
   const nodeMap = new Map(nodes.map(node => [node.id, node]))
   const rawClaims = strictArray(value.sourceClaims, 'sourceClaims')
   const claims = rawClaims.map((entry, index) => {
-    if (!semanticResultIsRecord(entry))
+    if (!isRecord(entry))
       semanticResultAdmissionFail(
         errorPrefix,
         `sourceClaims[${index}] must be an object`,
@@ -985,33 +974,7 @@ export function admitGameIrDomainSemanticResult(
       ),
       literal: text(entry.literal, `sourceClaims[${index}].literal`),
     })
-    const expected = gameIrSemanticPointerValue(node!, pointer)
-    if (expected === undefined)
-      semanticResultAdmissionFail(
-        errorPrefix,
-        `source claim target ${claim.subject} is absent`,
-      )
-    if (typeof expected === 'number') {
-      if (!SEMANTIC_JSON_NUMBER.test(claim.literal))
-        semanticResultAdmissionFail(
-          errorPrefix,
-          'numeric source literal is not a strict JSON number',
-        )
-      const numeric = Number(claim.literal)
-      if (!Number.isFinite(numeric) || numeric !== expected)
-        semanticResultAdmissionFail(
-          errorPrefix,
-          'source literal does not match the semantic record',
-        )
-    } else {
-      const expectedLiteral =
-        typeof expected === 'string' ? expected : canonicalGameIrJson(expected)
-      if (claim.literal !== expectedLiteral)
-        semanticResultAdmissionFail(
-          errorPrefix,
-          'source literal does not match the semantic record',
-        )
-    }
+    verifyGameIrSemanticClaimLiteral(claim, node!, pointer, errorPrefix)
     return claim
   }) as readonly GameIrSemanticSourceClaim[]
   for (let index = 1; index < claims.length; index += 1) {
@@ -1046,7 +1009,7 @@ export function admitGameIrDomainSemanticResult(
     foundationRevision: packet.foundationRevision,
     sourceDigest: packet.sourceDigest,
     mechanicalReceiptDigest: packet.mechanicalReceiptDigest,
-    packetDigest: packet.packetDigest,
+    packetDigest: receiptAuthorityDigest,
     nodes: admittedNodes,
     sourceClaims: Object.freeze(claims),
   }
@@ -1061,13 +1024,13 @@ export function normalizeGameIrDomainSemanticReceipt(
   value: unknown,
   options: Pick<
     SemanticResultAdmissionOptions,
-    'errorPrefix' | 'allowedModuleIds'
-  > = {},
+    'errorPrefix' | 'allowedModuleIds' | 'receiptAuthorityDigest'
+  >,
 ): GameIrDomainSemanticReceipt {
   const errorPrefix = options.errorPrefix ?? 'invalid Game IR domain projection'
   const primitives = createSemanticFidelityPrimitives(errorPrefix)
   const { exactKeys, strictArray, deepFreeze, sha256 } = primitives
-  if (!semanticResultIsRecord(value))
+  if (!isRecord(value))
     semanticResultAdmissionFail(
       errorPrefix,
       'semantic receipt must be a plain object',
@@ -1101,7 +1064,7 @@ export function normalizeGameIrDomainSemanticReceipt(
     value.foundationRevision !== packet.foundationRevision ||
     value.sourceDigest !== packet.sourceDigest ||
     value.mechanicalReceiptDigest !== packet.mechanicalReceiptDigest ||
-    value.packetDigest !== packet.packetDigest
+    value.packetDigest !== options.receiptAuthorityDigest
   )
     semanticResultAdmissionFail(
       errorPrefix,
@@ -1109,7 +1072,7 @@ export function normalizeGameIrDomainSemanticReceipt(
     )
   const rawNodes = strictArray(value.nodes, 'semantic receipt nodes')
   const nodes = rawNodes.map((entry, index) => {
-    if (!semanticResultIsRecord(entry))
+    if (!isRecord(entry))
       semanticResultAdmissionFail(
         errorPrefix,
         `semantic receipt nodes[${index}] must be an object`,
@@ -1130,7 +1093,11 @@ export function normalizeGameIrDomainSemanticReceipt(
   const admitted = admitGameIrDomainSemanticResult(
     packet,
     { outcome: 'PROJECTED', nodes, sourceClaims: value.sourceClaims },
-    { errorPrefix, allowedModuleIds: options.allowedModuleIds },
+    {
+      errorPrefix,
+      allowedModuleIds: options.allowedModuleIds,
+      receiptAuthorityDigest: options.receiptAuthorityDigest,
+    },
   )
   if (admitted.outcome !== 'PROJECTED')
     semanticResultAdmissionFail(
