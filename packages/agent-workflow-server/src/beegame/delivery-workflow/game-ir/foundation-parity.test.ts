@@ -86,9 +86,19 @@ import {
 } from './world-presentation-assembler'
 import {
   canonicalGameIrJson,
+  compareCodeUnits,
   digestGameIrValue,
   type GameIrNode,
 } from './model'
+import {
+  prepareResourceRealizationSemanticProjectionPacket,
+  admitResourceRealizationSemanticResult,
+} from './resource-realization-producer'
+import {
+  admitResourceRealizationSemanticValidationResult,
+  prepareResourceRealizationSemanticValidationPacket,
+} from './phase6-admission'
+import { assembleResourceRealizationClosure } from './resource-realization-assembler'
 import {
   boundaryViolations,
   FOUNDATION_PROTECTED_FILES,
@@ -246,6 +256,22 @@ function fixtureDocuments(variant: string): Map<string, string> {
       'docs/GDD.md',
       appendParitySourceBlock(documents.get('docs/GDD.md')!),
     )
+  if (variant === 'parity-issue') {
+    documents.set(
+      'docs/ASSET_PLAN.md',
+      appendResourceParitySourceBlock(
+        documents.get('docs/ASSET_PLAN.md')!,
+        'inventory',
+      ),
+    )
+    documents.set(
+      'docs/TECHNICAL_DESIGN.md',
+      appendResourceParitySourceBlock(
+        documents.get('docs/TECHNICAL_DESIGN.md')!,
+        'architecture',
+      ),
+    )
+  }
   return documents
 }
 
@@ -420,6 +446,203 @@ const PARITY_NODES: Readonly<{
   ],
 }
 
+const RESOURCE_PARITY_NODES: readonly ParityNode[] = [
+  {
+    id: 'resource.requirement.player-model',
+    kind: 'resource-realization.logical-resource',
+    value: {
+      requirementId: 'player-model',
+      resourceKind: 'model',
+      runtimeRole: 'player',
+    },
+    references: [],
+    edges: [
+      {
+        type: 'required-by',
+        targetId: 'entity.player',
+        targetType: 'gameplay.entity',
+      },
+    ],
+  },
+  {
+    id: 'resource.profile.player-model',
+    kind: 'resource-realization.acquisition-profile',
+    value: {
+      required: true,
+      dimensions: ['3D'],
+      assetKinds: ['model'],
+      usageTags: ['character'],
+      capabilities: ['skinned'],
+      styles: ['stylized'],
+      sourcingPolicy: {
+        allowedSourceKinds: ['agent-authored'],
+        licenseConstraints: ['project-license'],
+        responsibleParty: 'art-team',
+        handoffCriteria: ['runtime-import-ready'],
+      },
+    },
+    references: [],
+    edges: [
+      {
+        type: 'describes',
+        targetId: 'resource.requirement.player-model',
+        targetType: 'resource-realization.logical-resource',
+      },
+    ],
+  },
+  {
+    id: 'resource.target.desktop',
+    kind: 'resource-realization.delivery-target',
+    value: {
+      platform: 'desktop',
+      runtime: 'web',
+      assetFormatCapabilities: ['glb'],
+    },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'resource.variant.required',
+    kind: 'resource-realization.variant',
+    value: { activation: { kind: 'required' } },
+    references: [],
+    edges: [
+      {
+        type: 'realizes',
+        targetId: 'resource.requirement.player-model',
+        targetType: 'resource-realization.logical-resource',
+      },
+    ],
+  },
+  {
+    id: 'resource.artifact.player-model',
+    kind: 'resource-realization.delivery-artifact',
+    value: {
+      artifactClass: 'runtime-resource',
+      path: 'assets/runtime/player-model.glb',
+      format: 'glb',
+      runtimeRole: 'player',
+    },
+    references: [],
+    edges: [
+      {
+        type: 'part-of',
+        targetId: 'resource.variant.required',
+        targetType: 'resource-realization.variant',
+      },
+    ],
+  },
+]
+
+function resourceParitySequence(): readonly {
+  subject: string
+  literal: string
+}[] {
+  return RESOURCE_PARITY_NODES.flatMap(node =>
+    parityPointers(node)
+      .sort(compareCodeUnits)
+      .map(pointer => ({
+        subject: 'node:' + node.id + '#' + pointer,
+        literal: parityLiteral(parityPointerValue(node, pointer)),
+      })),
+  ).sort((left, right) => compareCodeUnits(left.subject, right.subject))
+}
+
+function appendResourceParitySourceBlock(
+  markdown: string,
+  sectionId: string,
+): string {
+  const marker = '<!-- game-ir-resource-parity-source -->'
+  const block =
+    marker +
+    '\n' +
+    resourceParitySequence()
+      .map(entry => 'resource parity literal: ' + entry.literal)
+      .join('\n') +
+    '\n'
+  const sectionMarker = `<!-- beegame-section:${sectionId} -->`
+  const start = markdown.indexOf(sectionMarker)
+  if (start < 0)
+    throw new Error(`resource parity fixture is missing ${sectionId}`)
+  const next = markdown.indexOf(
+    '\n<!-- beegame-section:',
+    start + sectionMarker.length,
+  )
+  const insertAt = next < 0 ? markdown.length : next + 1
+  return markdown.slice(0, insertAt) + block + markdown.slice(insertAt)
+}
+
+function resourceParityRanges(
+  sectionBytes: string,
+): ReadonlyMap<string, string> {
+  const ranges = new Map<string, string>()
+  let cursor = sectionBytes.indexOf('<!-- game-ir-resource-parity-source -->')
+  if (cursor < 0) throw new Error('resource parity source marker is missing')
+  for (const entry of resourceParitySequence()) {
+    const start = sectionBytes.indexOf(entry.literal, cursor)
+    if (start < 0)
+      throw new Error('resource parity literal is missing: ' + entry.subject)
+    const end = start + entry.literal.length
+    ranges.set(
+      entry.subject,
+      '/bytes/' +
+        Buffer.byteLength(sectionBytes.slice(0, start), 'utf8') +
+        '/' +
+        Buffer.byteLength(sectionBytes.slice(0, end), 'utf8'),
+    )
+    cursor = end
+  }
+  return ranges
+}
+
+function resourceParityClaims(
+  documents: ReadonlyMap<string, string>,
+  sectionIndex: readonly SectionRef[],
+): readonly Record<string, unknown>[] {
+  const rangesBySection = new Map<string, ReadonlyMap<string, string>>()
+  const sectionFor = (node: ParityNode): SectionRef => {
+    const documentPath =
+      node.kind === 'resource-realization.acquisition-profile' ||
+      node.kind === 'resource-realization.delivery-target'
+        ? 'docs/TECHNICAL_DESIGN.md'
+        : 'docs/ASSET_PLAN.md'
+    const sectionId =
+      documentPath === 'docs/ASSET_PLAN.md' ? 'inventory' : 'architecture'
+    const section = sectionIndex.find(
+      item =>
+        item.documentPath === documentPath && item.sectionId === sectionId,
+    )
+    if (!section)
+      throw new Error(
+        `resource parity section missing: ${documentPath}#${sectionId}`,
+      )
+    return section
+  }
+  return RESOURCE_PARITY_NODES.flatMap(node => {
+    const section = sectionFor(node)
+    const key = `${section.documentPath}#${section.sectionId}`
+    let ranges = rangesBySection.get(key)
+    if (!ranges) {
+      ranges = resourceParityRanges(sectionText(documents, section))
+      rangesBySection.set(key, ranges)
+    }
+    return parityPointers(node)
+      .sort(compareCodeUnits)
+      .map(pointer => ({
+        subject: 'node:' + node.id + '#' + pointer,
+        documentPath: section.documentPath as FoundationDocumentPath,
+        sectionId: section.sectionId,
+        sourcePointer: ranges!.get('node:' + node.id + '#' + pointer)!,
+        literal: parityLiteral(parityPointerValue(node, pointer)),
+      }))
+  }).sort((left, right) =>
+    compareCodeUnits(
+      left.subject + '\0' + left.sourcePointer + '\0' + left.literal,
+      right.subject + '\0' + right.sourcePointer + '\0' + right.literal,
+    ),
+  )
+}
+
 function parityPointers(node: ParityNode): string[] {
   const escape = (key: string) =>
     key.replaceAll('~', '~0').replaceAll('/', '~1')
@@ -480,7 +703,7 @@ function paritySequence(): readonly { subject: string; literal: string }[] {
           })),
       ),
     )
-    .sort((left, right) => left.subject.localeCompare(right.subject))
+    .sort((left, right) => compareCodeUnits(left.subject, right.subject))
 }
 
 function appendParitySourceBlock(markdown: string): string {
@@ -544,13 +767,8 @@ function parityClaims(
         })),
     )
     .sort((left, right) =>
-      (
-        left.subject +
-        '\0' +
-        left.sourcePointer +
-        '\0' +
-        left.literal
-      ).localeCompare(
+      compareCodeUnits(
+        left.subject + '\0' + left.sourcePointer + '\0' + left.literal,
         right.subject + '\0' + right.sourcePointer + '\0' + right.literal,
       ),
     )
@@ -740,6 +958,87 @@ async function phase5AuthorityFromPlan(
       mechanical: presentationMechanical,
       semantic: presentationSemantic,
       validation: presentationValidation,
+    },
+  }
+}
+
+async function resourceAuthorityFromPhase5(
+  authority: Awaited<ReturnType<typeof phase5AuthorityFromPlan>>,
+  documents: ReadonlyMap<string, string>,
+) {
+  const sectionIndex = buildFoundationSectionIndex({ documents })
+  const request = authority.phase4Authority.gameplay.source.compileRequest
+  const selected = new Set(
+    canonicalGameIrModuleSourceDocuments('resource-realization'),
+  )
+  const source = buildGameIrDomainSourceEnvelope({
+    moduleId: 'resource-realization',
+    request,
+    sectionIndex,
+    sectionBytes: Object.fromEntries(
+      sectionIndex
+        .filter(item => selected.has(item.documentPath))
+        .map(item => [
+          item.documentPath + '#' + item.sectionId,
+          sectionText(documents, item),
+        ]),
+    ),
+  })
+  const mechanicalBody = {
+    schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
+    taskId: source.taskId,
+    moduleId: source.moduleId,
+    foundationRevision: request.foundation.foundationRevision,
+    sourceDigest: source.sourceDigest,
+    nodes: [],
+    verifiedClaims: [],
+    ownedTargets: [],
+  }
+  const mechanical = admitGameIrMechanicalProjectionReceipt({
+    source,
+    receipt: {
+      ...mechanicalBody,
+      receiptDigest: digestGameIrValue(mechanicalBody),
+    },
+  })
+  const projectionAuthority = {
+    phase5Authority: authority,
+    resourceRealization: { source, mechanical },
+  }
+  const projectionPacket =
+    prepareResourceRealizationSemanticProjectionPacket(projectionAuthority)
+  const semantic = admitResourceRealizationSemanticResult(
+    projectionAuthority,
+    projectionPacket,
+    {
+      outcome: 'PROJECTED',
+      nodes: RESOURCE_PARITY_NODES,
+      sourceClaims: resourceParityClaims(documents, sectionIndex),
+    },
+  )
+  if (semantic.outcome !== 'PROJECTED')
+    throw new Error('resource parity fixture did not project')
+  const validationAuthority = {
+    phase5Authority: authority,
+    resourceRealization: { source, mechanical, semantic },
+  }
+  const validationPacket =
+    prepareResourceRealizationSemanticValidationPacket(validationAuthority)
+  const validation = admitResourceRealizationSemanticValidationResult(
+    validationAuthority,
+    validationPacket,
+    {
+      outcome: 'PASS',
+      packetDigest: validationPacket.packetDigest,
+      checkIds: validationPacket.checkIds,
+      coveredTargets: validationPacket.requiredTargets,
+    },
+  )
+  return {
+    ...validationAuthority,
+    resourceRealization: {
+      ...validationAuthority.resourceRealization,
+      validation,
     },
   }
 }
@@ -1552,6 +1851,22 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       const authority = await phase5AuthorityFromPlan(before, documentsBefore)
       const beforeClosure = assembleWorldPresentationClosure(authority)
       expect(beforeClosure.closureDigest).toMatch(/^[a-f0-9]{64}$/)
+      const resourceAuthority = await resourceAuthorityFromPhase5(
+        authority,
+        documentsBefore,
+      )
+      const resourceClosure =
+        assembleResourceRealizationClosure(resourceAuthority)
+      expect(resourceClosure.closureDigest).toMatch(/^[a-f0-9]{64}$/)
+      expect(resourceClosure.phase5.closureDigest).toBe(
+        beforeClosure.closureDigest,
+      )
+      expect(resourceClosure.authoritySectionIndexDigest).toBe(
+        beforeClosure.authoritySectionIndexDigest,
+      )
+      expect(
+        resourceAuthority.resourceRealization.source.compileRequest,
+      ).toEqual(authority.phase4Authority.gameplay.source.compileRequest)
       const documentsAfter = new Map(
         await Promise.all(
           CANONICAL_PATHS.map(

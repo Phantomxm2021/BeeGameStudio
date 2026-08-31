@@ -10,6 +10,7 @@ import {
   readSourceFilesRecursively,
   standaloneProductionViolations,
 } from './stage-boundary-test-helpers'
+import { compareCodeUnits } from './model'
 
 const deliveryWorkflowRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const serverSourceRoot = dirname(dirname(deliveryWorkflowRoot))
@@ -816,7 +817,7 @@ async function readGameIrProductionSourceFiles() {
       filename: basename(file.path),
       source: file.source,
     }))
-    .sort((left, right) => left.filename.localeCompare(right.filename))
+    .sort((left, right) => compareCodeUnits(left.filename, right.filename))
 }
 
 describe('Game IR stage boundary', () => {
@@ -1662,6 +1663,7 @@ describe('Game IR stage boundary', () => {
   test('keeps integration callers on staged preparation and out of projection construction', async () => {
     for (const filename of [
       'foundation-parity.test.ts',
+      'resource-realization-profiles.integration.test.ts',
       'world-presentation-traversal.integration.test.ts',
       'world-presentation-puzzle.integration.test.ts',
     ]) {
