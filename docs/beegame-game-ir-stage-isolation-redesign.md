@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）已通过 independent final review 与 root verification 并 accepted；Phase 5（World + Presentation）实现、任务级审查与专项门禁已完成，待本分支最终 root verification；Phase 6–9 尚未开始。完整 candidate assembly/publication、production routing/persistence 与 Chrome acceptance 仍不可用
+状态：设计已确认；Phase 3 Core 已完成；Phase 4（Gameplay + Balance）已通过 independent final review 与 root verification 并 accepted；Phase 5（World + Presentation）实现已完成，Task 11 independent review 与本分支 root verification pending；Phase 6–9 pending。完整 candidate assembly/publication、production routing/persistence 与 Chrome acceptance 仍不可用
 
 日期：2026-08-30
 
@@ -440,17 +440,18 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
 - Complete seven-module candidate assembly/publication、production
   routing/persistence、Chrome acceptance remain unavailable；Phase 6–9 remain
   unstarted。Phase 5 的 World/Presentation 实现、双 profile、Foundation
-  parity、AST isolation 与 status gate 已完成，最终 whole-branch review 与
-  root verification 仍待执行。
+  parity 与 AST isolation 已实现，Task 11 independent review、status gate
+  复核与最终 whole-branch/root verification 仍待执行。
 
-### Phase 5：World + Presentation（实现完成，待最终 root verification）
+### Phase 5：World + Presentation（实现完成，待 Task 11 independent review 与最终 root verification）
 
 - 已落地 scene graph、instances、routes、encounters、UI、Audio、Animation
   和 VFX binding；World/Presentation 通过唯一 closure assembler 只读重放
   Phase 4 authority，并完成 traversal 与 puzzle 两个完整 profile。
-- 已完成 Foundation planning parity、21-file protected baseline、分层 AST
-  isolation 与未来模块不可达性门禁；本阶段仍未接入 production routing、
-  publication、consumer 或 Chrome。
+- 已实现 Foundation planning parity、21-file protected baseline 与分层 AST
+  isolation；本阶段仍未接入 production routing、publication、consumer 或
+  Chrome。Task 11 independent review 与 status gate 尚未完成，不得宣称
+  parity/isolation/status 已最终 accepted。
 
 ### Phase 6：Resource Realization（未开始）
 
@@ -481,7 +482,7 @@ Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority
 
 相同文档在 Game IR enabled/disabled 下必须产生完全相同的 Stage 3 tasks、Issue Registry、Stage 4 Patch packets、Targeted Recheck 和 Foundation READY receipt。
 
-Core Phase 已实现 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile、Foundation parity 和 isolation gate 已实现并通过任务级验证，最终 whole-branch/root verification 仍需在计划结束时执行。Resource Realization、Implementation/Verification 的领域 producer 仍未实现。因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；production routing 仍不可达，不得为了 parity 伪造七个同构 placeholder candidate。测试必须使用现有完整八文档 fixture 和真实 Foundation fact/semantic/revision planning API，在边界调用前后重新序列化同一 documents/state 并重跑规划。完整 seven-module candidate parity 与 publication 要等 Phase 6–7 的其余领域模块落地后再开始；Phase 8–9 分别负责 consumer migration 与真实验收。
+Core Phase 已实现 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile 与 Foundation planning parity 已实现；Task 11 的 independent review、AST isolation/status gate 与最终 whole-branch/root verification pending。Resource Realization、Implementation/Verification 的领域 producer 仍未实现。因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；production routing 仍不可达，不得为了 parity 伪造七个同构 placeholder candidate。Task 11 parity 测试必须调用真实 Phase 5 closure assembler，并在调用前后重新序列化同一 Foundation documents/state、重跑规划；不得只比较 receipt/compile-request，也不得使用 Task 9/10 测试 helper。完整 seven-module candidate parity 与 publication 要等 Phase 6–7 的其余领域模块落地后再开始；Phase 8–9 分别负责 consumer migration 与真实验收。
 
 ### 11.2 架构边界
 

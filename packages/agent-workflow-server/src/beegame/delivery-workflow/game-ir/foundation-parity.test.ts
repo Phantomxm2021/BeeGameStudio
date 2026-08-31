@@ -13,6 +13,7 @@ import {
 import { withTestDocumentMetadata } from '../../../__tests__/delivery-workflow-test-helpers'
 import {
   buildFoundationSectionIndex,
+  digestSectionIndex,
   type SectionRef,
 } from '../foundation-section-index'
 import {
@@ -47,8 +48,56 @@ import type {
   FoundationRevisionSemanticRecheckTask,
   WorkerDispatchRequest,
 } from '../types'
-import { GAME_IR_SCHEMA_VERSION, parseGameIrCompileRequest } from './contracts'
+import {
+  GAME_IR_SCHEMA_VERSION,
+  parseGameIrCompileRequest,
+  receiptDigest,
+  type FoundationReadyReceipt,
+} from './contracts'
 import { projectFoundationReadyReceipt } from './foundation-ready-adapter'
+import {
+  admitGameIrMechanicalProjectionReceipt,
+  type GameIrMechanicalProjectionReceipt,
+} from './domain-projection'
+import {
+  buildGameIrDomainSourceEnvelope,
+  type GameIrDomainSourceEnvelope,
+} from './domain-source'
+import {
+  admitGameplaySemanticResult,
+  buildGameplaySemanticPacket,
+  type GameIrDomainSemanticReceipt as GameplaySemanticReceipt,
+} from './gameplay-producer'
+import {
+  admitBalanceSemanticResult,
+  buildBalanceSemanticPacket,
+  type GameIrDomainSemanticReceipt as BalanceSemanticReceipt,
+} from './balance-producer'
+import {
+  buildWorldSceneSemanticPacket,
+  admitWorldSceneSemanticResult,
+  type WorldSceneSemanticReceipt,
+} from './world-scene-producer'
+import {
+  buildPresentationSemanticPacket,
+  admitPresentationSemanticResult,
+  type PresentationSemanticReceipt,
+} from './presentation-producer'
+import {
+  buildPhase5SemanticValidationPacket,
+  admitPhase5SemanticValidationResult,
+  replayAndBindPhase5SemanticReceipt,
+  type WorldSceneModuleProjection,
+} from './phase5-admission'
+import { parseWorldSceneModule } from './world-scene-schema'
+import { parsePresentationModule } from './presentation-schema'
+import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
+import { assembleWorldPresentationClosure } from './world-presentation-assembler'
+import {
+  canonicalGameIrJson,
+  digestGameIrValue,
+  type GameIrNode,
+} from './model'
 import {
   boundaryViolations,
   FOUNDATION_PROTECTED_FILES,
@@ -227,27 +276,6 @@ function makeFixture(name: string): Fixture {
   }
 }
 
-function readOnlyCompileBoundaryEvidence(
-  plan: Awaited<ReturnType<typeof controllerIssuePlan>>,
-  projectId: string,
-) {
-  const receipt = projectFoundationReadyReceipt({
-    state: plan.readyState,
-    projectId,
-    confirmedBriefDigest: sha256('{"game":"bee"}'),
-  })
-  return {
-    receipt,
-    request: parseGameIrCompileRequest({
-      schemaVersion: 'game-ir-compile-request.v1',
-      taskId: 'foundation-issue.compile',
-      publicationId: 'foundation-issue.publication',
-      gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
-      foundation: receipt,
-    }),
-  }
-}
-
 function parityStateBytes(
   plan: Awaited<ReturnType<typeof controllerIssuePlan>>,
 ): string {
@@ -265,6 +293,466 @@ function parityStateBytes(
       readyBundle: plan.readyBundle,
     }),
   )
+}
+
+type MinimalSemanticNode = Omit<GameIrNode, 'producerMode' | 'bindings'>
+
+const MINIMAL_SECTION_ID = 'foundation-section'
+const MINIMAL_TASK_ID = 'phase5-parity-task'
+const MINIMAL_FOUNDATION_REVISION = 'phase5-parity-foundation'
+
+function minimalLeafPointers(value: Record<string, unknown>): string[] {
+  const output: string[] = []
+  const encode = (key: string) =>
+    key.replaceAll('~', '~0').replaceAll('/', '~1')
+  const visit = (entry: unknown, pointer: string): void => {
+    if (Array.isArray(entry)) {
+      if (entry.length === 0) output.push(pointer)
+      else entry.forEach((child, index) => visit(child, `${pointer}/${index}`))
+      return
+    }
+    if (entry && typeof entry === 'object') {
+      const entries = Object.entries(entry as Record<string, unknown>)
+      if (entries.length === 0) output.push(pointer)
+      else
+        entries.forEach(([key, child]) =>
+          visit(child, `${pointer}/${encode(key)}`),
+        )
+      return
+    }
+    output.push(pointer)
+  }
+  const entries = Object.entries(value)
+  if (entries.length === 0) output.push('/value')
+  else entries.forEach(([key, child]) => visit(child, `/value/${encode(key)}`))
+  return output
+}
+
+function minimalPointerValue(
+  node: MinimalSemanticNode,
+  pointer: string,
+): unknown {
+  if (pointer === '/id') return node.id
+  if (pointer.startsWith('/references/'))
+    return node.references[Number(pointer.slice('/references/'.length))]
+  if (pointer.startsWith('/edges/'))
+    return node.edges[Number(pointer.slice('/edges/'.length))]
+  let current: unknown = node.value
+  for (const segment of pointer
+    .slice('/value/'.length)
+    .split('/')
+    .map(entry => entry.replaceAll('~1', '/').replaceAll('~0', '~'))) {
+    if (current && typeof current === 'object')
+      current = (current as Record<string, unknown>)[segment]
+    else return undefined
+  }
+  return current
+}
+
+function minimalNodePointers(node: MinimalSemanticNode): string[] {
+  return [
+    '/id',
+    ...minimalLeafPointers(node.value),
+    ...node.references.map((_, index) => `/references/${index}`),
+    ...node.edges.map((_, index) => `/edges/${index}`),
+  ]
+}
+
+function minimalLiteral(value: unknown): string {
+  return typeof value === 'string' ? value : canonicalGameIrJson(value)
+}
+
+function minimalNodes(): Readonly<{
+  gameplay: readonly MinimalSemanticNode[]
+  balance: readonly MinimalSemanticNode[]
+  world: readonly MinimalSemanticNode[]
+  presentation: readonly MinimalSemanticNode[]
+}> {
+  return {
+    gameplay: [
+      {
+        id: 'entity.player',
+        kind: 'gameplay.entity',
+        value: { label: 'Player' },
+        references: [],
+        edges: [],
+      },
+      {
+        id: 'state.playing',
+        kind: 'gameplay.state',
+        value: { label: 'Playing', initial: true, terminal: 'none' },
+        references: [],
+        edges: [],
+      },
+    ],
+    balance: [
+      {
+        id: 'balance.unit.hp',
+        kind: 'balance.unit',
+        value: {
+          symbol: 'HP',
+          dimensions: [],
+          scale: { numerator: 1, denominator: 1 },
+        },
+        references: [],
+        edges: [],
+      },
+    ],
+    world: [
+      {
+        id: 'world.scene.main',
+        kind: 'world-scene.scene',
+        value: {
+          label: 'Main Scene',
+          coordinateConvention: {
+            dimensions: '3d',
+            handedness: 'right',
+            upAxis: '+y',
+            forwardAxis: '+z',
+            distanceUnit: 'meter',
+          },
+        },
+        references: [],
+        edges: [
+          {
+            type: 'root',
+            targetId: 'world.node.root',
+            targetType: 'world-scene.node',
+          },
+        ],
+      },
+      {
+        id: 'world.node.root',
+        kind: 'world-scene.node',
+        value: {
+          label: 'Root',
+          nodeType: 'container',
+          transform: {
+            dimensions: '3d',
+            space: 'world',
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0, w: 1 },
+            scale: { x: 1, y: 1, z: 1 },
+          },
+        },
+        references: [],
+        edges: [
+          {
+            type: 'scene',
+            targetId: 'world.scene.main',
+            targetType: 'world-scene.scene',
+          },
+        ],
+      },
+    ],
+    presentation: [
+      {
+        id: 'presentation.screen.main',
+        kind: 'presentation.ui-screen',
+        value: { label: 'Main Screen', modal: false },
+        references: [],
+        edges: [
+          {
+            type: 'driven-by',
+            targetId: 'state.playing',
+            targetType: 'gameplay.state',
+          },
+          {
+            type: 'initial-state',
+            targetId: 'presentation.state.main',
+            targetType: 'presentation.ui-state',
+          },
+        ],
+      },
+      {
+        id: 'presentation.state.main',
+        kind: 'presentation.ui-state',
+        value: { label: 'Main', terminal: false },
+        references: [],
+        edges: [
+          {
+            type: 'driven-by',
+            targetId: 'state.playing',
+            targetType: 'gameplay.state',
+          },
+          {
+            type: 'screen',
+            targetId: 'presentation.screen.main',
+            targetType: 'presentation.ui-screen',
+          },
+        ],
+      },
+    ],
+  }
+}
+
+function minimalPhase5Authority() {
+  const nodes = minimalNodes()
+  const allNodes = [
+    ...nodes.gameplay,
+    ...nodes.balance,
+    ...nodes.world,
+    ...nodes.presentation,
+  ]
+  const ranges = new Map<string, string>()
+  let sourceBytes = ''
+  for (const node of allNodes) {
+    for (const pointer of minimalNodePointers(node).sort()) {
+      const literal = minimalLiteral(minimalPointerValue(node, pointer))
+      const start = Buffer.byteLength(sourceBytes, 'utf8')
+      sourceBytes += `${literal}\n`
+      const end = start + Buffer.byteLength(literal, 'utf8')
+      ranges.set(`node:${node.id}#${pointer}`, `/bytes/${start}/${end}`)
+    }
+  }
+  const sectionIndex = CANONICAL_FOUNDATION_DOCUMENTS.map(
+    (documentPath, index) => ({
+      documentPath,
+      sectionId: `${MINIMAL_SECTION_ID}-${index}`,
+      heading: `Foundation ${index}`,
+      startLine: 1,
+      endLine: 1,
+      digest: sha256(sourceBytes),
+    }),
+  )
+  const foundationBody: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
+    schemaVersion: 'foundation-ready-receipt.v1',
+    projectId: 'phase5-parity-project',
+    foundationRevision: MINIMAL_FOUNDATION_REVISION,
+    confirmedBriefDigest: sha256('phase5-parity-brief'),
+    documentDigests: Object.fromEntries(
+      CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, sha256(sourceBytes)]),
+    ) as FoundationReadyReceipt['documentDigests'],
+    sectionIndexPath: '.beegame/foundation/section-index.json',
+    sectionIndexDigest: digestSectionIndex(sectionIndex),
+    authority: {
+      kind: 'review',
+      reviewDigest: sha256('phase5-parity-review'),
+      issueRegistryDigest: sha256('phase5-parity-issues'),
+    },
+  }
+  const request = parseGameIrCompileRequest({
+    schemaVersion: 'game-ir-compile-request.v1',
+    taskId: MINIMAL_TASK_ID,
+    publicationId: 'phase5-parity-publication',
+    gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
+    foundation: {
+      ...foundationBody,
+      receiptDigest: receiptDigest(foundationBody),
+    },
+  })
+  const source = (
+    moduleId: 'gameplay' | 'balance' | 'world-scene' | 'presentation',
+  ) => {
+    const paths = {
+      gameplay: ['docs/GDD.md'],
+      balance: ['docs/GDD.md', 'docs/BALANCE_DESIGN.md'],
+      'world-scene': ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+      presentation: [
+        'docs/GDD.md',
+        'docs/ART_DIRECTION.md',
+        'docs/UI_UX_SPEC.md',
+        'docs/AUDIO_DESIGN.md',
+      ],
+    }[moduleId]
+    return buildGameIrDomainSourceEnvelope({
+      moduleId,
+      request,
+      sectionIndex,
+      sectionBytes: Object.fromEntries(
+        paths.map(path => [
+          `${path}#${MINIMAL_SECTION_ID}-${CANONICAL_FOUNDATION_DOCUMENTS.indexOf(path as never)}`,
+          sourceBytes,
+        ]),
+      ),
+    })
+  }
+  const mechanical = (currentSource: GameIrDomainSourceEnvelope) => {
+    const body = {
+      schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
+      taskId: currentSource.taskId,
+      moduleId: currentSource.moduleId,
+      foundationRevision: MINIMAL_FOUNDATION_REVISION,
+      sourceDigest: currentSource.sourceDigest,
+      nodes: [],
+      verifiedClaims: [],
+      ownedTargets: [],
+    }
+    return admitGameIrMechanicalProjectionReceipt({
+      source: currentSource,
+      receipt: { ...body, receiptDigest: digestGameIrValue(body) },
+    })
+  }
+  const claims = (moduleNodes: readonly MinimalSemanticNode[]) =>
+    moduleNodes
+      .flatMap(node =>
+        minimalNodePointers(node).map(pointer => ({
+          subject: `node:${node.id}#${pointer}`,
+          documentPath: 'docs/GDD.md' as FoundationDocumentPath,
+          sectionId: `${MINIMAL_SECTION_ID}-0`,
+          sourcePointer: ranges.get(`node:${node.id}#${pointer}`)!,
+          literal: minimalLiteral(minimalPointerValue(node, pointer)),
+        })),
+      )
+      .sort((left, right) =>
+        `${left.subject}\0${left.sourcePointer}\0${left.literal}`.localeCompare(
+          `${right.subject}\0${right.sourcePointer}\0${right.literal}`,
+        ),
+      )
+  const gameplaySource = source('gameplay')
+  const balanceSource = source('balance')
+  const gameplayMechanical = mechanical(gameplaySource)
+  const balanceMechanical = mechanical(balanceSource)
+  const gameplaySemantic = admitGameplaySemanticResult(
+    buildGameplaySemanticPacket({
+      source: gameplaySource,
+      mechanical: gameplayMechanical,
+    }),
+    {
+      outcome: 'PROJECTED',
+      nodes: nodes.gameplay,
+      sourceClaims: claims(nodes.gameplay),
+    },
+  ) as GameplaySemanticReceipt
+  const balanceSemantic = admitBalanceSemanticResult(
+    buildBalanceSemanticPacket({
+      source: balanceSource,
+      mechanical: balanceMechanical,
+    }),
+    {
+      outcome: 'PROJECTED',
+      nodes: nodes.balance,
+      sourceClaims: claims(nodes.balance),
+    },
+  ) as BalanceSemanticReceipt
+  const phase4Authority = {
+    gameplay: {
+      source: gameplaySource,
+      mechanical: gameplayMechanical,
+      semantic: gameplaySemantic,
+    },
+    balance: {
+      source: balanceSource,
+      mechanical: balanceMechanical,
+      semantic: balanceSemantic,
+    },
+  }
+  const phase4 = assembleGameplayBalanceModules(phase4Authority)
+  const worldSource = source('world-scene')
+  const worldMechanical = mechanical(worldSource)
+  const worldSemantic = admitWorldSceneSemanticResult(
+    buildWorldSceneSemanticPacket({
+      source: worldSource,
+      mechanical: worldMechanical,
+    }),
+    {
+      outcome: 'PROJECTED',
+      nodes: nodes.world,
+      sourceClaims: claims(nodes.world),
+    },
+  ) as WorldSceneSemanticReceipt
+  const worldBound = replayAndBindPhase5SemanticReceipt({
+    source: worldSource,
+    mechanical: worldMechanical,
+    packet: buildWorldSceneSemanticPacket({
+      source: worldSource,
+      mechanical: worldMechanical,
+    }),
+    semantic: worldSemantic,
+  })
+  const worldModule = parseWorldSceneModule(worldBound.module, new Map())
+  const worldValidationPacket = buildPhase5SemanticValidationPacket({
+    source: worldSource,
+    mechanical: worldMechanical,
+    semantic: worldSemantic,
+    module: worldModule,
+    externalProjections: { gameplay: phase4.gameplay },
+  })
+  const worldValidation = admitPhase5SemanticValidationResult(
+    worldValidationPacket,
+    {
+      outcome: 'PASS',
+      packetDigest: worldValidationPacket.packetDigest,
+      checkIds: worldValidationPacket.checkIds,
+      coveredTargets: worldValidationPacket.requiredTargets,
+    },
+  )
+  const worldProjectionBody = {
+    schemaVersion: 'game-ir-world-scene-module.v1' as const,
+    taskId: worldSource.taskId,
+    foundationRevision: MINIMAL_FOUNDATION_REVISION,
+    module: worldModule,
+    sourceDigest: worldSource.sourceDigest,
+    mechanicalReceiptDigest: worldBound.mechanicalReceiptDigest,
+    semanticReceiptDigest: worldBound.semanticReceiptDigest,
+    semanticValidationResultDigest: digestGameIrValue(worldValidation),
+  }
+  const worldProjection = Object.freeze({
+    ...worldProjectionBody,
+    projectionDigest: digestGameIrValue(worldProjectionBody),
+  }) as WorldSceneModuleProjection
+  const presentationSource = source('presentation')
+  const presentationMechanical = mechanical(presentationSource)
+  const presentationPacket = buildPresentationSemanticPacket({
+    source: presentationSource,
+    mechanical: presentationMechanical,
+  })
+  const presentationSemantic = admitPresentationSemanticResult(
+    presentationPacket,
+    {
+      outcome: 'PROJECTED',
+      nodes: nodes.presentation,
+      sourceClaims: claims(nodes.presentation),
+    },
+  ) as PresentationSemanticReceipt
+  const presentationBound = replayAndBindPhase5SemanticReceipt({
+    source: presentationSource,
+    mechanical: presentationMechanical,
+    packet: presentationPacket,
+    semantic: presentationSemantic,
+  })
+  const presentationModule = parsePresentationModule(
+    presentationBound.module,
+    new Map(
+      [...phase4.gameplay.module.nodes, ...worldProjection.module.nodes].map(
+        node => [node.id, node],
+      ),
+    ),
+  )
+  const presentationValidationPacket = buildPhase5SemanticValidationPacket({
+    source: presentationSource,
+    mechanical: presentationMechanical,
+    semantic: presentationSemantic,
+    module: presentationModule,
+    externalProjections: {
+      gameplay: phase4.gameplay,
+      worldScene: worldProjection,
+    },
+  })
+  const presentationValidation = admitPhase5SemanticValidationResult(
+    presentationValidationPacket,
+    {
+      outcome: 'PASS',
+      packetDigest: presentationValidationPacket.packetDigest,
+      checkIds: presentationValidationPacket.checkIds,
+      coveredTargets: presentationValidationPacket.requiredTargets,
+    },
+  )
+  return {
+    phase4Authority,
+    worldScene: {
+      source: worldSource,
+      mechanical: worldMechanical,
+      semantic: worldSemantic,
+      validation: worldValidation,
+    },
+    presentation: {
+      source: presentationSource,
+      mechanical: presentationMechanical,
+      semantic: presentationSemantic,
+      validation: presentationValidation,
+    },
+  }
 }
 
 function factPacketResults(
@@ -1061,24 +1549,21 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
     try {
       const before = await controllerIssuePlan(fixture, firstWorkspace)
       const beforeStateBytes = parityStateBytes(before)
-      const beforeBoundary = readOnlyCompileBoundaryEvidence(
-        before,
-        'project-issue',
+      const beforeClosure = assembleWorldPresentationClosure(
+        minimalPhase5Authority(),
       )
-      expect(beforeBoundary.request.foundation).toEqual(beforeBoundary.receipt)
+      expect(beforeClosure.closureDigest).toMatch(/^[a-f0-9]{64}$/)
       expect(JSON.stringify([...documents])).toBe(serializedDocumentsBefore)
 
       const after = await controllerIssuePlan(fixture, secondWorkspace)
       const afterStateBytes = parityStateBytes(after)
-      const afterBoundary = readOnlyCompileBoundaryEvidence(
-        after,
-        'project-issue',
+      const afterClosure = assembleWorldPresentationClosure(
+        minimalPhase5Authority(),
       )
 
       expect(afterStateBytes).toBe(beforeStateBytes)
       expect(after.identity).toEqual(before.identity)
-      expect(afterBoundary.receipt).toEqual(beforeBoundary.receipt)
-      expect(afterBoundary.request).toEqual(beforeBoundary.request)
+      expect(afterClosure).toEqual(beforeClosure)
       expect(JSON.stringify([...documents])).toBe(serializedDocumentsBefore)
     } finally {
       await rm(firstWorkspace, { recursive: true, force: true })

@@ -16,7 +16,7 @@ const serverSourceRoot = dirname(dirname(deliveryWorkflowRoot))
 
 const gameIrContractFiles = ['contracts.ts'] as const
 
-const TASK_7_PHASE4_PRODUCTION_FILES = [
+const PHASE4_PRODUCTION_FILES = [
   'domain-source.ts',
   'domain-projection.ts',
   'gameplay-schema.ts',
@@ -26,7 +26,7 @@ const TASK_7_PHASE4_PRODUCTION_FILES = [
   'gameplay-balance-assembler.ts',
 ] as const
 
-const TASK_11_PHASE5_PRODUCTION_FILES = [
+const PHASE5_PRODUCTION_FILES = [
   'world-scene-schema.ts',
   'presentation-schema.ts',
   'world-scene-producer.ts',
@@ -35,126 +35,78 @@ const TASK_11_PHASE5_PRODUCTION_FILES = [
   'world-presentation-assembler.ts',
 ] as const
 
-function task7IsolationViolations(source: string): string[] {
-  const file = ts.createSourceFile(
-    'task-7-static-scan.ts',
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  )
-  const violations = new Set<string>()
-  const forbiddenApis = new Set([
-    'parseGameIrCandidate',
-    'prepareGameIrPublication',
-    'commitGameIrPublication',
-  ])
-  const placeholderModules = new Set([
-    'core',
-    'world-scene',
-    'presentation',
-    'resource-realization',
-    'implementation-verification',
-  ])
-  const containsProvider = (expression: ts.Expression): boolean => {
-    if (ts.isIdentifier(expression)) return expression.text === 'provider'
-    if (ts.isPropertyAccessExpression(expression))
-      return (
-        expression.name.text === 'provider' ||
-        containsProvider(expression.expression)
-      )
-    if (ts.isElementAccessExpression(expression))
-      return containsProvider(expression.expression)
-    return false
-  }
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier)
-    ) {
-      const path = node.moduleSpecifier.text
-      if (
-        /(?:^|\/)(?:controller|store|run-store|delivery-run|foundation-issue(?:-registry)?)(?:\.ts)?$/.test(
-          path,
-        )
-      )
-        violations.add(`path: ${path}`)
-      if (
-        node.importClause?.namedBindings &&
-        ts.isNamedImports(node.importClause.namedBindings)
-      )
-        for (const specifier of node.importClause.namedBindings.elements) {
-          const name = specifier.propertyName?.text ?? specifier.name.text
-          if (forbiddenApis.has(name)) violations.add(`api-import: ${name}`)
-        }
-    }
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      forbiddenApis.has(node.expression.text)
-    )
-      violations.add(`api-call: ${node.expression.text}`)
-    if (ts.isCallExpression(node)) {
-      const expression = node.expression
-      const calledName = ts.isPropertyAccessExpression(expression)
-        ? expression.name.text
-        : ts.isElementAccessExpression(expression) &&
-            ts.isStringLiteral(expression.argumentExpression)
-          ? expression.argumentExpression.text
-          : undefined
-      if (calledName && forbiddenApis.has(calledName))
-        violations.add(`api-call: ${calledName}`)
-      const receiver =
-        ts.isPropertyAccessExpression(expression) ||
-        ts.isElementAccessExpression(expression)
-          ? expression.expression
-          : undefined
-      if (calledName === 'dispatch' && receiver && containsProvider(receiver))
-        violations.add('provider-dispatch: provider dispatch call')
-    }
-    if (
-      ts.isIdentifier(node) &&
-      (node.text === 'DeliveryRun' || node.text === 'FoundationIssue')
-    )
-      violations.add(`identifier: ${node.text}`)
-    if (
-      ts.isPropertyAssignment(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === 'moduleId' &&
-      ts.isStringLiteral(node.initializer) &&
-      placeholderModules.has(node.initializer.text)
-    )
-      violations.add(`placeholder-module: ${node.initializer.text}`)
-    ts.forEachChild(node, visit)
-  }
-  visit(file)
-  return [...violations].sort()
-}
+/*
+ * All stage policies consume this one fact set.  Keeping syntax collection in
+ * one place prevents the phase scanners from drifting into separate walkers.
+ */
+type AstFacts = Readonly<{
+  imports: readonly { kind: string; path: string }[]
+  apiImports: readonly string[]
+  calls: readonly string[]
+  providerDispatch: boolean
+  identifiers: readonly string[]
+  properties: readonly { key?: string; value: string }[]
+  strings: readonly {
+    value: string
+    isPropertyName: boolean
+    isPropertyValue: boolean
+    declarationName?: string
+  }[]
+}>
 
-function task11Phase5IsolationViolations(source: string): string[] {
+const forbiddenApis = new Set([
+  'parseGameIrCandidate',
+  'prepareGameIrPublication',
+  'commitGameIrPublication',
+])
+const forbiddenPaths =
+  /(?:^|\/)(?:controller|store|run-store|delivery-run|foundation-issue(?:-registry)?)(?:\.ts)?$/
+const forbiddenPhase5Paths =
+  /(?:^|\/)(?:routes?|publication|consumer|delivery)(?:\.ts)?$/
+const placeholderModules = new Set([
+  'core',
+  'world-scene',
+  'presentation',
+  'resource-realization',
+  'implementation-verification',
+])
+const futureModuleIds = new Set([
+  'resource-realization',
+  'implementation-verification',
+])
+const futureNodePrefixes = [
+  'resource-realization.',
+  'implementation-verification.',
+]
+const phase5NodePrefixes = [
+  'world-scene.',
+  'presentation.',
+  ...futureNodePrefixes,
+]
+
+function collectAstFacts(
+  source: string,
+  filename = 'game-ir-static-scan.ts',
+): AstFacts {
   const file = ts.createSourceFile(
-    'task-11-phase-5-static-scan.ts',
+    filename,
     source,
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.TS,
   )
-  const violations = new Set<string>()
-  const forbiddenApis = new Set([
-    'parseGameIrCandidate',
-    'prepareGameIrPublication',
-    'commitGameIrPublication',
-  ])
-  const forbiddenPaths =
-    /(?:^|\/)(?:controller|store|run-store|delivery-run|foundation-issue(?:-registry)?)(?:\.ts)?$/
-  const futureModuleIds = new Set([
-    'resource-realization',
-    'implementation-verification',
-  ])
-  const futureNodePrefixes = [
-    'resource-realization.',
-    'implementation-verification.',
-  ]
+  const imports: Array<{ kind: string; path: string }> = []
+  const apiImports: string[] = []
+  const calls: string[] = []
+  const identifiers: string[] = []
+  const properties: Array<{ key?: string; value: string }> = []
+  const strings: Array<{
+    value: string
+    isPropertyName: boolean
+    isPropertyValue: boolean
+    declarationName?: string
+  }> = []
+  let providerDispatch = false
   const containsProvider = (expression: ts.Expression): boolean => {
     if (ts.isIdentifier(expression)) return expression.text === 'provider'
     if (ts.isPropertyAccessExpression(expression))
@@ -166,24 +118,56 @@ function task11Phase5IsolationViolations(source: string): string[] {
       return containsProvider(expression.expression)
     return false
   }
+  const declarationName = (node: ts.Node): string | undefined => {
+    for (let parent = node.parent; parent; parent = parent.parent)
+      if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name))
+        return parent.name.text
+    return undefined
+  }
   const visit = (node: ts.Node): void => {
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier)
     ) {
-      if (forbiddenPaths.test(node.moduleSpecifier.text))
-        violations.add(`path: ${node.moduleSpecifier.text}`)
+      imports.push({ kind: 'import', path: node.moduleSpecifier.text })
       if (
         node.importClause?.namedBindings &&
         ts.isNamedImports(node.importClause.namedBindings)
       )
         for (const specifier of node.importClause.namedBindings.elements) {
           const name = specifier.propertyName?.text ?? specifier.name.text
-          if (forbiddenApis.has(name)) violations.add(`api-import: ${name}`)
+          if (forbiddenApis.has(name)) apiImports.push(name)
         }
+    }
+    if (
+      ts.isExportDeclaration(node) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    )
+      imports.push({ kind: 'export', path: node.moduleSpecifier.text })
+    if (ts.isImportEqualsDeclaration(node)) {
+      const reference = node.moduleReference
+      if (
+        ts.isExternalModuleReference(reference) &&
+        ts.isStringLiteral(reference.expression)
+      )
+        imports.push({ kind: 'import-equals', path: reference.expression.text })
     }
     if (ts.isCallExpression(node)) {
       const expression = node.expression
+      if (
+        ts.isIdentifier(expression) &&
+        expression.text === 'require' &&
+        node.arguments.length === 1 &&
+        ts.isStringLiteral(node.arguments[0])
+      )
+        imports.push({ kind: 'require', path: node.arguments[0].text })
+      if (
+        expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments.length === 1 &&
+        ts.isStringLiteral(node.arguments[0])
+      )
+        imports.push({ kind: 'dynamic-import', path: node.arguments[0].text })
       const calledName = ts.isIdentifier(expression)
         ? expression.text
         : ts.isPropertyAccessExpression(expression)
@@ -192,142 +176,189 @@ function task11Phase5IsolationViolations(source: string): string[] {
               ts.isStringLiteral(expression.argumentExpression)
             ? expression.argumentExpression.text
             : undefined
-      if (calledName && forbiddenApis.has(calledName))
-        violations.add(`api-call: ${calledName}`)
+      if (calledName && forbiddenApis.has(calledName)) calls.push(calledName)
       const receiver =
         ts.isPropertyAccessExpression(expression) ||
         ts.isElementAccessExpression(expression)
           ? expression.expression
           : undefined
       if (calledName === 'dispatch' && receiver && containsProvider(receiver))
-        violations.add('provider-dispatch: provider dispatch call')
+        providerDispatch = true
       if (calledName === 'assembleWorldPresentationClosure')
-        violations.add('detached-closure-consumer: closure assembler call')
+        calls.push(calledName)
     }
-    if (
-      ts.isIdentifier(node) &&
-      (node.text === 'DeliveryRun' || node.text === 'FoundationIssue')
-    )
-      violations.add(`identifier: ${node.text}`)
-    if (ts.isPropertyAssignment(node) && ts.isStringLiteral(node.initializer)) {
-      const initializer = node.initializer as ts.StringLiteral
-      const key = ts.isIdentifier(node.name) ? node.name.text : undefined
-      if (key === 'moduleId' && futureModuleIds.has(initializer.text))
-        violations.add(`future-module: ${initializer.text}`)
-      if (
-        key === 'kind' &&
-        futureNodePrefixes.some(prefix => initializer.text.startsWith(prefix))
-      )
-        violations.add(`future-node: ${initializer.text}`)
-    }
-    if (
-      ts.isStringLiteral(node) &&
-      futureModuleIds.has(node.text) &&
-      !(
-        ts.isPropertyAssignment(node.parent) && node.parent.initializer === node
-      )
-    )
-      violations.add(`future-module-literal: ${node.text}`)
-    if (ts.isIdentifier(node)) {
-      if (
-        node.text === 'fallback' ||
-        node.text === 'compatibility' ||
-        node.text === 'legacy' ||
-        node.text === 'migration' ||
-        node.text === 'dualWrite'
-      )
-        violations.add(`forbidden-strategy: ${node.text}`)
-    }
+    if (ts.isIdentifier(node)) identifiers.push(node.text)
+    if (ts.isPropertyAssignment(node) && ts.isStringLiteral(node.initializer))
+      properties.push({
+        key: ts.isIdentifier(node.name) ? node.name.text : undefined,
+        value: node.initializer.text,
+      })
+    if (ts.isStringLiteral(node))
+      strings.push({
+        value: node.text,
+        isPropertyName:
+          ts.isPropertyAssignment(node.parent) && node.parent.name === node,
+        isPropertyValue:
+          ts.isPropertyAssignment(node.parent) &&
+          node.parent.initializer === node,
+        declarationName: declarationName(node),
+      })
     ts.forEachChild(node, visit)
   }
   visit(file)
+  return {
+    imports,
+    apiImports,
+    calls,
+    providerDispatch,
+    identifiers,
+    properties,
+    strings,
+  }
+}
+
+function policyViolations(
+  facts: AstFacts,
+  policy: 'task7' | 'phase4' | 'phase5' | 'other',
+): string[] {
+  const violations = new Set<string>()
+  for (const entry of facts.imports)
+    if (
+      forbiddenPaths.test(entry.path) ||
+      (policy === 'phase5' && forbiddenPhase5Paths.test(entry.path))
+    )
+      violations.add(`path: ${entry.path}`)
+  for (const name of facts.apiImports) violations.add(`api-import: ${name}`)
+  for (const name of facts.calls) {
+    if (forbiddenApis.has(name)) violations.add(`api-call: ${name}`)
+    if (
+      (policy === 'phase5' || policy === 'other') &&
+      name === 'assembleWorldPresentationClosure'
+    )
+      violations.add('detached-closure-consumer: closure assembler call')
+  }
+  if (facts.providerDispatch)
+    violations.add('provider-dispatch: provider dispatch call')
+  for (const name of facts.identifiers) {
+    if (name === 'DeliveryRun' || name === 'FoundationIssue')
+      violations.add(`identifier: ${name}`)
+    if (
+      policy === 'phase5' &&
+      [
+        'fallback',
+        'compatibility',
+        'legacy',
+        'migration',
+        'dualWrite',
+      ].includes(name)
+    )
+      violations.add(`forbidden-strategy: ${name}`)
+  }
+  for (const entry of facts.properties) {
+    if (
+      policy === 'task7' &&
+      entry.key === 'moduleId' &&
+      placeholderModules.has(entry.value)
+    )
+      violations.add(`placeholder-module: ${entry.value}`)
+    if (
+      policy === 'phase4' &&
+      (entry.key === 'kind' || entry.key === 'moduleId') &&
+      (entry.value === 'world-scene' ||
+        entry.value === 'presentation' ||
+        futureModuleIds.has(entry.value) ||
+        phase5NodePrefixes.some(prefix => entry.value.startsWith(prefix)))
+    )
+      violations.add(`phase5-construction: ${entry.value}`)
+    if (policy === 'phase5') {
+      if (entry.key === 'moduleId' && futureModuleIds.has(entry.value))
+        violations.add(`future-module: ${entry.value}`)
+      if (
+        entry.key === 'kind' &&
+        futureNodePrefixes.some(prefix => entry.value.startsWith(prefix))
+      )
+        violations.add(`future-node: ${entry.value}`)
+    }
+  }
+  if (policy === 'phase5' || policy === 'other')
+    for (const entry of facts.strings)
+      if (
+        futureModuleIds.has(entry.value) &&
+        !entry.isPropertyName &&
+        !entry.isPropertyValue
+      )
+        violations.add(`future-module-literal: ${entry.value}`)
   return [...violations].sort()
+}
+
+function task7IsolationViolations(source: string): string[] {
+  return policyViolations(
+    collectAstFacts(source, 'task-7-static-scan.ts'),
+    'task7',
+  )
+}
+
+function task11Phase5IsolationViolations(
+  source: string,
+  filename?: string,
+): string[] {
+  return policyViolations(
+    collectAstFacts(source, filename ?? 'task-11-phase-5-static-scan.ts'),
+    'phase5',
+  )
 }
 
 function task11Phase4IsolationViolations(source: string): string[] {
-  const file = ts.createSourceFile(
-    'task-11-phase-4-static-scan.ts',
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
+  return policyViolations(
+    collectAstFacts(source, 'task-11-phase-4-static-scan.ts'),
+    'phase4',
   )
-  const violations = new Set(
-    task7IsolationViolations(source).filter(
-      violation =>
-        !violation.startsWith('placeholder-module: world-scene') &&
-        !violation.startsWith('placeholder-module: presentation') &&
-        !violation.startsWith('placeholder-module: resource-realization') &&
-        !violation.startsWith(
-          'placeholder-module: implementation-verification',
-        ),
-    ),
-  )
-  const forbiddenPrefixes = [
-    'world-scene.',
-    'presentation.',
-    'resource-realization.',
-    'implementation-verification.',
-  ]
-  const visit = (node: ts.Node): void => {
-    if (ts.isPropertyAssignment(node) && ts.isStringLiteral(node.initializer)) {
-      const initializer = node.initializer as ts.StringLiteral
-      const property = ts.isIdentifier(node.name) ? node.name.text : undefined
-      if (
-        (property === 'kind' || property === 'moduleId') &&
-        (forbiddenPrefixes.some(prefix =>
-          initializer.text.startsWith(prefix),
-        ) ||
-          initializer.text === 'world-scene' ||
-          initializer.text === 'presentation')
-      )
-        violations.add(`phase5-construction: ${initializer.text}`)
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(file)
-  return [...violations].sort()
 }
 
-function futureModuleLiteralViolations(
-  source: string,
-  allowedDeclaration: string,
-): string[] {
-  const file = ts.createSourceFile(
-    'task-11-future-module-whitelist.ts',
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
+function futureModuleLiteralViolations(source: string): string[] {
+  return collectAstFacts(source, 'task-11-future-module-whitelist.ts')
+    .strings.filter(
+      entry =>
+        futureModuleIds.has(entry.value) &&
+        (!entry.isPropertyName ||
+          !['GAME_IR_MODULE_SOURCE_DOCUMENTS', 'MODULE_DESCRIPTORS'].includes(
+            entry.declarationName ?? '',
+          )),
+    )
+    .map(entry => `future-module-literal: ${entry.value}`)
+    .sort()
+}
+
+type GameIrProductionRole = 'phase4' | 'phase5' | 'authorized' | 'other'
+
+function gameIrProductionRole(filename: string): GameIrProductionRole {
+  if (
+    filename === 'contracts.ts' ||
+    filename === 'publication.ts' ||
+    filename === 'semantic-admission.ts'
   )
-  const allowed = new Set<ts.Node>()
-  const mark = (node: ts.Node): void => {
-    allowed.add(node)
-    ts.forEachChild(node, mark)
-  }
-  const findAllowedDeclaration = (node: ts.Node): void => {
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === allowedDeclaration
+    return 'authorized'
+  if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
+  if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
+  return 'other'
+}
+
+async function readGameIrProductionSourceFiles() {
+  const files = await readSourceFilesRecursively(
+    dirname(fileURLToPath(import.meta.url)),
+  )
+  return files
+    .filter(
+      file =>
+        file.path.endsWith('.ts') &&
+        !file.path.endsWith('.test.ts') &&
+        !file.path.endsWith('-test-helpers.ts'),
     )
-      mark(node)
-    ts.forEachChild(node, findAllowedDeclaration)
-  }
-  findAllowedDeclaration(file)
-  const violations: string[] = []
-  const visit = (node: ts.Node): void => {
-    if (
-      ts.isStringLiteral(node) &&
-      (node.text === 'resource-realization' ||
-        node.text === 'implementation-verification') &&
-      !allowed.has(node)
-    )
-      violations.push(`future-module-literal: ${node.text}`)
-    ts.forEachChild(node, visit)
-  }
-  visit(file)
-  return violations.sort()
+    .map(file => ({
+      filename: basename(file.path),
+      source: file.source,
+    }))
+    .sort((left, right) => left.filename.localeCompare(right.filename))
 }
 
 describe('Game IR stage boundary', () => {
@@ -538,6 +569,8 @@ describe('Game IR stage boundary', () => {
   test('Phase 5 boundary rejects future resource nodes and production reachability', () => {
     expect(
       task11Phase5IsolationViolations(`
+        import { route } from '../routes'
+        import { publish } from './publication'
         const resource = { kind: 'resource-realization.logical-resource' }
         const implementation = { moduleId: 'implementation-verification' }
         const candidate = parseGameIrCandidate(input)
@@ -549,6 +582,8 @@ describe('Game IR stage boundary', () => {
       'api-call: prepareGameIrPublication',
       'future-module: implementation-verification',
       'future-node: resource-realization.logical-resource',
+      'path: ../routes',
+      'path: ./publication',
       'provider-dispatch: provider dispatch call',
     ])
     expect(
@@ -576,11 +611,28 @@ describe('Game IR stage boundary', () => {
     ).toEqual([])
     expect(
       task11Phase4IsolationViolations(`
-        const world = { kind: 'world-scene.scene' }
-        const presentation = { moduleId: 'presentation' }
+        const worldModule = { moduleId: 'world-scene' }
+        const worldNode = { kind: 'world-scene.node' }
+        const worldProjection = { moduleId: 'world-scene', kind: 'world-scene.scene' }
+        const presentationModule = { moduleId: 'presentation' }
+        const presentationNode = { kind: 'presentation.ui-screen' }
+        const presentationProjection = { moduleId: 'presentation', kind: 'presentation.ui-screen' }
+        const resourceModule = { moduleId: 'resource-realization' }
+        const resourceNode = { kind: 'resource-realization.asset' }
+        const resourceProjection = { moduleId: 'resource-realization', kind: 'resource-realization.asset' }
+        const implementationModule = { moduleId: 'implementation-verification' }
+        const implementationNode = { kind: 'implementation-verification.target' }
+        const implementationProjection = { moduleId: 'implementation-verification', kind: 'implementation-verification.target' }
       `),
     ).toEqual([
+      'phase5-construction: implementation-verification',
+      'phase5-construction: implementation-verification.target',
       'phase5-construction: presentation',
+      'phase5-construction: presentation.ui-screen',
+      'phase5-construction: resource-realization',
+      'phase5-construction: resource-realization.asset',
+      'phase5-construction: world-scene',
+      'phase5-construction: world-scene.node',
       'phase5-construction: world-scene.scene',
     ])
     expect(
@@ -595,32 +647,28 @@ describe('Game IR stage boundary', () => {
     expect(
       futureModuleLiteralViolations(
         `const GAME_IR_MODULE_SOURCE_DOCUMENTS = { 'resource-realization': [] }`,
-        'GAME_IR_MODULE_SOURCE_DOCUMENTS',
       ),
     ).toEqual([])
     expect(
       futureModuleLiteralViolations(
         `const MODULE_DESCRIPTORS = { 'implementation-verification': {} }`,
-        'MODULE_DESCRIPTORS',
       ),
     ).toEqual([])
     expect(
       futureModuleLiteralViolations(
         `const future = 'resource-realization'; const node = { kind: 'implementation-verification.node' }`,
-        'GAME_IR_MODULE_SOURCE_DOCUMENTS',
       ),
     ).toEqual(['future-module-literal: resource-realization'])
     expect(
       futureModuleLiteralViolations(
         `// 'resource-realization'\nconst text = "implementation-verification"`,
-        'GAME_IR_MODULE_SOURCE_DOCUMENTS',
       ),
     ).toEqual(['future-module-literal: implementation-verification'])
   })
 
   test('scans every Phase 4 production file from its UTF-8 source', async () => {
     const sourceFiles = await Promise.all(
-      TASK_7_PHASE4_PRODUCTION_FILES.map(async filename => ({
+      PHASE4_PRODUCTION_FILES.map(async filename => ({
         filename,
         source: await readFile(
           join(dirname(fileURLToPath(import.meta.url)), filename),
@@ -629,7 +677,7 @@ describe('Game IR stage boundary', () => {
       })),
     )
     expect(sourceFiles.map(file => file.filename)).toEqual([
-      ...TASK_7_PHASE4_PRODUCTION_FILES,
+      ...PHASE4_PRODUCTION_FILES,
     ])
     expect(
       sourceFiles.flatMap(({ filename, source }) =>
@@ -642,7 +690,7 @@ describe('Game IR stage boundary', () => {
 
   test('scans every accepted Phase 4 file with the stricter Phase 5 construction rule', async () => {
     const sourceFiles = await Promise.all(
-      TASK_7_PHASE4_PRODUCTION_FILES.map(async filename => ({
+      PHASE4_PRODUCTION_FILES.map(async filename => ({
         filename,
         source: await readFile(
           join(dirname(fileURLToPath(import.meta.url)), filename),
@@ -661,7 +709,7 @@ describe('Game IR stage boundary', () => {
 
   test('scans every Phase 5 production file and forbids future reachability', async () => {
     const sourceFiles = await Promise.all(
-      TASK_11_PHASE5_PRODUCTION_FILES.map(async filename => ({
+      PHASE5_PRODUCTION_FILES.map(async filename => ({
         filename,
         source: await readFile(
           join(dirname(fileURLToPath(import.meta.url)), filename),
@@ -670,7 +718,7 @@ describe('Game IR stage boundary', () => {
       })),
     )
     expect(sourceFiles.map(file => file.filename)).toEqual([
-      ...TASK_11_PHASE5_PRODUCTION_FILES,
+      ...PHASE5_PRODUCTION_FILES,
     ])
     expect(
       sourceFiles.flatMap(({ filename, source }) =>
@@ -679,6 +727,47 @@ describe('Game IR stage boundary', () => {
         ),
       ),
     ).toEqual([])
+  })
+
+  test('discovers and classifies every non-test Game IR production file', async () => {
+    const sourceFiles = await readGameIrProductionSourceFiles()
+    expect(sourceFiles.map(file => file.filename)).toEqual([
+      'balance-producer.ts',
+      'balance-schema.ts',
+      'contracts.ts',
+      'domain-projection.ts',
+      'domain-source.ts',
+      'foundation-ready-adapter.ts',
+      'gameplay-balance-assembler.ts',
+      'gameplay-producer.ts',
+      'gameplay-schema.ts',
+      'model.ts',
+      'phase5-admission.ts',
+      'presentation-producer.ts',
+      'presentation-schema.ts',
+      'publication.ts',
+      'semantic-admission.ts',
+      'world-presentation-assembler.ts',
+      'world-scene-producer.ts',
+      'world-scene-schema.ts',
+    ])
+    for (const { filename, source } of sourceFiles) {
+      const role = gameIrProductionRole(filename)
+      if (role === 'phase4')
+        expect(task11Phase4IsolationViolations(source), filename).toEqual([])
+      if (role === 'phase5')
+        expect(
+          task11Phase5IsolationViolations(source, filename),
+          filename,
+        ).toEqual([])
+      if (role === 'other')
+        expect(
+          policyViolations(collectAstFacts(source, filename), 'other'),
+          filename,
+        ).toEqual([])
+      if (role !== 'authorized')
+        expect(futureModuleLiteralViolations(source), filename).toEqual([])
+    }
   })
 
   test('keeps Foundation internals independent from Game IR', async () => {
