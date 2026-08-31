@@ -251,6 +251,8 @@ function edgeOrder(
 function normalizeNode(
   value: unknown,
   index: number,
+  allowedNodeKinds: readonly string[] = [],
+  allowedRelationshipTypes: readonly string[] = [],
 ): Phase5SemanticCandidateNode {
   if (!isRecord(value)) fail(`nodes[${index}] must be an object`)
   exactKeys(
@@ -260,6 +262,8 @@ function normalizeNode(
   )
   const id = safeId(value.id, `nodes[${index}].id`)
   const kind = text(value.kind, `nodes[${index}].kind`)
+  if (allowedNodeKinds.length > 0 && !allowedNodeKinds.includes(kind))
+    fail(`nodes[${index}] has a node kind outside the semantic packet`)
   if (!isRecord(value.value)) fail(`nodes[${index}].value must be an object`)
   const clonedValue = cloneJson(value.value, `nodes[${index}].value`)
   if (!isRecord(clonedValue)) fail(`nodes[${index}].value must be an object`)
@@ -319,6 +323,11 @@ function normalizeNode(
       })
     },
   ) as GameIrRelationshipEdge[]
+  if (
+    allowedRelationshipTypes.length > 0 &&
+    edges.some(edge => !allowedRelationshipTypes.includes(edge.type))
+  )
+    fail(`nodes[${index}] has a relationship type outside the semantic packet`)
   for (let edgeIndex = 1; edgeIndex < edges.length; edgeIndex += 1)
     if (edgeOrder(edges[edgeIndex - 1]!, edges[edgeIndex]!) >= 0)
       fail(`nodes[${index}].edges must be unique and sorted`)
@@ -619,7 +628,14 @@ export function admitPhase5SemanticResult(
     fail('semantic result outcome must be PROJECTED, FAIL, or AMBIGUOUS')
   const nodes = Object.freeze(
     strictArray(value.nodes, 'nodes')
-      .map((node, index) => normalizeNode(node, index))
+      .map((node, index) =>
+        normalizeNode(
+          node,
+          index,
+          packet.allowedNodeKinds,
+          packet.allowedRelationshipTypes,
+        ),
+      )
       .sort((left, right) => compareCodeUnits(left.id, right.id)),
   )
   for (let index = 1; index < nodes.length; index += 1)
@@ -695,7 +711,14 @@ function normalizeStoredReceipt(
       if (entry.producerMode !== 'semantic')
         fail(`semantic receipt nodes[${index}] must be semantic`)
       const { producerMode: _producerMode, ...candidate } = entry
-      return Object.freeze(normalizeNode(candidate, index))
+      return Object.freeze(
+        normalizeNode(
+          candidate,
+          index,
+          packet.allowedNodeKinds,
+          packet.allowedRelationshipTypes,
+        ),
+      )
     }),
   )
   for (let index = 1; index < nodes.length; index += 1)
