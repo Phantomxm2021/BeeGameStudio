@@ -134,42 +134,100 @@ function collectAstFacts(
     isPropertyValue: boolean
     declarationName?: string
   }> = []
-  type ConstStringBinding =
-    | { kind: 'literal'; value: string }
-    | { kind: 'alias'; name: string }
-    | null
-  const constStringBindings = new Map<string, ConstStringBinding>()
+  type ConstStringDeclaration = Readonly<{
+    name: string
+    declaration: ts.VariableDeclaration
+    scope: ts.Node
+  }>
+  const constStringDeclarations: ConstStringDeclaration[] = []
+  const isLexicalScope = (node: ts.Node): boolean =>
+    ts.isSourceFile(node) ||
+    ts.isBlock(node) ||
+    ts.isModuleBlock(node) ||
+    ts.isCaseBlock(node) ||
+    ts.isCatchClause(node) ||
+    ts.isForStatement(node) ||
+    ts.isForInStatement(node) ||
+    ts.isForOfStatement(node)
+  const lexicalScopeFor = (node: ts.Node): ts.Node => {
+    for (let parent: ts.Node | undefined = node; parent; parent = parent.parent)
+      if (isLexicalScope(parent)) return parent
+    return file
+  }
   const collectConstStringBindings = (node: ts.Node): void => {
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       ts.isVariableDeclarationList(node.parent) &&
       (node.parent.flags & ts.NodeFlags.Const) !== 0
-    ) {
-      const initializer = node.initializer
-      constStringBindings.set(
-        node.name.text,
-        initializer && ts.isStringLiteral(initializer)
-          ? { kind: 'literal', value: initializer.text }
-          : initializer && ts.isIdentifier(initializer)
-            ? { kind: 'alias', name: initializer.text }
-            : null,
-      )
-    }
+    )
+      constStringDeclarations.push({
+        name: node.name.text,
+        declaration: node,
+        scope: lexicalScopeFor(node),
+      })
     ts.forEachChild(node, collectConstStringBindings)
   }
   collectConstStringBindings(file)
-  const resolveConstString = (
-    name: string,
-    resolving = new Set<string>(),
+  const unwrapTransparentExpression = (
+    expression: ts.Expression,
+  ): ts.Expression => {
+    let current = expression
+    while (
+      ts.isParenthesizedExpression(current) ||
+      ts.isAsExpression(current) ||
+      ts.isTypeAssertionExpression(current) ||
+      ts.isSatisfiesExpression(current) ||
+      ts.isNonNullExpression(current)
+    )
+      current = current.expression
+    return current
+  }
+  const resolveConstStringExpression = (
+    expression: ts.Expression,
+    resolving = new Set<ts.VariableDeclaration>(),
   ): string | undefined => {
-    if (resolving.has(name)) return undefined
-    const binding = constStringBindings.get(name)
-    if (!binding) return undefined
-    if (binding.kind === 'literal') return binding.value
-    const next = new Set(resolving)
-    next.add(name)
-    return resolveConstString(binding.name, next)
+    const unwrapped = unwrapTransparentExpression(expression)
+    if (ts.isStringLiteral(unwrapped)) return unwrapped.text
+    if (!ts.isIdentifier(unwrapped)) return undefined
+    let scope = lexicalScopeFor(unwrapped)
+    while (true) {
+      const declarations = constStringDeclarations.filter(
+        declaration =>
+          declaration.scope === scope && declaration.name === unwrapped.text,
+      )
+      if (declarations.length > 0) {
+        const usePosition = unwrapped.getStart(file)
+        const declaration = declarations
+          .filter(
+            candidate => candidate.declaration.getStart(file) < usePosition,
+          )
+          .at(-1)
+        if (!declaration || resolving.has(declaration.declaration))
+          return undefined
+        if (!declaration.declaration.initializer) return undefined
+        const next = new Set(resolving)
+        next.add(declaration.declaration)
+        return resolveConstStringExpression(
+          declaration.declaration.initializer,
+          next,
+        )
+      }
+      const parent = scope.parent
+      if (!parent) return undefined
+      let nextScope: ts.Node | undefined
+      for (
+        let ancestor: ts.Node | undefined = parent;
+        ancestor;
+        ancestor = ancestor.parent
+      )
+        if (isLexicalScope(ancestor)) {
+          nextScope = ancestor
+          break
+        }
+      if (!nextScope) return undefined
+      scope = nextScope
+    }
   }
   let providerDispatch = false
   const containsProvider = (expression: ts.Expression): boolean => {
@@ -334,16 +392,12 @@ function collectAstFacts(
         : ts.isStringLiteral(node.name)
           ? node.name.text
           : undefined
-      const value = ts.isStringLiteral(node.initializer)
-        ? node.initializer.text
-        : ts.isIdentifier(node.initializer)
-          ? resolveConstString(node.initializer.text)
-          : undefined
+      const value = resolveConstStringExpression(node.initializer)
       if (key !== undefined && value !== undefined)
         properties.push({ key, value })
     }
     if (ts.isShorthandPropertyAssignment(node)) {
-      const value = resolveConstString(node.name.text)
+      const value = resolveConstStringExpression(node.name)
       if (value !== undefined) properties.push({ key: node.name.text, value })
     }
     if (ts.isStringLiteral(node))
@@ -947,6 +1001,56 @@ describe('Game IR stage boundary', () => {
         // kind: 'implementation-verification.target'
       `),
     ).toEqual([])
+  })
+
+  test('resolves aliased sensitive values in their lexical scope', () => {
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'gameplay.action'
+        function unusedFuture() {
+          const kind = 'resource-realization.logical-resource'
+          void kind
+        }
+        const record = { kind }
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        const outer = { kind }
+        function legalShadow() {
+          const kind = 'gameplay.action'
+          const inner = { kind }
+          void inner
+        }
+        void outer
+      `),
+    ).toEqual(['future-node: resource-realization.logical-resource'])
+    expect(
+      task11Phase5IsolationViolations(`
+        const moduleId = 'resource-realization' as const
+        const record = { moduleId }
+      `),
+    ).toEqual(['future-module: resource-realization'])
+    expect(
+      task11Phase5IsolationViolations(`
+        const source = 'implementation-verification'
+        const alias = (source)
+        const moduleId = alias
+        const record = { moduleId }
+      `),
+    ).toEqual(['future-module: implementation-verification'])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        function legalNested() {
+          const kind = 'gameplay.action'
+          const nested = { kind }
+          void nested
+        }
+        const outer = { kind }
+      `),
+    ).toEqual(['future-node: resource-realization.logical-resource'])
   })
 
   test('splits accepted Phase 4 isolation from Phase 5 module construction', () => {
