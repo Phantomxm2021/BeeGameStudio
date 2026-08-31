@@ -35,7 +35,6 @@ import {
   replayAndBindPhase5SemanticReceipt,
   type WorldSceneModuleProjection,
 } from './phase5-admission'
-import { GAME_IR_SEMANTIC_VALIDATOR_MANIFEST } from './semantic-admission'
 import { assembleWorldPresentationClosure } from './world-presentation-assembler'
 import { assembleGameplayBalanceModules } from './gameplay-balance-assembler'
 import {
@@ -72,6 +71,8 @@ const eventRune = 'event.rune-turned'
 const actionTurn = 'action.turn-rune'
 const objectiveEast = 'objective.east'
 const objectiveWest = 'objective.west'
+const ACCEPTED_TASK9_CLOSURE_DIGEST =
+  'ade4e1917c8ae5d55e7212b14ee6232439cd64c532f7d902a76ae3068e3fccc1'
 
 let gameplayNodes: Node[] = [
   {
@@ -495,7 +496,7 @@ let presentationNodes: Node[] = [
     references: [],
     edges: [
       edge('region', 'world.camera-rune', 'world-scene.camera-region'),
-      edge('on', eventRune, 'gameplay.event'),
+      edge('on', stateSolved, 'gameplay.state'),
     ],
   },
   {
@@ -592,6 +593,281 @@ let presentationNodes: Node[] = [
   },
 ]
 
+const expandedWorldNodes: Node[] = [
+  {
+    id: 'world.scene-echo',
+    kind: 'world-scene.scene',
+    value: {
+      label: 'Echo chamber',
+      coordinateConvention: {
+        dimensions: '2d',
+        xDirection: 'right',
+        yDirection: 'up',
+        distanceUnit: 'meter',
+      },
+    },
+    references: [],
+    edges: [worldEdge('root', 'world.echo-root', 'world-scene.node')],
+  },
+  {
+    id: 'world.echo-root',
+    kind: 'world-scene.node',
+    value: {
+      label: 'Echo root',
+      nodeType: 'container',
+      transform: t2(12, 0, 'world'),
+    },
+    references: [],
+    edges: [worldEdge('scene', 'world.scene-echo', 'world-scene.scene')],
+  },
+  {
+    id: 'world.echo-waypoint',
+    kind: 'world-scene.node',
+    value: {
+      label: 'Shared echo waypoint',
+      nodeType: 'anchor',
+      transform: t2(14, 1),
+    },
+    references: [],
+    edges: [
+      worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+      worldEdge('parent', 'world.echo-root', 'world-scene.node'),
+    ],
+  },
+  {
+    id: 'world.echo-goal',
+    kind: 'world-scene.node',
+    value: {
+      label: 'Echo goal',
+      nodeType: 'visual',
+      transform: t2(17, 1),
+    },
+    references: [],
+    edges: [
+      worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+      worldEdge('parent', 'world.echo-root', 'world-scene.node'),
+    ],
+  },
+  {
+    id: 'world.echo-zone',
+    kind: 'world-scene.zone',
+    value: {
+      label: 'Echo floor',
+      shape: { kind: 'circle', radius: 2.5 },
+      transform: t2(15, 1),
+    },
+    references: [],
+    edges: [worldEdge('scene', 'world.scene-echo', 'world-scene.scene')],
+  },
+  {
+    id: 'world.route-echo-a',
+    kind: 'world-scene.route',
+    value: {
+      label: 'Echo approach',
+      closed: false,
+      waypointReferenceIndexes: [0, 1, 2, 1, 2],
+    },
+    references: [
+      { targetId: 'world.echo-goal', targetType: 'world-scene.node' },
+      { targetId: 'world.echo-root', targetType: 'world-scene.node' },
+      { targetId: 'world.echo-waypoint', targetType: 'world-scene.node' },
+    ],
+    edges: [worldEdge('scene', 'world.scene-echo', 'world-scene.scene')],
+  },
+  {
+    id: 'world.route-echo-b',
+    kind: 'world-scene.route',
+    value: {
+      label: 'Echo return',
+      closed: true,
+      waypointReferenceIndexes: [0, 1, 2, 1, 0, 2],
+    },
+    references: [
+      { targetId: 'world.echo-goal', targetType: 'world-scene.node' },
+      { targetId: 'world.echo-root', targetType: 'world-scene.node' },
+      { targetId: 'world.echo-waypoint', targetType: 'world-scene.node' },
+    ],
+    edges: [worldEdge('scene', 'world.scene-echo', 'world-scene.scene')],
+  },
+  {
+    id: 'world.echo-instance',
+    kind: 'world-scene.entity-instance',
+    value: { label: 'Echo solver avatar' },
+    references: [],
+    edges: [
+      worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+      worldEdge('entity', entity, 'gameplay.entity'),
+      worldEdge('location', 'world.echo-root', 'world-scene.node'),
+      worldEdge('zone', 'world.echo-zone', 'world-scene.zone'),
+    ],
+  },
+  {
+    id: 'world.echo-spawn',
+    kind: 'world-scene.spawn',
+    value: { label: 'Echo spawn', quantity: 2, policy: 'repeat' },
+    references: [],
+    edges: [
+      worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+      worldEdge('location', 'world.echo-waypoint', 'world-scene.node'),
+      worldEdge('entity', entity, 'gameplay.entity'),
+    ],
+  },
+  {
+    id: 'world.echo-encounter',
+    kind: 'world-scene.encounter',
+    value: { label: 'Echo challenge', mode: 'triggered' },
+    references: [],
+    edges: [
+      worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+      worldEdge('spawn', 'world.echo-spawn', 'world-scene.spawn'),
+      worldEdge('zone', 'world.echo-zone', 'world-scene.zone'),
+      worldEdge('triggered-by', eventRune, 'gameplay.event'),
+    ],
+  },
+  {
+    id: 'world.echo-checkpoint',
+    kind: 'world-scene.checkpoint',
+    value: {
+      label: 'Echo checkpoint',
+      ordinal: 1,
+      resetPolicy: 'last-checkpoint',
+    },
+    references: [],
+    edges: [
+      worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+      worldEdge('location', 'world.echo-goal', 'world-scene.node'),
+      worldEdge('respawn-state', stateSolved, 'gameplay.state'),
+    ],
+  },
+  {
+    id: 'world.echo-camera',
+    kind: 'world-scene.camera-region',
+    value: { label: 'Echo focus', priority: 4, blendIn: 0.3, blendOut: 0.6 },
+    references: [],
+    edges: [
+      worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+      worldEdge('zone', 'world.echo-zone', 'world-scene.zone'),
+      worldEdge('anchor', 'world.echo-waypoint', 'world-scene.node'),
+    ],
+  },
+  {
+    id: 'world.echo-objective',
+    kind: 'world-scene.objective-placement',
+    value: { label: 'Echo objective marker' },
+    references: [],
+    edges: [
+      worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+      worldEdge('objective', objectiveEast, 'gameplay.objective'),
+      worldEdge('location', 'world.echo-goal', 'world-scene.node'),
+      worldEdge('zone', 'world.echo-zone', 'world-scene.zone'),
+    ],
+  },
+]
+
+const expandedPresentationNodes: Node[] = [
+  {
+    id: 'presentation.screen-echo',
+    kind: 'presentation.ui-screen',
+    value: {
+      label: 'Echo board',
+      modal: false,
+      requirements: [requirement('req.echo-board', 'ui', 'screen')],
+    },
+    references: [],
+    edges: [
+      edge('initial-state', 'presentation.state-echo', 'presentation.ui-state'),
+      edge('driven-by', stateSolved, 'gameplay.state'),
+    ],
+  },
+  {
+    id: 'presentation.state-echo',
+    kind: 'presentation.ui-state',
+    value: { label: 'Echo clue', terminal: false },
+    references: [],
+    edges: [
+      edge('screen', 'presentation.screen-echo', 'presentation.ui-screen'),
+      edge('driven-by', stateSolved, 'gameplay.state'),
+    ],
+  },
+  {
+    id: 'presentation.state-finale',
+    kind: 'presentation.ui-state',
+    value: { label: 'Finale', terminal: true },
+    references: [],
+    edges: [
+      edge('screen', 'presentation.screen-echo', 'presentation.ui-screen'),
+      edge('driven-by', stateSolved, 'gameplay.state'),
+    ],
+  },
+  {
+    id: 'presentation.feedback-echo',
+    kind: 'presentation.feedback',
+    value: { label: 'Echo feedback', channel: 'flash' },
+    references: [],
+    edges: [
+      edge('on', stateSolved, 'gameplay.state'),
+      edge('screen', 'presentation.screen-echo', 'presentation.ui-screen'),
+    ],
+  },
+  {
+    id: 'presentation.audio-echo',
+    kind: 'presentation.audio-event',
+    value: { label: 'Echo chime', spatial: true },
+    references: [],
+    edges: [edge('on', stateSolved, 'gameplay.state')],
+  },
+  {
+    id: 'presentation.cue-echo',
+    kind: 'presentation.audio-cue',
+    value: {
+      label: 'Echo cue',
+      volume: 0.55,
+      requirements: [requirement('req.echo-cue', 'audio', 'cue')],
+    },
+    references: [],
+    edges: [
+      edge('event', 'presentation.audio-echo', 'presentation.audio-event'),
+      edge('at', 'world.echo-camera', 'world-scene.camera-region'),
+    ],
+  },
+  {
+    id: 'presentation.vfx-echo',
+    kind: 'presentation.vfx-cue',
+    value: {
+      label: 'Echo flare',
+      trigger: 'instant',
+      requirements: [requirement('req.echo-vfx', 'vfx', 'effect')],
+    },
+    references: [],
+    edges: [
+      edge('on', stateSolved, 'gameplay.state'),
+      edge('at', 'world.echo-goal', 'world-scene.node'),
+    ],
+  },
+  {
+    id: 'presentation.music-echo',
+    kind: 'presentation.music-state',
+    value: {
+      label: 'Echo cadence',
+      intensity: 0.8,
+      requirements: [requirement('req.echo-music', 'music', 'music')],
+    },
+    references: [],
+    edges: [edge('on', stateSolved, 'gameplay.state')],
+  },
+  {
+    id: 'presentation.transition-echo',
+    kind: 'presentation.transition',
+    value: { label: 'Enter finale', trigger: { kind: 'state' } },
+    references: [],
+    edges: [
+      edge('from', 'presentation.state-echo', 'presentation.ui-state'),
+      edge('to', 'presentation.state-finale', 'presentation.ui-state'),
+      edge('on', stateSolved, 'gameplay.state'),
+    ],
+  },
+]
+
 const sortNodes = (nodes: readonly Node[]): Node[] =>
   [...nodes].sort((a, b) => Buffer.from(a.id).compare(Buffer.from(b.id)))
 const pointerValue = (node: Node, pointer: string): unknown => {
@@ -661,10 +937,22 @@ const targetSubjects = (nodes: readonly Node[]) =>
   nodes
     .flatMap(n => pointers(n).map(pointer => `node:${n.id}#${pointer}`))
     .sort((a, b) => Buffer.from(a).compare(Buffer.from(b)))
-const expectedCheckIds = (moduleId: 'world-scene' | 'presentation') =>
-  GAME_IR_SEMANTIC_VALIDATOR_MANIFEST.modules.find(
-    m => m.moduleId === moduleId,
-  )!.checkIds
+const EXPECTED_WORLD_CHECK_IDS = [
+  'domain.world-scene',
+  'projection.ambiguity',
+  'projection.completeness',
+  'projection.cross-module-invariants',
+  'projection.fidelity',
+  'projection.source-bounds',
+] as const
+const EXPECTED_PRESENTATION_CHECK_IDS = [
+  'domain.presentation',
+  'projection.ambiguity',
+  'projection.completeness',
+  'projection.cross-module-invariants',
+  'projection.fidelity',
+  'projection.source-bounds',
+] as const
 const normalizeNodes = (nodes: readonly Node[]): Node[] =>
   nodes.map(node => ({
     ...node,
@@ -683,6 +971,14 @@ gameplayNodes = normalizeNodes(gameplayNodes)
 balanceNodes = normalizeNodes(balanceNodes)
 worldNodes = normalizeNodes(worldNodes)
 presentationNodes = normalizeNodes(presentationNodes)
+const expandedPuzzleWorldNodes = normalizeNodes([
+  ...worldNodes,
+  ...expandedWorldNodes,
+])
+const expandedPuzzlePresentationNodes = normalizeNodes([
+  ...presentationNodes,
+  ...expandedPresentationNodes,
+])
 
 type Context = {
   sourceBytes: string
@@ -1023,6 +1319,9 @@ const makeAuthority = (overrides: Partial<Context['modules']> = {}) => {
 }
 const closure = (overrides: Partial<Context['modules']> = {}) =>
   assembleWorldPresentationClosure(makeAuthority(overrides).authority)
+const assembleValidBaseline = (): void => {
+  assembleWorldPresentationClosure(makeAuthority().authority)
+}
 const expectedError = (
   input: Parameters<typeof assembleWorldPresentationClosure>[0],
   message: string,
@@ -1075,6 +1374,17 @@ const freezeFixture = (value: unknown): void => {
     Object.freeze(value)
   }
 }
+const deeplyFrozen = (value: unknown, seen = new Set<object>()): boolean => {
+  if (value === null || typeof value !== 'object') return true
+  if (seen.has(value)) return true
+  seen.add(value)
+  return (
+    Object.isFrozen(value) &&
+    Object.values(value as Record<string, unknown>).every(child =>
+      deeplyFrozen(child, seen),
+    )
+  )
+}
 const redigestMechanical = (
   receipt: GameIrMechanicalProjectionReceipt,
   patch: Record<string, unknown>,
@@ -1105,6 +1415,16 @@ const sortedMutation = (nodes: readonly Node[]) =>
       ),
     ),
   }))
+const expandedAuthority = () =>
+  makeAuthority({
+    world: expandedPuzzleWorldNodes,
+    presentation: expandedPuzzlePresentationNodes,
+  })
+const requirementObjects = (nodes: readonly Node[]) =>
+  nodes.flatMap(node => {
+    const requirements = (node.value as { requirements?: unknown }).requirements
+    return Array.isArray(requirements) ? requirements : []
+  })
 
 describe('Task 10 branching/puzzle World + Presentation profile', () => {
   test('assembles distinct shared-waypoint puzzle routes and same-screen transitions', () => {
@@ -1213,16 +1533,145 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     )
   })
 
+  test('admits an expanded multi-scene puzzle without caps and preserves unrelated insertion order', () => {
+    const expanded = expandedAuthority()
+    const expandedResult = assembleWorldPresentationClosure(expanded.authority)
+    const expandedWorld = expandedResult.worldScene.module.nodes
+    const expandedPresentation = expandedResult.presentation.module.nodes
+    expect(expandedWorld).toHaveLength(30)
+    expect(expandedPresentation).toHaveLength(25)
+    expect(
+      expandedWorld.filter(node => node.kind === 'world-scene.scene'),
+    ).toHaveLength(2)
+    expect(
+      expandedWorld.filter(node => node.kind === 'world-scene.route'),
+    ).toHaveLength(4)
+    expect(
+      expandedWorld.filter(node => node.kind === 'world-scene.node'),
+    ).toHaveLength(9)
+    expect(
+      expandedPresentation.filter(
+        node => node.kind === 'presentation.ui-screen',
+      ),
+    ).toHaveLength(3)
+    expect(
+      expandedPresentation.filter(
+        node => node.kind === 'presentation.ui-state',
+      ),
+    ).toHaveLength(5)
+    expect(
+      expandedPresentation.filter(
+        node => node.kind === 'presentation.transition',
+      ),
+    ).toHaveLength(3)
+    expect(
+      expandedPresentation.filter(
+        node => node.kind === 'presentation.audio-cue',
+      ),
+    ).toHaveLength(2)
+    expect(
+      expandedWorld
+        .filter(node => node.kind === 'world-scene.route')
+        .every(node => {
+          const indexes = (node.value as { waypointReferenceIndexes: number[] })
+            .waypointReferenceIndexes
+          return indexes.length >= 5 && new Set(indexes).size < indexes.length
+        }),
+    ).toBe(true)
+    expect(expandedResult.closureDigest).not.toBe(ACCEPTED_TASK9_CLOSURE_DIGEST)
+
+    const insertedWorld: Node = {
+      id: 'world.zz-unrelated-marker',
+      kind: 'world-scene.node',
+      value: {
+        label: 'Unrelated marker',
+        nodeType: 'visual',
+        transform: t2(19, 2),
+      },
+      references: [],
+      edges: [
+        worldEdge('scene', 'world.scene-echo', 'world-scene.scene'),
+        worldEdge('parent', 'world.echo-root', 'world-scene.node'),
+      ],
+    }
+    const insertedPresentation: Node = {
+      id: 'presentation.zz-unrelated-feedback',
+      kind: 'presentation.feedback',
+      value: { label: 'Unrelated feedback', channel: 'text' },
+      references: [],
+      edges: [edge('on', stateSolved, 'gameplay.state')],
+    }
+    const insertedAuthority = makeAuthority({
+      world: normalizeNodes([...expandedPuzzleWorldNodes, insertedWorld]),
+      presentation: normalizeNodes([
+        ...expandedPuzzlePresentationNodes,
+        insertedPresentation,
+      ]),
+    })
+    const insertedResult = assembleWorldPresentationClosure(
+      insertedAuthority.authority,
+    )
+    expect(
+      requirementObjects(insertedResult.presentation.module.nodes),
+    ).toEqual(requirementObjects(expandedResult.presentation.module.nodes))
+    expect(
+      insertedResult.presentation.module.nodes
+        .filter(node => node.id !== insertedPresentation.id)
+        .map(node => node.id),
+    ).toEqual(expandedResult.presentation.module.nodes.map(node => node.id))
+    expect(
+      insertedResult.worldScene.module.nodes
+        .filter(node => node.id !== insertedWorld.id)
+        .map(node => node.id),
+    ).toEqual(expandedResult.worldScene.module.nodes.map(node => node.id))
+    const existingRoutes = (nodes: readonly GameIrNode[]) =>
+      nodes
+        .filter(node => node.kind === 'world-scene.route')
+        .map(node => ({
+          id: node.id,
+          references: node.references,
+          edges: node.edges,
+          value: node.value,
+        }))
+    expect(existingRoutes(insertedResult.worldScene.module.nodes)).toEqual(
+      existingRoutes(expandedResult.worldScene.module.nodes),
+    )
+  })
+
   test('replays frozen authority deterministically and keeps puzzle digest distinct by construction', () => {
     const profile = makeAuthority()
     freezeFixture(profile)
     const first = assembleWorldPresentationClosure(profile.authority)
     const second = assembleWorldPresentationClosure(profile.authority)
+    expect(canonicalGameIrJson(first.phase4.gameplay.module)).toBe(
+      canonicalGameIrJson(second.phase4.gameplay.module),
+    )
+    expect(first.phase4.gameplay.projectionDigest).toBe(
+      second.phase4.gameplay.projectionDigest,
+    )
+    expect(canonicalGameIrJson(first.phase4.balance.module)).toBe(
+      canonicalGameIrJson(second.phase4.balance.module),
+    )
+    expect(first.phase4.balance.projectionDigest).toBe(
+      second.phase4.balance.projectionDigest,
+    )
+    expect(canonicalGameIrJson(first.worldScene.module)).toBe(
+      canonicalGameIrJson(second.worldScene.module),
+    )
+    expect(first.worldScene.projectionDigest).toBe(
+      second.worldScene.projectionDigest,
+    )
+    expect(canonicalGameIrJson(first.presentation.module)).toBe(
+      canonicalGameIrJson(second.presentation.module),
+    )
+    expect(first.presentation.projectionDigest).toBe(
+      second.presentation.projectionDigest,
+    )
+    expect(first.closureDigest).toBe(second.closureDigest)
     expect(canonicalGameIrJson(first)).toBe(canonicalGameIrJson(second))
     expect(digestGameIrValue(first)).toBe(digestGameIrValue(second))
-    expect(Object.isFrozen(first)).toBe(true)
-    expect(Object.isFrozen(first.worldScene.module)).toBe(true)
-    expect(Object.isFrozen(first.presentation.module)).toBe(true)
+    expect(deeplyFrozen(profile)).toBe(true)
+    expect(deeplyFrozen(first)).toBe(true)
     const authorityValue = profile
     expect(
       authorityValue.authority.worldScene.source.authoritySectionIndex,
@@ -1242,6 +1691,15 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         node => node.kind === 'world-scene.route',
       ),
     ).toBe(true)
+    expect(first.closureDigest).not.toBe(ACCEPTED_TASK9_CLOSURE_DIGEST)
+    expect(
+      first.presentation.module.nodes.find(
+        node => node.id === 'presentation.camera-rune',
+      )?.edges,
+    ).toEqual([
+      edge('on', stateSolved, 'gameplay.state'),
+      edge('region', 'world.camera-rune', 'world-scene.camera-region'),
+    ])
   })
 
   test('retains complete source and validator coverage for both domains', () => {
@@ -1253,10 +1711,10 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       targetSubjects(presentationNodes),
     )
     expect(authorityValue.packets.world.checkIds).toEqual(
-      expectedCheckIds('world-scene'),
+      EXPECTED_WORLD_CHECK_IDS,
     )
     expect(authorityValue.packets.presentation.checkIds).toEqual(
-      expectedCheckIds('presentation'),
+      EXPECTED_PRESENTATION_CHECK_IDS,
     )
     expect(
       authorityValue.authority.worldScene.validation.coveredTargets,
@@ -1264,6 +1722,12 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     expect(
       authorityValue.authority.presentation.validation.coveredTargets,
     ).toEqual(targetSubjects(presentationNodes))
+    expect(authorityValue.authority.worldScene.validation.checkIds).toEqual(
+      EXPECTED_WORLD_CHECK_IDS,
+    )
+    expect(authorityValue.authority.presentation.validation.checkIds).toEqual(
+      EXPECTED_PRESENTATION_CHECK_IDS,
+    )
     expect(
       Object.keys(authorityValue.authority.worldScene.source.sectionBytes),
     ).toContain('docs/GDD.md#puzzle-0')
@@ -1282,6 +1746,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
   })
 
   test('rejects typed graph mutations before closure', () => {
+    assembleValidBaseline()
     const missingParent = worldNodes.map(node =>
       node.id === 'world.branch-a'
         ? {
@@ -1290,6 +1755,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
           }
         : node,
     )
+    assembleValidBaseline()
     const missingParentProfile = makeAuthority({ world: missingParent })
     expect(() =>
       assembleWorldPresentationClosure(missingParentProfile.authority),
@@ -1308,6 +1774,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
           }
         : node,
     )
+    assembleValidBaseline()
     const wrongTargetProfile = makeAuthority({
       presentation: sortedMutation(wrongTarget),
     })
@@ -1324,6 +1791,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
           }
         : node,
     )
+    assembleValidBaseline()
     const invalidRouteProfile = makeAuthority({ world: invalidRoute })
     expect(() =>
       assembleWorldPresentationClosure(invalidRouteProfile.authority),
@@ -1341,45 +1809,19 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
           }
         : node,
     )
-    const forbiddenResourceProfile = makeAuthority()
-    const forbiddenNodes =
-      forbiddenResourceProfile.authority.presentation.semantic.nodes.map(
-        node =>
-          node.id === 'presentation.feedback-rune'
-            ? {
-                ...node,
-                edges: [
-                  ...node.edges,
-                  edge('on', 'resource.sound', 'resource-realization.asset'),
-                ].sort((a, b) =>
-                  Buffer.from(
-                    `${a.type}\0${a.targetId}\0${a.targetType}`,
-                  ).compare(
-                    Buffer.from(`${b.type}\0${b.targetId}\0${b.targetType}`),
-                  ),
-                ),
-              }
-            : node,
-      )
-    const forbiddenSemantic = redigestSemantic(
-      forbiddenResourceProfile.authority.presentation.semantic,
-      { nodes: forbiddenNodes },
-    ) as PresentationSemanticReceipt
-    const forbiddenResourceAuthority = {
-      ...forbiddenResourceProfile.authority,
-      presentation: {
-        ...forbiddenResourceProfile.authority.presentation,
-        semantic: forbiddenSemantic,
-      },
-    }
+    assembleValidBaseline()
+    const forbiddenResourceProfile = makeAuthority({
+      presentation: sortedMutation(forbiddenResource),
+    })
     expect(() =>
-      assembleWorldPresentationClosure(forbiddenResourceAuthority),
+      assembleWorldPresentationClosure(forbiddenResourceProfile.authority),
     ).toThrow(
-      'invalid Game IR Phase 5 admission: source literal does not match the semantic record',
+      'invalid Presentation module: node presentation.feedback-rune edge targets unknown node resource.sound',
     )
   })
 
   test('rejects malformed numeric, UI, trigger, requirement, and source authorities', () => {
+    assembleValidBaseline()
     const badTransform = worldNodes.map(node =>
       node.id === 'world.glyph-east'
         ? {
@@ -1394,6 +1836,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
           }
         : node,
     )
+    assembleValidBaseline()
     const badTransformProfile = makeAuthority({ world: badTransform })
     expect(() =>
       assembleWorldPresentationClosure(badTransformProfile.authority),
@@ -1405,6 +1848,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         ? { ...node, value: { ...node.value, modal: 'false' } }
         : node,
     )
+    assembleValidBaseline()
     const badScreenProfile = makeAuthority({ presentation: badScreen })
     expect(() =>
       assembleWorldPresentationClosure(badScreenProfile.authority),
@@ -1416,6 +1860,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
         ? { ...node, value: { ...node.value, trigger: { kind: 'future' } } }
         : node,
     )
+    assembleValidBaseline()
     const badTriggerProfile = makeAuthority({ presentation: badTrigger })
     expect(() =>
       assembleWorldPresentationClosure(badTriggerProfile.authority),
@@ -1439,6 +1884,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
           }
         : node,
     )
+    assembleValidBaseline()
     const badRequirementProfile = makeAuthority({
       presentation: badRequirement,
     })
@@ -1458,6 +1904,7 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
   })
 
   test('does not admit delivery/resource nodes and rejects stale external authority', () => {
+    assembleValidBaseline()
     const detached = worldNodes.map(node =>
       node.id === 'world.lattice-root'
         ? {
@@ -1471,6 +1918,24 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     )
     expect(() => closure({ world: detached })).toThrow(
       'invalid Game IR Phase 5 admission: nodes[8] has a relationship type outside the semantic packet',
+    )
+    const changedGameplay = makeAuthority({
+      gameplay: gameplayNodes.map(node =>
+        node.id === actionTurn
+          ? { ...node, value: { ...node.value, label: 'Turn echo rune' } }
+          : node,
+      ),
+    })
+    const mixedChangedUpstream = {
+      ...changedGameplay.authority,
+      worldScene: makeAuthority().authority.worldScene,
+      presentation: makeAuthority().authority.presentation,
+    }
+    assembleValidBaseline()
+    expect(() =>
+      assembleWorldPresentationClosure(mixedChangedUpstream),
+    ).toThrow(
+      'invalid Game IR World/Presentation assembly: all modules must bind one task, revision, READY receipt, compile request, and authority index',
     )
     const context = makeContext()
     const phase4 = phase4Authority(context)
@@ -1534,6 +1999,42 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
     }
     expect(() => assembleWorldPresentationClosure(mechanicalAuthority)).toThrow(
       'invalid Game IR domain projection: isolated domain mechanical nodes and verifiedClaims must be empty',
+    )
+    const mechanicalClaims = redigestMechanical(base.worldScene.mechanical, {
+      verifiedClaims: [
+        {
+          subject: 'node:spoof#/id',
+          sourcePointer: '/bytes/0/5',
+          literal: 'spoof',
+        },
+      ],
+    })
+    const mechanicalClaimsAuthority = {
+      ...base,
+      worldScene: {
+        ...base.worldScene,
+        mechanical: mechanicalClaims,
+      },
+    }
+    expect(() =>
+      assembleWorldPresentationClosure(mechanicalClaimsAuthority),
+    ).toThrow(
+      'invalid Game IR domain projection: isolated domain mechanical nodes and verifiedClaims must be empty',
+    )
+    const mechanicalTargets = redigestMechanical(base.worldScene.mechanical, {
+      ownedTargets: ['node:spoof#/id'],
+    })
+    const mechanicalTargetsAuthority = {
+      ...base,
+      worldScene: {
+        ...base.worldScene,
+        mechanical: mechanicalTargets,
+      },
+    }
+    expect(() =>
+      assembleWorldPresentationClosure(mechanicalTargetsAuthority),
+    ).toThrow(
+      'invalid Game IR domain projection: ownedTargets must exactly account for every mechanical node target',
     )
     const rangeClaims = base.worldScene.semantic.sourceClaims.map(
       (claim, index) =>
