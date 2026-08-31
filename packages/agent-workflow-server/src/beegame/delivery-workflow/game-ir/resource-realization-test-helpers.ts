@@ -862,11 +862,13 @@ export function completeResourceInput(
     return typeof current === 'string' ? current : canonicalGameIrJson(current)
   }
   const leaves = (value: unknown, pointer: string, output: string[]): void => {
-    if (Array.isArray(value))
-      value.forEach((item, index) =>
-        leaves(item, `${pointer}/${index}`, output),
-      )
-    else if (value && typeof value === 'object')
+    if (Array.isArray(value)) {
+      if (value.length === 0) output.push(pointer)
+      else
+        value.forEach((item, index) =>
+          leaves(item, `${pointer}/${index}`, output),
+        )
+    } else if (value && typeof value === 'object')
       Object.entries(value).forEach(([key, item]) =>
         leaves(item, `${pointer}/${key}`, output),
       )

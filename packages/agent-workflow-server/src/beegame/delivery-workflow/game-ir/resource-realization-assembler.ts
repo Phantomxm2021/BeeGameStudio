@@ -17,12 +17,17 @@ import {
   type ResourceRealizationValidationPreparationAuthority,
 } from './phase6-admission'
 import { parseResourceRealizationModule } from './resource-realization-schema'
+import { createSemanticFidelityPrimitives } from './semantic-fidelity'
 import type { GameIrDomainSourceEnvelope } from './domain-source'
 import type { GameIrMechanicalProjectionReceipt } from './domain-projection'
 import type { ResourceRealizationSemanticReceipt } from './resource-realization-producer'
 
 type ResourceSourcingPolicy = Readonly<{
-  allowedSourceKinds: readonly string[]
+  allowedSourceKinds: readonly (
+    | 'resource-library'
+    | 'agent-authored'
+    | 'user-provided'
+  )[]
   licenseConstraints: readonly string[]
   responsibleParty: string
   handoffCriteria: readonly string[]
@@ -86,6 +91,10 @@ function fail(message: string): never {
   throw new Error(`invalid Game IR Resource Realization assembly: ${message}`)
 }
 
+const { exactKeys, deepFreeze } = createSemanticFidelityPrimitives(
+  'invalid Game IR Resource Realization assembly',
+)
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return (
     value !== null &&
@@ -94,28 +103,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     (Object.getPrototypeOf(value) === Object.prototype ||
       Object.getPrototypeOf(value) === null)
   )
-}
-
-function exactKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-  label: string,
-): void {
-  const keys = Reflect.ownKeys(value)
-  if (keys.some(key => typeof key !== 'string'))
-    fail(`${label} has a symbol property`)
-  for (const key of keys) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable)
-      fail(`${label} has a hidden or accessor property`)
-  }
-  const actual = (keys as string[]).sort(compareCodeUnits)
-  const wanted = [...expected].sort(compareCodeUnits)
-  if (
-    actual.length !== wanted.length ||
-    actual.some((key, index) => key !== wanted[index])
-  )
-    fail(`${label} has unknown or missing fields`)
 }
 
 function validateAuthorityShape(
@@ -130,17 +117,6 @@ function validateAuthorityShape(
     ['source', 'mechanical', 'semantic', 'validation'],
     'resourceRealization',
   )
-}
-
-function deepFreeze<T>(value: T): T {
-  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-    for (const child of Reflect.ownKeys(value as object)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value as object, child)
-      if (descriptor && 'value' in descriptor) deepFreeze(descriptor.value)
-    }
-    Object.freeze(value)
-  }
-  return value
 }
 
 function profileFor(

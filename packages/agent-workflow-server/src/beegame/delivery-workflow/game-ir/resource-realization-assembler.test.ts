@@ -10,12 +10,19 @@ import {
 import {
   completeResourceInput,
   realAuthority,
+  type PresentationRequirementFixture,
+  type ResourceFixtureNode,
 } from './resource-realization-test-helpers'
 import { assembleResourceRealizationClosure } from './resource-realization-assembler'
 import { digestGameIrValue } from './model'
 
-function completeAuthority() {
-  const projectedAuthority = realAuthority()
+function completeAuthority(
+  mutate?: (nodes: ResourceFixtureNode[]) => ResourceFixtureNode[],
+  options: {
+    presentationRequirements?: readonly PresentationRequirementFixture[]
+  } = {},
+) {
+  const projectedAuthority = realAuthority(options)
   const projectionPacket =
     prepareResourceRealizationSemanticProjectionPacket(projectedAuthority)
   const semantic = admitResourceRealizationSemanticResult(
@@ -24,6 +31,8 @@ function completeAuthority() {
     completeResourceInput(
       projectionPacket,
       projectedAuthority.resourceRealization.source.sectionBytes,
+      'player',
+      mutate,
     ),
   )
   if (semantic.outcome !== 'PROJECTED') throw new Error('fixture must project')
@@ -121,15 +130,21 @@ describe('Resource Realization sole assembler', () => {
   test('is deterministic and does not expose caller-owned mutable state', () => {
     const authority = structuredClone(completeAuthority())
     const first = assembleResourceRealizationClosure(authority)
-    const second = assembleResourceRealizationClosure(authority)
-    expect(first).toEqual(second)
+    const firstDigest = first.closureDigest
+    const selectedKey = Object.keys(
+      authority.resourceRealization.source.sectionBytes,
+    ).find(key => key.endsWith('#section-7'))
+    expect(selectedKey).toBeDefined()
     ;(
       authority.resourceRealization.source.sectionBytes as Record<
         string,
         string
       >
-    )['docs/ASSET_PLAN.md#section-0'] = 'tampered'
-    expect(first).toEqual(second)
+    )[selectedKey!] += '\ntampered'
+    expect(first.closureDigest).toBe(firstDigest)
+    expect(() => assembleResourceRealizationClosure(authority)).toThrow(
+      /source|digest|section|stale|authority/i,
+    )
     expect(() => {
       ;(first.resourcePlan.requirements as unknown as Array<unknown>).push({})
     }).toThrow()
@@ -285,5 +300,196 @@ describe('Resource Realization sole assembler', () => {
         closure.resourcePlan.requirements.map(requirement => requirement.id),
       ).toEqual(expected)
     }
+  })
+
+  test('projects only the exact plan fields and preserves optional profile data', () => {
+    const authority = completeAuthority(nodes =>
+      nodes.map(node =>
+        node.id === 'profile-screen-main'
+          ? {
+              ...node,
+              value: {
+                ...node.value,
+                name: 'profile-main',
+                purpose: 'technical-design-section',
+                capabilities: [],
+                coverage: [{ capabilities: ['ui-states'] }],
+              },
+            }
+          : node,
+      ),
+    )
+    const closure = assembleResourceRealizationClosure(authority)
+    expect(Object.keys(closure.resourcePlan).sort()).toEqual([
+      'projectTarget',
+      'requirements',
+    ])
+    expect(Object.keys(closure.resourcePlan.projectTarget)).toEqual([
+      'platform',
+      'runtime',
+      'assetFormatCapabilities',
+    ])
+    const requirement = closure.resourcePlan.requirements.find(
+      item => item.id === 'screen-main',
+    )!
+    expect(Object.keys(requirement).sort()).toEqual([
+      'acquisitionProfile',
+      'id',
+      'name',
+      'purpose',
+      'required',
+      'sourcingPolicy',
+    ])
+    expect(Object.keys(requirement.acquisitionProfile).sort()).toEqual([
+      'assetKinds',
+      'capabilities',
+      'coverage',
+      'dimensions',
+      'styles',
+      'usageTags',
+    ])
+    expect(Object.keys(requirement.sourcingPolicy).sort()).toEqual([
+      'allowedSourceKinds',
+      'handoffCriteria',
+      'licenseConstraints',
+      'responsibleParty',
+    ])
+    expect(requirement).toMatchObject({
+      name: 'profile-main',
+      purpose: 'technical-design-section',
+      acquisitionProfile: {
+        capabilities: [],
+        coverage: [{ capabilities: ['ui-states'] }],
+      },
+    })
+    expect(Object.isFrozen(requirement.acquisitionProfile.coverage)).toBe(true)
+    expect(Object.isFrozen(requirement.sourcingPolicy)).toBe(true)
+  })
+
+  test('rejects caller resourcePlan, module, and packet injection by exact authority shape', () => {
+    const authority = completeAuthority()
+    expect(() =>
+      assembleResourceRealizationClosure({
+        ...authority,
+        resourcePlan: {},
+      } as never),
+    ).toThrow(/authority|unknown|missing|field/i)
+    expect(() =>
+      assembleResourceRealizationClosure({
+        ...authority,
+        resourceRealization: {
+          ...authority.resourceRealization,
+          module: {},
+        },
+      } as never),
+    ).toThrow(/resourceRealization|unknown|missing|field/i)
+    expect(() =>
+      assembleResourceRealizationClosure({
+        ...authority,
+        packet: {},
+      } as never),
+    ).toThrow(/authority|unknown|missing|field/i)
+  })
+
+  test('rejects representative nested source, mechanical, semantic, Phase 5, and cross-authority tampering', () => {
+    const baseline = completeAuthority()
+    const sourceTampered = structuredClone(baseline)
+    const sourceKey = Object.keys(
+      sourceTampered.resourceRealization.source.sectionBytes,
+    ).find(key => key.endsWith('#section-7'))!
+    ;(
+      sourceTampered.resourceRealization.source.sectionBytes as Record<
+        string,
+        string
+      >
+    )[sourceKey] += '\ntampered'
+    expect(() => assembleResourceRealizationClosure(sourceTampered)).toThrow(
+      /source|digest|section|stale/i,
+    )
+
+    const mechanicalTampered = structuredClone(baseline)
+    const mechanicalBody = {
+      ...mechanicalTampered.resourceRealization.mechanical,
+      nodes: [
+        mechanicalTampered.phase5Authority.phase4Authority.gameplay.semantic
+          .nodes[0] as never,
+      ] as never,
+    }
+    mechanicalTampered.resourceRealization.mechanical = {
+      ...mechanicalBody,
+      receiptDigest: digestGameIrValue(mechanicalBody),
+    }
+    expect(() =>
+      assembleResourceRealizationClosure(mechanicalTampered),
+    ).toThrow(/mechanical|empty|isolated/i)
+
+    const semanticTampered = structuredClone(baseline)
+    const semanticBody = {
+      ...semanticTampered.resourceRealization.semantic,
+      nodes: semanticTampered.resourceRealization.semantic.nodes.map(
+        (node, index) =>
+          index === 0
+            ? { ...node, value: { ...node.value, runtimeRole: 'tampered' } }
+            : node,
+      ),
+    }
+    semanticTampered.resourceRealization.semantic = {
+      ...semanticBody,
+      receiptDigest: digestGameIrValue(semanticBody),
+    }
+    expect(() => assembleResourceRealizationClosure(semanticTampered)).toThrow(
+      /semantic|claim|literal|stale|detached/i,
+    )
+
+    const phase5SemanticTampered = structuredClone(baseline)
+    const phase5SemanticBody = {
+      ...phase5SemanticTampered.phase5Authority.presentation.semantic,
+      nodes:
+        phase5SemanticTampered.phase5Authority.presentation.semantic.nodes.map(
+          (node, index) =>
+            index === 0
+              ? { ...node, value: { ...node.value, label: 'tampered' } }
+              : node,
+        ),
+    }
+    ;(
+      phase5SemanticTampered.phase5Authority.presentation as unknown as {
+        semantic: unknown
+      }
+    ).semantic = {
+      ...phase5SemanticBody,
+      receiptDigest: digestGameIrValue(phase5SemanticBody),
+    }
+    expect(() =>
+      assembleResourceRealizationClosure(phase5SemanticTampered),
+    ).toThrow(/Phase 5|Presentation|semantic|claim|literal|stale/i)
+
+    const phase5ValidationTampered = structuredClone(baseline)
+    const phase5Validation =
+      phase5ValidationTampered.phase5Authority.presentation.validation
+    if (phase5Validation.outcome !== 'PASS')
+      throw new Error('fixture must pass')
+    ;(
+      phase5ValidationTampered.phase5Authority.presentation as unknown as {
+        validation: unknown
+      }
+    ).validation = {
+      ...phase5Validation,
+      coveredTargets: phase5Validation.coveredTargets.slice(1),
+    }
+    expect(() =>
+      assembleResourceRealizationClosure(phase5ValidationTampered),
+    ).toThrow(/Phase 5|Presentation|validation|coverage|target/i)
+
+    const other = completeAuthority(undefined, { presentationRequirements: [] })
+    expect(() =>
+      assembleResourceRealizationClosure({
+        ...baseline,
+        resourceRealization: {
+          ...baseline.resourceRealization,
+          validation: other.resourceRealization.validation,
+        },
+      }),
+    ).toThrow(/validation|packet|stale|authority|coverage/i)
   })
 })
