@@ -134,12 +134,22 @@ function collectAstFacts(
     isPropertyValue: boolean
     declarationName?: string
   }> = []
-  type ConstStringDeclaration = Readonly<{
+  type BindingFact = Readonly<{
     name: string
-    declaration: ts.VariableDeclaration
     scope: ts.Node
+    position: number
+    kind: 'safe-const' | 'shadow'
+    initializer?: ts.Expression
   }>
-  const constStringDeclarations: ConstStringDeclaration[] = []
+  const bindingFacts: BindingFact[] = []
+  const isFunctionScope = (node: ts.Node): boolean =>
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node) ||
+    ts.isConstructorDeclaration(node)
   const isLexicalScope = (node: ts.Node): boolean =>
     ts.isSourceFile(node) ||
     ts.isBlock(node) ||
@@ -148,27 +158,116 @@ function collectAstFacts(
     ts.isCatchClause(node) ||
     ts.isForStatement(node) ||
     ts.isForInStatement(node) ||
-    ts.isForOfStatement(node)
+    ts.isForOfStatement(node) ||
+    isFunctionScope(node)
   const lexicalScopeFor = (node: ts.Node): ts.Node => {
     for (let parent: ts.Node | undefined = node; parent; parent = parent.parent)
       if (isLexicalScope(parent)) return parent
     return file
   }
-  const collectConstStringBindings = (node: ts.Node): void => {
+  const functionScopeFor = (node: ts.Node): ts.Node => {
+    for (let parent: ts.Node | undefined = node; parent; parent = parent.parent)
+      if (isFunctionScope(parent)) return parent
+    return file
+  }
+  const collectBindingNames = (
+    name: ts.BindingName,
+    callback: (identifier: ts.Identifier) => void,
+  ): void => {
+    if (ts.isIdentifier(name)) {
+      callback(name)
+      return
+    }
+    for (const element of name.elements) {
+      if (ts.isOmittedExpression(element)) continue
+      if (ts.isBindingElement(element))
+        collectBindingNames(element.name, callback)
+    }
+  }
+  const addBinding = (
+    name: ts.Identifier,
+    scope: ts.Node,
+    kind: BindingFact['kind'],
+    initializer?: ts.Expression,
+  ): void => {
+    bindingFacts.push({
+      name: name.text,
+      scope,
+      position: name.getStart(file),
+      kind,
+      ...(initializer ? { initializer } : {}),
+    })
+  }
+  const functionParameters = (
+    node: ts.Node,
+  ): readonly ts.ParameterDeclaration[] | undefined => {
+    if (
+      ts.isFunctionDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isGetAccessorDeclaration(node) ||
+      ts.isSetAccessorDeclaration(node) ||
+      ts.isConstructorDeclaration(node)
+    )
+      return node.parameters
+    return undefined
+  }
+  const collectBindings = (node: ts.Node): void => {
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       ts.isVariableDeclarationList(node.parent) &&
       (node.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
+      addBinding(
+        node.name,
+        lexicalScopeFor(node),
+        'safe-const',
+        node.initializer,
+      )
+    } else if (
+      ts.isVariableDeclaration(node) &&
+      ts.isVariableDeclarationList(node.parent)
+    ) {
+      const isBlockScoped =
+        (node.parent.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) !== 0
+      const scope = isBlockScoped
+        ? lexicalScopeFor(node)
+        : functionScopeFor(node)
+      collectBindingNames(node.name, name => addBinding(name, scope, 'shadow'))
+    }
+    const parameters = functionParameters(node)
+    if (parameters)
+      for (const parameter of parameters)
+        collectBindingNames(parameter.name, name =>
+          addBinding(name, node, 'shadow'),
+        )
+    if (ts.isCatchClause(node) && node.variableDeclaration)
+      collectBindingNames(node.variableDeclaration.name, name =>
+        addBinding(name, node, 'shadow'),
+      )
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+      node.name
     )
-      constStringDeclarations.push({
-        name: node.name.text,
-        declaration: node,
-        scope: lexicalScopeFor(node),
-      })
-    ts.forEachChild(node, collectConstStringBindings)
+      addBinding(node.name, lexicalScopeFor(node.parent), 'shadow')
+    if (ts.isImportDeclaration(node) && node.importClause) {
+      const clause = node.importClause
+      if (clause.name) addBinding(clause.name, file, 'shadow')
+      if (clause.namedBindings) {
+        if (ts.isNamespaceImport(clause.namedBindings))
+          addBinding(clause.namedBindings.name, file, 'shadow')
+        else
+          for (const specifier of clause.namedBindings.elements)
+            addBinding(specifier.name, file, 'shadow')
+      }
+    }
+    if (ts.isImportEqualsDeclaration(node) && ts.isIdentifier(node.name))
+      addBinding(node.name, file, 'shadow')
+    ts.forEachChild(node, collectBindings)
   }
-  collectConstStringBindings(file)
+  collectBindings(file)
   const unwrapTransparentExpression = (
     expression: ts.Expression,
   ): ts.Expression => {
@@ -185,39 +284,33 @@ function collectAstFacts(
   }
   const resolveConstStringExpression = (
     expression: ts.Expression,
-    resolving = new Set<ts.VariableDeclaration>(),
+    resolving = new Set<BindingFact>(),
   ): string | undefined => {
     const unwrapped = unwrapTransparentExpression(expression)
     if (ts.isStringLiteral(unwrapped)) return unwrapped.text
     if (!ts.isIdentifier(unwrapped)) return undefined
     let scope = lexicalScopeFor(unwrapped)
+    let usageScope = scope
     while (true) {
-      const declarations = constStringDeclarations.filter(
-        declaration =>
-          declaration.scope === scope && declaration.name === unwrapped.text,
+      const bindings = bindingFacts.filter(
+        binding => binding.scope === scope && binding.name === unwrapped.text,
       )
-      if (declarations.length > 0) {
+      if (bindings.length > 0) {
         const usePosition = unwrapped.getStart(file)
-        const declaration = declarations
-          .filter(
-            candidate => candidate.declaration.getStart(file) < usePosition,
-          )
-          .at(-1)
-        if (!declaration || resolving.has(declaration.declaration))
-          return undefined
-        if (!declaration.declaration.initializer) return undefined
+        const isUsageScope = scope === usageScope
+        const declaration = isUsageScope
+          ? bindings.filter(binding => binding.position < usePosition).at(-1)
+          : bindings.at(-1)
+        if (!declaration || declaration.kind !== 'safe-const') return undefined
+        if (!declaration.initializer) return undefined
+        if (resolving.has(declaration)) return undefined
         const next = new Set(resolving)
-        next.add(declaration.declaration)
-        return resolveConstStringExpression(
-          declaration.declaration.initializer,
-          next,
-        )
+        next.add(declaration)
+        return resolveConstStringExpression(declaration.initializer, next)
       }
-      const parent = scope.parent
-      if (!parent) return undefined
       let nextScope: ts.Node | undefined
       for (
-        let ancestor: ts.Node | undefined = parent;
+        let ancestor: ts.Node | undefined = scope.parent;
         ancestor;
         ancestor = ancestor.parent
       )
@@ -1051,6 +1144,76 @@ describe('Game IR stage boundary', () => {
         const outer = { kind }
       `),
     ).toEqual(['future-node: resource-realization.logical-resource'])
+  })
+
+  test('stops at every nearer shadow binding and captures safe ancestor consts', () => {
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        function parameterShadow(kind: string) {
+          const record = { kind }
+          void record
+        }
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        {
+          const kind = 'gameplay.action'
+          const record = { kind }
+          void record
+        }
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        function captureLaterAncestor() {
+          return { moduleId }
+        }
+        const moduleId = 'resource-realization'
+      `),
+    ).toEqual(['future-module: resource-realization'])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        {
+          const record = { kind }
+          const kind = 'gameplay.action'
+          void record
+        }
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        function siblingLegal() {
+          const kind = 'gameplay.action'
+          const nested = { kind }
+          void nested
+        }
+        const outer = { kind }
+        void outer
+      `),
+    ).toEqual(['future-node: resource-realization.logical-resource'])
+    expect(
+      task11Phase5IsolationViolations(`
+        const kind = 'resource-realization.logical-resource'
+        try {
+          throw new Error('x')
+        } catch (kind) {
+          const record = { kind }
+          void record
+        }
+      `),
+    ).toEqual([])
+    expect(
+      task11Phase5IsolationViolations(`
+        import { value as kind } from './ordinary'
+        const record = { kind }
+        void record
+      `),
+    ).toEqual([])
   })
 
   test('splits accepted Phase 4 isolation from Phase 5 module construction', () => {
