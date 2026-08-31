@@ -14,9 +14,16 @@
 - Assertion-level RED after API wiring: the temporary exported stub produced `Expected length: 12 / Received length: 0` for the manifest assertion and failed the parser behavior assertions with `not implemented`.
 - GREEN: `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/presentation-schema.test.ts` → 9 pass, 0 fail, 37 expect calls.
 
+## Fix round 1 evidence
+
+- Added table-driven exact assertions for all twelve manifest entries, every role/target/cardinality list, absent references policy, five requirement owners, closed enums, and independent requirement/UI/behavior/external-target mutation matrices.
+- Each mutation case first parses an unchanged legal baseline. Final focused result: 14 pass, 0 fail, 126 expect calls.
+- Mutation-strength check: temporarily disabled the single `allowedKeys` unknown-field guard; the focused `strict values` and `requirements` tests failed because artifact/unknown-key mutations were accepted. The guard was restored before commit.
+- No production defect was exposed, so no production file was changed in this round.
+
 ## Verification
 
-- Focused test: 9 pass, 0 fail.
+- Focused test: 14 pass, 0 fail, 126 assertions.
 - Server typecheck: `cd packages/agent-workflow-server && bun run typecheck` → exit 0.
 - Biome: checked both Task4 files with no fixes required.
 - `git diff --check` → clean.
@@ -30,4 +37,8 @@
 
 ## Commit
 
-`a5a46445 feat: validate Game IR presentation graphs`
+Original implementation: `b3ca881c feat: validate Game IR presentation graphs`
+
+Fix-round test commit: `acc69262 test: strengthen Presentation schema audit coverage`
+
+This report update is a separate evidence commit.
