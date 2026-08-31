@@ -31,8 +31,14 @@ import {
   type GameIrModuleCandidate,
   type GameIrNode,
 } from './model'
-import { parseWorldSceneModule } from './world-scene-schema'
-import { parsePresentationModule } from './presentation-schema'
+import {
+  parseWorldSceneModule,
+  WORLD_SCENE_DOMAIN_MANIFEST,
+} from './world-scene-schema'
+import {
+  parsePresentationModule,
+  PRESENTATION_DOMAIN_MANIFEST,
+} from './presentation-schema'
 
 export type { WorldSceneModuleProjection } from './phase5-admission'
 
@@ -181,10 +187,39 @@ function assertCrossSourceIdentity(
       )
 }
 
+type DomainManifest = Readonly<
+  Record<
+    string,
+    Readonly<{
+      relationships: Readonly<
+        Record<string, Readonly<{ targetKinds: readonly string[] }>>
+      >
+      references?: Readonly<{ targetKinds: readonly string[] }>
+    }>
+  >
+>
+
+function externalTargetKinds(manifest: DomainManifest): ReadonlySet<string> {
+  const localKinds = new Set(Object.keys(manifest))
+  const targetKinds = new Set<string>()
+  for (const descriptor of Object.values(manifest)) {
+    for (const relationship of Object.values(descriptor.relationships))
+      relationship.targetKinds.forEach(kind => targetKinds.add(kind))
+    descriptor.references?.targetKinds.forEach(kind => targetKinds.add(kind))
+  }
+  return new Set([...targetKinds].filter(kind => !localKinds.has(kind)))
+}
+
 function targetMap(
   nodes: readonly GameIrNode[],
+  manifest: DomainManifest,
 ): ReadonlyMap<string, GameIrNode> {
-  return new Map(nodes.map(node => [node.id, node]))
+  const allowedKinds = externalTargetKinds(manifest)
+  return new Map(
+    nodes
+      .filter(node => allowedKinds.has(node.kind))
+      .map(node => [node.id, node]),
+  )
 }
 
 function assertDisjointIds(
@@ -249,7 +284,7 @@ export function assembleWorldPresentationClosure(
   )
   const worldModule = parseWorldSceneModule(
     boundWorld.module,
-    targetMap(phase4.gameplay.module.nodes),
+    targetMap(phase4.gameplay.module.nodes, WORLD_SCENE_DOMAIN_MANIFEST),
   ) as WorldSceneModuleProjection['module']
   const worldValidationPacket = buildPhase5SemanticValidationPacket({
     source: worldSource,
@@ -310,10 +345,10 @@ export function assembleWorldPresentationClosure(
   )
   const presentationModule = parsePresentationModule(
     boundPresentation.module,
-    targetMap([
-      ...phase4.gameplay.module.nodes,
-      ...worldProjection.module.nodes,
-    ]),
+    targetMap(
+      [...phase4.gameplay.module.nodes, ...worldProjection.module.nodes],
+      PRESENTATION_DOMAIN_MANIFEST,
+    ),
   ) as PresentationModuleProjection['module']
   const presentationValidationPacket = buildPhase5SemanticValidationPacket({
     source: presentationSource,

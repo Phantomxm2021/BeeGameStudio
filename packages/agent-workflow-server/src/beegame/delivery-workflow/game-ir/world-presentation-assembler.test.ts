@@ -30,8 +30,14 @@ import {
   assembleWorldPresentationClosure,
   type WorldSceneModuleProjection,
 } from './world-presentation-assembler'
-import { parseWorldSceneModule } from './world-scene-schema'
-import { parsePresentationModule } from './presentation-schema'
+import {
+  parseWorldSceneModule,
+  WORLD_SCENE_DOMAIN_MANIFEST,
+} from './world-scene-schema'
+import {
+  parsePresentationModule,
+  PRESENTATION_DOMAIN_MANIFEST,
+} from './presentation-schema'
 import {
   canonicalGameIrJson,
   canonicalizeGameIrSourceSections,
@@ -66,6 +72,176 @@ const gameplayNodes: FixtureNode[] = [
     value: { label: 'Start', initial: true, terminal: 'none' },
     references: [],
     edges: [],
+  },
+]
+
+const richGameplayNodes: FixtureNode[] = [
+  {
+    id: 'action.jump',
+    kind: 'gameplay.action',
+    value: { label: 'Jump' },
+    references: [
+      { targetId: 'condition.can-jump', targetType: 'gameplay.condition' },
+      { targetId: 'effect.jump', targetType: 'gameplay.effect' },
+      { targetId: 'event.jumped', targetType: 'gameplay.event' },
+    ],
+    edges: [
+      {
+        type: 'causes',
+        targetId: 'effect.jump',
+        targetType: 'gameplay.effect',
+      },
+      {
+        type: 'causes',
+        targetId: 'event.jumped',
+        targetType: 'gameplay.event',
+      },
+      {
+        type: 'requires',
+        targetId: 'condition.can-jump',
+        targetType: 'gameplay.condition',
+      },
+    ],
+  },
+  {
+    id: 'capability.player-jump',
+    kind: 'gameplay.capability',
+    value: { label: 'Can jump' },
+    references: [],
+    edges: [
+      {
+        type: 'belongs-to',
+        targetId: 'entity.player',
+        targetType: 'gameplay.entity',
+      },
+    ],
+  },
+  {
+    id: 'condition.can-jump',
+    kind: 'gameplay.condition',
+    value: { expression: { kind: 'reference', referenceIndex: 0 } },
+    references: [
+      {
+        targetId: 'capability.player-jump',
+        targetType: 'gameplay.capability',
+      },
+    ],
+    edges: [],
+  },
+  {
+    id: 'effect.jump',
+    kind: 'gameplay.effect',
+    value: {
+      effect: { operation: 'set', targetReferenceIndex: 0, value: true },
+    },
+    references: [{ targetId: 'entity.player', targetType: 'gameplay.entity' }],
+    edges: [],
+  },
+  {
+    id: 'entity.player',
+    kind: 'gameplay.entity',
+    value: { label: 'Player' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'event.jumped',
+    kind: 'gameplay.event',
+    value: { label: 'Jumped' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'objective.complete',
+    kind: 'gameplay.objective',
+    value: { label: 'Complete the game' },
+    references: [],
+    edges: [
+      {
+        type: 'fails-with',
+        targetId: 'outcome.loss',
+        targetType: 'gameplay.outcome',
+      },
+      {
+        type: 'succeeds-with',
+        targetId: 'outcome.win',
+        targetType: 'gameplay.outcome',
+      },
+    ],
+  },
+  {
+    id: 'outcome.loss',
+    kind: 'gameplay.outcome',
+    value: { label: 'Loss', result: 'loss' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'outcome.neutral',
+    kind: 'gameplay.outcome',
+    value: { label: 'Neutral', result: 'neutral' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'outcome.win',
+    kind: 'gameplay.outcome',
+    value: { label: 'Win', result: 'win' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'rule.jump',
+    kind: 'gameplay.rule',
+    value: { label: 'Jump rule' },
+    references: [],
+    edges: [
+      {
+        type: 'guards',
+        targetId: 'condition.can-jump',
+        targetType: 'gameplay.condition',
+      },
+      {
+        type: 'triggered-by',
+        targetId: 'event.jumped',
+        targetType: 'gameplay.event',
+      },
+    ],
+  },
+  {
+    id: 'state.lose',
+    kind: 'gameplay.state',
+    value: { label: 'Lost', initial: false, terminal: 'failure' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'state.win',
+    kind: 'gameplay.state',
+    value: { label: 'Won', initial: false, terminal: 'success' },
+    references: [],
+    edges: [],
+  },
+  {
+    id: 'transition.finish',
+    kind: 'gameplay.transition',
+    value: { label: 'Finish' },
+    references: [],
+    edges: [
+      { type: 'from', targetId: 'state-start', targetType: 'gameplay.state' },
+      { type: 'on', targetId: 'event.jumped', targetType: 'gameplay.event' },
+      { type: 'to', targetId: 'state.win', targetType: 'gameplay.state' },
+    ],
+  },
+  {
+    id: 'transition.lose',
+    kind: 'gameplay.transition',
+    value: { label: 'Lose' },
+    references: [],
+    edges: [
+      { type: 'from', targetId: 'state-start', targetType: 'gameplay.state' },
+      { type: 'to', targetId: 'state.lose', targetType: 'gameplay.state' },
+    ],
   },
 ]
 const balanceNodes: FixtureNode[] = [
@@ -123,6 +299,219 @@ const worldNodes: FixtureNode[] = [
         type: 'scene',
         targetId: 'world-scene-main',
         targetType: 'world-scene.scene',
+      },
+    ],
+  },
+]
+
+const richWorldNodes: FixtureNode[] = [
+  {
+    id: 'world-node-anchor',
+    kind: 'world-scene.node',
+    value: {
+      label: 'Anchor',
+      nodeType: 'anchor',
+      transform: {
+        dimensions: '2d',
+        space: 'local',
+        position: { x: 2, y: 1 },
+        rotationRadians: 0,
+        scale: { x: 1, y: 1 },
+      },
+    },
+    references: [],
+    edges: [
+      {
+        type: 'parent',
+        targetId: 'world-node-root',
+        targetType: 'world-scene.node',
+      },
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+    ],
+  },
+  {
+    id: 'world-zone-main',
+    kind: 'world-scene.zone',
+    value: {
+      label: 'Zone',
+      shape: { kind: 'circle', radius: 2 },
+      transform: {
+        dimensions: '2d',
+        space: 'local',
+        position: { x: 2, y: 1 },
+        rotationRadians: 0,
+        scale: { x: 1, y: 1 },
+      },
+    },
+    references: [],
+    edges: [
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+    ],
+  },
+  {
+    id: 'world-route-main',
+    kind: 'world-scene.route',
+    value: { label: 'Route', closed: false, waypointReferenceIndexes: [0, 1] },
+    references: [
+      { targetId: 'world-node-anchor', targetType: 'world-scene.node' },
+      { targetId: 'world-node-root', targetType: 'world-scene.node' },
+    ],
+    edges: [
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+    ],
+  },
+  {
+    id: 'world-entity-player',
+    kind: 'world-scene.entity-instance',
+    value: { label: 'Player instance' },
+    references: [],
+    edges: [
+      {
+        type: 'entity',
+        targetId: 'entity.player',
+        targetType: 'gameplay.entity',
+      },
+      {
+        type: 'location',
+        targetId: 'world-node-anchor',
+        targetType: 'world-scene.node',
+      },
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+    ],
+  },
+  {
+    id: 'world-spawn-main',
+    kind: 'world-scene.spawn',
+    value: { label: 'Spawn', quantity: 1, policy: 'once' },
+    references: [],
+    edges: [
+      {
+        type: 'entity',
+        targetId: 'entity.player',
+        targetType: 'gameplay.entity',
+      },
+      {
+        type: 'location',
+        targetId: 'world-node-anchor',
+        targetType: 'world-scene.node',
+      },
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+    ],
+  },
+  {
+    id: 'world-encounter-main',
+    kind: 'world-scene.encounter',
+    value: { label: 'Encounter', mode: 'patrol' },
+    references: [],
+    edges: [
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+      {
+        type: 'spawn',
+        targetId: 'world-spawn-main',
+        targetType: 'world-scene.spawn',
+      },
+      {
+        type: 'zone',
+        targetId: 'world-zone-main',
+        targetType: 'world-scene.zone',
+      },
+    ],
+  },
+  {
+    id: 'world-checkpoint-main',
+    kind: 'world-scene.checkpoint',
+    value: { label: 'Checkpoint', ordinal: 1, resetPolicy: 'restart' },
+    references: [],
+    edges: [
+      {
+        type: 'location',
+        targetId: 'world-node-anchor',
+        targetType: 'world-scene.node',
+      },
+      {
+        type: 'respawn-state',
+        targetId: 'state-start',
+        targetType: 'gameplay.state',
+      },
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+    ],
+  },
+  {
+    id: 'world-camera-main',
+    kind: 'world-scene.camera-region',
+    value: { label: 'Camera', priority: 1, blendIn: 0.2, blendOut: 0.2 },
+    references: [],
+    edges: [
+      {
+        type: 'anchor',
+        targetId: 'world-node-anchor',
+        targetType: 'world-scene.node',
+      },
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+      {
+        type: 'zone',
+        targetId: 'world-zone-main',
+        targetType: 'world-scene.zone',
+      },
+    ],
+  },
+  {
+    id: 'world-objective-main',
+    kind: 'world-scene.objective-placement',
+    value: { label: 'Objective placement' },
+    references: [],
+    edges: [
+      {
+        type: 'location',
+        targetId: 'world-node-anchor',
+        targetType: 'world-scene.node',
+      },
+      {
+        type: 'objective',
+        targetId: 'objective.complete',
+        targetType: 'gameplay.objective',
+      },
+      {
+        type: 'scene',
+        targetId: 'world-scene-main',
+        targetType: 'world-scene.scene',
+      },
+      {
+        type: 'zone',
+        targetId: 'world-zone-main',
+        targetType: 'world-scene.zone',
       },
     ],
   },
@@ -217,10 +606,54 @@ const pointers = (node: FixtureNode): string[] => [
 ]
 const allNodes = [
   ...gameplayNodes,
+  ...richGameplayNodes,
   ...balanceNodes,
   ...worldNodes,
+  ...richWorldNodes,
   ...presentationNodes,
 ]
+
+function fixtureExternalKinds(
+  manifest: Readonly<
+    Record<
+      string,
+      Readonly<{
+        relationships: Readonly<
+          Record<string, Readonly<{ targetKinds: readonly string[] }>>
+        >
+        references?: Readonly<{ targetKinds: readonly string[] }>
+      }>
+    >
+  >,
+): ReadonlySet<string> {
+  const localKinds = new Set(Object.keys(manifest))
+  const targetKinds = new Set<string>()
+  for (const descriptor of Object.values(manifest)) {
+    for (const relationship of Object.values(descriptor.relationships))
+      relationship.targetKinds.forEach(kind => targetKinds.add(kind))
+    descriptor.references?.targetKinds.forEach(kind => targetKinds.add(kind))
+  }
+  return new Set([...targetKinds].filter(kind => !localKinds.has(kind)))
+}
+
+function fixtureExternalTargets(
+  nodes: readonly FixtureNode[],
+  manifest: Parameters<typeof fixtureExternalKinds>[0],
+  localNodes: readonly FixtureNode[] = [],
+): ReadonlyMap<string, FixtureNode> {
+  const allowedKinds = fixtureExternalKinds(manifest)
+  const localIds = new Set(localNodes.map(node => node.id))
+  const targets = new Map<string, FixtureNode>()
+  for (const node of nodes) {
+    if (
+      allowedKinds.has(node.kind) &&
+      !localIds.has(node.id) &&
+      !targets.has(node.id)
+    )
+      targets.set(node.id, node)
+  }
+  return targets
+}
 const sourceRanges = new Map<string, string>()
 let sourceBytes = ''
 for (const node of [...allNodes].sort((left, right) =>
@@ -488,15 +921,22 @@ function makePhase4Authority(
   balanceId = 'balance-unit',
   profile: FixtureProfile = defaultProfile,
   gameplayLabel = 'Start',
+  includeUnusedGameplayKinds = false,
 ) {
   const gameplaySource = source('gameplay', profile)
   const balanceSource = source('balance', profile)
   const gameplayMechanical = mechanical(gameplaySource)
   const balanceMechanical = mechanical(balanceSource)
   const balanceVariant = balanceNodes.map(node => ({ ...node, id: balanceId }))
-  const gameplayVariant = gameplayNodes.map(node => ({
+  const gameplayVariant = [
+    ...gameplayNodes,
+    ...(includeUnusedGameplayKinds ? richGameplayNodes : []),
+  ].map(node => ({
     ...node,
-    value: { ...node.value, label: gameplayLabel },
+    value:
+      node.id === 'state-start'
+        ? { ...node.value, label: gameplayLabel }
+        : node.value,
   }))
   const gameplaySemantic = admitGameplaySemanticResult(
     buildGameplaySemanticPacket({
@@ -549,6 +989,7 @@ function buildAuthority(
     presentationDrivenByTargetType?: string
     worldValidationOutcome?: ValidationOutcome
     presentationValidationOutcome?: ValidationOutcome
+    includeUnusedKinds?: boolean
   }> = {},
 ) {
   const profile = overrides.profile ?? defaultProfile
@@ -556,11 +997,15 @@ function buildAuthority(
     overrides.balanceId,
     profile,
     overrides.gameplayLabel,
+    overrides.includeUnusedKinds,
   )
   const phase4 = assembleGameplayBalanceModules(phase4Authority)
   const worldId = overrides.worldId ?? 'world-scene-main'
   const presentationId = overrides.presentationId ?? 'presentation-screen-main'
-  const worldVariant = worldNodes.map(node => ({
+  const worldVariant = [
+    ...worldNodes,
+    ...(overrides.includeUnusedKinds ? richWorldNodes : []),
+  ].map(node => ({
     ...node,
     kind:
       node.id === 'world-scene-main'
@@ -609,7 +1054,14 @@ function buildAuthority(
     packet: worldPacket,
     semantic: worldSemantic,
   })
-  const worldModule = parseWorldSceneModule(worldBound.module)
+  const worldModule = parseWorldSceneModule(
+    worldBound.module,
+    fixtureExternalTargets(
+      phase4.gameplay.module.nodes,
+      WORLD_SCENE_DOMAIN_MANIFEST,
+      worldBound.module.nodes,
+    ) as never,
+  )
   const worldValidationPacket = buildPhase5SemanticValidationPacket({
     source: worldSource,
     mechanical: worldMechanical,
@@ -663,7 +1115,11 @@ function buildAuthority(
       ? (presentationBound.module as never)
       : parsePresentationModule(
           presentationBound.module,
-          new Map(phase4.gameplay.module.nodes.map(node => [node.id, node])),
+          fixtureExternalTargets(
+            [...phase4.gameplay.module.nodes, ...worldProjection.module.nodes],
+            PRESENTATION_DOMAIN_MANIFEST,
+            presentationBound.module.nodes,
+          ) as never,
         )
   const presentationValidationPacket = buildPhase5SemanticValidationPacket({
     source: presentationSource,
@@ -795,6 +1251,11 @@ test('assembles a complete authority deterministically and freezes derived proje
     'sourceDigest',
     'taskId',
   ])
+})
+
+test('accepts complete upstream kinds that downstream domains do not reference', () => {
+  const authority = buildAuthority({ includeUnusedKinds: true })
+  expect(() => assembleWorldPresentationClosure(authority)).not.toThrow()
 })
 
 test('rejects detached Phase 4 projection input before any Phase 5 work', () => {

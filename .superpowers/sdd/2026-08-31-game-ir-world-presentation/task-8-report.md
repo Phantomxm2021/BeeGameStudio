@@ -16,6 +16,10 @@
   complete authority Section Index identity across all four source envelopes;
   checks cross-module global ID disjointness and delegates typed graph rules
   to the existing schema boundaries.
+- Derives each schema parser's local and allowed external target kinds directly
+  from its domain manifest; filters only the temporary parser target maps while
+  retaining complete Gameplay/Balance/World/Presentation projections for
+  namespace checks and fidelity packets.
 - Projection and closure digests are service-derived and exclude only their
   own digest field. No candidate, publication, route, store, provider,
   fallback, detached projection authority, or future-stage code was added.
@@ -43,7 +47,7 @@ namespace tests were added, the focused test passed:
 
 ```text
 bun test .../world-presentation-assembler.test.ts
-→ 39 pass, 0 fail, 217 expect() calls
+→ 40 pass, 0 fail, 218 expect() calls
 ```
 
 Rounds 2–4 extend the legal-baseline-first matrix with independent Gameplay and
@@ -64,13 +68,19 @@ validator because its canonical digest is coupled to the Foundation compile
 receipt; it does not claim an independent cross-index identity guard. No new
 production change was needed in rounds 2–4. Altered output digest assertions
 are mechanical recomputation checks; the assembler does not accept a closure
-reader input.
+reader input. The root-fix RED used a fully admitted rich Gameplay/World
+authority containing action/condition/effect/objective and route/spawn/encounter/
+checkpoint/objective-placement kinds that downstream contracts do not reference;
+the pre-fix closure failed on a forbidden temporary external target, while the
+manifest-derived filter now accepts it. Existing forbidden and wrong-kind
+negative cases still fail at their schema guards. This is the only production
+change in the root-fix.
 
 ## Verification
 
 ```text
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/*.test.ts
-→ 328 pass, 0 fail, 2 snapshots, 1769 expect() calls
+→ 332 pass, 0 fail, 2 snapshots, 1873 expect() calls
 
 bun run typecheck
 → tsc --noEmit passed
