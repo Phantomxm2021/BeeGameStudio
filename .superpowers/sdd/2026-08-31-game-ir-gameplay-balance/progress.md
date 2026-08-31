@@ -76,10 +76,10 @@ Task 7: fix round 3/5 (roadmap wording addressed, 0 open — independent Task 7 
 Task 7: fix round 4/5 (accepted status accurately recorded, 0 open; commits 55eedcc..48f10a2)
 Task 7: complete (commits 1312e11..48f10a2, review clean)
 
-Final root-cause correction: implementation fixed; automated verification
-complete; independent final re-review pending. Scope remained limited to the
-recorded Phase 4 findings; no Phase 5+ or production
-routing/publication/persistence work was added.
+Final root-cause correction: implementation fixed; independent final
+verification/re-review pending. Scope remained limited to the recorded Phase 4
+findings; no Phase 5+ or production routing/publication/persistence work was
+added.
 
 Final correction dispositions:
 
@@ -108,3 +108,25 @@ assertions across 14 files;
 exact Foundation 21-file suite 263/263 with 1439 assertions; protected parity
 plus full-server unreachable scan 10/10 with 131 assertions; root and server
 typechecks pass. Final Biome and diff checks are recorded in the Task 7 report.
+
+Final targeted correction: implementation fixed; independent final
+verification/re-review pending.
+
+- Diagnostic authority: removed the shared final diagnostic admission export.
+  The shared parser returns only an identity-free worker value; Gameplay and
+  Balance producer admission validate their service-owned packet before
+  binding identity and signing a final diagnostic.
+- Diagnostic evidence: semantic packets carry canonical Section Evidence
+  pointers derived by the existing source-pointer authority from the selected
+  source closure. Evidence must be canonical sorted/unique and every pointer
+  must exactly match the packet closure, including section digest. Arbitrary
+  syntax, a section outside the closure, and a tampered digest fail.
+- Balance manifest: variable and parameter `minimum`/`maximum` are declared in
+  the sole `BALANCE_DOMAIN_MANIFEST` value-field authority, including their
+  optionality. The parser derives admitted keys only from that manifest; the
+  completeness/drift regression covers bounded and omitted-bound records.
+- TDD RED: focused tests produced 49 pass, 6 expected fail, 194 assertions.
+  The six failures mapped exactly to the two review findings.
+- Own GREEN verification: focused 75/75 with 280 assertions and full Game IR
+  197/197 with 912 assertions are implementation evidence only; independent
+  final verification/re-review remains pending.

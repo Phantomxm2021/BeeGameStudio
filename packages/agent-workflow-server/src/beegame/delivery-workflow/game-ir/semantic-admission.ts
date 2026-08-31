@@ -301,7 +301,7 @@ function ownerEvidencePointer(binding: {
   return `binding:${binding.documentPath}#${binding.sectionId}${binding.sourcePointer}`
 }
 
-function sectionEvidencePointer(ref: GameIrSourceSection): string {
+export function sectionEvidencePointer(ref: GameIrSourceSection): string {
   return `section:${ref.documentPath}#${ref.sectionId}@${ref.digest}`
 }
 

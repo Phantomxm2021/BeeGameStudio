@@ -1,15 +1,15 @@
 # Task 7 report: Phase 4 cross-domain and isolation completion gate
 
-Status: final root-cause correction implementation fixed and automated
-verification complete; independent final re-review pending. The earlier
-completion-gate implementation was committed with subject
-`test: prove isolated Game IR gameplay and balance`.
+Status: final targeted correction implementation fixed; independent final
+verification/re-review pending. Independent review owns the terminal status.
+The earlier completion-gate implementation was committed with subject `test:
+prove isolated Game IR gameplay and balance`.
 
 ## Exact verification commands and results
 
-- `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/*.test.ts` — **192 pass, 0 fail, 900 assertions** across 14 files.
+- `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/*.test.ts` — **197 pass, 0 fail, 912 assertions** across 14 files after the final targeted correction.
 - Exact Foundation regression command from `task-7-brief.md`:
-  `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-cutover.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-integration.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-round-policy.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/transition.test.ts` — **263 pass, 0 fail** across 21 files.
+  `bun test packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-cutover.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-integration.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-round-policy.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/transition.test.ts` — **263 pass, 0 fail, 1439 assertions** across 21 files.
 - `bun run typecheck` — passed (`tsc --noEmit`).
 - `(cd packages/agent-workflow-server && bun run typecheck)` — passed (`tsc --noEmit`).
 - `git diff --check` — passed.
@@ -19,6 +19,27 @@ completion-gate implementation was committed with subject
 - `./node_modules/.bin/biome check docs/beegame-game-ir-stage-isolation-redesign.md docs/superpowers/specs/2026-08-31-game-ir-gameplay-balance-design.md packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir` — passed (exit 0).
 
 ## Evidence
+
+The final targeted correction removed the exported shared diagnostic admission
+authority. The remaining shared parser returns only an identity-free worker
+value; each domain producer first validates its service-owned packet, then
+binds packet/source identity and signs the final diagnostic. The packet carries
+the selected source closure's canonical Section Evidence pointers, derived
+through the existing semantic-admission pointer authority. Admission requires
+canonical sorted/unique evidence and exact packet-closure membership, so
+malformed syntax, an out-of-closure section, and a changed section digest are
+all rejected.
+
+`BALANCE_DOMAIN_MANIFEST` now declares complete variable/parameter value fields
+and optional `minimum`/`maximum`. The parser's accepted key set is derived from
+that manifest with no manifest-external whitelist. A completeness/drift
+regression proves every admitted fixture field is declared, every optional
+field is also a declared value field, and omitted bounds remain valid.
+
+The focused RED run was **49 pass, 6 expected fail, 194 assertions**. The final
+focused GREEN run is **75 pass, 0 fail, 280 assertions** across four files.
+These are implementation-team verification results only; independent final
+verification/re-review remains pending.
 
 `gameplay-balance.integration.test.ts` builds Gameplay and Balance source
 envelopes from one READY receipt and the same complete canonical authority

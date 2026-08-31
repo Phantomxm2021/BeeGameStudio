@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
+import * as domainProjection from './domain-projection'
 import {
   admitGameIrMechanicalProjectionReceipt,
   type GameIrMechanicalProjectionReceipt,
@@ -233,6 +234,13 @@ function packet() {
   return packetFor(source())
 }
 
+function diagnosticEvidence(currentSource = source()): string {
+  const section = currentSource.sectionIndex.find(
+    candidate => candidate.documentPath === 'docs/GDD.md',
+  )!
+  return `section:${section.documentPath}#${section.sectionId}@${section.digest}`
+}
+
 function resultValue(
   overrides: Record<string, unknown> = {},
   sectionId = 'gameplay',
@@ -346,6 +354,12 @@ function completeFixtureSource(
 }
 
 describe('Gameplay producer admission and Core preparation', () => {
+  test('does not expose a generic diagnostic authority outside domain producer admission', () => {
+    expect(
+      'admitGameIrDomainSemanticDiagnostic' in domainProjection,
+    ).toBeFalse()
+  })
+
   test.each([
     ['FAIL', 'missing-projection'],
     ['AMBIGUOUS', 'ambiguous-projection'],
@@ -412,11 +426,29 @@ describe('Gameplay producer admission and Core preparation', () => {
       )
   })
 
+  test.each([
+    'not-a-source-pointer',
+    `section:docs/BALANCE_DESIGN.md#balance@${'a'.repeat(64)}`,
+    `section:docs/GDD.md#gameplay@${'b'.repeat(64)}`,
+  ])('rejects diagnostic evidence outside the exact packet source closure: %s', evidencePointer => {
+    expect(() =>
+      admitGameplaySemanticResult(packet(), {
+        outcome: 'FAIL',
+        reasonCode: 'missing-projection',
+        actual: 'Missing.',
+        missingSubject: 'node:condition.can-jump#/value/expression',
+        expectedProjection: 'Condition.',
+        evidencePointers: [evidencePointer],
+      }),
+    ).toThrow(/evidence|source|closure|pointer|digest/i)
+  })
+
   test('builds a service-owned packet from source and mechanical receipt', () => {
     const value = packet()
     expect(value.moduleId).toBe('gameplay')
     expect(value.allowedNodeKinds).toContain('gameplay.entity')
     expect(value.allowedRelationshipTypes).toContain('succeeds-with')
+    expect(value.allowedEvidencePointers).toEqual([diagnosticEvidence()])
     expect(value.forbiddenTargets).toEqual([])
     expect(Object.isFrozen(value)).toBe(true)
   })

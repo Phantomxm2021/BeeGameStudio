@@ -345,6 +345,26 @@ describe('Balance Game IR schema', () => {
   })
 
   test('exposes the closed relationship role manifest', () => {
+    expect(BALANCE_DOMAIN_MANIFEST['balance.variable'].valueFields).toEqual([
+      'label',
+      'baseline',
+      'minimum',
+      'maximum',
+      'unitReferenceIndex',
+    ])
+    expect(
+      BALANCE_DOMAIN_MANIFEST['balance.variable'].optionalValueFields,
+    ).toEqual(['minimum', 'maximum'])
+    expect(BALANCE_DOMAIN_MANIFEST['balance.parameter'].valueFields).toEqual([
+      'label',
+      'baseline',
+      'minimum',
+      'maximum',
+      'unitReferenceIndex',
+    ])
+    expect(
+      BALANCE_DOMAIN_MANIFEST['balance.parameter'].optionalValueFields,
+    ).toEqual(['minimum', 'maximum'])
     expect(
       BALANCE_DOMAIN_MANIFEST['balance.economy-source'].relationships.amount
         .targetKinds,
@@ -354,6 +374,38 @@ describe('Balance Game IR schema', () => {
         'triggered-by'
       ].targetKinds,
     ).toEqual(['gameplay.action', 'gameplay.event'])
+  })
+
+  test('keeps every admitted value field and optional field in the one manifest', () => {
+    const fixture = validBalanceModule()
+    const unlistedValueFields = fixture.nodes.flatMap(node => {
+      const manifest =
+        BALANCE_DOMAIN_MANIFEST[
+          node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST
+        ]
+      return Object.keys(node.value).filter(
+        field => !(manifest.valueFields as readonly string[]).includes(field),
+      )
+    })
+    const invalidOptionalFields = [
+      BALANCE_DOMAIN_MANIFEST['balance.variable'],
+      BALANCE_DOMAIN_MANIFEST['balance.parameter'],
+    ].flatMap(manifest =>
+      manifest.optionalValueFields.filter(
+        field => !(manifest.valueFields as readonly string[]).includes(field),
+      ),
+    )
+    expect(unlistedValueFields).toEqual([])
+    expect(invalidOptionalFields).toEqual([])
+
+    const withoutBounds = cloneModule()
+    delete nodeById(withoutBounds, 'balance.hp').value.minimum
+    delete nodeById(withoutBounds, 'balance.hp').value.maximum
+    delete nodeById(withoutBounds, 'balance.rate').value.minimum
+    delete nodeById(withoutBounds, 'balance.rate').value.maximum
+    expect(() =>
+      parseBalanceModule(withoutBounds, gameplayTargets()),
+    ).not.toThrow()
   })
 
   test.each([

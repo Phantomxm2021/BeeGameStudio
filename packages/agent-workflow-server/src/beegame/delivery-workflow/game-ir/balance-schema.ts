@@ -55,11 +55,25 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
     relationships: Object.freeze({}),
   }),
   'balance.variable': Object.freeze({
-    valueFields: Object.freeze(['label', 'baseline', 'unitReferenceIndex']),
+    valueFields: Object.freeze([
+      'label',
+      'baseline',
+      'minimum',
+      'maximum',
+      'unitReferenceIndex',
+    ]),
+    optionalValueFields: Object.freeze(['minimum', 'maximum']),
     relationships: Object.freeze({}),
   }),
   'balance.parameter': Object.freeze({
-    valueFields: Object.freeze(['label', 'baseline', 'unitReferenceIndex']),
+    valueFields: Object.freeze([
+      'label',
+      'baseline',
+      'minimum',
+      'maximum',
+      'unitReferenceIndex',
+    ]),
+    optionalValueFields: Object.freeze(['minimum', 'maximum']),
     relationships: Object.freeze({}),
   }),
   'balance.formula': Object.freeze({
@@ -475,13 +489,14 @@ function parseVariableValue(
   node: GameIrNode,
 ): Readonly<Record<string, unknown>> {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
-  const fields = [
-    ...BALANCE_DOMAIN_MANIFEST[
+  const manifest =
+    BALANCE_DOMAIN_MANIFEST[
       node.kind as 'balance.variable' | 'balance.parameter'
-    ].valueFields,
-  ]
-  if (Object.hasOwn(node.value, 'minimum')) fields.push('minimum')
-  if (Object.hasOwn(node.value, 'maximum')) fields.push('maximum')
+    ]
+  const optionalFields = new Set<string>(manifest.optionalValueFields)
+  const fields = manifest.valueFields.filter(
+    field => !optionalFields.has(field) || Object.hasOwn(node.value, field),
+  )
   exactKeys(node.value, fields, `node ${node.id} value`)
   const label = text(node.value.label, `node ${node.id} label`)
   if (!SAFE_NUMBER(node.value.baseline))

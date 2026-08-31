@@ -7,6 +7,7 @@ import {
 import {
   GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES,
   GAME_IR_SEMANTIC_FAILURE_REASON_CODES,
+  sectionEvidencePointer,
   type GameIrSemanticAmbiguousReasonCode,
   type GameIrSemanticFailureReasonCode,
 } from './semantic-admission'
@@ -43,6 +44,7 @@ export type GameIrDomainSemanticPacket = Readonly<{
   mechanicalReceiptDigest: string
   allowedNodeKinds: readonly string[]
   allowedRelationshipTypes: readonly string[]
+  allowedEvidencePointers: readonly string[]
   forbiddenTargets: readonly string[]
   packetDigest: string
 }>
@@ -64,6 +66,15 @@ export type GameIrDomainSemanticDiagnostic = Readonly<{
   expectedProjection: string
   evidencePointers: readonly string[]
   diagnosticDigest: string
+}>
+
+export type GameIrDomainSemanticDiagnosticValue = Readonly<{
+  outcome: 'FAIL' | 'AMBIGUOUS'
+  reasonCode: GameIrDomainSemanticDiagnostic['reasonCode']
+  actual: string
+  missingSubject: string
+  expectedProjection: string
+  evidencePointers: readonly string[]
 }>
 
 type MechanicalReceiptInput = Readonly<{
@@ -198,10 +209,10 @@ function canonicalDiagnosticSubject(value: unknown): string {
   return `node:${nodeId}#${pointer}`
 }
 
-export function admitGameIrDomainSemanticDiagnostic(
-  packet: GameIrDomainSemanticPacket,
+export function parseGameIrDomainSemanticDiagnosticValue(
   value: unknown,
-): GameIrDomainSemanticDiagnostic {
+  allowedEvidencePointers: readonly string[],
+): GameIrDomainSemanticDiagnosticValue {
   if (!isRecord(value)) fail('semantic diagnostic must be a plain object')
   exactKeys(
     value,
@@ -235,15 +246,20 @@ export function admitGameIrDomainSemanticDiagnostic(
   )
   if (evidencePointers.length === 0)
     fail('semantic diagnostic evidencePointers must not be empty')
-  const body: Omit<GameIrDomainSemanticDiagnostic, 'diagnosticDigest'> = {
-    schemaVersion: 'game-ir-domain-semantic-diagnostic.v1',
+  const allowed = new Set(
+    normalizeTargets(
+      allowedEvidencePointers,
+      'semantic diagnostic allowedEvidencePointers',
+    ),
+  )
+  for (const evidencePointer of evidencePointers) {
+    if (!allowed.has(evidencePointer))
+      fail(
+        'semantic diagnostic evidence pointer is outside the exact source closure',
+      )
+  }
+  return deepFreeze({
     outcome,
-    taskId: packet.taskId,
-    moduleId: packet.moduleId,
-    foundationRevision: packet.foundationRevision,
-    sourceDigest: packet.sourceDigest,
-    mechanicalReceiptDigest: packet.mechanicalReceiptDigest,
-    packetDigest: packet.packetDigest,
     reasonCode: admittedReasonCode,
     actual: text(value.actual, 'semantic diagnostic actual'),
     missingSubject: canonicalDiagnosticSubject(value.missingSubject),
@@ -252,10 +268,6 @@ export function admitGameIrDomainSemanticDiagnostic(
       'semantic diagnostic expectedProjection',
     ),
     evidencePointers,
-  }
-  return deepFreeze({
-    ...body,
-    diagnosticDigest: digestGameIrValue(body),
   })
 }
 
@@ -416,6 +428,9 @@ export function buildGameIrDomainSemanticPacket(
     allowedRelationshipTypes: normalizeAllowed(
       input.allowedRelationshipTypes,
       'allowedRelationshipTypes',
+    ),
+    allowedEvidencePointers: Object.freeze(
+      source.sectionIndex.map(sectionEvidencePointer).sort(compareCodeUnits),
     ),
     forbiddenTargets: mechanical.ownedTargets,
   }

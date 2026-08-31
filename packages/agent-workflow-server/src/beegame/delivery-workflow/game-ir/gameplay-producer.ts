@@ -1,8 +1,8 @@
 import {
   admitGameIrMechanicalProjectionReceipt,
-  admitGameIrDomainSemanticDiagnostic,
   assertDisjointDomainTargets,
   buildGameIrDomainSemanticPacket,
+  parseGameIrDomainSemanticDiagnosticValue,
   type GameIrDomainSemanticPacket,
   type GameIrDomainSemanticDiagnostic,
   type GameIrMechanicalProjectionReceipt,
@@ -468,6 +468,7 @@ function validatePacket(
       'mechanicalReceiptDigest',
       'allowedNodeKinds',
       'allowedRelationshipTypes',
+      'allowedEvidencePointers',
       'forbiddenTargets',
       'packetDigest',
     ],
@@ -503,6 +504,20 @@ function validatePacket(
     fail(
       'semantic packet allowedRelationshipTypes is not the Gameplay manifest',
     )
+  const allowedEvidencePointers = strictArray(
+    packet.allowedEvidencePointers,
+    'allowedEvidencePointers',
+  )
+  for (let index = 0; index < allowedEvidencePointers.length; index += 1)
+    text(allowedEvidencePointers[index], `allowedEvidencePointers[${index}]`)
+  for (let index = 1; index < allowedEvidencePointers.length; index += 1)
+    if (
+      compareCodeUnits(
+        String(allowedEvidencePointers[index - 1]),
+        String(allowedEvidencePointers[index]),
+      ) >= 0
+    )
+      fail('allowedEvidencePointers must be unique and sorted')
   const forbiddenTargets = strictArray(
     packet.forbiddenTargets,
     'forbiddenTargets',
@@ -549,6 +564,30 @@ function receiptBody(
   return receipt
 }
 
+function admitGameplaySemanticDiagnostic(
+  packet: GameIrDomainSemanticPacket,
+  value: unknown,
+): GameIrDomainSemanticDiagnostic {
+  const diagnostic = parseGameIrDomainSemanticDiagnosticValue(
+    value,
+    packet.allowedEvidencePointers,
+  )
+  const body: Omit<GameIrDomainSemanticDiagnostic, 'diagnosticDigest'> = {
+    schemaVersion: 'game-ir-domain-semantic-diagnostic.v1',
+    taskId: packet.taskId,
+    moduleId: 'gameplay',
+    foundationRevision: packet.foundationRevision,
+    sourceDigest: packet.sourceDigest,
+    mechanicalReceiptDigest: packet.mechanicalReceiptDigest,
+    packetDigest: packet.packetDigest,
+    ...diagnostic,
+  }
+  return Object.freeze({
+    ...body,
+    diagnosticDigest: digestGameIrValue(body),
+  })
+}
+
 export function admitGameplaySemanticResult(
   packet: GameIrDomainSemanticPacket,
   value: Readonly<{ outcome: 'PROJECTED'; [key: string]: unknown }>,
@@ -571,7 +610,7 @@ export function admitGameplaySemanticResult(
   const validatedPacket = validatePacket(packet)
   if (!isRecord(value)) fail('semantic result must be a plain object')
   if (value.outcome === 'FAIL' || value.outcome === 'AMBIGUOUS')
-    return admitGameIrDomainSemanticDiagnostic(validatedPacket, value)
+    return admitGameplaySemanticDiagnostic(validatedPacket, value)
   exactKeys(value, ['outcome', 'nodes', 'sourceClaims'], 'semantic result')
   if (value.outcome !== 'PROJECTED')
     fail('semantic result outcome must be PROJECTED, FAIL, or AMBIGUOUS')
