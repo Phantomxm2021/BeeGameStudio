@@ -44,6 +44,11 @@ import {
   type FoundationDocumentPath,
 } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
+import {
+  createSemanticFidelityPrimitives,
+  type GameIrSemanticCandidateNode,
+  type GameIrSemanticSourceClaim,
+} from './semantic-fidelity'
 
 /*
  * This is the only Phase 5 receipt boundary. Domain producers should pass
@@ -51,24 +56,12 @@ import { digestSectionIndex } from '../foundation-section-index'
  * replay; neither side owns a parser, canonicalizer, or binding writer.
  */
 
-export type Phase5SemanticCandidateNode = Readonly<{
-  id: string
-  kind: string
-  value: Readonly<Record<string, unknown>>
-  references: readonly GameIrReference[]
-  edges: readonly GameIrRelationshipEdge[]
-}>
+export type Phase5SemanticCandidateNode = GameIrSemanticCandidateNode
 
 export type Phase5AdmittedSemanticNode = Phase5SemanticCandidateNode &
   Readonly<{ producerMode: 'semantic' }>
 
-export type GameIrDomainSourceClaim = Readonly<{
-  subject: string
-  documentPath: FoundationDocumentPath
-  sectionId: string
-  sourcePointer: string
-  literal: string
-}>
+export type GameIrDomainSourceClaim = GameIrSemanticSourceClaim
 
 export type Phase5SemanticReceipt = Readonly<{
   schemaVersion: 'game-ir-domain-semantic-receipt.v1'
@@ -166,6 +159,16 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const SHA256 = /^[a-f0-9]{64}$/
 const JSON_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
 const FOUNDATION_DOCUMENT_SET = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
+const {
+  exactKeys,
+  strictArray,
+  text,
+  safeId,
+  sha256,
+  deepFreeze,
+  normalizeSourcePointer,
+  exactStringCoverage,
+} = createSemanticFidelityPrimitives('invalid Game IR Phase 5 admission')
 
 function fail(message: string): never {
   throw new Error(`invalid Game IR Phase 5 admission: ${message}`)
@@ -181,81 +184,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   )
 }
 
-function exactKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-  label: string,
-): void {
-  const actual = Reflect.ownKeys(value)
-  for (const key of actual) {
-    if (typeof key !== 'string') fail(`${label} has a symbol property`)
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable)
-      fail(`${label} has a hidden or accessor property`)
-  }
-  const sorted = (actual as string[]).sort(compareCodeUnits)
-  const wanted = [...expected].sort(compareCodeUnits)
-  if (
-    sorted.length !== wanted.length ||
-    sorted.some((key, index) => key !== wanted[index])
-  )
-    fail(`${label} has unknown or missing fields`)
-}
-
-function strictArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) fail(`${label} must be an array`)
-  const length = Object.getOwnPropertyDescriptor(value, 'length')
-  if (
-    !length ||
-    !('value' in length) ||
-    length.value !== value.length ||
-    length.enumerable ||
-    length.configurable
-  )
-    fail(`${label} has an invalid length property`)
-  const keys = Reflect.ownKeys(value)
-  if (keys.length !== value.length + 1)
-    fail(`${label} must be dense without custom properties`)
-  for (const key of keys) {
-    if (key === 'length') continue
-    if (typeof key !== 'string' || !/^\d+$/.test(key))
-      fail(`${label} has a hidden or symbol property`)
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable)
-      fail(`${label} has a hidden or accessor property`)
-  }
-  for (let index = 0; index < value.length; index += 1)
-    if (!Object.hasOwn(value, String(index))) fail(`${label} must be dense`)
-  return value
-}
-
-function text(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0)
-    fail(`${label} must be non-empty text`)
-  return value
-}
-
-function safeId(value: unknown, label: string): string {
-  const result = text(value, label)
-  if (!SAFE_ID.test(result)) fail(`${label} must be a safe identifier`)
-  return result
-}
-
-function sha256(value: unknown, label: string): string {
-  const result = text(value, label)
-  if (!SHA256.test(result)) fail(`${label} must be a SHA-256 digest`)
-  return result
-}
-
-function deepFreeze<T>(value: T): T {
-  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-    for (const nested of Object.values(value as Record<string, unknown>))
-      deepFreeze(nested)
-    Object.freeze(value)
-  }
-  return value
-}
-
 function cloneJson(value: unknown, label: string): unknown {
   try {
     return JSON.parse(canonicalGameIrJson(value))
@@ -264,27 +192,6 @@ function cloneJson(value: unknown, label: string): unknown {
       fail(`${label} contains invalid JSON`)
     fail(`${label} contains invalid JSON`)
   }
-}
-
-function normalizeSourcePointer(value: unknown, label: string): string {
-  const pointer = text(value, label)
-  const parts = pointer.split('/')
-  if (
-    parts.length !== 4 ||
-    parts[1] !== 'bytes' ||
-    !/^(?:0|[1-9]\d*)$/.test(parts[2]!) ||
-    !/^(?:0|[1-9]\d*)$/.test(parts[3]!)
-  )
-    fail(`${label} must be a canonical /bytes/<start>/<end> range`)
-  const start = Number(parts[2])
-  const end = Number(parts[3])
-  if (
-    !Number.isSafeInteger(start) ||
-    !Number.isSafeInteger(end) ||
-    start >= end
-  )
-    fail(`${label} must contain a non-empty byte range`)
-  return pointer
 }
 
 function valueLeafPointers(value: Readonly<Record<string, unknown>>): string[] {
@@ -1760,21 +1667,6 @@ function normalizeValidationPacket(value: unknown): {
     }) as Phase5SemanticValidationPacket,
     module,
   }
-}
-
-function exactStringCoverage(
-  value: unknown,
-  expected: readonly string[],
-  label: string,
-): readonly string[] {
-  const actual = strictArray(value, label)
-  if (actual.length !== expected.length)
-    fail(`${label} has incomplete or extra values`)
-  if (actual.some(entry => typeof entry !== 'string'))
-    fail(`${label} must contain strings`)
-  if (actual.some((entry, index) => entry !== expected[index]))
-    fail(`${label} must be exact canonical coverage`)
-  return Object.freeze([...actual] as string[])
 }
 
 export function admitPhase5SemanticValidationResult(

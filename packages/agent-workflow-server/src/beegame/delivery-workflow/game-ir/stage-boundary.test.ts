@@ -1555,6 +1555,7 @@ describe('Game IR stage boundary', () => {
       'presentation-schema.ts',
       'publication.ts',
       'semantic-admission.ts',
+      'semantic-fidelity.ts',
       'world-presentation-assembler.ts',
       'world-scene-producer.ts',
       'world-scene-schema.ts',
