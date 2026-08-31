@@ -2,7 +2,7 @@
 
 ## Status
 
-DONE (fix round 1/5). Task 7 is limited to the Presentation producer wrapper,
+DONE (fix round 2/5). Task 7 is limited to the Presentation producer wrapper,
 its focused assertion-level tests, and this report. Task 8 was not started. No schema,
 closure assembler, route, store, provider, Reviewer, Revision, publication,
 or future-stage code was changed.
@@ -66,7 +66,11 @@ changed in this fix round.
   are reachable with a real cycle, preserve existing requirement/trigger
   identities across unrelated insertion, reject each artifact-shaped field,
   reject independently relabeled stored results and omitted claims, and
-  exercise the shared replay's isolated empty-mechanical policy. Because the
+  exercise the shared replay's isolated empty-mechanical policy. Fix round 2
+  also extracts both VFX trigger claims (value trigger and `on` edge) from
+  baseline and append-inserted receipts and compares their complete claim
+  identities, including exact byte ranges. Because the
+  service contract makes Phase 5 mechanical ownership unconditionally empty,
   service contract makes Phase 5 mechanical ownership unconditionally empty,
   a synthetic mechanical/semantic overlap cannot reach disjointness; the test
   proves the earlier policy guard on the shared replay path instead.
@@ -78,9 +82,9 @@ changed in this fix round.
 
 ```text
 bun test .../presentation-producer.test.ts .../phase5-admission.test.ts
-→ 41 pass, 0 fail, 230 expect() calls
+→ 41 pass, 0 fail, 231 expect() calls
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir
-→ 289 pass, 0 fail, 2 snapshots, 1551 expect() calls
+→ 289 pass, 0 fail, 2 snapshots, 1552 expect() calls
 (cd packages/agent-workflow-server && bun run typecheck)
 → tsc --noEmit passed
 Biome check on both Task 7 TypeScript files

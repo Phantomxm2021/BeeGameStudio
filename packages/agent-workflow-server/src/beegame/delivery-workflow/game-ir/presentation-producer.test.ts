@@ -852,6 +852,11 @@ describe('Presentation semantic producer wrapper', () => {
         claim.subject === 'node:transition.main#/value/trigger/kind' ||
         claim.subject === 'node:transition.main#/edges/1',
     )
+    const baselineVfxTriggerClaims = baseline.semantic.sourceClaims.filter(
+      claim =>
+        claim.subject === 'node:vfx.main#/value/trigger' ||
+        claim.subject === 'node:vfx.main#/edges/1',
+    )
     const unrelated: ProjectionNode = {
       id: 'zzz.feedback',
       kind: 'presentation.feedback',
@@ -889,6 +894,12 @@ describe('Presentation semantic producer wrapper', () => {
           candidate => candidate.subject === claim.subject,
         ),
       ).toEqual(claim)
+    const insertedVfxTriggerClaims = inserted.semantic.sourceClaims.filter(
+      claim =>
+        claim.subject === 'node:vfx.main#/value/trigger' ||
+        claim.subject === 'node:vfx.main#/edges/1',
+    )
+    expect(insertedVfxTriggerClaims).toEqual(baselineVfxTriggerClaims)
   })
 
   test('rejects every artifact-shaped value field without inferring artifacts from labels', () => {
