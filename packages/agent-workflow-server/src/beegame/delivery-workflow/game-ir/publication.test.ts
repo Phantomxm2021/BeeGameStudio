@@ -170,6 +170,28 @@ function shaBytes(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
+function derivedFromAnchor(
+  derivationRuleId: string,
+  moduleId: string,
+  nodeId: string,
+  pointer: string,
+  targetValue: unknown,
+): Record<string, unknown> {
+  return {
+    kind: 'derived',
+    derivationRuleId,
+    inputs: [
+      {
+        kind: 'external',
+        moduleId,
+        nodeId,
+        pointer,
+        targetDigest: digestGameIrValue(targetValue),
+      },
+    ],
+  }
+}
+
 function rawCandidate(
   extraNodeCount = 3,
   externalDerived = false,
@@ -217,19 +239,19 @@ function rawCandidate(
                     },
                   ],
                   bindings: {
-                    '/id': {
-                      kind: 'owner',
-                      documentPath: 'docs/GDD.md',
-                      sectionId,
-                      sectionDigest,
-                      sourcePointer: `/ir/${moduleId}/extra-${extraId}`,
-                    },
-                    '/value/score': {
-                      kind: 'derived',
-                      derivationRuleId: `score-${extraId}`,
-                      inputs:
-                        externalDerived && index === 0
-                          ? [
+                    '/id': derivedFromAnchor(
+                      `identity-from-${moduleId}-root-${extraId}`,
+                      moduleId,
+                      `${moduleId}.root`,
+                      '/id',
+                      `${moduleId}.root`,
+                    ),
+                    '/value/score':
+                      externalDerived && index === 0
+                        ? {
+                            kind: 'derived',
+                            derivationRuleId: `score-${extraId}`,
+                            inputs: [
                               {
                                 kind: 'external',
                                 moduleId: 'core',
@@ -237,37 +259,43 @@ function rawCandidate(
                                 pointer: '/value/label',
                                 targetDigest: digestGameIrValue('core'),
                               },
-                            ]
-                          : [{ kind: 'local', pointer: '/id' }],
-                    },
-                    '/edges/0': {
-                      kind: 'owner',
-                      documentPath: 'docs/GDD.md',
-                      sectionId,
-                      sectionDigest,
-                      sourcePointer: `/ir/${moduleId}/extra-${extraId}/blocks`,
-                    },
-                    '/edges/1': {
-                      kind: 'owner',
-                      documentPath: 'docs/GDD.md',
-                      sectionId,
-                      sectionDigest,
-                      sourcePointer: `/ir/${moduleId}/extra-${extraId}/requires`,
-                    },
-                    '/edges/2': {
-                      kind: 'owner',
-                      documentPath: 'docs/GDD.md',
-                      sectionId,
-                      sectionDigest,
-                      sourcePointer: `/ir/${moduleId}/extra-${extraId}/z`,
-                    },
-                    '/edges/3': {
-                      kind: 'owner',
-                      documentPath: 'docs/GDD.md',
-                      sectionId,
-                      sectionDigest,
-                      sourcePointer: `/ir/${moduleId}/extra-${extraId}/ä`,
-                    },
+                            ],
+                          }
+                        : derivedFromAnchor(
+                            `score-from-${moduleId}-root-${extraId}`,
+                            moduleId,
+                            `${moduleId}.root`,
+                            '/id',
+                            `${moduleId}.root`,
+                          ),
+                    '/edges/0': derivedFromAnchor(
+                      `blocks-from-${moduleId}-root-${extraId}`,
+                      moduleId,
+                      `${moduleId}.root`,
+                      '/id',
+                      `${moduleId}.root`,
+                    ),
+                    '/edges/1': derivedFromAnchor(
+                      `requires-from-${moduleId}-root-${extraId}`,
+                      moduleId,
+                      `${moduleId}.root`,
+                      '/id',
+                      `${moduleId}.root`,
+                    ),
+                    '/edges/2': derivedFromAnchor(
+                      `z-from-${moduleId}-root-${extraId}`,
+                      moduleId,
+                      `${moduleId}.root`,
+                      '/id',
+                      `${moduleId}.root`,
+                    ),
+                    '/edges/3': derivedFromAnchor(
+                      `umlaut-from-${moduleId}-root-${extraId}`,
+                      moduleId,
+                      `${moduleId}.root`,
+                      '/id',
+                      `${moduleId}.root`,
+                    ),
                   },
                 }
               })
@@ -419,11 +447,15 @@ describe('atomic Game IR publication and recovery', () => {
       edges: readonly Record<string, unknown>[]
     }
     expect(
-      dependencyGraph.edges.find(edge => edge.kind === 'derived'),
+      dependencyGraph.edges.find(
+        edge =>
+          edge.kind === 'derived' &&
+          edge.from === 'gameplay/gameplay.extra-0/value/score',
+      ),
     ).toMatchObject({
       kind: 'derived',
       from: 'gameplay/gameplay.extra-0/value/score',
-      to: 'gameplay/gameplay.extra-0/id',
+      to: 'gameplay/gameplay.root/id',
     })
     expect(dependencyGraph.edges.some(edge => edge.type === 'requires')).toBe(
       true,
@@ -441,6 +473,49 @@ describe('atomic Game IR publication and recovery', () => {
       .map(edge => edge.type)
     expect(firstRelationshipTypes).toEqual(['blocks', 'requires', 'z', 'ä'])
     expect(ready.dependencyGraphDigest).toBe(shaBytes(dependencyGraphBytes))
+
+    const sourceMapBytes = await readFile(
+      join(
+        value.workspacePath,
+        ready.committedPath.replace(
+          /COMMITTED\.json$/,
+          'source-maps/gameplay.json',
+        ),
+      ),
+      'utf8',
+    )
+    const sourceMap = JSON.parse(sourceMapBytes) as {
+      bindings: readonly {
+        nodeId: string
+        pointer: string
+        binding: Record<string, unknown>
+      }[]
+    }
+    const extraBindings = sourceMap.bindings.filter(
+      binding => binding.nodeId === 'gameplay.extra-0',
+    )
+    expect(extraBindings.map(binding => binding.pointer)).toEqual([
+      '/edges/0',
+      '/edges/1',
+      '/edges/2',
+      '/edges/3',
+      '/id',
+      '/value/score',
+    ])
+    for (const binding of extraBindings) {
+      expect(binding.binding).toMatchObject({
+        kind: 'derived',
+        inputs: [
+          {
+            kind: 'external',
+            moduleId: 'gameplay',
+            nodeId: 'gameplay.root',
+            pointer: '/id',
+            targetDigest: digestGameIrValue('gameplay.root'),
+          },
+        ],
+      })
+    }
     await expect(validateCommittedGameIr(value)).resolves.toEqual(ready)
   })
 
