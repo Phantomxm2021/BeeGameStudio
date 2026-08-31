@@ -59,5 +59,25 @@ export function admitWorldSceneSemanticResult(
   const result = admitPhase5SemanticResult(packet, value)
   if (result.moduleId !== 'world-scene')
     throw new Error('invalid World/Scene semantic result module')
+  const nodeKinds = manifestNodeKinds()
+  const relationshipTypes = manifestRelationshipTypes()
+  if (
+    packet.allowedNodeKinds.length !== nodeKinds.length ||
+    packet.allowedNodeKinds.some((kind, index) => kind !== nodeKinds[index]) ||
+    packet.allowedRelationshipTypes.length !== relationshipTypes.length ||
+    packet.allowedRelationshipTypes.some(
+      (relationship, index) => relationship !== relationshipTypes[index],
+    )
+  )
+    throw new Error('invalid World/Scene semantic packet manifest identity')
+  if (result.outcome === 'PROJECTED') {
+    for (const node of result.nodes) {
+      if (!nodeKinds.includes(node.kind))
+        throw new Error('invalid World/Scene semantic result node kind')
+      for (const edge of node.edges)
+        if (!relationshipTypes.includes(edge.type))
+          throw new Error('invalid World/Scene semantic result relationship')
+    }
+  }
   return result as WorldSceneSemanticResult
 }

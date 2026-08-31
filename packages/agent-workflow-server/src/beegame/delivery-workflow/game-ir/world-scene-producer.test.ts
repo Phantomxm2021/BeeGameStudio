@@ -400,6 +400,47 @@ describe('World/Scene semantic producer wrapper', () => {
     ).toThrow('invalid World/Scene semantic result module')
   })
 
+  test('rejects a same-module packet widened with a rogue World kind after shared admission', () => {
+    const { packet: currentPacket } = packet()
+    expect(
+      admitWorldSceneSemanticResult(currentPacket, resultInput()),
+    ).toMatchObject({
+      outcome: 'PROJECTED',
+      moduleId: 'world-scene',
+    })
+    const widened = reissuePacket(currentPacket, {
+      allowedNodeKinds: [
+        ...currentPacket.allowedNodeKinds,
+        'world-scene.rogue',
+      ].sort(),
+    })
+    expect(() =>
+      admitWorldSceneSemanticResult(
+        widened,
+        resultInput('rogue', 'world-scene.rogue'),
+      ),
+    ).toThrow('World/Scene semantic packet manifest identity')
+  })
+
+  test('rejects a same-module packet widened with a rogue relationship role after shared admission', () => {
+    const { packet: currentPacket } = packet()
+    expect(
+      admitWorldSceneSemanticResult(currentPacket, resultInput()),
+    ).toMatchObject({
+      outcome: 'PROJECTED',
+      moduleId: 'world-scene',
+    })
+    const widened = reissuePacket(currentPacket, {
+      allowedRelationshipTypes: [
+        ...currentPacket.allowedRelationshipTypes,
+        'rogue-role',
+      ].sort(),
+    })
+    expect(() => admitWorldSceneSemanticResult(widened, resultInput())).toThrow(
+      'World/Scene semantic packet manifest identity',
+    )
+  })
+
   test('lets shared admission reject hidden packet fields before any wrapper narrowing', () => {
     const { packet: currentPacket } = packet()
     const descriptors: PropertyDescriptorMap =
@@ -564,15 +605,15 @@ describe('World/Scene semantic producer wrapper', () => {
       closed: true,
       waypointReferenceIndexes: [0, 1, 1],
     })
-    expect(route.references).toHaveLength(2)
+    expect(route.references).toEqual([
+      { targetId: 'waypoint-a', targetType: 'world-scene.node' },
+      { targetId: 'waypoint-b', targetType: 'world-scene.node' },
+    ])
     expect(route.edges[0]).toEqual({
       type: 'scene',
       targetId: 'scene',
       targetType: 'world-scene.scene',
     })
-    expect(Object.keys(child.bindings)).toContain('/value/transform/position/x')
-    expect(Object.keys(route.bindings)).toContain('/references/1')
-    expect(Object.keys(route.bindings)).toContain('/edges/0')
     const assertOwnerBindings = (
       nodeId: string,
       pointers: readonly string[],
@@ -596,23 +637,19 @@ describe('World/Scene semantic producer wrapper', () => {
         })
       }
     }
-    assertOwnerBindings('child', [
-      '/value/transform/position/x',
-      '/value/transform/position/y',
-    ])
-    assertOwnerBindings('zone', [
-      '/value/shape/kind',
-      '/value/shape/radius',
-      '/value/transform/position/x',
-    ])
-    assertOwnerBindings('route', [
-      '/value/waypointReferenceIndexes/0',
-      '/value/waypointReferenceIndexes/1',
-      '/value/waypointReferenceIndexes/2',
-      '/references/0',
-      '/references/1',
-      '/edges/0',
-    ])
+    for (const expectedNode of fixture.semantic.nodes) {
+      const actualNode = bound.module.nodes.find(
+        node => node.id === expectedNode.id,
+      )!
+      expect(actualNode.references).toEqual(expectedNode.references)
+      expect(actualNode.edges).toEqual(expectedNode.edges)
+      assertOwnerBindings(expectedNode.id, [
+        '/id',
+        ...valueLeafPointers(expectedNode.value),
+        ...expectedNode.references.map((_, index) => `/references/${index}`),
+        ...expectedNode.edges.map((_, index) => `/edges/${index}`),
+      ])
+    }
   })
 
   test('rejects UTF-8 range and edge-role tampering in the shared replay helper', () => {
