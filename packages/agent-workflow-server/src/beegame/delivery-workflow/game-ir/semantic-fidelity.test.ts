@@ -1,11 +1,69 @@
 import { describe, expect, test } from 'bun:test'
-import { createSemanticFidelityPrimitives } from './semantic-fidelity'
+import {
+  createSemanticFidelityPrimitives,
+  GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES,
+  GAME_IR_SEMANTIC_FAILURE_REASON_CODES,
+  sectionEvidencePointer,
+  verifyGameIrSemanticClaimBytes,
+  type GameIrSemanticAmbiguousReasonCode,
+  type GameIrSemanticFailureReasonCode,
+  type GameIrSemanticSourceSection,
+} from './semantic-fidelity'
 
 const phase5 = createSemanticFidelityPrimitives(
   'invalid Game IR Phase 5 admission',
 )
 
 describe('shared semantic fidelity primitives', () => {
+  test('preserves neutral source-section, reason-code, and evidence-pointer bytes', () => {
+    const ref: GameIrSemanticSourceSection['ref'] = {
+      documentPath: 'docs/GDD.md',
+      sectionId: 'rules',
+      heading: 'Rules',
+      startLine: 3,
+      endLine: 4,
+      digest: 'b'.repeat(64),
+    }
+    const sourceSection: GameIrSemanticSourceSection = {
+      ref,
+      bytes: 'héllo',
+    }
+    const failure: GameIrSemanticFailureReasonCode =
+      GAME_IR_SEMANTIC_FAILURE_REASON_CODES[0]
+    const ambiguous: GameIrSemanticAmbiguousReasonCode =
+      GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES[0]
+
+    expect(sourceSection).toEqual({ ref, bytes: 'héllo' })
+    expect(failure).toBe('projection-mismatch')
+    expect(ambiguous).toBe('ambiguous-projection')
+    expect(sectionEvidencePointer(ref)).toBe(
+      'section:docs/GDD.md#rules@' + 'b'.repeat(64),
+    )
+
+    const authority = {
+      sectionIndex: [ref],
+      sectionBytes: { 'docs/GDD.md#rules': sourceSection.bytes },
+    }
+    verifyGameIrSemanticClaimBytes(authority, {
+      subject: 'node:rules#/label',
+      documentPath: ref.documentPath,
+      sectionId: ref.sectionId,
+      sourcePointer: '/bytes/1/3',
+      literal: 'é',
+    })
+    expect(() =>
+      verifyGameIrSemanticClaimBytes(authority, {
+        subject: 'node:rules#/label',
+        documentPath: ref.documentPath,
+        sectionId: ref.sectionId,
+        sourcePointer: '/bytes/2/3',
+        literal: 'l',
+      }),
+    ).toThrow(
+      'invalid Game IR semantic fidelity: source pointer does not lie on UTF-8 code-point boundaries',
+    )
+  })
+
   test('admission preserves Phase 5 evidence-kind boundaries', () => {
     const admit = phase5.admitValidationResult
     const policy = {

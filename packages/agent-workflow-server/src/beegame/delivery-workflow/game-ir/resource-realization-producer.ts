@@ -27,8 +27,10 @@ import {
   type GameIrNode,
   type GameIrSourceSection,
 } from './model'
-import { createSemanticFidelityPrimitives } from './semantic-fidelity'
-import { sectionEvidencePointer } from './semantic-admission'
+import {
+  createSemanticFidelityPrimitives,
+  sectionEvidencePointer,
+} from './semantic-fidelity'
 
 const fidelity = createSemanticFidelityPrimitives(
   'invalid Resource Realization producer',

@@ -8,13 +8,6 @@ import {
   type GameIrNode,
 } from './model'
 import {
-  GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES,
-  GAME_IR_SEMANTIC_FAILURE_REASON_CODES,
-  sectionEvidencePointer,
-  type GameIrSemanticAmbiguousReasonCode,
-  type GameIrSemanticFailureReasonCode,
-} from './semantic-admission'
-import {
   isGameIrDomainId,
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainId,
@@ -24,7 +17,12 @@ import { GAME_IR_DOMAIN_IDS } from './domain-source'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import {
   createSemanticFidelityPrimitives,
+  GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES,
+  GAME_IR_SEMANTIC_FAILURE_REASON_CODES,
+  sectionEvidencePointer,
   type GameIrSemanticCandidateNode,
+  type GameIrSemanticAmbiguousReasonCode,
+  type GameIrSemanticFailureReasonCode,
   type GameIrSemanticSourceClaim,
 } from './semantic-fidelity'
 

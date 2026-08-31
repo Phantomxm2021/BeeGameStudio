@@ -3,6 +3,7 @@ import {
   parseGameIrTargetPointer,
   type GameIrReference,
   type GameIrRelationshipEdge,
+  type GameIrSourceSection,
 } from './model'
 import type { FoundationDocumentPath } from '../types'
 
@@ -21,6 +22,30 @@ export type GameIrSemanticSourceClaim = Readonly<{
   sourcePointer: string
   literal: string
 }>
+
+export type GameIrSemanticSourceSection = Readonly<{
+  ref: GameIrSourceSection
+  bytes: string
+}>
+
+/** Service-owned reasons for a deterministic semantic projection failure. */
+export const GAME_IR_SEMANTIC_FAILURE_REASON_CODES = Object.freeze([
+  'projection-mismatch',
+  'missing-projection',
+] as const)
+export type GameIrSemanticFailureReasonCode =
+  (typeof GAME_IR_SEMANTIC_FAILURE_REASON_CODES)[number]
+
+/** The only reason an isolated semantic validator may return AMBIGUOUS. */
+export const GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES = Object.freeze([
+  'ambiguous-projection',
+] as const)
+export type GameIrSemanticAmbiguousReasonCode =
+  (typeof GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES)[number]
+
+export function sectionEvidencePointer(ref: GameIrSourceSection): string {
+  return `section:${ref.documentPath}#${ref.sectionId}@${ref.digest}`
+}
 
 export type SemanticValidationResult = Readonly<
   | {

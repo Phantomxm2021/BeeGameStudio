@@ -35,15 +35,13 @@ import {
   type ResourceRealizationResourceKind,
 } from './resource-realization-schema'
 import {
-  sectionEvidencePointer,
-  type GameIrSemanticSourceSection,
-} from './semantic-admission'
-import { assembleWorldPresentationClosure } from './world-presentation-assembler'
-import {
   createSemanticFidelityPrimitives,
+  sectionEvidencePointer,
   verifyGameIrSemanticClaimBytes,
+  type GameIrSemanticSourceSection,
   type SemanticValidationResult,
 } from './semantic-fidelity'
+import { assembleWorldPresentationClosure } from './world-presentation-assembler'
 import type { WorldPresentationAssemblyAuthority } from './world-presentation-assembler'
 
 const fidelity = createSemanticFidelityPrimitives(

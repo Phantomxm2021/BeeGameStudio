@@ -18,11 +18,7 @@ import {
   type GameIrDomainId,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
-import {
-  GAME_IR_SEMANTIC_VALIDATOR_MANIFEST,
-  sectionEvidencePointer,
-  type GameIrSemanticSourceSection,
-} from './semantic-admission'
+import { GAME_IR_SEMANTIC_VALIDATOR_MANIFEST } from './semantic-admission'
 import { type GameplayModuleProjection } from './gameplay-balance-assembler'
 import { WORLD_SCENE_DOMAIN_MANIFEST } from './world-scene-schema'
 import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
@@ -47,8 +43,10 @@ import {
 import { digestSectionIndex } from '../foundation-section-index'
 import {
   createSemanticFidelityPrimitives,
+  sectionEvidencePointer,
   verifyGameIrSemanticClaimBytes,
   type GameIrSemanticCandidateNode,
+  type GameIrSemanticSourceSection,
   type GameIrSemanticSourceClaim,
   type SemanticValidationResult,
 } from './semantic-fidelity'

@@ -23,6 +23,14 @@ import {
   canonicalGameIrModuleSourceDocuments,
   GAME_IR_MODULE_SOURCE_DOCUMENTS,
 } from './domain-source'
+import {
+  GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES,
+  GAME_IR_SEMANTIC_FAILURE_REASON_CODES,
+  sectionEvidencePointer,
+  type GameIrSemanticAmbiguousReasonCode,
+  type GameIrSemanticFailureReasonCode,
+  type GameIrSemanticSourceSection,
+} from './semantic-fidelity'
 
 export const GAME_IR_SEMANTIC_VALIDATOR_MANIFEST_VERSION =
   'game-ir-semantic-validator-manifest.v1' as const
@@ -38,26 +46,6 @@ export type GameIrSemanticValidatorManifest = Readonly<{
   modules: readonly GameIrSemanticValidatorModule[]
   digest: string
 }>
-
-export type GameIrSemanticSourceSection = Readonly<{
-  ref: GameIrSourceSection
-  bytes: string
-}>
-
-/** Service-owned reasons for a deterministic semantic projection failure. */
-export const GAME_IR_SEMANTIC_FAILURE_REASON_CODES = Object.freeze([
-  'projection-mismatch',
-  'missing-projection',
-] as const)
-export type GameIrSemanticFailureReasonCode =
-  (typeof GAME_IR_SEMANTIC_FAILURE_REASON_CODES)[number]
-
-/** The only reason an isolated semantic validator may return AMBIGUOUS. */
-export const GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES = Object.freeze([
-  'ambiguous-projection',
-] as const)
-export type GameIrSemanticAmbiguousReasonCode =
-  (typeof GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES)[number]
 
 export type GameIrSemanticValidationPacket = Readonly<{
   schemaVersion: 'game-ir-semantic-validation-packet.v1'
@@ -271,10 +259,6 @@ function ownerEvidencePointer(binding: {
   sourcePointer: string
 }): string {
   return `binding:${binding.documentPath}#${binding.sectionId}${binding.sourcePointer}`
-}
-
-export function sectionEvidencePointer(ref: GameIrSourceSection): string {
-  return `section:${ref.documentPath}#${ref.sectionId}@${ref.digest}`
 }
 
 function normalizeSection(value: unknown, label: string): GameIrSourceSection {
