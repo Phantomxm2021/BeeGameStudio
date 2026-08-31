@@ -144,13 +144,11 @@
 - Produces: exact six-entry `GameIrPublishedModuleEvidence` discriminated by Phase 4/5/6/7 and derived only from replayed source/projection digests; Phase 4 contains no invented validation result.
 - Removes atomically: canonical `core`, caller `compileRequest/candidate/sectionIndex/admissions`, every generic semantic-admission API and all imports/tests for that file.
 
-- [ ] Write one missing-interface RED for the assembler, add its minimal compiling shell and make one complete six-module candidate fixture GREEN before mutation cases.
-- [ ] Add authority mutations one at a time rejecting caller module, prior closure, candidate, Section Index and digest fields; add candidate mutations for exact code-unit order, non-empty modules and global ID/reference/edge/derived closure.
-- [ ] Rewrite one publication fixture around real Phase 7 authority and make its derived six-entry Phase 4/5/6/7 evidence GREEN; independently reconstruct exact evidence bytes from replayed authorities/projections.
-- [ ] Add mutations one at a time rejecting old caller fields, detached candidate/result relabeling, missing/duplicate/relabelled/generic-homogenized evidence and staged/journal self-attestation.
-- [ ] In one implementation change, delete canonical `core`, update all closed module/source maps, implement the sole assembler and call Core complete-candidate parsing once.
-- [ ] Cut publication planning to the sole assembler and derive every artifact/manifest/graph/marker byte internally.
-- [ ] Delete generic semantic admission and update stage-boundary/traversal/static gates to require zero source or test imports and no `core` module literals outside explicit rejection evidence.
+- [ ] Write one missing-interface RED, add only the minimal compiling assembler/publication test shell, and keep one complete assembler-to-publication end-to-end fixture RED at the explicit `not implemented`/old-authority-rejected boundary. Do not make it GREEN through a temporary adapter or parallel route.
+- [ ] In one indivisible implementation change, delete canonical `core`, update every closed module/source map, implement the sole assembler with one Core complete-candidate parse, cut publication planning to Phase 7 authority, derive the exact six-entry Phase 4/5/6/7 evidence and every artifact/manifest/graph/marker byte internally, then make the complete end-to-end fixture GREEN.
+- [ ] In that same green cutover, delete generic semantic admission and update stage-boundary/traversal/static gates to require zero source or test imports and no `core` module literals outside explicit rejection evidence. Do not commit an intermediate state.
+- [ ] After the valid end-to-end fixture is GREEN, add authority and candidate mutations one at a time for caller module/prior closure/candidate/Section Index/digest fields, exact code-unit order, non-empty modules and global ID/reference/edge/derived closure; observe assertion-specific RED before minimum GREEN.
+- [ ] Add publication mutations one at a time rejecting old caller fields, detached candidate/result relabeling, missing/duplicate/relabelled/generic-homogenized evidence and staged/journal self-attestation; independently reconstruct exact evidence bytes from replayed authorities/projections.
 - [ ] Run assembler determinism/mutation/expanded tests, publication crash/concurrency/symlink/FIFO/recovery, complete Game IR, root/server typecheck and Biome before committing.
 - [ ] Commit the atomic green cutover as `feat: publish complete Game IR from Phase 7 authority`.
 
