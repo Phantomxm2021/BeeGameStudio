@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   PRESENTATION_DOMAIN_MANIFEST,
   parsePresentationModule,
+  type PresentationTransitionTrigger,
 } from './presentation-schema'
 import {
   compareCodeUnits,
@@ -853,18 +854,88 @@ describe('Presentation Game IR schema', () => {
       )
   })
 
-  test('rejects every closed enum mutation with a legal baseline first', () => {
-    const cases: Array<[string, string, unknown, RegExp]> = [
-      ['action.open', 'input', 'joystick', /input/],
-      ['feedback.hit', 'channel', 'sound', /channel/],
-      ['camera.follow', 'mode', 'orbit', /mode/],
-      ['vfx.hit', 'trigger', 'looping', /trigger/],
-      ['transition.start', 'trigger', { kind: 'other' }, /trigger/],
+  test('accepts every approved closed enum and rejects each invalid value exactly', () => {
+    const valueCases: Array<
+      [string, string, readonly unknown[], unknown, string]
+    > = [
+      [
+        'action.open',
+        'input',
+        ['button', 'pointer', 'key', 'gesture', 'system'],
+        'joystick',
+        'input',
+      ],
+      [
+        'feedback.hit',
+        'channel',
+        ['text', 'icon', 'meter', 'haptic', 'flash'],
+        'sound',
+        'channel',
+      ],
+      [
+        'camera.follow',
+        'mode',
+        ['follow', 'fixed', 'blend', 'cut', 'shake'],
+        'orbit',
+        'mode',
+      ],
+      [
+        'vfx.hit',
+        'trigger',
+        ['instant', 'attached', 'persistent'],
+        'looping',
+        'trigger',
+      ],
     ]
-    for (const [id, field, value, message] of cases)
-      expectSingleMutationToThrow(module => {
-        nodeById(module, id).value[field] = value
-      }, message)
+    for (const [id, field, approved, invalid, label] of valueCases) {
+      for (const value of approved) {
+        const baseline = cloneModule(validModule())
+        expect(() =>
+          parsePresentationModule(admitted(baseline), externalTargets()),
+        ).not.toThrow()
+        const mutation = cloneModule(validModule())
+        nodeById(mutation, id).value[field] = value
+        expect(() =>
+          parsePresentationModule(admitted(mutation), externalTargets()),
+        ).not.toThrow()
+      }
+      expectSingleMutationToThrow(
+        module => {
+          nodeById(module, id).value[field] = invalid
+        },
+        new RegExp(
+          `invalid Presentation module: node ${id} ${label} is invalid`,
+        ),
+      )
+    }
+    const transitionTargets: Array<
+      [PresentationTransitionTrigger['kind'], string, string]
+    > = [
+      ['event', 'gameplay.event.start', 'gameplay.event'],
+      ['action', 'gameplay.action.open', 'gameplay.action'],
+      ['state', 'gameplay.state.playing', 'gameplay.state'],
+      ['world-scene', 'world-scene.scene.main', 'world-scene.scene'],
+      ['camera-region', 'world-scene.camera.main', 'world-scene.camera-region'],
+    ]
+    for (const [kind, targetId, targetType] of transitionTargets) {
+      const baseline = cloneModule(validModule())
+      expect(() =>
+        parsePresentationModule(admitted(baseline), externalTargets()),
+      ).not.toThrow()
+      const mutation = cloneModule(validModule())
+      nodeById(mutation, 'transition.start').value.trigger = { kind }
+      nodeById(mutation, 'transition.start').edges[2] = edge(
+        'on',
+        targetId,
+        targetType,
+      )
+      expect(() =>
+        parsePresentationModule(admitted(mutation), externalTargets()),
+      ).not.toThrow()
+    }
+    expectSingleMutationToThrow(module => {
+      nodeById(module, 'transition.start').value.trigger = { kind: 'other' }
+    }, /invalid Presentation module: node transition\.start trigger kind is invalid/)
   })
 
   test('validates requirements as independent single-variable cases', () => {
@@ -873,6 +944,12 @@ describe('Presentation Game IR schema', () => {
     expect(() =>
       parsePresentationModule(admitted(omitted), externalTargets()),
     ).not.toThrow()
+    expect(
+      omitted.nodes.find(candidate => candidate.id === 'screen.home')?.value,
+    ).toEqual({
+      label: 'Home',
+      modal: false,
+    })
     expectSingleMutationToThrow(module => {
       ownerRequirements(module, 'screen.home').push({
         requirementId: 'req.ui.aaa',
@@ -893,20 +970,71 @@ describe('Presentation Game IR schema', () => {
       nodeById(module, 'state.home').value.requirements = []
     }, /field|requirement/)
     const filenameLike = cloneModule(validModule())
-    ownerRequirements(filenameLike, 'screen.home')[0]!.requirementId =
-      'assets.ui.screen.v1'
     expect(() =>
       parsePresentationModule(admitted(filenameLike), externalTargets()),
     ).not.toThrow()
+    const filenameLikeId = ownerRequirements(filenameLike, 'screen.home')[0]!
+    filenameLikeId.requirementId = 'assets.ui.screen.v1'
+    const parsedFilenameLike = parsePresentationModule(
+      admitted(filenameLike),
+      externalTargets(),
+    )
+    expect(
+      parsedFilenameLike.nodes.find(candidate => candidate.id === 'screen.home')
+        ?.value,
+    ).toEqual({
+      label: 'Home',
+      modal: false,
+      requirements: [
+        {
+          requirementId: 'assets.ui.screen.v1',
+          kind: 'ui',
+          runtimeRole: 'screen',
+        },
+      ],
+    })
   })
 
   test('checks UI and behavior graph guards one mutation at a time', () => {
-    expectSingleMutationToThrow(module => {
-      nodeById(module, 'screen.home').edges = nodeById(
-        module,
-        'screen.home',
-      ).edges.filter(candidate => candidate.type !== 'initial-state')
-    }, /initial|exactly|state/)
+    const twoScreens = cloneModule(validModule())
+    twoScreens.nodes.push(
+      node(
+        'screen.other',
+        'presentation.ui-screen',
+        { label: 'Other', modal: false },
+        [
+          edge('initial-state', 'state.other', 'presentation.ui-state'),
+          edge('driven-by', 'world-scene.scene.main', 'world-scene.scene'),
+        ],
+      ),
+      node(
+        'state.other',
+        'presentation.ui-state',
+        { label: 'Other', terminal: false },
+        [
+          edge('screen', 'screen.other', 'presentation.ui-screen'),
+          edge('driven-by', 'world-scene.scene.main', 'world-scene.scene'),
+        ],
+      ),
+    )
+    twoScreens.nodes.sort((left, right) => compareCodeUnits(left.id, right.id))
+    expect(() =>
+      parsePresentationModule(admitted(twoScreens), externalTargets()),
+    ).not.toThrow()
+    const backlinkMutation = cloneModule(twoScreens)
+    nodeById(backlinkMutation, 'state.home').edges = nodeById(
+      backlinkMutation,
+      'state.home',
+    ).edges.map(candidate =>
+      candidate.type === 'screen'
+        ? edge('screen', 'screen.other', 'presentation.ui-screen')
+        : candidate,
+    )
+    expect(() =>
+      parsePresentationModule(admitted(backlinkMutation), externalTargets()),
+    ).toThrow(
+      'invalid Presentation module: screen screen.home initial state does not point back',
+    )
     expectSingleMutationToThrow(module => {
       const duplicate = cloneModule(module).nodes.find(
         candidate => candidate.id === 'transition.start',
