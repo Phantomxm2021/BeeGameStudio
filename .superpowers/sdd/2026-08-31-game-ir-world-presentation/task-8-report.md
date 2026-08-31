@@ -43,14 +43,26 @@ namespace tests were added, the focused test passed:
 
 ```text
 bun test .../world-presentation-assembler.test.ts
-→ 10 pass, 0 fail, 128 expect() calls
+→ 30 pass, 0 fail, 170 expect() calls
 ```
+
+Round 2 extends the legal-baseline-first matrix with independent Gameplay and
+Balance mechanical/semantic receipt tampering, raw Map/digest-only/detached
+Phase 4 branches, complete mixed task/revision/READY/compile/index identities,
+all six global ID pairs, precise dual-failure ordering, rebuilt wrong-kind and
+forbidden-target graphs, admitted incomplete/PASS/FAIL/AMBIGUOUS fidelity,
+evidence crossover, and stale external Gameplay→World and World→Presentation
+validation packets. Every negative starts from a successful baseline and uses
+one mutation except the explicitly labelled ordering double-fault tests. No
+new production change was needed in round 2. Altered output digest assertions
+are mechanical recomputation checks; the assembler does not accept a closure
+reader input.
 
 ## Verification
 
 ```text
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/*.test.ts
-→ 299 pass, 0 fail, 2 snapshots, 1680 expect() calls
+→ 319 pass, 0 fail, 2 snapshots, 1722 expect() calls
 
 bun run typecheck
 → tsc --noEmit passed
@@ -61,7 +73,7 @@ bun run typecheck
 ./node_modules/.bin/biome check packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir
 → 39 files checked, no errors
 
-git diff --check 5fd5a8a9..HEAD
+git diff --check 802f3a16..HEAD
 → passed
 ```
 
