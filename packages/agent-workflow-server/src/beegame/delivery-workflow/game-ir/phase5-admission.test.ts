@@ -15,6 +15,11 @@ import {
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
 import {
+  admitGameplaySemanticResult,
+  buildGameplaySemanticPacket,
+  prepareGameplayModule,
+} from './gameplay-producer'
+import {
   canonicalGameIrJson,
   digestGameIrValue,
   type GameIrSourceSection,
@@ -36,7 +41,7 @@ const digest = 'a'.repeat(64)
 
 function source(
   bytes = 'bytes',
-  moduleId: 'world-scene' | 'presentation' = 'world-scene',
+  moduleId: 'gameplay' | 'world-scene' | 'presentation' = 'world-scene',
 ): GameIrDomainSourceEnvelope {
   const sectionIndex: readonly GameIrSourceSection[] =
     CANONICAL_FOUNDATION_DOCUMENTS.map((documentPath, index) => ({
@@ -77,14 +82,16 @@ function source(
     request: requestBody,
     sectionIndex,
     sectionBytes: Object.fromEntries(
-      (moduleId === 'world-scene'
-        ? ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']
-        : [
-            'docs/GDD.md',
-            'docs/ART_DIRECTION.md',
-            'docs/UI_UX_SPEC.md',
-            'docs/AUDIO_DESIGN.md',
-          ]
+      (moduleId === 'gameplay'
+        ? ['docs/GDD.md']
+        : moduleId === 'world-scene'
+          ? ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']
+          : [
+              'docs/GDD.md',
+              'docs/ART_DIRECTION.md',
+              'docs/UI_UX_SPEC.md',
+              'docs/AUDIO_DESIGN.md',
+            ]
       ).map(path => [
         `${path}#section-${CANONICAL_FOUNDATION_DOCUMENTS.indexOf(path as FoundationDocumentPath)}`,
         bytes,
@@ -196,96 +203,84 @@ function fullPhase5Packet(currentSource = source()) {
   })
 }
 
-function gameplayProjection(
-  currentSource = source(),
-  mechanicalReceiptDigest = digest,
-  semanticReceiptDigest = digest,
-) {
-  const sectionDigest = createHash('sha256').update('bytes').digest('hex')
+function gameplayProjection(currentSource = source()) {
+  const gameplaySource = source('bytes', 'gameplay')
+  const gameplayMechanical = mechanical(gameplaySource)
+  const gameplayPacket = buildGameplaySemanticPacket({
+    source: gameplaySource,
+    mechanical: gameplayMechanical,
+  })
+  const gameplaySemantic = admitGameplaySemanticResult(gameplayPacket, {
+    outcome: 'PROJECTED',
+    nodes: [
+      {
+        id: 'bytes',
+        kind: 'gameplay.entity',
+        value: { label: 'bytes' },
+        references: [],
+        edges: [],
+      },
+    ],
+    sourceClaims: [
+      {
+        subject: 'node:bytes#/id',
+        documentPath: 'docs/GDD.md',
+        sectionId: 'section-0',
+        sourcePointer: '/bytes/0/5',
+        literal: 'bytes',
+      },
+      {
+        subject: 'node:bytes#/value/label',
+        documentPath: 'docs/GDD.md',
+        sectionId: 'section-0',
+        sourcePointer: '/bytes/0/5',
+        literal: 'bytes',
+      },
+    ],
+  })
+  if ('reasonCode' in gameplaySemantic)
+    throw new Error('expected independent Gameplay receipt')
+  const prepared = prepareGameplayModule({
+    source: gameplaySource,
+    mechanical: gameplayMechanical,
+    semantic: gameplaySemantic,
+  })
   const body = {
     schemaVersion: 'game-ir-gameplay-module.v1' as const,
     taskId: currentSource.taskId,
     foundationRevision:
       currentSource.compileRequest.foundation.foundationRevision,
-    module: {
-      moduleId: 'gameplay' as const,
-      nodes: [
-        {
-          id: 'player',
-          kind: 'gameplay.entity',
-          producerMode: 'semantic' as const,
-          value: { label: 'bytes' },
-          references: [],
-          edges: [],
-          bindings: {
-            '/id': {
-              kind: 'owner' as const,
-              documentPath: 'docs/GDD.md' as const,
-              sectionId: 'section-0',
-              sectionDigest,
-              sourcePointer: '/bytes/0/5',
-            },
-            '/value/label': {
-              kind: 'owner' as const,
-              documentPath: 'docs/GDD.md' as const,
-              sectionId: 'section-0',
-              sectionDigest,
-              sourcePointer: '/bytes/0/5',
-            },
-          },
-        },
-      ],
-    },
-    mechanicalReceiptDigest,
-    semanticReceiptDigest,
+    module: prepared.module,
+    mechanicalReceiptDigest: gameplayMechanical.receiptDigest,
+    semanticReceiptDigest: gameplaySemantic.receiptDigest,
   }
   return { ...body, projectionDigest: digestGameIrValue(body) }
 }
 
-function worldSceneProjection(
-  currentSource = source(),
-  mechanicalReceiptDigest = digest,
-  semanticReceiptDigest = digest,
-) {
-  const sectionDigest = createHash('sha256').update('bytes').digest('hex')
+function worldSceneProjection(currentSource = source()) {
+  const worldSource = source('bytes', 'world-scene')
+  const worldMechanical = mechanical(worldSource)
+  const worldSemantic = projected(worldSource)
+  const bound = replayAndBindPhase5SemanticReceipt({
+    source: worldSource,
+    mechanical: worldMechanical,
+    packet: packet(worldSource),
+    semantic: worldSemantic,
+  })
   const body = {
     schemaVersion: 'game-ir-world-scene-module.v1' as const,
     taskId: currentSource.taskId,
     foundationRevision:
       currentSource.compileRequest.foundation.foundationRevision,
-    module: {
-      moduleId: 'world-scene' as const,
-      nodes: [
-        {
-          id: 'scene',
-          kind: 'world-scene.scene',
-          producerMode: 'semantic' as const,
-          value: { label: 'bytes' },
-          references: [],
-          edges: [],
-          bindings: {
-            '/id': {
-              kind: 'owner' as const,
-              documentPath: 'docs/GDD.md' as const,
-              sectionId: 'section-0',
-              sectionDigest,
-              sourcePointer: '/bytes/0/5',
-            },
-            '/value/label': {
-              kind: 'owner' as const,
-              documentPath: 'docs/GDD.md' as const,
-              sectionId: 'section-0',
-              sectionDigest,
-              sourcePointer: '/bytes/0/5',
-            },
-          },
-        },
-      ],
-    },
-    sourceDigest: currentSource.sourceDigest,
-    mechanicalReceiptDigest,
-    semanticReceiptDigest,
-    semanticValidationResultDigest: digest,
+    module: bound.module,
+    sourceDigest: worldSource.sourceDigest,
+    mechanicalReceiptDigest: worldMechanical.receiptDigest,
+    semanticReceiptDigest: worldSemantic.receiptDigest,
+    semanticValidationResultDigest: digestGameIrValue({
+      outcome: 'PASS',
+      sourceDigest: worldSource.sourceDigest,
+      semanticReceiptDigest: worldSemantic.receiptDigest,
+    }),
   }
   return { ...body, projectionDigest: digestGameIrValue(body) }
 }
@@ -325,23 +320,11 @@ function validationFixture(
   const externalProjections =
     moduleId === 'world-scene'
       ? {
-          gameplay: gameplayProjection(
-            currentSource,
-            currentMechanical.receiptDigest,
-            currentSemantic.receiptDigest,
-          ),
+          gameplay: gameplayProjection(currentSource),
         }
       : {
-          gameplay: gameplayProjection(
-            currentSource,
-            currentMechanical.receiptDigest,
-            currentSemantic.receiptDigest,
-          ),
-          worldScene: worldSceneProjection(
-            currentSource,
-            currentMechanical.receiptDigest,
-            currentSemantic.receiptDigest,
-          ),
+          gameplay: gameplayProjection(currentSource),
+          worldScene: worldSceneProjection(currentSource),
         }
   const validationPacket = phase5Admission.buildPhase5SemanticValidationPacket({
     source: currentSource,
@@ -416,9 +399,31 @@ function repackValidation(
   return { ...body, packetDigest: digestGameIrValue(withoutDigest) }
 }
 
+function repackExternalProjection(
+  projection: Record<string, unknown>,
+  module: unknown,
+): Record<string, unknown> {
+  const body = { ...projection, module }
+  const { projectionDigest: _ignored, ...withoutDigest } = body as Record<
+    string,
+    unknown
+  >
+  return { ...body, projectionDigest: digestGameIrValue(withoutDigest) }
+}
+
 describe('shared Phase 5 admission', () => {
   test('reconstructs a fidelity packet from the complete external projection', () => {
-    const { validationPacket } = validationFixture()
+    const { currentSource, validationPacket } = validationFixture()
+    const packetWithAuthority = validationPacket as typeof validationPacket & {
+      authoritySectionIndex: readonly GameIrSourceSection[]
+    }
+    expect(packetWithAuthority.authoritySectionIndex).toEqual(
+      currentSource.authoritySectionIndex,
+    )
+    expect(packetWithAuthority.authoritySectionIndex).toHaveLength(8)
+    expect(Object.isFrozen(packetWithAuthority.authoritySectionIndex)).toBe(
+      true,
+    )
     expect(
       validationPacket.externalProjections.gameplay.module.nodes,
     ).toHaveLength(1)
@@ -427,6 +432,12 @@ describe('shared Phase 5 admission', () => {
       'node:bytes#/value/label',
     ])
     expect(validationPacket.checkIds.length).toBeGreaterThan(0)
+    expect(
+      validationPacket.externalProjections.gameplay.mechanicalReceiptDigest,
+    ).not.toBe(validationPacket.mechanicalReceiptDigest)
+    expect(
+      validationPacket.externalProjections.gameplay.semanticReceiptDigest,
+    ).not.toBe(validationPacket.semanticReceiptDigest)
     expect(Object.isFrozen(validationPacket)).toBe(true)
     expect(() =>
       phase5Admission.admitPhase5SemanticValidationResult(
@@ -454,6 +465,11 @@ describe('shared Phase 5 admission', () => {
     expect(validationPacket.moduleId).toBe('presentation')
     expect(validationPacket.externalProjections).toHaveProperty('gameplay')
     expect(validationPacket.externalProjections).toHaveProperty('worldScene')
+    if (!('worldScene' in validationPacket.externalProjections))
+      throw new Error('expected Presentation worldScene projection')
+    expect(
+      validationPacket.externalProjections.worldScene.sourceDigest,
+    ).not.toBe(validationPacket.sourceDigest)
     const result = phase5Admission.admitPhase5SemanticValidationResult(
       validationPacket,
       {
@@ -564,6 +580,74 @@ describe('shared Phase 5 admission', () => {
     }
   })
 
+  test('reconstructs the complete authority index without expanding selected closure', () => {
+    const { currentSource, validationPacket } = validationFixture()
+    const authority = validationPacket.authoritySectionIndex
+    expect(authority).toEqual(currentSource.authoritySectionIndex)
+    expect(validationPacket.sourceSections).toHaveLength(2)
+    expect(
+      validationPacket.allowedEvidencePointers.filter(pointer =>
+        pointer.startsWith('section:docs/ART_DIRECTION.md'),
+      ),
+    ).toHaveLength(0)
+    const authorityOnly = authority.find(
+      section => section.documentPath === 'docs/ART_DIRECTION.md',
+    )!
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(validationPacket, {
+        outcome: 'FAIL',
+        packetDigest: validationPacket.packetDigest,
+        reasonCode: 'missing-projection',
+        actual: 'missing',
+        missingSubject: validationPacket.requiredTargets[0],
+        expectedProjection: 'node',
+        evidencePointers: [
+          `section:${authorityOnly.documentPath}#${authorityOnly.sectionId}@${authorityOnly.digest}`,
+        ],
+      }),
+    ).toThrow(/evidence|coverage|section/i)
+
+    const mutations = [
+      authority.slice(1),
+      [...authority, authority[0]],
+      [...authority].reverse(),
+      authority.map(section =>
+        section.documentPath === 'docs/GDD.md'
+          ? { ...section, startLine: 2 }
+          : section,
+      ),
+      authority.map(section =>
+        section.documentPath === 'docs/GDD.md'
+          ? { ...section, digest: 'b'.repeat(64) }
+          : section,
+      ),
+      authority.map(section =>
+        section.documentPath === 'docs/GDD.md'
+          ? { ...section, digest: 'invalid' }
+          : section,
+      ),
+      authority.map(section =>
+        section.documentPath === 'docs/GDD.md'
+          ? { ...section, unknown: true }
+          : section,
+      ),
+    ]
+    for (const authoritySectionIndex of mutations) {
+      const mutated = repackValidation(validationPacket, {
+        authoritySectionIndex,
+        authoritySectionIndexDigest: digestGameIrValue(authoritySectionIndex),
+      })
+      expect(() =>
+        phase5Admission.admitPhase5SemanticValidationResult(mutated as never, {
+          outcome: 'PASS',
+          packetDigest: mutated.packetDigest,
+          checkIds: validationPacket.checkIds,
+          coveredTargets: validationPacket.requiredTargets,
+        }),
+      ).toThrow(/authority|index|canonical|document|member|digest|section/i)
+    }
+  })
+
   test('delegates reference, edge, and binding invariants to Core', () => {
     const { validationPacket } = validationFixture()
     const baseline = JSON.parse(validationPacket.moduleBytes) as {
@@ -660,6 +744,7 @@ describe('shared Phase 5 admission', () => {
         nodes: [
           {
             ...validModule.nodes[0],
+            producerMode: 'derived',
             bindings: {
               ...(validModule.nodes[0]!.bindings as Record<string, unknown>),
               '/value/label': {
@@ -682,6 +767,49 @@ describe('shared Phase 5 admission', () => {
         }),
       ).toThrow(/reserved|binding|derived|cycle|reference|conflicts/i)
     }
+  })
+
+  test('rejects Core-invalid external projections after all digest recomputation', () => {
+    const { validationPacket } = validationFixture()
+    const gameplay = validationPacket.externalProjections.gameplay
+    const node = gameplay.module.nodes[0]!
+    const invalidModule = {
+      ...gameplay.module,
+      nodes: [
+        {
+          ...node,
+          edges: [
+            {
+              type: 'reference',
+              targetId: node.id,
+              targetType: node.kind,
+            },
+          ],
+          bindings: {
+            ...node.bindings,
+            '/edges/0': node.bindings['/id'],
+          },
+        },
+      ],
+    }
+    const invalidProjection = repackExternalProjection(
+      gameplay as unknown as Record<string, unknown>,
+      invalidModule,
+    )
+    const invalidPacket = repackValidation(validationPacket, {
+      externalProjections: { gameplay: invalidProjection },
+    })
+    expect(() =>
+      phase5Admission.admitPhase5SemanticValidationResult(
+        invalidPacket as never,
+        {
+          outcome: 'PASS',
+          packetDigest: invalidPacket.packetDigest,
+          checkIds: validationPacket.checkIds,
+          coveredTargets: validationPacket.requiredTargets,
+        },
+      ),
+    ).toThrow(/reserved|reference|Core|edge/i)
   })
 
   test('admits only exact service-owned PASS coverage', () => {

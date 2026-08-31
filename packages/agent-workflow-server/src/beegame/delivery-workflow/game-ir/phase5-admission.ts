@@ -31,6 +31,8 @@ import {
   type GameIrModuleCandidate,
   type GameIrReference,
   type GameIrRelationshipEdge,
+  type GameIrSourceSection,
+  canonicalizeGameIrSourceSections,
 } from './model'
 import {
   GAME_IR_SCHEMA_VERSION,
@@ -119,6 +121,7 @@ type Phase5SemanticValidationPacketBase = Readonly<{
   semanticReceiptDigest: string
   compileRequestDigest: string
   authoritySectionIndexDigest: string
+  authoritySectionIndex: readonly GameIrSourceSection[]
   sourceSections: readonly GameIrSemanticSourceSection[]
   moduleBytes: string
   moduleDigest: string
@@ -1053,10 +1056,6 @@ function phase5SemanticPacket(
 function externalProjection<T extends Record<string, unknown>>(
   value: unknown,
   source: GameIrDomainSourceEnvelope,
-  expectedDigests: Readonly<{
-    mechanicalReceiptDigest: string
-    semanticReceiptDigest: string
-  }>,
   moduleId: 'gameplay' | 'world-scene',
   schemaVersion: string,
   expectedKeys: readonly string[],
@@ -1083,13 +1082,16 @@ function externalProjection<T extends Record<string, unknown>>(
   })
   if (module.nodes.length === 0)
     fail('external projection must contain its replayed module nodes')
-  if (value.mechanicalReceiptDigest !== expectedDigests.mechanicalReceiptDigest)
-    fail('external projection mechanical receipt is stale')
-  if (value.semanticReceiptDigest !== expectedDigests.semanticReceiptDigest)
-    fail('external projection semantic receipt is stale')
+  sha256(
+    value.mechanicalReceiptDigest,
+    'external projection mechanicalReceiptDigest',
+  )
+  sha256(
+    value.semanticReceiptDigest,
+    'external projection semanticReceiptDigest',
+  )
   if (moduleId === 'world-scene') {
-    if (value.sourceDigest !== source.sourceDigest)
-      fail('external world-scene projection source is stale')
+    sha256(value.sourceDigest, 'external projection sourceDigest')
     sha256(
       value.semanticValidationResultDigest,
       'external projection validation digest',
@@ -1105,8 +1107,6 @@ function externalProjection<T extends Record<string, unknown>>(
 function phase5ExternalProjections(
   source: GameIrDomainSourceEnvelope,
   value: unknown,
-  mechanicalReceiptDigest: string,
-  semanticReceiptDigest: string,
 ): Phase5SemanticValidationPacket['externalProjections'] {
   if (!isRecord(value)) fail('externalProjections must be a plain object')
   if (source.moduleId === 'world-scene') {
@@ -1115,7 +1115,6 @@ function phase5ExternalProjections(
       gameplay: externalProjection<GameplayModuleProjection>(
         value.gameplay,
         source,
-        { mechanicalReceiptDigest, semanticReceiptDigest },
         'gameplay',
         'game-ir-gameplay-module.v1',
         [
@@ -1139,7 +1138,6 @@ function phase5ExternalProjections(
     gameplay: externalProjection<GameplayModuleProjection>(
       value.gameplay,
       source,
-      { mechanicalReceiptDigest, semanticReceiptDigest },
       'gameplay',
       'game-ir-gameplay-module.v1',
       [
@@ -1155,7 +1153,6 @@ function phase5ExternalProjections(
     worldScene: externalProjection<WorldSceneModuleProjection>(
       value.worldScene,
       source,
-      { mechanicalReceiptDigest, semanticReceiptDigest },
       'world-scene',
       'game-ir-world-scene-module.v1',
       [
@@ -1218,8 +1215,6 @@ export function buildPhase5SemanticValidationPacket(
   const externalProjections = phase5ExternalProjections(
     source,
     input.externalProjections,
-    mechanical.receiptDigest,
-    semantic.receiptDigest,
   )
   const manifest = validatorModule(source.moduleId)
   const moduleBytes = canonicalGameIrJson(bound.module)
@@ -1241,6 +1236,7 @@ export function buildPhase5SemanticValidationPacket(
     authoritySectionIndexDigest: digestGameIrValue(
       source.authoritySectionIndex,
     ),
+    authoritySectionIndex: source.authoritySectionIndex,
     sourceSections,
     moduleBytes,
     moduleDigest: digestGameIrValue(bound.module),
@@ -1341,15 +1337,107 @@ function normalizePacketSourceSections(
   return Object.freeze(sections)
 }
 
+function normalizeAuthoritySectionIndex(
+  value: unknown,
+): readonly GameIrSourceSection[] {
+  const entries = strictArray(
+    value,
+    'fidelity packet authoritySectionIndex',
+  ).map((entry, index) => {
+    if (!isRecord(entry))
+      fail(`fidelity packet authoritySectionIndex[${index}] must be an object`)
+    exactKeys(
+      entry,
+      [
+        'documentPath',
+        'sectionId',
+        'heading',
+        'startLine',
+        'endLine',
+        'digest',
+      ],
+      `fidelity packet authoritySectionIndex[${index}]`,
+    )
+    const documentPath = text(
+      entry.documentPath,
+      'authority section documentPath',
+    )
+    if (!FOUNDATION_DOCUMENT_SET.has(documentPath))
+      fail('fidelity packet authority section documentPath is invalid')
+    const sectionId = safeId(entry.sectionId, 'authority section sectionId')
+    const heading = text(entry.heading, 'authority section heading')
+    if (
+      typeof entry.startLine !== 'number' ||
+      !Number.isSafeInteger(entry.startLine) ||
+      entry.startLine < 1 ||
+      typeof entry.endLine !== 'number' ||
+      !Number.isSafeInteger(entry.endLine) ||
+      entry.endLine < entry.startLine
+    )
+      fail('fidelity packet authority section line range is invalid')
+    return {
+      documentPath: documentPath as FoundationDocumentPath,
+      sectionId,
+      heading,
+      startLine: entry.startLine,
+      endLine: entry.endLine,
+      digest: sha256(entry.digest, 'authority section digest'),
+    }
+  })
+  let canonical: readonly GameIrSourceSection[]
+  try {
+    canonical = canonicalizeGameIrSourceSections(entries)
+  } catch {
+    fail('fidelity packet authoritySectionIndex contains duplicates')
+  }
+  if (
+    entries.some(
+      (entry, index) =>
+        !sameSourceSection(entry, canonical[index] as GameIrSourceSection),
+    )
+  )
+    fail('fidelity packet authoritySectionIndex is not canonical')
+  for (const documentPath of CANONICAL_FOUNDATION_DOCUMENTS)
+    if (!canonical.some(section => section.documentPath === documentPath))
+      fail('fidelity packet authoritySectionIndex omits a canonical document')
+  return deepFreeze(canonical.map(section => Object.freeze({ ...section })))
+}
+
+function sameSourceSection(
+  left: GameIrSourceSection,
+  right: GameIrSourceSection,
+): boolean {
+  return (
+    left.documentPath === right.documentPath &&
+    left.sectionId === right.sectionId &&
+    left.heading === right.heading &&
+    left.startLine === right.startLine &&
+    left.endLine === right.endLine &&
+    left.digest === right.digest
+  )
+}
+
+function assertSelectedSectionsInAuthority(
+  sections: readonly GameIrSemanticSourceSection[],
+  authority: readonly GameIrSourceSection[],
+): void {
+  for (const section of sections) {
+    const match = authority.find(
+      candidate =>
+        candidate.documentPath === section.ref.documentPath &&
+        candidate.sectionId === section.ref.sectionId,
+    )
+    if (!match || !sameSourceSection(section.ref, match))
+      fail('fidelity packet selected source section is not an authority member')
+  }
+}
+
 function normalizePacketProjection(
   value: unknown,
   source: Pick<GameIrDomainSourceEnvelope, 'taskId'> & {
     foundationRevision: string
-    sourceDigest: string
-    mechanicalReceiptDigest: string
-    semanticReceiptDigest: string
   },
-  sourceSections: readonly GameIrSemanticSourceSection[],
+  authoritySectionIndex: readonly GameIrSourceSection[],
   moduleId: 'gameplay' | 'world-scene',
   schemaVersion: string,
   expectedKeys: readonly string[],
@@ -1361,21 +1449,27 @@ function normalizePacketProjection(
     fail('fidelity packet external projection identity is stale')
   if (value.foundationRevision !== source.foundationRevision)
     fail('fidelity packet external projection revision is stale')
-  if (value.mechanicalReceiptDigest !== source.mechanicalReceiptDigest)
-    fail('fidelity packet external projection mechanical receipt is stale')
-  if (value.semanticReceiptDigest !== source.semanticReceiptDigest)
-    fail('fidelity packet external projection semantic receipt is stale')
-  if (moduleId === 'world-scene' && value.sourceDigest !== source.sourceDigest)
-    fail('fidelity packet external world-scene projection source is stale')
+  sha256(
+    value.mechanicalReceiptDigest,
+    'fidelity packet projection mechanicalReceiptDigest',
+  )
+  sha256(
+    value.semanticReceiptDigest,
+    'fidelity packet projection semanticReceiptDigest',
+  )
+  if (moduleId === 'world-scene')
+    sha256(value.sourceDigest, 'fidelity packet projection sourceDigest')
   const module = parseGameIrModuleCandidate(value.module, {
     request: packetParseRequest(
       source.taskId,
       source.foundationRevision,
-      sourceSections,
+      authoritySectionIndex,
     ),
-    sections: sourceSections.map(section => section.ref),
+    sections: authoritySectionIndex,
     expectedModuleId: moduleId,
   })
+  if (module.nodes.length === 0)
+    fail('fidelity packet external projection module must be non-empty')
   const { projectionDigest: _projectionDigest, ...withoutDigest } = value
   const body: Record<string, unknown> = { ...withoutDigest, module }
   if (moduleId === 'world-scene')
@@ -1402,13 +1496,14 @@ function normalizePacketProjection(
 function packetParseRequest(
   taskId: string,
   foundationRevision: string,
-  sections: readonly GameIrSemanticSourceSection[],
+  authoritySectionIndex: readonly GameIrSourceSection[],
 ): GameIrCompileRequest {
   const documentDigests = Object.fromEntries(
     CANONICAL_FOUNDATION_DOCUMENTS.map(documentPath => [
       documentPath,
-      sections.find(section => section.ref.documentPath === documentPath)?.ref
-        .digest ?? '0'.repeat(64),
+      authoritySectionIndex.find(
+        section => section.documentPath === documentPath,
+      )?.digest ?? '0'.repeat(64),
     ]),
   ) as FoundationReadyReceipt['documentDigests']
   const foundationBody: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
@@ -1418,9 +1513,7 @@ function packetParseRequest(
     confirmedBriefDigest: '0'.repeat(64),
     documentDigests,
     sectionIndexPath: '.beegame/foundation/section-index.json',
-    sectionIndexDigest: digestSectionIndex(
-      sections.map(section => section.ref),
-    ),
+    sectionIndexDigest: digestSectionIndex(authoritySectionIndex),
     authority: {
       kind: 'review',
       reviewDigest: '0'.repeat(64),
@@ -1453,6 +1546,7 @@ function normalizeValidationPacket(value: unknown): {
     'semanticReceiptDigest',
     'compileRequestDigest',
     'authoritySectionIndexDigest',
+    'authoritySectionIndex',
     'sourceSections',
     'moduleBytes',
     'moduleDigest',
@@ -1495,10 +1589,16 @@ function normalizeValidationPacket(value: unknown): {
     value.authoritySectionIndexDigest,
     'fidelity packet authoritySectionIndexDigest',
   )
+  const authoritySectionIndex = normalizeAuthoritySectionIndex(
+    value.authoritySectionIndex,
+  )
+  if (authoritySectionIndexDigest !== digestGameIrValue(authoritySectionIndex))
+    fail('fidelity packet authoritySectionIndexDigest is stale')
   const sourceSections = normalizePacketSourceSections(
     value.sourceSections,
     moduleId,
   )
+  assertSelectedSectionsInAuthority(sourceSections, authoritySectionIndex)
   const moduleBytes = text(value.moduleBytes, 'fidelity packet moduleBytes')
   let rawModule: unknown
   try {
@@ -1507,8 +1607,12 @@ function normalizeValidationPacket(value: unknown): {
     fail('fidelity packet moduleBytes must contain JSON')
   }
   const module = parseGameIrModuleCandidate(rawModule, {
-    request: packetParseRequest(taskId, foundationRevision, sourceSections),
-    sections: sourceSections.map(section => section.ref),
+    request: packetParseRequest(
+      taskId,
+      foundationRevision,
+      authoritySectionIndex,
+    ),
+    sections: authoritySectionIndex,
     expectedModuleId: moduleId,
   })
   if (canonicalGameIrJson(module) !== moduleBytes)
@@ -1550,9 +1654,6 @@ function normalizeValidationPacket(value: unknown): {
   const source = {
     taskId,
     foundationRevision,
-    sourceDigest,
-    mechanicalReceiptDigest,
-    semanticReceiptDigest,
   }
   let externalProjections: Phase5SemanticValidationPacket['externalProjections']
   if (moduleId === 'world-scene') {
@@ -1567,7 +1668,7 @@ function normalizeValidationPacket(value: unknown): {
       gameplay: normalizePacketProjection(
         value.externalProjections.gameplay,
         source,
-        sourceSections,
+        authoritySectionIndex,
         'gameplay',
         'game-ir-gameplay-module.v1',
         [
@@ -1593,7 +1694,7 @@ function normalizeValidationPacket(value: unknown): {
       gameplay: normalizePacketProjection(
         value.externalProjections.gameplay,
         source,
-        sourceSections,
+        authoritySectionIndex,
         'gameplay',
         'game-ir-gameplay-module.v1',
         [
@@ -1609,7 +1710,7 @@ function normalizeValidationPacket(value: unknown): {
       worldScene: normalizePacketProjection(
         value.externalProjections.worldScene,
         source,
-        sourceSections,
+        authoritySectionIndex,
         'world-scene',
         'game-ir-world-scene-module.v1',
         [
@@ -1635,6 +1736,7 @@ function normalizeValidationPacket(value: unknown): {
     semanticReceiptDigest,
     compileRequestDigest,
     authoritySectionIndexDigest,
+    authoritySectionIndex,
     sourceSections,
     moduleBytes,
     moduleDigest,
