@@ -125,6 +125,32 @@ exit 0
 
 Fix commit: `bbb74fb1 test: close Phase 5 review round two`.
 
+## Reviewer fix round 3
+
+- Reworked the string mismatch case to replay a complete valid source,
+  mechanical, packet, and semantic receipt first. The mutation now changes
+  only the stored semantic node string value, preserves source claim literal,
+  range, and bytes, and recomputes only the receipt digest required by that
+  changed receipt body. Replay hits the semantic value/literal mismatch guard.
+- Reworked worker-field coverage around a truly valid worker DTO (including
+  all exact source claims). Baseline admission succeeds, then two independent
+  cases inject only `producerMode` or only `bindings`; each hits strict
+  unknown-key rejection.
+
+```text
+$ bun test packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/phase5-admission.test.ts
+13 pass
+0 fail
+40 expect() calls
+
+$ (cd packages/agent-workflow-server && bun run typecheck)
+$ ./node_modules/.bin/biome check [the four changed TS files]
+$ git diff --check
+exit 0
+```
+
+Fix commit: `973d6da7 test: close Phase 5 review round three`.
+
 ### Fix commits
 
 - `9f3ce636 fix: enforce Phase 5 packet node policy`
