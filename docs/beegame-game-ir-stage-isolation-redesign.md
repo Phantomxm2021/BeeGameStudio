@@ -316,6 +316,8 @@ Validator 不接受可重新贴 task/revision 身份的 detached module。服务
 
 V1 canonical domain modules 为 gameplay、balance、world-scene、presentation、resource-realization 与 implementation-verification；candidate/publication 按 code-unit 排序为 balance、gameplay、implementation-verification、presentation、resource-realization、world-scene。Core 是 compile request、binding、graph admission 与 publication 基础设施，不是第七个业务 module；没有独立 schema、producer 或职责的旧 `core` placeholder requirement 必须删除，不得用空 module、alias 或 derived index 恢复。六个 domain module 均不得缺失或为空。诊断 evidence pointer 优先精确到 owner Source Binding 的 document、section 与 sourcePointer；当诊断的正是 missing/ambiguous projection、尚不存在 binding 时，允许使用带 section digest 的 immutable `section:<document>#<section>@<digest>` pointer。裸 document/section identity 不可入场。
 
+本节与 Phase 7 Implementation/Verification 设计仅在未投入生产的 complete-candidate/publication completion boundary 上窄范围 supersede Phase 3–6 历史设计中的 seven-module、业务 `core` module、caller-supplied candidate/admissions 与 generic semantic-admission publication route；Phase 3–6 已验收的领域行为、commit 与证据不被重写。
+
 同一 input 支持两个不同且无法机械区分的合法映射时，Validator 必须返回 ambiguity diagnostic，并由 Stage 5 输出 FoundationDefectReport。不得用模型偏好、默认值或首次成功输出选择业务含义。
 
 Compiler 是唯一 candidate writer，Validator 是只读 admission，因此二者不是双写或双轨。

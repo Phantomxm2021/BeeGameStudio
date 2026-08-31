@@ -25,6 +25,12 @@ This design is subordinate to:
 - the accepted Phase 5 World/Presentation design;
 - the accepted Phase 6 Resource Realization design.
 
+It narrowly supersedes earlier references to a seven-module candidate, a
+business `core` module, caller-supplied publication candidate/admissions and
+the generic semantic-admission publication route. Historical phase behavior
+and evidence remain accepted; only these not-yet-used completion boundaries
+are replaced by sections 3 and 8 of this design.
+
 The following rules are mandatory:
 
 - Phase 7 receives `ImplementationVerificationAssemblyAuthority` and replays
@@ -211,9 +217,13 @@ The module is valid only when:
   constrained by at least one invariant;
 - every scenario and invariant has at least one evidence requirement;
 - every evidence requirement proves at least one scenario or invariant;
-- evidence owned by a unit may prove only a scenario owned by that same unit,
-  or an invariant that directly constrains that unit or one of the prior nodes
-  implemented by that unit;
+- for a scenario or invariant, derive its `requiredProofOwners`: the scenario
+  owner plus owners of every covered prior node, or the directly constrained
+  units plus owners of every constrained prior node;
+- each proving evidence owner's support closure is itself plus all transitive
+  `depends-on` units; every evidence must support at least one required proof
+  owner, and the union of all proving evidence support closures must cover the
+  complete `requiredProofOwners` set;
 - every unit owns or transitively supports at least one scenario or invariant;
 - dependency cycles, orphan nodes, duplicate IDs, duplicate/overlapping path
   ownership and duplicate relationship edges are rejected.
@@ -321,11 +331,13 @@ Checklist remains the sole delivery-completeness document and is not ingested
 as Phase 7 source. Implementation/Verification nodes are execution semantics,
 not a replacement Checklist or task graph. Phase 8 may derive a read-only
 crosswalk from Checklist source tags to admitted owner bindings and then feed
-the existing atomic task planner. Phase 8 mechanically projects exactly one
-implementation task per admitted unit: `ownedPaths` becomes write scope,
-`depends-on` becomes task dependency, and required resources come from that
-unit's Resource Realization `implements` edges. It may attach Checklist IDs by
-the read-only source-tag crosswalk, but it may not regroup units, reassign
+the implementation planner. Phase 7 freezes unit `ownedPaths`, `depends-on`
+and required Resource Realization edges as the only ownership/dependency input;
+Phase 8 must not re-author those facts. Phase 8 separately defines the exact
+single-track projection into the production task contract, removes the old
+artifact/verification count caps and decides whether one admitted unit maps to
+one or more execution attempts without changing ownership. It may attach
+Checklist IDs by the read-only source-tag crosswalk, but it may not reassign
 paths, invent dependencies, re-author Checklist text or create a second
 Checklist ID authority.
 
