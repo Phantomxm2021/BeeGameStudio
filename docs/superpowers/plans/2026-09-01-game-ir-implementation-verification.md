@@ -96,6 +96,7 @@
 **Files:**
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/implementation-verification-producer.ts`
 - Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/implementation-verification-producer.test.ts`
+- Create: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/implementation-verification-test-helpers.ts` (test-only fixture helper)
 
 **Interfaces:**
 - Produces: service-built semantic packet, semantic receipt/diagnostic replay and a Core-admitted candidate module; never a final projection.

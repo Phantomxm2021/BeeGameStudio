@@ -4,11 +4,13 @@ import {
   buildImplementationVerificationSemanticPacket,
   replayImplementationVerificationSemanticReceipt,
   replayImplementationVerificationSemanticResult,
+  prepareImplementationVerificationModule,
   type ImplementationVerificationSemanticProjectionAuthority,
 } from './implementation-verification-producer'
 import { admitGameIrMechanicalProjectionReceipt } from './domain-projection'
 import { buildGameIrDomainSourceEnvelope } from './domain-source'
 import { digestGameIrValue } from './model'
+import { implementationVerificationFixture } from './implementation-verification-test-helpers'
 import { realAuthority } from './resource-realization-test-helpers'
 
 function authority(): ImplementationVerificationSemanticProjectionAuthority {
@@ -189,6 +191,95 @@ describe('Implementation/Verification semantic producer', () => {
         sourceClaims,
       }),
     ).toThrow(/source literal|byte range|UTF-8|source pointer/)
+  })
+
+  test('binds the complete semantic receipt through the one Core admission path', () => {
+    const fixture = implementationVerificationFixture()
+    const prepared = prepareImplementationVerificationModule({
+      source: fixture.authority.source,
+      mechanical: fixture.authority.mechanical,
+      semantic: fixture.semantic,
+      priorModules: fixture.priorModules,
+    })
+    expect(prepared.module.moduleId).toBe('implementation-verification')
+    expect(Object.isFrozen(prepared)).toBe(true)
+    expect(Object.isFrozen(prepared.module)).toBe(true)
+    expect(prepared.module.nodes).toHaveLength(fixture.nodes.length)
+    expect(
+      prepared.module.nodes.every(node => node.producerMode === 'semantic'),
+    ).toBe(true)
+    expect(
+      prepared.module.nodes.every(
+        node => Object.keys(node.bindings).length > 0,
+      ),
+    ).toBe(true)
+  })
+
+  test('rejects caller-supplied module, bindings, prior closure, and digest fields', () => {
+    const fixture = implementationVerificationFixture()
+    const input = {
+      source: fixture.authority.source,
+      mechanical: fixture.authority.mechanical,
+      semantic: fixture.semantic,
+      priorModules: fixture.priorModules,
+    }
+    for (const field of ['module', 'bindings', 'priorClosure', 'digest'])
+      expect(() =>
+        prepareImplementationVerificationModule({
+          ...input,
+          [field]: {},
+        } as never),
+      ).toThrow(/module preparation input|unknown|field/)
+    expect(() =>
+      prepareImplementationVerificationModule({
+        ...input,
+        priorModules: fixture.priorModules.slice(0, -1),
+      }),
+    ).toThrow(/prior modules|complete Phase 6 sequence/)
+  })
+
+  test('rejects stale and relabelled packets and stale semantic receipt replay', () => {
+    const fixture = implementationVerificationFixture()
+    const { packetDigest: _packetDigest, ...packetBody } = fixture.packet
+    const stalePacketBody = {
+      ...packetBody,
+      allowedEvidencePointers: [
+        ...fixture.packet.allowedEvidencePointers,
+        '/caller',
+      ],
+    }
+    const stalePacket = {
+      ...stalePacketBody,
+      packetDigest: digestGameIrValue(stalePacketBody),
+    }
+    expect(() =>
+      replayImplementationVerificationSemanticReceipt(
+        fixture.authority,
+        stalePacket as never,
+        fixture.semantic,
+      ),
+    ).toThrow(/packet|stale|authority|field/)
+
+    expect(() =>
+      replayImplementationVerificationSemanticReceipt(
+        fixture.authority,
+        { ...fixture.packet, moduleId: 'resource-realization' } as never,
+        fixture.semantic,
+      ),
+    ).toThrow(/moduleId|allowed|relabel|packet/)
+
+    const { receiptDigest: _receiptDigest, ...receiptBody } = fixture.semantic
+    const staleReceiptBody = { ...receiptBody, packetDigest: 'f'.repeat(64) }
+    expect(() =>
+      replayImplementationVerificationSemanticReceipt(
+        fixture.authority,
+        fixture.packet,
+        {
+          ...staleReceiptBody,
+          receiptDigest: digestGameIrValue(staleReceiptBody),
+        },
+      ),
+    ).toThrow(/packet|authority|stale|digest/)
   })
 
   test('rejects hidden, accessor, and symbol packet fields without invoking accessors', () => {
