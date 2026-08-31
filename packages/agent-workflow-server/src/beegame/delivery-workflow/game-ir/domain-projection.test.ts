@@ -125,8 +125,10 @@ function source(
   })
 }
 
-function receipt(overrides: Partial<GameIrMechanicalProjectionReceipt> = {}) {
-  const currentSource = source()
+function receipt(
+  overrides: Partial<GameIrMechanicalProjectionReceipt> = {},
+  currentSource = source(),
+) {
   const base = {
     schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
     taskId: currentSource.taskId,
@@ -215,6 +217,31 @@ describe('Game IR domain producer contracts', () => {
       expect(admitted.nodes).toEqual([])
       expect(admitted.verifiedClaims).toEqual([])
       expect(admitted.ownedTargets).toEqual([])
+    }
+  })
+
+  test('rejects non-empty, unsorted, and duplicate mechanical ownership', () => {
+    for (const moduleId of [
+      'gameplay',
+      'balance',
+      'world-scene',
+      'presentation',
+    ] as const) {
+      const currentSource = source(moduleId)
+      expect(
+        admitGameIrMechanicalProjectionReceipt({
+          source: currentSource,
+          receipt: receipt({}, currentSource),
+        }).ownedTargets,
+      ).toEqual([])
+      for (const ownedTargets of [['owned'], ['z', 'a'], ['z', 'z']]) {
+        expect(() =>
+          admitGameIrMechanicalProjectionReceipt({
+            source: currentSource,
+            receipt: receipt({ ownedTargets }, currentSource),
+          }),
+        ).toThrow(/target|empty|sorted|duplicate/i)
+      }
     }
   })
 

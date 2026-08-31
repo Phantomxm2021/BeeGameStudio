@@ -262,7 +262,7 @@ function normalizeNode(
   )
   const id = safeId(value.id, `nodes[${index}].id`)
   const kind = text(value.kind, `nodes[${index}].kind`)
-  if (allowedNodeKinds.length > 0 && !allowedNodeKinds.includes(kind))
+  if (!allowedNodeKinds.includes(kind))
     fail(`nodes[${index}] has a node kind outside the semantic packet`)
   if (!isRecord(value.value)) fail(`nodes[${index}].value must be an object`)
   const clonedValue = cloneJson(value.value, `nodes[${index}].value`)
@@ -323,10 +323,7 @@ function normalizeNode(
       })
     },
   ) as GameIrRelationshipEdge[]
-  if (
-    allowedRelationshipTypes.length > 0 &&
-    edges.some(edge => !allowedRelationshipTypes.includes(edge.type))
-  )
+  if (edges.some(edge => !allowedRelationshipTypes.includes(edge.type)))
     fail(`nodes[${index}] has a relationship type outside the semantic packet`)
   for (let edgeIndex = 1; edgeIndex < edges.length; edgeIndex += 1)
     if (edgeOrder(edges[edgeIndex - 1]!, edges[edgeIndex]!) >= 0)
