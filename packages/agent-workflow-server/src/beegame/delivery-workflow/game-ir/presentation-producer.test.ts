@@ -19,7 +19,9 @@ import {
 } from './phase5-admission'
 import {
   canonicalGameIrJson,
+  compareCodeUnits,
   digestGameIrValue,
+  type GameIrNode,
   type GameIrSourceSection,
 } from './model'
 import {
@@ -29,7 +31,10 @@ import {
 } from './contracts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
-import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
+import {
+  parsePresentationModule,
+  PRESENTATION_DOMAIN_MANIFEST,
+} from './presentation-schema'
 
 const digest = 'a'.repeat(64)
 const selectedDocuments = [
@@ -338,6 +343,283 @@ function replayFixture() {
   return { currentSource, currentMechanical, currentPacket, semantic }
 }
 
+type ProjectionNode = Readonly<{
+  id: string
+  kind: string
+  value: Readonly<Record<string, unknown>>
+  references: readonly Readonly<{ targetId: string; targetType: string }>[]
+  edges: readonly Readonly<{
+    type: string
+    targetId: string
+    targetType: string
+  }>[]
+}>
+
+function projectionFixture(nodes: readonly ProjectionNode[]) {
+  const literals = nodes.flatMap(node => [
+    node.id,
+    ...valueLeafPointers(node.value).map(pointer =>
+      sourceLiteral(pointerValue(node, pointer)),
+    ),
+    ...node.references.map(reference => canonicalGameIrJson(reference)),
+    ...node.edges.map(edge => canonicalGameIrJson(edge)),
+  ])
+  const bytes = [...new Set(literals)].join('|')
+  const currentSource = source(bytes)
+  const currentMechanical = mechanical(currentSource)
+  const currentPacket = buildPresentationSemanticPacket({
+    source: currentSource,
+    mechanical: currentMechanical,
+  })
+  const sourceClaims = nodes.flatMap(node => {
+    const claims = [
+      { subject: `node:${node.id}#/id`, literal: node.id },
+      ...valueLeafPointers(node.value).map(pointer => ({
+        subject: `node:${node.id}#${pointer}`,
+        literal: sourceLiteral(pointerValue(node, pointer)),
+      })),
+      ...node.references.map((reference, index) => ({
+        subject: `node:${node.id}#/references/${index}`,
+        literal: canonicalGameIrJson(reference),
+      })),
+      ...node.edges.map((edge, index) => ({
+        subject: `node:${node.id}#/edges/${index}`,
+        literal: canonicalGameIrJson(edge),
+      })),
+    ]
+    return claims.map(claim => ({
+      ...claim,
+      documentPath: 'docs/GDD.md' as const,
+      sectionId: 'section-0',
+      sourcePointer: `/bytes/${bytes.indexOf(claim.literal)}/${
+        bytes.indexOf(claim.literal) + Buffer.byteLength(claim.literal)
+      }`,
+    }))
+  })
+  const semantic = admitPresentationSemanticResult(currentPacket, {
+    outcome: 'PROJECTED',
+    nodes,
+    sourceClaims: sourceClaims.sort((left, right) =>
+      left.subject.localeCompare(right.subject),
+    ),
+  })
+  if ('reasonCode' in semantic) throw new Error('expected Presentation receipt')
+  const bound = replayAndBindPhase5SemanticReceipt({
+    source: currentSource,
+    mechanical: currentMechanical,
+    packet: currentPacket,
+    semantic,
+  })
+  return {
+    nodes,
+    currentSource,
+    currentMechanical,
+    currentPacket,
+    semantic,
+    bound,
+  }
+}
+
+function presentationExternalTargets(): ReadonlyMap<string, GameIrNode> {
+  return new Map(
+    [
+      ['gameplay.event.hit', 'gameplay.event'],
+      ['gameplay.event.start', 'gameplay.event'],
+      ['gameplay.state.playing', 'gameplay.state'],
+      ['gameplay.action.open', 'gameplay.action'],
+      ['state', 'gameplay.state'],
+      ['invoke', 'gameplay.action'],
+      ['trigger', 'gameplay.event'],
+      ['world-scene.node.anchor', 'world-scene.node'],
+    ].map(([id, kind]) => [id, { id, kind }]),
+  ) as unknown as ReadonlyMap<string, GameIrNode>
+}
+
+function workerResult(receipt: Phase5SemanticReceipt) {
+  return {
+    outcome: 'PROJECTED' as const,
+    nodes: receipt.nodes.map(
+      ({ producerMode: _producerMode, ...node }) => node,
+    ),
+    sourceClaims: receipt.sourceClaims,
+  }
+}
+
+function stableNodes(): readonly ProjectionNode[] {
+  return [
+    {
+      id: 'screen.main',
+      kind: 'presentation.ui-screen',
+      value: {
+        label: 'Main screen',
+        modal: false,
+        requirements: [
+          { requirementId: 'req.ui.main', kind: 'ui', runtimeRole: 'screen' },
+          {
+            requirementId: 'req.ui.overlay',
+            kind: 'ui',
+            runtimeRole: 'screen',
+          },
+        ],
+      },
+      references: [],
+      edges: [
+        {
+          type: 'driven-by',
+          targetId: 'gameplay.state.playing',
+          targetType: 'gameplay.state',
+        },
+        {
+          type: 'initial-state',
+          targetId: 'state.main',
+          targetType: 'presentation.ui-state',
+        },
+      ],
+    },
+    {
+      id: 'state.main',
+      kind: 'presentation.ui-state',
+      value: { label: 'Main state', terminal: false },
+      references: [],
+      edges: [
+        {
+          type: 'driven-by',
+          targetId: 'gameplay.state.playing',
+          targetType: 'gameplay.state',
+        },
+        {
+          type: 'screen',
+          targetId: 'screen.main',
+          targetType: 'presentation.ui-screen',
+        },
+      ],
+    },
+    {
+      id: 'transition.main',
+      kind: 'presentation.transition',
+      value: { label: 'Start', trigger: { kind: 'event' } },
+      references: [],
+      edges: [
+        {
+          type: 'from',
+          targetId: 'state.main',
+          targetType: 'presentation.ui-state',
+        },
+        {
+          type: 'on',
+          targetId: 'gameplay.event.start',
+          targetType: 'gameplay.event',
+        },
+        {
+          type: 'to',
+          targetId: 'state.main',
+          targetType: 'presentation.ui-state',
+        },
+      ],
+    },
+    {
+      id: 'vfx.main',
+      kind: 'presentation.vfx-cue',
+      value: {
+        label: 'Impact cue',
+        trigger: 'instant',
+        requirements: [
+          { requirementId: 'req.vfx.main', kind: 'vfx', runtimeRole: 'effect' },
+        ],
+      },
+      references: [],
+      edges: [
+        {
+          type: 'at',
+          targetId: 'world-scene.node.anchor',
+          targetType: 'world-scene.node',
+        },
+        {
+          type: 'on',
+          targetId: 'gameplay.event.hit',
+          targetType: 'gameplay.event',
+        },
+      ],
+    },
+  ]
+}
+
+function largeUiNodes(): readonly ProjectionNode[] {
+  const states = Array.from({ length: 127 }, (_, index) => ({
+    id: `state-${String(index).padStart(3, '0')}`,
+    kind: 'presentation.ui-state',
+    value: { label: `State ${index}`, terminal: false },
+    references: [],
+    edges: [
+      {
+        type: 'driven-by',
+        targetId: 'gameplay.state.playing',
+        targetType: 'gameplay.state',
+      },
+      {
+        type: 'screen',
+        targetId: 'screen.main',
+        targetType: 'presentation.ui-screen',
+      },
+    ],
+  }))
+  const transitions = Array.from({ length: 128 }, (_, index) => {
+    const from = index < 126 ? index : index === 126 ? 126 : 0
+    const to = index < 126 ? index + 1 : index === 126 ? 0 : 0
+    return {
+      id: `transition-${String(index).padStart(3, '0')}`,
+      kind: 'presentation.transition',
+      value: { label: `Transition ${index}`, trigger: { kind: 'event' } },
+      references: [],
+      edges: [
+        {
+          type: 'from',
+          targetId: `state-${String(from).padStart(3, '0')}`,
+          targetType: 'presentation.ui-state',
+        },
+        {
+          type: 'on',
+          targetId: 'gameplay.event.start',
+          targetType: 'gameplay.event',
+        },
+        {
+          type: 'to',
+          targetId: `state-${String(to).padStart(3, '0')}`,
+          targetType: 'presentation.ui-state',
+        },
+      ],
+    }
+  })
+  return [
+    {
+      id: 'screen.main',
+      kind: 'presentation.ui-screen',
+      value: {
+        label: 'Main screen',
+        modal: false,
+        requirements: [
+          { requirementId: 'req.ui.large', kind: 'ui', runtimeRole: 'screen' },
+        ],
+      },
+      references: [],
+      edges: [
+        {
+          type: 'driven-by',
+          targetId: 'gameplay.state.playing',
+          targetType: 'gameplay.state',
+        },
+        {
+          type: 'initial-state',
+          targetId: 'state-000',
+          targetType: 'presentation.ui-state',
+        },
+      ],
+    },
+    ...states,
+    ...transitions,
+  ].sort((left, right) => compareCodeUnits(left.id, right.id))
+}
+
 describe('Presentation semantic producer wrapper', () => {
   test('derives exact GDD/Art/UI/Audio closure and manifest kinds/roles', () => {
     const {
@@ -510,57 +792,208 @@ describe('Presentation semantic producer wrapper', () => {
   })
 
   test('admits and replays a large graph without a business cap', () => {
-    const graph = Array.from({ length: 256 }, (_, index) => ({
-      id: `state-${index}`,
-      kind: 'presentation.ui-state',
-      value: { label: `state-${index}` },
-      references: [],
-      edges: [],
-    }))
-    const bytes = graph.map(node => node.id).join('|')
-    const currentSource = source(bytes)
-    const currentMechanical = mechanical(currentSource)
-    const currentPacket = buildPresentationSemanticPacket({
-      source: currentSource,
-      mechanical: currentMechanical,
+    const fixture = projectionFixture(largeUiNodes())
+    const parsed = parsePresentationModule(
+      fixture.bound.module,
+      presentationExternalTargets(),
+    )
+    const states = parsed.nodes.filter(
+      node => node.kind === 'presentation.ui-state',
+    )
+    const transitionEdges = parsed.nodes
+      .filter(node => node.kind === 'presentation.transition')
+      .map(node => ({
+        from: node.edges.find(edge => edge.type === 'from')!.targetId,
+        to: node.edges.find(edge => edge.type === 'to')!.targetId,
+      }))
+    const reachable = new Set(['state-000'])
+    for (let changed = true; changed; ) {
+      changed = false
+      for (const edge of transitionEdges)
+        if (reachable.has(edge.from) && !reachable.has(edge.to)) {
+          reachable.add(edge.to)
+          changed = true
+        }
+    }
+    expect(fixture.semantic.nodes).toHaveLength(256)
+    expect(parsed.nodes).toHaveLength(256)
+    expect(states).toHaveLength(127)
+    expect(reachable.size).toBe(127)
+    expect(transitionEdges).toContainEqual({
+      from: 'state-126',
+      to: 'state-000',
     })
-    const sourceClaims = graph.flatMap(node => [
-      {
-        subject: `node:${node.id}#/id`,
-        documentPath: 'docs/GDD.md' as const,
-        sectionId: 'section-0',
-        sourcePointer: `/bytes/${bytes.indexOf(node.id)}/${
-          bytes.indexOf(node.id) + Buffer.byteLength(node.id)
-        }`,
-        literal: node.id,
-      },
-      {
-        subject: `node:${node.id}#/value/label`,
-        documentPath: 'docs/GDD.md' as const,
-        sectionId: 'section-0',
-        sourcePointer: `/bytes/${bytes.indexOf(node.id)}/${
-          bytes.indexOf(node.id) + Buffer.byteLength(node.id)
-        }`,
-        literal: node.id,
-      },
+    expect(
+      parsed.nodes.find(node => node.id === 'screen.main')!.value.requirements,
+    ).toEqual([
+      { requirementId: 'req.ui.large', kind: 'ui', runtimeRole: 'screen' },
     ])
-    const admitted = admitPresentationSemanticResult(currentPacket, {
+  })
+
+  test('preserves existing requirement order and trigger claims when an unrelated node is inserted', () => {
+    const baseline = projectionFixture(stableNodes())
+    const baselineParsed = parsePresentationModule(
+      baseline.bound.module,
+      presentationExternalTargets(),
+    )
+    const baselineRequirements = baselineParsed.nodes.flatMap(node =>
+      Array.isArray(node.value.requirements)
+        ? node.value.requirements.map(
+            requirement =>
+              (requirement as Record<string, unknown>).requirementId,
+          )
+        : [],
+    )
+    const baselineTrigger = baselineParsed.nodes.find(
+      node => node.id === 'transition.main',
+    )!.value.trigger
+    const baselineTriggerClaims = baseline.semantic.sourceClaims.filter(
+      claim =>
+        claim.subject === 'node:transition.main#/value/trigger/kind' ||
+        claim.subject === 'node:transition.main#/edges/1',
+    )
+    const unrelated: ProjectionNode = {
+      id: 'zzz.feedback',
+      kind: 'presentation.feedback',
+      value: { label: 'Unrelated', channel: 'text' },
+      references: [],
+      edges: [
+        {
+          type: 'on',
+          targetId: 'gameplay.event.hit',
+          targetType: 'gameplay.event',
+        },
+      ],
+    }
+    const inserted = projectionFixture([...stableNodes(), unrelated])
+    const insertedParsed = parsePresentationModule(
+      inserted.bound.module,
+      presentationExternalTargets(),
+    )
+    const insertedRequirements = insertedParsed.nodes.flatMap(node =>
+      Array.isArray(node.value.requirements)
+        ? node.value.requirements.map(
+            requirement =>
+              (requirement as Record<string, unknown>).requirementId,
+          )
+        : [],
+    )
+    expect(insertedRequirements).toEqual(baselineRequirements)
+    expect(
+      insertedParsed.nodes.find(node => node.id === 'transition.main')!.value
+        .trigger,
+    ).toEqual(baselineTrigger)
+    for (const claim of baselineTriggerClaims)
+      expect(
+        inserted.semantic.sourceClaims.find(
+          candidate => candidate.subject === claim.subject,
+        ),
+      ).toEqual(claim)
+  })
+
+  test('rejects every artifact-shaped value field without inferring artifacts from labels', () => {
+    const baseline = projectionFixture(stableNodes())
+    for (const field of ['path', 'fileName', 'digest', 'provider']) {
+      const mutation = structuredClone(baseline.bound.module) as unknown as {
+        moduleId: string
+        nodes: GameIrNode[]
+      }
+      const screen = mutation.nodes.find(node => node.id === 'screen.main')!
+      ;(screen as { value: Record<string, unknown> }).value = {
+        ...screen.value,
+        [field]: 'assets/ui.screen.v1',
+      }
+      expect(() =>
+        parsePresentationModule(mutation, presentationExternalTargets()),
+      ).toThrow('has unknown or missing fields')
+    }
+    const filenameLikeNodes = stableNodes().map(node =>
+      node.id === 'screen.main'
+        ? { ...node, value: { ...node.value, label: 'assets/ui.screen.v1' } }
+        : node,
+    )
+    const filenameLike = projectionFixture(filenameLikeNodes)
+    const parsed = parsePresentationModule(
+      filenameLike.bound.module,
+      presentationExternalTargets(),
+    )
+    expect(
+      parsed.nodes.find(node => node.id === 'screen.main')!.value.label,
+    ).toBe('assets/ui.screen.v1')
+    expect(
+      parsed.nodes.some(node => node.kind.startsWith('resource-realization')),
+    ).toBe(false)
+  })
+
+  test('rejects an independently relabeled and re-signed stored result at shared identity replay', () => {
+    const fixture = replayFixture()
+    const baseline = replayAndBindPhase5SemanticReceipt({
+      source: fixture.currentSource,
+      mechanical: fixture.currentMechanical,
+      packet: fixture.currentPacket,
+      semantic: fixture.semantic,
+    })
+    expect(baseline.module.moduleId).toBe('presentation')
+    const relabeled = reissueReceipt(fixture.semantic, {
+      moduleId: 'world-scene',
+    })
+    expect(() =>
+      replayAndBindPhase5SemanticReceipt({
+        source: fixture.currentSource,
+        mechanical: fixture.currentMechanical,
+        packet: fixture.currentPacket,
+        semantic: relabeled,
+      }),
+    ).toThrow('semantic receipt identity is stale or relabeled')
+  })
+
+  test('rejects an omitted required claim at shared target coverage', () => {
+    const fixture = replayFixture()
+    const baseline = admitPresentationSemanticResult(
+      fixture.currentPacket,
+      workerResult(fixture.semantic),
+    )
+    expect(baseline).toMatchObject({
       outcome: 'PROJECTED',
-      nodes: graph,
-      sourceClaims: sourceClaims.sort((left, right) =>
-        left.subject.localeCompare(right.subject),
-      ),
+      moduleId: 'presentation',
     })
-    if ('reasonCode' in admitted)
-      throw new Error('expected Presentation receipt')
-    const bound = replayAndBindPhase5SemanticReceipt({
-      source: currentSource,
-      mechanical: currentMechanical,
-      packet: currentPacket,
-      semantic: admitted,
-    })
-    expect(admitted.nodes).toHaveLength(256)
-    expect(bound.module.nodes).toHaveLength(256)
+    const omitted = workerResult(fixture.semantic)
+    omitted.sourceClaims = omitted.sourceClaims.filter(
+      claim =>
+        claim.subject !== 'node:audio-cue#/value/requirements/0/runtimeRole',
+    )
+    expect(() =>
+      admitPresentationSemanticResult(fixture.currentPacket, omitted),
+    ).toThrow('sourceClaims must exactly account for every semantic target')
+  })
+
+  test('rejects nonempty mechanical ownership under the shared isolated-domain policy', () => {
+    const fixture = replayFixture()
+    const currentSource = fixture.currentSource
+    const body = {
+      schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
+      taskId: currentSource.taskId,
+      moduleId: currentSource.moduleId,
+      foundationRevision:
+        currentSource.compileRequest.foundation.foundationRevision,
+      sourceDigest: currentSource.sourceDigest,
+      nodes: [{}],
+      verifiedClaims: [],
+      ownedTargets: [],
+    }
+    expect(() =>
+      replayAndBindPhase5SemanticReceipt({
+        source: currentSource,
+        mechanical: {
+          ...body,
+          receiptDigest: digestGameIrValue(body),
+        } as unknown as GameIrMechanicalProjectionReceipt,
+        packet: fixture.currentPacket,
+        semantic: fixture.semantic,
+      }),
+    ).toThrow(
+      'isolated domain mechanical nodes and verifiedClaims must be empty',
+    )
   })
 
   test('replays logical requirements, UI/action/feedback/audio references and edges with complete owner bindings', () => {
