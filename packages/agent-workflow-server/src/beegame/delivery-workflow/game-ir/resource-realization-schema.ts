@@ -71,6 +71,82 @@ export type ResourceRealizationRelationshipRole = Readonly<{
   cardinality: 'exactly-one' | 'at-least-one'
 }>
 
+export type ResourceRealizationSourcingPolicyValue = Readonly<{
+  allowedSourceKinds: readonly string[]
+  licenseConstraints: readonly string[]
+  responsibleParty: string
+  handoffCriteria: readonly string[]
+}>
+export type ResourceRealizationCoverageConstraintValue = Readonly<{
+  assetKinds?: readonly string[]
+  usageTags?: readonly string[]
+  capabilities?: readonly string[]
+  relationKinds?: readonly string[]
+  embeddedKinds?: readonly string[]
+}>
+export type ResourceRealizationActivationValue =
+  | Readonly<{ kind: 'required' }>
+  | Readonly<{ kind: 'alternative'; groupId: string }>
+  | Readonly<{
+      kind: 'conditional'
+      predicate: Readonly<{
+        field: 'platform' | 'runtime' | 'asset-format-capability'
+        operator: 'eq' | 'contains'
+        value: string
+      }>
+    }>
+export type ResourceRealizationLogicalResourceValue = Readonly<{
+  requirementId: string
+  resourceKind: ResourceRealizationResourceKind
+  runtimeRole: string
+}>
+export type ResourceRealizationAcquisitionProfileValue = Readonly<{
+  required: boolean
+  dimensions: readonly string[]
+  assetKinds: readonly string[]
+  usageTags: readonly string[]
+  capabilities: readonly string[]
+  styles: readonly string[]
+  sourcingPolicy: ResourceRealizationSourcingPolicyValue
+  name?: string
+  purpose?: string
+  coverage?: readonly ResourceRealizationCoverageConstraintValue[]
+}>
+export type ResourceRealizationDeliveryTargetValue = Readonly<{
+  assetFormatCapabilities: readonly string[]
+  platform?: string
+  runtime?: string
+}>
+export type ResourceRealizationVariantValue = Readonly<{
+  activation: ResourceRealizationActivationValue
+}>
+export type ResourceRealizationAssertionValue = Readonly<{
+  operator: 'eq' | 'lte' | 'gte' | 'range' | 'one-of'
+  value?: string | number | boolean
+  values?: readonly (string | number)[]
+  min?: number
+  max?: number
+  unit?: string
+}>
+export type ResourceRealizationTechnicalConstraintValue = Readonly<{
+  name: string
+  assertion: ResourceRealizationAssertionValue
+}>
+export type ResourceRealizationBudgetValue = Readonly<{
+  metric: string
+  limit: number
+  unit: string
+}>
+export type ResourceRealizationDeliveryArtifactValue = Readonly<{
+  artifactClass: 'runtime-resource' | 'content-definition' | 'generated-output'
+  path: string
+  format: string
+  runtimeRole: string
+  codec?: string
+  technicalConstraints?: readonly ResourceRealizationTechnicalConstraintValue[]
+  budgets?: readonly ResourceRealizationBudgetValue[]
+}>
+
 type ResourceRealizationManifestEntry = Readonly<{
   valueFields: readonly string[]
   optionalValueFields?: readonly string[]

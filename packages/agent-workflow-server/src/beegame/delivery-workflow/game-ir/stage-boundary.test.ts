@@ -2172,13 +2172,74 @@ describe('Game IR stage boundary', () => {
     const files = await readProductionSourceFiles(serverSourceRoot)
     const routeFiles = files.filter(file => /\/(?:controller|dispatch)\.ts$/.test(file.path))
     const routeViolations = standaloneProductionViolations(routeFiles)
-    const allowedRouteViolation = /\/(?:controller|dispatch)\.ts: (?:import: \.\/game-ir\/(?:foundation-ready-adapter|contracts|model|committed-reader|stage-checkpoint|gameplay-balance-assembler|world-presentation-assembler|resource-realization-assembler|implementation-verification-assembler|publication|domain-source|domain-projection|gameplay-producer|balance-producer|world-scene-producer|presentation-producer|resource-realization-producer|implementation-verification-producer|phase5-admission|phase6-admission|phase7-admission)|identifier: (?:GameIrCompilerDomainModel|GAME_IR_CHECKPOINT_RECORD_KINDS|GameIrCheckpointRecord|GameIrReplayAuthority|GameIrDomainId|GAME_IR_DOMAIN_IDS|GAME_IR_MODULE_SOURCE_DOCUMENTS|GameIrDomainSourceEnvelope|GameIrCompilerAuthorities|GameIrStageCheckpointLoader|GameIrCompileRequest|gameIrState|gameIrSchemaVersion))$/
-    expect(routeViolations.filter(violation => !allowedRouteViolation.test(violation))).toEqual([])
+    const allowedRouteImports = new Set([
+      './game-ir/balance-producer',
+      './game-ir/committed-reader',
+      './game-ir/contracts',
+      './game-ir/domain-projection',
+      './game-ir/domain-source',
+      './game-ir/foundation-ready-adapter',
+      './game-ir/gameplay-balance-assembler',
+      './game-ir/gameplay-producer',
+      './game-ir/implementation-verification-assembler',
+      './game-ir/implementation-verification-producer',
+      './game-ir/model',
+      './game-ir/phase5-admission',
+      './game-ir/phase6-admission',
+      './game-ir/phase7-admission',
+      './game-ir/presentation-producer',
+      './game-ir/publication',
+      './game-ir/resource-realization-assembler',
+      './game-ir/resource-realization-producer',
+      './game-ir/stage-checkpoint',
+      './game-ir/world-presentation-assembler',
+      './game-ir/world-scene-producer',
+    ])
+    const allowedRouteIdentifiers = new Set([
+      'GAME_IR_CHECKPOINT_RECORD_KINDS',
+      'GAME_IR_DOMAIN_IDS',
+      'GAME_IR_MODULE_SOURCE_DOCUMENTS',
+      'GameIrCheckpointRecord',
+      'GameIrCompileRequest',
+      'GameIrCompilerAuthorities',
+      'GameIrCompilerDomainModel',
+      'GameIrDomainId',
+      'GameIrDomainSourceEnvelope',
+      'GameIrReplayAuthority',
+      'GameIrStageCheckpointLoader',
+      'gameIrSchemaVersion',
+      'gameIrState',
+    ])
+    const unexpectedRouteViolations = routeViolations.filter(violation => {
+      const detail = violation.slice(violation.indexOf(': ') + 2)
+      if (detail.startsWith('import: ')) return !allowedRouteImports.has(detail.slice(8))
+      if (detail.startsWith('identifier: ')) return !allowedRouteIdentifiers.has(detail.slice(12))
+      return true
+    }).sort(compareCodeUnits)
+    expect(unexpectedRouteViolations).toEqual([])
+    const allowedOutsideRoute = new Map<string, ReadonlySet<string>>([
+      ['beegame/delivery-worker-session-port.ts', new Set(['identifier: gameIrCompilerModelPayloadSchema', 'identifier: gameIrCompilerStructuredOutputJsonSchema', 'identifier: gameIrCompilerTerminalSchema'])],
+      ['beegame/delivery-workflow/recovery-projector.ts', new Set(['identifier: gameIrState'])],
+      ['beegame/delivery-workflow/recovery.ts', new Set(['import: ./game-ir/stage-checkpoint', 'identifier: GameIrStageCheckpointLoader', 'identifier: gameIrState'])],
+      ['beegame/delivery-workflow/schema.ts', new Set(['import: ./game-ir/contracts', 'import: ./game-ir/model', 'identifier: GameIrCheckpointRef', 'identifier: GameIrCompilationIdentity', 'identifier: GameIrReadyReceipt', 'identifier: GameIrState', 'identifier: gameIr', 'identifier: gameIrCheckpointRefSchema', 'identifier: gameIrCompilationIdentitySchema', 'identifier: gameIrPlacementIsValid', 'identifier: gameIrReadyReceiptDigest', 'identifier: gameIrReadyReceiptSchema', 'identifier: gameIrState', 'identifier: gameIrStateSchema'])],
+      ['beegame/delivery-workflow/transition.ts', new Set(['import: ./game-ir/contracts', 'import: ./game-ir/model', 'identifier: GameIrCheckpointRef', 'identifier: GameIrCompilationIdentity', 'identifier: GameIrReadyEventState', 'identifier: GameIrState', 'identifier: gameIrReadyReceiptDigest', 'identifier: gameIrState'])],
+      ['beegame/delivery-workflow/types.ts', new Set(['import: ./game-ir/contracts', 'identifier: GameIrCheckpointRef', 'identifier: GameIrCompilationDiagnostic', 'identifier: GameIrCompilationIdentity', 'identifier: GameIrCompilationProgressIdentity', 'identifier: GameIrReadyReceipt', 'identifier: GameIrState', 'identifier: gameIrReadyReceiptDigest', 'identifier: gameIrState'])],
+      ['beegame/delivery-workflow/worker-contracts.ts', new Set(['identifier: GameIrCompilerDomainModel', 'identifier: gameIrCompilerModelPayloadSchema', 'identifier: gameIrCompilerStructuredOutputJsonSchema', 'identifier: gameIrCompilerTerminalSchema'])],
+      ['beegame/delivery-workflow/workflow-display-message.ts', new Set(['identifier: GameIrCompilationDiagnostic'])],
+    ])
     const forbiddenOutsideRoute = files
       .filter(file => !routeFiles.includes(file))
-      .flatMap(file => collectAstFacts(file.source, file.path).imports
-        .filter(entry => /(?:game-ir\/(?:committed-reader|publication))/.test(entry.path))
-        .map(entry => `${file.path}: ${entry.path}`))
+      .flatMap(file => {
+        const relativePath = file.path.slice(serverSourceRoot.length + 1)
+        const allowed = allowedOutsideRoute.get(relativePath) ?? new Set<string>()
+        return boundaryViolations(file.source)
+          .filter(violation => {
+            if (!violation.includes('game-ir') && !violation.includes('GameIr') && !violation.includes('gameIr') && !violation.includes('GAME_IR')) return false
+            return !allowed.has(violation)
+          })
+          .map(violation => `${relativePath}: ${violation}`)
+      })
+      .sort(compareCodeUnits)
     expect(forbiddenOutsideRoute).toEqual([])
   })
 })

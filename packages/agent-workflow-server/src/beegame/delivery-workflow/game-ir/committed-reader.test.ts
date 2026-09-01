@@ -143,21 +143,38 @@ describe('committed Game IR reader', () => {
       const readyReceipt = await commitGameIrPublication({ workspacePath: workspace, publicationId: authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority.gameplay.source.compileRequest.publicationId, phase7Authority: authority.phase7Authority })
       const committed = await validateCommittedGameIr({ workspacePath: workspace, publicationId: readyReceipt.publicationId, phase7Authority: authority.phase7Authority })
       expect(committed).toEqual(readyReceipt)
+      const compilingState = run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>
+      const readyRun = {
+        ...run,
+        phase: 'DOCUMENT_REVIEW' as const,
+        documentStep: 'CHECKLIST_DRAFTING' as const,
+        gameIrState: {
+          status: 'ready' as const,
+          identity: compilingState.identity,
+          checkpoint: compilingState.latestCheckpoint!,
+          readyReceipt,
+          readyReceiptDigest: digestGameIrValue(readyReceipt),
+        },
+      } as DeliveryRun
+      const projection = await readCommittedGameIr({ workspacePath: workspace, deliveryRun: readyRun })
+      expect(projection.readyReceipt).toEqual(readyReceipt)
+      expect(projection.executionProjection.units.every(node => node.payload.kind === 'implementation-verification.unit')).toBe(true)
+      expect(projection.resourceProjection.deliveryArtifacts.every(node => node.payload.kind === 'resource-realization.delivery-artifact')).toBe(true)
       const tamperCases = [
-        { path: join(workspace, readyReceipt.committedPath, '..', 'COMMITTED.json'), validate: () => validateCommittedGameIr({ workspacePath: workspace, publicationId: readyReceipt.publicationId, phase7Authority: authority.phase7Authority }) },
-        { path: join(workspace, readyReceipt.committedPath, '..', 'manifest.json'), validate: () => validateCommittedGameIr({ workspacePath: workspace, publicationId: readyReceipt.publicationId, phase7Authority: authority.phase7Authority }) },
-        { path: join(workspace, (run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>).latestCheckpoint!.checkpointPath.replace(/manifest\.json$/, 'records/phase7__implementation-verification__source.json')), validate: () => new GameIrStageCheckpointLoader().load({ workspacePath: workspace, deliveryRun: run }) },
+        { path: join(workspace, readyReceipt.committedPath, '..', 'COMMITTED.json') },
+        { path: join(workspace, readyReceipt.committedPath, '..', 'manifest.json') },
+        { path: join(workspace, (run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>).latestCheckpoint!.checkpointPath.replace(/manifest\.json$/, 'records/phase7__implementation-verification__source.json')) },
       ]
       for (const tamper of tamperCases) {
         const original = await readFile(tamper.path)
         await writeFile(tamper.path, Buffer.concat([original, Buffer.from('tampered')]))
-        await expect(tamper.validate()).rejects.toThrow()
+        await expect(readCommittedGameIr({ workspacePath: workspace, deliveryRun: readyRun })).rejects.toThrow()
         await writeFile(tamper.path, original)
       }
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
-  })
+  }, 20_000)
 
   test('reads only regular workspace files and rejects symlinked components', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'game-ir-reader-'))

@@ -248,7 +248,14 @@ function getContractIfCanonical(path: FoundationDocumentPath) {
 
 export function digestSectionIndex(index: readonly SectionRef[]): string {
   const canonical = [...index]
-    .map(section => ({ ...section }))
+    .map(section => ({
+      documentPath: section.documentPath,
+      sectionId: section.sectionId,
+      heading: section.heading,
+      startLine: section.startLine,
+      endLine: section.endLine,
+      digest: section.digest,
+    }))
     .sort((left, right) =>
       `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
         `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,

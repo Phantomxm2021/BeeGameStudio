@@ -7,6 +7,7 @@ import {
 import { GAME_IR_SCHEMA_VERSION } from './contracts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
+import { relativeFoundationAuditArtifactPaths } from '../foundation-audit-artifacts'
 import { buildGameIrDomainSourceEnvelope } from './domain-source'
 import { admitGameIrMechanicalProjectionReceipt } from './domain-projection'
 import {
@@ -535,7 +536,7 @@ export function realAuthority(
     documentDigests: Object.fromEntries(
       CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, hash(bytesFor(path))]),
     ) as Record<(typeof CANONICAL_FOUNDATION_DOCUMENTS)[number], string>,
-    sectionIndexPath: '.beegame/foundation/section-index.json',
+    sectionIndexPath: relativeFoundationAuditArtifactPaths('foundation-revision-1').sectionIndex.replace('/staging/', '/derived/'),
     sectionIndexDigest: digestSectionIndex(sectionIndex),
     authority: {
       kind: 'review' as const,

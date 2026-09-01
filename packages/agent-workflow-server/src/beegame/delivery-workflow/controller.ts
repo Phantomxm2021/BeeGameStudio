@@ -191,7 +191,10 @@ async function buildGameIrSourcePackets(input: {
   receipt: import('./game-ir/contracts').FoundationReadyReceipt
 }): Promise<Readonly<Record<GameIrDomainId, GameIrDomainSourceEnvelope>>> {
   const workspace = resolve(input.workspacePath)
-  const sectionIndex = JSON.parse(await readSecureWorkspaceFile(workspace, input.receipt.sectionIndexPath)) as readonly import('./foundation-section-index').SectionRef[]
+  const sectionArtifact = JSON.parse(await readSecureWorkspaceFile(workspace, input.receipt.sectionIndexPath)) as { revision?: unknown; sections?: unknown; digest?: unknown }
+  if (!sectionArtifact || typeof sectionArtifact !== 'object' || Object.keys(sectionArtifact).sort().join('\0') !== 'digest\0revision\0sections' || !Array.isArray(sectionArtifact.sections) || sectionArtifact.revision !== input.receipt.foundationRevision || sectionArtifact.digest !== input.receipt.sectionIndexDigest)
+    throw new Error('Foundation READY Section Index artifact is invalid')
+  const sectionIndex = sectionArtifact.sections as readonly import('./foundation-section-index').SectionRef[]
   if (digestSectionIndex(sectionIndex) !== input.receipt.sectionIndexDigest)
     throw new Error('Foundation READY Section Index digest mismatch')
   const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => {
@@ -233,12 +236,54 @@ function remainingGameIrDomainIds(
   return []
 }
 
-function canonicalCompilerDomainResults(
+export function canonicalCompilerDomainResults(
   results: readonly GameIrCompilerDomainModel[] | undefined,
 ): readonly GameIrCompilerDomainModel[] | undefined {
-  return results
-    ? [...results].sort((left, right) => left.moduleId.localeCompare(right.moduleId))
-    : undefined
+  if (!results) return undefined
+  const unordered = new Set([
+    'nodes', 'claims', 'sourceClaims', 'checkIds', 'coveredTargets',
+    'targets', 'evidencePointers', 'references', 'edges', 'bindings',
+    'inputs', 'requiredTargets', 'ownedTargets', 'verifiedClaims', 'artifactPaths',
+  ])
+  const canonicalReason = (value: unknown, fallback: string): string => {
+    const text = typeof value === 'string' ? value.toLowerCase() : ''
+    if (text.includes('publication')) return 'publication'
+    if (text.includes('checkpoint') || text.includes('journal')) return 'checkpoint'
+    if (text.includes('source') || text.includes('section')) return 'source'
+    if (text.includes('validation') || text.includes('check')) return 'validation'
+    if (text.includes('ambiguous') && text.includes('projection')) return 'ambiguous-projection'
+    if (text.includes('mismatch') && text.includes('projection')) return 'projection-mismatch'
+    if (text.includes('missing') && text.includes('projection')) return 'missing-projection'
+    if (text.includes('admission') || text.includes('domain')) return 'admission'
+    return fallback
+  }
+  const normalize = (value: unknown, key = ''): unknown => {
+    if (Array.isArray(value)) {
+      const items = value.map(item => normalize(item, key))
+      if (unordered.has(key)) items.sort((left, right) => compareGameIrValues(left, right))
+      return items
+    }
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, normalize(item, name)]))
+    }
+    return value
+  }
+  const normalizeOutcome = (value: unknown, fallback: string): unknown => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const model = value as Record<string, unknown>
+    if (model.outcome === 'PROJECTED') return { outcome: 'PROJECTED', nodes: normalize(model.nodes, 'nodes'), sourceClaims: normalize(model.sourceClaims, 'sourceClaims') }
+    if (model.outcome === 'PASS') return { outcome: 'PASS', checkIds: normalize(model.checkIds, 'checkIds'), coveredTargets: normalize(model.coveredTargets, 'coveredTargets') }
+    return { outcome: model.outcome, reasonCode: canonicalReason(model.reasonCode, fallback), missingSubject: model.missingSubject, evidencePointers: normalize(model.evidencePointers, 'evidencePointers') }
+  }
+  return [...results]
+    .map(model => ({ ...model, semantic: normalizeOutcome(model.semantic, 'semantic_failure'), ...(model.validation ? { validation: normalizeOutcome(model.validation, 'validation_failure') } : {}) }))
+    .sort((left, right) => left.moduleId.localeCompare(right.moduleId)) as readonly GameIrCompilerDomainModel[]
+}
+
+function compareGameIrValues(left: unknown, right: unknown): number {
+  const a = digestGameIrValue(left)
+  const b = digestGameIrValue(right)
+  return a < b ? -1 : a > b ? 1 : 0
 }
 
 function admitGameIrCompilerResults(
@@ -2247,15 +2292,58 @@ export function createDeliveryWorkflowController(input: {
           compilationRun = await persist(recovered, 'game_ir_checkpoint.recovered', { checkpoint: recoveredCheckpoint })
         state = compilationRun.gameIrState
         if (!state || state.status !== 'compiling') throw new Error('Recovered Game IR state is missing')
+        const compilingState = state
         replay = await checkpointLoader.load({ workspacePath: input.workspacePath, deliveryRun: compilationRun })
         if (replay.phase7Authority) {
-          const readyReceipt = await commitGameIrPublication({ workspacePath: input.workspacePath, publicationId: state.identity.publicationId, phase7Authority: replay.phase7Authority })
-          const latestCheckpoint = compilationRun.gameIrState?.status === 'compiling' ? compilationRun.gameIrState.latestCheckpoint : undefined
-          if (!latestCheckpoint) throw new Error('Game IR publication has no committed Phase 7 checkpoint')
-          const candidateReady = transitionDeliveryRun(compilationRun, { type: 'game_ir_ready', state: { status: 'ready', identity: state.identity, checkpoint: latestCheckpoint, readyReceipt, readyReceiptDigest: digestGameIrValue(readyReceipt) } })
-          await readCommittedGameIr({ workspacePath: input.workspacePath, deliveryRun: candidateReady })
-          const readyRun = await persist(candidateReady, 'game_ir_ready', { readyReceiptDigest: digestGameIrValue(readyReceipt) })
-          await resumeUnlocked(readyRun)
+          const publicationProgress = {
+            inputDigest: digestGameIrValue(compilingState.identity),
+            diagnosticDigest: digestGameIrValue({ reasonCode: 'publication' }),
+            candidateDigest: replay.phase7Authority.implementationVerification.source.sourceDigest,
+            checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? undefined),
+            terminalDigest: digestGameIrValue({ reasonCode: 'publication', phase: 'phase7' }),
+          }
+          const publishOrAttend = async (): Promise<void> => {
+            try {
+              const readyReceipt = await commitGameIrPublication({ workspacePath: input.workspacePath, publicationId: compilingState.identity.publicationId, phase7Authority: replay!.phase7Authority! })
+              const latestCheckpoint = compilationRun.gameIrState?.status === 'compiling' ? compilationRun.gameIrState.latestCheckpoint : undefined
+              if (!latestCheckpoint) throw new Error('Game IR publication has no committed Phase 7 checkpoint')
+              const candidateReady = transitionDeliveryRun(compilationRun, { type: 'game_ir_ready', state: { status: 'ready', identity: compilingState.identity, checkpoint: latestCheckpoint, readyReceipt, readyReceiptDigest: digestGameIrValue(readyReceipt) } })
+              await readCommittedGameIr({ workspacePath: input.workspacePath, deliveryRun: candidateReady })
+              const readyRun = await persist(candidateReady, 'game_ir_ready', { readyReceiptDigest: digestGameIrValue(readyReceipt) })
+              await resumeUnlocked(readyRun)
+            } catch {
+              const current = await store.load()
+              const durable = current?.runId === compilationRun.runId ? current : compilationRun
+              const durableState = durable.gameIrState?.status === 'compiling' ? durable.gameIrState : compilingState
+              const unchanged = durableState.progressIdentity !== undefined && digestGameIrValue(durableState.progressIdentity) === digestGameIrValue(publicationProgress)
+              const diagnosticRef = `game-ir-${digestGameIrValue({ taskId: durableState.identity.taskId, progressIdentity: publicationProgress, reasonCode: 'publication' }).slice(0, 12)}`
+              const attended = await persist({
+                ...durable,
+                activeDispatch: undefined,
+                status: unchanged ? 'needs_action' : 'running',
+                blockedReason: unchanged ? `game_ir_publication diagnostic ${diagnosticRef}` : undefined,
+                thinking: unchanged ? 'idle' : 'working',
+                gameIrState: {
+                  ...durableState,
+                  diagnosticRef,
+                  diagnostic: {
+                    phase: 'GAME_IR_COMPILATION',
+                    step: 'publication',
+                    taskId: durableState.identity.taskId,
+                    workerType: 'game-ir-compiler',
+                    reasonCode: 'publication',
+                    expected: 'reader-valid committed Game IR',
+                    actual: 'Phase 7 publication or reader validation failed',
+                    diagnosticRef,
+                    recoveryAction: unchanged ? 'resolve the unchanged publication prerequisite, then retry the same compilation identity' : 'retry the same compilation identity; publication will be attempted again',
+                  },
+                  progressIdentity: publicationProgress,
+                },
+              }, unchanged ? 'game_ir_publication.needs_action' : 'game_ir_publication.retryable', { diagnosticRef, reasonCode: 'publication' })
+              if (attended.status === 'running') await resumeUnlocked(attended)
+            }
+          }
+          await publishOrAttend()
           return
         }
       }

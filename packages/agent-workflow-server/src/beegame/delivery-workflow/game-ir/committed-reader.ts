@@ -7,6 +7,7 @@ import {
   parseGameIrCompileRequest,
   parseGameIrReadyReceipt,
   type FoundationReadyReceipt,
+  type GameIrModuleId,
   type GameIrReadyReceipt,
 } from './contracts'
 import {
@@ -26,6 +27,13 @@ import type {
   ImplementationVerificationTargetValue,
   ImplementationVerificationUnitValue,
 } from './implementation-verification-schema'
+import type {
+  ResourceRealizationAcquisitionProfileValue,
+  ResourceRealizationDeliveryArtifactValue,
+  ResourceRealizationDeliveryTargetValue,
+  ResourceRealizationLogicalResourceValue,
+  ResourceRealizationVariantValue,
+} from './resource-realization-schema'
 import { projectFoundationReadyReceipt } from './foundation-ready-adapter'
 import {
   GameIrStageCheckpointLoader,
@@ -46,44 +54,46 @@ type ImplementationProjectionPayload =
   | Readonly<{ kind: 'implementation-verification.acceptance-scenario'; value: ImplementationVerificationAcceptanceScenarioValue }>
   | Readonly<{ kind: 'implementation-verification.invariant'; value: ImplementationVerificationInvariantValue }>
   | Readonly<{ kind: 'implementation-verification.evidence-requirement'; value: ImplementationVerificationEvidenceRequirementValue }>
-type ResourceProjectionValue = object
-type ResourceProjectionPayload = Readonly<{
-  kind:
-    | 'resource-realization.logical-resource'
-    | 'resource-realization.acquisition-profile'
-    | 'resource-realization.delivery-target'
-    | 'resource-realization.variant'
-    | 'resource-realization.delivery-artifact'
-  value: ResourceProjectionValue
-}>
+type ResourceProjectionPayload =
+  | Readonly<{ kind: 'resource-realization.logical-resource'; value: ResourceRealizationLogicalResourceValue }>
+  | Readonly<{ kind: 'resource-realization.acquisition-profile'; value: ResourceRealizationAcquisitionProfileValue }>
+  | Readonly<{ kind: 'resource-realization.delivery-target'; value: ResourceRealizationDeliveryTargetValue }>
+  | Readonly<{ kind: 'resource-realization.variant'; value: ResourceRealizationVariantValue }>
+  | Readonly<{ kind: 'resource-realization.delivery-artifact'; value: ResourceRealizationDeliveryArtifactValue }>
 type ProjectionPayload = ImplementationProjectionPayload | ResourceProjectionPayload
 
-type ProjectionNode<P extends ProjectionPayload = ProjectionPayload> = Readonly<{
+type ProjectionNodeFor<P extends ProjectionPayload> = Readonly<{
   id: string
-  kind: string
+  kind: P['kind']
   producerMode: 'mechanical' | 'semantic' | 'derived'
   references: readonly Readonly<{ targetId: string; targetType: string }>[]
   edges: readonly Readonly<{ type: string; targetId: string; targetType: string }>[]
   bindings: Readonly<Record<string, GameIrSourceBinding>>
   payload: P
 }>
+type ProjectionNode = {
+  [P in ProjectionPayload as P['kind']]: ProjectionNodeFor<P>
+}[ProjectionPayload['kind']]
+
+export type GameIrProjectionPayload = ProjectionPayload
+export type GameIrProjectionNode = ProjectionNode
 
 export type GameIrExecutionProjection = Readonly<{
   moduleId: 'implementation-verification'
-  units: readonly ProjectionNode[]
-  scenarios: readonly ProjectionNode[]
-  invariants: readonly ProjectionNode[]
-  evidenceRequirements: readonly ProjectionNode[]
+  units: readonly Extract<ProjectionNode, { kind: 'implementation-verification.unit' }>[]
+  scenarios: readonly Extract<ProjectionNode, { kind: 'implementation-verification.acceptance-scenario' }>[]
+  invariants: readonly Extract<ProjectionNode, { kind: 'implementation-verification.invariant' }>[]
+  evidenceRequirements: readonly Extract<ProjectionNode, { kind: 'implementation-verification.evidence-requirement' }>[]
   digest: string
 }>
 
 export type GameIrResourceProjection = Readonly<{
   moduleId: 'resource-realization'
-  logicalResources: readonly ProjectionNode[]
-  acquisitionProfiles: readonly ProjectionNode[]
-  deliveryTargets: readonly ProjectionNode[]
-  variants: readonly ProjectionNode[]
-  deliveryArtifacts: readonly ProjectionNode[]
+  logicalResources: readonly Extract<ProjectionNode, { kind: 'resource-realization.logical-resource' }>[]
+  acquisitionProfiles: readonly Extract<ProjectionNode, { kind: 'resource-realization.acquisition-profile' }>[]
+  deliveryTargets: readonly Extract<ProjectionNode, { kind: 'resource-realization.delivery-target' }>[]
+  variants: readonly Extract<ProjectionNode, { kind: 'resource-realization.variant' }>[]
+  deliveryArtifacts: readonly Extract<ProjectionNode, { kind: 'resource-realization.delivery-artifact' }>[]
   digest: string
 }>
 
@@ -99,11 +109,11 @@ export type GameIrPublishedReader = Readonly<{
   readyReceipt: GameIrReadyReceipt
   candidate: GameIrCandidate
   modules: readonly GameIrModuleCandidate[]
-  sourceMap: object
-  sourceMaps: Readonly<{ [moduleId: string]: object }>
-  dependencyGraph: object
-  semanticEvidence: readonly object[]
-  manifest: object
+  sourceMap: GameIrSourceMaps
+  sourceMaps: GameIrSourceMaps
+  dependencyGraph: GameIrDependencyGraph
+  semanticEvidence: readonly GameIrSemanticEvidence[]
+  manifest: GameIrManifest
   executionProjection: GameIrExecutionProjection
   resourceProjection: GameIrResourceProjection
   acceptanceProjection: GameIrAcceptanceProjection
@@ -111,11 +121,47 @@ export type GameIrPublishedReader = Readonly<{
     candidate: string
     manifest: string
     dependencyGraph: string
-    modules: Readonly<Record<string, string>>
-    sourceMaps: Readonly<Record<string, string>>
+    modules: Readonly<Record<GameIrModuleId, string>>
+    sourceMaps: Readonly<Record<GameIrModuleId, string>>
     evidence: string
     closure: string
   }>
+}>
+
+export type GameIrSourceMap = Readonly<{
+  schemaVersion: 'game-ir-source-map.v1'
+  foundationRevision: string
+  moduleId: GameIrModuleId
+  bindings: readonly Readonly<{ nodeId: string; pointer: string; binding: GameIrSourceBinding }>[]
+}>
+export type GameIrSourceMaps = Readonly<Record<GameIrModuleId, GameIrSourceMap>>
+export type GameIrDependencyGraph = Readonly<{
+  schemaVersion: 'game-ir-dependency-graph.v1'
+  foundationRevision: string
+  edges: readonly Readonly<{ kind: string; type: string; from: string; to: string; targetType?: string }>[]
+}>
+export type GameIrSemanticEvidence = Readonly<{
+  phase: string
+  moduleId: GameIrModuleId
+  sourceDigest: string
+  mechanicalReceiptDigest: string
+  semanticReceiptDigest: string
+  semanticValidationResultDigest?: string
+  projectionDigest: string
+}>
+export type GameIrManifest = Readonly<{
+  schemaVersion: 'game-ir-manifest.v1'
+  gameIrSchemaVersion: 'game-ir.v1'
+  publicationId: string
+  foundationRevision: string
+  foundationReceiptDigest: string
+  compileRequestDigest: string
+  compileRequest: ReturnType<typeof parseGameIrCompileRequest>
+  candidateDigest: string
+  semanticEvidence: readonly GameIrSemanticEvidence[]
+  modules: readonly Readonly<{ moduleId: GameIrModuleId; path: string; digest: string; sourceMapPath: string; sourceMapDigest: string }>[]
+  dependencyGraphPath: string
+  dependencyGraphDigest: string
 }>
 
 const SHA256 = /^[a-f0-9]{64}$/
@@ -186,7 +232,7 @@ async function readJson(root: string, path: string, label: string): Promise<Reco
   }
 }
 
-function sourceMap(module: GameIrModuleCandidate, revision: string): RecordValue {
+function sourceMap(module: GameIrModuleCandidate, revision: string): GameIrSourceMap {
   return {
     schemaVersion: 'game-ir-source-map.v1',
     foundationRevision: revision,
@@ -196,7 +242,7 @@ function sourceMap(module: GameIrModuleCandidate, revision: string): RecordValue
         .sort(compareCodeUnits)
         .map(pointer => ({ nodeId: node.id, pointer, binding: node.bindings[pointer] })),
     ),
-  }
+  } as GameIrSourceMap
 }
 
 function dependencyGraph(candidate: GameIrCandidate): RecordValue {
@@ -234,24 +280,32 @@ function dependencyGraph(candidate: GameIrCandidate): RecordValue {
   return { schemaVersion: 'game-ir-dependency-graph.v1', foundationRevision: candidate.foundationRevision, edges }
 }
 
-function nodesOf(module: GameIrModuleCandidate, kind: string): readonly ProjectionNode[] {
-  return Object.freeze(
+type ProjectionKind = ProjectionPayload['kind']
+type ProjectionValue<K extends ProjectionKind> = Extract<ProjectionPayload, { kind: K }>['value']
+
+function projectionValue<K extends ProjectionKind>(kind: K, value: unknown): ProjectionValue<K> {
+  const parsed = projectionPayloadSchema.parse({ kind, value })
+  if (parsed.kind !== kind) fail(`projection kind ${kind} does not match its value`)
+  return parsed.value as ProjectionValue<K>
+}
+
+function nodesOf<K extends ProjectionKind>(module: GameIrModuleCandidate, kind: K): readonly Extract<ProjectionNode, { kind: K }>[] {
+  const values = Object.freeze(
     module.nodes
       .filter(node => node.kind === kind)
       .map(node =>
         Object.freeze({
           id: node.id,
-          kind: node.kind,
+          kind,
           producerMode: node.producerMode,
           references: Object.freeze(node.references.map(reference => Object.freeze({ ...reference }))),
           edges: Object.freeze(node.edges.map(edge => Object.freeze({ ...edge }))),
           bindings: Object.freeze({ ...node.bindings }),
-          payload: Object.freeze(
-            projectionPayloadSchema.parse({ kind: node.kind, value: node.value }),
-          ),
+          payload: Object.freeze({ kind, value: projectionValue(kind, node.value) }) as unknown as Extract<ProjectionPayload, { kind: K }>,
         }),
       ),
   )
+  return values as unknown as readonly Extract<ProjectionNode, { kind: K }>[]
 }
 
 function projections(candidate: GameIrCandidate): Pick<GameIrPublishedReader, 'executionProjection' | 'resourceProjection' | 'acceptanceProjection'> {
@@ -374,6 +428,7 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
   const moduleDigests: Record<string, string> = {}
   const sourceMapDigests: Record<string, string> = {}
   const sourceMaps: Record<string, Readonly<Record<string, unknown>>> = {}
+  const rawModules: Array<Readonly<{ moduleId: string; nodes: unknown }>> = []
   for (const [index, raw] of moduleEntries.entries()) {
     const entry = record(raw, `manifest module[${index}]`)
     exact(entry, ['moduleId', 'path', 'digest', 'sourceMapPath', 'sourceMapDigest'], `manifest module[${index}]`)
@@ -384,8 +439,9 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
     const moduleBytes = canonicalGameIrJson(moduleFile) + '\n'
     const moduleDigest = digestBytes(moduleBytes)
     if (moduleDigest !== entry.digest || moduleDigest !== readyReceipt.moduleDigests[entry.moduleId as keyof typeof readyReceipt.moduleDigests]) fail(`module ${entry.moduleId} digest mismatch`)
-    const parsed = parseGameIrModuleCandidate({ moduleId: entry.moduleId, nodes: moduleFile.nodes }, { request, sections: sectionIndex })
+    const parsed = parseGameIrModuleCandidate({ moduleId: entry.moduleId, nodes: moduleFile.nodes }, { request, sections: sectionIndex, externalModules: rawModules })
     modules.push(parsed)
+    rawModules.push({ moduleId: entry.moduleId, nodes: moduleFile.nodes })
     moduleDigests[entry.moduleId] = moduleDigest
     const source = await readJson(root, String(entry.sourceMapPath), `source map ${entry.moduleId}`)
     exact(source, ['schemaVersion', 'foundationRevision', 'moduleId', 'bindings'], `source map ${entry.moduleId}`)
@@ -398,7 +454,7 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
   }
   const ordered = modules.map(module => module.moduleId)
   same(ordered, GAME_IR_CANONICAL_MODULE_IDS, 'module order or coverage')
-  const candidate = parseGameIrCandidate({ schemaVersion: 'game-ir.v1', taskId: request.taskId, foundationRevision: request.foundation.foundationRevision, modules }, { request, sections: sectionIndex })
+  const candidate = parseGameIrCandidate({ schemaVersion: 'game-ir.v1', taskId: request.taskId, foundationRevision: request.foundation.foundationRevision, modules: rawModules }, { request, sections: sectionIndex })
   const candidateDigest = digestGameIrValue(candidate)
   if (candidateDigest !== manifest.candidateDigest) fail('candidate digest mismatch')
   const closure = assembleImplementationVerificationClosure(phase7Authority)
@@ -416,5 +472,5 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
   const projectionValues = projections(candidate)
   const evidenceDigest = digestGameIrValue(semanticEvidence)
   const closureDigest = digestGameIrValue({ candidateDigest, semanticEvidence, manifestDigest: readyReceipt.manifestDigest, dependencyGraphDigest: dependencyDigest })
-  return Object.freeze({ foundationReadyReceipt, readyReceipt, candidate, modules: Object.freeze(modules), sourceMap: sourceMaps, sourceMaps: Object.freeze(sourceMaps), dependencyGraph: dependency, semanticEvidence, manifest, ...projectionValues, digests: Object.freeze({ candidate: candidateDigest, manifest: readyReceipt.manifestDigest, dependencyGraph: dependencyDigest, modules: Object.freeze(moduleDigests), sourceMaps: Object.freeze(sourceMapDigests), evidence: evidenceDigest, closure: closureDigest }) })
+  return Object.freeze({ foundationReadyReceipt, readyReceipt, candidate, modules: Object.freeze(modules), sourceMap: sourceMaps as unknown as GameIrSourceMaps, sourceMaps: Object.freeze(sourceMaps) as unknown as GameIrSourceMaps, dependencyGraph: dependency as unknown as GameIrDependencyGraph, semanticEvidence: semanticEvidence as readonly GameIrSemanticEvidence[], manifest: manifest as unknown as GameIrManifest, ...projectionValues, digests: Object.freeze({ candidate: candidateDigest, manifest: readyReceipt.manifestDigest, dependencyGraph: dependencyDigest, modules: Object.freeze(moduleDigests) as Readonly<Record<GameIrModuleId, string>>, sourceMaps: Object.freeze(sourceMapDigests) as Readonly<Record<GameIrModuleId, string>>, evidence: evidenceDigest, closure: closureDigest }) })
 }
