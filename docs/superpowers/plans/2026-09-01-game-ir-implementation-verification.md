@@ -35,10 +35,10 @@
 - Produces: neutral `GameIrSemanticSourceSection`, diagnostic reason-code types and `sectionEvidencePointer` exports.
 - Preserves: current canonical module set and generic publication behavior until the atomic Task 7 cutover.
 
-- [ ] Add characterization tests for exact source-section/evidence pointer/reason-code bytes and errors.
-- [ ] Move the definitions to semantic fidelity and update every live production/test import in the same change; generic semantic admission imports them internally but does not re-export them.
-- [ ] Prove no duplicate definitions or forwarding exports remain and all existing Game IR tests/typechecks stay green.
-- [ ] Commit `refactor: neutralize Game IR fidelity primitives`.
+- [x] Add characterization tests for exact source-section/evidence pointer/reason-code bytes and errors.
+- [x] Move the definitions to semantic fidelity and update every live production/test import in the same change; generic semantic admission imports them internally but does not re-export them.
+- [x] Prove no duplicate definitions or forwarding exports remain and all existing Game IR tests/typechecks stay green.
+- [x] Commit `refactor: neutralize Game IR fidelity primitives`.
 
 ### Task 2: Phase 5 descriptor localization and generic admission dependency removal
 
@@ -52,10 +52,10 @@
 - Produces: Phase 5-local World/Presentation validator descriptors derived from canonical source documents, domain manifests and Phase 5 check IDs.
 - Removes: all production imports from `semantic-admission.ts` except publication, which the atomic Task 7 cutover deletes.
 
-- [ ] Add characterization tests for Phase 5 packet bytes, manifest digests, checks and diagnostic errors.
-- [ ] Add a RED static assertion that Phase 5/6/Resource production files do not import generic semantic admission.
-- [ ] Implement the local Phase 5 descriptor and import neutral source/evidence primitives from semantic fidelity.
-- [ ] Run Phase 5/6/Resource producer gates and prove byte/error parity; commit `refactor: localize Phase 5 validator descriptors`.
+- [x] Add characterization tests for Phase 5 packet bytes, manifest digests, checks and diagnostic errors.
+- [x] Add a RED static assertion that Phase 5/6/Resource production files do not import generic semantic admission.
+- [x] Implement the local Phase 5 descriptor and import neutral source/evidence primitives from semantic fidelity.
+- [x] Run Phase 5/6/Resource producer gates and prove byte/error parity; commit `refactor: localize Phase 5 validator descriptors`.
 
 ### Task 3: Extend the real domain source/projection protocol
 
@@ -68,9 +68,9 @@
 **Interfaces:**
 - Produces: `GameIrDomainId` including `implementation-verification`; exact GDD/Level/Balance/Technical source envelope; existing empty-mechanical and semantic receipt protocols for the new domain.
 
-- [ ] Write RED tests for the exact four-document closure, full receipt-bound Section Index, caller byte rejection and an empty-only mechanical receipt.
-- [ ] Extend the closed domain ID/source maps and projection discriminants; do not add a new generic producer framework.
-- [ ] Run domain source/projection plus Phase 4–6 characterization tests; commit `feat: admit implementation verification source authority`.
+- [x] Write RED tests for the exact four-document closure, full receipt-bound Section Index, caller byte rejection and an empty-only mechanical receipt.
+- [x] Extend the closed domain ID/source maps and projection discriminants; do not add a new generic producer framework.
+- [x] Run domain source/projection plus Phase 4–6 characterization tests; commit `feat: admit implementation verification source authority`.
 
 ### Task 4: Strict Implementation/Verification schema
 
@@ -83,13 +83,13 @@
 - Produces: `IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST`, five node-kind/value types and `parseImplementationVerificationModule(value, {request, sections, priorModules})`.
 - Consumes: exact Phase 6 prior sequence and existing five domain parsers.
 
-- [ ] Write one missing-interface RED, then add the minimal compiling manifest/parser shell and make one complete valid fixture GREEN before adding negative cases.
-- [ ] Add each exact-field/union, non-empty root/path, safe-path, canonical-array and forbidden status/result/command mutation one at a time; observe an assertion-specific RED and implement the minimum GREEN.
-- [ ] Add prior-admission mutations one at a time for complete/order-exact modules, exact moduleId-to-domain-parser binding and malformed same-kind values/edges. Keep the raw full prior map for parser identity, filter external targets per domain, prove existing legal cross-domain targets/edges remain accepted, then prove Core global closure across all six modules.
-- [ ] Add graph mutations one at a time for exact-once prior ownership, full prior scenario/invariant coverage, unit dependency cycles, segment-aware root/path overlap and orphan closure.
-- [ ] Add proof mutations one at a time for same-unit, multi-evidence and integration-unit dependency closure; reject irrelevant or incomplete proof owners while the valid fixture remains GREEN.
-- [ ] Keep one explicit parser using existing Core and domain parsers; no meta-schema or fixed count ceiling.
-- [ ] Run focused tests, typecheck and Biome; commit `feat: add implementation verification schema`.
+- [x] Write one missing-interface RED, then add the minimal compiling manifest/parser shell and make one complete valid fixture GREEN before adding negative cases.
+- [x] Add each exact-field/union, non-empty root/path, safe-path, canonical-array and forbidden status/result/command mutation one at a time; observe an assertion-specific RED and implement the minimum GREEN.
+- [x] Add prior-admission mutations one at a time for complete/order-exact modules, exact moduleId-to-domain-parser binding and malformed same-kind values/edges. Keep the raw full prior map for parser identity, filter external targets per domain, prove existing legal cross-domain targets/edges remain accepted, then prove Core global closure across all six modules.
+- [x] Add graph mutations one at a time for exact-once prior ownership, full prior scenario/invariant coverage, unit dependency cycles, segment-aware root/path overlap and orphan closure.
+- [x] Add proof mutations one at a time for same-unit, multi-evidence and integration-unit dependency closure; reject irrelevant or incomplete proof owners while the valid fixture remains GREEN.
+- [x] Keep one explicit parser using existing Core and domain parsers; no meta-schema or fixed count ceiling.
+- [x] Run focused tests, typecheck and Biome; commit `feat: add implementation verification schema`.
 
 ### Task 5: Producer and semantic receipt
 
@@ -102,11 +102,11 @@
 - Produces: service-built semantic packet, semantic receipt/diagnostic replay and a Core-admitted candidate module; never a final projection.
 - Consumes: exact source envelope, empty mechanical receipt and manifest kinds/roles.
 
-- [ ] Write one missing-interface RED, add the minimal compiling producer shell, then make one valid packet/receipt replay fixture GREEN.
-- [ ] Add exact packet-shape, allowed-kind/role/evidence-namespace and forbidden caller identity/bindings/module mutations one at a time through assertion-specific RED to minimum GREEN.
-- [ ] Add direct owner claim, exact UTF-8 literal, missing/ambiguous diagnostic, hidden/accessor key and stale packet/receipt replay mutations one at a time.
-- [ ] Keep the producer wrapper minimal and reuse existing domain-projection and semantic-fidelity primitives.
-- [ ] Run producer/schema/cumulative Phase 4–6 tests; commit `feat: add implementation verification producer`.
+- [x] Write one missing-interface RED, add the minimal compiling producer shell, then make one valid packet/receipt replay fixture GREEN.
+- [x] Add exact packet-shape, allowed-kind/role/evidence-namespace and forbidden caller identity/bindings/module mutations one at a time through assertion-specific RED to minimum GREEN.
+- [x] Add direct owner claim, exact UTF-8 literal, missing/ambiguous diagnostic, hidden/accessor key and stale packet/receipt replay mutations one at a time.
+- [x] Keep the producer wrapper minimal and reuse existing domain-projection and semantic-fidelity primitives.
+- [x] Run producer/schema/cumulative Phase 4–6 tests; commit `feat: add implementation verification producer`.
 
 ### Task 6: Phase 7 fidelity admission
 
@@ -179,8 +179,8 @@
 **Interfaces:**
 - Produces: independent Sol final review and exact acceptance evidence; leaves Phase 8–9 pending.
 
-- [ ] Scan all Game IR production/callers for `core` module literals, generic semantic admission, caller candidate/admissions, compatibility/fallback/placeholder routes, arbitrary caps and duplicate assemblers.
-- [ ] Independently review source fidelity, domain schema, complete coverage/proof closure, candidate order, publication/recovery and test validity; repair every finding through new Luna RED→GREEN commits and repeat until `0 Critical / 0 Important / 0 Minor`.
-- [ ] Re-run full Game IR, Foundation gate, root/server typecheck, Biome, diff/static/protected scans on final HEAD.
-- [ ] Update the roadmap with exact commits/counts and mark only Phase 7 accepted; keep Phase 8 consumer cutover, Phase 9 fresh workflow and Chrome pending.
-- [ ] Commit `docs: close Phase 7 Game IR status`.
+- [x] Scan all Game IR production/callers for `core` module literals, generic semantic admission, caller candidate/admissions, compatibility/fallback/placeholder routes, arbitrary caps and duplicate assemblers.
+- [x] Independently review source fidelity, domain schema, complete coverage/proof closure, candidate order, publication/recovery and test validity; repair every finding through new Luna RED→GREEN commits and repeat until `0 Critical / 0 Important / 0 Minor`.
+- [x] Re-run full Game IR, Foundation gate, root/server typecheck, Biome, diff/static/protected scans on final HEAD.
+- [x] Update the roadmap with exact commits/counts and mark only Phase 7 accepted; keep Phase 8 consumer cutover, Phase 9 fresh workflow and Chrome pending.
+- [x] Commit `docs: close Phase 7 Game IR status`.
