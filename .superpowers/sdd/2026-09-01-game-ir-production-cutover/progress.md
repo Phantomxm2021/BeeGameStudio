@@ -23,7 +23,7 @@ Spec reachable: `docs/superpowers/specs/2026-09-01-game-ir-production-cutover-de
 | 13 | Implementation Worker atomic cutover | Consistent after Tasks 3–8/12. |
 | 14 | Implementation Auditor atomic cutover | Consistent after Tasks 3–8/12–13. |
 | 15 | Acceptance atomic cutover | Consistent after Tasks 3–8/12–14. |
-| 16 | static and full acceptance matrix | Consistent; no Chrome belongs in Phase 8. |
+| 16 | static and full acceptance matrix | Consistent; Task 3A owns scoped committed-IR Chrome admission, while full-workflow Chrome remains Phase 9 only. |
 
 ### Shared-file/interface scan
 
@@ -138,3 +138,5 @@ Task 3: fix round 2 completion — pending final commit — dispatcher now binds
 Task 3: fix round 3 takeover checkpoint — native real session-port compiler structured-output path now installs the strict workflow schema and service-attaches terminal identity; source and committed-reader reads use shared component-safe O_NOFOLLOW handles; recovered compiler dispatch exposes remaining domain IDs and uses recovered state; progress canonicalizes module order/reason codes; stage route boundary uses an explicit allowlist; committed-reader test contains a real Phase 4–7 checkpoint/publication fixture with marker/manifest/checkpoint tamper cases. Exact Task3 command: 63 passed; checkpoint: 22 passed; worker session: 3 passed; typecheck and diff-check passed. Public reader positive fixture remains blocked by legacy test helper receipt path mismatch with the canonical adapter (documented in report).
 
 Task 3: post-round-5 main correction — independent review blockers corrected without touching protected Reviewer/Revision production files: persisted schema advanced atomically to v49; failure identity preserves material numbers; projection parsing moved to domain owners with exact Zod contracts; compiler terminal replay moved before `GAME_IR_COMPILATION` redispatch; absent progress inputs use canonical JSON `null`. Recovery now proves changed progress retries once and the same repeated failure stops at a durable diagnostic instead of looping. Evidence: recovery 107/107, Task 3 exact 64/64, schema/transition/prompts 44/44, checkpoint/publication 45/45, Foundation parity 6/6, typecheck and diff-check pass. Remaining before Task 3 completion: public-reader digest-resealed mutation matrix and explicit ruling or deterministic seam for the secure-file ABA race test.
+
+Execution order revision: accepted by user and main-audited. The authoritative plan now inserts Task 3A standalone IR content-quality plus scoped Chrome admission, keeps UI ordering out of scope, hard-blocks Task 9–15 until both initial and post-Task-8 `IR_CONTENT_ADMITTED` audit reports, separates mechanical coverage from source-packet semantic audit, and retains final Phase 9 as a distinct full-workflow Chrome acceptance. Production baseline remains `e6eba06e9`; unfinished reader evidence is test-only and uncommitted.

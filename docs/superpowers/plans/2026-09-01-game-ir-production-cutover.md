@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** 经主代理审计修订，准入执行；每个任务仍须由主代理在提交前独立审计。
+**Status:** 2026-09-01 范围重排中。Task 9–15 硬阻塞；只有独立 Game IR 内容质量 Gate、自动验收和 Chrome 真实实例验收全部通过，才允许 consumer cutover。
 
-**Goal:** 将已验收的六域 Game IR publication 接入 Bee Game Studio 生产 workflow，建立 v46 单一 durable compilation/checkpoint/reader 链，并按顺序把七个 consumer 原子切换到 IR authority。
+**Goal:** 先证明最终八文档能够稳定产出正确、具体、完整且可追溯的六域 committed Game IR；在独立自动验收与 Chrome 真实实例验收通过后，再把七个 consumer 原子切换到唯一 IR authority。
 
-**Architecture:** `Foundation READY` 是唯一上游交接；同一 DeliveryRun 进入唯一 `GAME_IR_COMPILATION`，由一个 checkpoint writer/loader 负责 durable manifest chain 和 Phase 4→7 replay，再由 committed reader 从 run-state authority 重验六域 publication。Checklist 继续由 READY raw Markdown 负责内容，唯一 durable `ChecklistToScenarioBridge` 负责 typed traceability；资源以 `requirementId -> variantId -> artifactId -> resourceId/files` 精确 join，执行 consumer 只消费 reader、bridge 和 actual-file facts。
+**Architecture:** `Foundation READY` 是唯一上游交接；同一 DeliveryRun 进入唯一 `GAME_IR_COMPILATION`，由一个 checkpoint writer/loader 负责 durable manifest chain 和 Phase 4→7 replay，再由 committed reader 从 run-state authority 重验六域 publication。Game IR 在系统中的唯一位置是 Foundation Reviewer/Revision 完成之后、Checklist authoring 之前。它表达 design intent 与 delivery requirements；后续实际资源只通过绑定到 IR digest 的 realization receipt/projection 记录，不回写第二份 IR。Checklist 继续由 READY raw Markdown 负责内容，唯一 durable `ChecklistToScenarioBridge` 负责 typed traceability；资源以 `requirementId -> variantId -> artifactId -> resourceId/files` 精确 join，执行 consumer 只消费 reader、bridge 和 actual-file facts。
 
 **Tech Stack:** TypeScript, Zod v4, Bun test, Node `fs/promises` atomic rename/fsync primitives, existing DeliveryRun run-store/controller/dispatcher/recovery, existing Game IR domain assemblers and publication validators.
 
@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- DeliveryRun schema 固定为 v46；旧版本、未知字段/枚举、旧 checkpoint 一律 fail closed 为 obsolete/attention，不实现 migration/compat reader。
+- DeliveryRun persisted schema 必须随结构变化原子递增；当前实现为 v49。旧版本、未知字段/枚举、旧 checkpoint 一律 fail closed 为 obsolete/attention，不实现 migration/compat reader。
 - 只有一个 `GAME_IR_COMPILATION` durable phase；完成后只能回到现有 `DOCUMENT_REVIEW + CHECKLIST_DRAFTING`，再经过 `DOCUMENT_REVIEW + CHECKLIST_BRIDGE` 才能进入 `RESOURCE_PREPARATION`；不得创建顶层 `CHECKLIST` phase。
 - `gameIrState` 只保存 compilation identity、checkpoint/publication receipt refs 和 digest，不复制 candidate、module、graph、Checklist、resource 或 document body。
 - 只允许一个 `GameIrStageCheckpointWriter`、一个 `GameIrStageCheckpointLoader`、一个 committed reader；复用既有 run-store/controller/dispatcher/recovery，不创建第二 store/controller/journal/publication authority。
@@ -26,7 +26,64 @@
 - Phase 8 新增 route 和七个迁移 consumer 不设置 token、时间、attempt、task、node、edge、scenario、invariant、evidence、artifact 或文件数量的任意业务上限；schema 固有 cardinality 仍由 strict parser 强制。protected Foundation surface 的既存策略只记录为独立审计发现，不在本计划修改。
 - consumer 切换必须与旧 reader/prompts/authorityPaths 的删除处于同一提交；每个 consumer 先写 RED test，再实现 GREEN、static boundary 和 recovery test。
 - Foundation parity test 可以在测试 harness 内使用 enabled/disabled switch，但该 switch 不得进入生产 DeliveryRun、controller、prompt 或 fallback path。
-- 本 Phase 不跑 Chrome；只有全矩阵、静态门禁、自动化回归和至少两个新 READY 项目通过后，才允许后续 Phase 9 fresh Chrome。
+- Task 9–15 之前必须运行一次范围受限的 Chrome 真实实例验收：从真实 Idea/Brief 经八文档、Foundation Reviewer/Revision 和 Foundation READY 到 committed Game IR，随后暂停，不以 Checklist 或 downstream 成功掩盖 IR 问题。Task 16 之后仍需独立 Phase 9 全流程 Chrome 验收。
+- Chrome 验收不能只看 UI completed；必须联合核对服务日志、durable run、checkpoint、publication、committed reader、六个 module、source maps、dependency graph、semantic evidence、token、耗时和恢复记录。token、耗时和重试值只记录，不设任意阈值。
+- 当前阶段不修 UI 展示顺序；已知 `CHECKLIST_AUTHORING` 与 `GAME_IR_COMPILATION` 的 display order 冲突登记为后续独立问题，不得混入 IR 内容质量工作。
+
+## Authoritative execution boundary and order
+
+本节覆盖下方历史任务编号的执行顺序；任务内部接口与原子提交边界仍保留。不得因为某个下游测试需要数据而提前执行 consumer cutover。
+
+### 当前工作范围
+
+只包含：
+
+- `Foundation READY -> GAME_IR_COMPILATION -> checkpoint -> publication -> committed reader` 唯一链路。
+- 六域实际内容质量、source binding、dependency graph、semantic evidence、resource realization design projection、implementation/verification projection。
+- compiler 失败、恢复、无进展诊断与 committed reader fail-closed 证据。
+- 独立自动内容质量 Gate 和 Chrome 真实实例验收。
+
+明确排除：
+
+- UI 阶段排序或新增 UI 功能。
+- 修改 Foundation Reviewer、Foundation Revision、Issue Registry、八文档内容 authority 或 Checklist 内容 authority。
+- Task 9–15 consumer 切换，以及为通过 IR 验收而修改任何 downstream consumer。
+- 旧 reader、fallback、compatibility、migration、dual write 或第二份 resource-completed Game IR。
+
+### 唯一执行顺序
+
+1. 完成并审计 Task 3 的 reader/recovery/security 证据。
+2. 执行 Task 3A：独立 Game IR 内容质量 Gate。
+3. 运行 Game IR 自动验收；问题只能回到 compiler prompt、strict DTO/domain admission、assembler、checkpoint/publication/reader 范围修正。
+4. 使用 Chrome 从真实项目零状态运行到 committed Game IR，核对 UI、日志与产物；进入 Checklist 时立即暂停。发现问题继续在 Game IR 范围内循环，直至没有未解释问题。
+5. 执行 Task 4–8，但不得调用或修改 Task 9–15 consumer route。
+6. Task 4–8 后重新运行同一自动 Gate 与 Chrome committed-IR 回归。
+7. 只有两次准入均通过，才按 Task 9→15 顺序逐个原子切换，并在同一提交删除该 consumer 旧轨。
+8. Task 16 关闭全局静态双轨门禁与跨项目矩阵。
+9. Phase 9 从零执行完整 Chrome workflow 验收。
+
+### Task 9–15 硬准入条件
+
+以下任一项不满足，Task 9–15 保持 blocked：
+
+- 六个 canonical module 完整、非占位、非空泛摘要，且只有唯一 authority representation。
+- 八文档中属于 IR 的权威事实都有唯一落点或明确 reference-only 关系；不存在无来源发明、冲突或遗漏。
+- 每个业务字段具有有效 source binding；所有 reference、edge、dependency 和 semantic evidence 可解析且与 committed closure 一致。
+- Resource Realization 明确 logical resource、acquisition profile、delivery target、variant 和一个 variant 的一个或多个 delivery artifact。
+- Implementation Verification 明确 implementation unit、acceptance scenario、invariant 和 evidence requirement，达到下游可执行粒度。
+- committed reader、checkpoint、publication、recovery、tamper 和 unchanged-progress 证据通过。
+- Chrome 真实实例的 UI、日志、durable state 和实际产物一致；没有未解释的 blocked、重派、停滞、placeholder、冗余或内容失真。`IR_CONTENT_ADMITTED` 只允许作为审计报告结论，不得写入 DeliveryRun、schema、transition、controller 或任何生产 authority。
+- 不使用固定 token、时间、轮数、节点、场景、资源或文件数量作为合格阈值；按未覆盖语义维度选择实例并持续验证。
+
+### 2026-09-01 main audit ruling
+
+- **Stage placement — accepted:** runtime canonical order is Foundation Reviewer → Foundation Revision → Game IR → Checklist；UI display order mismatch is recorded but excluded from this scope。
+- **Authority — accepted:** Task 3A consumes immutable source packets and the sole committed reader result；it creates no second writer、reader、publication、reviewer、revision or persisted admission state。
+- **Quality proof — accepted after correction:** objective structure/coverage is mechanical；semantic fidelity、空泛、冗余和 unsupported invention use source-packet-to-node artifact audit plus Chrome evidence，not keyword/length/count heuristics。
+- **Consumer isolation — accepted:** Task 9–15 are hard-blocked twice：initial Task 3A admission and post-Task-8 regression admission。No downstream change may be used to make an IR case pass。
+- **Chrome — accepted:** scoped Chrome is an evidence gate rather than a substitute for automated tests；final Phase 9 full workflow remains separate。
+- **No-cap/no-dual-track — accepted:** metrics are observational only；each later consumer switch still deletes its old route atomically。
+- **Current implementation state — explicit:** production HEAD is `e6eba06e9`；the working tree contains only unfinished `committed-reader.test.ts` evidence work, which must be made type-clean and independently verified before Task 3 can be admitted。
 
 ## 文件地图与职责
 
@@ -156,6 +213,40 @@ Expected: PASS; invalid publication is diagnostic-only and never reaches a consu
 - [ ] **Step 6: Commit boundary.**
 
 Run: `git add packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/committed-reader.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/committed-reader.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/controller.ts packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.ts packages/agent-workflow-server/src/beegame/delivery-workflow/transition.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.ts packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts && git commit -m "feat: route production through committed Game IR"`
+
+### Task 3A: standalone Game IR content-quality and Chrome admission gate
+
+**Boundary:** 本任务只验证 committed Game IR 本身，不接入 Checklist Bridge、Resource、Planner、Implementation、Audit 或 Acceptance。它不得创建第二 reader、第二 publication、第二 reviewer/revision loop 或新的 durable authority。
+
+**Files:**
+- Create only if mechanical checks are not already expressible through existing domain validators: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/content-quality-gate.ts`
+- Test: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/content-quality-gate.test.ts`
+- Test/harness: reuse `committed-reader.test.ts`, existing domain semantic-fidelity tests and real workflow/log/artifact inspection; do not modify downstream consumers.
+- Report: `.superpowers/sdd/2026-09-01-game-ir-production-cutover/task-3a-ir-quality-report.md`
+
+**Quality contract:**
+- Input is only the canonical Foundation READY receipt/source packets plus the result of `readCommittedGameIr`; the gate does not reread alternate documents or infer authority by keyword/similarity.
+- Coverage is authority-driven, not count-driven: every admitted source claim and owned material has exactly one module/node destination or an explicit permitted reference-only relation.
+- Reject placeholder/core modules, empty/generic summary nodes, unresolved references/edges, missing source bindings, detached evidence, duplicated authority, unsupported invention and contradictions with source packets.
+- Resource projection must preserve logical requirement→profile→target→variant→artifact semantics, including multiple artifacts for one variant where required. It describes desired delivery, not actual inventory files.
+- Implementation/Verification projection must provide concrete units, scenarios, invariants and evidence requirements with resolvable ownership and traceability.
+- Density/redundancy is split deliberately: repeated authority payloads and duplicate ownership are mechanically rejected；“空泛、冗余、是否忠实表达来源”由主代理将 committed node 逐项对照 immutable source packet 审计，并记录到 coverage ledger。禁止用关键词、字符串相似度、字数、token 或节点数量启发式替代语义判断。
+
+- [ ] **Step 1: Freeze downstream.** 以 `e6eba06e9` 为本阶段变更基线；主代理通过 changed-path diff 和 protected manifest 只读核对，证明 Task 9–15 production routes 与 Foundation protected files 未被修改。不要把 Git baseline 或测试开关写入生产代码。
+
+- [ ] **Step 2: Complete Task 3 public-reader evidence.** Run the public entry against digest-resealed duplicate/remap/core-placeholder, detached evidence, source-map/graph, READY/run/checkpoint digest and staging/old/previous fallback mutations. Record an explicit secure-file ABA test ruling; add a production seam only if a real vulnerability cannot otherwise be proved closed.
+
+- [ ] **Step 3: Write RED objective content-quality cases.** Use committed reader fixtures to demonstrate rejection of missing owned source coverage, duplicated owner payload, invalid/unbound source claims, unresolved cross-module relations, incomplete resource artifact realization, and non-executable implementation/verification projections. “空泛内容”和“unsupported invention”不得通过关键词/长度启发式实现，留给 Step 5/6 的 source-packet 对照审计。
+
+- [ ] **Step 4: Implement the smallest mechanical gate.** Reuse existing strict DTO/domain parsers, semantic-fidelity checks, closure and reader projections. Add no generic second validator framework and no model-based reviewer stage. If a requirement is already enforced by an existing validator, reference and test it instead of duplicating code.
+
+- [ ] **Step 5: Run standalone automatic acceptance and semantic artifact audit.** Run the complete Game IR domain, checkpoint, publication, reader, recovery, boundary and Foundation parity suites plus typecheck/lint/diff-check。随后将 committed nodes/source claims 与 immutable source packets 建立逐项 coverage ledger，人工/主代理判断空泛、冗余、遗漏、冲突和 unsupported invention。记录实际 token、duration、retry 和 artifact metrics，不设阈值。
+
+- [ ] **Step 6: Chrome real-instance admission.** From a fresh real project, run Idea/Brief→eight documents→Foundation Reviewer/Revision→Foundation READY→committed Game IR. At Checklist entry immediately pause. Inspect all six modules, source maps, dependency graph, semantic evidence, checkpoint/publication/READY receipts, service logs and durable run. Continue correcting only Game IR-owned code until no unexplained defect remains.
+
+- [ ] **Step 7: Repeat by uncovered semantic dimension.** Select additional real projects based on uncovered complexity—numerical/formula-heavy, scene/UI-state-heavy, and resource-variant/multi-artifact-heavy are examples, not a fixed project count. Stop only when the source/material coverage ledger has no uncovered dimension.
+
+- [ ] **Step 8: Main audit and admission decision.** The main agent verifies the evidence, protected boundaries, no-dual-track gate and report. Only an explicit `IR_CONTENT_ADMITTED` result unlocks Task 4–8. Task 9–15 remain blocked until the post-Task-8 rerun also produces `IR_CONTENT_ADMITTED`.
 
 ### Task 4: Checklist semantic bridge and durable admission
 
@@ -321,6 +412,8 @@ Run: `git add packages/agent-workflow-server/src/beegame/delivery-workflow/execu
 
 ## Consumer atomic cutovers
 
+**HARD BLOCK:** Task 9 may not start until Task 3A has produced `IR_CONTENT_ADMITTED`, Task 4–8 are complete, and the post-Task-8 automatic plus Chrome committed-IR regression has produced a second `IR_CONTENT_ADMITTED`. Test fixture convenience, downstream compile failures, or schedule pressure cannot waive this gate.
+
 Each task below has one commit boundary containing: the consumer's RED single-reader test, the reader switch, deletion of its old document reader/prompt/scope, GREEN test, and a recovery/tamper assertion. No task may leave both routes callable.
 
 ### Task 9: Resource Planner single-reader cutover
@@ -449,4 +542,4 @@ Run: `git add packages/agent-workflow-server/src/beegame/delivery-workflow/phase
 - [ ] Confirm no task creates Comprehensive Reviewer/Revision or leaves a compatibility/fallback/old-reader wrapper.
 - [ ] Confirm every consumer switch deletes its old reader in the same commit as the new reader and contains RED→GREEN→static/recovery verification.
 - [ ] Confirm all examples use concrete paths, function names and commands; no `TBD`, `TODO`, “implement later”, “appropriate error handling”, or unspecified test step remains.
-- [ ] Confirm no Chrome command appears in an implementation/verification step; Phase 9 remains a separate fresh-run acceptance after this plan's automatic gates.
+- [ ] Confirm Chrome only appears in Task 3A 的 committed-IR scoped admission 和 Task 3A post-Task-8 regression；Task 16 不启动 Chrome，Phase 9 仍是独立 fresh full-workflow acceptance。
