@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** 2026-09-01 范围重排中。Task 9–15 硬阻塞；只有独立 Game IR 内容质量 Gate、自动验收和 Chrome 真实实例验收全部通过，才允许 consumer cutover。
+**Status:** 2026-09-01 范围重排已批准并执行中。Task 9–15 硬阻塞；先删除当前通用六域 compiler 轨道，恢复权威设计规定的阶段化 domain-specific packet 协议，再执行独立 Game IR 内容质量 Gate、自动验收和 Chrome 真实实例验收。
 
 **Goal:** 先证明最终八文档能够稳定产出正确、具体、完整且可追溯的六域 committed Game IR；在独立自动验收与 Chrome 真实实例验收通过后，再把七个 consumer 原子切换到唯一 IR authority。
 
@@ -53,14 +53,15 @@
 ### 唯一执行顺序
 
 1. 完成并审计 Task 3 的 reader/recovery/security 证据。
-2. 执行 Task 3A：独立 Game IR 内容质量 Gate。
-3. 运行 Game IR 自动验收；问题只能回到 compiler prompt、strict DTO/domain admission、assembler、checkpoint/publication/reader 范围修正。
-4. 使用 Chrome 从真实项目零状态运行到 committed Game IR，核对 UI、日志与产物；进入 Checklist 时立即暂停。发现问题继续在 Game IR 范围内循环，直至没有未解释问题。
-5. 执行 Task 4–8，但不得调用或修改 Task 9–15 consumer route。
-6. Task 4–8 后重新运行同一自动 Gate 与 Chrome committed-IR 回归。
-7. 只有两次准入均通过，才按 Task 9→15 顺序逐个原子切换，并在同一提交删除该 consumer 旧轨。
-8. Task 16 关闭全局静态双轨门禁与跨项目矩阵。
-9. Phase 9 从零执行完整 Chrome workflow 验收。
+2. 执行 Task 3B：删除通用六域 compiler 轨道，切换为同一 `GAME_IR_COMPILATION` identity 内的阶段化 domain-specific projection/validation packet 协议。
+3. 执行 Task 3A：独立 Game IR 内容质量 Gate。
+4. 运行 Game IR 自动验收；问题只能回到 compiler protocol/prompt、strict DTO/domain admission、assembler、checkpoint/publication/reader 范围修正。
+5. 使用 Chrome 从真实项目零状态运行到 committed Game IR，核对 UI、日志与产物；进入 Checklist 时立即暂停。发现问题继续在 Game IR 范围内循环，直至没有未解释问题。
+6. 执行 Task 4–8，但不得调用或修改 Task 9–15 consumer route。
+7. Task 4–8 后重新运行同一自动 Gate 与 Chrome committed-IR 回归。
+8. 只有两次准入均通过，才按 Task 9→15 顺序逐个原子切换，并在同一提交删除该 consumer 旧轨。
+9. Task 16 关闭全局静态双轨门禁与跨项目矩阵。
+10. Phase 9 从零执行完整 Chrome workflow 验收。
 
 ### Task 9–15 硬准入条件
 
@@ -83,7 +84,8 @@
 - **Consumer isolation — accepted:** Task 9–15 are hard-blocked twice：initial Task 3A admission and post-Task-8 regression admission。No downstream change may be used to make an IR case pass。
 - **Chrome — accepted:** scoped Chrome is an evidence gate rather than a substitute for automated tests；final Phase 9 full workflow remains separate。
 - **No-cap/no-dual-track — accepted:** metrics are observational only；each later consumer switch still deletes its old route atomically。
-- **Current implementation state — explicit:** production HEAD is `e6eba06e9`；the working tree contains only unfinished `committed-reader.test.ts` evidence work, which must be made type-clean and independently verified before Task 3 can be admitted。
+- **Compiler protocol correction — required:** the authority spec requires the service to build domain-specific semantic and validation packets before transport. The current generic `sourcePackets + remainingDomainIds + domainResults` batch makes the model infer six domain contracts and self-report projection plus PASS in one terminal. Task 3B must delete that route atomically; enriching the same generic prompt is not an accepted fix.
+- **Current implementation state — explicit:** Task 3 reader/recovery/security evidence is complete at `2c95905dd`; Task 3B is the next production task. Task 9–15 remain blocked。
 
 ## 文件地图与职责
 
@@ -214,6 +216,43 @@ Expected: PASS; invalid publication is diagnostic-only and never reaches a consu
 
 Run: `git add packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/committed-reader.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/committed-reader.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/controller.ts packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.ts packages/agent-workflow-server/src/beegame/delivery-workflow/transition.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.ts packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts && git commit -m "feat: route production through committed Game IR"`
 
+### Task 3B: staged domain-packet compiler protocol cutover
+
+**Why this precedes content admission:** The accepted design requires the service to construct domain-specific semantic packets and independent semantic-validation packets. The current production route sends all raw domain source envelopes through one generic compiler contract and accepts candidate plus validator PASS from the same terminal. Strict server admission can reject malformed output, but the model does not receive the contract it is expected to satisfy and is allowed to self-validate. This is a protocol defect, not a content-quality tuning problem.
+
+**Boundary:** Keep one top-level `GAME_IR_COMPILATION`, one compilation identity, one checkpoint chain, one publication and one committed reader. Do not modify Foundation Reviewer/Revision, Checklist, any Task 9–15 consumer, or create domain-specific top-level phases. Generic worker transport may remain shared infrastructure, but its Game IR payload must be a strict discriminated domain operation and may not normalize domain authority into a generic admission.
+
+**Files:**
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/stage-checkpoint.ts` and its tests only if durable pre-validation authority cannot be reconstructed from the existing checkpoint chain without copying authority into `DeliveryRun`.
+- Create or modify the smallest Game IR-owned protocol scheduler file under `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/`; do not add scheduling logic to every domain producer.
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/controller.ts`, `dispatch.ts`, `worker-contracts.ts`, `worker-prompts.ts`, `delivery-worker-session-port.ts` and focused tests.
+- Modify `types.ts`/`schema.ts` only if the persisted `DeliveryRun` shape changes; if it changes, bump the schema atomically and reject the previous version without migration.
+- Report: `.superpowers/sdd/2026-09-01-game-ir-production-cutover/task-3b-staged-packet-report.md`.
+
+**Protocol contract:**
+- A projection operation receives exactly one service-built, identity-bound domain semantic packet. Its result can contain only that domain's semantic candidate or structured diagnostic; it cannot return validation, checkpoint, READY or publication authority.
+- Gameplay 与 Balance 是一个原子 Phase 4 pair，不是先后 admission：两份 projection operation 分别接收其 domain owner 构建的 semantic packet，以及由另一侧 deterministic candidate/source authority 派生的 exact allowed target catalog；两份 candidate 都完成后，服务端才调用现有 pair assembler 同时重验并签发 Phase 4 closure。任何一侧都不得提前标记为 admitted authority。
+- Phase 5–7 的 dependent packet 只携带该 domain owner 既有 schema/assembler 实际允许的 exact prior-node IDs/kinds 和 prior closure digest：World/Scene 使用 Phase 4 中被其 manifest 允许的目标；Presentation 使用 admitted Phase 4 与 World/Scene 中被其 manifest 允许的目标；Resource Realization 使用 admitted Phase 5 closure；Implementation/Verification 使用 admitted Phase 6 closure。不得把“所有先前节点”包装成 controller-owned generic transport catalog，也不得扩大既有 domain dependency。
+- After service admission of the candidate, a distinct validation operation receives the exact service-built validation packet for that admitted candidate. Its result can contain only PASS or structured diagnostic and cannot modify or replace the candidate.
+- Protocol order is fixed: Gameplay candidate → Balance candidate → atomic Phase 4 pair admission → World/Scene candidate → independent World/Scene validation/admission → Presentation candidate → independent Presentation validation/admission → Resource Realization candidate → independent validation/admission → Implementation/Verification candidate → independent validation/admission。A later operation is built only after its exact prerequisite candidate or closure is durably committed. This order is dependency, not a retry/time/token cap.
+- Durable recovery replays the last committed protocol substep and derives exactly the next legal operation. It must never regenerate an already committed candidate, skip independent validation, restart Phase 4 after a later checkpoint, or read an old packet/result/publication as fallback.
+- **Durability ruling:** extend the existing sole checkpoint writer/loader into an immutable ordered protocol journal, then retain the existing Phase 4→7 closure manifests in the same hash chain. Projection/validation terminals are transient transport evidence; `activeDispatch` is overwritten and `DeliveryRun.tasks` contains atomic implementation tasks, so neither can reconstruct compiler substeps after crash. Candidate/validation authority therefore lives only in checkpoint records and is never copied into `gameIrState` or a second store. Rejected alternative: terminal reconstruction would require a second durable terminal ledger or replay already-completed model work. Recovery cost if this ruling is wrong: replace the protocol journal before Task 3A; do not add a fallback reader.
+- **Version ruling:** the persisted `DeliveryRun` baseline remains v49 because this task does not change `GameIrState`; historical v46 Task 1/2 wording describes the original landed increment and must not be used to roll production state backward. The checkpoint/record protocol must advance from its current `game-ir-stage-checkpoint.v46` / `game-ir-stage-record.v46` values because the manifest chain gains ordered substeps. The loader rejects all old checkpoint protocol values with no migration or compatibility path.
+- Delete `sourcePackets`, `remainingDomainIds`, generic multi-domain `domainResults`, and any worker instruction that asks one terminal to project and validate multiple domains. Do not keep an adapter or compatibility parser.
+
+- [x] **Step 1: Audit and rule on durable substep persistence.** Main audit selected an extension of the sole checkpoint chain for the reasons and recovery cost recorded above. It also corrected the Phase 4 dependency from a false Gameplay→Balance admission sequence to atomic pair admission.
+- [ ] **Step 2: Write RED protocol and static-boundary tests.** Prove the model receives an exact domain packet rather than raw six-domain source envelopes; projection output cannot contain validation; validation cannot contain candidate; operations cannot be reordered, duplicated, skipped or cross-bound; the old generic fields and prompt instructions are absent from every production path.
+- [ ] **Step 3: Write RED crash/recovery tests.** Cover restart after projection admission before validation, after validation before phase closure, after each committed phase, and before publication. Prove the same compilation identity resumes the exact next operation with no fixed attempt/time/token cap.
+- [ ] **Step 4: Implement the smallest staged scheduler and durable protocol.** Reuse the six existing domain packet builders, admissions, validators and assemblers. Do not duplicate any domain schema or introduce a generic semantic admission.
+- [ ] **Step 5: Atomically delete the generic compiler route.** Remove the old contract fields, result shape, prompt wording, controller batch admission and recovery branches in the same commit that makes the staged route green. Unknown old fields must fail closed.
+- [ ] **Step 6: Run focused GREEN evidence.** Run compiler contract/prompt/session, staged scheduler, controller recovery, checkpoint/publication/reader, boundary and Foundation parity suites plus typecheck, Biome and diff-check.
+- [ ] **Step 7: Main-agent audit.** Verify exact spec compliance, no second stage/authority, no Reviewer/Revision or Task 9–15 changes, no compatibility path, no arbitrary caps, and no same-worker self-validation. Correct findings before admitting Task 3B.
+
+**Bounded implementation order (no temporary production dual route):**
+1. **Task 3B.1 — owner-built packet completeness:** add the missing exact counterpart/prior-target bindings to existing domain-owned projection packet builders and strict tests. Do not change controller routing yet and do not duplicate schema rules.
+2. **Task 3B.2 — atomic protocol cutover:** RED tests first, then add the sole checkpoint protocol journal, strict discriminated projection/validation contracts, staged scheduler, prompt/session/controller/recovery wiring, and delete the generic batch fields/branches in the same production commit.
+3. **Task 3B.3 — evidence and correction:** run focused recovery/tamper/boundary/Foundation parity evidence; main-agent audit the complete diff and assign only concrete corrections. Task 3A remains blocked until this audit is clean.
+
 ### Task 3A: standalone Game IR content-quality and Chrome admission gate
 
 **Boundary:** 本任务只验证 committed Game IR 本身，不接入 Checklist Bridge、Resource、Planner、Implementation、Audit 或 Acceptance。它不得创建第二 reader、第二 publication、第二 reviewer/revision loop 或新的 durable authority。
@@ -232,9 +271,9 @@ Run: `git add packages/agent-workflow-server/src/beegame/delivery-workflow/game-
 - Implementation/Verification projection must provide concrete units, scenarios, invariants and evidence requirements with resolvable ownership and traceability.
 - Density/redundancy is split deliberately: repeated authority payloads and duplicate ownership are mechanically rejected；“空泛、冗余、是否忠实表达来源”由主代理将 committed node 逐项对照 immutable source packet 审计，并记录到 coverage ledger。禁止用关键词、字符串相似度、字数、token 或节点数量启发式替代语义判断。
 
-- [ ] **Step 1: Freeze downstream.** 以 `e6eba06e9` 为本阶段变更基线；主代理通过 changed-path diff 和 protected manifest 只读核对，证明 Task 9–15 production routes 与 Foundation protected files 未被修改。不要把 Git baseline 或测试开关写入生产代码。
+- [ ] **Step 1: Freeze downstream.** 以 Task 3B accepted commit 为本阶段变更基线；主代理通过 changed-path diff 和 protected manifest 只读核对，证明 Task 9–15 production routes 与 Foundation protected files 未被修改。不要把 Git baseline 或测试开关写入生产代码。
 
-- [ ] **Step 2: Complete Task 3 public-reader evidence.** Run the public entry against digest-resealed duplicate/remap/core-placeholder, detached evidence, source-map/graph, READY/run/checkpoint digest and staging/old/previous fallback mutations. Record an explicit secure-file ABA test ruling; add a production seam only if a real vulnerability cannot otherwise be proved closed.
+- [x] **Step 2: Complete Task 3 public-reader evidence.** Completed at `2c95905dd`: public entry rejects digest-resealed duplicate/remap/core-placeholder, detached evidence, source-map/graph, READY/run/checkpoint digest and staging/old/previous fallback mutations. The secure-file ABA ruling is recorded in `task-3-report.md`; no production-only test seam was added.
 
 - [ ] **Step 3: Write RED objective content-quality cases.** Use committed reader fixtures to demonstrate rejection of missing owned source coverage, duplicated owner payload, invalid/unbound source claims, unresolved cross-module relations, incomplete resource artifact realization, and non-executable implementation/verification projections. “空泛内容”和“unsupported invention”不得通过关键词/长度启发式实现，留给 Step 5/6 的 source-packet 对照审计。
 
