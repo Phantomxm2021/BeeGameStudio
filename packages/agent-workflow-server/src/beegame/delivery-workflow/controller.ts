@@ -69,7 +69,7 @@ import {
   type GameIrCompilerDomainModel,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
-import { lstat, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, mergeFoundationFactResults, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
@@ -175,6 +175,7 @@ import { admitResourceRealizationSemanticValidationResult, prepareResourceRealiz
 import { admitImplementationVerificationSemanticResult, buildImplementationVerificationSemanticPacket, prepareImplementationVerificationModule } from './game-ir/implementation-verification-producer'
 import { admitImplementationVerificationSemanticValidationResult, prepareImplementationVerificationSemanticValidationPacket } from './game-ir/phase7-admission'
 import { GameIrStageCheckpointLoader } from './game-ir/stage-checkpoint'
+import { readSecureWorkspaceFile } from './secure-file'
 
 function sameDocumentDigests(
   left: readonly { path: string; digest: string }[],
@@ -190,22 +191,11 @@ async function buildGameIrSourcePackets(input: {
   receipt: import('./game-ir/contracts').FoundationReadyReceipt
 }): Promise<Readonly<Record<GameIrDomainId, GameIrDomainSourceEnvelope>>> {
   const workspace = resolve(input.workspacePath)
-  const indexPath = resolve(workspace, input.receipt.sectionIndexPath)
-  const indexRelative = relative(workspace, indexPath)
-  if (!indexRelative || indexRelative === '..' || indexRelative.startsWith(`..${sep}`))
-    throw new Error('Foundation READY Section Index path escapes the workspace')
-  const indexInfo = await lstat(indexPath)
-  if (!indexInfo.isFile() || indexInfo.isSymbolicLink())
-    throw new Error('Foundation READY Section Index is not a canonical regular file')
-  const sectionIndex = JSON.parse(await readFile(indexPath, 'utf8')) as readonly import('./foundation-section-index').SectionRef[]
+  const sectionIndex = JSON.parse(await readSecureWorkspaceFile(workspace, input.receipt.sectionIndexPath)) as readonly import('./foundation-section-index').SectionRef[]
   if (digestSectionIndex(sectionIndex) !== input.receipt.sectionIndexDigest)
     throw new Error('Foundation READY Section Index digest mismatch')
   const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => {
-    const documentPath = join(workspace, path)
-    const documentInfo = await lstat(documentPath)
-    if (!documentInfo.isFile() || documentInfo.isSymbolicLink())
-      throw new Error(`Foundation READY document is not a canonical regular file: ${path}`)
-    const bytes = await readFile(documentPath, 'utf8')
+    const bytes = await readSecureWorkspaceFile(workspace, path)
     if (createHash('sha256').update(bytes, 'utf8').digest('hex') !== input.receipt.documentDigests[path])
       throw new Error(`Foundation READY document digest mismatch: ${path}`)
     return [path, bytes] as const
@@ -233,16 +223,35 @@ type GameIrCompilerAuthorities = {
   phase7: ImplementationVerificationAssemblyAuthority
 }
 
+function remainingGameIrDomainIds(
+  replay?: GameIrReplayAuthority,
+): readonly GameIrDomainId[] {
+  if (!replay) return GAME_IR_DOMAIN_IDS
+  if (!replay.phase5Authority) return ['world-scene', 'presentation', 'resource-realization', 'implementation-verification']
+  if (!replay.phase6Authority) return ['resource-realization', 'implementation-verification']
+  if (!replay.phase7Authority) return ['implementation-verification']
+  return []
+}
+
+function canonicalCompilerDomainResults(
+  results: readonly GameIrCompilerDomainModel[] | undefined,
+): readonly GameIrCompilerDomainModel[] | undefined {
+  return results
+    ? [...results].sort((left, right) => left.moduleId.localeCompare(right.moduleId))
+    : undefined
+}
+
 function admitGameIrCompilerResults(
   value: readonly GameIrCompilerDomainModel[],
   sources: Readonly<Record<GameIrDomainId, GameIrDomainSourceEnvelope>>,
   replay?: GameIrReplayAuthority,
 ): GameIrCompilerAuthorities {
-  if (value.length !== GAME_IR_DOMAIN_IDS.length)
-    throw new Error('Game IR compiler output must contain exactly one model DTO per domain')
+  const remaining = remainingGameIrDomainIds(replay)
+  if (value.length !== remaining.length)
+    throw new Error('Game IR compiler output must contain exactly one model DTO per remaining domain')
   const byModule = new Map(value.map(model => [model.moduleId, model]))
-  if (byModule.size !== GAME_IR_DOMAIN_IDS.length || GAME_IR_DOMAIN_IDS.some(moduleId => !byModule.has(moduleId)))
-    throw new Error('Game IR compiler output has duplicate or missing domain DTOs')
+  if (byModule.size !== remaining.length || remaining.some(moduleId => !byModule.has(moduleId)))
+    throw new Error('Game IR compiler output has duplicate, unexpected, or missing remaining domain DTOs')
   const entry = (moduleId: GameIrDomainId) => byModule.get(moduleId)!
   const mechanical = (moduleId: GameIrDomainId) => {
     const source = sources[moduleId]
@@ -748,9 +757,9 @@ export function createDeliveryWorkflowController(input: {
       const progressIdentity = {
         inputDigest: digestGameIrValue({ identity: state.identity, compileRequest: admittedRequest }),
         diagnosticDigest: digestGameIrValue(result.status === 'completed' ? undefined : { reasonCode: 'compiler_failed' }),
-        candidateDigest: digestGameIrValue(result.domainResults ?? undefined),
+        candidateDigest: digestGameIrValue(canonicalCompilerDomainResults(result.domainResults)),
         checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? undefined),
-        terminalDigest: digestGameIrValue({ status: result.status, domainResults: result.domainResults, reason: result.reason }),
+        terminalDigest: digestGameIrValue({ status: result.status, domainResults: canonicalCompilerDomainResults(result.domainResults), reasonCode: result.status === 'completed' ? undefined : 'compiler_failed' }),
       }
       const saveCompilerAttention = async (reasonCode: string, expected: string, actual: string): Promise<void> => {
         const durable = await store.load()
@@ -806,6 +815,10 @@ export function createDeliveryWorkflowController(input: {
         const replay = state.latestCheckpoint
           ? await new GameIrStageCheckpointLoader().load({ workspacePath: input.workspacePath, deliveryRun: run })
           : undefined
+        const declaredRemaining = request.contract.remainingDomainIds
+        const expectedRemaining = remainingGameIrDomainIds(replay)
+        if (!Array.isArray(declaredRemaining) || digestGameIrValue(declaredRemaining) !== digestGameIrValue(expectedRemaining))
+          throw new Error('Game IR compiler remaining domain contract is stale')
         authorities = admitGameIrCompilerResults(domainResults, sourcePackets, replay)
       } catch (error) {
         await saveCompilerAttention('compilation', 'domain-specific Phase 4–7 admission', 'compiler result failed domain admission')
@@ -2222,16 +2235,19 @@ export function createDeliveryWorkflowController(input: {
     if (run.status !== 'running') return
     if (run.phase === 'GAME_IR_COMPILATION') {
       let compilationRun = run
-      const state = run.gameIrState
+      let state = run.gameIrState
       if (!state || state.status !== 'compiling')
         throw new Error('Game IR compilation phase is missing its compiling state')
       const checkpointLoader = new GameIrStageCheckpointLoader()
+      let replay: GameIrReplayAuthority | undefined
       if (state.latestCheckpoint) {
         const recovered = await checkpointLoader.recover({ workspacePath: input.workspacePath, deliveryRun: compilationRun })
         const recoveredCheckpoint = recovered.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined
         if (recoveredCheckpoint?.checkpointPath !== state.latestCheckpoint.checkpointPath || recoveredCheckpoint?.checkpointDigest !== state.latestCheckpoint.checkpointDigest)
           compilationRun = await persist(recovered, 'game_ir_checkpoint.recovered', { checkpoint: recoveredCheckpoint })
-        const replay = await checkpointLoader.load({ workspacePath: input.workspacePath, deliveryRun: compilationRun })
+        state = compilationRun.gameIrState
+        if (!state || state.status !== 'compiling') throw new Error('Recovered Game IR state is missing')
+        replay = await checkpointLoader.load({ workspacePath: input.workspacePath, deliveryRun: compilationRun })
         if (replay.phase7Authority) {
           const readyReceipt = await commitGameIrPublication({ workspacePath: input.workspacePath, publicationId: state.identity.publicationId, phase7Authority: replay.phase7Authority })
           const latestCheckpoint = compilationRun.gameIrState?.status === 'compiling' ? compilationRun.gameIrState.latestCheckpoint : undefined
@@ -2243,11 +2259,11 @@ export function createDeliveryWorkflowController(input: {
           return
         }
       }
-      const foundationReadyReceipt = run.foundationAuditState
+      const foundationReadyReceipt = compilationRun.foundationAuditState
         ? projectFoundationReadyReceipt({
-            state: run.foundationAuditState,
-            projectId: run.projectId,
-            confirmedBriefDigest: run.confirmedBriefDigest,
+            state: compilationRun.foundationAuditState,
+            projectId: compilationRun.projectId,
+            confirmedBriefDigest: compilationRun.confirmedBriefDigest,
           })
         : undefined
       if (!foundationReadyReceipt)
@@ -2288,6 +2304,9 @@ export function createDeliveryWorkflowController(input: {
             request: compileRequest,
           }),
           sourcePackets,
+          compileRequestDigest: digestGameIrValue(compileRequest),
+          foundationReadyReceiptDigest: foundationReadyReceipt.receiptDigest,
+          remainingDomainIds: remainingGameIrDomainIds(replay),
           ...(state.progressIdentity
             ? {
                 retryProgressIdentity: digestGameIrValue(
@@ -2670,6 +2689,9 @@ export function createDeliveryWorkflowController(input: {
               request: compileRequest,
             }),
             sourcePackets,
+            compileRequestDigest: digestGameIrValue(compileRequest),
+            foundationReadyReceiptDigest: foundationReadyReceipt.receiptDigest,
+            remainingDomainIds: GAME_IR_DOMAIN_IDS,
           },
         })
         return

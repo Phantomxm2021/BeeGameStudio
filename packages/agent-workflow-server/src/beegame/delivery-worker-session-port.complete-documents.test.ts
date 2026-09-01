@@ -7,7 +7,8 @@ import {
   createBeeGameDeliveryWorkerPort,
 } from './delivery-worker-session-port'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import type { FoundationDocumentPath } from './delivery-workflow/types'
+import { parseWorkerTerminalResult } from './delivery-workflow/worker-contracts'
+import type { FoundationDocumentPath, WorkerDispatchRequest } from './delivery-workflow/types'
 
 function canonicalSource(
   path: 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md',
@@ -37,6 +38,92 @@ async function writeAuthoritySource(
 }
 
 describe('delivery worker complete document boundary', () => {
+  test('turns native compiler structured output into an identity-bound terminal', async () => {
+    const events = [{
+      id: 1,
+      sessionId: 'compiler-session',
+      type: 'result' as const,
+      text: '',
+      createdAt: new Date(),
+      payload: {
+        structured_output: {
+          status: 'completed',
+          domainResults: [
+            'gameplay',
+            'balance',
+            'world-scene',
+            'presentation',
+            'resource-realization',
+            'implementation-verification',
+          ].map(moduleId => ({
+            moduleId,
+            semantic: { outcome: 'PROJECTED', nodes: [], sourceClaims: [] },
+          })),
+        },
+      },
+    }]
+    let started: WorkerDispatchRequest | undefined
+    const sessions = {
+      start: (request: WorkerDispatchRequest) => {
+        started = request
+        return { id: 'compiler-session' }
+      },
+      updateAuthToken: () => undefined,
+      sendWithDisplay: async () => undefined,
+      events: () => events,
+      get: () => ({ status: 'running', turnStatus: 'completed', createdAt: new Date() }),
+      waitForWorkflowWorkerIdle: async () => undefined,
+      isWorkflowWorkerOpen: () => true,
+    }
+    const port = createBeeGameDeliveryWorkerPort({ sessions: sessions as never, userId: 'user' })
+    await port.start({
+      dispatchId: 'dispatch-compiler',
+      runId: 'run-compiler',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'game-ir-compiler',
+      phase: 'GAME_IR_COMPILATION',
+      taskId: 'task-compiler',
+      revision: 'revision-compiler',
+      allowedPaths: [],
+      projectReadScope: 'empty',
+      contract: {
+        compileRequestDigest: 'a'.repeat(64),
+        foundationReadyReceiptDigest: 'b'.repeat(64),
+        compileRequest: { taskId: 'task-compiler' },
+        foundationReadyReceipt: { receiptDigest: 'b'.repeat(64) },
+      },
+    } as never)
+    const terminal = await port.waitForTerminal!('dispatch-compiler')
+    expect(started?.workflowJsonSchema).toBeDefined()
+    expect(parseWorkerTerminalResult(terminal)).toMatchObject({
+      workerType: 'game-ir-compiler',
+      runId: 'run-compiler',
+      dispatchId: 'dispatch-compiler',
+      taskId: 'task-compiler',
+      revision: 'revision-compiler',
+      compileRequestDigest: 'a'.repeat(64),
+      foundationReadyReceiptDigest: 'b'.repeat(64),
+    })
+    const forgedPort = createBeeGameDeliveryWorkerPort({ sessions: sessions as never, userId: 'user' })
+    await forgedPort.start({
+      dispatchId: 'dispatch-forged-compiler',
+      runId: 'run-compiler',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'game-ir-compiler',
+      phase: 'GAME_IR_COMPILATION',
+      taskId: 'task-compiler',
+      revision: 'revision-compiler',
+      allowedPaths: [],
+      projectReadScope: 'empty',
+      contract: { foundationReadyReceiptDigest: 'b'.repeat(64) },
+    } as never)
+    await expect(forgedPort.waitForTerminal!('dispatch-forged-compiler')).rejects.toThrow(/identity/i)
+  })
+
   test('submits the dispatch-built revision projection instead of rebuilding from the start request', async () => {
     const prompts: string[] = []
     const sessions = {

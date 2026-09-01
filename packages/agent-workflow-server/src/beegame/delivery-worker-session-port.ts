@@ -31,7 +31,7 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationRevisionToolResultSchema, foundationSemanticModelPayloadSchema, foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
+import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationRevisionToolResultSchema, foundationSemanticModelPayloadSchema, foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema, gameIrCompilerModelPayloadSchema, gameIrCompilerStructuredOutputJsonSchema, gameIrCompilerTerminalSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -414,6 +414,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactSchemaForRequest(request) }
           : request.workerType === 'foundation-semantic-reviewer'
             ? { workflowJsonSchema: request.workflowJsonSchema ?? (typeof request.contract.issueId === 'string' ? foundationSemanticRecheckStructuredOutputJsonSchema : foundationSemanticReviewerStructuredOutputJsonSchema) as unknown as Record<string, unknown> }
+            : request.workerType === 'game-ir-compiler'
+              ? { workflowJsonSchema: request.workflowJsonSchema ?? gameIrCompilerStructuredOutputJsonSchema as unknown as Record<string, unknown> }
           : {}),
         ...(packetWorker
           ? { workflowProjectReadScope: 'empty' as const }
@@ -984,6 +986,8 @@ function structuredSubmissionToolName(
       return 'SubmitQuestionAnswerResult'
     case 'resource-content-author':
       return undefined
+    case 'game-ir-compiler':
+      return undefined
     case 'resource-planner':
     case 'resource-curator':
       return undefined
@@ -1063,7 +1067,47 @@ async function createDeterministicStructuredTerminal(input: {
       throw new Error(
         'resource content terminal requires a committed durable content receipt',
       )
+    case 'game-ir-compiler':
+      return createDeterministicGameIrCompilerTerminal(input)
   }
+}
+
+function createDeterministicGameIrCompilerTerminal(input: {
+  request: WorkerDispatchRequest
+  events: ReturnType<BeeGameSessionManager['events']>
+}) {
+  const resultEvent = [...input.events].reverse().find(event => event.type === 'result')
+  const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
+    ? (resultEvent.payload as Record<string, unknown>).structured_output
+    : undefined
+  if (structured === undefined)
+    throw new Error('Game IR compiler result is missing native StructuredOutput')
+  assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
+  const payload = gameIrCompilerModelPayloadSchema.parse(structured)
+  const dispatchId = input.request.dispatchId
+  const compileRequestDigest = input.request.contract.compileRequestDigest
+  const foundationReadyReceiptDigest = input.request.contract.foundationReadyReceiptDigest
+  if (
+    typeof dispatchId !== 'string' ||
+    typeof input.request.runId !== 'string' ||
+    typeof input.request.taskId !== 'string' ||
+    typeof input.request.revision !== 'string' ||
+    typeof compileRequestDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(compileRequestDigest) ||
+    typeof foundationReadyReceiptDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(foundationReadyReceiptDigest)
+  )
+    throw new Error('Game IR compiler dispatch identity is incomplete')
+  return gameIrCompilerTerminalSchema.parse({
+    workerType: 'game-ir-compiler',
+    ...payload,
+    runId: input.request.runId,
+    dispatchId,
+    taskId: input.request.taskId,
+    revision: input.request.revision,
+    compileRequestDigest,
+    foundationReadyReceiptDigest,
+  })
 }
 
 function createDeterministicFoundationFactTerminal(input: {

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { lstat, readFile } from 'node:fs/promises'
-import { relative, resolve, sep } from 'node:path'
+import { readSecureWorkspaceFile } from '../secure-file'
+import { resolve } from 'node:path'
 import { z } from 'zod'
 import {
   GAME_IR_CANONICAL_MODULE_IDS,
@@ -19,6 +19,13 @@ import {
   type GameIrModuleCandidate,
   type GameIrSourceBinding,
 } from './model'
+import type {
+  ImplementationVerificationAcceptanceScenarioValue,
+  ImplementationVerificationEvidenceRequirementValue,
+  ImplementationVerificationInvariantValue,
+  ImplementationVerificationTargetValue,
+  ImplementationVerificationUnitValue,
+} from './implementation-verification-schema'
 import { projectFoundationReadyReceipt } from './foundation-ready-adapter'
 import {
   GameIrStageCheckpointLoader,
@@ -33,27 +40,32 @@ import type { DeliveryRun } from '../types'
 
 type RecordValue = Record<string, unknown>
 
-type ProjectionJsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | readonly ProjectionJsonValue[]
-  | Readonly<{ [key: string]: ProjectionJsonValue }>
-
-type ProjectionPayload = Readonly<{
-  kind: string
-  value: ProjectionJsonValue
+type ImplementationProjectionPayload =
+  | Readonly<{ kind: 'implementation-verification.target'; value: ImplementationVerificationTargetValue }>
+  | Readonly<{ kind: 'implementation-verification.unit'; value: ImplementationVerificationUnitValue }>
+  | Readonly<{ kind: 'implementation-verification.acceptance-scenario'; value: ImplementationVerificationAcceptanceScenarioValue }>
+  | Readonly<{ kind: 'implementation-verification.invariant'; value: ImplementationVerificationInvariantValue }>
+  | Readonly<{ kind: 'implementation-verification.evidence-requirement'; value: ImplementationVerificationEvidenceRequirementValue }>
+type ResourceProjectionValue = object
+type ResourceProjectionPayload = Readonly<{
+  kind:
+    | 'resource-realization.logical-resource'
+    | 'resource-realization.acquisition-profile'
+    | 'resource-realization.delivery-target'
+    | 'resource-realization.variant'
+    | 'resource-realization.delivery-artifact'
+  value: ResourceProjectionValue
 }>
+type ProjectionPayload = ImplementationProjectionPayload | ResourceProjectionPayload
 
-type ProjectionNode = Readonly<{
+type ProjectionNode<P extends ProjectionPayload = ProjectionPayload> = Readonly<{
   id: string
   kind: string
   producerMode: 'mechanical' | 'semantic' | 'derived'
   references: readonly Readonly<{ targetId: string; targetType: string }>[]
   edges: readonly Readonly<{ type: string; targetId: string; targetType: string }>[]
   bindings: Readonly<Record<string, GameIrSourceBinding>>
-  payload: ProjectionPayload
+  payload: P
 }>
 
 export type GameIrExecutionProjection = Readonly<{
@@ -87,11 +99,11 @@ export type GameIrPublishedReader = Readonly<{
   readyReceipt: GameIrReadyReceipt
   candidate: GameIrCandidate
   modules: readonly GameIrModuleCandidate[]
-  sourceMap: Readonly<Record<string, unknown>>
-  sourceMaps: Readonly<Record<string, Readonly<Record<string, unknown>>>>
-  dependencyGraph: Readonly<Record<string, unknown>>
-  semanticEvidence: readonly RecordValue[]
-  manifest: Readonly<Record<string, unknown>>
+  sourceMap: object
+  sourceMaps: Readonly<{ [moduleId: string]: object }>
+  dependencyGraph: object
+  semanticEvidence: readonly object[]
+  manifest: object
   executionProjection: GameIrExecutionProjection
   resourceProjection: GameIrResourceProjection
   acceptanceProjection: GameIrAcceptanceProjection
@@ -108,19 +120,15 @@ export type GameIrPublishedReader = Readonly<{
 
 const SHA256 = /^[a-f0-9]{64}$/
 
-const projectionJsonSchema: z.ZodType<ProjectionJsonValue> = z.lazy(() =>
-  z.union([
-    z.null(),
-    z.boolean(),
-    z.number().finite(),
-    z.string(),
-    z.array(projectionJsonSchema),
-    z.record(z.string(), projectionJsonSchema),
-  ]),
+const projectionPayloadSchema: z.ZodType<ProjectionPayload> = z.custom<ProjectionPayload>(
+  value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const payload = value as { kind?: unknown; value?: unknown }
+    return typeof payload.kind === 'string' && payload.kind.includes('.') &&
+      !!payload.value && typeof payload.value === 'object' && !Array.isArray(payload.value)
+  },
+  'invalid discriminated projection payload',
 )
-const projectionPayloadSchema: z.ZodType<ProjectionPayload> = z
-  .object({ kind: z.string().min(1), value: projectionJsonSchema })
-  .strict()
 
 function fail(message: string): never {
   throw new Error(`invalid committed Game IR: ${message}`)
@@ -169,30 +177,9 @@ function same(left: unknown, right: unknown, label: string): void {
     fail(`${label} mismatch`)
 }
 
-function safeRelative(root: string, path: string, label: string): string {
-  if (
-    path.length === 0 ||
-    path.startsWith('/') ||
-    path.startsWith('\\') ||
-    /^[A-Za-z]:[\\/]/.test(path) ||
-    path.includes('\\') ||
-    path.includes('\0') ||
-    path.split('/').some(part => !part || part === '.' || part === '..')
-  )
-    fail(`${label} is not a safe relative path`)
-  const target = resolve(root, path)
-  const rel = relative(root, target)
-  if (rel.startsWith('..') || rel.includes(`${sep}..${sep}`))
-    fail(`${label} escapes the committed root`)
-  return target
-}
-
 async function readJson(root: string, path: string, label: string): Promise<RecordValue> {
-  const target = safeRelative(root, path, label)
-  const info = await lstat(target)
-  if (!info.isFile() || info.isSymbolicLink()) fail(`${label} is not a regular file`)
   try {
-    return record(JSON.parse(await readFile(target, 'utf8')), label)
+    return record(JSON.parse(await readSecureWorkspaceFile(root, path)), label)
   } catch (error) {
     if (error instanceof SyntaxError) fail(`${label} is not valid JSON`)
     throw error

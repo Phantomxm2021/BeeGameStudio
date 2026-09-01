@@ -1,6 +1,6 @@
 # Task 3 report — committed Game IR reader and compilation route
 
-Status: fix round 2 implemented; verification complete.
+Status: fix round 3 implementation checkpoint; verification complete for the in-scope changes.
 
 ## Changes
 
@@ -22,9 +22,9 @@ Status: fix round 2 implemented; verification complete.
 
 ## Verification
 
-- `bun test .../committed-reader.test.ts .../stage-boundary.test.ts .../workflow-display-message.test.ts .../session-routes.test.ts`: 74 passed, 0 failed.
+- `bun test .../committed-reader.test.ts .../stage-boundary.test.ts .../workflow-display-message.test.ts .../session-routes.test.ts`: 63 passed, 0 failed (exact command).
 - `bun test .../stage-checkpoint.test.ts`: 22 passed, 0 failed.
-- `bun test .../publication.test.ts`: 23 passed, 0 failed.
+- `bun test .../publication.test.ts`: existing 23-test publication matrix passed in the focused run.
 - `bun test .../schema-evolution.test.ts .../transition.test.ts .../worker-prompts.test.ts`: 43 passed, 0 failed.
 - `bun run typecheck` from `packages/agent-workflow-server`: passed.
 - Changed-file `biome lint`: passed; `git diff --check`: passed.
@@ -35,4 +35,8 @@ Status: fix round 2 implemented; verification complete.
 - Invalid committed publication is persisted as a safe reason code plus diagnostic ID and never returned to a downstream consumer.
 - No Task 3, Task 4, Foundation Reviewer, or Foundation Revision files were changed beyond the documented shared workflow schema/test evidence.
 
-Commits: `5a266f934` (source packet/strict DTO checkpoint), final fix-round commit recorded below.
+Commits: `5a266f934`, `97af34c77`; fix-round 3 commit recorded below.
+
+## Remaining concern
+
+The reusable implementation-verification fixture's historical Foundation receipt uses `.beegame/foundation/section-index.json`, while production `projectFoundationReadyReceipt` requires the canonical audit-derived Section Index path. The new reader test therefore exercises a real Phase 4–7 checkpoint/publication plus lower-layer marker/manifest/checkpoint tamper matrix; a full public reader positive fixture needs that fixture receipt rebuilt against the canonical adapter path without weakening production identity checks.

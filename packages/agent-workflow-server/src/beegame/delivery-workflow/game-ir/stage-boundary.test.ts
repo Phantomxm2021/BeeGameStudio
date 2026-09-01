@@ -2172,8 +2172,8 @@ describe('Game IR stage boundary', () => {
     const files = await readProductionSourceFiles(serverSourceRoot)
     const routeFiles = files.filter(file => /\/(?:controller|dispatch)\.ts$/.test(file.path))
     const routeViolations = standaloneProductionViolations(routeFiles)
-    expect(routeViolations.length).toBeGreaterThan(0)
-    expect(routeViolations.every(violation => /\/(?:controller|dispatch)\.ts:/.test(violation))).toBe(true)
+    const allowedRouteViolation = /\/(?:controller|dispatch)\.ts: (?:import: \.\/game-ir\/(?:foundation-ready-adapter|contracts|model|committed-reader|stage-checkpoint|gameplay-balance-assembler|world-presentation-assembler|resource-realization-assembler|implementation-verification-assembler|publication|domain-source|domain-projection|gameplay-producer|balance-producer|world-scene-producer|presentation-producer|resource-realization-producer|implementation-verification-producer|phase5-admission|phase6-admission|phase7-admission)|identifier: (?:GameIrCompilerDomainModel|GAME_IR_CHECKPOINT_RECORD_KINDS|GameIrCheckpointRecord|GameIrReplayAuthority|GameIrDomainId|GAME_IR_DOMAIN_IDS|GAME_IR_MODULE_SOURCE_DOCUMENTS|GameIrDomainSourceEnvelope|GameIrCompilerAuthorities|GameIrStageCheckpointLoader|GameIrCompileRequest|gameIrState|gameIrSchemaVersion))$/
+    expect(routeViolations.filter(violation => !allowedRouteViolation.test(violation))).toEqual([])
     const forbiddenOutsideRoute = files
       .filter(file => !routeFiles.includes(file))
       .flatMap(file => collectAstFacts(file.source, file.path).imports

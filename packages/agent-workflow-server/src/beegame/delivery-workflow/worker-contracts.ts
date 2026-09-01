@@ -113,17 +113,8 @@ function validCompilerModel(value: unknown): value is GameIrCompilerDomainModel 
 
 const compilerDomainModelSchema = z.custom<GameIrCompilerDomainModel>(validCompilerModel, 'invalid Game IR compiler domain model')
 
-/** Compiler output is a model-only DTO. Checkpoint, source-envelope, READY,
- * and publication authority remain service-owned and are never accepted. */
-export const gameIrCompilerTerminalSchema = z.object({
-  workerType: z.literal('game-ir-compiler'),
+export const gameIrCompilerModelPayloadSchema = z.object({
   status: z.enum(['completed', 'failed', 'blocked']),
-  runId: z.string().min(1),
-  dispatchId: z.string().min(1),
-  taskId: z.string().min(1),
-  revision: z.string().min(1),
-  compileRequestDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  foundationReadyReceiptDigest: z.string().regex(/^[a-f0-9]{64}$/),
   domainResults: z.array(compilerDomainModelSchema).optional(),
   reason: z.string().min(1).optional(),
 }).strict().superRefine((value, context) => {
@@ -132,6 +123,70 @@ export const gameIrCompilerTerminalSchema = z.object({
   if (value.status !== 'completed' && value.reason === undefined)
     context.addIssue({ code: 'custom', path: ['reason'], message: 'failed compiler output requires a diagnostic reason' })
 })
+
+/** Native StructuredOutput returns only this model payload. Checkpoint,
+ * source-envelope, READY, identity, and publication authority are attached by
+ * the service after parsing the native result. */
+export const gameIrCompilerTerminalSchema = z.object({
+  workerType: z.literal('game-ir-compiler'),
+  runId: z.string().min(1),
+  dispatchId: z.string().min(1),
+  taskId: z.string().min(1),
+  revision: z.string().min(1),
+  compileRequestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  foundationReadyReceiptDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  ...gameIrCompilerModelPayloadSchema.shape,
+}).strict().superRefine((value, context) => {
+  if (value.status === 'completed' && (!value.domainResults || value.domainResults.length === 0))
+    context.addIssue({ code: 'custom', path: ['domainResults'], message: 'completed compiler output requires domain candidate results' })
+  if (value.status !== 'completed' && value.reason === undefined)
+    context.addIssue({ code: 'custom', path: ['reason'], message: 'failed compiler output requires a diagnostic reason' })
+})
+
+export const gameIrCompilerStructuredOutputJsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    status: { enum: ['completed', 'failed', 'blocked'] },
+    domainResults: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          moduleId: { enum: [...compilerModuleIds] },
+          semantic: {
+            oneOf: [
+              { type: 'object', additionalProperties: false, properties: { outcome: { const: 'PROJECTED' }, nodes: { type: 'array', items: { $ref: '#/$defs/json' } }, sourceClaims: { type: 'array', items: { $ref: '#/$defs/json' } } }, required: ['outcome', 'nodes', 'sourceClaims'] },
+              { type: 'object', additionalProperties: false, properties: { outcome: { enum: ['FAIL', 'AMBIGUOUS'] }, reasonCode: { type: 'string', minLength: 1 }, actual: { type: 'string', minLength: 1 }, missingSubject: { type: 'string', minLength: 1 }, expectedProjection: { type: 'string', minLength: 1 }, evidencePointers: { type: 'array', items: { type: 'string', minLength: 1 } } }, required: ['outcome', 'reasonCode', 'actual', 'missingSubject', 'expectedProjection', 'evidencePointers'] },
+            ],
+          },
+          validation: {
+            oneOf: [
+              { type: 'object', additionalProperties: false, properties: { outcome: { const: 'PASS' }, checkIds: { type: 'array', items: { type: 'string', minLength: 1 } }, coveredTargets: { type: 'array', items: { type: 'string', minLength: 1 } } }, required: ['outcome', 'checkIds', 'coveredTargets'] },
+              { type: 'object', additionalProperties: false, properties: { outcome: { enum: ['FAIL', 'AMBIGUOUS'] }, reasonCode: { type: 'string', minLength: 1 }, actual: { type: 'string', minLength: 1 }, missingSubject: { type: 'string', minLength: 1 }, expectedProjection: { type: 'string', minLength: 1 }, evidencePointers: { type: 'array', items: { type: 'string', minLength: 1 } } }, required: ['outcome', 'reasonCode', 'actual', 'missingSubject', 'expectedProjection', 'evidencePointers'] },
+            ],
+          },
+        },
+        required: ['moduleId', 'semantic'],
+      },
+    },
+    reason: { type: 'string', minLength: 1 },
+  },
+  required: ['status'],
+  $defs: {
+    json: {
+      anyOf: [
+        { type: 'null' },
+        { type: 'boolean' },
+        { type: 'number' },
+        { type: 'string' },
+        { type: 'array', items: { $ref: '#/$defs/json' } },
+        { type: 'object', additionalProperties: { $ref: '#/$defs/json' } },
+      ],
+    },
+  },
+} as const
 
 const foundationFactEvidenceSchema = z
   .object({
