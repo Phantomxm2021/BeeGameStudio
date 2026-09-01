@@ -1,6 +1,7 @@
 import { z } from 'zod/v4'
 import { atomicTaskSchema } from './schema'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import { gameIrReadyReceiptSchema } from './game-ir/contracts'
 import {
   FOUNDATION_FACT_CATALOG,
   foundationFactDefinition,
@@ -9,6 +10,27 @@ import {
 import type { FoundationFactPacket } from './foundation-fact-extraction'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
+
+/** Compiler terminal identity is service-owned; authority is revalidated from
+ * the run checkpoint/publication before the workflow can advance. */
+export const gameIrCompilerTerminalSchema = z.object({
+  workerType: z.literal('game-ir-compiler'),
+  status: z.enum(['completed', 'failed', 'blocked']),
+  runId: z.string().min(1),
+  dispatchId: z.string().min(1),
+  taskId: z.string().min(1),
+  revision: z.string().min(1),
+  compileRequestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  foundationReadyReceiptDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  checkpoint: z.object({ checkpointPath: z.string().min(1), checkpointDigest: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
+  readyReceipt: gameIrReadyReceiptSchema.optional(),
+  reason: z.string().min(1).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.status === 'completed' && (!value.checkpoint || !value.readyReceipt))
+    context.addIssue({ code: 'custom', path: ['checkpoint'], message: 'completed compiler output requires committed checkpoint and READY receipt' })
+  if (value.status !== 'completed' && value.reason === undefined)
+    context.addIssue({ code: 'custom', path: ['reason'], message: 'failed compiler output requires a diagnostic reason' })
+})
 
 const foundationFactEvidenceSchema = z
   .object({
@@ -584,6 +606,7 @@ export const questionAnswerSubmissionSchema = questionAnswerTerminalSchema.omit(
 )
 
 export const workerTerminalSchema = z.discriminatedUnion('workerType', [
+  gameIrCompilerTerminalSchema,
   documentAuthorTerminalSchema,
   foundationFactExtractorTerminalSchema,
   foundationSemanticReviewerTerminalSchema,

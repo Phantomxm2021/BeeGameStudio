@@ -53,6 +53,8 @@ export type WorkflowDisplayReasonCode =
   | 'derivation_failed'
   | 'dispatch_failed'
   | 'provider_failed'
+  | 'game_ir_compilation'
+  | 'game_ir_publication'
   | 'workflow_blocked'
 
 export type WorkflowDisplayReason = {
@@ -66,6 +68,8 @@ const workflowDisplayReasonCodes = new Set<WorkflowDisplayReasonCode>([
   'derivation_failed',
   'dispatch_failed',
   'provider_failed',
+  'game_ir_compilation',
+  'game_ir_publication',
   'workflow_blocked',
 ])
 
@@ -92,7 +96,7 @@ export function projectWorkflowDisplayReason(
     }
   const reason = typeof value === 'string' ? value.trim() : ''
   if (!reason) return undefined
-  const normalized = reason.toLowerCase().replaceAll('-', ' ')
+  const normalized = reason.toLowerCase().replaceAll('-', ' ').replaceAll('_', ' ')
   let code: WorkflowDisplayReasonCode = 'workflow_blocked'
   let message = 'Workflow is blocked and needs attention.'
 
@@ -119,6 +123,12 @@ export function projectWorkflowDisplayReason(
   ) {
     code = 'dispatch_failed'
     message = 'Workflow dispatch failed.'
+  } else if (normalized.includes('game ir compilation')) {
+    code = 'game_ir_compilation'
+    message = 'Game IR compilation needs attention.'
+  } else if (normalized.includes('game ir publication')) {
+    code = 'game_ir_publication'
+    message = 'Game IR publication needs attention.'
   }
 
   const diagnosticId = `workflow-${createHash('sha256')

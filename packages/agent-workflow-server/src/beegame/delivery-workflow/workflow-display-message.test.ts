@@ -84,4 +84,15 @@ describe('projectWorkflowDisplayReason', () => {
     expect(projection).toMatchObject({ diagnosticId: 'trace-12345678' })
     expect(projection?.message).not.toContain('trace-12345678')
   })
+
+  test('projects Game IR attention with its diagnostic id', () => {
+    const projection = projectWorkflowDisplayReason(
+      'game_ir_compilation_failed diagnostic game-ir-12345678',
+    )
+    expect(projection).toEqual({
+      code: 'game_ir_compilation',
+      message: 'Game IR compilation needs attention.',
+      diagnosticId: 'game-ir-12345678',
+    })
+  })
 })

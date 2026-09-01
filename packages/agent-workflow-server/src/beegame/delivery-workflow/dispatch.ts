@@ -44,6 +44,27 @@ import {
   type RevisionTaskReceipt,
 } from './foundation-revision-stage'
 import type { AuditIssue } from './foundation-issue-registry'
+import {
+  parseGameIrCompileRequest,
+  type FoundationReadyReceipt,
+  type GameIrCompileRequest,
+} from './game-ir/contracts'
+import { digestGameIrValue } from './game-ir/model'
+
+/** The only compiler contract builder. Both values are service-bound and the
+ * request's Foundation receipt must be the exact same READY receipt. */
+export function buildGameIrCompileContract(input: {
+  foundation: FoundationReadyReceipt
+  request: GameIrCompileRequest
+}): GameIrCompileRequest {
+  const keys = Object.keys(input).sort()
+  if (keys.length !== 2 || keys[0] !== 'foundation' || keys[1] !== 'request')
+    throw new DispatchError('blocked', 'Game IR compiler accepts only READY receipt and compile request')
+  const request = parseGameIrCompileRequest(input.request)
+  if (digestGameIrValue(request.foundation) !== digestGameIrValue(input.foundation))
+    throw new DispatchError('blocked', 'Game IR compile request is detached from Foundation READY')
+  return request
+}
 
 export type DispatchCredits = {
   reserve?: (
@@ -337,6 +358,7 @@ function workerRequiresEvidence(
 ): boolean {
   return (
     workerType !== 'document-author' &&
+    workerType !== 'game-ir-compiler' &&
     workerType !== 'foundation-fact-extractor' &&
     workerType !== 'resource-planner' &&
     workerType !== 'resource-curator' &&

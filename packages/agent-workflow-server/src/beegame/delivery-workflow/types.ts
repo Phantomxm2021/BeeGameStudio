@@ -121,6 +121,7 @@ export type DispatchWorkerType =
   | 'foundation-fact-extractor'
   | 'foundation-semantic-reviewer'
   | 'foundation-document-reviser'
+  | 'game-ir-compiler'
   | 'resource-planner'
   | 'resource-curator'
   | 'resource-content-author'

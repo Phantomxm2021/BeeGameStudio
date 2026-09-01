@@ -309,6 +309,8 @@ function requireFoundationReadyIdentity(
     fail('Game IR compilation requires a Foundation READY audit state')
   if (identity.runId !== run.runId)
     fail('Game IR compilation identity run does not match DeliveryRun')
+  if (!identity.taskId || !identity.publicationId)
+    fail('Game IR compilation identity must name one task and publication')
   if (identity.confirmedBriefDigest !== run.confirmedBriefDigest)
     fail('Game IR compilation identity brief does not match DeliveryRun')
   if (identity.foundationRevision !== run.foundationAuditState.revision)
