@@ -626,15 +626,17 @@ export async function recoverAndResumeRun(input: {
             (await input.store.reconcile(async () => false)) ?? currentRun
         }
         if (currentRun.phase === 'GAME_IR_COMPILATION' && currentRun.gameIrState?.status === 'compiling') {
-          const recovered = await new GameIrStageCheckpointLoader().recover({ workspacePath, deliveryRun: currentRun })
-          const before = currentRun.gameIrState.latestCheckpoint
-          const after = recovered.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined
-          if (after?.checkpointPath !== before?.checkpointPath || after?.checkpointDigest !== before?.checkpointDigest) {
-            const current = await input.store.inspectWorkflowSnapshot()
-            const lease = await input.store.mutationLock(currentRun.runId)
-            try {
+          const lease = await input.store.mutationLock(currentRun.runId)
+          try {
+            const lockedSource = await input.store.inspectWorkflowSnapshot()
+            if (!lockedSource.currentRun) throw new WorkflowStoreError('workflow snapshot disappeared during checkpoint recovery', 'recovery_snapshot_changed')
+            currentRun = lockedSource.currentRun
+            const recovered = await new GameIrStageCheckpointLoader().recover({ workspacePath, deliveryRun: currentRun })
+            const before = currentRun.gameIrState?.status === 'compiling' ? currentRun.gameIrState.latestCheckpoint : undefined
+            const after = recovered.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined
+            if (after?.checkpointPath !== before?.checkpointPath || after?.checkpointDigest !== before?.checkpointDigest) {
               currentRun = await input.store.replaceSnapshotIfDigest({
-                expectedDigest: current.digest,
+                expectedDigest: lockedSource.digest,
                 run: recovered,
                 event: {
                   runId: recovered.runId,
@@ -646,9 +648,9 @@ export async function recoverAndResumeRun(input: {
                 },
                 lease,
               })
-            } finally {
-              await input.store.unlock(lease)
             }
+          } finally {
+            await input.store.unlock(lease)
           }
         }
         return {
