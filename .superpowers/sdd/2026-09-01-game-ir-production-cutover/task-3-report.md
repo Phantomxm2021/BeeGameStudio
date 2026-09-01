@@ -1,6 +1,6 @@
 # Task 3 report — committed Game IR reader and compilation route
 
-Status: post-audit stabilization checkpoint; production recovery blockers corrected, final evidence audit still pending.
+Status: complete; production recovery blockers and final public-reader evidence debt are closed.
 
 ## Changes
 
@@ -22,7 +22,7 @@ Status: post-audit stabilization checkpoint; production recovery blockers correc
 
 ## Verification
 
-- `bun test .../committed-reader.test.ts .../stage-boundary.test.ts .../workflow-display-message.test.ts .../session-routes.test.ts`: 64 passed, 0 failed.
+- `bun test .../committed-reader.test.ts .../stage-boundary.test.ts .../workflow-display-message.test.ts .../session-routes.test.ts`: 72 passed, 0 failed, 380 assertions.
 - `bun test .../delivery-workflow-recovery.test.ts`: 107 passed, 0 failed; the compiler is now part of the exact persisted-worker recovery matrix.
 - `bun test .../stage-checkpoint.test.ts .../publication.test.ts`: 45 passed, 0 failed.
 - `bun test .../schema-evolution.test.ts .../transition.test.ts .../worker-prompts.test.ts`: 44 passed, 0 failed.
@@ -38,6 +38,8 @@ Status: post-audit stabilization checkpoint; production recovery blockers correc
 
 Commits through the last reviewed implementation: `5a266f934`, `97af34c77`, `b55b13ce1`; the post-audit stabilization changes are included with this report.
 
-## Remaining concern
+## Final evidence and secure-file ruling
 
-The public reader has a production-valid positive fixture and lower-layer marker/manifest/checkpoint tamper cases. The remaining evidence debt is a reader-entry digest-resealed mutation matrix covering module remap/duplicate/placeholder, detached evidence, graph/source-map, READY/run identity, and stale/temp/previous-publication supplementation. The secure-file implementation validates pre-open, descriptor, parent, and canonical target identities; a deterministic ABA swap-race test still requires a test seam and remains an explicit audit item rather than a hidden claim.
+- The public reader now rejects digest-resealed duplicate/remapped/placeholder modules, detached semantic evidence, detached source maps and dependency graph, every READY/run/checkpoint digest mismatch, and absent canonical publication even when staging/old/previous directories exist. These cases call the sole public reader against real Phase 4→7 checkpoint/publication files.
+- The secure-file implementation validates canonical containment and target identity before open, uses `O_NOFOLLOW`, compares the opened descriptor with both pre-open and post-open target identities, and verifies parent directory identity across open. A deterministic ABA interleaving would require a production scheduling hook. That hook is deliberately not added because it would expand production API only for testing without closing an unverified code path. Cost if wrong: a future secure-file refactor could weaken one identity check without a deterministic race test; the existing symlink/component and identity checks must therefore remain part of the public-reader regression suite.
+- No production file changed while closing this evidence debt. Task 3A may begin; Task 9–15 remain blocked.
