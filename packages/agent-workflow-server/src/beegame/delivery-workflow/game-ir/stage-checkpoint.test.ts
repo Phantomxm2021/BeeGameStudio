@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,6 +15,7 @@ import { implementationVerificationFixture } from './implementation-verification
 import { prepareImplementationVerificationSemanticValidationPacket } from './phase7-admission'
 import type { ImplementationVerificationAssemblyAuthority } from './implementation-verification-assembler'
 import type { ResourceRealizationAssemblyAuthority } from './resource-realization-assembler'
+import { canonicalGameIrJson, digestGameIrValue } from './model'
 import {
   GameIrStageCheckpointLoader,
   GameIrStageCheckpointWriter,
@@ -24,6 +25,7 @@ import {
 
 const workspaces: string[] = []
 const sha = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex')
+const canonicalBytes = (value: unknown) => `${canonicalGameIrJson(value)}\n`
 const FIXTURE_DIGEST = 'a'.repeat(64)
 const FIXTURE_REVIEW = 'b'.repeat(64)
 const FIXTURE_REVISION = 'foundation-revision-1'
@@ -80,6 +82,28 @@ function recordsFor(phase: 'phase4' | 'phase5' | 'phase6' | 'phase7', authority:
 }
 function step(phase: 'phase4' | 'phase5' | 'phase6' | 'phase7', authority: ReturnType<typeof authorityFixture>['phase7Authority']): GameIrCheckpointStep { return { phase, records: recordsFor(phase, authority) } }
 async function persist(workspacePath: string, run: DeliveryRun): Promise<void> { await createRunStore(workspacePath, run.ownerId).save(run) }
+async function resealManifest(manifestPath: string, mutate: (manifest: Record<string, unknown>) => Record<string, unknown>): Promise<string> {
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
+  const body = mutate({ ...manifest })
+  delete body.manifestDigest
+  const sealed = { ...body, manifestDigest: digestGameIrValue(body) }
+  await writeFile(manifestPath, canonicalBytes(sealed))
+  return sha(canonicalBytes(sealed))
+}
+async function resealRecord(input: { workspacePath: string; manifestPath: string; kind: string; mutate: (record: Record<string, unknown>) => Record<string, unknown> }): Promise<string> {
+  const manifest = JSON.parse(await readFile(input.manifestPath, 'utf8')) as Record<string, unknown>
+  const refs = manifest.records as Array<Record<string, unknown>>
+  const ref = refs.find(candidate => candidate.kind === input.kind)
+  if (!ref || typeof ref.path !== 'string') throw new Error(`missing test record ref ${input.kind}`)
+  const recordPath = join(input.workspacePath, ref.path)
+  const record = JSON.parse(await readFile(recordPath, 'utf8')) as Record<string, unknown>
+  const bytes = canonicalBytes(input.mutate({ ...record }))
+  await writeFile(recordPath, bytes)
+  return resealManifest(input.manifestPath, current => ({
+    ...current,
+    records: refs.map(candidate => candidate.kind === input.kind ? { ...candidate, digest: sha(bytes), canonicalLength: Buffer.byteLength(bytes, 'utf8') } : candidate),
+  }))
+}
 beforeEach(async () => { workspaces.push(await mkdtemp(join(tmpdir(), 'game-ir-stage-checkpoint-'))) })
 afterEach(async () => { await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 
@@ -287,15 +311,22 @@ describe('v46 Game IR stage checkpoint boundary', () => {
     const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
     await persist(workspaces[0]!, run)
     const moduleUrl = new URL('../run-store.ts', import.meta.url).href
-    const child = spawn(process.execPath, ['-e', `import { createRunStore } from ${JSON.stringify(moduleUrl)}; const store = createRunStore(${JSON.stringify(workspaces[0]!)}, ${JSON.stringify(run.ownerId)}); const lease = await store.mutationLock(${JSON.stringify(run.runId)}); console.log('ready'); setTimeout(async () => { await store.unlock(lease); console.log('released') }, 350)`], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, ['-e', `import { createRunStore } from ${JSON.stringify(moduleUrl)}; const store = createRunStore(${JSON.stringify(workspaces[0]!)}, ${JSON.stringify(run.ownerId)}); const lease = await store.mutationLock(${JSON.stringify(run.runId)}); console.log('locked'); await new Promise(resolve => process.stdin.once('data', resolve)); await store.unlock(lease); console.log('released')`], { stdio: ['pipe', 'pipe', 'pipe'] })
     let output = ''
-    const outputReady = new Promise<void>((resolve, reject) => { child.stdout?.on('data', chunk => { output += chunk.toString(); if (output.includes('ready')) resolve() }); child.once('error', reject); child.once('exit', code => { if (code !== 0) reject(new Error(`holder exited ${code}: ${output}`)) }) })
+    const outputReady = new Promise<void>((resolve, reject) => { child.stdout?.on('data', chunk => { output += chunk.toString(); if (output.includes('locked')) resolve() }); child.once('error', reject); child.once('exit', code => { if (code !== 0) reject(new Error(`holder exited ${code}: ${output}`)) }) })
     await outputReady
+    let settled = false
+    const resultPromise = new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+    void resultPromise.then(() => { settled = true }, () => { settled = true })
     try {
-      const result = await new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+      await new Promise<void>(resolve => setImmediate(resolve))
+      expect(settled).toBe(false)
+      child.stdin?.write('release\n')
+      const result = await resultPromise
       expect(result.checkpointPath).toContain('/phase4/manifest.json')
     } finally {
-      await new Promise<void>((resolve, reject) => { const check = () => output.includes('released') ? resolve() : setTimeout(check, 10); check(); child.once('error', reject) })
+      if (!output.includes('released')) child.stdin?.write('release\n')
+      await new Promise<void>((resolve, reject) => { if (output.includes('released')) return resolve(); child.stdout?.on('data', chunk => { output += chunk.toString(); if (output.includes('released')) resolve() }); child.once('error', reject); child.once('exit', code => { if (code !== 0) reject(new Error(`holder exited ${code}: ${output}`)) }) })
       child.kill()
     }
   })
@@ -315,18 +346,42 @@ describe('v46 Game IR stage checkpoint boundary', () => {
 
   test('rejects missing or extra committed record envelope fields and unexpected tree entries', async () => {
     const authority = authorityFixture()
+    for (const mutation of ['unknown', 'missing'] as const) {
+      const workspacePath = await mkdtemp(join(tmpdir(), `game-ir-stage-record-${mutation}-`))
+      workspaces.push(workspacePath)
+      const run = runFor(authority)
+      const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
+      await persist(workspacePath, run)
+      const ref = await new GameIrStageCheckpointWriter().write({ workspacePath, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+      const manifestPath = join(workspacePath, ref.checkpointPath)
+      const sealedDigest = await resealRecord({ workspacePath, manifestPath, kind: 'phase4/gameplay/source', mutate: record => {
+        if (mutation === 'unknown') return { ...record, unknown: true }
+        const missing = { ...record }
+        delete missing.record
+        return missing
+      } })
+      const pointerRun = { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: { ...ref, checkpointDigest: sealedDigest } } }
+      await expect(new GameIrStageCheckpointLoader().load({ workspacePath, deliveryRun: pointerRun })).rejects.toThrow(/unknown|missing|fields/i)
+    }
     const run = runFor(authority)
     const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
     await persist(workspaces[0]!, run)
     const ref = await new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
     const pointerRun = { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: ref } }
-    const recordPath = join(workspaces[0]!, '.beegame/ir/runs/checkpoint-run/checkpoints/phase4/records/phase4__gameplay__source.json')
-    const recordBytes = await readFile(recordPath, 'utf8')
-    await writeFile(recordPath, recordBytes.replace('"record":', '"missingRecord":'))
+    await writeFile(join(workspaces[0]!, '.beegame/ir/runs/checkpoint-run/checkpoints/phase4/unexpected'), 'x')
     await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: pointerRun })).rejects.toThrow()
-    await writeFile(recordPath, recordBytes.replace('\n', '\n'))
-    await import('node:fs/promises').then(fs => fs.writeFile(join(workspaces[0]!, '.beegame/ir/runs/checkpoint-run/checkpoints/phase4/unexpected'), 'x'))
-    await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: pointerRun })).rejects.toThrow()
+  })
+
+  test('fails closed when a committed record referenced by the manifest is missing', async () => {
+    const authority = authorityFixture()
+    const run = runFor(authority)
+    const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
+    await persist(workspaces[0]!, run)
+    const ref = await new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+    const manifest = JSON.parse(await readFile(join(workspaces[0]!, ref.checkpointPath), 'utf8')) as { records: Array<{ path: string }> }
+    await unlink(join(workspaces[0]!, manifest.records[0]!.path))
+    const pointerRun = { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: ref } }
+    await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: pointerRun })).rejects.toThrow(/missing|record|tree/i)
   })
 
   test('rejects a committed checkpoint with an independently mismatched task identity', async () => {
@@ -353,16 +408,33 @@ describe('v46 Game IR stage checkpoint boundary', () => {
     const phase4Path = join(workspaces[0]!, phase4.checkpointPath)
     const originalPhase5 = await readFile(phase5Path, 'utf8')
     const originalPhase4 = await readFile(phase4Path, 'utf8')
-    for (const [path, replacement] of [
-      [phase5Path, originalPhase5.replace(phase4.checkpointPath, '.../phase9/manifest.json')],
-      [phase5Path, originalPhase5.replace(phase4.checkpointDigest, 'f'.repeat(64))],
-      [phase4Path, originalPhase4.replace(run.gameIrState!.identity.taskId, 'other-task')],
-      [join(workspaces[0]!, phase4.checkpointPath.replace('manifest.json', 'records/phase4__gameplay__source.json')), originalPhase4],
-    ] as const) {
-      await writeFile(path, replacement)
-      await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: phase5 } } })).rejects.toThrow()
+    const mutations: readonly { run: () => Promise<string>; error: RegExp }[] = [
+      {
+        run: () => resealManifest(phase5Path, manifest => ({ ...manifest, previousManifestPath: '.beegame/ir/runs/checkpoint-run/checkpoints/phase6/manifest.json' })),
+        error: /immediate predecessor|predecessor path/i,
+      },
+      {
+        run: () => resealManifest(phase5Path, manifest => ({ ...manifest, previousManifestDigest: 'f'.repeat(64) })),
+        error: /manifest digest mismatch|predecessor/i,
+      },
+      {
+        run: async () => {
+          const changedPhase4Digest = await resealManifest(phase4Path, manifest => ({ ...manifest, identity: { ...(manifest.identity as Record<string, unknown>), taskId: 'other-task' } }))
+          return resealManifest(phase5Path, manifest => ({ ...manifest, previousManifestDigest: changedPhase4Digest }))
+        },
+        error: /identity|task/i,
+      },
+      {
+        run: () => resealRecord({ workspacePath: workspaces[0]!, manifestPath: phase5Path, kind: 'phase5/world-scene/source', mutate: record => ({ ...record, priorClosureDigest: 'f'.repeat(64) }) }),
+        error: /prior closure/i,
+      },
+    ]
+    for (const mutation of mutations) {
       await writeFile(phase5Path, originalPhase5)
       await writeFile(phase4Path, originalPhase4)
+      const checkpointDigest = await mutation.run()
+      const pointer = { ...phase5, checkpointDigest }
+      await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: pointer } } })).rejects.toThrow(mutation.error)
     }
   })
 
@@ -387,5 +459,50 @@ describe('v46 Game IR stage checkpoint boundary', () => {
     ])
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+  })
+
+  test('selects one fail-closed winner for conflicting service-valid authority bytes', async () => {
+    const left = authorityFixture()
+    const right = implementationVerificationFixture({ expandedCount: 4 })
+    const rightPhase6 = right.phase6Authority as ResourceRealizationAssemblyAuthority
+    const rightPreparation = {
+      phase6Authority: rightPhase6,
+      implementationVerification: { source: right.authority.source, mechanical: right.authority.mechanical, semantic: right.semantic },
+    } as const
+    const rightPacket = prepareImplementationVerificationSemanticValidationPacket(rightPreparation)
+    const rightPhase7: ImplementationVerificationAssemblyAuthority = {
+      phase6Authority: rightPhase6,
+      implementationVerification: {
+        ...rightPreparation.implementationVerification,
+        validation: { outcome: 'PASS', packetDigest: rightPacket.packetDigest, checkIds: rightPacket.checkIds, coveredTargets: rightPacket.requiredTargets },
+      },
+    }
+    const run = runFor(left)
+    const writer = new GameIrStageCheckpointWriter()
+    await persist(workspaces[0]!, run)
+    let durable = run
+    for (const phase of ['phase4', 'phase5', 'phase6'] as const) {
+      const phaseAuthority = phase === 'phase4' ? left.phase7Authority.phase6Authority.phase5Authority.phase4Authority : phase === 'phase5' ? left.phase7Authority.phase6Authority.phase5Authority : left.phase7Authority.phase6Authority
+      const ref = await writer.write({ workspacePath: workspaces[0]!, deliveryRun: durable, step: step(phase, left.phase7Authority), authority: phaseAuthority })
+      durable = { ...durable, gameIrState: { ...(durable.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: ref } }
+      await persist(workspaces[0]!, durable)
+    }
+    const leftStep = step('phase7', left.phase7Authority)
+    const rightStep = { phase: 'phase7', records: recordsFor('phase7', rightPhase7 as ReturnType<typeof authorityFixture>['phase7Authority']) } as GameIrCheckpointStep
+    const leftRequest = left.phase7Authority.phase6Authority.phase5Authority.phase4Authority.gameplay.source.compileRequest
+    const rightRequest = rightPhase7.phase6Authority.phase5Authority.phase4Authority.gameplay.source.compileRequest
+    expect(canonicalBytes(leftRequest)).toBe(canonicalBytes(rightRequest))
+    expect(canonicalBytes(leftStep.records)).not.toBe(canonicalBytes(rightStep.records))
+    const results = await Promise.allSettled([
+      writer.write({ workspacePath: workspaces[0]!, deliveryRun: durable, step: leftStep, authority: left.phase7Authority }),
+      writer.write({ workspacePath: workspaces[0]!, deliveryRun: durable, step: rightStep, authority: rightPhase7 }),
+    ])
+    const winners = results.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<GameIrStageCheckpointWriter['write']>>> => result.status === 'fulfilled')
+    const failures = results.filter(result => result.status === 'rejected')
+    expect(winners).toHaveLength(1)
+    expect(failures).toHaveLength(1)
+    expect((failures[0] as PromiseRejectedResult).reason).toMatchObject({ message: expect.stringMatching(/locked|conflict|deterministic/i) })
+    const winnerRun = { ...durable, gameIrState: { ...(durable.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: winners[0]!.value } }
+    await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: winnerRun })).resolves.toMatchObject({ phase7Authority: expect.anything() })
   })
 })
