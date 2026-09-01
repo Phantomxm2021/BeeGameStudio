@@ -352,7 +352,7 @@ function paths(workspacePath: string) {
   }
 }
 
-async function durableWrite(path: string, content: string): Promise<void> {
+export async function durableWrite(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`
   const handle = await open(temporary, 'w')

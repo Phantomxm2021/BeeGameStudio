@@ -39,6 +39,7 @@ import {
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
+import { GameIrStageCheckpointLoader } from './game-ir/stage-checkpoint'
 
 export {
   inspectWorkflowSnapshot,
@@ -623,6 +624,13 @@ export async function recoverAndResumeRun(input: {
           }
           currentRun =
             (await input.store.reconcile(async () => false)) ?? currentRun
+        }
+        if (currentRun.phase === 'GAME_IR_COMPILATION' && currentRun.gameIrState?.status === 'compiling') {
+          const recovered = await new GameIrStageCheckpointLoader().recover({ workspacePath, deliveryRun: currentRun })
+          const before = currentRun.gameIrState.latestCheckpoint
+          const after = recovered.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined
+          if (after?.checkpointPath !== before?.checkpointPath || after?.checkpointDigest !== before?.checkpointDigest)
+            currentRun = await input.store.save(recovered)
         }
         return {
           run: currentRun,
