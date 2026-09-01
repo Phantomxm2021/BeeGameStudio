@@ -60,58 +60,52 @@ export type GameIrCompilerDomainModel = Readonly<{
   validation?: CompilerValidationModel
 }>
 
-const compilerModuleIds = new Set<GameIrCompilerDomainModel['moduleId']>([
+const compilerModuleIds = [
   'gameplay',
   'balance',
   'world-scene',
   'presentation',
   'resource-realization',
   'implementation-verification',
+] as const
+const compilerText = z.string().min(1)
+const compilerJsonSchema: z.ZodType<CompilerJsonValue> = z.lazy(() => z.union([
+  z.null(),
+  z.boolean(),
+  z.number().finite(),
+  z.string(),
+  z.array(compilerJsonSchema),
+  z.record(z.string(), compilerJsonSchema),
+]))
+const compilerFailureSchema = z.object({
+  outcome: z.enum(['FAIL', 'AMBIGUOUS']),
+  reasonCode: compilerText,
+  actual: compilerText,
+  missingSubject: compilerText,
+  expectedProjection: compilerText,
+  evidencePointers: z.array(compilerText),
+}).strict()
+const compilerSemanticSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    outcome: z.literal('PROJECTED'),
+    nodes: z.array(compilerJsonSchema),
+    sourceClaims: z.array(compilerJsonSchema),
+  }).strict(),
+  compilerFailureSchema,
 ])
-
-function compilerRecord(value: unknown): value is { readonly [key: string]: unknown } {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
-    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
-}
-
-function compilerJson(value: unknown): value is CompilerJsonValue {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
-  if (typeof value === 'number') return Number.isFinite(value)
-  if (Array.isArray(value)) return value.every(compilerJson)
-  if (!compilerRecord(value)) return false
-  return Object.keys(value).every(key => compilerJson(value[key]))
-}
-
-function compilerStrings(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string' && item.length > 0)
-}
-
-function compilerExact(value: { readonly [key: string]: unknown }, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort()
-  const expected = [...keys].sort()
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
-}
-
-function validCompilerModel(value: unknown): value is GameIrCompilerDomainModel {
-  if (!compilerRecord(value) || !compilerExact(value, ['moduleId', 'semantic', ...(Object.hasOwn(value, 'validation') ? ['validation'] : [])]) || !compilerModuleIds.has(value.moduleId as GameIrCompilerDomainModel['moduleId'])) return false
-  const semantic = value.semantic
-  if (!compilerRecord(semantic)) return false
-  if (semantic.outcome === 'PROJECTED') {
-    if (!compilerExact(semantic, ['outcome', 'nodes', 'sourceClaims']) || !Array.isArray(semantic.nodes) || !Array.isArray(semantic.sourceClaims)) return false
-    if (!semantic.nodes.every(compilerJson) || !semantic.sourceClaims.every(compilerJson)) return false
-  } else {
-    if (!compilerExact(semantic, ['outcome', 'reasonCode', 'actual', 'missingSubject', 'expectedProjection', 'evidencePointers']) || !['FAIL', 'AMBIGUOUS'].includes(String(semantic.outcome))) return false
-    if ([semantic.reasonCode, semantic.actual, semantic.missingSubject, semantic.expectedProjection].some(item => typeof item !== 'string' || item.length === 0) || !compilerStrings(semantic.evidencePointers)) return false
-  }
-  if (!Object.hasOwn(value, 'validation')) return true
-  const validation = value.validation
-  if (!compilerRecord(validation)) return false
-  if (validation.outcome === 'PASS')
-    return compilerExact(validation, ['outcome', 'checkIds', 'coveredTargets']) && compilerStrings(validation.checkIds) && compilerStrings(validation.coveredTargets)
-  return compilerExact(validation, ['outcome', 'reasonCode', 'actual', 'missingSubject', 'expectedProjection', 'evidencePointers']) && ['FAIL', 'AMBIGUOUS'].includes(String(validation.outcome)) && typeof validation.reasonCode === 'string' && validation.reasonCode.length > 0 && typeof validation.actual === 'string' && validation.actual.length > 0 && typeof validation.missingSubject === 'string' && validation.missingSubject.length > 0 && typeof validation.expectedProjection === 'string' && validation.expectedProjection.length > 0 && compilerStrings(validation.evidencePointers)
-}
-
-const compilerDomainModelSchema = z.custom<GameIrCompilerDomainModel>(validCompilerModel, 'invalid Game IR compiler domain model')
+const compilerValidationSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    outcome: z.literal('PASS'),
+    checkIds: z.array(compilerText),
+    coveredTargets: z.array(compilerText),
+  }).strict(),
+  compilerFailureSchema,
+])
+const compilerDomainModelSchema: z.ZodType<GameIrCompilerDomainModel> = z.object({
+  moduleId: z.enum(compilerModuleIds),
+  semantic: compilerSemanticSchema,
+  validation: compilerValidationSchema.optional(),
+}).strict()
 
 export const gameIrCompilerModelPayloadSchema = z.object({
   status: z.enum(['completed', 'failed', 'blocked']),

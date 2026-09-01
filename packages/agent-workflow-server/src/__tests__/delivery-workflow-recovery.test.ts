@@ -399,6 +399,8 @@ function exactResumeCheckpointsForWorker(
     workerType === 'foundation-semantic-reviewer' ||
     workerType === 'foundation-document-reviser'
   ) return []
+  if (workerType === 'game-ir-compiler')
+    return ['before-dispatch', 'open', 'terminal-accepted']
   return EXACT_RESUME_WORKER_CHECKPOINTS.filter(
     checkpoint =>
       checkpoint !== 'canonical-receipt' ||
@@ -619,6 +621,18 @@ async function matrixTerminal(input: {
       resolvedFindingIds: [],
     }
   }
+  if (request.workerType === 'game-ir-compiler')
+    return {
+      workerType: request.workerType,
+      status: 'failed' as const,
+      runId: request.runId,
+      dispatchId: request.dispatchId!,
+      taskId: request.taskId!,
+      revision: request.revision,
+      compileRequestDigest: String(request.contract.compileRequestDigest),
+      foundationReadyReceiptDigest: String(request.contract.foundationReadyReceiptDigest),
+      reason: 'missing 1 required section',
+    }
   if (request.workerType === 'resource-planner') {
     await writeBeeGameAssetManifest(workspacePath, {
       version: 8,
@@ -835,6 +849,9 @@ async function createWorkerRecoveryRun(input: {
     input.workspacePath,
     confirmedBriefDigest,
   )
+  const compilerFoundationAuditState = input.workerType === 'game-ir-compiler'
+    ? await materializeFoundationReadyState(input.workspacePath, documentRevision)
+    : undefined
   let workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
   const needsManifest = ![
     'document-author',
@@ -966,6 +983,16 @@ async function createWorkerRecoveryRun(input: {
       phase: 'DOCUMENT_DRAFTING',
       documentStep: 'FOUNDATION_DRAFTING',
       foundationDraftState: { completedPaths: [] },
+      evidence: {},
+      resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+    }
+  if (input.workerType === 'game-ir-compiler')
+    return {
+      ...common,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      foundationDraftState: { completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS] },
+      foundationAuditState: compilerFoundationAuditState!,
       evidence: {},
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     }
@@ -1981,7 +2008,7 @@ describe('delivery workflow recovery', () => {
   })
 
   test('defines every exact-resume checkpoint for every persisted worker type', () => {
-    expect(WORKER_TYPES).toHaveLength(13)
+    expect(WORKER_TYPES).toHaveLength(14)
     expect(EXACT_RESUME_WORKER_CHECKPOINTS).toEqual([
       'before-dispatch',
       'open',
@@ -1991,7 +2018,7 @@ describe('delivery workflow recovery', () => {
     ])
     expect(
       WORKER_TYPES.flatMap(workerType => exactResumeCheckpointsForWorker(workerType)),
-    ).toHaveLength(42)
+    ).toHaveLength(45)
     expect(CANONICAL_RECEIPT_WORKERS).toEqual([
       'document-author',
       'resource-content-author',
@@ -2075,8 +2102,41 @@ describe('delivery workflow recovery', () => {
               active!.dispatchId,
               terminal,
             )
+            if (workerType === 'game-ir-compiler')
+              expect((await store.load())?.activeDispatch?.terminalResult).toEqual(terminal)
           }
           const recoveredStore = await resumeFromDisk(false)
+          if (
+            workerType === 'game-ir-compiler' &&
+            checkpoint === 'terminal-accepted'
+          ) {
+            const retryRun = await recoveredStore.load()
+            expect(started).toHaveLength(2)
+            expect(started.at(-1)?.contract.retryProgressIdentity).toBeString()
+            expect(retryRun?.gameIrState?.status === 'compiling'
+              ? retryRun.gameIrState.progressIdentity
+              : undefined).toBeDefined()
+            const retry = retryRun?.activeDispatch
+            expect(retry?.request?.workerType).toBe('game-ir-compiler')
+            const repeatedFailure = await matrixTerminal({
+              workspacePath: workspace,
+              request: retry!.request!,
+            })
+            await createDeliveryDispatcher({ store: recoveredStore, workerPort })
+              .completeDispatch(retry!.dispatchId, repeatedFailure)
+            const repeatedTerminalRun = await recoveredStore.load()
+            expect(repeatedTerminalRun?.gameIrState?.status === 'compiling'
+              ? repeatedTerminalRun.gameIrState.progressIdentity
+              : undefined).toBeDefined()
+            const attendedStore = await resumeFromDisk(false)
+            expect(await attendedStore.load()).toMatchObject({
+              status: 'needs_action',
+              gameIrState: {
+                status: 'compiling',
+                diagnostic: { reasonCode: 'compilation' },
+              },
+            })
+          }
           if (
             workerType === 'document-author' &&
             checkpoint === 'terminal-accepted'
@@ -2117,13 +2177,17 @@ describe('delivery workflow recovery', () => {
           if (checkpoint === 'unit-accepted') await resumeFromDisk(false)
         }
 
+        const expectedSameUnitDispatches =
+          workerType === 'game-ir-compiler' && checkpoint === 'terminal-accepted'
+            ? 2
+            : 1
         expect(
           started.filter(
             request =>
               matrixWorkerUnitKey(request) ===
               matrixWorkerUnitKey(originalRequest),
           ),
-        ).toHaveLength(1)
+        ).toHaveLength(expectedSameUnitDispatches)
       })
     }
   }

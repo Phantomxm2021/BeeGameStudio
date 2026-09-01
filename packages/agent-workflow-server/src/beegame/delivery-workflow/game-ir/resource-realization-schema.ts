@@ -147,6 +147,13 @@ export type ResourceRealizationDeliveryArtifactValue = Readonly<{
   budgets?: readonly ResourceRealizationBudgetValue[]
 }>
 
+export type ResourceRealizationProjectionPayload =
+  | Readonly<{ kind: 'resource-realization.logical-resource'; value: ResourceRealizationLogicalResourceValue }>
+  | Readonly<{ kind: 'resource-realization.acquisition-profile'; value: ResourceRealizationAcquisitionProfileValue }>
+  | Readonly<{ kind: 'resource-realization.delivery-target'; value: ResourceRealizationDeliveryTargetValue }>
+  | Readonly<{ kind: 'resource-realization.variant'; value: ResourceRealizationVariantValue }>
+  | Readonly<{ kind: 'resource-realization.delivery-artifact'; value: ResourceRealizationDeliveryArtifactValue }>
+
 type ResourceRealizationManifestEntry = Readonly<{
   valueFields: readonly string[]
   optionalValueFields?: readonly string[]
@@ -824,6 +831,33 @@ function parseArtifact(
     result.budgets = parsedBudgets
   }
   return result
+}
+
+/** Domain-owned projection parsing. Consumers must not duplicate Phase 6 value rules. */
+export function parseResourceRealizationProjectionPayload(
+  node: GameIrNode,
+  module: GameIrModuleCandidate,
+): ResourceRealizationProjectionPayload {
+  switch (node.kind) {
+    case 'resource-realization.logical-resource':
+      return { kind: node.kind, value: parseLogical(node) as ResourceRealizationLogicalResourceValue }
+    case 'resource-realization.acquisition-profile':
+      return { kind: node.kind, value: parseProfile(node) as ResourceRealizationAcquisitionProfileValue }
+    case 'resource-realization.delivery-target':
+      return { kind: node.kind, value: parseTarget(node) as ResourceRealizationDeliveryTargetValue }
+    case 'resource-realization.variant':
+      return { kind: node.kind, value: parseVariant(node) as ResourceRealizationVariantValue }
+    case 'resource-realization.delivery-artifact': {
+      const target = module.nodes.find(candidate => candidate.kind === 'resource-realization.delivery-target')
+      if (!target) return fail('module has no delivery target for artifact projection')
+      return {
+        kind: node.kind,
+        value: parseArtifact(node, parseTarget(target)) as ResourceRealizationDeliveryArtifactValue,
+      }
+    }
+    default:
+      return fail(`node ${node.id} has an unknown projection kind`)
+  }
 }
 
 function targetMap(

@@ -277,7 +277,11 @@ export function canonicalCompilerDomainResults(
       return items
     }
     if (value && typeof value === 'object') {
-      return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, normalize(item, name)]))
+      return Object.fromEntries(
+        Object.entries(value)
+          .filter(([, item]) => item !== undefined)
+          .map(([name, item]) => [name, normalize(item, name)]),
+      )
     }
     return value
   }
@@ -286,14 +290,14 @@ export function canonicalCompilerDomainResults(
     const model = value as Record<string, unknown>
     if (model.outcome === 'PROJECTED') return { outcome: 'PROJECTED', nodes: normalize(model.nodes, 'nodes'), sourceClaims: normalize(model.sourceClaims, 'sourceClaims') }
     if (model.outcome === 'PASS') return { outcome: 'PASS', checkIds: normalize(model.checkIds, 'checkIds'), coveredTargets: normalize(model.coveredTargets, 'coveredTargets') }
-    return {
+    return normalize({
       outcome: model.outcome,
       reasonCode: canonicalReason(model.reasonCode, fallback),
       actual: model.actual,
       missingSubject: model.missingSubject,
       expectedProjection: model.expectedProjection,
       evidencePointers: normalize(model.evidencePointers, 'evidencePointers'),
-    }
+    })
   }
   return [...results]
     .map(model => ({ ...model, semantic: normalizeOutcome(model.semantic, 'semantic_failure'), ...(model.validation ? { validation: normalizeOutcome(model.validation, 'validation_failure') } : {}) }))
@@ -308,7 +312,7 @@ export function canonicalCompilerFailureReason(reason: unknown): string {
     .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, '<volatile>')
     .replace(/[a-f0-9]{64}/g, '<volatile>')
     .replace(/\b\d{4}-\d{2}-\d{2}t[^\s]+/g, '<volatile>')
-    .replace(/\b\d+\b/g, '<volatile>')
+    .replace(/\b(id|attempt|retry|elapsed|duration)\s*[:=#-]?\s*\d+\b/g, '$1 <volatile>')
     .replace(/[^a-z0-9_<>'-]+/g, ' ')
   const stop = new Set(['a', 'an', 'and', 'at', 'by', 'for', 'from', 'in', 'is', 'of', 'the', 'to', 'with', 'was'])
   const tokens = [...new Set(normalized.split(/\s+/).filter(token => token && !stop.has(token) && token !== '<volatile>'))].sort()
@@ -837,16 +841,18 @@ export function createDeliveryWorkflowController(input: {
       const failureReason = result.status === 'completed' ? undefined : canonicalCompilerFailureReason(result.reason)
       const progressIdentity = {
         inputDigest: digestGameIrValue({ identity: state.identity, compileRequest: admittedRequest }),
-        diagnosticDigest: digestGameIrValue(result.status === 'completed' ? undefined : { reasonCode: 'compiler_failed', reason: failureReason }),
-        candidateDigest: digestGameIrValue(canonicalCompilerDomainResults(result.domainResults)),
-        checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? undefined),
-        terminalDigest: digestGameIrValue({ status: result.status, domainResults: canonicalCompilerDomainResults(result.domainResults), reasonCode: result.status === 'completed' ? undefined : 'compiler_failed', reason: failureReason }),
+        diagnosticDigest: digestGameIrValue(result.status === 'completed' ? null : { reasonCode: 'compiler_failed', reason: failureReason }),
+        candidateDigest: digestGameIrValue(canonicalCompilerDomainResults(result.domainResults) ?? null),
+        checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? null),
+        terminalDigest: digestGameIrValue(result.status === 'completed'
+          ? { status: result.status, domainResults: canonicalCompilerDomainResults(result.domainResults) ?? null }
+          : { status: result.status, domainResults: canonicalCompilerDomainResults(result.domainResults) ?? null, reasonCode: 'compiler_failed', reason: failureReason }),
       }
       const saveCompilerAttention = async (reasonCode: string, expected: string, actual: string): Promise<void> => {
         const durable = await store.load()
         const base = durable?.runId === run.runId ? durable : run
         const currentState = base.gameIrState?.status === 'compiling' ? base.gameIrState : state
-        const currentProgress = { ...progressIdentity, checkpointJournalDigest: digestGameIrValue(currentState.latestCheckpoint ?? undefined) }
+        const currentProgress = { ...progressIdentity, checkpointJournalDigest: digestGameIrValue(currentState.latestCheckpoint ?? null) }
         const unchanged = currentState.progressIdentity !== undefined && digestGameIrValue(currentState.progressIdentity) === digestGameIrValue(currentProgress)
         const diagnosticId = `game-ir-${digestGameIrValue({ taskId: currentState.identity.taskId, progressIdentity: currentProgress, reasonCode }).slice(0, 12)}`
         const next = await persist({
@@ -2314,6 +2320,20 @@ export function createDeliveryWorkflowController(input: {
 
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
     if (run.status !== 'running') return
+    // A persisted compiler terminal is the next Game IR input. Admit it
+    // before deriving another dispatch so recovery cannot overwrite durable
+    // evidence and repeat the same compilation indefinitely.
+    if (
+      run.phase === 'GAME_IR_COMPILATION' &&
+      run.activeDispatch?.workerType === 'game-ir-compiler' &&
+      run.activeDispatch.terminalResult
+    ) {
+      await dispatcher.replayTerminal(
+        run.activeDispatch,
+        handleTerminalUnlocked,
+      )
+      return
+    }
     if (run.phase === 'GAME_IR_COMPILATION') {
       let compilationRun = run
       let state = run.gameIrState
@@ -2335,7 +2355,7 @@ export function createDeliveryWorkflowController(input: {
             inputDigest: digestGameIrValue(compilingState.identity),
             diagnosticDigest: digestGameIrValue({ reasonCode: 'publication' }),
             candidateDigest: replay.phase7Authority.implementationVerification.source.sourceDigest,
-            checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? undefined),
+            checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? null),
             terminalDigest: digestGameIrValue({ reasonCode: 'publication', phase: 'phase7' }),
           }
           const publishOrAttend = async (): Promise<void> => {

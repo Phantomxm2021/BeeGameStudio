@@ -149,6 +149,13 @@ export type ImplementationVerificationEvidenceRequirementValue = Readonly<{
   artifactPaths?: readonly string[]
 }>
 
+export type ImplementationVerificationProjectionPayload =
+  | Readonly<{ kind: 'implementation-verification.target'; value: ImplementationVerificationTargetValue }>
+  | Readonly<{ kind: 'implementation-verification.unit'; value: ImplementationVerificationUnitValue }>
+  | Readonly<{ kind: 'implementation-verification.acceptance-scenario'; value: ImplementationVerificationAcceptanceScenarioValue }>
+  | Readonly<{ kind: 'implementation-verification.invariant'; value: ImplementationVerificationInvariantValue }>
+  | Readonly<{ kind: 'implementation-verification.evidence-requirement'; value: ImplementationVerificationEvidenceRequirementValue }>
+
 const PRIOR_SEQUENCE = [
   'gameplay',
   'balance',
@@ -430,6 +437,27 @@ function parseValue(node: GameIrNode): RecordValue {
           ),
         }
       : {}),
+  }
+}
+
+/** Domain-owned projection parsing. Consumers must not duplicate Phase 7 value rules. */
+export function parseImplementationVerificationProjectionPayload(
+  node: GameIrNode,
+): ImplementationVerificationProjectionPayload {
+  const value = parseValue(node)
+  switch (node.kind) {
+    case 'implementation-verification.target':
+      return { kind: node.kind, value: value as ImplementationVerificationTargetValue }
+    case 'implementation-verification.unit':
+      return { kind: node.kind, value: value as ImplementationVerificationUnitValue }
+    case 'implementation-verification.acceptance-scenario':
+      return { kind: node.kind, value: value as ImplementationVerificationAcceptanceScenarioValue }
+    case 'implementation-verification.invariant':
+      return { kind: node.kind, value: value as ImplementationVerificationInvariantValue }
+    case 'implementation-verification.evidence-requirement':
+      return { kind: node.kind, value: value as ImplementationVerificationEvidenceRequirementValue }
+    default:
+      return fail(`node ${node.id} has an unknown projection kind`)
   }
 }
 

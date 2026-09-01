@@ -97,6 +97,7 @@ const publicationModelRuntime = new Set([
   'canonicalGameIrJson',
   'canonicalizeGameIrSourceSections',
   'compareCodeUnits',
+  'digestGameIrSourceSectionIndex',
   'digestGameIrValue',
 ])
 const publicationConstructionPath =

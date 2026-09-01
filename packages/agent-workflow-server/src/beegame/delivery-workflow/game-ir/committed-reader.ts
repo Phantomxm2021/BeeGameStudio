@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readSecureWorkspaceFile } from '../secure-file'
 import { resolve } from 'node:path'
-import { z } from 'zod'
 import {
   GAME_IR_CANONICAL_MODULE_IDS,
   parseGameIrCompileRequest,
@@ -20,19 +19,13 @@ import {
   type GameIrModuleCandidate,
   type GameIrSourceBinding,
 } from './model'
-import type {
-  ImplementationVerificationAcceptanceScenarioValue,
-  ImplementationVerificationEvidenceRequirementValue,
-  ImplementationVerificationInvariantValue,
-  ImplementationVerificationTargetValue,
-  ImplementationVerificationUnitValue,
+import {
+  parseImplementationVerificationProjectionPayload,
+  type ImplementationVerificationProjectionPayload,
 } from './implementation-verification-schema'
-import type {
-  ResourceRealizationAcquisitionProfileValue,
-  ResourceRealizationDeliveryArtifactValue,
-  ResourceRealizationDeliveryTargetValue,
-  ResourceRealizationLogicalResourceValue,
-  ResourceRealizationVariantValue,
+import {
+  parseResourceRealizationProjectionPayload,
+  type ResourceRealizationProjectionPayload,
 } from './resource-realization-schema'
 import { projectFoundationReadyReceipt } from './foundation-ready-adapter'
 import {
@@ -48,19 +41,7 @@ import type { DeliveryRun } from '../types'
 
 type RecordValue = Record<string, unknown>
 
-type ImplementationProjectionPayload =
-  | Readonly<{ kind: 'implementation-verification.target'; value: ImplementationVerificationTargetValue }>
-  | Readonly<{ kind: 'implementation-verification.unit'; value: ImplementationVerificationUnitValue }>
-  | Readonly<{ kind: 'implementation-verification.acceptance-scenario'; value: ImplementationVerificationAcceptanceScenarioValue }>
-  | Readonly<{ kind: 'implementation-verification.invariant'; value: ImplementationVerificationInvariantValue }>
-  | Readonly<{ kind: 'implementation-verification.evidence-requirement'; value: ImplementationVerificationEvidenceRequirementValue }>
-type ResourceProjectionPayload =
-  | Readonly<{ kind: 'resource-realization.logical-resource'; value: ResourceRealizationLogicalResourceValue }>
-  | Readonly<{ kind: 'resource-realization.acquisition-profile'; value: ResourceRealizationAcquisitionProfileValue }>
-  | Readonly<{ kind: 'resource-realization.delivery-target'; value: ResourceRealizationDeliveryTargetValue }>
-  | Readonly<{ kind: 'resource-realization.variant'; value: ResourceRealizationVariantValue }>
-  | Readonly<{ kind: 'resource-realization.delivery-artifact'; value: ResourceRealizationDeliveryArtifactValue }>
-type ProjectionPayload = ImplementationProjectionPayload | ResourceProjectionPayload
+type ProjectionPayload = ImplementationVerificationProjectionPayload | ResourceRealizationProjectionPayload
 
 type ProjectionNodeFor<P extends ProjectionPayload> = Readonly<{
   id: string
@@ -98,9 +79,9 @@ export type GameIrResourceProjection = Readonly<{
 }>
 
 export type GameIrAcceptanceProjection = Readonly<{
-  scenarios: readonly ProjectionNode[]
-  invariants: readonly ProjectionNode[]
-  evidenceRequirements: readonly ProjectionNode[]
+  scenarios: readonly Extract<ProjectionNode, { kind: 'implementation-verification.acceptance-scenario' }>[]
+  invariants: readonly Extract<ProjectionNode, { kind: 'implementation-verification.invariant' }>[]
+  evidenceRequirements: readonly Extract<ProjectionNode, { kind: 'implementation-verification.evidence-requirement' }>[]
   digest: string
 }>
 
@@ -165,117 +146,8 @@ export type GameIrManifest = Readonly<{
 }>
 
 const SHA256 = /^[a-f0-9]{64}$/
-
-const textValue = z.string().min(1)
-const textArray = z.array(textValue)
-const implementationTargetValueSchema = z.object({
-  label: textValue,
-  runtime: textValue,
-  platforms: textArray,
-  projectRoots: textArray,
-}).strict()
-const implementationUnitValueSchema = z.object({
-  label: textValue,
-  responsibility: textValue,
-  ownedPaths: textArray,
-}).strict()
-const implementationScenarioValueSchema = z.object({
-  label: textValue,
-  precondition: textValue,
-  action: textValue,
-  expectedOutcome: textValue,
-}).strict()
-const implementationInvariantValueSchema = z.object({
-  label: textValue,
-  assertion: textValue,
-  scope: z.enum(['runtime', 'state', 'numeric', 'resource', 'persistence']),
-}).strict()
-const implementationEvidenceValueSchema = z.object({
-  label: textValue,
-  kind: z.enum(['unit-test', 'integration-test', 'build', 'runtime-observation', 'visual-observation', 'audio-observation', 'file-inspection']),
-  expected: textValue,
-  artifactPaths: textArray.optional(),
-}).strict()
-
-const resourceLogicalValueSchema = z.object({
-  requirementId: textValue,
-  resourceKind: z.enum(['model', 'mesh', 'material', 'texture', 'rig', 'animation', 'audio', 'music', 'vfx', 'shader', 'ui-asset', 'font', 'scene', 'prefab', 'content', 'config']),
-  runtimeRole: textValue,
-}).strict()
-const resourceSourcingPolicySchema = z.object({
-  allowedSourceKinds: textArray,
-  licenseConstraints: textArray,
-  responsibleParty: textValue,
-  handoffCriteria: textArray,
-}).strict()
-const resourceCoverageSchema = z.object({
-  assetKinds: textArray.optional(),
-  usageTags: textArray.optional(),
-  capabilities: textArray.optional(),
-  relationKinds: textArray.optional(),
-  embeddedKinds: textArray.optional(),
-}).strict()
-const resourceAcquisitionValueSchema = z.object({
-  required: z.boolean(),
-  dimensions: textArray,
-  assetKinds: textArray,
-  usageTags: textArray,
-  capabilities: textArray,
-  styles: textArray,
-  sourcingPolicy: resourceSourcingPolicySchema,
-  name: textValue.optional(),
-  purpose: textValue.optional(),
-  coverage: z.array(resourceCoverageSchema).optional(),
-}).strict()
-const resourceDeliveryTargetValueSchema = z.object({
-  assetFormatCapabilities: textArray,
-  platform: textValue.optional(),
-  runtime: textValue.optional(),
-}).strict()
-const resourceVariantValueSchema = z.object({
-  activation: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('required') }).strict(),
-    z.object({ kind: z.literal('alternative'), groupId: textValue }).strict(),
-    z.object({
-      kind: z.literal('conditional'),
-      predicate: z.object({
-        field: z.enum(['platform', 'runtime', 'asset-format-capability']),
-        operator: z.enum(['eq', 'contains']),
-        value: textValue,
-      }).strict(),
-    }).strict(),
-  ]),
-}).strict()
-const resourceAssertionSchema = z.object({
-  operator: z.enum(['eq', 'lte', 'gte', 'range', 'one-of']),
-  value: z.union([z.string(), z.number(), z.boolean()]).optional(),
-  values: z.array(z.union([z.string(), z.number()])).optional(),
-  min: z.number().optional(),
-  max: z.number().optional(),
-  unit: textValue.optional(),
-}).strict()
-const resourceArtifactValueSchema = z.object({
-  artifactClass: z.enum(['runtime-resource', 'content-definition', 'generated-output']),
-  path: textValue,
-  format: textValue,
-  runtimeRole: textValue,
-  codec: textValue.optional(),
-  technicalConstraints: z.array(z.object({ name: textValue, assertion: resourceAssertionSchema }).strict()).optional(),
-  budgets: z.array(z.object({ metric: textValue, limit: z.number(), unit: textValue }).strict()).optional(),
-}).strict()
-
-const projectionPayloadSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('implementation-verification.target'), value: implementationTargetValueSchema }).strict(),
-  z.object({ kind: z.literal('implementation-verification.unit'), value: implementationUnitValueSchema }).strict(),
-  z.object({ kind: z.literal('implementation-verification.acceptance-scenario'), value: implementationScenarioValueSchema }).strict(),
-  z.object({ kind: z.literal('implementation-verification.invariant'), value: implementationInvariantValueSchema }).strict(),
-  z.object({ kind: z.literal('implementation-verification.evidence-requirement'), value: implementationEvidenceValueSchema }).strict(),
-  z.object({ kind: z.literal('resource-realization.logical-resource'), value: resourceLogicalValueSchema }).strict(),
-  z.object({ kind: z.literal('resource-realization.acquisition-profile'), value: resourceAcquisitionValueSchema }).strict(),
-  z.object({ kind: z.literal('resource-realization.delivery-target'), value: resourceDeliveryTargetValueSchema }).strict(),
-  z.object({ kind: z.literal('resource-realization.variant'), value: resourceVariantValueSchema }).strict(),
-  z.object({ kind: z.literal('resource-realization.delivery-artifact'), value: resourceArtifactValueSchema }).strict(),
-])
+const IMPLEMENTATION_MODULE_ID = GAME_IR_CANONICAL_MODULE_IDS[2]
+const RESOURCE_MODULE_ID = GAME_IR_CANONICAL_MODULE_IDS[4]
 
 function fail(message: string): never {
   throw new Error(`invalid committed Game IR: ${message}`)
@@ -382,43 +254,46 @@ function dependencyGraph(candidate: GameIrCandidate): GameIrDependencyGraph {
 }
 
 type ProjectionKind = ProjectionPayload['kind']
-type ProjectionValue<K extends ProjectionKind> = Extract<ProjectionPayload, { kind: K }>['value']
 
-function projectionValue<K extends ProjectionKind>(kind: K, value: unknown): ProjectionValue<K> {
-  const parsed = projectionPayloadSchema.parse({ kind, value })
-  if (parsed.kind !== kind) fail(`projection kind ${kind} does not match its value`)
-  return parsed.value as ProjectionValue<K>
+function projectionPayload(node: GameIrModuleCandidate['nodes'][number], module: GameIrModuleCandidate): ProjectionPayload {
+  if (module.moduleId === IMPLEMENTATION_MODULE_ID)
+    return parseImplementationVerificationProjectionPayload(node)
+  if (module.moduleId === RESOURCE_MODULE_ID)
+    return parseResourceRealizationProjectionPayload(node, module)
+  return fail(`module ${module.moduleId} does not expose a consumer projection`)
 }
 
 function nodesOf<K extends ProjectionKind>(module: GameIrModuleCandidate, kind: K): readonly Extract<ProjectionNode, { kind: K }>[] {
   const values = Object.freeze(
     module.nodes
       .filter(node => node.kind === kind)
-      .map(node =>
-        Object.freeze({
+      .map(node => {
+        const payload = projectionPayload(node, module)
+        if (payload.kind !== kind) fail(`projection kind ${kind} does not match its value`)
+        return Object.freeze({
           id: node.id,
           kind,
           producerMode: node.producerMode,
           references: Object.freeze(node.references.map(reference => Object.freeze({ ...reference }))),
           edges: Object.freeze(node.edges.map(edge => Object.freeze({ ...edge }))),
           bindings: Object.freeze({ ...node.bindings }),
-          payload: Object.freeze({ kind, value: projectionValue(kind, node.value) }),
-        }) as ProjectionNode,
-      ),
+          payload: Object.freeze(payload),
+        }) as ProjectionNode
+      }),
   )
   return values as readonly Extract<ProjectionNode, { kind: K }>[]
 }
 
 function projections(candidate: GameIrCandidate): Pick<GameIrPublishedReader, 'executionProjection' | 'resourceProjection' | 'acceptanceProjection'> {
-  const execution = candidate.modules.find(module => module.moduleId === 'implementation-verification')
-  const resource = candidate.modules.find(module => module.moduleId === 'resource-realization')
+  const execution = candidate.modules.find(module => module.moduleId === IMPLEMENTATION_MODULE_ID)
+  const resource = candidate.modules.find(module => module.moduleId === RESOURCE_MODULE_ID)
   if (!execution || !resource) fail('typed projection module is missing')
   const units = nodesOf(execution, 'implementation-verification.unit')
   const scenarios = nodesOf(execution, 'implementation-verification.acceptance-scenario')
   const invariants = nodesOf(execution, 'implementation-verification.invariant')
   const evidenceRequirements = nodesOf(execution, 'implementation-verification.evidence-requirement')
   const executionProjection = Object.freeze({
-    moduleId: 'implementation-verification' as const,
+    moduleId: IMPLEMENTATION_MODULE_ID,
     units,
     scenarios,
     invariants,
@@ -431,7 +306,7 @@ function projections(candidate: GameIrCandidate): Pick<GameIrPublishedReader, 'e
   const variants = nodesOf(resource, 'resource-realization.variant')
   const deliveryArtifacts = nodesOf(resource, 'resource-realization.delivery-artifact')
   const resourceProjection = Object.freeze({
-    moduleId: 'resource-realization' as const,
+    moduleId: RESOURCE_MODULE_ID,
     logicalResources,
     acquisitionProfiles,
     deliveryTargets,
@@ -460,9 +335,9 @@ function validateSemanticEvidence(value: unknown, authority: NonNullable<GameIrR
   const entries = [
     ['phase4', 'balance', phase4.balance.source.sourceDigest, phase4.balance.mechanical.receiptDigest, phase4.balance.semantic.receiptDigest, phase4Closure.balance.projectionDigest],
     ['phase4', 'gameplay', phase4.gameplay.source.sourceDigest, phase4.gameplay.mechanical.receiptDigest, phase4.gameplay.semantic.receiptDigest, phase4Closure.gameplay.projectionDigest],
-    ['phase7', 'implementation-verification', authority.implementationVerification.source.sourceDigest, authority.implementationVerification.mechanical.receiptDigest, authority.implementationVerification.semantic.receiptDigest, closure.implementationVerification.semanticValidationResultDigest, closure.implementationVerification.projectionDigest],
+    ['phase7', IMPLEMENTATION_MODULE_ID, authority.implementationVerification.source.sourceDigest, authority.implementationVerification.mechanical.receiptDigest, authority.implementationVerification.semantic.receiptDigest, closure.implementationVerification.semanticValidationResultDigest, closure.implementationVerification.projectionDigest],
     ['phase5', 'presentation', phase5.presentation.source.sourceDigest, phase5.presentation.mechanical.receiptDigest, phase5.presentation.semantic.receiptDigest, digestGameIrValue(phase5.presentation.validation), phase5Closure.presentation.projectionDigest],
-    ['phase6', 'resource-realization', phase6.resourceRealization.source.sourceDigest, phase6.resourceRealization.mechanical.receiptDigest, phase6.resourceRealization.semantic.receiptDigest, digestGameIrValue(phase6.resourceRealization.validation), phase6Closure.resourceRealization.projectionDigest],
+    ['phase6', RESOURCE_MODULE_ID, phase6.resourceRealization.source.sourceDigest, phase6.resourceRealization.mechanical.receiptDigest, phase6.resourceRealization.semantic.receiptDigest, digestGameIrValue(phase6.resourceRealization.validation), phase6Closure.resourceRealization.projectionDigest],
     ['phase5', 'world-scene', phase5.worldScene.source.sourceDigest, phase5.worldScene.mechanical.receiptDigest, phase5.worldScene.semantic.receiptDigest, digestGameIrValue(phase5.worldScene.validation), phase5Closure.worldScene.projectionDigest],
   ] as const
   for (const entry of entries) {
@@ -576,8 +451,8 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
     balance: sourceMaps.balance!,
     'world-scene': sourceMaps['world-scene']!,
     presentation: sourceMaps.presentation!,
-    'resource-realization': sourceMaps['resource-realization']!,
-    'implementation-verification': sourceMaps['implementation-verification']!,
+    [RESOURCE_MODULE_ID]: sourceMaps[RESOURCE_MODULE_ID]!,
+    [IMPLEMENTATION_MODULE_ID]: sourceMaps[IMPLEMENTATION_MODULE_ID]!,
   }
   const typedManifest: GameIrManifest = {
     schemaVersion: 'game-ir-manifest.v1',

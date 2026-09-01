@@ -65,6 +65,12 @@ describe('committed Game IR reader', () => {
     expect(canonicalCompilerFailureReason('source digest mismatch')).not.toBe(
       canonicalCompilerFailureReason('publication digest mismatch'),
     )
+    expect(canonicalCompilerFailureReason('missing 1 required section')).not.toBe(
+      canonicalCompilerFailureReason('missing 2 required sections'),
+    )
+    expect(canonicalCompilerFailureReason('expected 4 modules, received 3')).not.toBe(
+      canonicalCompilerFailureReason('expected 6 modules, received 2'),
+    )
     const failed = canonicalCompilerDomainResults([{
       moduleId: 'gameplay',
       semantic: {
