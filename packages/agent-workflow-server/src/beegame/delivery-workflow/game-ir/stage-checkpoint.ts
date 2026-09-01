@@ -1,477 +1,126 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, rm } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import type { DeliveryRun, GameIrCheckpointRef } from '../types'
 import { durableWrite } from '../run-store'
-import {
-  assembleGameplayBalanceModules,
-  type GameplayBalanceAssemblyAuthority,
-} from './gameplay-balance-assembler'
-import {
-  assembleWorldPresentationClosure,
-  type WorldPresentationAssemblyAuthority,
-} from './world-presentation-assembler'
-import {
-  assembleResourceRealizationClosure,
-  type ResourceRealizationAssemblyAuthority,
-} from './resource-realization-assembler'
-import {
-  assembleImplementationVerificationClosure,
-  type ImplementationVerificationAssemblyAuthority,
-} from './implementation-verification-assembler'
-import {
-  canonicalGameIrJson,
-  digestGameIrValue,
-  type GameIrSourceSection,
-} from './model'
-import {
-  validateGameIrDomainSourceEnvelope,
-  type GameIrDomainSourceEnvelope,
-} from './domain-source'
+import { assembleGameplayBalanceModules, type GameplayBalanceAssemblyAuthority } from './gameplay-balance-assembler'
+import { assembleWorldPresentationClosure, type WorldPresentationAssemblyAuthority } from './world-presentation-assembler'
+import { assembleResourceRealizationClosure, type ResourceRealizationAssemblyAuthority } from './resource-realization-assembler'
+import { assembleImplementationVerificationClosure, type ImplementationVerificationAssemblyAuthority } from './implementation-verification-assembler'
+import { canonicalGameIrJson, digestGameIrValue, type GameIrSourceSection } from './model'
+import { validateGameIrDomainSourceEnvelope, type GameIrDomainSourceEnvelope } from './domain-source'
 
-export const GAME_IR_CHECKPOINT_SCHEMA_VERSION =
-  'game-ir-stage-checkpoint.v46' as const
-
-export const GAME_IR_CHECKPOINT_PHASES = Object.freeze([
-  'phase4',
-  'phase5',
-  'phase6',
-  'phase7',
-] as const)
+export const GAME_IR_CHECKPOINT_SCHEMA_VERSION = 'game-ir-stage-checkpoint.v46' as const
+export const GAME_IR_CHECKPOINT_PHASES = Object.freeze(['phase4', 'phase5', 'phase6', 'phase7'] as const)
 export type GameIrCheckpointPhase = (typeof GAME_IR_CHECKPOINT_PHASES)[number]
-
 export const GAME_IR_CHECKPOINT_RECORD_KINDS = Object.freeze([
-  'phase4/gameplay/source',
-  'phase4/gameplay/mechanical',
-  'phase4/gameplay/semantic',
-  'phase4/balance/source',
-  'phase4/balance/mechanical',
-  'phase4/balance/semantic',
-  'phase5/world-scene/source',
-  'phase5/world-scene/mechanical',
-  'phase5/world-scene/semantic',
-  'phase5/world-scene/validation',
-  'phase5/presentation/source',
-  'phase5/presentation/mechanical',
-  'phase5/presentation/semantic',
-  'phase5/presentation/validation',
-  'phase6/resource-realization/source',
-  'phase6/resource-realization/mechanical',
-  'phase6/resource-realization/semantic',
-  'phase6/resource-realization/validation',
-  'phase7/implementation-verification/source',
-  'phase7/implementation-verification/mechanical',
-  'phase7/implementation-verification/semantic',
-  'phase7/implementation-verification/validation',
+  'phase4/gameplay/source', 'phase4/gameplay/mechanical', 'phase4/gameplay/semantic', 'phase4/balance/source', 'phase4/balance/mechanical', 'phase4/balance/semantic',
+  'phase5/world-scene/source', 'phase5/world-scene/mechanical', 'phase5/world-scene/semantic', 'phase5/world-scene/validation', 'phase5/presentation/source', 'phase5/presentation/mechanical', 'phase5/presentation/semantic', 'phase5/presentation/validation',
+  'phase6/resource-realization/source', 'phase6/resource-realization/mechanical', 'phase6/resource-realization/semantic', 'phase6/resource-realization/validation',
+  'phase7/implementation-verification/source', 'phase7/implementation-verification/mechanical', 'phase7/implementation-verification/semantic', 'phase7/implementation-verification/validation',
 ] as const)
-export type GameIrCheckpointRecordKind =
-  (typeof GAME_IR_CHECKPOINT_RECORD_KINDS)[number]
-
-export type GameIrCheckpointRecord = Readonly<{
-  kind: GameIrCheckpointRecordKind
-  record: unknown
-}>
-
-/** A stage is deliberately a closed union; there is no generic record kind. */
+export type GameIrCheckpointRecordKind = (typeof GAME_IR_CHECKPOINT_RECORD_KINDS)[number]
+export type GameIrCheckpointRecord = Readonly<{ kind: GameIrCheckpointRecordKind; record: unknown }>
 export type GameIrCheckpointStep =
   | Readonly<{ phase: 'phase4'; records: readonly GameIrCheckpointRecord[] }>
   | Readonly<{ phase: 'phase5'; records: readonly GameIrCheckpointRecord[] }>
   | Readonly<{ phase: 'phase6'; records: readonly GameIrCheckpointRecord[] }>
   | Readonly<{ phase: 'phase7'; records: readonly GameIrCheckpointRecord[] }>
+export type GameIrAdmittedAuthority = GameplayBalanceAssemblyAuthority | WorldPresentationAssemblyAuthority | ResourceRealizationAssemblyAuthority | ImplementationVerificationAssemblyAuthority
+export type GameIrReplayAuthority = Readonly<{ phase4Authority: GameplayBalanceAssemblyAuthority; phase5Authority?: WorldPresentationAssemblyAuthority; phase6Authority?: ResourceRealizationAssemblyAuthority; phase7Authority?: ImplementationVerificationAssemblyAuthority; checkpoint: GameIrCheckpointRef }>
 
-/** Existing domain assembly authorities are the only admitted input. */
-export type GameIrAdmittedAuthority =
-  | GameplayBalanceAssemblyAuthority
-  | WorldPresentationAssemblyAuthority
-  | ResourceRealizationAssemblyAuthority
-  | ImplementationVerificationAssemblyAuthority
-
-export type GameIrReplayAuthority = Readonly<{
-  phase4Authority: GameplayBalanceAssemblyAuthority
-  phase5Authority?: WorldPresentationAssemblyAuthority
-  phase6Authority?: ResourceRealizationAssemblyAuthority
-  phase7Authority?: ImplementationVerificationAssemblyAuthority
-  checkpoint: GameIrCheckpointRef
-}>
-
-type Identity = Readonly<{
-  runId: string
-  taskId: string
-  publicationId: string
-  confirmedBriefDigest: string
-  foundationRevision: string
-  foundationReadyReceiptDigest: string
-}>
-type StoredRecord = Readonly<{
-  schemaVersion: 'game-ir-stage-record.v46'
-  kind: GameIrCheckpointRecordKind
-  record: unknown
-}>
-type RecordRef = Readonly<{
-  kind: GameIrCheckpointRecordKind
-  path: string
-  digest: string
-  canonicalLength: number
-}>
-type ManifestBody = Readonly<{
-  schemaVersion: typeof GAME_IR_CHECKPOINT_SCHEMA_VERSION
-  phase: GameIrCheckpointPhase
-  identity: Identity
-  compileRequestDigest: string
-  foundationReadyBinding: Readonly<{
-    foundationRevision: string
-    receiptDigest: string
-  }>
-  authoritySectionIndex: readonly GameIrSourceSection[]
-  records: readonly RecordRef[]
-  previousManifestPath?: string
-  previousManifestDigest?: string
-}>
+type Identity = Readonly<{ runId: string; taskId: string; publicationId: string; confirmedBriefDigest: string; foundationRevision: string; foundationReadyReceiptDigest: string }>
+type RecordEnvelope = Readonly<{ schemaVersion: 'game-ir-stage-record.v46'; kind: GameIrCheckpointRecordKind; phase: GameIrCheckpointPhase; moduleId: string; taskId: string; foundationRevision: string; foundationReadyReceiptDigest: string; compileRequestDigest: string; authoritySectionIndexDigest: string; authorityDigest: string; priorClosureDigest?: string; record: unknown }>
+type RecordRef = Readonly<{ kind: GameIrCheckpointRecordKind; path: string; digest: string; canonicalLength: number }>
+type ManifestBody = Readonly<{ schemaVersion: typeof GAME_IR_CHECKPOINT_SCHEMA_VERSION; phase: GameIrCheckpointPhase; identity: Identity; compileRequestDigest: string; foundationReadyBinding: Readonly<{ foundationRevision: string; receiptDigest: string }>; authoritySectionIndex: readonly GameIrSourceSection[]; records: readonly RecordRef[]; previousManifestPath?: string; previousManifestDigest?: string }>
 type Manifest = ManifestBody & Readonly<{ manifestDigest: string }>
 
 const SHA256 = /^[a-f0-9]{64}$/u
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
 const RECORD_SET = new Set<string>(GAME_IR_CHECKPOINT_RECORD_KINDS)
-const PHASE_KINDS: Record<GameIrCheckpointPhase, readonly GameIrCheckpointRecordKind[]> = {
-  phase4: GAME_IR_CHECKPOINT_RECORD_KINDS.slice(0, 6),
-  phase5: GAME_IR_CHECKPOINT_RECORD_KINDS.slice(6, 14),
-  phase6: GAME_IR_CHECKPOINT_RECORD_KINDS.slice(14, 18),
-  phase7: GAME_IR_CHECKPOINT_RECORD_KINDS.slice(18, 22),
-}
+const PHASE_KINDS: Record<GameIrCheckpointPhase, readonly GameIrCheckpointRecordKind[]> = { phase4: GAME_IR_CHECKPOINT_RECORD_KINDS.slice(0, 6), phase5: GAME_IR_CHECKPOINT_RECORD_KINDS.slice(6, 14), phase6: GAME_IR_CHECKPOINT_RECORD_KINDS.slice(14, 18), phase7: GAME_IR_CHECKPOINT_RECORD_KINDS.slice(18, 22) }
+const checkpointQueues = new Map<string, Promise<void>>()
 
-function fail(message: string): never {
-  throw new Error(`invalid Game IR stage checkpoint: ${message}`)
-}
-function sha(bytes: string): string {
-  return createHash('sha256').update(bytes, 'utf8').digest('hex')
-}
-function json(value: unknown): string {
-  return `${canonicalGameIrJson(value)}\n`
-}
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void {
-  const keys = Object.keys(value).sort()
-  const wanted = [...expected].sort()
-  if (keys.length !== wanted.length || keys.some((key, index) => key !== wanted[index]))
-    fail(`${label} has unknown or missing fields`)
-}
-function safeRelative(value: unknown, label: string): asserts value is string {
-  if (typeof value !== 'string' || !value || value.startsWith('/') || value.includes('\\') || value.includes('\0'))
-    fail(`${label} is not a safe relative path`)
-  if (value.split('/').some(part => !part || part === '.' || part === '..'))
-    fail(`${label} is not a safe relative path`)
-}
-function digest(value: unknown): string {
-  return digestGameIrValue(value)
-}
-function phaseForKind(kind: GameIrCheckpointRecordKind): GameIrCheckpointPhase {
-  return kind.slice(0, 6) as GameIrCheckpointPhase
-}
-function sourceOf(value: unknown): GameIrDomainSourceEnvelope | undefined {
-  if (!isRecord(value) || value.schemaVersion !== 'game-ir-domain-source.v1') return undefined
-  return validateGameIrDomainSourceEnvelope(value)
-}
-function sourceList(authority: GameIrAdmittedAuthority): GameIrDomainSourceEnvelope[] {
-  const candidate = authority as Record<string, any>
-  const values: unknown[] = []
-  if (isRecord(candidate) && isRecord(candidate.gameplay)) values.push(candidate.gameplay.source)
-  if (isRecord(candidate) && isRecord(candidate.balance)) values.push(candidate.balance.source)
-  if (isRecord(candidate) && isRecord(candidate.worldScene)) values.push(candidate.worldScene.source)
-  if (isRecord(candidate) && isRecord(candidate.presentation)) values.push(candidate.presentation.source)
-  if (isRecord(candidate) && isRecord(candidate.resourceRealization)) values.push(candidate.resourceRealization.source)
-  if (isRecord(candidate) && isRecord(candidate.implementationVerification)) values.push(candidate.implementationVerification.source)
-  return values.map(sourceOf).filter((source): source is GameIrDomainSourceEnvelope => source !== undefined)
-}
+function fail(message: string): never { throw new Error(`invalid Game IR stage checkpoint: ${message}`) }
+function sha(bytes: string): string { return createHash('sha256').update(bytes, 'utf8').digest('hex') }
+function json(value: unknown): string { return `${canonicalGameIrJson(value)}\n` }
+function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value) }
+function exactKeys(value: Record<string, unknown>, expected: readonly string[], label: string): void { const keys = Object.keys(value).sort(); const wanted = [...expected].sort(); if (keys.length !== wanted.length || keys.some((key, index) => key !== wanted[index])) fail(`${label} has unknown or missing fields`) }
+function safeRelative(value: unknown, label: string): asserts value is string { if (typeof value !== 'string' || !value || value.startsWith('/') || value.includes('\\') || value.includes('\0') || value.split('/').some(part => !part || part === '.' || part === '..')) fail(`${label} is not a safe relative path`) }
+function digest(value: unknown): string { return digestGameIrValue(value) }
+function phaseForKind(kind: GameIrCheckpointRecordKind): GameIrCheckpointPhase { return kind.slice(0, 6) as GameIrCheckpointPhase }
+function sourceOf(value: unknown): GameIrDomainSourceEnvelope | undefined { if (!isRecord(value) || value.schemaVersion !== 'game-ir-domain-source.v1') return undefined; return validateGameIrDomainSourceEnvelope(value) }
+function sourceList(authority: GameIrAdmittedAuthority): GameIrDomainSourceEnvelope[] { const candidate = authority as Record<string, any>; const values: unknown[] = []; for (const key of ['gameplay', 'balance', 'worldScene', 'presentation', 'resourceRealization', 'implementationVerification']) if (isRecord(candidate[key])) values.push(candidate[key].source); return values.map(sourceOf).filter((source): source is GameIrDomainSourceEnvelope => source !== undefined) }
 function identityFor(run: DeliveryRun, authority: GameIrAdmittedAuthority): { identity: Identity; compileRequestDigest: string; sections: readonly GameIrSourceSection[] } {
-  const state = run.gameIrState
-  if (!state) fail('DeliveryRun has no Game IR compilation identity')
-  if (state.status !== 'compiling' || run.phase !== 'GAME_IR_COMPILATION') fail('checkpoint writes require the compiling Game IR phase')
-  const identity = state.identity
-  if (identity.runId !== run.runId || identity.taskId.length === 0 || identity.publicationId.length === 0 || !SHA256.test(identity.confirmedBriefDigest) || !SAFE_ID.test(identity.foundationRevision) || !SHA256.test(identity.foundationReadyReceiptDigest)) fail('DeliveryRun Game IR identity is invalid')
-  const sources = sourceList(authority)
-  if (!sources.length) fail('authority has no admitted source records')
-  const source = sources[0]!
-  const request = source.compileRequest
-  const expected: Identity = {
-    runId: run.runId,
-    taskId: identity.taskId,
-    publicationId: identity.publicationId,
-    confirmedBriefDigest: identity.confirmedBriefDigest,
-    foundationRevision: identity.foundationRevision,
-    foundationReadyReceiptDigest: identity.foundationReadyReceiptDigest,
-  }
-  if (request.taskId !== expected.taskId || request.publicationId !== expected.publicationId || request.foundation.foundationRevision !== expected.foundationRevision || request.foundation.receiptDigest !== expected.foundationReadyReceiptDigest || request.foundation.confirmedBriefDigest !== expected.confirmedBriefDigest)
-    fail('admitted authority identity does not match DeliveryRun')
-  if (sources.some(item => item.taskId !== expected.taskId || item.compileRequest.foundation.foundationRevision !== expected.foundationRevision || item.compileRequest.foundation.receiptDigest !== expected.foundationReadyReceiptDigest))
-    fail('authority source identity is inconsistent')
-  const sections = source.authoritySectionIndex
-  if (sources.some(item => digest(item.authoritySectionIndex) !== digest(sections))) fail('authority Section Index is inconsistent')
+  const state = run.gameIrState; if (!state || state.status !== 'compiling' || run.phase !== 'GAME_IR_COMPILATION') fail('checkpoint writes require the compiling Game IR phase')
+  const identity = state.identity; if (identity.runId !== run.runId || !identity.taskId || !identity.publicationId || !SHA256.test(identity.confirmedBriefDigest) || !SAFE_ID.test(identity.foundationRevision) || !SHA256.test(identity.foundationReadyReceiptDigest)) fail('DeliveryRun Game IR identity is invalid')
+  const sources = sourceList(authority); if (!sources.length) fail('authority has no admitted source records'); const first = sources[0]!; const request = first.compileRequest
+  const expected: Identity = { runId: run.runId, taskId: identity.taskId, publicationId: identity.publicationId, confirmedBriefDigest: identity.confirmedBriefDigest, foundationRevision: identity.foundationRevision, foundationReadyReceiptDigest: identity.foundationReadyReceiptDigest }
+  if (request.taskId !== expected.taskId || request.publicationId !== expected.publicationId || request.foundation.foundationRevision !== expected.foundationRevision || request.foundation.receiptDigest !== expected.foundationReadyReceiptDigest || request.foundation.confirmedBriefDigest !== expected.confirmedBriefDigest) fail('admitted authority identity does not match DeliveryRun')
+  if (sources.some(item => item.taskId !== expected.taskId || item.compileRequest.foundation.foundationRevision !== expected.foundationRevision || item.compileRequest.foundation.receiptDigest !== expected.foundationReadyReceiptDigest || item.compileRequest.foundation.confirmedBriefDigest !== expected.confirmedBriefDigest)) fail('authority source identity is inconsistent')
+  const sections = first.authoritySectionIndex; if (sources.some(item => digest(item.authoritySectionIndex) !== digest(sections))) fail('authority Section Index is inconsistent')
   return { identity: expected, compileRequestDigest: digest(request), sections }
 }
 function authorityRecords(phase: GameIrCheckpointPhase, authority: GameIrAdmittedAuthority): Map<GameIrCheckpointRecordKind, unknown> {
-  const candidate = authority as Record<string, any>
-  const out = new Map<GameIrCheckpointRecordKind, unknown>()
-  const put = (prefix: string, value: unknown) => out.set(`${phase}/${prefix}` as GameIrCheckpointRecordKind, value)
-  if (phase === 'phase4') {
-    if (!isRecord(candidate) || !isRecord(candidate.gameplay) || !isRecord(candidate.balance)) fail('Phase 4 authority shape is invalid')
-    put('gameplay.source', candidate.gameplay.source); put('gameplay.mechanical', candidate.gameplay.mechanical); put('gameplay.semantic', candidate.gameplay.semantic)
-    put('balance.source', candidate.balance.source); put('balance.mechanical', candidate.balance.mechanical); put('balance.semantic', candidate.balance.semantic)
-    assembleGameplayBalanceModules(authority as GameplayBalanceAssemblyAuthority)
-  } else if (phase === 'phase5') {
-    if (!isRecord(candidate) || !isRecord(candidate.phase4Authority) || !isRecord(candidate.worldScene) || !isRecord(candidate.presentation)) fail('Phase 5 authority shape is invalid')
-    put('world-scene.source', candidate.worldScene.source); put('world-scene.mechanical', candidate.worldScene.mechanical); put('world-scene.semantic', candidate.worldScene.semantic); put('world-scene.validation', candidate.worldScene.validation)
-    put('presentation.source', candidate.presentation.source); put('presentation.mechanical', candidate.presentation.mechanical); put('presentation.semantic', candidate.presentation.semantic); put('presentation.validation', candidate.presentation.validation)
-    assembleWorldPresentationClosure(authority as WorldPresentationAssemblyAuthority)
-  } else if (phase === 'phase6') {
-    if (!isRecord(candidate) || !isRecord(candidate.phase5Authority) || !isRecord(candidate.resourceRealization)) fail('Phase 6 authority shape is invalid')
-    put('resource-realization.source', candidate.resourceRealization.source); put('resource-realization.mechanical', candidate.resourceRealization.mechanical); put('resource-realization.semantic', candidate.resourceRealization.semantic); put('resource-realization.validation', candidate.resourceRealization.validation)
-    assembleResourceRealizationClosure(authority as ResourceRealizationAssemblyAuthority)
-  } else {
-    if (!isRecord(candidate) || !isRecord(candidate.phase6Authority) || !isRecord(candidate.implementationVerification)) fail('Phase 7 authority shape is invalid')
-    put('implementation-verification.source', candidate.implementationVerification.source); put('implementation-verification.mechanical', candidate.implementationVerification.mechanical); put('implementation-verification.semantic', candidate.implementationVerification.semantic); put('implementation-verification.validation', candidate.implementationVerification.validation)
-    assembleImplementationVerificationClosure(authority as ImplementationVerificationAssemblyAuthority)
-  }
+  const candidate = authority as Record<string, any>; const out = new Map<GameIrCheckpointRecordKind, unknown>(); const put = (suffix: string, value: unknown) => out.set(`${phase}/${suffix}` as GameIrCheckpointRecordKind, value)
+  if (phase === 'phase4') { if (!isRecord(candidate.gameplay) || !isRecord(candidate.balance)) fail('Phase 4 authority shape is invalid'); put('gameplay/source', candidate.gameplay.source); put('gameplay/mechanical', candidate.gameplay.mechanical); put('gameplay/semantic', candidate.gameplay.semantic); put('balance/source', candidate.balance.source); put('balance/mechanical', candidate.balance.mechanical); put('balance/semantic', candidate.balance.semantic); assembleGameplayBalanceModules(authority as GameplayBalanceAssemblyAuthority) }
+  else if (phase === 'phase5') { if (!isRecord(candidate.phase4Authority) || !isRecord(candidate.worldScene) || !isRecord(candidate.presentation)) fail('Phase 5 authority shape is invalid'); put('world-scene/source', candidate.worldScene.source); put('world-scene/mechanical', candidate.worldScene.mechanical); put('world-scene/semantic', candidate.worldScene.semantic); put('world-scene/validation', candidate.worldScene.validation); put('presentation/source', candidate.presentation.source); put('presentation/mechanical', candidate.presentation.mechanical); put('presentation/semantic', candidate.presentation.semantic); put('presentation/validation', candidate.presentation.validation); assembleWorldPresentationClosure(authority as WorldPresentationAssemblyAuthority) }
+  else if (phase === 'phase6') { if (!isRecord(candidate.phase5Authority) || !isRecord(candidate.resourceRealization)) fail('Phase 6 authority shape is invalid'); put('resource-realization/source', candidate.resourceRealization.source); put('resource-realization/mechanical', candidate.resourceRealization.mechanical); put('resource-realization/semantic', candidate.resourceRealization.semantic); put('resource-realization/validation', candidate.resourceRealization.validation); assembleResourceRealizationClosure(authority as ResourceRealizationAssemblyAuthority) }
+  else { if (!isRecord(candidate.phase6Authority) || !isRecord(candidate.implementationVerification)) fail('Phase 7 authority shape is invalid'); put('implementation-verification/source', candidate.implementationVerification.source); put('implementation-verification/mechanical', candidate.implementationVerification.mechanical); put('implementation-verification/semantic', candidate.implementationVerification.semantic); put('implementation-verification/validation', candidate.implementationVerification.validation); assembleImplementationVerificationClosure(authority as ImplementationVerificationAssemblyAuthority) }
   return out
 }
-function normalizeStep(step: GameIrCheckpointStep): { phase: GameIrCheckpointPhase; records: readonly GameIrCheckpointRecord[] } {
-  if (!isRecord(step) || typeof step.phase !== 'string' || !GAME_IR_CHECKPOINT_PHASES.includes(step.phase as GameIrCheckpointPhase) || !Array.isArray(step.records)) fail('checkpoint step is invalid')
-  return { phase: step.phase as GameIrCheckpointPhase, records: step.records as GameIrCheckpointRecord[] }
+function priorClosureDigest(phase: GameIrCheckpointPhase, authority: GameIrAdmittedAuthority): string | undefined {
+  if (phase === 'phase4') return undefined
+  if (phase === 'phase5') return digest(assembleGameplayBalanceModules((authority as WorldPresentationAssemblyAuthority).phase4Authority))
+  if (phase === 'phase6') return digest(assembleWorldPresentationClosure((authority as ResourceRealizationAssemblyAuthority).phase5Authority))
+  return digest(assembleResourceRealizationClosure((authority as ImplementationVerificationAssemblyAuthority).phase6Authority))
 }
+function moduleForKind(kind: GameIrCheckpointRecordKind): string { return kind.split('/')[1]! }
+function normalizeStep(step: GameIrCheckpointStep): { phase: GameIrCheckpointPhase; records: readonly GameIrCheckpointRecord[] } { if (!isRecord(step) || !GAME_IR_CHECKPOINT_PHASES.includes(step.phase as GameIrCheckpointPhase) || !Array.isArray(step.records)) fail('checkpoint step is invalid'); return { phase: step.phase as GameIrCheckpointPhase, records: step.records as GameIrCheckpointRecord[] } }
 function normalizeManifest(value: unknown): Manifest {
-  if (!isRecord(value)) fail('manifest is not an object')
-  exactKeys(value, ['schemaVersion', 'phase', 'identity', 'compileRequestDigest', 'foundationReadyBinding', 'authoritySectionIndex', 'records', 'previousManifestPath', 'previousManifestDigest', 'manifestDigest'], 'manifest')
-  if (value.schemaVersion !== GAME_IR_CHECKPOINT_SCHEMA_VERSION || !GAME_IR_CHECKPOINT_PHASES.includes(value.phase as GameIrCheckpointPhase)) fail('manifest schema or phase is invalid')
-  if (!isRecord(value.identity) || !isRecord(value.foundationReadyBinding) || !Array.isArray(value.authoritySectionIndex) || !Array.isArray(value.records)) fail('manifest shape is invalid')
-  const identityKeys = ['runId','taskId','publicationId','confirmedBriefDigest','foundationRevision','foundationReadyReceiptDigest'] as const
-  exactKeys(value.identity, identityKeys, 'manifest identity')
-  for (const key of identityKeys) if (typeof value.identity[key] !== 'string' || (key.endsWith('Digest') && !SHA256.test(value.identity[key] as string))) fail('manifest identity is invalid')
-  exactKeys(value.foundationReadyBinding, ['foundationRevision','receiptDigest'], 'manifest Foundation binding')
-  if (value.foundationReadyBinding.foundationRevision !== value.identity.foundationRevision || value.foundationReadyBinding.receiptDigest !== value.identity.foundationReadyReceiptDigest) fail('manifest Foundation binding mismatch')
-  if (typeof value.compileRequestDigest !== 'string' || !SHA256.test(value.compileRequestDigest) || typeof value.manifestDigest !== 'string' || !SHA256.test(value.manifestDigest)) fail('manifest digest is invalid')
-  if (value.previousManifestPath !== undefined) safeRelative(value.previousManifestPath, 'previousManifestPath')
-  if (value.previousManifestDigest !== undefined && (typeof value.previousManifestDigest !== 'string' || !SHA256.test(value.previousManifestDigest))) fail('previousManifestDigest is invalid')
-  if ((value.previousManifestPath === undefined) !== (value.previousManifestDigest === undefined)) fail('previous manifest reference is incomplete')
-  const records: RecordRef[] = []
-  const seen = new Set<string>()
-  for (const raw of value.records) {
-    if (!isRecord(raw)) fail('record reference is invalid')
-    exactKeys(raw, ['kind','path','digest','canonicalLength'], 'record reference')
-    if (typeof raw.kind !== 'string' || !RECORD_SET.has(raw.kind) || seen.has(raw.kind)) fail('record kind is unknown or duplicated')
-    safeRelative(raw.path, 'record path')
-    if (typeof raw.digest !== 'string' || !SHA256.test(raw.digest) || typeof raw.canonicalLength !== 'number' || !Number.isInteger(raw.canonicalLength) || raw.canonicalLength < 0) fail('record reference digest or length is invalid')
-    seen.add(raw.kind); records.push(raw as RecordRef)
-  }
-  const expectedOrder = PHASE_KINDS[value.phase as GameIrCheckpointPhase]
-  if (records.length !== expectedOrder.length || records.some((item, index) => item.kind !== expectedOrder[index])) fail('manifest records are not in canonical phase order')
-  const body = { ...value }; delete (body as Record<string, unknown>).manifestDigest
-  if (digest(body) !== value.manifestDigest) fail('manifest digest mismatch')
-  return value as Manifest
+  if (!isRecord(value)) fail('manifest is not an object'); const phase = value.phase as GameIrCheckpointPhase; const common = ['schemaVersion', 'phase', 'identity', 'compileRequestDigest', 'foundationReadyBinding', 'authoritySectionIndex', 'records', 'manifestDigest']; exactKeys(value, phase === 'phase4' ? common : [...common, 'previousManifestPath', 'previousManifestDigest'], 'manifest'); if (value.schemaVersion !== GAME_IR_CHECKPOINT_SCHEMA_VERSION || !GAME_IR_CHECKPOINT_PHASES.includes(phase)) fail('manifest schema or phase is invalid')
+  if (!isRecord(value.identity) || !isRecord(value.foundationReadyBinding) || !Array.isArray(value.authoritySectionIndex) || !Array.isArray(value.records)) fail('manifest shape is invalid'); const identityKeys = ['runId', 'taskId', 'publicationId', 'confirmedBriefDigest', 'foundationRevision', 'foundationReadyReceiptDigest'] as const; exactKeys(value.identity, identityKeys, 'manifest identity'); for (const key of identityKeys) if (typeof value.identity[key] !== 'string' || (key.endsWith('Digest') && !SHA256.test(value.identity[key] as string))) fail('manifest identity is invalid'); exactKeys(value.foundationReadyBinding, ['foundationRevision', 'receiptDigest'], 'manifest Foundation binding'); if (value.foundationReadyBinding.foundationRevision !== value.identity.foundationRevision || value.foundationReadyBinding.receiptDigest !== value.identity.foundationReadyReceiptDigest) fail('manifest Foundation binding mismatch'); if (typeof value.compileRequestDigest !== 'string' || !SHA256.test(value.compileRequestDigest) || typeof value.manifestDigest !== 'string' || !SHA256.test(value.manifestDigest)) fail('manifest digest is invalid')
+  if (phase === 'phase4') { if ('previousManifestPath' in value || 'previousManifestDigest' in value) fail('Phase 4 manifest cannot contain a predecessor') } else { safeRelative(value.previousManifestPath, 'previousManifestPath'); if (typeof value.previousManifestDigest !== 'string' || !SHA256.test(value.previousManifestDigest)) fail('previous manifest reference is invalid') }
+  const records: RecordRef[] = []; const seen = new Set<string>(); for (const raw of value.records) { if (!isRecord(raw)) fail('record reference is invalid'); exactKeys(raw, ['kind', 'path', 'digest', 'canonicalLength'], 'record reference'); if (typeof raw.kind !== 'string' || !RECORD_SET.has(raw.kind) || seen.has(raw.kind) || phaseForKind(raw.kind as GameIrCheckpointRecordKind) !== phase) fail('record kind is unknown, out of scope, or duplicated'); safeRelative(raw.path, 'record path'); if (typeof raw.digest !== 'string' || !SHA256.test(raw.digest) || typeof raw.canonicalLength !== 'number' || !Number.isInteger(raw.canonicalLength) || raw.canonicalLength < 0) fail('record reference digest or length is invalid'); seen.add(raw.kind); records.push(raw as RecordRef) }
+  const expectedOrder = PHASE_KINDS[phase]; if (records.length !== expectedOrder.length || records.some((item, index) => item.kind !== expectedOrder[index])) fail('manifest records are not in canonical phase order'); const body = { ...value }; delete (body as Record<string, unknown>).manifestDigest; if (digest(body) !== value.manifestDigest) fail('manifest digest mismatch'); return value as Manifest
 }
-function stageRoot(workspacePath: string, runId: string): string {
-  if (!SAFE_ID.test(runId)) fail('runId is not a safe path segment')
-  return join(resolve(workspacePath), '.beegame', 'ir', 'runs', runId, 'checkpoints')
-}
-function inside(root: string, path: string): boolean {
-  const relativePath = relative(root, path)
-  return relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && relativePath !== ''
-}
-async function readManifest(path: string): Promise<{ manifest: Manifest; bytes: string }> {
-  const bytes = await readFile(path, 'utf8')
-  return { manifest: normalizeManifest(JSON.parse(bytes) as unknown), bytes }
-}
-async function writeImmutable(path: string, bytes: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  try {
-    const handle = await open(path, 'wx')
-    try {
-      await handle.writeFile(bytes, 'utf8')
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    if ((await readFile(path, 'utf8')) !== bytes) fail('immutable checkpoint file contains conflicting bytes')
-  }
-}
+function stageRoot(workspacePath: string, runId: string): string { if (!SAFE_ID.test(runId)) fail('runId is not a safe path segment'); return join(resolve(workspacePath), '.beegame', 'ir', 'runs', runId, 'checkpoints') }
+function inside(root: string, path: string): boolean { const value = relative(root, path); return value !== '..' && !value.startsWith(`..${sep}`) && value !== '' }
+async function regularPath(root: string, path: string, label: string): Promise<void> { let rootReal: string; let targetReal: string; try { rootReal = await realpath(root); targetReal = await realpath(path) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw error; fail(`${label} cannot be resolved`) } if (!targetReal.startsWith(`${rootReal}${sep}`)) fail(`${label} escapes checkpoint root`); const info = await lstat(path); if (info.isSymbolicLink() || !info.isFile()) fail(`${label} is not a regular file`) }
+async function readManifest(path: string, root: string): Promise<{ manifest: Manifest; bytes: string }> { await regularPath(root, path, 'manifest'); const bytes = await readFile(path, 'utf8'); return { manifest: normalizeManifest(JSON.parse(bytes) as unknown), bytes } }
+async function syncDirectory(path: string): Promise<void> { const handle = await open(path, 'r'); try { await handle.sync() } finally { await handle.close() } }
+async function locked<T>(key: string, operation: () => Promise<T>): Promise<T> { const prior = checkpointQueues.get(key) ?? Promise.resolve(); let current!: Promise<T>; current = prior.catch(() => undefined).then(operation); const marker = current.then(() => undefined, () => undefined); checkpointQueues.set(key, marker); try { return await current } finally { if (checkpointQueues.get(key) === marker) checkpointQueues.delete(key) } }
 
 export class GameIrStageCheckpointWriter {
   async write(input: { workspacePath: string; deliveryRun: DeliveryRun; step: GameIrCheckpointStep; authority: GameIrAdmittedAuthority }): Promise<GameIrCheckpointRef> {
-    const { phase, records } = normalizeStep(input.step)
-    const { identity, compileRequestDigest, sections } = identityFor(input.deliveryRun, input.authority)
-    const expected = authorityRecords(phase, input.authority)
-    const expectedKinds = PHASE_KINDS[phase]
-    if (records.length !== expectedKinds.length) fail('checkpoint step does not contain the complete stage record set')
-    const seen = new Set<string>()
-    for (const item of records) {
-      if (!isRecord(item) || typeof item.kind !== 'string' || !RECORD_SET.has(item.kind) || phaseForKind(item.kind as GameIrCheckpointRecordKind) !== phase || seen.has(item.kind)) fail('checkpoint step contains unknown, out-of-scope, or duplicate records')
-      if (!expected.has(item.kind as GameIrCheckpointRecordKind) || digest(item.record) !== digest(expected.get(item.kind as GameIrCheckpointRecordKind))) fail(`admitted record ${item.kind} does not match authority`)
-      seen.add(item.kind)
-    }
-    if (seen.size !== expectedKinds.length) fail('checkpoint step is missing an admitted record')
-    const root = stageRoot(input.workspacePath, input.deliveryRun.runId)
-    const finalPath = join(root, `${phase}.json`)
-    const previous = input.deliveryRun.gameIrState?.status === 'compiling' ? input.deliveryRun.gameIrState.latestCheckpoint : undefined
-    const expectedPreviousPhase = phase === 'phase4' ? undefined : `phase${Number(phase.slice(-1)) - 1}`
-    if (expectedPreviousPhase === undefined && previous) fail('Phase 4 cannot link a previous manifest')
-    if (expectedPreviousPhase !== undefined && (!previous || !previous.checkpointPath.endsWith(`/${expectedPreviousPhase}.json`))) fail('checkpoint predecessor does not match phase order')
-    const temp = join(root, `.tmp-${phase}-${process.pid}-${randomUUID()}`)
-    const recordRefs: RecordRef[] = []
-    try {
-      if (previous) {
-        safeRelative(previous.checkpointPath, 'previous checkpoint path')
-        const previousPath = resolve(input.workspacePath, previous.checkpointPath)
-        if (!inside(root, previousPath) || previousPath !== join(root, `${expectedPreviousPhase}.json`)) fail('checkpoint predecessor is outside its deterministic path')
-        const previousManifest = await readManifest(previousPath)
-        if (sha(previousManifest.bytes) !== previous.checkpointDigest || previousManifest.manifest.identity.runId !== identity.runId || previousManifest.manifest.identity.taskId !== identity.taskId || previousManifest.manifest.identity.foundationRevision !== identity.foundationRevision) fail('checkpoint predecessor identity or digest mismatch')
-      }
-      await mkdir(join(temp, 'records'), { recursive: true })
-      const pending: { path: string; bytes: string }[] = []
-      for (const kind of expectedKinds) {
-        const value = expected.get(kind)!
-        const stored: StoredRecord = { schemaVersion: 'game-ir-stage-record.v46', kind, record: value }
-        const bytes = json(stored)
-        const recordPath = join('records', `${kind.replaceAll('/', '__')}.json`)
-        await durableWrite(join(temp, recordPath), bytes)
-        const finalRecordPath = join(root, recordPath)
-        pending.push({ path: finalRecordPath, bytes })
-        recordRefs.push({ kind, path: relative(resolve(input.workspacePath), finalRecordPath).replaceAll('\\', '/'), digest: sha(bytes), canonicalLength: bytes.length })
-      }
-      for (const record of pending) await writeImmutable(record.path, record.bytes)
-      const previousManifestPath = previous?.checkpointPath
-      const previousManifestDigest = previous?.checkpointDigest
-      const body: ManifestBody = {
-        schemaVersion: GAME_IR_CHECKPOINT_SCHEMA_VERSION,
-        phase,
-        identity,
-        compileRequestDigest,
-        foundationReadyBinding: { foundationRevision: identity.foundationRevision, receiptDigest: identity.foundationReadyReceiptDigest },
-        authoritySectionIndex: sections,
-        records: recordRefs,
-        ...(previousManifestPath ? { previousManifestPath } : {}),
-        ...(previousManifestDigest ? { previousManifestDigest } : {}),
-      }
-      const manifest: Manifest = { ...body, manifestDigest: digest(body) }
-      const manifestBytes = json(manifest)
-      await durableWrite(join(temp, 'manifest.json'), manifestBytes)
-      await mkdir(dirname(finalPath), { recursive: true })
-      await writeImmutable(finalPath, manifestBytes)
-      const committed = await readManifest(finalPath)
-      return { checkpointPath: relative(resolve(input.workspacePath), finalPath).replaceAll('\\', '/'), checkpointDigest: sha(committed.bytes) }
-    } finally {
-      await rm(temp, { recursive: true, force: true })
-    }
+    const { phase, records } = normalizeStep(input.step); const { identity, compileRequestDigest, sections } = identityFor(input.deliveryRun, input.authority); const expected = authorityRecords(phase, input.authority); const expectedKinds = PHASE_KINDS[phase]; if (records.length !== expectedKinds.length) fail('checkpoint step does not contain the complete stage record set'); const seen = new Set<string>(); for (const item of records) { if (!isRecord(item) || typeof item.kind !== 'string' || !RECORD_SET.has(item.kind) || phaseForKind(item.kind as GameIrCheckpointRecordKind) !== phase || seen.has(item.kind)) fail('checkpoint step contains unknown, out-of-scope, or duplicate records'); if (!expected.has(item.kind as GameIrCheckpointRecordKind) || digest(item.record) !== digest(expected.get(item.kind as GameIrCheckpointRecordKind))) fail(`admitted record ${item.kind} does not match authority`); seen.add(item.kind) } if (seen.size !== expectedKinds.length) fail('checkpoint step is missing an admitted record')
+    const root = stageRoot(input.workspacePath, input.deliveryRun.runId); const finalPath = join(root, phase); const finalManifestPath = join(finalPath, 'manifest.json'); const previous = input.deliveryRun.gameIrState?.status === 'compiling' ? input.deliveryRun.gameIrState.latestCheckpoint : undefined; const expectedPreviousPhase = phase === 'phase4' ? undefined : `phase${Number(phase.slice(-1)) - 1}`; if (phase === 'phase4' && previous) fail('Phase 4 cannot link a previous manifest'); if (phase !== 'phase4' && (!previous || !previous.checkpointPath.endsWith(`/${expectedPreviousPhase}/manifest.json`))) fail('checkpoint predecessor does not match phase order')
+    return locked(finalPath, async () => { if (previous) { safeRelative(previous.checkpointPath, 'previous checkpoint path'); const previousPath = resolve(input.workspacePath, previous.checkpointPath); if (!inside(root, previousPath) || previousPath !== join(root, expectedPreviousPhase!, 'manifest.json')) fail('checkpoint predecessor is outside deterministic path'); const prior = await readManifest(previousPath, root); if (sha(prior.bytes) !== previous.checkpointDigest || prior.manifest.identity.runId !== identity.runId || prior.manifest.identity.taskId !== identity.taskId || prior.manifest.identity.publicationId !== identity.publicationId || prior.manifest.identity.confirmedBriefDigest !== identity.confirmedBriefDigest || prior.manifest.identity.foundationRevision !== identity.foundationRevision || prior.manifest.identity.foundationReadyReceiptDigest !== identity.foundationReadyReceiptDigest) fail('checkpoint predecessor identity or digest mismatch') }
+      const temp = join(root, `.tmp-${phase}-${process.pid}-${randomUUID()}`); const priorDigest = priorClosureDigest(phase, input.authority); const refs: RecordRef[] = []; try { await mkdir(join(temp, 'records'), { recursive: true }); for (const kind of expectedKinds) { const record = expected.get(kind)!; const envelope: RecordEnvelope = { schemaVersion: 'game-ir-stage-record.v46', kind, phase, moduleId: moduleForKind(kind), taskId: identity.taskId, foundationRevision: identity.foundationRevision, foundationReadyReceiptDigest: identity.foundationReadyReceiptDigest, compileRequestDigest, authoritySectionIndexDigest: digest(sections), authorityDigest: digest(record), ...(priorDigest ? { priorClosureDigest: priorDigest } : {}), record }; const bytes = json(envelope); const recordPath = join('records', `${kind.replaceAll('/', '__')}.json`); await durableWrite(join(temp, recordPath), bytes); refs.push({ kind, path: relative(resolve(input.workspacePath), join(finalPath, recordPath)).replaceAll('\\', '/'), digest: sha(bytes), canonicalLength: Buffer.byteLength(bytes, 'utf8') }) }
+        const body: ManifestBody = { schemaVersion: GAME_IR_CHECKPOINT_SCHEMA_VERSION, phase, identity, compileRequestDigest, foundationReadyBinding: { foundationRevision: identity.foundationRevision, receiptDigest: identity.foundationReadyReceiptDigest }, authoritySectionIndex: sections, records: refs, ...(previous ? { previousManifestPath: previous.checkpointPath, previousManifestDigest: previous.checkpointDigest } : {}) }; const manifest: Manifest = { ...body, manifestDigest: digest(body) }; await durableWrite(join(temp, 'manifest.json'), json(manifest)); await syncDirectory(join(temp, 'records')); await syncDirectory(temp); await mkdir(dirname(finalPath), { recursive: true }); try { await rename(temp, finalPath) } catch (error) { const code = (error as NodeJS.ErrnoException).code; if (code !== 'EEXIST' && code !== 'ENOTEMPTY') throw error; const existing = await readManifest(finalManifestPath, root); if (existing.bytes !== json(manifest)) fail('deterministic final checkpoint path contains conflicting bytes') }
+        const committed = await readManifest(finalManifestPath, root); return { checkpointPath: relative(resolve(input.workspacePath), finalManifestPath).replaceAll('\\', '/'), checkpointDigest: sha(committed.bytes) }
+      } finally { await rm(temp, { recursive: true, force: true }) }
+    })
   }
 }
 
 export class GameIrStageCheckpointLoader {
-  async recover(input: { workspacePath: string; deliveryRun: DeliveryRun }): Promise<DeliveryRun> {
-    const state = input.deliveryRun.gameIrState
-    if (!state || state.status !== 'compiling' || input.deliveryRun.phase !== 'GAME_IR_COMPILATION') return input.deliveryRun
-    let recovered = input.deliveryRun
-    for (const phase of GAME_IR_CHECKPOINT_PHASES) {
-      const path = join(stageRoot(input.workspacePath, input.deliveryRun.runId), `${phase}.json`)
-      let bytes: string
-      try { bytes = await readFile(path, 'utf8') } catch { break }
-      const ref: GameIrCheckpointRef = { checkpointPath: relative(resolve(input.workspacePath), path).replaceAll('\\', '/'), checkpointDigest: sha(bytes) }
-      const candidate: DeliveryRun = { ...input.deliveryRun, gameIrState: { ...state, latestCheckpoint: ref } }
-      try { await this.load({ workspacePath: input.workspacePath, deliveryRun: candidate }); recovered = candidate } catch { break }
-    }
-    return recovered
-  }
+  async recover(input: { workspacePath: string; deliveryRun: DeliveryRun }): Promise<DeliveryRun> { const state = input.deliveryRun.gameIrState; if (!state || state.status !== 'compiling' || input.deliveryRun.phase !== 'GAME_IR_COMPILATION') return input.deliveryRun; if (state.latestCheckpoint) { await this.load({ workspacePath: input.workspacePath, deliveryRun: input.deliveryRun }); return input.deliveryRun }; let recovered = input.deliveryRun; for (const phase of GAME_IR_CHECKPOINT_PHASES) { const path = join(stageRoot(input.workspacePath, input.deliveryRun.runId), phase, 'manifest.json'); let bytes: string; try { await regularPath(stageRoot(input.workspacePath, input.deliveryRun.runId), path, 'manifest'); bytes = await readFile(path, 'utf8') } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') break; throw error }; const ref: GameIrCheckpointRef = { checkpointPath: relative(resolve(input.workspacePath), path).replaceAll('\\', '/'), checkpointDigest: sha(bytes) }; const candidate: DeliveryRun = { ...input.deliveryRun, gameIrState: { ...state, latestCheckpoint: ref } }; await this.load({ workspacePath: input.workspacePath, deliveryRun: candidate }); recovered = candidate }; return recovered }
   async load(input: { workspacePath: string; deliveryRun: DeliveryRun }): Promise<GameIrReplayAuthority> {
-    const state = input.deliveryRun.gameIrState
-    if (!state) fail('DeliveryRun has no Game IR state')
-    const ref = state.status === 'compiling' ? state.latestCheckpoint : state.checkpoint
-    if (!ref) fail('DeliveryRun does not point to a checkpoint')
-    safeRelative(ref.checkpointPath, 'checkpointPath')
-    const root = stageRoot(input.workspacePath, input.deliveryRun.runId)
-    const firstPath = resolve(input.workspacePath, ref.checkpointPath)
-    if (!inside(root, firstPath) || !firstPath.endsWith('.json') || firstPath.includes(`${sep}records${sep}`)) fail('checkpoint pointer is outside the run-scoped checkpoint root')
-    const manifests: Manifest[] = []
-    const records = new Map<GameIrCheckpointRecordKind, unknown>()
-    let path = firstPath
-    let expectedDigest: string | undefined = ref.checkpointDigest
-    while (true) {
-      const { manifest, bytes } = await readManifest(path)
-      if (path !== join(root, `${manifest.phase}.json`)) fail('manifest is not at its deterministic phase path')
-      if (sha(bytes) !== expectedDigest) fail('checkpoint manifest digest mismatch')
-      const identity = state.identity
-      if (manifest.identity.runId !== input.deliveryRun.runId || manifest.identity.taskId !== identity.taskId || manifest.identity.publicationId !== identity.publicationId || manifest.identity.confirmedBriefDigest !== identity.confirmedBriefDigest || manifest.identity.foundationRevision !== identity.foundationRevision || manifest.identity.foundationReadyReceiptDigest !== identity.foundationReadyReceiptDigest) fail('checkpoint identity does not match DeliveryRun')
-      if (manifest.records.length !== PHASE_KINDS[manifest.phase].length) fail('checkpoint manifest has missing records')
-      for (const refRecord of manifest.records) {
-        const recordPath = resolve(input.workspacePath, refRecord.path)
-        if (!inside(root, recordPath)) fail('record path escapes run-scoped checkpoint root')
-        const expectedRecordPath = join(root, 'records', `${refRecord.kind.replaceAll('/', '__')}.json`)
-        if (recordPath !== expectedRecordPath) fail('record is outside its deterministic path')
-        const recordBytes = await readFile(recordPath, 'utf8')
-        if (sha(recordBytes) !== refRecord.digest || recordBytes.length !== refRecord.canonicalLength) fail('record digest or canonical length mismatch')
-        const value = JSON.parse(recordBytes) as unknown
-        if (!isRecord(value)) fail('record is not an object')
-        exactKeys(value, ['schemaVersion','kind','record'], 'record')
-        if (value.schemaVersion !== 'game-ir-stage-record.v46' || value.kind !== refRecord.kind || records.has(refRecord.kind)) fail('record schema, kind, or uniqueness is invalid')
-        records.set(refRecord.kind, value.record)
-      }
-      manifests.unshift(manifest)
-      if (!manifest.previousManifestPath) break
-      if (!manifest.previousManifestDigest) fail('previous manifest digest is missing')
-      const previousPath = resolve(input.workspacePath, manifest.previousManifestPath)
-      if (!inside(root, previousPath) || !previousPath.endsWith('.json') || previousPath.includes(`${sep}records${sep}`)) fail('previous manifest path escapes run-scoped checkpoint root')
-      path = previousPath; expectedDigest = manifest.previousManifestDigest
-    }
-    if (manifests.length < 1 || manifests[0]!.phase !== 'phase4') fail('checkpoint chain must begin at Phase 4')
-    for (let index = 0; index < manifests.length; index += 1) if (manifests[index]!.phase !== `phase${index + 4}`) fail('checkpoint phases are not ordered')
-    const source = [...records.values()].map(sourceOf).filter((value): value is GameIrDomainSourceEnvelope => value !== undefined)
-    if (!source.length) fail('checkpoint has no source records')
-    const first = source[0]!
-    if (manifests.some(manifest => manifest.compileRequestDigest !== digest(first.compileRequest))) fail('compile request digest mismatch')
-    if (digest(first.authoritySectionIndex) !== digest(manifests.at(-1)!.authoritySectionIndex)) fail('checkpoint Section Index mismatch')
-    const authority4 = this.phase4(records)
-    let replay: GameIrReplayAuthority = { phase4Authority: authority4, checkpoint: ref }
-    const phase5Manifest = manifests.find(item => item.phase === 'phase5')
-    const phase6Manifest = manifests.find(item => item.phase === 'phase6')
-    const phase7Manifest = manifests.find(item => item.phase === 'phase7')
-    if (phase5Manifest) replay = { ...replay, phase5Authority: this.phase5(records, authority4) }
-    if (phase6Manifest) replay = { ...replay, phase6Authority: this.phase6(records, replay.phase5Authority!) }
-    if (phase7Manifest) replay = { ...replay, phase7Authority: this.phase7(records, replay.phase6Authority!) }
-    return Object.freeze(replay)
+    const state = input.deliveryRun.gameIrState; if (!state) fail('DeliveryRun has no Game IR state'); const ref = state.status === 'compiling' ? state.latestCheckpoint : state.checkpoint; if (!ref) fail('DeliveryRun does not point to a checkpoint'); safeRelative(ref.checkpointPath, 'checkpointPath'); const root = stageRoot(input.workspacePath, input.deliveryRun.runId); const firstPath = resolve(input.workspacePath, ref.checkpointPath); if (!inside(root, firstPath) || !firstPath.endsWith(`${sep}manifest.json`)) fail('checkpoint pointer is outside run-scoped checkpoint root')
+    const manifests: Manifest[] = []; const records = new Map<GameIrCheckpointRecordKind, RecordEnvelope>(); let path = firstPath; let expectedDigest = ref.checkpointDigest
+    while (true) { const { manifest, bytes } = await readManifest(path, root); if (sha(bytes) !== expectedDigest) fail('checkpoint manifest digest mismatch'); if (path !== join(root, manifest.phase, 'manifest.json')) fail('manifest is not at deterministic phase path'); const identity = state.identity; if (manifest.identity.runId !== input.deliveryRun.runId || manifest.identity.taskId !== identity.taskId || manifest.identity.publicationId !== identity.publicationId || manifest.identity.confirmedBriefDigest !== identity.confirmedBriefDigest || manifest.identity.foundationRevision !== identity.foundationRevision || manifest.identity.foundationReadyReceiptDigest !== identity.foundationReadyReceiptDigest) fail('checkpoint identity does not match DeliveryRun'); for (const recordRef of manifest.records) { const recordPath = resolve(input.workspacePath, recordRef.path); const expectedRecordPath = join(root, manifest.phase, 'records', `${recordRef.kind.replaceAll('/', '__')}.json`); if (recordPath !== expectedRecordPath || !inside(root, recordPath)) fail('record is outside deterministic path'); await regularPath(root, recordPath, 'record'); const recordBytes = await readFile(recordPath, 'utf8'); if (sha(recordBytes) !== recordRef.digest || Buffer.byteLength(recordBytes, 'utf8') !== recordRef.canonicalLength) fail('record digest or canonical length mismatch'); const value = JSON.parse(recordBytes) as unknown; if (!isRecord(value)) fail('record is not an object'); const expectedKeys = ['schemaVersion', 'kind', 'phase', 'moduleId', 'taskId', 'foundationRevision', 'foundationReadyReceiptDigest', 'compileRequestDigest', 'authoritySectionIndexDigest', 'authorityDigest', 'record']; if ('priorClosureDigest' in value) expectedKeys.push('priorClosureDigest'); exactKeys(value, expectedKeys, 'record'); if (value.schemaVersion !== 'game-ir-stage-record.v46' || value.kind !== recordRef.kind || value.phase !== manifest.phase || records.has(recordRef.kind as GameIrCheckpointRecordKind)) fail('record schema, kind, phase, or uniqueness is invalid'); records.set(recordRef.kind as GameIrCheckpointRecordKind, value as unknown as RecordEnvelope) }; manifests.unshift(manifest); if (manifest.phase === 'phase4') { if ('previousManifestPath' in manifest || 'previousManifestDigest' in manifest) fail('Phase 4 manifest contains a predecessor'); break }; const previousPath = resolve(input.workspacePath, manifest.previousManifestPath!); if (!inside(root, previousPath) || previousPath !== join(root, `phase${Number(manifest.phase.slice(-1)) - 1}`, 'manifest.json')) fail('previous manifest path is not the immediate predecessor'); path = previousPath; expectedDigest = manifest.previousManifestDigest! }
+    if (manifests.length < 1 || manifests[0]!.phase !== 'phase4') fail('checkpoint chain must begin at Phase 4'); for (let index = 0; index < manifests.length; index += 1) if (manifests[index]!.phase !== `phase${index + 4}`) fail('checkpoint phases are not ordered'); const sourceRecords = [...records.values()].map(item => sourceOf(item.record)).filter((value): value is GameIrDomainSourceEnvelope => value !== undefined); if (!sourceRecords.length) fail('checkpoint has no source records'); const first = sourceRecords[0]!; if (manifests.some(manifest => manifest.compileRequestDigest !== digest(first.compileRequest) || digest(manifest.authoritySectionIndex) !== digest(first.authoritySectionIndex))) fail('checkpoint compile request or Section Index mismatch'); for (const [kind, record] of records) if (record.taskId !== state.identity.taskId || record.phase !== phaseForKind(kind) || record.moduleId !== moduleForKind(kind) || record.foundationRevision !== state.identity.foundationRevision || record.foundationReadyReceiptDigest !== state.identity.foundationReadyReceiptDigest || record.compileRequestDigest !== digest(first.compileRequest) || record.authoritySectionIndexDigest !== digest(first.authoritySectionIndex) || record.authorityDigest !== digest(record.record)) fail('record authority binding mismatch')
+    const assertPrior = (phase: GameIrCheckpointPhase, expected: string | undefined) => { for (const [kind, record] of records) if (phaseForKind(kind) === phase && (record.priorClosureDigest !== expected)) fail(`${phase} prior closure digest mismatch`) }
+    assertPrior('phase4', undefined); const authority4 = this.phase4(records); const phase4Closure = assembleGameplayBalanceModules(authority4); let replay: GameIrReplayAuthority = { phase4Authority: authority4, checkpoint: ref }; const phase5 = manifests.some(item => item.phase === 'phase5') ? this.phase5(records, authority4) : undefined; if (phase5) { assertPrior('phase5', digest(phase4Closure)); const phase5Closure = assembleWorldPresentationClosure(phase5); replay = { ...replay, phase5Authority: phase5 }; const phase6 = manifests.some(item => item.phase === 'phase6') ? this.phase6(records, phase5) : undefined; if (phase6) { assertPrior('phase6', digest(phase5Closure)); const phase6Closure = assembleResourceRealizationClosure(phase6); replay = { ...replay, phase6Authority: phase6 }; const phase7 = manifests.some(item => item.phase === 'phase7') ? this.phase7(records, phase6) : undefined; if (phase7) { assertPrior('phase7', digest(phase6Closure)); assembleImplementationVerificationClosure(phase7); replay = { ...replay, phase7Authority: phase7 } } } }; return Object.freeze(replay)
   }
-
-  private phase4(records: Map<GameIrCheckpointRecordKind, unknown>): GameplayBalanceAssemblyAuthority {
-    const get = (kind: GameIrCheckpointRecordKind) => { const value = records.get(kind); if (value === undefined) fail(`missing ${kind}`); return value }
-    return { gameplay: { source: get('phase4/gameplay/source'), mechanical: get('phase4/gameplay/mechanical'), semantic: get('phase4/gameplay/semantic') }, balance: { source: get('phase4/balance/source'), mechanical: get('phase4/balance/mechanical'), semantic: get('phase4/balance/semantic') } } as GameplayBalanceAssemblyAuthority
-  }
-  private phase5(records: Map<GameIrCheckpointRecordKind, unknown>, phase4Authority: GameplayBalanceAssemblyAuthority): WorldPresentationAssemblyAuthority {
-    const get = (kind: GameIrCheckpointRecordKind) => { const value = records.get(kind); if (value === undefined) fail(`missing ${kind}`); return value }
-    return { phase4Authority, worldScene: { source: get('phase5/world-scene/source'), mechanical: get('phase5/world-scene/mechanical'), semantic: get('phase5/world-scene/semantic'), validation: get('phase5/world-scene/validation') }, presentation: { source: get('phase5/presentation/source'), mechanical: get('phase5/presentation/mechanical'), semantic: get('phase5/presentation/semantic'), validation: get('phase5/presentation/validation') } } as WorldPresentationAssemblyAuthority
-  }
-  private phase6(records: Map<GameIrCheckpointRecordKind, unknown>, phase5Authority: WorldPresentationAssemblyAuthority): ResourceRealizationAssemblyAuthority {
-    const get = (kind: GameIrCheckpointRecordKind) => { const value = records.get(kind); if (value === undefined) fail(`missing ${kind}`); return value }
-    return { phase5Authority, resourceRealization: { source: get('phase6/resource-realization/source'), mechanical: get('phase6/resource-realization/mechanical'), semantic: get('phase6/resource-realization/semantic'), validation: get('phase6/resource-realization/validation') } } as ResourceRealizationAssemblyAuthority
-  }
-  private phase7(records: Map<GameIrCheckpointRecordKind, unknown>, phase6Authority: ResourceRealizationAssemblyAuthority): ImplementationVerificationAssemblyAuthority {
-    const get = (kind: GameIrCheckpointRecordKind) => { const value = records.get(kind); if (value === undefined) fail(`missing ${kind}`); return value }
-    return { phase6Authority, implementationVerification: { source: get('phase7/implementation-verification/source'), mechanical: get('phase7/implementation-verification/mechanical'), semantic: get('phase7/implementation-verification/semantic'), validation: get('phase7/implementation-verification/validation') } } as ImplementationVerificationAssemblyAuthority
-  }
+  private get(records: Map<GameIrCheckpointRecordKind, RecordEnvelope>, kind: GameIrCheckpointRecordKind): unknown { const value = records.get(kind); if (!value) fail(`missing ${kind}`); return value.record }
+  private phase4(records: Map<GameIrCheckpointRecordKind, RecordEnvelope>): GameplayBalanceAssemblyAuthority { return { gameplay: { source: this.get(records, 'phase4/gameplay/source'), mechanical: this.get(records, 'phase4/gameplay/mechanical'), semantic: this.get(records, 'phase4/gameplay/semantic') }, balance: { source: this.get(records, 'phase4/balance/source'), mechanical: this.get(records, 'phase4/balance/mechanical'), semantic: this.get(records, 'phase4/balance/semantic') } } as GameplayBalanceAssemblyAuthority }
+  private phase5(records: Map<GameIrCheckpointRecordKind, RecordEnvelope>, phase4Authority: GameplayBalanceAssemblyAuthority): WorldPresentationAssemblyAuthority { return { phase4Authority, worldScene: { source: this.get(records, 'phase5/world-scene/source'), mechanical: this.get(records, 'phase5/world-scene/mechanical'), semantic: this.get(records, 'phase5/world-scene/semantic'), validation: this.get(records, 'phase5/world-scene/validation') } , presentation: { source: this.get(records, 'phase5/presentation/source'), mechanical: this.get(records, 'phase5/presentation/mechanical'), semantic: this.get(records, 'phase5/presentation/semantic'), validation: this.get(records, 'phase5/presentation/validation') } } as WorldPresentationAssemblyAuthority }
+  private phase6(records: Map<GameIrCheckpointRecordKind, RecordEnvelope>, phase5Authority: WorldPresentationAssemblyAuthority): ResourceRealizationAssemblyAuthority { return { phase5Authority, resourceRealization: { source: this.get(records, 'phase6/resource-realization/source'), mechanical: this.get(records, 'phase6/resource-realization/mechanical'), semantic: this.get(records, 'phase6/resource-realization/semantic'), validation: this.get(records, 'phase6/resource-realization/validation') } } as ResourceRealizationAssemblyAuthority }
+  private phase7(records: Map<GameIrCheckpointRecordKind, RecordEnvelope>, phase6Authority: ResourceRealizationAssemblyAuthority): ImplementationVerificationAssemblyAuthority { return { phase6Authority, implementationVerification: { source: this.get(records, 'phase7/implementation-verification/source'), mechanical: this.get(records, 'phase7/implementation-verification/mechanical'), semantic: this.get(records, 'phase7/implementation-verification/semantic'), validation: this.get(records, 'phase7/implementation-verification/validation') } } as ImplementationVerificationAssemblyAuthority }
 }
-
 export const gameIrStageCheckpointWriter = new GameIrStageCheckpointWriter()
 export const gameIrStageCheckpointLoader = new GameIrStageCheckpointLoader()
-
-export function writeGameIrStageCheckpoint(input: {
-  workspacePath: string
-  deliveryRun: DeliveryRun
-  step: GameIrCheckpointStep
-  authority: GameIrAdmittedAuthority
-}): Promise<GameIrCheckpointRef> {
-  return gameIrStageCheckpointWriter.write(input)
-}
-
-export function loadGameIrStageCheckpoint(input: {
-  workspacePath: string
-  deliveryRun: DeliveryRun
-}): Promise<GameIrReplayAuthority> {
-  return gameIrStageCheckpointLoader.load(input)
-}
+export function writeGameIrStageCheckpoint(input: { workspacePath: string; deliveryRun: DeliveryRun; step: GameIrCheckpointStep; authority: GameIrAdmittedAuthority }): Promise<GameIrCheckpointRef> { return gameIrStageCheckpointWriter.write(input) }
+export function loadGameIrStageCheckpoint(input: { workspacePath: string; deliveryRun: DeliveryRun }): Promise<GameIrReplayAuthority> { return gameIrStageCheckpointLoader.load(input) }

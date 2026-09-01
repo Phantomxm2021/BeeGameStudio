@@ -629,8 +629,27 @@ export async function recoverAndResumeRun(input: {
           const recovered = await new GameIrStageCheckpointLoader().recover({ workspacePath, deliveryRun: currentRun })
           const before = currentRun.gameIrState.latestCheckpoint
           const after = recovered.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined
-          if (after?.checkpointPath !== before?.checkpointPath || after?.checkpointDigest !== before?.checkpointDigest)
-            currentRun = await input.store.save(recovered)
+          if (after?.checkpointPath !== before?.checkpointPath || after?.checkpointDigest !== before?.checkpointDigest) {
+            const current = await input.store.inspectWorkflowSnapshot()
+            const lease = await input.store.mutationLock(currentRun.runId)
+            try {
+              currentRun = await input.store.replaceSnapshotIfDigest({
+                expectedDigest: current.digest,
+                run: recovered,
+                event: {
+                  runId: recovered.runId,
+                  type: 'game_ir_checkpoint_recovered',
+                  phase: recovered.phase,
+                  status: recovered.status,
+                  revision: recovered.revision,
+                  checkpoint: after,
+                },
+                lease,
+              })
+            } finally {
+              await input.store.unlock(lease)
+            }
+          }
         }
         return {
           run: currentRun,
