@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core、Phase 4（Gameplay + Balance）、Phase 5（World + Presentation）、Phase 6（Resource Realization）与 Phase 7（Implementation + Verification）均已完成 implementation plan、independent final review 与 root verification，并 accepted。Phase 8–9 pending：production routing/persistence、consumer migration、fresh workflow 与 Chrome acceptance 尚未执行；Game IR 的六域 assembly、Phase 7 authority-bound publication/recovery 已可用。
+状态：设计已确认；Phase 3 Core、Phase 4（Gameplay + Balance）、Phase 5（World + Presentation）、Phase 6（Resource Realization）与 Phase 7（Implementation + Verification）均已完成 implementation plan、independent final review 与 root verification，并 accepted。Phase 8 的 production cutover 设计已经独立审计并准入 implementation plan，生产代码尚未执行；Phase 9 fresh workflow 与 Chrome acceptance 尚未执行。Game IR 的六域 assembly、Phase 7 authority-bound publication/recovery 已可用。
 
 日期：2026-08-30
 
@@ -510,11 +510,20 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
   其中 `c06dce7b7`、`60639aa82` 分别纠正 schema invariants 与 producer
   authority；`f22e3dd20` 清除 Phase 7 audit residue 并完成最终边界测试。
 
-### Phase 8：Consumer 单轨迁移（未开始）
+### Phase 8：Production cutover 与 Consumer 单轨迁移（设计已审计，实施未开始）
 
-按 Resource Planner、Resource Curator、Content、Implementation、Comprehensive Reviewer、Acceptance 顺序逐个迁移。每个 consumer 在同一提交中切换唯一 reader 并删除旧 reader，不保留 fallback 或双写。
+Phase 8 先把唯一 `GAME_IR_COMPILATION` durable phase、checkpoint/committed
+reader 和 Checklist bridge 接入现有 DeliveryRun，再按 Resource Planner、
+Resource Curator、Content、Atomic Task Planner、Implementation Worker、
+Implementation Auditor、Acceptance 顺序逐个迁移。每个 consumer 在同一提交中
+切换唯一 reader 并删除旧 reader，不保留 fallback 或双写。完整约束见
+`docs/superpowers/specs/2026-09-01-game-ir-production-cutover-design.md`。
 
 Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority；Game IR 只提供稳定 ID traceability，不重写 Checklist 业务内容。
+
+产品阶段图中的 Comprehensive Reviewer/Revision 是未来独立阶段；当前仓库没有
+该实现，Phase 8 不新增、恢复、改名或预埋其 route，也不修改 Foundation
+Reviewer/Revision。
 
 ### Phase 9：真实验收（未开始）
 
