@@ -1,4 +1,5 @@
 import type { FoundationAuditState } from './foundation-audit-state'
+import type { GameIrReadyReceipt } from './game-ir/contracts'
 export type {
   FoundationAuditState,
   FoundationRevisionDocumentTask,
@@ -80,6 +81,7 @@ export type DeliveryPhase =
   | 'BRIEF_CONFIRMED'
   | 'DOCUMENT_DRAFTING'
   | 'DOCUMENT_REVIEW'
+  | 'GAME_IR_COMPILATION'
   | 'RESOURCE_PREPARATION'
   | 'ATOMIC_TASK_PLANNING'
   | 'IMPLEMENTATION'
@@ -91,6 +93,7 @@ export type DocumentWorkflowStep =
   | 'FOUNDATION_DRAFTING'
   | 'FOUNDATION_REVIEW'
   | 'CHECKLIST_DRAFTING'
+  | 'CHECKLIST_BRIDGE'
 
 /**
  * `blocked` is reserved for a durable validation gate result.  Operational
@@ -143,7 +146,56 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 45 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 46 as const
+
+export type GameIrCompilationIdentity = Readonly<{
+  runId: string
+  taskId: string
+  publicationId: string
+  confirmedBriefDigest: string
+  foundationRevision: string
+  foundationReadyReceiptDigest: string
+}>
+
+export type GameIrCheckpointRef = Readonly<{
+  checkpointPath: string
+  checkpointDigest: string
+}>
+
+export type GameIrState =
+  | Readonly<{
+      status: 'compiling'
+      identity: GameIrCompilationIdentity
+      latestCheckpoint?: GameIrCheckpointRef
+      diagnosticRef?: string
+    }>
+  | Readonly<{
+      status: 'ready'
+      identity: GameIrCompilationIdentity
+      checkpoint: GameIrCheckpointRef
+      readyReceipt: GameIrReadyReceipt
+      readyReceiptDigest: string
+    }>
+
+export type ChecklistBridgeIdentity = Readonly<{
+  runId: string
+  taskId: string
+  checklistPublicationDigest: string
+  gameIrReadyReceiptDigest: string
+}>
+
+export type ChecklistBridgeState =
+  | Readonly<{
+      status: 'bridging'
+      identity: ChecklistBridgeIdentity
+      diagnosticRef?: string
+    }>
+  | Readonly<{
+      status: 'ready'
+      identity: ChecklistBridgeIdentity
+      receiptPath: string
+      receiptDigest: string
+    }>
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -327,6 +379,10 @@ export type DeliveryRun = {
   foundationDraftState: FoundationDraftState
   /** Deterministic post-authoring Section Index + Fact Store binding. */
   foundationAuditState?: FoundationAuditState
+  /** Sole durable Game IR compilation/checkpoint state. */
+  gameIrState?: GameIrState
+  /** Sole durable Checklist-to-Game-IR semantic bridge state. */
+  checklistBridgeState?: ChecklistBridgeState
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
   usage?: WorkflowUsage

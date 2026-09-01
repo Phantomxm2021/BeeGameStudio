@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
 import {
@@ -597,5 +598,216 @@ describe('foundation retry transitions', () => {
       expect(retried.status, label).toBe('running')
       expect(retried.blockedReason, label).toBeUndefined()
     }
+  })
+})
+
+const GAME_IR_DIGEST = 'c'.repeat(64)
+const GAME_IR_BRIEF = 'confirmed brief for v46 transition'
+const GAME_IR_BRIEF_DIGEST = createHash('sha256').update(GAME_IR_BRIEF).digest('hex')
+const GAME_IR_IDENTITY = {
+  runId: 'transition-game-ir-run',
+  taskId: 'game-ir-compile-task',
+  publicationId: 'game-ir-publication',
+  confirmedBriefDigest: GAME_IR_BRIEF_DIGEST,
+  foundationRevision: REVISION,
+  foundationReadyReceiptDigest: GAME_IR_DIGEST,
+} as const
+const GAME_IR_CHECKPOINT = {
+  checkpointPath: '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase4.json',
+  checkpointDigest: GAME_IR_DIGEST,
+} as const
+
+function foundationReadyRun(): DeliveryRun {
+  return {
+    ...createTestDeliveryRun({
+      runId: GAME_IR_IDENTITY.runId,
+      projectId: 'game-ir-route-project',
+      ownerId: 'game-ir-route-owner',
+      confirmedBriefContext: GAME_IR_BRIEF,
+    }),
+    phase: 'DOCUMENT_REVIEW',
+    documentStep: 'FOUNDATION_REVIEW',
+    status: 'running',
+    foundationAuditState: auditReadyState(),
+  }
+}
+
+function canonicalizeTransitionValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeTransitionValue)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalizeTransitionValue(entry)]),
+  )
+}
+
+function gameIrReadyReceipt() {
+  return {
+    schemaVersion: 'game-ir-ready-receipt.v1',
+    taskId: GAME_IR_IDENTITY.taskId,
+    publicationId: GAME_IR_IDENTITY.publicationId,
+    gameIrSchemaVersion: 'game-ir.v1',
+    foundationRevision: REVISION,
+    foundationReceiptDigest: GAME_IR_DIGEST,
+    manifestDigest: GAME_IR_DIGEST,
+    moduleDigests: {
+      balance: GAME_IR_DIGEST,
+      gameplay: GAME_IR_DIGEST,
+      'implementation-verification': GAME_IR_DIGEST,
+      presentation: GAME_IR_DIGEST,
+      'resource-realization': GAME_IR_DIGEST,
+      'world-scene': GAME_IR_DIGEST,
+    },
+    sourceMapDigests: {
+      balance: GAME_IR_DIGEST,
+      gameplay: GAME_IR_DIGEST,
+      'implementation-verification': GAME_IR_DIGEST,
+      presentation: GAME_IR_DIGEST,
+      'resource-realization': GAME_IR_DIGEST,
+      'world-scene': GAME_IR_DIGEST,
+    },
+    dependencyGraphDigest: GAME_IR_DIGEST,
+    committedPath: '.beegame/ir/game-ir.v1/revisions/rev-1/COMMITTED.json',
+  } as const
+}
+
+function gameIrReadyReceiptDigest(): string {
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalizeTransitionValue(gameIrReadyReceipt())))
+    .digest('hex')
+}
+
+describe('v46 Game IR and Checklist bridge transitions', () => {
+  test('routes Foundation READY into the one durable Game IR compilation phase', () => {
+    const next = transitionDeliveryRun(foundationReadyRun(), {
+      type: 'game_ir_compilation_started',
+      identity: GAME_IR_IDENTITY,
+    } as never)
+
+    expect(next).toMatchObject({
+      phase: 'GAME_IR_COMPILATION',
+      documentStep: undefined,
+      status: 'running',
+      gameIrState: { status: 'compiling', identity: GAME_IR_IDENTITY },
+    })
+  })
+
+  test('commits a checkpoint and only then admits Game IR ready state', () => {
+    const compiling = transitionDeliveryRun(foundationReadyRun(), {
+      type: 'game_ir_compilation_started',
+      identity: GAME_IR_IDENTITY,
+    } as never)
+    const checkpointed = transitionDeliveryRun(compiling, {
+      type: 'game_ir_checkpoint_committed',
+      checkpoint: GAME_IR_CHECKPOINT,
+      expectedPreviousCheckpoint: undefined,
+    } as never)
+    expect(checkpointed.gameIrState).toMatchObject({
+      status: 'compiling',
+      latestCheckpoint: GAME_IR_CHECKPOINT,
+    })
+
+    const readyReceipt = gameIrReadyReceipt()
+    const ready = transitionDeliveryRun(checkpointed, {
+      type: 'game_ir_ready',
+      state: {
+        status: 'ready',
+        identity: GAME_IR_IDENTITY,
+        checkpoint: GAME_IR_CHECKPOINT,
+        readyReceipt,
+        readyReceiptDigest: createHash('sha256')
+          .update(JSON.stringify(canonicalizeTransitionValue(readyReceipt)))
+          .digest('hex'),
+      },
+    } as never)
+    expect(ready).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
+      gameIrState: { status: 'ready', checkpoint: GAME_IR_CHECKPOINT },
+    })
+  })
+
+  test('advances checkpoints with compare-and-swap and keeps repeats idempotent', () => {
+    const compiling = transitionDeliveryRun(foundationReadyRun(), {
+      type: 'game_ir_compilation_started',
+      identity: GAME_IR_IDENTITY,
+    } as never)
+    const first = transitionDeliveryRun(compiling, {
+      type: 'game_ir_checkpoint_committed',
+      checkpoint: GAME_IR_CHECKPOINT,
+      expectedPreviousCheckpoint: undefined,
+    } as never)
+    const nextCheckpoint = {
+      checkpointPath: '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase5.json',
+      checkpointDigest: 'd'.repeat(64),
+    }
+    const second = transitionDeliveryRun(first, {
+      type: 'game_ir_checkpoint_committed',
+      checkpoint: nextCheckpoint,
+      expectedPreviousCheckpoint: GAME_IR_CHECKPOINT,
+    } as never)
+    expect(second.gameIrState).toMatchObject({
+      status: 'compiling',
+      latestCheckpoint: nextCheckpoint,
+    })
+    const repeated = transitionDeliveryRun(second, {
+      type: 'game_ir_checkpoint_committed',
+      checkpoint: nextCheckpoint,
+      expectedPreviousCheckpoint: GAME_IR_CHECKPOINT,
+    } as never)
+    expect(repeated.gameIrState).toMatchObject(second.gameIrState!)
+    expect(() => transitionDeliveryRun(second, {
+      type: 'game_ir_checkpoint_committed',
+      checkpoint: {
+        checkpointPath: '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase6.json',
+        checkpointDigest: 'e'.repeat(64),
+      },
+      expectedPreviousCheckpoint: GAME_IR_CHECKPOINT,
+    } as never)).toThrow()
+    expect(() => transitionDeliveryRun(second, {
+      type: 'game_ir_checkpoint_committed',
+      checkpoint: {
+        checkpointPath: '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase6.json',
+        checkpointDigest: 'e'.repeat(64),
+      },
+      expectedPreviousCheckpoint: undefined,
+    } as never)).toThrow()
+  })
+
+  test('requires the bridge step before entering resource preparation', () => {
+    const run: DeliveryRun = {
+      ...foundationReadyRun(),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'CHECKLIST_DRAFTING' as const,
+      gameIrState: {
+        status: 'ready' as const,
+        identity: GAME_IR_IDENTITY,
+        checkpoint: GAME_IR_CHECKPOINT,
+        readyReceipt: gameIrReadyReceipt(),
+        readyReceiptDigest: createHash('sha256')
+          .update(JSON.stringify(canonicalizeTransitionValue(gameIrReadyReceipt())))
+          .digest('hex'),
+      },
+    } as unknown as DeliveryRun
+
+    expect(() => transitionDeliveryRun(run, {
+      type: 'resource_preparation_required',
+    })).toThrow()
+
+    const bridging = transitionDeliveryRun(run, {
+      type: 'checklist_bridge_started',
+      identity: {
+        runId: run.runId,
+        taskId: 'bridge-task',
+        checklistPublicationDigest: GAME_IR_DIGEST,
+        gameIrReadyReceiptDigest: gameIrReadyReceiptDigest(),
+      },
+    } as never)
+    expect(bridging).toMatchObject({
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_BRIDGE',
+      checklistBridgeState: { status: 'bridging' },
+    })
   })
 })

@@ -1968,8 +1968,7 @@ export function createDeliveryWorkflowController(input: {
     // gets a chance to close its committed publication.
     if (
       run.activeDispatch?.terminalResult &&
-      !run.foundationAuditState &&
-      !run.foundationAuditState
+      (!run.foundationAuditState || run.gameIrState?.status === 'ready')
     ) {
       // resumeUnlocked already owns the controller serialization lane. Reuse
       // the canonical terminal handler directly instead of queueing behind

@@ -1300,18 +1300,19 @@ function buildProjectionRun(input: {
     phase = 'DOCUMENT_DRAFTING'
     documentStep = 'FOUNDATION_DRAFTING'
     currentItemId = activeUnitId.slice('document:'.length)
-  } else if (activeUnitId === RESOURCE_INVENTORY_UNIT_ID) {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
-  } else if (activeUnitId === RESOURCE_CONTENT_UNIT_ID) {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
-  } else if (activeUnitId === RESOURCE_GATE_UNIT_ID) {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
+  } else if (
+    activeUnitId === RESOURCE_INVENTORY_UNIT_ID ||
+    activeUnitId === RESOURCE_CONTENT_UNIT_ID ||
+    activeUnitId === RESOURCE_GATE_UNIT_ID
+  ) {
+    phase = 'RESOURCE_PREPARATION'
+    resourceTask = activeUnitId === RESOURCE_INVENTORY_UNIT_ID
+      ? 'RESOURCE_INVENTORY'
+      : activeUnitId === RESOURCE_CONTENT_UNIT_ID
+        ? 'RESOURCE_CONTENT'
+        : 'RESOURCE_GATE'
   } else if (activeUnitId === ATOMIC_PLAN_UNIT_ID) {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
+    phase = 'ATOMIC_TASK_PLANNING'
   } else if (
     input.tasks.some(task => `implementation:${task.id}` === activeUnitId)
   ) {
@@ -1384,6 +1385,18 @@ function buildProjectionRun(input: {
       ...(gate ? { resource: gate.inputRevision } : {}),
     },
     ...(currentItemId ? { currentItemId } : {}),
+    ...(input.snapshot?.foundationAuditState !== undefined
+      ? {
+          foundationAuditState: input.snapshot
+            .foundationAuditState as DeliveryRun['foundationAuditState'],
+        }
+      : {}),
+    ...(input.snapshot?.gameIrState !== undefined
+      ? { gameIrState: input.snapshot.gameIrState as DeliveryRun['gameIrState'] }
+      : {}),
+    ...(input.snapshot?.checklistBridgeState !== undefined
+      ? { checklistBridgeState: input.snapshot.checklistBridgeState as DeliveryRun['checklistBridgeState'] }
+      : {}),
     tasks: projectedTasks,
     evidence: {
       ...(gate

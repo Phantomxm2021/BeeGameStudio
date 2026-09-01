@@ -216,7 +216,7 @@ const foundationDefectReportSchema = z
 
 const digestRecordSchema = z.record(z.string().min(1), sha256Schema)
 
-const gameIrReadyReceiptSchema = z
+export const gameIrReadyReceiptSchema = z
   .object({
     schemaVersion: z.literal('game-ir-ready-receipt.v1'),
     taskId: safeIdSchema,

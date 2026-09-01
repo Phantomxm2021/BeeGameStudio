@@ -35,7 +35,7 @@ import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 import { proveExactRawActiveUnitId } from '../beegame/delivery-workflow/recovery-projector'
 import {
-  createTestDeliveryRun,
+  createTestDeliveryRun as createBaseTestDeliveryRun,
   withTestDocumentMetadata,
 } from './delivery-workflow-test-helpers'
 import {
@@ -52,6 +52,7 @@ import {
 } from '../beegame/delivery-workflow/types'
 import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
+import { digestGameIrValue } from '../beegame/delivery-workflow/game-ir/model'
 import {
   commitAuthoredFoundationDocument,
 } from '../beegame/authored-document-receipt'
@@ -74,8 +75,278 @@ import {
   foundationProjectionRelativePath,
   projectFoundationAuthority,
 } from '../beegame/foundation-authority-projection'
+import {
+  FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
+  FOUNDATION_SEMANTIC_CHECKS,
+} from '../beegame/delivery-workflow/foundation-semantic-audit'
+import {
+  deriveFoundationAuditArtifacts,
+  publishDeterministicFoundationReview,
+  publishFoundationDerivedArtifacts,
+  publishFoundationSemanticReview,
+} from '../beegame/delivery-workflow/foundation-audit-artifacts'
+import {
+  createFoundationFactStore,
+  digestFactStore,
+} from '../beegame/delivery-workflow/foundation-fact-store'
 
 const RECOVERY_OWNER_ID = 'recovery-owner'
+
+function syntheticFoundationReadyState(revision: string) {
+  const digest = 'a'.repeat(64)
+  const reviewDigest = 'b'.repeat(64)
+  const reviewRoot = `.beegame/audit/foundation/${revision}/review/${reviewDigest}`
+  const seed = createFoundationAuditState({
+    revision,
+    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+    manifest: {
+      revision,
+      status: 'index_staged',
+      catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+      sectionIndexDigest: digest,
+    },
+  })
+  const usage = { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  return parseFoundationAuditState({
+    ...seed,
+    status: 'audit_ready',
+    phaseStartedAt: '2026-01-01T00:00:00.000Z',
+    derived: {
+      manifestPath: `.beegame/audit/foundation/${revision}/derived/manifest.json`, manifestDigest: digest,
+      markerPath: `.beegame/audit/foundation/${revision}/derived/COMMITTED.json`, markerDigest: digest,
+      factStorePath: `.beegame/audit/foundation/${revision}/derived/fact-store.json`, factStoreDigest: digest,
+      sectionIndexPath: `.beegame/audit/foundation/${revision}/derived/section-index.json`, sectionIndexDigest: digest,
+    },
+    deterministic: {
+      reviewDigest: digest,
+      issueRegistryPath: `.beegame/audit/foundation/${revision}/staging/review/issue-registry.json`, issueRegistryDigest: digest,
+      manifestPath: `.beegame/audit/foundation/${revision}/staging/review/manifest.json`, manifestDigest: digest,
+      markerPath: `.beegame/audit/foundation/${revision}/staging/review/COMMITTED.json`, markerDigest: digest,
+      catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+      contractGraphDigest: digest, sectionIndexDigest: digest, factStoreDigest: digest,
+    },
+    semantic: { aggregateUsage: usage },
+    tasks: FOUNDATION_SEMANTIC_CHECKS.map(check => ({
+      taskId: `synthetic-semantic-${check.checkId}`,
+      kind: 'semantic' as const,
+      revision,
+      checkId: check.checkId,
+      packetDigest: digest,
+      modelTier: check.modelTier,
+      status: 'completed' as const,
+      attempt: 1,
+      terminalDigest: digest,
+      usage,
+      durationMs: 0,
+      dispatch: {
+        dispatchId: `synthetic-dispatch-${check.checkId}`,
+        workerType: 'foundation-semantic-reviewer' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        taskId: `synthetic-semantic-${check.checkId}`,
+        revision,
+        status: 'completed' as const,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: '2026-01-01T00:00:00.000Z',
+        terminalResult: {},
+      },
+      admittedResult: { checkId: check.checkId, packetIdentity: digest, outcome: 'PASS' as const },
+    })),
+    review: {
+      reviewDigest,
+      issueRegistryPath: `${reviewRoot}/issue-registry.json`, issueRegistryDigest: reviewDigest,
+      manifestPath: `${reviewRoot}/manifest.json`, manifestDigest: reviewDigest,
+      markerPath: `${reviewRoot}/COMMITTED.json`, markerDigest: reviewDigest,
+      sectionIndexDigest: digest, factStoreDigest: digest,
+      semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest,
+      issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
+    },
+  })
+}
+
+async function materializeFoundationReadyState(
+  workspacePath: string,
+  revision: string,
+) {
+  const staged = await deriveFoundationAuditArtifacts({
+    workspacePath,
+    revision,
+    checkpoints: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+      path,
+      status: 'committed' as const,
+    })),
+  })
+  const factStore = createFoundationFactStore([])
+  const derived = await publishFoundationDerivedArtifacts({
+    workspacePath,
+    revision,
+    documentDigests: staged.documentDigests,
+    sectionIndex: staged.sectionIndex,
+    factStore,
+    normalizedFactDigest: digestFactStore(factStore),
+    manifest: staged.manifest as unknown as Record<string, unknown>,
+  })
+  const deterministic = await publishDeterministicFoundationReview({
+    workspacePath,
+    revision,
+    documentDigests: derived.documentDigests,
+    sectionIndex: derived.sectionIndex,
+    factStore: derived.factStore,
+    issues: [],
+  })
+  const resultDigest = 'a'.repeat(64)
+  const resultLedger = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => ({
+    checkId: check.checkId,
+    packetIdentity: resultDigest,
+    admittedResultDigest: resultDigest,
+  }))
+  const review = await publishFoundationSemanticReview({
+    workspacePath,
+    revision,
+    documentDigests: derived.documentDigests,
+    sectionIndexDigest: derived.digests.sectionIndex,
+    factStoreDigest: derived.digests.factStore,
+    deterministicReviewDigest: deterministic.reviewDigest,
+    semanticManifest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
+    semanticResultDigests: resultLedger,
+    issues: [],
+  })
+  const usage = { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  const seed = createFoundationAuditState({
+    revision,
+    documentDigests: staged.documentDigests,
+    manifest: staged.manifest,
+  })
+  const derivedRoot = `.beegame/audit/foundation/${revision}/derived`
+  const deterministicRoot = `.beegame/audit/foundation/${revision}/staging/review/${deterministic.reviewDigest}`
+  const reviewRoot = `.beegame/audit/foundation/${revision}/review/${review.reviewDigest}`
+  return parseFoundationAuditState({
+    ...seed,
+    status: 'audit_ready',
+    phaseStartedAt: '2026-01-01T00:00:00.000Z',
+    derived: {
+      manifestPath: `${derivedRoot}/manifest.json`, manifestDigest: derived.digests.manifest,
+      markerPath: `${derivedRoot}/COMMITTED.json`, markerDigest: derived.digests.marker,
+      factStorePath: `${derivedRoot}/fact-store.json`, factStoreDigest: derived.digests.factStore,
+      sectionIndexPath: `${derivedRoot}/section-index.json`, sectionIndexDigest: derived.digests.sectionIndex,
+    },
+    deterministic: {
+      reviewDigest: deterministic.reviewDigest,
+      issueRegistryPath: `${deterministicRoot}/issue-registry.json`, issueRegistryDigest: deterministic.digests.issueRegistry,
+      manifestPath: `${deterministicRoot}/manifest.json`, manifestDigest: deterministic.digests.manifest,
+      markerPath: `${deterministicRoot}/COMMITTED.json`, markerDigest: deterministic.digests.marker,
+      catalogVersion: deterministic.catalogVersion,
+      contractGraphDigest: deterministic.contractGraphDigest,
+      sectionIndexDigest: deterministic.sectionIndexDigest,
+      factStoreDigest: deterministic.factStoreDigest,
+    },
+    semantic: { aggregateUsage: usage },
+    tasks: FOUNDATION_SEMANTIC_CHECKS.map(check => ({
+      taskId: `recovery-semantic-${check.checkId}`,
+      kind: 'semantic' as const,
+      revision,
+      checkId: check.checkId,
+      packetDigest: resultDigest,
+      modelTier: check.modelTier,
+      status: 'completed' as const,
+      attempt: 1,
+      terminalDigest: resultDigest,
+      usage,
+      durationMs: 0,
+      dispatch: {
+        dispatchId: `recovery-dispatch-${check.checkId}`,
+        workerType: 'foundation-semantic-reviewer' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        taskId: `recovery-semantic-${check.checkId}`,
+        revision,
+        status: 'completed' as const,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: '2026-01-01T00:00:00.000Z',
+        terminalResult: {},
+      },
+      admittedResult: {
+        checkId: check.checkId,
+        packetIdentity: resultDigest,
+        outcome: 'PASS' as const,
+      },
+    })),
+    review: {
+      reviewDigest: review.reviewDigest,
+      issueRegistryPath: `${reviewRoot}/issue-registry.json`, issueRegistryDigest: review.digests.issueRegistry,
+      manifestPath: `${reviewRoot}/manifest.json`, manifestDigest: review.digests.manifest,
+      markerPath: `${reviewRoot}/COMMITTED.json`, markerDigest: review.digests.marker,
+      sectionIndexDigest: review.sectionIndexDigest,
+      factStoreDigest: review.factStoreDigest,
+      semanticManifestDigest: review.semanticManifestDigest,
+      issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
+    },
+  })
+}
+
+/** Existing downstream recovery fixtures carry synthetic v46 authority refs. */
+function withSyntheticV46DownstreamAuthority(run: DeliveryRun): DeliveryRun {
+  const digest = 'a'.repeat(64)
+  const foundationRevision = run.foundationAuditState?.revision ?? 'synthetic-foundation'
+  const moduleDigests = {
+    balance: digest,
+    gameplay: digest,
+    'implementation-verification': digest,
+    presentation: digest,
+    'resource-realization': digest,
+    'world-scene': digest,
+  } as const
+  const readyReceipt = {
+    schemaVersion: 'game-ir-ready-receipt.v1' as const,
+    taskId: `synthetic-game-ir-${run.runId}`,
+    publicationId: `synthetic-publication-${run.runId}`,
+    gameIrSchemaVersion: 'game-ir.v1' as const,
+    foundationRevision,
+    foundationReceiptDigest: digest,
+    manifestDigest: digest,
+    moduleDigests,
+    sourceMapDigests: moduleDigests,
+    dependencyGraphDigest: digest,
+    committedPath: `.beegame/ir/game-ir.v1/revisions/${foundationRevision}/COMMITTED.json`,
+  }
+  const readyReceiptDigest = digestGameIrValue(readyReceipt)
+  return {
+    ...run,
+    foundationAuditState: run.foundationAuditState ?? syntheticFoundationReadyState(foundationRevision),
+    gameIrState: {
+      status: 'ready',
+      identity: {
+        runId: run.runId,
+        taskId: readyReceipt.taskId,
+        publicationId: readyReceipt.publicationId,
+        confirmedBriefDigest: run.confirmedBriefDigest,
+        foundationRevision,
+        foundationReadyReceiptDigest: digest,
+      },
+      checkpoint: {
+        checkpointPath: `.beegame/ir/runs/${run.runId}/checkpoints/synthetic.json`,
+        checkpointDigest: digest,
+      },
+      readyReceipt,
+      readyReceiptDigest,
+    },
+    checklistBridgeState: {
+      status: 'ready',
+      identity: {
+        runId: run.runId,
+        taskId: `synthetic-bridge-${run.runId}`,
+        checklistPublicationDigest: digest,
+        gameIrReadyReceiptDigest: readyReceiptDigest,
+      },
+      receiptPath: `.beegame/workflow/checklist-bridge/${run.runId}.json`,
+      receiptDigest: digest,
+    },
+  }
+}
+
+function createTestDeliveryRun(
+  input: Parameters<typeof createBaseTestDeliveryRun>[0],
+): DeliveryRun {
+  return createBaseTestDeliveryRun(input)
+}
 
 test('current delivery schema rejects removed remediation state', () => {
   const run = createTestDeliveryRun({
@@ -699,23 +970,23 @@ async function createWorkerRecoveryRun(input: {
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     }
   if (input.workerType === 'resource-planner')
-    return {
+    return withSyntheticV46DownstreamAuthority({
       ...common,
       phase: 'RESOURCE_PREPARATION',
       documentStep: undefined,
       evidence: {},
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
-    }
+    })
   if (input.workerType === 'resource-curator')
-    return {
+    return withSyntheticV46DownstreamAuthority({
       ...common,
       phase: 'RESOURCE_PREPARATION',
       documentStep: undefined,
       evidence: {},
       resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-    }
+    })
   if (input.workerType === 'resource-content-author')
-    return {
+    return withSyntheticV46DownstreamAuthority({
       ...common,
       phase: 'RESOURCE_PREPARATION',
       documentStep: undefined,
@@ -725,11 +996,11 @@ async function createWorkerRecoveryRun(input: {
         currentTask: 'RESOURCE_CONTENT',
         contentReceipt: undefined,
       },
-    }
+    })
   if (input.workerType === 'atomic-task-planner')
-    return { ...common, phase: 'ATOMIC_TASK_PLANNING', tasks: [] }
+    return withSyntheticV46DownstreamAuthority({ ...common, phase: 'ATOMIC_TASK_PLANNING', tasks: [] })
   if (input.workerType === 'implementation-worker')
-    return { ...common, phase: 'IMPLEMENTATION', tasks: [task] }
+    return withSyntheticV46DownstreamAuthority({ ...common, phase: 'IMPLEMENTATION', tasks: [task] })
   const completedTask: AtomicTask = {
     ...task,
     status: 'completed',
@@ -737,14 +1008,14 @@ async function createWorkerRecoveryRun(input: {
     evidenceRefs: ['.beegame/workflow/evidence/matrix-task.json'],
   }
   if (input.workerType === 'implementation-auditor')
-    return {
+    return withSyntheticV46DownstreamAuthority({
       ...common,
       phase: 'IMPLEMENTATION_AUDIT',
       tasks: [completedTask],
       revision: { ...common.revision, implementation: workspaceRevision },
-    }
+    })
   if (input.workerType === 'acceptance-validator')
-    return {
+    return withSyntheticV46DownstreamAuthority({
       ...common,
       phase: 'ACCEPTANCE',
       tasks: [completedTask],
@@ -759,19 +1030,19 @@ async function createWorkerRecoveryRun(input: {
           observedAt: RECOVERY_ACCEPTED_AT,
         },
       },
-    }
+    })
   if (input.workerType === 'change-impact-analyzer')
-    return {
+    return withSyntheticV46DownstreamAuthority({
       ...common,
       phase: 'DELIVERY',
       changeRequest: 'Synthetic change request.',
-    }
-  return {
+    })
+  return withSyntheticV46DownstreamAuthority({
     ...common,
     phase: 'DELIVERY',
     changeRequest: 'Synthetic question.',
     changeRoute: 'question',
-  }
+  })
 }
 
 function sha256(value: string): string {
@@ -828,6 +1099,10 @@ async function createResourceRecoveryFixture() {
   const documentRevision = await computeDocumentRevision(
     workspacePath,
     confirmedBriefDigest,
+  )
+  const foundationAuditState = await materializeFoundationReadyState(
+    workspacePath,
+    documentRevision,
   )
   const inventoryRevision =
     await computeResourceInventoryRevision(workspacePath)
@@ -940,7 +1215,7 @@ async function createResourceRecoveryFixture() {
       eventSchemaVersion: 1,
       unitId: 'resource:gate',
       kind: 'resource-gate',
-      phase: 'DOCUMENT_REVIEW',
+      phase: 'RESOURCE_PREPARATION',
       predecessorUnitIds: ['resource:content'],
       inputRevision: resourceRevision,
       dependencyDigests: {},
@@ -994,36 +1269,39 @@ async function createResourceRecoveryFixture() {
   )
 
   const snapshot = {
-    ...journalRun,
-    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+    ...withSyntheticV46DownstreamAuthority({
+      ...journalRun,
+      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
+      phase: 'ATOMIC_TASK_PLANNING' as const,
+      documentStep: undefined,
+      foundationAuditState,
+      evidence: {
+        resourcePreparation: {
+          path: '.beegame/workflow/evidence/resource-gate.json',
+          kind: 'resource_preparation' as const,
+          revision: resourceRevision,
+          status: 'passed' as const,
+          observedAt: RECOVERY_ACCEPTED_AT,
+        },
+      },
+      resourceProductionState: {
+        currentTask: 'RESOURCE_GATE' as const,
+        inventoryReceipt: {
+          revision: inventoryRevision,
+          bindings: [
+            {
+              requirementId: 'fixture-requirement',
+              resourceIds: ['fixture-resource'],
+            },
+          ],
+          catalogObserved: true,
+          acceptedAt: RECOVERY_ACCEPTED_AT,
+        },
+        contentReceipt: { contentDigest, acceptedAt: RECOVERY_ACCEPTED_AT },
+      },
+    }),
     invalidRecoveryMarker: true,
-    phase: 'DOCUMENT_REVIEW' as const,
-    documentStep: 'FOUNDATION_REVIEW' as const,
-    evidence: {
-      resourcePreparation: {
-        path: '.beegame/workflow/evidence/resource-gate.json',
-        kind: 'resource_preparation' as const,
-        revision: resourceRevision,
-        status: 'passed' as const,
-        observedAt: RECOVERY_ACCEPTED_AT,
-      },
-    },
-    resourceProductionState: {
-      currentTask: 'RESOURCE_GATE' as const,
-      inventoryReceipt: {
-        revision: inventoryRevision,
-        bindings: [
-          {
-            requirementId: 'fixture-requirement',
-            resourceIds: ['fixture-resource'],
-          },
-        ],
-        catalogObserved: true,
-        acceptedAt: RECOVERY_ACCEPTED_AT,
-      },
-      contentReceipt: { contentDigest, acceptedAt: RECOVERY_ACCEPTED_AT },
-    },
-  }
+  } as unknown as DeliveryRun
   await writeFile(
     store.paths.snapshot,
     `${JSON.stringify(snapshot, null, 2)}\n`,
@@ -1996,7 +2274,7 @@ describe('delivery workflow recovery', () => {
     workspace = fixture.workspacePath
     const dispatchId = 'committed-resource-content-dispatch'
     const inventoryReceipt =
-      fixture.snapshot.resourceProductionState.inventoryReceipt
+      fixture.snapshot.resourceProductionState.inventoryReceipt!
     const commitContract = {
       dispatchId,
       inventoryRevision: inventoryReceipt.revision,
@@ -2214,7 +2492,21 @@ describe('delivery workflow recovery', () => {
         },
       },
     })
+    for (const [index, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries()) {
+      await commitMatrixFoundationDocument({
+        workspacePath: workspace,
+        dispatchId: `resource-receipt-document-${index}`,
+        path,
+      })
+    }
+    await mkdir(join(workspace, 'docs/acceptance'), { recursive: true })
+    for (const path of CANONICAL_PROJECT_DOCUMENTS) {
+      if (CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never)) continue
+      await writeFile(join(workspace, path), '# Acceptance\n')
+    }
+    const documentRevision = await computeDocumentRevision(workspace, initial.confirmedBriefDigest)
     const request: WorkerDispatchRequest = {
+
       dispatchId: commitContract.dispatchId,
       runId: initial.runId,
       ownerId: initial.ownerId,
@@ -2222,22 +2514,32 @@ describe('delivery workflow recovery', () => {
       workspacePath: workspace,
       workerType: 'resource-content-author',
       phase: 'RESOURCE_PREPARATION',
-      revision: initial.revision.document,
+      taskId: 'RESOURCE_CONTENT',
+      revision: documentRevision,
       contract: {
+        task: 'RESOURCE_CONTENT',
         ...commitContract,
       },
     }
-    await store.save({
+    await store.save(withSyntheticV46DownstreamAuthority({
       ...initial,
       phase: 'RESOURCE_PREPARATION',
+      revision: { ...initial.revision, document: documentRevision },
       status: 'failed',
       resourceProductionState: {
         currentTask: 'RESOURCE_CONTENT',
+        inventoryReceipt: {
+          revision: commitContract.inventoryRevision,
+          bindings: commitContract.inventoryBindings,
+          catalogObserved: true,
+          acceptedAt: new Date().toISOString(),
+        },
       },
       activeDispatch: {
         dispatchId: commitContract.dispatchId,
         workerType: 'resource-content-author',
         phase: 'RESOURCE_PREPARATION',
+        taskId: 'RESOURCE_CONTENT',
         revision: request.revision,
         status: 'failed',
         startedAt: new Date().toISOString(),
@@ -2246,7 +2548,7 @@ describe('delivery workflow recovery', () => {
         request,
       },
       blockedReason: 'transport result mapping failed',
-    })
+    }))
 
     const retried = await retryRun({
       store,
@@ -2666,7 +2968,7 @@ describe('delivery workflow recovery', () => {
       startedRevision: initial.revision.workspace,
       evidenceRefs: [],
     }
-    await store.save({
+    await store.save(withSyntheticV46DownstreamAuthority({
       ...initial,
       phase: 'IMPLEMENTATION',
       currentMessage: 'Preparing a file edit…',
@@ -2681,7 +2983,7 @@ describe('delivery workflow recovery', () => {
         status: 'running',
         startedAt: new Date().toISOString(),
       },
-    })
+    }))
 
     let lateUsageResult: DeliveryRun | null | undefined
     const stoppedTailUsage = {
@@ -3146,7 +3448,7 @@ describe('delivery workflow recovery', () => {
       startedRevision: initial.revision.workspace,
       evidenceRefs: [],
     }
-    await store.save({
+    await store.save(withSyntheticV46DownstreamAuthority({
       ...initial,
       phase: 'IMPLEMENTATION',
       status: 'stopped',
@@ -3163,7 +3465,7 @@ describe('delivery workflow recovery', () => {
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
       },
-    })
+    }))
 
     const continued = await retryRun({ store, runId: initial.runId })
 
@@ -3185,7 +3487,7 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    const failed = {
+    const failed = withSyntheticV46DownstreamAuthority({
       ...initial,
       phase: 'RESOURCE_PREPARATION' as const,
       status: 'needs_action' as const,
@@ -3212,7 +3514,7 @@ describe('delivery workflow recovery', () => {
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
       },
-    }
+    })
     await store.save(failed)
 
     const retried = await retryRun({ store, runId: failed.runId })
@@ -3230,7 +3532,7 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save({
+    await store.save(withSyntheticV46DownstreamAuthority({
       ...initial,
       phase: 'RESOURCE_PREPARATION',
       status: 'failed',
@@ -3247,7 +3549,7 @@ describe('delivery workflow recovery', () => {
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
       },
-    })
+    }))
 
     const retried = await retryRun({ store, runId: initial.runId })
 
@@ -3269,11 +3571,11 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save({
+    await store.save(withSyntheticV46DownstreamAuthority({
       ...initial,
       phase: 'RESOURCE_PREPARATION',
       lastProgressAt: '2020-01-01T00:00:00.000Z',
-    })
+    }))
     const dispatcher = createDeliveryDispatcher({
       store,
       workerPort: {
@@ -3939,7 +4241,7 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await firstStore.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
+    await firstStore.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
     const started: string[] = []
     const workerPort = {
       async start(request: WorkerDispatchRequest) {
@@ -3991,10 +4293,10 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save({
+    await store.save(withSyntheticV46DownstreamAuthority({
       ...initial,
       phase: 'RESOURCE_PREPARATION',
-    })
+    }))
     const started: string[] = []
     let closeCalls = 0
     const dispatcher = createDeliveryDispatcher({
@@ -4057,7 +4359,7 @@ describe('delivery workflow recovery', () => {
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-fallback-stop',
     })
-    await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
+    await store.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
     const transportStops: string[] = []
     const transportCloses: string[] = []
     const dispatcher = createDeliveryDispatcher({
@@ -4124,7 +4426,7 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
+    await store.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
     let submitCount = 0
     const stopped: string[] = []
     const dispatcher = createDeliveryDispatcher({
@@ -4186,7 +4488,7 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
     })
     const startedAt = new Date().toISOString()
-    await store.save({
+    await store.save(withSyntheticV46DownstreamAuthority({
       ...initial,
       phase: 'RESOURCE_PREPARATION',
       activeDispatch: {
@@ -4197,7 +4499,7 @@ describe('delivery workflow recovery', () => {
         status: 'running',
         startedAt,
       },
-    })
+    }))
     const delta = {
       input_tokens: 10,
       cache_read_tokens: 20,
@@ -4259,7 +4561,7 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
+    await store.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
     const dispatcher = createDeliveryDispatcher({
       store,
       workerPort: {
@@ -4350,7 +4652,7 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save({ ...initial, phase: 'RESOURCE_PREPARATION' })
+    await store.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
     const dispatcher = createDeliveryDispatcher({
       store,
       workerPort: {

@@ -1,10 +1,16 @@
 import { parseDeliveryRun } from './schema'
 import type {
   AtomicTask,
+  ChecklistBridgeIdentity,
   DeliveryRun,
   EvidenceRef,
   EvidenceStatus,
+  GameIrCheckpointRef,
+  GameIrCompilationIdentity,
+  GameIrState,
 } from './types'
+import { digestGameIrValue } from './game-ir/model'
+import { parseGameIrReadyReceipt } from './game-ir/contracts'
 import type {
   FoundationAuditState,
   FoundationAuditTask,
@@ -25,7 +31,28 @@ export class WorkflowTransitionError extends Error {
 
 type EvidenceEvent = { evidence: EvidenceRef }
 
+type GameIrReadyEventState = Extract<GameIrState, { status: 'ready' }>
+
 export type DeliveryTransition =
+  | {
+      type: 'game_ir_compilation_started'
+      identity: GameIrCompilationIdentity
+    }
+  | {
+      type: 'game_ir_checkpoint_committed'
+      checkpoint: GameIrCheckpointRef
+      expectedPreviousCheckpoint?: GameIrCheckpointRef
+    }
+  | { type: 'game_ir_ready'; state: GameIrReadyEventState }
+  | {
+      type: 'checklist_bridge_started'
+      identity: ChecklistBridgeIdentity
+    }
+  | {
+      type: 'checklist_bridge_ready'
+      receiptPath: string
+      receiptDigest: string
+    }
   | { type: 'documents_ready' }
   | ({
       type: 'resource_preparation_ready'
@@ -251,6 +278,45 @@ function requirePhase(run: DeliveryRun, phase: DeliveryRun['phase']): void {
     fail(`transition requires ${phase}, current phase is ${run.phase}`)
 }
 
+function requireSha256(value: string, label: string): void {
+  if (!/^[a-f0-9]{64}$/u.test(value)) fail(`${label} must be a SHA-256 digest`)
+}
+
+function sameGameIrIdentity(
+  left: GameIrCompilationIdentity,
+  right: GameIrCompilationIdentity,
+): boolean {
+  return (
+    left.runId === right.runId &&
+    left.taskId === right.taskId &&
+    left.publicationId === right.publicationId &&
+    left.confirmedBriefDigest === right.confirmedBriefDigest &&
+    left.foundationRevision === right.foundationRevision &&
+    left.foundationReadyReceiptDigest === right.foundationReadyReceiptDigest
+  )
+}
+
+function requireFoundationReadyIdentity(
+  run: DeliveryRun,
+  identity: GameIrCompilationIdentity,
+): void {
+  if (run.documentStep !== 'FOUNDATION_REVIEW')
+    fail('Game IR compilation requires the Foundation review step')
+  if (
+    !run.foundationAuditState ||
+    !['audit_ready', 'revision_ready'].includes(run.foundationAuditState.status)
+  )
+    fail('Game IR compilation requires a Foundation READY audit state')
+  if (identity.runId !== run.runId)
+    fail('Game IR compilation identity run does not match DeliveryRun')
+  if (identity.confirmedBriefDigest !== run.confirmedBriefDigest)
+    fail('Game IR compilation identity brief does not match DeliveryRun')
+  if (identity.foundationRevision !== run.foundationAuditState.revision)
+    fail('Game IR compilation identity revision does not match Foundation READY')
+  requireSha256(identity.confirmedBriefDigest, 'confirmed brief digest')
+  requireSha256(identity.foundationReadyReceiptDigest, 'Foundation READY receipt digest')
+}
+
 function requireEvidence(
   evidence: EvidenceRef,
   revision: string,
@@ -293,6 +359,173 @@ export function transitionDeliveryRun(
   const run = assertDeliveryRunInvariants(input)
   let next: DeliveryRun
   switch (event.type) {
+    case 'game_ir_compilation_started':
+      requirePhase(run, 'DOCUMENT_REVIEW')
+      requireFoundationReadyIdentity(run, event.identity)
+      if (run.gameIrState)
+        fail('Game IR compilation cannot start with an existing Game IR state')
+      next = {
+        ...run,
+        phase: 'GAME_IR_COMPILATION',
+        documentStep: undefined,
+        status: 'running',
+        blockedReason: undefined,
+        gameIrState: { status: 'compiling', identity: event.identity },
+        checklistBridgeState: undefined,
+        updatedAt: timestamp(),
+      }
+      break
+    case 'game_ir_checkpoint_committed': {
+      requirePhase(run, 'GAME_IR_COMPILATION')
+      if (!run.gameIrState || run.gameIrState.status !== 'compiling')
+        fail('Game IR checkpoint requires compiling state')
+      requireSha256(event.checkpoint.checkpointDigest, 'checkpoint digest')
+      const current = run.gameIrState.latestCheckpoint
+      const sameCheckpoint =
+        current?.checkpointPath === event.checkpoint.checkpointPath &&
+        current?.checkpointDigest === event.checkpoint.checkpointDigest
+      if (sameCheckpoint) return run
+      if (
+        current &&
+        current.checkpointPath === event.checkpoint.checkpointPath
+      )
+        fail('Game IR checkpoint pointer conflicts with the existing checkpoint')
+      const expected = event.expectedPreviousCheckpoint
+      if (
+        (current === undefined && expected !== undefined) ||
+        (current !== undefined &&
+          (expected === undefined ||
+            current.checkpointPath !== expected.checkpointPath ||
+            current.checkpointDigest !== expected.checkpointDigest))
+      )
+        fail('Game IR checkpoint compare-and-swap predecessor is stale')
+      next = {
+        ...run,
+        gameIrState: {
+          ...run.gameIrState,
+          latestCheckpoint: event.checkpoint,
+        },
+        updatedAt: timestamp(),
+      }
+      break
+    }
+    case 'game_ir_ready': {
+      requirePhase(run, 'GAME_IR_COMPILATION')
+      if (!run.gameIrState || run.gameIrState.status !== 'compiling')
+        fail('Game IR ready requires compiling state')
+      const checkpoint = run.gameIrState.latestCheckpoint
+      if (!checkpoint) fail('Game IR ready requires a committed checkpoint')
+      if (
+        checkpoint.checkpointPath !== event.state.checkpoint.checkpointPath ||
+        checkpoint.checkpointDigest !== event.state.checkpoint.checkpointDigest
+      )
+        fail('Game IR ready checkpoint does not match the committed checkpoint')
+      if (!sameGameIrIdentity(run.gameIrState.identity, event.state.identity))
+        fail('Game IR ready identity does not match the compilation identity')
+      let readyReceipt
+      try {
+        readyReceipt = parseGameIrReadyReceipt(event.state.readyReceipt)
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'Game IR ready receipt is invalid')
+      }
+      if (digestGameIrValue(readyReceipt) !== event.state.readyReceiptDigest)
+        fail('Game IR ready receipt digest mismatch')
+      if (
+        readyReceipt.taskId !== event.state.identity.taskId ||
+        readyReceipt.publicationId !== event.state.identity.publicationId ||
+        readyReceipt.foundationRevision !== event.state.identity.foundationRevision ||
+        readyReceipt.foundationReceiptDigest !==
+          event.state.identity.foundationReadyReceiptDigest
+      )
+        fail('Game IR ready receipt identity does not match compilation identity')
+      next = {
+        ...run,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_DRAFTING',
+        status: 'running',
+        blockedReason: undefined,
+        activeTaskId: undefined,
+        activeDispatch: undefined,
+        gameIrState: {
+          status: 'ready',
+          identity: run.gameIrState.identity,
+          checkpoint,
+          readyReceipt,
+          readyReceiptDigest: event.state.readyReceiptDigest,
+        },
+        checklistBridgeState: undefined,
+        updatedAt: timestamp(),
+      }
+      break
+    }
+    case 'checklist_bridge_started':
+      requirePhase(run, 'DOCUMENT_REVIEW')
+      if (run.documentStep !== 'CHECKLIST_DRAFTING')
+        fail('Checklist bridge requires the Checklist drafting step')
+      if (!run.gameIrState || run.gameIrState.status !== 'ready')
+        fail('Checklist bridge requires ready Game IR state')
+      if (run.checklistBridgeState)
+        fail('Checklist bridge cannot start with an existing bridge state')
+      if (event.identity.runId !== run.runId)
+        fail('Checklist bridge identity run does not match DeliveryRun')
+      requireSha256(
+        event.identity.checklistPublicationDigest,
+        'Checklist publication digest',
+      )
+      if (
+        event.identity.gameIrReadyReceiptDigest !==
+        run.gameIrState.readyReceiptDigest
+      )
+        fail('Checklist bridge identity does not match ready Game IR')
+      next = {
+        ...run,
+        documentStep: 'CHECKLIST_BRIDGE',
+        status: 'running',
+        checklistBridgeState: { status: 'bridging', identity: event.identity },
+        updatedAt: timestamp(),
+      }
+      break
+    case 'checklist_bridge_ready': {
+      requirePhase(run, 'DOCUMENT_REVIEW')
+      if (run.documentStep !== 'CHECKLIST_BRIDGE')
+        fail('Checklist bridge ready requires the bridge step')
+      if (!run.checklistBridgeState || run.checklistBridgeState.status !== 'bridging')
+        fail('Checklist bridge ready requires bridging state')
+      if (!run.gameIrState || run.gameIrState.status !== 'ready')
+        fail('Checklist bridge ready requires ready Game IR state')
+      if (!event.receiptPath.trim()) fail('Checklist bridge receipt path is required')
+      requireSha256(event.receiptDigest, 'Checklist bridge receipt digest')
+      if (
+        run.checklistBridgeState.identity.gameIrReadyReceiptDigest !==
+        run.gameIrState.readyReceiptDigest
+      )
+        fail('Checklist bridge receipt is stale for the ready Game IR')
+      next = {
+        ...run,
+        phase: 'RESOURCE_PREPARATION',
+        documentStep: undefined,
+        status: 'running',
+        blockedReason: undefined,
+        activeTaskId: undefined,
+        activeDispatch: undefined,
+        checklistBridgeState: {
+          status: 'ready',
+          identity: run.checklistBridgeState.identity,
+          receiptPath: event.receiptPath,
+          receiptDigest: event.receiptDigest,
+        },
+        revision: {
+          ...run.revision,
+          resource: undefined,
+          implementation: undefined,
+        },
+        tasks: [],
+        evidence: {},
+        resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+        updatedAt: timestamp(),
+      }
+      break
+    }
     case 'documents_ready':
       requirePhase(run, 'BRIEF_CONFIRMED')
       next = {
