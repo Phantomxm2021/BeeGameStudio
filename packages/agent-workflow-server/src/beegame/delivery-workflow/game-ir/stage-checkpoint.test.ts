@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { DeliveryRun } from '../types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { createRunStore } from '../run-store'
+import { recoverAndResumeRun } from '../recovery'
 import { createFoundationAuditState, parseFoundationAuditState, type FoundationAuditState } from '../foundation-audit-state'
 import { FOUNDATION_AUDIT_PRODUCTION_MANIFEST } from '../foundation-audit-production-manifest'
 import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST, FOUNDATION_SEMANTIC_CHECKS } from '../foundation-semantic-audit'
@@ -144,6 +146,23 @@ describe('v46 Game IR stage checkpoint boundary', () => {
     expect(recovered.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined).toEqual(phase5)
   })
 
+  test('recoverAndResumeRun CAS-adopts a filesystem-committed Phase 5 checkpoint', async () => {
+    const authority = authorityFixture()
+    const writer = new GameIrStageCheckpointWriter()
+    let run = runFor(authority)
+    await persist(workspaces[0]!, run)
+    const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
+    const phase4 = await writer.write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+    run = { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: phase4 } }
+    await persist(workspaces[0]!, run)
+    const phase5 = await writer.write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase5', authority.phase7Authority), authority: authority.phase7Authority.phase6Authority.phase5Authority })
+    expect(phase5).toBeDefined()
+    const store = createRunStore(workspaces[0]!, run.ownerId)
+    await recoverAndResumeRun({ workspacePath: workspaces[0]!, store, ownerId: run.ownerId, projectId: run.projectId, confirmedBriefContext: run.confirmedBriefContext, stopWorkspaceWorkers: async () => undefined, resumeCurrentRun: async () => undefined })
+    const recovered = await store.load()
+    expect(recovered?.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined).toEqual(phase5)
+  })
+
   test('fails closed for missing, duplicate, out-of-scope, damaged, empty, and symlink finals', async () => {
     const authority = authorityFixture()
     const writer = new GameIrStageCheckpointWriter()
@@ -239,12 +258,46 @@ describe('v46 Game IR stage checkpoint boundary', () => {
     const store = createRunStore(workspaces[0]!, run.ownerId)
     const lease = await store.mutationLock(run.runId)
     try {
-      await expect(new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })).rejects.toThrow('mutation lease')
+      await expect(new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })).rejects.toThrow('locked')
     } finally {
       await store.unlock(lease)
     }
     const stale = { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), identity: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>).identity, publicationId: 'stale-publication' } } }
     await expect(new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: stale, step: step('phase4', authority.phase7Authority), authority: phase4Authority })).rejects.toThrow()
+  })
+
+  test('releases the mutation lease when the durable caller snapshot is stale', async () => {
+    const authority = authorityFixture()
+    const writer = new GameIrStageCheckpointWriter()
+    const run = runFor(authority)
+    const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
+    await persist(workspaces[0]!, run)
+    const phase4 = await writer.write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+    const durable = { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: phase4 } }
+    await persist(workspaces[0]!, durable)
+    const stale = { ...durable, gameIrState: { ...(durable.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: { ...phase4, checkpointDigest: 'f'.repeat(64) } } }
+    await expect(writer.write({ workspacePath: workspaces[0]!, deliveryRun: stale, step: step('phase5', authority.phase7Authority), authority: authority.phase7Authority.phase6Authority.phase5Authority })).rejects.toThrow('stale')
+    const lease = await createRunStore(workspaces[0]!, run.ownerId).mutationLock(run.runId)
+    await createRunStore(workspaces[0]!, run.ownerId).unlock(lease)
+  })
+
+  test('waits for a same-owner mutation lease held by another process', async () => {
+    const authority = authorityFixture()
+    const run = runFor(authority)
+    const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
+    await persist(workspaces[0]!, run)
+    const moduleUrl = new URL('../run-store.ts', import.meta.url).href
+    const child = spawn(process.execPath, ['-e', `import { createRunStore } from ${JSON.stringify(moduleUrl)}; const store = createRunStore(${JSON.stringify(workspaces[0]!)}, ${JSON.stringify(run.ownerId)}); const lease = await store.mutationLock(${JSON.stringify(run.runId)}); console.log('ready'); setTimeout(async () => { await store.unlock(lease); console.log('released') }, 350)`], { stdio: ['ignore', 'pipe', 'pipe'] })
+    let output = ''
+    const outputReady = new Promise<void>((resolve, reject) => { child.stdout?.on('data', chunk => { output += chunk.toString(); if (output.includes('ready')) resolve() }); child.once('error', reject); child.once('exit', code => { if (code !== 0) reject(new Error(`holder exited ${code}: ${output}`)) }) })
+    await outputReady
+    try {
+      const result = await new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+      expect(result.checkpointPath).toContain('/phase4/manifest.json')
+    } finally {
+      await new Promise<void>((resolve, reject) => { const check = () => output.includes('released') ? resolve() : setTimeout(check, 10); check(); child.once('error', reject) })
+      child.kill()
+    }
   })
 
   test('asserts the exact manifest envelope and rejects unknown persisted fields', async () => {
@@ -258,6 +311,59 @@ describe('v46 Game IR stage checkpoint boundary', () => {
     expect(Object.keys(manifest).sort()).toEqual(['authoritySectionIndex', 'compileRequestDigest', 'foundationReadyBinding', 'identity', 'manifestDigest', 'phase', 'records', 'schemaVersion'])
     await writeFile(manifestPath, JSON.stringify({ ...manifest, unknown: true }))
     await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: ref } } })).rejects.toThrow()
+  })
+
+  test('rejects missing or extra committed record envelope fields and unexpected tree entries', async () => {
+    const authority = authorityFixture()
+    const run = runFor(authority)
+    const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
+    await persist(workspaces[0]!, run)
+    const ref = await new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+    const pointerRun = { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: ref } }
+    const recordPath = join(workspaces[0]!, '.beegame/ir/runs/checkpoint-run/checkpoints/phase4/records/phase4__gameplay__source.json')
+    const recordBytes = await readFile(recordPath, 'utf8')
+    await writeFile(recordPath, recordBytes.replace('"record":', '"missingRecord":'))
+    await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: pointerRun })).rejects.toThrow()
+    await writeFile(recordPath, recordBytes.replace('\n', '\n'))
+    await import('node:fs/promises').then(fs => fs.writeFile(join(workspaces[0]!, '.beegame/ir/runs/checkpoint-run/checkpoints/phase4/unexpected'), 'x'))
+    await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: pointerRun })).rejects.toThrow()
+  })
+
+  test('rejects a committed checkpoint with an independently mismatched task identity', async () => {
+    const authority = authorityFixture()
+    const run = runFor(authority)
+    const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
+    await persist(workspaces[0]!, run)
+    const ref = await new GameIrStageCheckpointWriter().write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+    const identity = (run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>).identity
+    await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), identity: { ...identity, taskId: 'other-task' }, latestCheckpoint: ref } } })).rejects.toThrow()
+  })
+
+  test('rejects committed predecessor path, digest, identity, and record-chain mutations', async () => {
+    const authority = authorityFixture()
+    const writer = new GameIrStageCheckpointWriter()
+    let run = runFor(authority)
+    const phase4Authority = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority
+    await persist(workspaces[0]!, run)
+    const phase4 = await writer.write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase4', authority.phase7Authority), authority: phase4Authority })
+    run = { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: phase4 } }
+    await persist(workspaces[0]!, run)
+    const phase5 = await writer.write({ workspacePath: workspaces[0]!, deliveryRun: run, step: step('phase5', authority.phase7Authority), authority: authority.phase7Authority.phase6Authority.phase5Authority })
+    const phase5Path = join(workspaces[0]!, phase5.checkpointPath)
+    const phase4Path = join(workspaces[0]!, phase4.checkpointPath)
+    const originalPhase5 = await readFile(phase5Path, 'utf8')
+    const originalPhase4 = await readFile(phase4Path, 'utf8')
+    for (const [path, replacement] of [
+      [phase5Path, originalPhase5.replace(phase4.checkpointPath, '.../phase9/manifest.json')],
+      [phase5Path, originalPhase5.replace(phase4.checkpointDigest, 'f'.repeat(64))],
+      [phase4Path, originalPhase4.replace(run.gameIrState!.identity.taskId, 'other-task')],
+      [join(workspaces[0]!, phase4.checkpointPath.replace('manifest.json', 'records/phase4__gameplay__source.json')), originalPhase4],
+    ] as const) {
+      await writeFile(path, replacement)
+      await expect(new GameIrStageCheckpointLoader().load({ workspacePath: workspaces[0]!, deliveryRun: { ...run, gameIrState: { ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>), latestCheckpoint: phase5 } } })).rejects.toThrow()
+      await writeFile(phase5Path, originalPhase5)
+      await writeFile(phase4Path, originalPhase4)
+    }
   })
 
   test('reclaims a crashed mutation lease before committing the checkpoint', async () => {

@@ -499,7 +499,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         }
         const ownerProcessAlive = processIsAlive(active.processId)
         if (ownerProcessAlive && active.purpose === 'recovery') throw error
-        if (failFast && ownerProcessAlive && active.purpose === 'mutation' && active.ownerId === ownerId) throw error
+        if (failFast && ownerProcessAlive && active.purpose === 'mutation' && active.ownerId === ownerId && active.processId === process.pid) throw error
         if (!ownerProcessAlive) {
           try {
             await enqueueMutation(filePaths.lock, async () => {
