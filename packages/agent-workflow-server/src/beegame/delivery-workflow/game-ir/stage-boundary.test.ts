@@ -577,24 +577,30 @@ function policyViolations(
     | 'phase7-producer'
     | 'phase7-admission'
     | 'phase7-assembler'
+    | 'reader'
+    | 'checkpoint'
     | 'other',
 ): string[] {
   const violations = new Set<string>()
   for (const entry of facts.imports)
     if (
-      forbiddenPaths.test(entry.path) ||
-      (forbiddenClosurePath.test(entry.path) && policy !== 'phase6-producer') ||
-      (policy === 'phase7-producer' &&
-        forbiddenPhase7ClosurePath.test(entry.path)) ||
-      ((policy === 'phase4' ||
-        policy === 'phase5' ||
-        policy === 'phase6-producer' ||
-        policy === 'phase7-producer' ||
-        policy === 'phase7-admission' ||
-        policy === 'phase7-assembler' ||
-        policy === 'publication' ||
-        policy === 'other') &&
-        forbiddenPhase5Paths.test(entry.path))
+      (policy !== 'checkpoint' ||
+        !/^(?:\.\.)?\/?run-store$|^\.\/world-presentation-assembler$/.test(
+          entry.path,
+        )) &&
+      (forbiddenPaths.test(entry.path) ||
+        (forbiddenClosurePath.test(entry.path) && policy !== 'phase6-producer') ||
+        (policy === 'phase7-producer' &&
+          forbiddenPhase7ClosurePath.test(entry.path)) ||
+        ((policy === 'phase4' ||
+          policy === 'phase5' ||
+          policy === 'phase6-producer' ||
+          policy === 'phase7-producer' ||
+          policy === 'phase7-admission' ||
+          policy === 'phase7-assembler' ||
+          policy === 'publication' ||
+          policy === 'other') &&
+          forbiddenPhase5Paths.test(entry.path)))
     )
       violations.add(`path: ${entry.path}`)
   if (policy === 'phase6-producer') {
@@ -818,7 +824,7 @@ function policyViolations(
   if (facts.providerDispatch)
     violations.add('provider-dispatch: provider dispatch call')
   for (const name of facts.identifiers) {
-    if (name === 'DeliveryRun' || name === 'FoundationIssue')
+    if (!['reader', 'checkpoint'].includes(policy) && (name === 'DeliveryRun' || name === 'FoundationIssue'))
       violations.add(`identifier: ${name}`)
     if (
       (policy === 'phase5' ||
@@ -977,6 +983,8 @@ type GameIrProductionRole =
   | 'phase7-producer'
   | 'phase7-admission'
   | 'phase7-assembler'
+  | 'reader'
+  | 'checkpoint'
   | 'other'
 
 function gameIrProductionRole(filename: string): GameIrProductionRole {
@@ -992,6 +1000,8 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'phase7-admission.ts') return 'phase7-admission'
   if (filename === 'implementation-verification-assembler.ts')
     return 'phase7-assembler'
+  if (filename === 'committed-reader.ts') return 'reader'
+  if (filename === 'stage-checkpoint.ts') return 'checkpoint'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -2054,14 +2064,23 @@ describe('Game IR stage boundary', () => {
         )
         .map(() => filename),
     )
-    expect(closureImports).toEqual(['publication.ts'])
+    expect(closureImports).toEqual([
+      'committed-reader.ts',
+      'publication.ts',
+      'stage-checkpoint.ts',
+    ])
     expect(
       facts.flatMap(({ filename, facts: fileFacts }) =>
         fileFacts.calls
           .filter(name => name === 'assembleImplementationVerificationClosure')
           .map(() => filename),
       ),
-    ).toEqual(['publication.ts'])
+    ).toEqual([
+      'committed-reader.ts',
+      'publication.ts',
+      'stage-checkpoint.ts',
+      'stage-checkpoint.ts',
+    ])
     expect(
       facts.flatMap(({ filename, facts: fileFacts }) =>
         fileFacts.calls
@@ -2069,12 +2088,14 @@ describe('Game IR stage boundary', () => {
           .map(() => filename),
       ),
     ).toEqual([
+      'committed-reader.ts',
       'implementation-verification-assembler.ts',
       'implementation-verification-schema.ts',
     ])
     expect(sourceFiles.map(file => file.filename)).toEqual([
       'balance-producer.ts',
       'balance-schema.ts',
+      'committed-reader.ts',
       'contracts.ts',
       'domain-projection.ts',
       'domain-source.ts',
@@ -2096,6 +2117,7 @@ describe('Game IR stage boundary', () => {
       'resource-realization-producer.ts',
       'resource-realization-schema.ts',
       'semantic-fidelity.ts',
+      'stage-checkpoint.ts',
       'world-presentation-assembler.ts',
       'world-scene-producer.ts',
       'world-scene-schema.ts',
@@ -2117,7 +2139,9 @@ describe('Game IR stage boundary', () => {
         role === 'phase6-producer' ||
         role === 'phase7-producer' ||
         role === 'phase7-admission' ||
-        role === 'phase7-assembler'
+        role === 'phase7-assembler' ||
+        role === 'reader' ||
+        role === 'checkpoint'
       )
         expect(
           policyViolations(collectAstFacts(source, filename), role),
@@ -2144,10 +2168,17 @@ describe('Game IR stage boundary', () => {
     }
   })
 
-  test('keeps incomplete Stage 5 unreachable from current production files', async () => {
-    const violations = standaloneProductionViolations(
-      await readProductionSourceFiles(serverSourceRoot),
-    )
-    expect(violations).toEqual([])
+  test('permits the committed reader/writer only through the controller and dispatcher route', async () => {
+    const files = await readProductionSourceFiles(serverSourceRoot)
+    const routeFiles = files.filter(file => /\/(?:controller|dispatch)\.ts$/.test(file.path))
+    const routeViolations = standaloneProductionViolations(routeFiles)
+    expect(routeViolations.length).toBeGreaterThan(0)
+    expect(routeViolations.every(violation => /\/(?:controller|dispatch)\.ts:/.test(violation))).toBe(true)
+    const forbiddenOutsideRoute = files
+      .filter(file => !routeFiles.includes(file))
+      .flatMap(file => collectAstFacts(file.source, file.path).imports
+        .filter(entry => /(?:game-ir\/(?:committed-reader|publication))/.test(entry.path))
+        .map(entry => `${file.path}: ${entry.path}`))
+    expect(forbiddenOutsideRoute).toEqual([])
   })
 })

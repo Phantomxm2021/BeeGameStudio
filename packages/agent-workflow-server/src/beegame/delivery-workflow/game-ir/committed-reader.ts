@@ -16,7 +16,7 @@ import {
   parseGameIrModuleCandidate,
   type GameIrCandidate,
   type GameIrModuleCandidate,
-  type GameIrNode,
+  type GameIrSourceBinding,
 } from './model'
 import { projectFoundationReadyReceipt } from './foundation-ready-adapter'
 import {
@@ -32,29 +32,38 @@ import type { DeliveryRun } from '../types'
 
 type RecordValue = Record<string, unknown>
 
+type ProjectionNode = Readonly<{
+  id: string
+  kind: string
+  producerMode: 'mechanical' | 'semantic' | 'derived'
+  references: readonly Readonly<{ targetId: string; targetType: string }>[]
+  edges: readonly Readonly<{ type: string; targetId: string; targetType: string }>[]
+  bindings: Readonly<Record<string, GameIrSourceBinding>>
+}>
+
 export type GameIrExecutionProjection = Readonly<{
   moduleId: 'implementation-verification'
-  units: readonly GameIrNode[]
-  scenarios: readonly GameIrNode[]
-  invariants: readonly GameIrNode[]
-  evidenceRequirements: readonly GameIrNode[]
+  units: readonly ProjectionNode[]
+  scenarios: readonly ProjectionNode[]
+  invariants: readonly ProjectionNode[]
+  evidenceRequirements: readonly ProjectionNode[]
   digest: string
 }>
 
 export type GameIrResourceProjection = Readonly<{
   moduleId: 'resource-realization'
-  logicalResources: readonly GameIrNode[]
-  acquisitionProfiles: readonly GameIrNode[]
-  deliveryTargets: readonly GameIrNode[]
-  variants: readonly GameIrNode[]
-  deliveryArtifacts: readonly GameIrNode[]
+  logicalResources: readonly ProjectionNode[]
+  acquisitionProfiles: readonly ProjectionNode[]
+  deliveryTargets: readonly ProjectionNode[]
+  variants: readonly ProjectionNode[]
+  deliveryArtifacts: readonly ProjectionNode[]
   digest: string
 }>
 
 export type GameIrAcceptanceProjection = Readonly<{
-  scenarios: readonly GameIrNode[]
-  invariants: readonly GameIrNode[]
-  evidenceRequirements: readonly GameIrNode[]
+  scenarios: readonly ProjectionNode[]
+  invariants: readonly ProjectionNode[]
+  evidenceRequirements: readonly ProjectionNode[]
   digest: string
 }>
 
@@ -209,8 +218,21 @@ function dependencyGraph(candidate: GameIrCandidate): RecordValue {
   return { schemaVersion: 'game-ir-dependency-graph.v1', foundationRevision: candidate.foundationRevision, edges }
 }
 
-function nodesOf(module: GameIrModuleCandidate, kind: string): readonly GameIrNode[] {
-  return Object.freeze(module.nodes.filter(node => node.kind === kind))
+function nodesOf(module: GameIrModuleCandidate, kind: string): readonly ProjectionNode[] {
+  return Object.freeze(
+    module.nodes
+      .filter(node => node.kind === kind)
+      .map(node =>
+        Object.freeze({
+          id: node.id,
+          kind: node.kind,
+          producerMode: node.producerMode,
+          references: Object.freeze(node.references.map(reference => Object.freeze({ ...reference }))),
+          edges: Object.freeze(node.edges.map(edge => Object.freeze({ ...edge }))),
+          bindings: Object.freeze({ ...node.bindings }),
+        }),
+      ),
+  )
 }
 
 function projections(candidate: GameIrCandidate): Pick<GameIrPublishedReader, 'executionProjection' | 'resourceProjection' | 'acceptanceProjection'> {

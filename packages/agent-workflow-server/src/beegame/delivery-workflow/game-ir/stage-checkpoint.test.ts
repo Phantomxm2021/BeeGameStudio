@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { DeliveryRun } from '../types'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
+import { CANONICAL_FOUNDATION_DOCUMENTS, DELIVERY_RUN_SCHEMA_VERSION } from '../types'
 import { createRunStore } from '../run-store'
 import { recoverAndResumeRun } from '../recovery'
 import { createFoundationAuditState, parseFoundationAuditState, type FoundationAuditState } from '../foundation-audit-state'
@@ -56,7 +56,7 @@ function authorityFixture() {
 function runFor(authority: ReturnType<typeof authorityFixture>): DeliveryRun {
   const request = authority.phase7Authority.phase6Authority.phase5Authority.phase4Authority.gameplay.source.compileRequest
   return {
-    schemaVersion: 46, runId: 'checkpoint-run', ownerId: 'checkpoint-owner', projectId: request.foundation.projectId,
+    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION, runId: 'checkpoint-run', ownerId: 'checkpoint-owner', projectId: request.foundation.projectId,
     confirmedBriefDigest: request.foundation.confirmedBriefDigest, confirmedBriefContext: 'fixture', phase: 'GAME_IR_COMPILATION', status: 'running',
     revision: { document: request.foundation.foundationRevision, workspace: 'workspace-revision' }, tasks: [], evidence: {}, foundationDraftState: { completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS] }, foundationAuditState: auditReadyFixture(),
     gameIrState: { status: 'compiling', identity: { runId: 'checkpoint-run', taskId: request.taskId, publicationId: request.publicationId, confirmedBriefDigest: request.foundation.confirmedBriefDigest, foundationRevision: request.foundation.foundationRevision, foundationReadyReceiptDigest: request.foundation.receiptDigest } },

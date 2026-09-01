@@ -659,8 +659,12 @@ export function createDeliveryDispatcher(options: {
         ? foundationDispatch(run, parallelFoundationPath)
         : run.activeDispatch
 
+    const compilerRetry =
+      request.workerType === 'game-ir-compiler' &&
+      typeof request.contract.retryProgressIdentity === 'string'
     if (
       durableDispatch?.status === 'completed' &&
+      !compilerRetry &&
       (!auditRequest || runtimeTasks.some(task => task.taskId === request.taskId && task.status === 'completed')) &&
       durableDispatch.phase === request.phase &&
       durableDispatch.revision === request.revision &&

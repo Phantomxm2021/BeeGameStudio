@@ -147,7 +147,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 46 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 47 as const
 
 export type GameIrCompilationIdentity = Readonly<{
   runId: string
@@ -163,12 +163,21 @@ export type GameIrCheckpointRef = Readonly<{
   checkpointDigest: string
 }>
 
+export type GameIrCompilationProgressIdentity = Readonly<{
+  inputDigest: string
+  diagnosticDigest: string
+  candidateDigest: string
+  checkpointJournalDigest: string
+  terminalDigest: string
+}>
+
 export type GameIrState =
   | Readonly<{
       status: 'compiling'
       identity: GameIrCompilationIdentity
       latestCheckpoint?: GameIrCheckpointRef
       diagnosticRef?: string
+      progressIdentity?: GameIrCompilationProgressIdentity
     }>
   | Readonly<{
       status: 'ready'

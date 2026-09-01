@@ -127,9 +127,31 @@ import { foundationRevisionTasksComplete } from './foundation-revision-stage'
 import type { FoundationAuditState, FoundationRevisionDocumentTask, FoundationRevisionImpactedFactsTask, FoundationRevisionSemanticRecheckTask } from './types'
 import type { AuditIssue } from './foundation-issue-registry'
 import { projectFoundationReadyReceipt } from './game-ir/foundation-ready-adapter'
-import { parseGameIrCompileRequest, parseGameIrReadyReceipt } from './game-ir/contracts'
+import { parseGameIrCompileRequest } from './game-ir/contracts'
 import { digestGameIrValue } from './game-ir/model'
 import { readCommittedGameIr } from './game-ir/committed-reader'
+import {
+  GAME_IR_CHECKPOINT_RECORD_KINDS,
+  writeGameIrStageCheckpoint,
+  type GameIrCheckpointRecord,
+} from './game-ir/stage-checkpoint'
+import {
+  assembleGameplayBalanceModules,
+  type GameplayBalanceAssemblyAuthority,
+} from './game-ir/gameplay-balance-assembler'
+import {
+  assembleWorldPresentationClosure,
+  type WorldPresentationAssemblyAuthority,
+} from './game-ir/world-presentation-assembler'
+import {
+  assembleResourceRealizationClosure,
+  type ResourceRealizationAssemblyAuthority,
+} from './game-ir/resource-realization-assembler'
+import {
+  assembleImplementationVerificationClosure,
+  type ImplementationVerificationAssemblyAuthority,
+} from './game-ir/implementation-verification-assembler'
+import { commitGameIrPublication } from './game-ir/publication'
 
 function sameDocumentDigests(
   left: readonly { path: string; digest: string }[],
@@ -142,6 +164,60 @@ function sameDocumentDigests(
 function markRevisionCommitTransient(error: unknown): never {
   if (error && typeof error === 'object') Object.assign(error, { foundationRevisionCommitTransient: true })
   throw error
+}
+
+type GameIrCompilerAuthorities = {
+  records: readonly GameIrCheckpointRecord[]
+  phase4: GameplayBalanceAssemblyAuthority
+  phase5: WorldPresentationAssemblyAuthority
+  phase6: ResourceRealizationAssemblyAuthority
+  phase7: ImplementationVerificationAssemblyAuthority
+}
+
+function admitGameIrCompilerResults(value: unknown): GameIrCompilerAuthorities {
+  if (!Array.isArray(value) || value.length !== GAME_IR_CHECKPOINT_RECORD_KINDS.length)
+    throw new Error('Game IR compiler output must contain the complete domain result set')
+  const records = value.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item))
+      throw new Error(`Game IR compiler result ${index} is not a domain record`)
+    const candidate = item as Record<string, unknown>
+    const keys = Object.keys(candidate).sort()
+    if (keys.length !== 2 || keys[0] !== 'kind' || keys[1] !== 'record')
+      throw new Error(`Game IR compiler result ${index} has unknown fields`)
+    if (typeof candidate.kind !== 'string' || !GAME_IR_CHECKPOINT_RECORD_KINDS.includes(candidate.kind as never))
+      throw new Error(`Game IR compiler result ${index} has an unknown kind`)
+    return { kind: candidate.kind, record: candidate.record } as GameIrCheckpointRecord
+  })
+  const byKind = new Map(records.map(record => [record.kind, record.record]))
+  if (byKind.size !== GAME_IR_CHECKPOINT_RECORD_KINDS.length)
+    throw new Error('Game IR compiler output has duplicate or missing domain records')
+  const get = (kind: (typeof GAME_IR_CHECKPOINT_RECORD_KINDS)[number]): unknown => {
+    const result = byKind.get(kind)
+    if (result === undefined) throw new Error(`Game IR compiler output is missing ${kind}`)
+    return result
+  }
+  const phase4: GameplayBalanceAssemblyAuthority = {
+    gameplay: { source: get('phase4/gameplay/source') as never, mechanical: get('phase4/gameplay/mechanical') as never, semantic: get('phase4/gameplay/semantic') as never },
+    balance: { source: get('phase4/balance/source') as never, mechanical: get('phase4/balance/mechanical') as never, semantic: get('phase4/balance/semantic') as never },
+  }
+  assembleGameplayBalanceModules(phase4)
+  const phase5: WorldPresentationAssemblyAuthority = {
+    phase4Authority: phase4,
+    worldScene: { source: get('phase5/world-scene/source') as never, mechanical: get('phase5/world-scene/mechanical') as never, semantic: get('phase5/world-scene/semantic') as never, validation: get('phase5/world-scene/validation') as never },
+    presentation: { source: get('phase5/presentation/source') as never, mechanical: get('phase5/presentation/mechanical') as never, semantic: get('phase5/presentation/semantic') as never, validation: get('phase5/presentation/validation') as never },
+  }
+  assembleWorldPresentationClosure(phase5)
+  const phase6: ResourceRealizationAssemblyAuthority = {
+    phase5Authority: phase5,
+    resourceRealization: { source: get('phase6/resource-realization/source') as never, mechanical: get('phase6/resource-realization/mechanical') as never, semantic: get('phase6/resource-realization/semantic') as never, validation: get('phase6/resource-realization/validation') as never },
+  }
+  assembleResourceRealizationClosure(phase6)
+  const phase7: ImplementationVerificationAssemblyAuthority = {
+    phase6Authority: phase6,
+    implementationVerification: { source: get('phase7/implementation-verification/source') as never, mechanical: get('phase7/implementation-verification/mechanical') as never, semantic: get('phase7/implementation-verification/semantic') as never, validation: get('phase7/implementation-verification/validation') as never },
+  }
+  assembleImplementationVerificationClosure(phase7)
+  return { records, phase4, phase5, phase6, phase7 }
 }
 
 function isRevisionCommitTransient(error: unknown): boolean {
@@ -562,29 +638,87 @@ export function createDeliveryWorkflowController(input: {
       const admittedRequest = buildGameIrCompileContract({ foundation: foundationReadyReceipt as never, request: compileRequest as never })
       if (result.runId !== run.runId || result.taskId !== state.identity.taskId || result.compileRequestDigest !== digestGameIrValue(admittedRequest) || result.foundationReadyReceiptDigest !== state.identity.foundationReadyReceiptDigest)
         throw new Error('Game IR compiler terminal identity is stale')
+      const progressIdentity = {
+        inputDigest: digestGameIrValue({ identity: state.identity, compileRequest: admittedRequest }),
+        diagnosticDigest: digestGameIrValue(result.status === 'completed' ? undefined : { reasonCode: 'compiler_failed' }),
+        candidateDigest: digestGameIrValue(result.domainResults ?? undefined),
+        checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? undefined),
+        terminalDigest: digestGameIrValue(result),
+      }
+      const saveCompilerAttention = async (reasonCode: string, expected: string, actual: string): Promise<void> => {
+        const durable = await store.load()
+        const base = durable?.runId === run.runId ? durable : run
+        const currentState = base.gameIrState?.status === 'compiling' ? base.gameIrState : state
+        const currentProgress = { ...progressIdentity, checkpointJournalDigest: digestGameIrValue(currentState.latestCheckpoint ?? undefined) }
+        const unchanged = currentState.progressIdentity !== undefined && digestGameIrValue(currentState.progressIdentity) === digestGameIrValue(currentProgress)
+        const diagnosticId = `game-ir-${digestGameIrValue({ taskId: currentState.identity.taskId, progressIdentity: currentProgress, reasonCode }).slice(0, 12)}`
+        const next = await persist({
+          ...base,
+          activeDispatch: undefined,
+          status: unchanged ? 'needs_action' : 'running',
+          blockedReason: unchanged ? `game_ir_${reasonCode} diagnostic ${diagnosticId}` : undefined,
+          thinking: unchanged ? 'idle' : 'working',
+          gameIrState: { ...currentState, diagnosticRef: diagnosticId, progressIdentity: currentProgress },
+        }, unchanged ? `game_ir_${reasonCode}.needs_action` : `game_ir_${reasonCode}.retryable`, {
+          diagnosticId,
+          reasonCode,
+          expected,
+          actual,
+          recoveryAction: unchanged ? 'resolve the unchanged prerequisite, then retry the same compilation identity' : 'retry the same compilation identity with the changed domain result or publication state',
+        })
+        if (next.status === 'running') await resumeUnlocked(next)
+      }
       if (result.status !== 'completed') {
-        const diagnosticId = `game-ir-${digestGameIrValue({ taskId: result.taskId, compileRequestDigest: result.compileRequestDigest, reason: result.reason ?? 'compiler failed' }).slice(0, 12)}`
-        await persist({ ...run, status: 'needs_action', blockedReason: `game_ir_compilation_failed diagnostic ${diagnosticId}`, thinking: 'idle', gameIrState: { ...state, diagnosticRef: diagnosticId } }, 'game_ir_compilation.needs_action', { diagnosticId, reasonCode: 'compiler_failed', expected: 'committed Game IR publication', actual: 'compiler terminal did not commit a publication', recoveryAction: 'retry the same compilation identity after resolving the compiler prerequisite' })
+        await saveCompilerAttention('compilation', 'admitted domain results', 'compiler terminal did not provide an admitted result set')
         return
       }
-      const checkpoint = result.checkpoint!
-      const readyReceipt = parseGameIrReadyReceipt(result.readyReceipt!)
-      let checkpointed = run
-      if (!state.latestCheckpoint || state.latestCheckpoint.checkpointPath !== checkpoint.checkpointPath || state.latestCheckpoint.checkpointDigest !== checkpoint.checkpointDigest) {
-        checkpointed = transitionDeliveryRun(run, { type: 'game_ir_checkpoint_committed', checkpoint, expectedPreviousCheckpoint: state.latestCheckpoint })
-        checkpointed = await persist(checkpointed, 'game_ir_checkpoint_committed', { checkpoint })
-      }
-      const readyState = { status: 'ready' as const, identity: state.identity, checkpoint, readyReceipt, readyReceiptDigest: digestGameIrValue(readyReceipt) }
-      let readyRun = transitionDeliveryRun(checkpointed, { type: 'game_ir_ready', state: readyState })
-      readyRun = await persist(readyRun, 'game_ir_ready', { readyReceiptDigest: readyRun.gameIrState?.status === 'ready' ? readyRun.gameIrState.readyReceiptDigest : undefined })
+      let authorities: GameIrCompilerAuthorities
       try {
-        await readCommittedGameIr({ workspacePath: input.workspacePath, deliveryRun: readyRun })
+        authorities = admitGameIrCompilerResults(result.domainResults)
       } catch (error) {
-        const diagnosticId = `game-ir-${digestGameIrValue({ taskId: state.identity.taskId, reason: 'committed reader revalidation failed', detail: error instanceof Error ? error.message : String(error) }).slice(0, 12)}`
-        await persist({ ...readyRun, status: 'needs_action', blockedReason: `game_ir_publication_invalid diagnostic ${diagnosticId}`, thinking: 'idle' }, 'game_ir_publication.needs_action', { diagnosticId, reasonCode: 'publication_invalid', expected: 'reader-valid committed Game IR', actual: 'reader revalidation failed', recoveryAction: 'repair the compiler publication and retry the same compilation identity' })
+        await saveCompilerAttention('compilation', 'domain-specific Phase 4–7 admission', 'compiler result failed domain admission')
         return
       }
-      await resumeUnlocked(readyRun)
+      try {
+        let checkpointed = run
+        const phases = [
+          ['phase4', authorities.phase4],
+          ['phase5', authorities.phase5],
+          ['phase6', authorities.phase6],
+          ['phase7', authorities.phase7],
+        ] as const
+        for (const [phase, authority] of phases) {
+          const records = authorities.records.filter(record => record.kind.startsWith(`${phase}/`))
+          const checkpoint = await writeGameIrStageCheckpoint({
+            workspacePath: input.workspacePath,
+            deliveryRun: checkpointed,
+            step: { phase, records },
+            authority,
+          })
+          checkpointed = transitionDeliveryRun(checkpointed, {
+            type: 'game_ir_checkpoint_committed',
+            checkpoint,
+            expectedPreviousCheckpoint: checkpointed.gameIrState?.status === 'compiling' ? checkpointed.gameIrState.latestCheckpoint : undefined,
+          })
+          checkpointed = await persist(checkpointed, 'game_ir_checkpoint_committed', { checkpoint })
+        }
+        const readyReceipt = await commitGameIrPublication({
+          workspacePath: input.workspacePath,
+          publicationId: state.identity.publicationId,
+          phase7Authority: authorities.phase7,
+        })
+        const latestCheckpoint = checkpointed.gameIrState?.status === 'compiling' ? checkpointed.gameIrState.latestCheckpoint : undefined
+        if (!latestCheckpoint) throw new Error('Game IR publication has no committed Phase 7 checkpoint')
+        const candidateReady = transitionDeliveryRun(checkpointed, {
+          type: 'game_ir_ready',
+          state: { status: 'ready', identity: state.identity, checkpoint: latestCheckpoint, readyReceipt, readyReceiptDigest: digestGameIrValue(readyReceipt) },
+        })
+        await readCommittedGameIr({ workspacePath: input.workspacePath, deliveryRun: candidateReady })
+        const readyRun = await persist(candidateReady, 'game_ir_ready', { readyReceiptDigest: digestGameIrValue(readyReceipt) })
+        await resumeUnlocked(readyRun)
+      } catch (error) {
+        await saveCompilerAttention('publication', 'reader-valid committed Game IR', 'checkpoint or publication admission failed')
+      }
       return
     }
     if (foundationRevisionTask?.kind === 'impacted-facts' && result.workerType === 'foundation-fact-extractor') {
@@ -1954,13 +2088,6 @@ export function createDeliveryWorkflowController(input: {
       const state = run.gameIrState
       if (!state || state.status !== 'compiling')
         throw new Error('Game IR compilation phase is missing its compiling state')
-      const replayable = run.activeDispatch?.terminalResult
-        ? run.activeDispatch
-        : undefined
-      if (replayable) {
-        await dispatcher.replayTerminal(replayable, handleTerminalUnlocked)
-        return
-      }
       const foundationReadyReceipt = run.foundationAuditState
         ? projectFoundationReadyReceipt({
             state: run.foundationAuditState,
@@ -2000,6 +2127,13 @@ export function createDeliveryWorkflowController(input: {
             foundation: foundationReadyReceipt,
             request: compileRequest,
           }),
+          ...(state.progressIdentity
+            ? {
+                retryProgressIdentity: digestGameIrValue(
+                  state.progressIdentity,
+                ),
+              }
+            : {}),
         },
       })
       return

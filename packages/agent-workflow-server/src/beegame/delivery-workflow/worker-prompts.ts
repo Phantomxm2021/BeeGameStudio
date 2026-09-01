@@ -417,7 +417,7 @@ function formatResourceContentContract(
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'game-ir-compiler':
-      return 'Compile only the service-bound Foundation READY request into the declared domain-specific Game IR stages. Submit the committed checkpoint and READY receipt; do not read old documents, journals, prior publications, or invent fallback authority.'
+      return 'Compile only the service-bound Foundation READY request into the declared domain-specific Game IR stages. Submit only the complete domainResults candidate set for service admission; never submit checkpoint paths, READY receipts, publication markers, or self-assigned authority. Do not read old documents, journals, prior publications, or invent fallback authority.'
     case 'foundation-fact-extractor':
       return [
         'Extract only the declared fact keys from the exact packet sections.',
@@ -556,7 +556,7 @@ function factExtractionInstructions(request: WorkerDispatchRequest): string[] {
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'game-ir-compiler':
-      return 'Return one compiler terminal conforming to the supplied schema. Completed output must include the committed checkpoint and READY receipt; failed or blocked output must include a concrete diagnostic reason.'
+      return 'Return one compiler terminal conforming to the supplied schema. Completed output must include only domainResults for service admission; failed or blocked output must include a concrete diagnostic reason. Checkpoints, publication markers, and READY receipts are service-owned and forbidden in worker output.'
     case 'foundation-fact-extractor':
       return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, and value; omit evidence and reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, and reason; omit evidence and value. The service binds immutable provenance from the packet owner section into the durable terminal.'
     case 'foundation-semantic-reviewer':

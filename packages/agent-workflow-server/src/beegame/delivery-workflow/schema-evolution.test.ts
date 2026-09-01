@@ -50,6 +50,7 @@ const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
   44: '10c9b7d69cf294be7934368ca0fd0be02be62f570b5c456fb9c35192c1ea964c',
   45: 'e7965861cc072c45e510fca3ffb61201034c7639dcf9ec694cb19dcc51fd28b6',
   46: 'ac47715fa5d9b650ce56330a5720e3f28eaddce59da6f5d27215d8dd8cd5085f',
+  47: '49437690f3e102e79736ef591533988e432df96d1104f3c29aab2dbcb91b6323',
 }
 
 function canonicalize(value: unknown): unknown {
@@ -168,7 +169,7 @@ function v46FoundationReadyState() {
 function v46Run(overrides: Record<string, unknown> = {}): DeliveryRun {
   const readyReceipt = v46ReadyReceipt()
   return {
-    schemaVersion: 46,
+    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
     runId: 'run-v46',
     projectId: 'project-v46',
     ownerId: 'owner-v46',
@@ -218,8 +219,8 @@ function v46ReadyReceiptDigest(): string {
 
 describe('v46 Game IR and Checklist bridge schema', () => {
   test('accepts a strict ready v46 run and rejects the v45 shape', () => {
-    expect(parseDeliveryRun(v46Run()).schemaVersion).toBe(46)
-    expect(() => parseDeliveryRun({ ...v46Run(), schemaVersion: 45 })).toThrow()
+    expect(parseDeliveryRun(v46Run()).schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
+    expect(() => parseDeliveryRun({ ...v46Run(), schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1 })).toThrow()
   })
 
   test('requires persisted Game IR state to retain Foundation READY authority and matching revision', () => {

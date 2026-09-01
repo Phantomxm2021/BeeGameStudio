@@ -206,6 +206,13 @@ const gameIrStateSchema: z.ZodType<GameIrState> = z.discriminatedUnion(
         identity: gameIrCompilationIdentitySchema,
         latestCheckpoint: gameIrCheckpointRefSchema.optional(),
         diagnosticRef: z.string().min(1).optional(),
+        progressIdentity: z.object({
+          inputDigest: sha256Schema,
+          diagnosticDigest: sha256Schema,
+          candidateDigest: sha256Schema,
+          checkpointJournalDigest: sha256Schema,
+          terminalDigest: sha256Schema,
+        }).strict().optional(),
       })
       .strict(),
     z

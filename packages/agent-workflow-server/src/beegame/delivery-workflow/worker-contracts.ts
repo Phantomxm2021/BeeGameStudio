@@ -1,7 +1,6 @@
 import { z } from 'zod/v4'
 import { atomicTaskSchema } from './schema'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
-import { gameIrReadyReceiptSchema } from './game-ir/contracts'
 import {
   FOUNDATION_FACT_CATALOG,
   foundationFactDefinition,
@@ -11,8 +10,8 @@ import type { FoundationFactPacket } from './foundation-fact-extraction'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
 
-/** Compiler terminal identity is service-owned; authority is revalidated from
- * the run checkpoint/publication before the workflow can advance. */
+/** Compiler output is a domain-result DTO. Checkpoint and publication
+ * authority remain service-owned and are never accepted from the worker. */
 export const gameIrCompilerTerminalSchema = z.object({
   workerType: z.literal('game-ir-compiler'),
   status: z.enum(['completed', 'failed', 'blocked']),
@@ -22,12 +21,11 @@ export const gameIrCompilerTerminalSchema = z.object({
   revision: z.string().min(1),
   compileRequestDigest: z.string().regex(/^[a-f0-9]{64}$/),
   foundationReadyReceiptDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  checkpoint: z.object({ checkpointPath: z.string().min(1), checkpointDigest: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
-  readyReceipt: gameIrReadyReceiptSchema.optional(),
+  domainResults: z.array(z.unknown()).optional(),
   reason: z.string().min(1).optional(),
 }).strict().superRefine((value, context) => {
-  if (value.status === 'completed' && (!value.checkpoint || !value.readyReceipt))
-    context.addIssue({ code: 'custom', path: ['checkpoint'], message: 'completed compiler output requires committed checkpoint and READY receipt' })
+  if (value.status === 'completed' && (!value.domainResults || value.domainResults.length === 0))
+    context.addIssue({ code: 'custom', path: ['domainResults'], message: 'completed compiler output requires domain candidate results' })
   if (value.status !== 'completed' && value.reason === undefined)
     context.addIssue({ code: 'custom', path: ['reason'], message: 'failed compiler output requires a diagnostic reason' })
 })
