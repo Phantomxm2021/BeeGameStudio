@@ -249,8 +249,8 @@ Run: `git add packages/agent-workflow-server/src/beegame/delivery-workflow/game-
 - [ ] **Step 7: Main-agent audit.** Verify exact spec compliance, no second stage/authority, no Reviewer/Revision or Task 9–15 changes, no compatibility path, no arbitrary caps, and no same-worker self-validation. Correct findings before admitting Task 3B.
 
 **Bounded implementation order (no temporary production dual route):**
-1. **Task 3B.1 — owner-built packet completeness:** add the missing exact counterpart/prior-target bindings to existing domain-owned projection packet builders and strict tests. Do not change controller routing yet and do not duplicate schema rules.
-2. **Task 3B.2 — atomic protocol cutover:** RED tests first, then restore the sole checkpoint protocol to an immutable step-manifest chain, add strict discriminated projection/validation contracts, staged scheduler, prompt/session/controller/recovery wiring, and delete the generic batch fields/branches in the same production commit.
+1. **Task 3B.1 — owner packet seam audit（complete, no production diff）:** the audit proved that adding unused prior-target APIs before the scheduler would create speculative/dead authority seams, while shared optional fields would recreate a generic wrapper. Therefore packet completeness is part of the atomic cutover, not a standalone production commit. Baseline owner producer suites remain green.
+2. **Task 3B.2 — atomic protocol and packet cutover:** RED tests first, then add the required domain-owned counterpart/prior packet seams together with their sole scheduler caller, restore the sole checkpoint protocol to an immutable step-manifest chain, add strict discriminated projection/validation contracts, prompt/session/controller/recovery wiring, and delete the generic batch fields/branches in the same production commit.
 3. **Task 3B.3 — evidence and correction:** run focused recovery/tamper/boundary/Foundation parity evidence; main-agent audit the complete diff and assign only concrete corrections. Task 3A remains blocked until this audit is clean.
 
 ### Task 3A: standalone Game IR content-quality and Chrome admission gate
