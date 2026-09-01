@@ -58,6 +58,7 @@ export function realAuthority(
   options: {
     presentationRequirements?: readonly PresentationRequirementFixture[]
     additionalTechnicalSourceLiterals?: readonly string[]
+    additionalResourceSourceLiterals?: readonly string[]
   } = {},
 ): ResourceRealizationSemanticProjectionAuthority {
   type Node = {
@@ -445,6 +446,7 @@ export function realAuthority(
       targetId: 'variant-main',
       targetType: 'resource-realization.variant',
     }),
+    ...(options.additionalResourceSourceLiterals ?? []),
   ].join('\n')
   const hash = (value: string): string =>
     createHash('sha256').update(value, 'utf8').digest('hex')

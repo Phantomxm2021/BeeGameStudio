@@ -146,13 +146,13 @@
 - Produces: exact six-entry `GameIrPublishedModuleEvidence` discriminated by Phase 4/5/6/7 and derived only from replayed source/projection digests; Phase 4 contains no invented validation result.
 - Removes atomically: canonical `core`, caller `compileRequest/candidate/sectionIndex/admissions`, every generic semantic-admission API and all imports/tests for that file.
 
-- [ ] Write one missing-interface RED, add only the minimal compiling assembler/publication test shell, and keep one complete assembler-to-publication end-to-end fixture RED at the explicit `not implemented`/old-authority-rejected boundary. Do not make it GREEN through a temporary adapter or parallel route.
-- [ ] In one indivisible implementation change, delete canonical `core`, update every closed module/source map, implement the sole assembler with one Core complete-candidate parse, cut publication planning to Phase 7 authority, derive the exact six-entry Phase 4/5/6/7 evidence and every artifact/manifest/graph/marker byte internally, then make the complete end-to-end fixture GREEN.
-- [ ] In that same green cutover, delete generic semantic admission and update stage-boundary/traversal/static gates to require zero source or test imports and no `core` module literals outside explicit rejection evidence. Do not commit an intermediate state.
-- [ ] After the valid end-to-end fixture is GREEN, add authority and candidate mutations one at a time for caller module/prior closure/candidate/Section Index/digest fields, exact code-unit order, non-empty modules and global ID/reference/edge/derived closure; observe assertion-specific RED before minimum GREEN.
-- [ ] Add publication mutations one at a time rejecting old caller fields, detached candidate/result relabeling, missing/duplicate/relabelled/generic-homogenized evidence and staged/journal self-attestation; independently reconstruct exact evidence bytes from replayed authorities/projections.
-- [ ] Run assembler determinism/mutation/expanded tests, publication crash/concurrency/symlink/FIFO/recovery, complete Game IR, root/server typecheck and Biome before committing.
-- [ ] Commit the atomic green cutover as `feat: publish complete Game IR from Phase 7 authority`.
+- [x] Write one missing-interface RED, add only the minimal compiling assembler/publication test shell, and keep one complete assembler-to-publication end-to-end fixture RED at the explicit `not implemented`/old-authority-rejected boundary. Do not make it GREEN through a temporary adapter or parallel route.
+- [x] In one indivisible implementation change, delete canonical `core`, update every closed module/source map, implement the sole assembler with one Core complete-candidate parse, cut publication planning to Phase 7 authority, derive the exact six-entry Phase 4/5/6/7 evidence and every artifact/manifest/graph/marker byte internally, then make the complete end-to-end fixture GREEN.
+- [x] In that same green cutover, delete generic semantic admission and update stage-boundary/traversal/static gates to require zero source or test imports and no `core` module literals outside explicit rejection evidence. Do not commit an intermediate state.
+- [x] After the valid end-to-end fixture is GREEN, add authority and candidate mutations one at a time for caller module/prior closure/candidate/Section Index/digest fields, exact code-unit order, non-empty modules and global ID/reference/edge/derived closure; observe assertion-specific RED before minimum GREEN.
+- [x] Add publication mutations one at a time rejecting old caller fields, detached candidate/result relabeling, missing/duplicate/relabelled/generic-homogenized evidence and staged/journal self-attestation; independently reconstruct exact evidence bytes from replayed authorities/projections.
+- [x] Run assembler determinism/mutation/expanded tests, publication crash/concurrency/symlink/FIFO/recovery, complete Game IR, root/server typecheck and Biome before committing.
+- [x] Commit the atomic green cutover as `feat: publish complete Game IR from Phase 7 authority`.
 
 ### Task 8: Profiles, Foundation parity and phase-boundary audit
 
@@ -165,10 +165,10 @@
 **Interfaces:**
 - Proves: runtime/numeric/persistence/resource/visual/audio profiles; complete candidate/publication; Foundation and protected-stage parity; zero production caller.
 
-- [ ] Add at least two structurally different complete profiles, including an integration evidence unit and expanded graph beyond ordinary counts.
-- [ ] Use real controller READY documents and the same compile request/Section Index; compare all eight document bytes and Foundation state before/after Phase 7 assembly/publication preparation.
-- [ ] Update AST boundaries for six canonical domains, no `core`, no generic semantic admission, exactly one Phase 7 assembler/publication path and no protected imports/callers.
-- [ ] Run the complete Game IR suite, Foundation 21-file gate, root/server typecheck, Biome, `git diff --check` and protected-path diff; commit `test: close Phase 7 isolation and parity`.
+- [x] Add at least two structurally different complete profiles, including an integration evidence unit and expanded graph beyond ordinary counts.
+- [x] Use real controller READY documents and the same compile request/Section Index; compare all eight document bytes and Foundation state before/after Phase 7 assembly/publication preparation.
+- [x] Update AST boundaries for six canonical domains, no `core`, no generic semantic admission, exactly one Phase 7 assembler/publication path and no protected imports/callers.
+- [x] Run the complete Game IR suite, Foundation 21-file gate, root/server typecheck, Biome, `git diff --check` and protected-path diff; commit `test: audit Phase 7 profiles and boundaries`.
 
 ### Task 9: Whole-phase deletion audit and acceptance status
 

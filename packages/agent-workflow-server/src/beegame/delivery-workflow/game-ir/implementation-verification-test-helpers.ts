@@ -26,6 +26,7 @@ import {
 import type { GameIrSemanticCandidateNode } from './semantic-fidelity'
 import {
   assembleResourceRealizationClosure,
+  type ResourceRealizationAssemblyAuthority,
   type ResourceRealizationClosure,
 } from './resource-realization-assembler'
 import {
@@ -40,6 +41,8 @@ import {
 import {
   completeResourceInput,
   realAuthority,
+  type PresentationRequirementFixture,
+  type ResourceFixtureNode,
   validationAuthority as buildValidationAuthority,
 } from './resource-realization-test-helpers'
 
@@ -49,7 +52,7 @@ const edge = (type: string, targetId: string, targetType: string) => ({
   targetType,
 })
 
-const IV_SOURCE_LITERALS = Object.freeze([
+export const IMPLEMENTATION_VERIFICATION_SOURCE_LITERALS = Object.freeze([
   'implementation-verification',
   'implementation-verification.target',
   'implementation-verification.unit',
@@ -73,6 +76,18 @@ const IV_SOURCE_LITERALS = Object.freeze([
   'resource',
   'integration-test',
   'file-inspection',
+  'unit-test',
+  'build',
+  'runtime-observation',
+  'visual-observation',
+  'audio-observation',
+  'state',
+  'numeric',
+  'persistence',
+  'invariant-runtime',
+  'invariant-state',
+  'invariant-numeric',
+  'invariant-persistence',
   ...[
     ['depends-on', 'artifact-alt', 'implementation-verification.unit'],
     ['targets', 'target-secondary', 'implementation-verification.target'],
@@ -89,7 +104,12 @@ const IV_SOURCE_LITERALS = Object.freeze([
       'implementation-verification.evidence-requirement',
     ],
     ['constrains', 'artifact-alt', 'implementation-verification.unit'],
+    ['constrains', 'artifact-main-2', 'implementation-verification.unit'],
     ['constrains', 'balance-unit', 'balance.unit'],
+    ['implements', 'variant-alt', 'resource-realization.variant'],
+    ['implements', 'artifact-alt', 'resource-realization.delivery-artifact'],
+    ['covers', 'variant-alt', 'resource-realization.variant'],
+    ['covers', 'artifact-alt', 'resource-realization.delivery-artifact'],
   ].map(([type, targetId, targetType]) =>
     canonicalGameIrJson(edge(type!, targetId!, targetType!)),
   ),
@@ -120,7 +140,7 @@ const IV_SOURCE_LITERALS = Object.freeze([
       canonicalGameIrJson(edge(type, targetId, targetType)),
     ),
   ),
-  ...Array.from({ length: 24 }, (_, index) => {
+  ...Array.from({ length: 64 }, (_, index) => {
     const suffix = String(index).padStart(2, '0')
     return [
       `expanded-evidence-${suffix}`,
@@ -167,8 +187,15 @@ function sourceFor(
   return resourceSource
 }
 
+export type ImplementationVerificationFixtureOptions = Readonly<{
+  expandedCount?: number
+  presentationRequirements?: readonly PresentationRequirementFixture[]
+  resourceSourceLiterals?: readonly string[]
+  resourceMutate?: (nodes: ResourceFixtureNode[]) => ResourceFixtureNode[]
+}>
+
 function phase6Fixture(
-  additionalTechnicalSourceLiterals: readonly string[] = [],
+  options: ImplementationVerificationFixtureOptions = {},
 ): {
   closure: ResourceRealizationClosure
   phase6Authority: ReturnType<typeof buildValidationAuthority> & {
@@ -182,7 +209,10 @@ function phase6Fixture(
   resource: ResourceRealizationSemanticReceipt
 } {
   const projectionAuthority = realAuthority({
-    additionalTechnicalSourceLiterals,
+    presentationRequirements: options.presentationRequirements,
+    additionalTechnicalSourceLiterals:
+      IMPLEMENTATION_VERIFICATION_SOURCE_LITERALS,
+    additionalResourceSourceLiterals: options.resourceSourceLiterals,
   })
   const packet =
     prepareResourceRealizationSemanticProjectionPacket(projectionAuthority)
@@ -192,6 +222,8 @@ function phase6Fixture(
     completeResourceInput(
       packet,
       projectionAuthority.resourceRealization.source.sectionBytes,
+      'player',
+      options.resourceMutate,
     ),
   )
   if (resource.outcome !== 'PROJECTED')
@@ -356,12 +388,21 @@ function ivNodes(
   }
   const expanded = Array.from({ length: expandedCount }, (_, index) => {
     const suffix = String(index).padStart(2, '0')
+    const evidenceKinds = [
+      'unit-test',
+      'integration-test',
+      'build',
+      'runtime-observation',
+      'visual-observation',
+      'audio-observation',
+      'file-inspection',
+    ] as const
     const evidence = {
       id: `expanded-evidence-${suffix}`,
       kind: 'implementation-verification.evidence-requirement',
       value: {
         label: 'runtime-player-model',
-        kind: 'file-inspection',
+        kind: evidenceKinds[index % evidenceKinds.length]!,
         expected: 'runtime-import-ready',
         artifactPaths: ['assets/runtime/player-model.png'],
       },
@@ -386,6 +427,29 @@ function ivNodes(
     }
     return [evidence, scenario]
   }).flat()
+  const profileInvariants =
+    expandedCount > 0
+      ? (['runtime', 'state', 'numeric', 'persistence'] as const).map(
+          scope => ({
+            id: `invariant-${scope}`,
+            kind: 'implementation-verification.invariant',
+            value: {
+              label: `invariant-${scope}`,
+              assertion: 'runtime-import-ready',
+              scope,
+            },
+            references: [],
+            edges: [
+              edge('constrains', main.id, main.kind),
+              edge(
+                'proved-by',
+                'player-acquisition',
+                'implementation-verification.evidence-requirement',
+              ),
+            ],
+          }),
+        )
+      : []
   return [
     target,
     main,
@@ -394,6 +458,7 @@ function ivNodes(
     evidenceVerification,
     scenario,
     invariant,
+    ...profileInvariants,
     ...expanded,
   ].map(node => ({ ...node, edges: sortedEdges(node.edges) }))
 }
@@ -509,12 +574,22 @@ function sourceAndClaims(
   }
 }
 
-export function implementationVerificationFixture(expandedCount = 0) {
-  const phase6 = phase6Fixture(IV_SOURCE_LITERALS)
-  const nodes = ivNodes(phase6.priorModules, expandedCount)
+export function implementationVerificationFromPhase6Authority(
+  phase6Authority: ResourceRealizationAssemblyAuthority,
+  expandedCount = 0,
+) {
+  const closure = assembleResourceRealizationClosure(phase6Authority)
+  const priorModules = [
+    closure.phase5.phase4.gameplay.module,
+    closure.phase5.phase4.balance.module,
+    closure.phase5.worldScene.module,
+    closure.phase5.presentation.module,
+    closure.resourceRealization.module,
+  ]
+  const nodes = ivNodes(priorModules, expandedCount)
   const built = sourceAndClaims(
-    phase6.phase5Authority,
-    phase6.resourceSource,
+    phase6Authority.phase5Authority,
+    phase6Authority.resourceRealization.source,
     nodes,
   )
   const authority: ImplementationVerificationSemanticProjectionAuthority = {
@@ -531,11 +606,27 @@ export function implementationVerificationFixture(expandedCount = 0) {
   if (semantic.outcome !== 'PROJECTED')
     throw new Error('fixture IV semantic result must be projected')
   return {
-    ...phase6,
     authority,
     packet,
     semantic: semantic as ImplementationVerificationSemanticReceipt,
-    priorModules: phase6.priorModules,
+    priorModules,
     nodes,
+  }
+}
+
+export function implementationVerificationFixture(
+  expandedCountOrOptions: number | ImplementationVerificationFixtureOptions = 0,
+) {
+  const options =
+    typeof expandedCountOrOptions === 'number'
+      ? { expandedCount: expandedCountOrOptions }
+      : expandedCountOrOptions
+  const phase6 = phase6Fixture(options)
+  return {
+    ...phase6,
+    ...implementationVerificationFromPhase6Authority(
+      phase6.phase6Authority as ResourceRealizationAssemblyAuthority,
+      options.expandedCount ?? 0,
+    ),
   }
 }

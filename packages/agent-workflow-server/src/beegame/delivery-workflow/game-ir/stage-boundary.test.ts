@@ -2001,6 +2001,7 @@ describe('Game IR stage boundary', () => {
   test('keeps integration callers on staged preparation and out of projection construction', async () => {
     for (const filename of [
       'foundation-parity.test.ts',
+      'implementation-verification-profiles.integration.test.ts',
       'resource-realization-profiles.integration.test.ts',
       'world-presentation-traversal.integration.test.ts',
       'world-presentation-puzzle.integration.test.ts',
@@ -2015,6 +2016,62 @@ describe('Game IR stage boundary', () => {
 
   test('discovers and classifies every non-test Game IR production file', async () => {
     const sourceFiles = await readGameIrProductionSourceFiles()
+    expect(
+      sourceFiles.filter(
+        file => file.filename === 'implementation-verification-assembler.ts',
+      ),
+    ).toHaveLength(1)
+    expect(
+      sourceFiles.filter(file => file.filename === 'publication.ts'),
+    ).toHaveLength(1)
+    expect(
+      sourceFiles.some(file => file.filename === 'semantic-admission.ts'),
+    ).toBe(false)
+    const facts = sourceFiles.map(file => ({
+      filename: file.filename,
+      facts: collectAstFacts(file.source, file.filename),
+    }))
+    expect(
+      facts.flatMap(({ filename, facts: fileFacts }) =>
+        fileFacts.properties
+          .filter(entry => entry.key === 'moduleId' && entry.value === 'core')
+          .map(() => filename),
+      ),
+    ).toEqual([])
+    expect(
+      facts.flatMap(({ filename, facts: fileFacts }) =>
+        fileFacts.imports
+          .filter(entry => entry.path.includes('semantic-admission'))
+          .map(() => filename),
+      ),
+    ).toEqual([])
+    const closureImports = facts.flatMap(({ filename, facts: fileFacts }) =>
+      fileFacts.importBindings
+        .filter(
+          entry =>
+            entry.original === 'assembleImplementationVerificationClosure' &&
+            !entry.isTypeOnly,
+        )
+        .map(() => filename),
+    )
+    expect(closureImports).toEqual(['publication.ts'])
+    expect(
+      facts.flatMap(({ filename, facts: fileFacts }) =>
+        fileFacts.calls
+          .filter(name => name === 'assembleImplementationVerificationClosure')
+          .map(() => filename),
+      ),
+    ).toEqual(['publication.ts'])
+    expect(
+      facts.flatMap(({ filename, facts: fileFacts }) =>
+        fileFacts.calls
+          .filter(name => name === 'parseGameIrCandidate')
+          .map(() => filename),
+      ),
+    ).toEqual([
+      'implementation-verification-assembler.ts',
+      'implementation-verification-schema.ts',
+    ])
     expect(sourceFiles.map(file => file.filename)).toEqual([
       'balance-producer.ts',
       'balance-schema.ts',

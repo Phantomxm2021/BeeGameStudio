@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createDeliveryWorkflowController } from '../controller'
 import { createInitialDeliveryRun } from '../run-store'
 import {
@@ -98,7 +98,20 @@ import {
   admitResourceRealizationSemanticValidationResult,
   prepareResourceRealizationSemanticValidationPacket,
 } from './phase6-admission'
-import { assembleResourceRealizationClosure } from './resource-realization-assembler'
+import {
+  assembleResourceRealizationClosure,
+  type ResourceRealizationAssemblyAuthority,
+} from './resource-realization-assembler'
+import {
+  assembleImplementationVerificationClosure,
+  type ImplementationVerificationAssemblyAuthority,
+} from './implementation-verification-assembler'
+import {
+  IMPLEMENTATION_VERIFICATION_SOURCE_LITERALS,
+  implementationVerificationFromPhase6Authority,
+} from './implementation-verification-test-helpers'
+import { prepareImplementationVerificationSemanticValidationPacket } from './phase7-admission'
+import { prepareGameIrPublication } from './publication'
 import {
   boundaryViolations,
   FOUNDATION_PROTECTED_FILES,
@@ -110,6 +123,7 @@ const ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../../../../../../',
 )
+setDefaultTimeout(30_000)
 const BASELINE = '70df2e2c'
 const PHASE_STARTED_AT = '2026-08-24T00:00:00.000Z'
 const WORKER_KEY: FoundationFactKey = 'game.win_conditions'
@@ -243,6 +257,45 @@ function fixtureDocuments(variant: string): Map<string, string> {
         ),
       ]
     }),
+  )
+  const technical = documents.get('docs/TECHNICAL_DESIGN.md')!
+  const technicalMarker = '<!-- beegame-section:architecture -->'
+  const technicalStart = technical.indexOf(technicalMarker)
+  if (technicalStart < 0)
+    throw new Error(
+      'implementation verification parity fixture is missing architecture',
+    )
+  const technicalNext = technical.indexOf(
+    '\n<!-- beegame-section:',
+    technicalStart + technicalMarker.length,
+  )
+  const technicalInsertAt =
+    technicalNext < 0 ? technical.length : technicalNext + 1
+  const implementationVerificationBlock =
+    '<!-- game-ir-implementation-verification-parity-source -->\n' +
+    [
+      ...IMPLEMENTATION_VERIFICATION_SOURCE_LITERALS,
+      ...paritySequence().map(entry => entry.literal),
+      ...resourceParitySequence().map(entry => entry.literal),
+      ...[
+        ...Object.values(PARITY_NODES).flat(),
+        ...RESOURCE_PARITY_NODES,
+      ].flatMap(node =>
+        ['implements', 'covers', 'constrains'].map(type =>
+          canonicalGameIrJson({
+            type,
+            targetId: node.id,
+            targetType: node.kind,
+          }),
+        ),
+      ),
+    ].join('\n') +
+    '\n'
+  documents.set(
+    'docs/TECHNICAL_DESIGN.md',
+    technical.slice(0, technicalInsertAt) +
+      implementationVerificationBlock +
+      technical.slice(technicalInsertAt),
   )
   if (variant === 'issue' || variant === 'parity-issue')
     documents.set(
@@ -1886,6 +1939,93 @@ describe('Foundation parity against stable baseline 70df2e2c', () => {
       expect([...documentsAfter]).toEqual([...documentsBefore])
     } finally {
       await rm(firstWorkspace, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps a real READY workspace byte-identical across Phase 7 assembly and publication preparation', async () => {
+    const fixture = makeFixture('parity-issue')
+    const workspacePath = await mkdtemp(join('/tmp', 'game-ir-parity-'))
+    try {
+      const before = await controllerIssuePlan(fixture, workspacePath)
+      const documentsBefore = new Map(
+        await Promise.all(
+          CANONICAL_PATHS.map(
+            async path =>
+              [
+                path,
+                await readFile(join(workspacePath, path), 'utf8'),
+              ] as const,
+          ),
+        ),
+      )
+      const phase5Authority = await phase5AuthorityFromPlan(
+        before,
+        documentsBefore,
+      )
+      const phase6Authority = (await resourceAuthorityFromPhase5(
+        phase5Authority,
+        documentsBefore,
+      )) as ResourceRealizationAssemblyAuthority
+      const gameIrFixture =
+        implementationVerificationFromPhase6Authority(phase6Authority)
+      expect(gameIrFixture.authority.source.compileRequest).toEqual(
+        phase5Authority.phase4Authority.gameplay.source.compileRequest,
+      )
+      expect(gameIrFixture.authority.source.authoritySectionIndex).toEqual(
+        phase5Authority.phase4Authority.gameplay.source.authoritySectionIndex,
+      )
+      const preparation = {
+        phase6Authority,
+        implementationVerification: {
+          source: gameIrFixture.authority.source,
+          mechanical: gameIrFixture.authority.mechanical,
+          semantic: gameIrFixture.semantic,
+        },
+      } as const
+      const packet =
+        prepareImplementationVerificationSemanticValidationPacket(preparation)
+      const phase7Authority: ImplementationVerificationAssemblyAuthority = {
+        phase6Authority,
+        implementationVerification: {
+          ...preparation.implementationVerification,
+          validation: {
+            outcome: 'PASS',
+            packetDigest: packet.packetDigest,
+            checkIds: packet.checkIds,
+            coveredTargets: packet.requiredTargets,
+          },
+        },
+      }
+      const closure = assembleImplementationVerificationClosure(phase7Authority)
+      expect(closure.candidate.modules).toHaveLength(6)
+      await prepareGameIrPublication({
+        workspacePath,
+        publicationId:
+          phase7Authority.phase6Authority.phase5Authority.phase4Authority
+            .gameplay.source.compileRequest.publicationId,
+        phase7Authority,
+      })
+      const documentsAfter = new Map(
+        await Promise.all(
+          CANONICAL_PATHS.map(
+            async path =>
+              [
+                path,
+                await readFile(join(workspacePath, path), 'utf8'),
+              ] as const,
+          ),
+        ),
+      )
+      expect([...documentsAfter]).toEqual([...documentsBefore])
+      const afterController = createDeliveryWorkflowController({
+        workspacePath,
+        ownerId: 'parity-owner',
+        workerPort: parityWorkerPort([]),
+      })
+      const afterRun = await afterController.store.load()
+      expect(afterRun?.foundationAuditState).toEqual(before.readyState)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
     }
   })
 
