@@ -10,7 +10,7 @@ import type { ResourceRealizationAssemblyAuthority } from './resource-realizatio
 function authority(
   expandedCount = 0,
 ): ImplementationVerificationAssemblyAuthority {
-  const fixture = implementationVerificationFixture(expandedCount)
+  const fixture = implementationVerificationFixture({ expandedCount })
   const phase6Authority =
     fixture.phase6Authority as ResourceRealizationAssemblyAuthority
   const preparation = {
@@ -92,6 +92,44 @@ describe('complete Game IR assembly from Phase 7 authority', () => {
         },
       } as never),
     ).toThrow(/unknown|authority|Resource Realization/i)
+  })
+
+  test('rejects outer authority hidden, symbol, and accessor fields before dereference', () => {
+    const input = authority()
+    let getterExecuted = false
+    const symbol = Symbol('detached')
+    const candidates: readonly [string, unknown][] = [
+      [
+        'hidden',
+        Object.defineProperty({ ...input }, 'detached', {
+          value: true,
+          enumerable: false,
+        }),
+      ],
+      [
+        'symbol',
+        Object.defineProperty({ ...input }, symbol, {
+          value: true,
+          enumerable: true,
+        }),
+      ],
+      [
+        'accessor',
+        Object.defineProperty({ ...input }, 'phase6Authority', {
+          get: () => {
+            getterExecuted = true
+            return input.phase6Authority
+          },
+          enumerable: true,
+        }),
+      ],
+    ]
+    for (const [label, candidate] of candidates) {
+      expect(() =>
+        assembleImplementationVerificationClosure(candidate as never),
+      ).toThrow(/hidden|accessor|symbol|property/i)
+      expect(getterExecuted, `${label} must not execute a getter`).toBe(false)
+    }
   })
 
   test('accepts expanded graphs without a fixed node, edge, or evidence cap', () => {

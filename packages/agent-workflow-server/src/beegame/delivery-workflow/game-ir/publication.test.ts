@@ -16,37 +16,15 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test'
-import {
-  completeTestSubmission,
-  renderTestCompleteGameDocument,
-} from '../../../__tests__/complete-game-document-fixture'
-import { withTestDocumentMetadata } from '../../../__tests__/delivery-workflow-test-helpers'
-import {
-  buildFoundationSectionIndex,
-  digestSectionIndex,
-} from '../foundation-section-index'
-import {
-  CANONICAL_FOUNDATION_DOCUMENTS,
-  type FoundationDocumentPath,
-} from '../types'
-import {
-  GAME_IR_CANONICAL_MODULE_IDS,
-  gameIrCommittedPath,
-  GAME_IR_SCHEMA_VERSION,
-  type FoundationReadyReceipt,
-  type GameIrCompileRequest,
-} from './contracts'
-import {
-  parseGameIrCandidate,
-  digestGameIrValue,
-  type GameIrCandidate,
-  type GameIrSourceSection,
-} from './model'
+import { gameIrCommittedPath } from './contracts'
 import {
   assembleImplementationVerificationClosure,
   type ImplementationVerificationAssemblyAuthority,
 } from './implementation-verification-assembler'
-import { implementationVerificationFixture } from './implementation-verification-test-helpers'
+import {
+  implementationVerificationFixture,
+  type ImplementationVerificationFixtureOptions,
+} from './implementation-verification-test-helpers'
 import { prepareImplementationVerificationSemanticValidationPacket } from './phase7-admission'
 import type { ResourceRealizationAssemblyAuthority } from './resource-realization-assembler'
 import {
@@ -69,64 +47,6 @@ const fifoProbeSupported =
     process.platform,
   ) && typeof process.getuid === 'function'
 setDefaultTimeout(30_000)
-const documents = new Map(
-  CANONICAL_FOUNDATION_DOCUMENTS.map(path => {
-    const submission = completeTestSubmission(path)
-    return [
-      path,
-      withTestDocumentMetadata(
-        path,
-        renderTestCompleteGameDocument(path, submission),
-      ),
-    ] as const
-  }),
-)
-const sectionIndex: readonly GameIrSourceSection[] = [
-  ...buildFoundationSectionIndex({ documents }),
-].sort((left, right) =>
-  `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
-    `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
-  ),
-)
-const documentDigests = Object.fromEntries(
-  [...documents].map(([path, bytes]) => [path, shaBytes(bytes)]),
-) as Record<FoundationDocumentPath, string>
-const gddSection = sectionIndex.find(
-  section => section.documentPath === 'docs/GDD.md',
-)!
-const sectionDigest = gddSection.digest
-const sectionId = gddSection.sectionId
-
-function sectionKey(
-  ref: Pick<GameIrSourceSection, 'documentPath' | 'sectionId'>,
-): string {
-  return `${ref.documentPath}#${ref.sectionId}`
-}
-
-function sectionBytesFor(moduleId: string): Record<string, string> {
-  const module = {
-    moduleId,
-    sourceDocumentPaths: CANONICAL_FOUNDATION_DOCUMENTS,
-  }
-  const result = Object.fromEntries(
-    sectionIndex
-      .filter(
-        section =>
-          module.sourceDocumentPaths.includes(section.documentPath) ||
-          sectionKey(section) === sectionKey(gddSection),
-      )
-      .map(section => [
-        sectionKey(section),
-        documents
-          .get(section.documentPath)!
-          .split('\n')
-          .slice(section.startLine - 1, section.endLine)
-          .join('\n'),
-      ]),
-  )
-  return result
-}
-
 const publicationModulePath = join(
   dirname(fileURLToPath(import.meta.url)),
   'publication.ts',
@@ -142,184 +62,14 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function request(publicationId = 'publication-1'): GameIrCompileRequest {
-  const body: Omit<FoundationReadyReceipt, 'receiptDigest'> = {
-    schemaVersion: 'foundation-ready-receipt.v1',
-    projectId: 'project-1',
-    foundationRevision: 'foundation-revision-1',
-    confirmedBriefDigest: shaBytes('confirmed brief'),
-    documentDigests: documentDigests,
-    sectionIndexPath: '.beegame/foundation/section-index.json',
-    sectionIndexDigest: digestSectionIndex(sectionIndex),
-    authority: {
-      kind: 'review',
-      reviewDigest: digest,
-      issueRegistryDigest: digest,
-    },
-  }
-  return {
-    schemaVersion: 'game-ir-compile-request.v1',
-    taskId: 'compile-task-1',
-    publicationId,
-    gameIrSchemaVersion: GAME_IR_SCHEMA_VERSION,
-    foundation: { ...body, receiptDigest: sha(body) },
-  }
-}
-
-function sha(value: unknown): string {
-  return createHash('sha256').update(canonical(value)).digest('hex')
-}
 function shaBytes(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
-
-function derivedFromAnchor(
-  derivationRuleId: string,
-  moduleId: string,
-  nodeId: string,
-  pointer: string,
-  targetValue: unknown,
-): Record<string, unknown> {
-  return {
-    kind: 'derived',
-    derivationRuleId,
-    inputs: [
-      {
-        kind: 'external',
-        moduleId,
-        nodeId,
-        pointer,
-        targetDigest: digestGameIrValue(targetValue),
-      },
-    ],
-  }
-}
-
-function rawCandidate(extraNodeCount = 3): Record<string, unknown> {
-  return {
-    schemaVersion: GAME_IR_SCHEMA_VERSION,
-    taskId: 'compile-task-1',
-    foundationRevision: 'foundation-revision-1',
-    modules: [...GAME_IR_CANONICAL_MODULE_IDS].map(moduleId => ({
-      moduleId,
-      nodes: [
-        ...(moduleId === 'gameplay'
-          ? Array.from({ length: extraNodeCount }, (_, index) => {
-              const extraId =
-                extraNodeCount > 9
-                  ? String(index).padStart(3, '0')
-                  : String(index)
-              return {
-                id: `${moduleId}.extra-${extraId}`,
-                kind: 'derived-node',
-                producerMode: 'derived',
-                value: { score: index },
-                references: [],
-                edges: [
-                  {
-                    type: 'blocks',
-                    targetId: `${moduleId}.root`,
-                    targetType: 'semantic-node',
-                  },
-                  {
-                    type: 'requires',
-                    targetId: `${moduleId}.root`,
-                    targetType: 'semantic-node',
-                  },
-                  {
-                    type: 'z',
-                    targetId: `${moduleId}.root`,
-                    targetType: 'semantic-node',
-                  },
-                  {
-                    type: 'ä',
-                    targetId: `${moduleId}.root`,
-                    targetType: 'semantic-node',
-                  },
-                ],
-                bindings: {
-                  '/id': derivedFromAnchor(
-                    `identity-from-${moduleId}-root-${extraId}`,
-                    moduleId,
-                    `${moduleId}.root`,
-                    '/id',
-                    `${moduleId}.root`,
-                  ),
-                  '/value/score': derivedFromAnchor(
-                    `score-from-${moduleId}-root-${extraId}`,
-                    moduleId,
-                    `${moduleId}.root`,
-                    '/id',
-                    `${moduleId}.root`,
-                  ),
-                  '/edges/0': derivedFromAnchor(
-                    `blocks-from-${moduleId}-root-${extraId}`,
-                    moduleId,
-                    `${moduleId}.root`,
-                    '/id',
-                    `${moduleId}.root`,
-                  ),
-                  '/edges/1': derivedFromAnchor(
-                    `requires-from-${moduleId}-root-${extraId}`,
-                    moduleId,
-                    `${moduleId}.root`,
-                    '/id',
-                    `${moduleId}.root`,
-                  ),
-                  '/edges/2': derivedFromAnchor(
-                    `z-from-${moduleId}-root-${extraId}`,
-                    moduleId,
-                    `${moduleId}.root`,
-                    '/id',
-                    `${moduleId}.root`,
-                  ),
-                  '/edges/3': derivedFromAnchor(
-                    `umlaut-from-${moduleId}-root-${extraId}`,
-                    moduleId,
-                    `${moduleId}.root`,
-                    '/id',
-                    `${moduleId}.root`,
-                  ),
-                },
-              }
-            })
-          : []),
-        {
-          id: `${moduleId}.root`,
-          kind: 'semantic-node',
-          producerMode: 'semantic',
-          value: { label: moduleId },
-          references: [],
-          edges: [],
-          bindings: {
-            '/id': {
-              kind: 'owner',
-              documentPath: 'docs/GDD.md',
-              sectionId,
-              sectionDigest,
-              sourcePointer: `/ir/${moduleId}`,
-            },
-            '/value/label': {
-              kind: 'owner',
-              documentPath: 'docs/GDD.md',
-              sectionId,
-              sectionDigest,
-              sourcePointer: `/ir/${moduleId}/label`,
-            },
-          },
-        },
-      ],
-    })),
-  }
-}
-
 function authority(
   workspacePath: string,
-  extraNodeCount = 3,
+  options: ImplementationVerificationFixtureOptions = {},
 ): GameIrPublicationAuthority {
-  const fixture = implementationVerificationFixture(
-    extraNodeCount > 3 ? extraNodeCount : 0,
-  )
+  const fixture = implementationVerificationFixture(options)
   const phase6Authority =
     fixture.phase6Authority as ResourceRealizationAssemblyAuthority
   const preparation = {
@@ -355,10 +105,12 @@ function authority(
 }
 
 const workspaces: string[] = []
-async function setup(extraNodeCount = 3): Promise<GameIrPublicationAuthority> {
+async function setup(
+  options: ImplementationVerificationFixtureOptions = {},
+): Promise<GameIrPublicationAuthority> {
   const workspacePath = await mkdtemp(join(tmpdir(), 'game-ir-publication-'))
   workspaces.push(workspacePath)
-  return authority(workspacePath, extraNodeCount)
+  return authority(workspacePath, options)
 }
 afterEach(async () => {
   await Promise.all(
@@ -588,7 +340,7 @@ describe('atomic Game IR publication and recovery', () => {
       await readFile(tamperedJournalPath, 'utf8'),
     ) as Record<string, unknown>
     const entries = journal.entries as Array<Record<string, unknown>>
-    entries[0] = { ...entries[0], digest: sha('coordinated') }
+    entries[0] = { ...entries[0], digest: shaBytes('coordinated') }
     await Bun.write(tamperedJournalPath, `${canonical(journal)}\n`)
     await Bun.write(
       join(
@@ -1188,7 +940,7 @@ describe('atomic Game IR publication and recovery', () => {
 
   test('rejects an independent different authority without mixing final bytes', async () => {
     const value = await setup()
-    const other = authority(value.workspacePath, 4)
+    const other = authority(value.workspacePath, { expandedCount: 4 })
     await prepareGameIrPublication(value)
     const childScript = `
       import { commitGameIrPublication } from ${JSON.stringify(publicationModulePath)}
@@ -1396,7 +1148,7 @@ describe('atomic Game IR publication and recovery', () => {
   })
 
   test('publishes an expanded candidate beyond common node and edge counts', async () => {
-    const value = await setup(24)
+    const value = await setup({ expandedCount: 24 })
     const ready = await commitGameIrPublication(value)
     const graphPath = join(
       value.workspacePath,

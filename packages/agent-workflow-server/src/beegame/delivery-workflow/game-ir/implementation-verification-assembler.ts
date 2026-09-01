@@ -24,8 +24,10 @@ import {
 import type { GameIrDomainSourceEnvelope } from './domain-source'
 import type { GameIrMechanicalProjectionReceipt } from './domain-projection'
 import type { SemanticValidationResult } from './semantic-fidelity'
+import { createSemanticFidelityPrimitives } from './semantic-fidelity'
 
 const ERROR_PREFIX = 'invalid Game IR Implementation/Verification assembly'
+const { exactKeys } = createSemanticFidelityPrimitives(ERROR_PREFIX)
 
 export type ImplementationVerificationAssemblyAuthority = Readonly<{
   phase6Authority: ResourceRealizationAssemblyAuthority
@@ -113,27 +115,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     (Object.getPrototypeOf(value) === Object.prototype ||
       Object.getPrototypeOf(value) === null)
   )
-}
-
-function exactKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-  label: string,
-): void {
-  const keys = Reflect.ownKeys(value)
-  for (const key of keys) {
-    if (typeof key !== 'string') fail(`${label} has a symbol property`)
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable)
-      fail(`${label} has a hidden or accessor property`)
-  }
-  const actual = (keys as string[]).sort()
-  const wanted = [...expected].sort()
-  if (
-    actual.length !== wanted.length ||
-    actual.some((key, index) => key !== wanted[index])
-  )
-    fail(`${label} has unknown or missing fields`)
 }
 
 function validateAuthority(

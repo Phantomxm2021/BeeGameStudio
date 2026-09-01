@@ -20,7 +20,7 @@ import {
 import type { ResourceRealizationAssemblyAuthority } from './resource-realization-assembler'
 
 function authority(
-  options: number | ImplementationVerificationFixtureOptions = 0,
+  options: ImplementationVerificationFixtureOptions = {},
 ): ImplementationVerificationAssemblyAuthority {
   const fixture = implementationVerificationFixture(options)
   const phase6Authority =
@@ -51,7 +51,7 @@ function authority(
 
 function publicationAuthority(
   workspacePath: string,
-  options: number | ImplementationVerificationFixtureOptions = 0,
+  options: ImplementationVerificationFixtureOptions = {},
 ) {
   const phase7Authority = authority(options)
   return {

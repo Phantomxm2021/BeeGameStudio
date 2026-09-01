@@ -566,7 +566,7 @@ test('rejects packet accessors, hidden fields, and wrong evidence namespaces', (
 })
 
 test('admits a substantially expanded scenario and evidence graph without a count ceiling', () => {
-  const fixture = implementationVerificationFixture(24)
+  const fixture = implementationVerificationFixture({ expandedCount: 24 })
   const current = {
     phase6Authority: fixture.phase6Authority,
     implementationVerification: {

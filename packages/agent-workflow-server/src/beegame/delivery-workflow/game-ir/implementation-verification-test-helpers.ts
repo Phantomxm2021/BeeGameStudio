@@ -615,12 +615,8 @@ export function implementationVerificationFromPhase6Authority(
 }
 
 export function implementationVerificationFixture(
-  expandedCountOrOptions: number | ImplementationVerificationFixtureOptions = 0,
+  options: ImplementationVerificationFixtureOptions = {},
 ) {
-  const options =
-    typeof expandedCountOrOptions === 'number'
-      ? { expandedCount: expandedCountOrOptions }
-      : expandedCountOrOptions
   const phase6 = phase6Fixture(options)
   return {
     ...phase6,
