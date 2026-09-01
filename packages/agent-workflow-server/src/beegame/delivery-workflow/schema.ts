@@ -206,6 +206,17 @@ const gameIrStateSchema: z.ZodType<GameIrState> = z.discriminatedUnion(
         identity: gameIrCompilationIdentitySchema,
         latestCheckpoint: gameIrCheckpointRefSchema.optional(),
         diagnosticRef: z.string().min(1).optional(),
+        diagnostic: z.object({
+          phase: z.literal('GAME_IR_COMPILATION'),
+          step: z.string().min(1),
+          taskId: z.string().min(1),
+          workerType: z.literal('game-ir-compiler'),
+          reasonCode: z.string().min(1),
+          expected: z.string().min(1),
+          actual: z.string().min(1),
+          diagnosticRef: z.string().min(1),
+          recoveryAction: z.string().min(1),
+        }).strict().optional(),
         progressIdentity: z.object({
           inputDigest: sha256Schema,
           diagnosticDigest: sha256Schema,

@@ -160,6 +160,9 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
     ...(typeof request.contract.kind === 'string' ? { kind: request.contract.kind } : {}),
     ...(typeof request.contract.checkId === 'string' ? { checkId: request.contract.checkId } : {}),
     ...(projected ? { packet: projected } : {}),
+    ...(request.workerType === 'game-ir-compiler' && request.contract.sourcePackets
+      ? { sourcePackets: request.contract.sourcePackets }
+      : {}),
   }
   return JSON.stringify(contract)
 }

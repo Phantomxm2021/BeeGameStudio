@@ -66,10 +66,11 @@ import {
   parseWorkerTerminalResult,
   buildFoundationFactStructuredOutputJsonSchema,
   type WorkerTerminalResult,
+  type GameIrCompilerDomainModel,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
 import { readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, mergeFoundationFactResults, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
 import { admitFoundationFactTerminal, digestFoundationFactTerminal, foundationFactTasksComplete, type FoundationFactTaskCollection } from './foundation-fact-runtime'
@@ -105,6 +106,7 @@ import { buildFoundationRevisionBatches } from './foundation-revision-batches'
 import { evaluateFoundationRevisionRoundPolicy } from './foundation-revision-round-policy'
 import { analyzeFoundationImpact } from './foundation-impact-analysis'
 import { buildFoundationSectionIndex } from './foundation-section-index'
+import { digestSectionIndex } from './foundation-section-index'
 import { admitFoundationSemanticRecheckResult, buildFoundationSemanticRecheckPacket, digestFoundationSemanticRecheckResult, rebuildFoundationImpactedFacts, validateFoundationPatch } from './foundation-patch-validation'
 import type { FoundationSemanticRecheckPacket } from './foundation-patch-validation'
 import {
@@ -127,13 +129,14 @@ import { foundationRevisionTasksComplete } from './foundation-revision-stage'
 import type { FoundationAuditState, FoundationRevisionDocumentTask, FoundationRevisionImpactedFactsTask, FoundationRevisionSemanticRecheckTask } from './types'
 import type { AuditIssue } from './foundation-issue-registry'
 import { projectFoundationReadyReceipt } from './game-ir/foundation-ready-adapter'
-import { parseGameIrCompileRequest } from './game-ir/contracts'
+import { parseFoundationReadyReceipt, parseGameIrCompileRequest } from './game-ir/contracts'
 import { digestGameIrValue } from './game-ir/model'
 import { readCommittedGameIr } from './game-ir/committed-reader'
 import {
   GAME_IR_CHECKPOINT_RECORD_KINDS,
   writeGameIrStageCheckpoint,
   type GameIrCheckpointRecord,
+  type GameIrReplayAuthority,
 } from './game-ir/stage-checkpoint'
 import {
   assembleGameplayBalanceModules,
@@ -141,6 +144,8 @@ import {
 } from './game-ir/gameplay-balance-assembler'
 import {
   assembleWorldPresentationClosure,
+  prepareWorldSceneSemanticValidationPacket,
+  preparePresentationSemanticValidationPacket,
   type WorldPresentationAssemblyAuthority,
 } from './game-ir/world-presentation-assembler'
 import {
@@ -152,6 +157,24 @@ import {
   type ImplementationVerificationAssemblyAuthority,
 } from './game-ir/implementation-verification-assembler'
 import { commitGameIrPublication } from './game-ir/publication'
+import {
+  buildGameIrDomainSourceEnvelope,
+  GAME_IR_DOMAIN_IDS,
+  GAME_IR_MODULE_SOURCE_DOCUMENTS,
+  type GameIrDomainId,
+  type GameIrDomainSourceEnvelope,
+} from './game-ir/domain-source'
+import { admitGameIrMechanicalProjectionReceipt } from './game-ir/domain-projection'
+import { buildGameplaySemanticPacket, admitGameplaySemanticResult, prepareGameplayModule } from './game-ir/gameplay-producer'
+import { buildBalanceSemanticPacket, admitBalanceSemanticResult, prepareBalanceModule } from './game-ir/balance-producer'
+import { buildWorldSceneSemanticPacket, admitWorldSceneSemanticResult } from './game-ir/world-scene-producer'
+import { buildPresentationSemanticPacket, admitPresentationSemanticResult } from './game-ir/presentation-producer'
+import { admitResourceRealizationSemanticResult, prepareResourceRealizationSemanticProjectionPacket, type ResourceRealizationSemanticProjectionAuthority } from './game-ir/resource-realization-producer'
+import { admitPhase5SemanticValidationResult, buildPhase5SemanticValidationPacket } from './game-ir/phase5-admission'
+import { admitResourceRealizationSemanticValidationResult, prepareResourceRealizationSemanticValidationPacket } from './game-ir/phase6-admission'
+import { admitImplementationVerificationSemanticResult, buildImplementationVerificationSemanticPacket, prepareImplementationVerificationModule } from './game-ir/implementation-verification-producer'
+import { admitImplementationVerificationSemanticValidationResult, prepareImplementationVerificationSemanticValidationPacket } from './game-ir/phase7-admission'
+import { GameIrStageCheckpointLoader } from './game-ir/stage-checkpoint'
 
 function sameDocumentDigests(
   left: readonly { path: string; digest: string }[],
@@ -159,6 +182,35 @@ function sameDocumentDigests(
 ): boolean {
   return JSON.stringify([...left].sort((a, b) => a.path.localeCompare(b.path))) ===
     JSON.stringify([...right].sort((a, b) => a.path.localeCompare(b.path)))
+}
+
+async function buildGameIrSourcePackets(input: {
+  workspacePath: string
+  request: import('./game-ir/contracts').GameIrCompileRequest
+  receipt: import('./game-ir/contracts').FoundationReadyReceipt
+}): Promise<Readonly<Record<GameIrDomainId, GameIrDomainSourceEnvelope>>> {
+  const workspace = resolve(input.workspacePath)
+  const indexPath = resolve(workspace, input.receipt.sectionIndexPath)
+  const indexRelative = relative(workspace, indexPath)
+  if (!indexRelative || indexRelative === '..' || indexRelative.startsWith(`..${sep}`))
+    throw new Error('Foundation READY Section Index path escapes the workspace')
+  const sectionIndex = JSON.parse(await readFile(indexPath, 'utf8')) as readonly import('./foundation-section-index').SectionRef[]
+  if (digestSectionIndex(sectionIndex) !== input.receipt.sectionIndexDigest)
+    throw new Error('Foundation READY Section Index digest mismatch')
+  const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => {
+    const bytes = await readFile(join(input.workspacePath, path), 'utf8')
+    if (createHash('sha256').update(bytes, 'utf8').digest('hex') !== input.receipt.documentDigests[path])
+      throw new Error(`Foundation READY document digest mismatch: ${path}`)
+    return [path, bytes] as const
+  })))
+  const packets = Object.fromEntries(GAME_IR_DOMAIN_IDS.map(moduleId => {
+    const allowed = GAME_IR_MODULE_SOURCE_DOCUMENTS[moduleId]
+    const bytes = Object.fromEntries(sectionIndex
+      .filter(section => allowed.includes(section.documentPath))
+      .map(section => [`${section.documentPath}#${section.sectionId}`, sectionBytes(documents, section)]))
+    return [moduleId, buildGameIrDomainSourceEnvelope({ moduleId, request: input.request, sectionIndex, sectionBytes: bytes })]
+  })) as Record<GameIrDomainId, GameIrDomainSourceEnvelope>
+  return Object.freeze(packets)
 }
 
 function markRevisionCommitTransient(error: unknown): never {
@@ -174,49 +226,89 @@ type GameIrCompilerAuthorities = {
   phase7: ImplementationVerificationAssemblyAuthority
 }
 
-function admitGameIrCompilerResults(value: unknown): GameIrCompilerAuthorities {
-  if (!Array.isArray(value) || value.length !== GAME_IR_CHECKPOINT_RECORD_KINDS.length)
-    throw new Error('Game IR compiler output must contain the complete domain result set')
-  const records = value.map((item, index) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item))
-      throw new Error(`Game IR compiler result ${index} is not a domain record`)
-    const candidate = item as Record<string, unknown>
-    const keys = Object.keys(candidate).sort()
-    if (keys.length !== 2 || keys[0] !== 'kind' || keys[1] !== 'record')
-      throw new Error(`Game IR compiler result ${index} has unknown fields`)
-    if (typeof candidate.kind !== 'string' || !GAME_IR_CHECKPOINT_RECORD_KINDS.includes(candidate.kind as never))
-      throw new Error(`Game IR compiler result ${index} has an unknown kind`)
-    return { kind: candidate.kind, record: candidate.record } as GameIrCheckpointRecord
-  })
-  const byKind = new Map(records.map(record => [record.kind, record.record]))
-  if (byKind.size !== GAME_IR_CHECKPOINT_RECORD_KINDS.length)
-    throw new Error('Game IR compiler output has duplicate or missing domain records')
-  const get = (kind: (typeof GAME_IR_CHECKPOINT_RECORD_KINDS)[number]): unknown => {
-    const result = byKind.get(kind)
-    if (result === undefined) throw new Error(`Game IR compiler output is missing ${kind}`)
-    return result
+function admitGameIrCompilerResults(
+  value: readonly GameIrCompilerDomainModel[],
+  sources: Readonly<Record<GameIrDomainId, GameIrDomainSourceEnvelope>>,
+  replay?: GameIrReplayAuthority,
+): GameIrCompilerAuthorities {
+  if (value.length !== GAME_IR_DOMAIN_IDS.length)
+    throw new Error('Game IR compiler output must contain exactly one model DTO per domain')
+  const byModule = new Map(value.map(model => [model.moduleId, model]))
+  if (byModule.size !== GAME_IR_DOMAIN_IDS.length || GAME_IR_DOMAIN_IDS.some(moduleId => !byModule.has(moduleId)))
+    throw new Error('Game IR compiler output has duplicate or missing domain DTOs')
+  const entry = (moduleId: GameIrDomainId) => byModule.get(moduleId)!
+  const mechanical = (moduleId: GameIrDomainId) => {
+    const source = sources[moduleId]
+    const body = {
+      schemaVersion: 'game-ir-mechanical-projection-receipt.v1' as const,
+      taskId: source.taskId,
+      moduleId,
+      foundationRevision: source.compileRequest.foundation.foundationRevision,
+      sourceDigest: source.sourceDigest,
+      nodes: Object.freeze([]),
+      verifiedClaims: Object.freeze([]),
+      ownedTargets: Object.freeze([]),
+    }
+    return admitGameIrMechanicalProjectionReceipt({ source, receipt: { ...body, receiptDigest: digestGameIrValue(body) } })
   }
-  const phase4: GameplayBalanceAssemblyAuthority = {
-    gameplay: { source: get('phase4/gameplay/source') as never, mechanical: get('phase4/gameplay/mechanical') as never, semantic: get('phase4/gameplay/semantic') as never },
-    balance: { source: get('phase4/balance/source') as never, mechanical: get('phase4/balance/mechanical') as never, semantic: get('phase4/balance/semantic') as never },
-  }
-  assembleGameplayBalanceModules(phase4)
-  const phase5: WorldPresentationAssemblyAuthority = {
-    phase4Authority: phase4,
-    worldScene: { source: get('phase5/world-scene/source') as never, mechanical: get('phase5/world-scene/mechanical') as never, semantic: get('phase5/world-scene/semantic') as never, validation: get('phase5/world-scene/validation') as never },
-    presentation: { source: get('phase5/presentation/source') as never, mechanical: get('phase5/presentation/mechanical') as never, semantic: get('phase5/presentation/semantic') as never, validation: get('phase5/presentation/validation') as never },
-  }
+  const gameplayMechanical = mechanical('gameplay')
+  const balanceMechanical = mechanical('balance')
+  const phase4: GameplayBalanceAssemblyAuthority = replay?.phase4Authority ?? (() => {
+    const gameplaySemantic = admitGameplaySemanticResult(buildGameplaySemanticPacket({ source: sources.gameplay, mechanical: gameplayMechanical }), entry('gameplay').semantic)
+    if (gameplaySemantic.outcome !== 'PROJECTED') throw new Error('gameplay semantic result was not projected')
+    const balanceSemantic = admitBalanceSemanticResult(buildBalanceSemanticPacket({ source: sources.balance, mechanical: balanceMechanical }), entry('balance').semantic)
+    if (balanceSemantic.outcome !== 'PROJECTED') throw new Error('balance semantic result was not projected')
+    return { gameplay: { source: sources.gameplay, mechanical: gameplayMechanical, semantic: gameplaySemantic }, balance: { source: sources.balance, mechanical: balanceMechanical, semantic: balanceSemantic } }
+  })()
+  prepareGameplayModule(phase4.gameplay)
+  prepareBalanceModule(phase4.balance)
+  const phase5: WorldPresentationAssemblyAuthority = replay?.phase5Authority ?? (() => {
+    const worldMechanical = mechanical('world-scene')
+    const worldSemantic = admitWorldSceneSemanticResult(buildWorldSceneSemanticPacket({ source: sources['world-scene'], mechanical: worldMechanical }), entry('world-scene').semantic)
+    if (worldSemantic.outcome !== 'PROJECTED' || !entry('world-scene').validation) throw new Error('world-scene model admission failed')
+    const worldPacket = prepareWorldSceneSemanticValidationPacket({ phase4Authority: phase4, worldScene: { source: sources['world-scene'], mechanical: worldMechanical, semantic: worldSemantic } })
+    const worldValidation = admitPhase5SemanticValidationResult(worldPacket, { ...entry('world-scene').validation, packetDigest: worldPacket.packetDigest })
+    const presentationMechanical = mechanical('presentation')
+    const presentationSemantic = admitPresentationSemanticResult(buildPresentationSemanticPacket({ source: sources.presentation, mechanical: presentationMechanical }), entry('presentation').semantic)
+    if (presentationSemantic.outcome !== 'PROJECTED' || !entry('presentation').validation) throw new Error('presentation model admission failed')
+    const presentationPacket = preparePresentationSemanticValidationPacket({ phase4Authority: phase4, worldScene: { source: sources['world-scene'], mechanical: worldMechanical, semantic: worldSemantic, validation: worldValidation }, presentation: { source: sources.presentation, mechanical: presentationMechanical, semantic: presentationSemantic } })
+    const presentationValidation = admitPhase5SemanticValidationResult(presentationPacket, { ...entry('presentation').validation, packetDigest: presentationPacket.packetDigest })
+    return { phase4Authority: phase4, worldScene: { source: sources['world-scene'], mechanical: worldMechanical, semantic: worldSemantic, validation: worldValidation }, presentation: { source: sources.presentation, mechanical: presentationMechanical, semantic: presentationSemantic, validation: presentationValidation } }
+  })()
   assembleWorldPresentationClosure(phase5)
-  const phase6: ResourceRealizationAssemblyAuthority = {
-    phase5Authority: phase5,
-    resourceRealization: { source: get('phase6/resource-realization/source') as never, mechanical: get('phase6/resource-realization/mechanical') as never, semantic: get('phase6/resource-realization/semantic') as never, validation: get('phase6/resource-realization/validation') as never },
-  }
+  const phase6: ResourceRealizationAssemblyAuthority = replay?.phase6Authority ?? (() => {
+    const resourceMechanical = mechanical('resource-realization')
+    const resourceAuthority: ResourceRealizationSemanticProjectionAuthority = { phase5Authority: phase5, resourceRealization: { source: sources['resource-realization'], mechanical: resourceMechanical } }
+    const resourcePacket = prepareResourceRealizationSemanticProjectionPacket(resourceAuthority)
+    const resourceSemantic = admitResourceRealizationSemanticResult(resourceAuthority, resourcePacket, entry('resource-realization').semantic)
+    if (resourceSemantic.outcome !== 'PROJECTED' || !entry('resource-realization').validation) throw new Error('resource model admission failed')
+    const phase6ValidationAuthority = { phase5Authority: phase5, resourceRealization: { source: sources['resource-realization'], mechanical: resourceMechanical, semantic: resourceSemantic } }
+    const resourceValidationPacket = prepareResourceRealizationSemanticValidationPacket(phase6ValidationAuthority)
+    const resourceValidation = admitResourceRealizationSemanticValidationResult(phase6ValidationAuthority, resourceValidationPacket, { ...entry('resource-realization').validation, packetDigest: resourceValidationPacket.packetDigest })
+    return { phase5Authority: phase5, resourceRealization: { source: sources['resource-realization'], mechanical: resourceMechanical, semantic: resourceSemantic, validation: resourceValidation } }
+  })()
   assembleResourceRealizationClosure(phase6)
-  const phase7: ImplementationVerificationAssemblyAuthority = {
-    phase6Authority: phase6,
-    implementationVerification: { source: get('phase7/implementation-verification/source') as never, mechanical: get('phase7/implementation-verification/mechanical') as never, semantic: get('phase7/implementation-verification/semantic') as never, validation: get('phase7/implementation-verification/validation') as never },
-  }
+  const phase7: ImplementationVerificationAssemblyAuthority = replay?.phase7Authority ?? (() => {
+    const implementationMechanical = mechanical('implementation-verification')
+    const implementationAuthority = { source: sources['implementation-verification'], mechanical: implementationMechanical }
+    const implementationPacket = buildImplementationVerificationSemanticPacket(implementationAuthority)
+    const implementationSemantic = admitImplementationVerificationSemanticResult(implementationAuthority, implementationPacket, entry('implementation-verification').semantic)
+    if (implementationSemantic.outcome !== 'PROJECTED' || !entry('implementation-verification').validation) throw new Error('implementation model admission failed')
+    const phase7ValidationAuthority = { phase6Authority: phase6, implementationVerification: { source: sources['implementation-verification'], mechanical: implementationMechanical, semantic: implementationSemantic } }
+    const implementationValidationPacket = prepareImplementationVerificationSemanticValidationPacket(phase7ValidationAuthority)
+    const implementationValidation = admitImplementationVerificationSemanticValidationResult(phase7ValidationAuthority, implementationValidationPacket, { ...entry('implementation-verification').validation, packetDigest: implementationValidationPacket.packetDigest })
+    return { phase6Authority: phase6, implementationVerification: { source: sources['implementation-verification'], mechanical: implementationMechanical, semantic: implementationSemantic, validation: implementationValidation } }
+  })()
   assembleImplementationVerificationClosure(phase7)
+  const record = (kind: GameIrCheckpointRecord['kind'], recordValue: unknown): GameIrCheckpointRecord => ({ kind, record: recordValue })
+  const records = [
+    record('phase4/gameplay/source', phase4.gameplay.source), record('phase4/gameplay/mechanical', phase4.gameplay.mechanical), record('phase4/gameplay/semantic', phase4.gameplay.semantic),
+    record('phase4/balance/source', phase4.balance.source), record('phase4/balance/mechanical', phase4.balance.mechanical), record('phase4/balance/semantic', phase4.balance.semantic),
+    record('phase5/world-scene/source', phase5.worldScene.source), record('phase5/world-scene/mechanical', phase5.worldScene.mechanical), record('phase5/world-scene/semantic', phase5.worldScene.semantic), record('phase5/world-scene/validation', phase5.worldScene.validation),
+    record('phase5/presentation/source', phase5.presentation.source), record('phase5/presentation/mechanical', phase5.presentation.mechanical), record('phase5/presentation/semantic', phase5.presentation.semantic), record('phase5/presentation/validation', phase5.presentation.validation),
+    record('phase6/resource-realization/source', phase6.resourceRealization.source), record('phase6/resource-realization/mechanical', phase6.resourceRealization.mechanical), record('phase6/resource-realization/semantic', phase6.resourceRealization.semantic), record('phase6/resource-realization/validation', phase6.resourceRealization.validation),
+    record('phase7/implementation-verification/source', phase7.implementationVerification.source), record('phase7/implementation-verification/mechanical', phase7.implementationVerification.mechanical), record('phase7/implementation-verification/semantic', phase7.implementationVerification.semantic), record('phase7/implementation-verification/validation', phase7.implementationVerification.validation),
+  ]
   return { records, phase4, phase5, phase6, phase7 }
 }
 
@@ -631,19 +723,27 @@ export function createDeliveryWorkflowController(input: {
     if (result.workerType === 'game-ir-compiler') {
       const state = run.gameIrState
       if (!state || state.status !== 'compiling') return
-      const compileRequest = request?.contract.compileRequest
-      const foundationReadyReceipt = request?.contract.foundationReadyReceipt
-      if (!compileRequest || !foundationReadyReceipt)
+      if (!request?.contract.compileRequest || !request.contract.foundationReadyReceipt)
         throw new Error('Game IR compiler dispatch contract is missing service-owned authority')
-      const admittedRequest = buildGameIrCompileContract({ foundation: foundationReadyReceipt as never, request: compileRequest as never })
-      if (result.runId !== run.runId || result.taskId !== state.identity.taskId || result.compileRequestDigest !== digestGameIrValue(admittedRequest) || result.foundationReadyReceiptDigest !== state.identity.foundationReadyReceiptDigest)
+      const contractRequest = parseGameIrCompileRequest(request.contract.compileRequest)
+      const contractReceipt = parseFoundationReadyReceipt(request.contract.foundationReadyReceipt)
+      const admittedRequest = buildGameIrCompileContract({ foundation: contractReceipt, request: contractRequest })
+      const foundationReadyReceipt = projectFoundationReadyReceipt({ state: run.foundationAuditState!, projectId: run.projectId, confirmedBriefDigest: run.confirmedBriefDigest })
+      const compileRequest = parseGameIrCompileRequest({ ...admittedRequest, foundation: foundationReadyReceipt })
+      if (digestGameIrValue(contractReceipt) !== digestGameIrValue(foundationReadyReceipt) || digestGameIrValue(contractRequest) !== digestGameIrValue(compileRequest))
+        throw new Error('Game IR compiler contract authority is stale')
+      if (result.runId !== run.runId || result.dispatchId !== record.dispatchId || result.taskId !== state.identity.taskId || result.revision !== record.revision || result.compileRequestDigest !== digestGameIrValue(admittedRequest) || result.foundationReadyReceiptDigest !== state.identity.foundationReadyReceiptDigest)
         throw new Error('Game IR compiler terminal identity is stale')
+      const sourcePackets = await buildGameIrSourcePackets({ workspacePath: input.workspacePath, request: compileRequest, receipt: foundationReadyReceipt })
+      const contractSourcePackets = request.contract.sourcePackets
+      if (!contractSourcePackets || digestGameIrValue(contractSourcePackets) !== digestGameIrValue(sourcePackets))
+        throw new Error('Game IR compiler source packet authority is stale')
       const progressIdentity = {
         inputDigest: digestGameIrValue({ identity: state.identity, compileRequest: admittedRequest }),
         diagnosticDigest: digestGameIrValue(result.status === 'completed' ? undefined : { reasonCode: 'compiler_failed' }),
         candidateDigest: digestGameIrValue(result.domainResults ?? undefined),
         checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? undefined),
-        terminalDigest: digestGameIrValue(result),
+        terminalDigest: digestGameIrValue({ status: result.status, domainResults: result.domainResults, reason: result.reason }),
       }
       const saveCompilerAttention = async (reasonCode: string, expected: string, actual: string): Promise<void> => {
         const durable = await store.load()
@@ -658,7 +758,24 @@ export function createDeliveryWorkflowController(input: {
           status: unchanged ? 'needs_action' : 'running',
           blockedReason: unchanged ? `game_ir_${reasonCode} diagnostic ${diagnosticId}` : undefined,
           thinking: unchanged ? 'idle' : 'working',
-          gameIrState: { ...currentState, diagnosticRef: diagnosticId, progressIdentity: currentProgress },
+          gameIrState: {
+            ...currentState,
+            diagnosticRef: diagnosticId,
+            diagnostic: {
+              phase: 'GAME_IR_COMPILATION',
+              step: reasonCode === 'publication' ? 'publication' : 'compilation',
+              taskId: currentState.identity.taskId,
+              workerType: 'game-ir-compiler',
+              reasonCode,
+              expected,
+              actual,
+              diagnosticRef: diagnosticId,
+              recoveryAction: unchanged
+                ? 'resolve the unchanged prerequisite, then retry the same compilation identity'
+                : 'retry the same compilation identity with the changed domain result or publication state',
+            },
+            progressIdentity: currentProgress,
+          },
         }, unchanged ? `game_ir_${reasonCode}.needs_action` : `game_ir_${reasonCode}.retryable`, {
           diagnosticId,
           reasonCode,
@@ -672,15 +789,26 @@ export function createDeliveryWorkflowController(input: {
         await saveCompilerAttention('compilation', 'admitted domain results', 'compiler terminal did not provide an admitted result set')
         return
       }
+      if (!result.domainResults) {
+        await saveCompilerAttention('compilation', 'admitted domain results', 'compiler terminal did not provide an admitted result set')
+        return
+      }
+      const domainResults = result.domainResults
       let authorities: GameIrCompilerAuthorities
       try {
-        authorities = admitGameIrCompilerResults(result.domainResults)
+        const replay = state.latestCheckpoint
+          ? await new GameIrStageCheckpointLoader().load({ workspacePath: input.workspacePath, deliveryRun: run })
+          : undefined
+        authorities = admitGameIrCompilerResults(domainResults, sourcePackets, replay)
       } catch (error) {
         await saveCompilerAttention('compilation', 'domain-specific Phase 4–7 admission', 'compiler result failed domain admission')
         return
       }
       try {
         let checkpointed = run
+        const replay = state.latestCheckpoint
+          ? await new GameIrStageCheckpointLoader().load({ workspacePath: input.workspacePath, deliveryRun: run })
+          : undefined
         const phases = [
           ['phase4', authorities.phase4],
           ['phase5', authorities.phase5],
@@ -688,6 +816,7 @@ export function createDeliveryWorkflowController(input: {
           ['phase7', authorities.phase7],
         ] as const
         for (const [phase, authority] of phases) {
+          if ((phase === 'phase4' && replay?.phase4Authority) || (phase === 'phase5' && replay?.phase5Authority) || (phase === 'phase6' && replay?.phase6Authority) || (phase === 'phase7' && replay?.phase7Authority)) continue
           const records = authorities.records.filter(record => record.kind.startsWith(`${phase}/`))
           const checkpoint = await writeGameIrStageCheckpoint({
             workspacePath: input.workspacePath,
@@ -2085,9 +2214,28 @@ export function createDeliveryWorkflowController(input: {
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
     if (run.status !== 'running') return
     if (run.phase === 'GAME_IR_COMPILATION') {
+      let compilationRun = run
       const state = run.gameIrState
       if (!state || state.status !== 'compiling')
         throw new Error('Game IR compilation phase is missing its compiling state')
+      const checkpointLoader = new GameIrStageCheckpointLoader()
+      if (state.latestCheckpoint) {
+        const recovered = await checkpointLoader.recover({ workspacePath: input.workspacePath, deliveryRun: compilationRun })
+        const recoveredCheckpoint = recovered.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined
+        if (recoveredCheckpoint?.checkpointPath !== state.latestCheckpoint.checkpointPath || recoveredCheckpoint?.checkpointDigest !== state.latestCheckpoint.checkpointDigest)
+          compilationRun = await persist(recovered, 'game_ir_checkpoint.recovered', { checkpoint: recoveredCheckpoint })
+        const replay = await checkpointLoader.load({ workspacePath: input.workspacePath, deliveryRun: compilationRun })
+        if (replay.phase7Authority) {
+          const readyReceipt = await commitGameIrPublication({ workspacePath: input.workspacePath, publicationId: state.identity.publicationId, phase7Authority: replay.phase7Authority })
+          const latestCheckpoint = compilationRun.gameIrState?.status === 'compiling' ? compilationRun.gameIrState.latestCheckpoint : undefined
+          if (!latestCheckpoint) throw new Error('Game IR publication has no committed Phase 7 checkpoint')
+          const candidateReady = transitionDeliveryRun(compilationRun, { type: 'game_ir_ready', state: { status: 'ready', identity: state.identity, checkpoint: latestCheckpoint, readyReceipt, readyReceiptDigest: digestGameIrValue(readyReceipt) } })
+          await readCommittedGameIr({ workspacePath: input.workspacePath, deliveryRun: candidateReady })
+          const readyRun = await persist(candidateReady, 'game_ir_ready', { readyReceiptDigest: digestGameIrValue(readyReceipt) })
+          await resumeUnlocked(readyRun)
+          return
+        }
+      }
       const foundationReadyReceipt = run.foundationAuditState
         ? projectFoundationReadyReceipt({
             state: run.foundationAuditState,
@@ -2109,11 +2257,16 @@ export function createDeliveryWorkflowController(input: {
         gameIrSchemaVersion: 'game-ir.v1',
         foundation: foundationReadyReceipt,
       })
+      const sourcePackets = await buildGameIrSourcePackets({
+        workspacePath: input.workspacePath,
+        request: compileRequest,
+        receipt: foundationReadyReceipt,
+      })
       await dispatcher.dispatch({
         dispatchId: randomUUID(),
-        runId: run.runId,
-        ownerId: run.ownerId,
-        projectId: run.projectId,
+        runId: compilationRun.runId,
+        ownerId: compilationRun.ownerId,
+        projectId: compilationRun.projectId,
         workspacePath: input.workspacePath,
         workerType: 'game-ir-compiler',
         phase: 'GAME_IR_COMPILATION',
@@ -2127,6 +2280,7 @@ export function createDeliveryWorkflowController(input: {
             foundation: foundationReadyReceipt,
             request: compileRequest,
           }),
+          sourcePackets,
           ...(state.progressIdentity
             ? {
                 retryProgressIdentity: digestGameIrValue(
@@ -2134,6 +2288,7 @@ export function createDeliveryWorkflowController(input: {
                 ),
               }
             : {}),
+          ...(state.latestCheckpoint ? { resumeFrom: state.latestCheckpoint } : {}),
         },
       })
       return
@@ -2484,6 +2639,11 @@ export function createDeliveryWorkflowController(input: {
           publicationId: identity.publicationId,
           foundationReadyReceiptDigest: identity.foundationReadyReceiptDigest,
         })
+        const sourcePackets = await buildGameIrSourcePackets({
+          workspacePath: input.workspacePath,
+          request: compileRequest,
+          receipt: foundationReadyReceipt,
+        })
         await dispatcher.dispatch({
           dispatchId: randomUUID(),
           runId: persisted.runId,
@@ -2502,6 +2662,7 @@ export function createDeliveryWorkflowController(input: {
               foundation: foundationReadyReceipt,
               request: compileRequest,
             }),
+            sourcePackets,
           },
         })
         return

@@ -95,4 +95,24 @@ describe('projectWorkflowDisplayReason', () => {
       diagnosticId: 'game-ir-12345678',
     })
   })
+
+  test('projects typed durable diagnostics without exposing expected or actual', () => {
+    const projection = projectWorkflowDisplayReason({
+      phase: 'GAME_IR_COMPILATION',
+      step: 'publication',
+      taskId: 'task-1',
+      workerType: 'game-ir-compiler',
+      reasonCode: 'publication',
+      expected: 'reader-valid committed Game IR',
+      actual: 'tampered checkpoint',
+      diagnosticRef: 'game-ir-typed-1234',
+      recoveryAction: 'retry',
+    })
+    expect(projection).toEqual({
+      code: 'game_ir_publication',
+      message: 'Game IR publication needs attention.',
+      diagnosticId: 'game-ir-typed-1234',
+    })
+    expect(projection?.message).not.toContain('tampered')
+  })
 })

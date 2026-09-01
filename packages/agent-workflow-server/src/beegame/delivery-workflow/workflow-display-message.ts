@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { GameIrCompilationDiagnostic } from './types'
 
 /**
  * Keeps worker protocol payloads out of the user-facing workflow card. Worker
@@ -77,6 +78,24 @@ const workflowDisplayReasonCodes = new Set<WorkflowDisplayReasonCode>([
 export function projectWorkflowDisplayReason(
   value: unknown,
 ): WorkflowDisplayReason | undefined {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    (value as Partial<GameIrCompilationDiagnostic>).phase === 'GAME_IR_COMPILATION' &&
+    (value as Partial<GameIrCompilationDiagnostic>).workerType === 'game-ir-compiler' &&
+    typeof (value as Partial<GameIrCompilationDiagnostic>).reasonCode === 'string' &&
+    typeof (value as Partial<GameIrCompilationDiagnostic>).diagnosticRef === 'string'
+  ) {
+    const diagnostic = value as GameIrCompilationDiagnostic
+    const publication = diagnostic.reasonCode === 'publication'
+    return {
+      code: publication ? 'game_ir_publication' : 'game_ir_compilation',
+      message: publication
+        ? 'Game IR publication needs attention.'
+        : 'Game IR compilation needs attention.',
+      diagnosticId: diagnostic.diagnosticRef,
+    }
+  }
   // Stage snapshots already carry the stable public projection. Preserve it
   // instead of feeding the localized message back through the raw-reason
   // classifier ("Workflow stopped by user." does not contain "user stopped").

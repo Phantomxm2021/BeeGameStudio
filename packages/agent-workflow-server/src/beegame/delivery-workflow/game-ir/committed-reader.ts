@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { lstat, readFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
+import { z } from 'zod'
 import {
   GAME_IR_CANONICAL_MODULE_IDS,
   parseGameIrCompileRequest,
@@ -32,6 +33,19 @@ import type { DeliveryRun } from '../types'
 
 type RecordValue = Record<string, unknown>
 
+type ProjectionJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly ProjectionJsonValue[]
+  | Readonly<{ [key: string]: ProjectionJsonValue }>
+
+type ProjectionPayload = Readonly<{
+  kind: string
+  value: ProjectionJsonValue
+}>
+
 type ProjectionNode = Readonly<{
   id: string
   kind: string
@@ -39,6 +53,7 @@ type ProjectionNode = Readonly<{
   references: readonly Readonly<{ targetId: string; targetType: string }>[]
   edges: readonly Readonly<{ type: string; targetId: string; targetType: string }>[]
   bindings: Readonly<Record<string, GameIrSourceBinding>>
+  payload: ProjectionPayload
 }>
 
 export type GameIrExecutionProjection = Readonly<{
@@ -92,6 +107,20 @@ export type GameIrPublishedReader = Readonly<{
 }>
 
 const SHA256 = /^[a-f0-9]{64}$/
+
+const projectionJsonSchema: z.ZodType<ProjectionJsonValue> = z.lazy(() =>
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number().finite(),
+    z.string(),
+    z.array(projectionJsonSchema),
+    z.record(z.string(), projectionJsonSchema),
+  ]),
+)
+const projectionPayloadSchema: z.ZodType<ProjectionPayload> = z
+  .object({ kind: z.string().min(1), value: projectionJsonSchema })
+  .strict()
 
 function fail(message: string): never {
   throw new Error(`invalid committed Game IR: ${message}`)
@@ -230,6 +259,9 @@ function nodesOf(module: GameIrModuleCandidate, kind: string): readonly Projecti
           references: Object.freeze(node.references.map(reference => Object.freeze({ ...reference }))),
           edges: Object.freeze(node.edges.map(edge => Object.freeze({ ...edge }))),
           bindings: Object.freeze({ ...node.bindings }),
+          payload: Object.freeze(
+            projectionPayloadSchema.parse({ kind: node.kind, value: node.value }),
+          ),
         }),
       ),
   )

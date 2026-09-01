@@ -10,8 +10,111 @@ import type { FoundationFactPacket } from './foundation-fact-extraction'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
 
-/** Compiler output is a domain-result DTO. Checkpoint and publication
- * authority remain service-owned and are never accepted from the worker. */
+type CompilerJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly CompilerJsonValue[]
+  | { readonly [key: string]: CompilerJsonValue }
+
+type CompilerSemanticModel =
+  | Readonly<{
+      outcome: 'PROJECTED'
+      nodes: readonly CompilerJsonValue[]
+      sourceClaims: readonly CompilerJsonValue[]
+    }>
+  | Readonly<{
+      outcome: 'FAIL' | 'AMBIGUOUS'
+      reasonCode: string
+      actual: string
+      missingSubject: string
+      expectedProjection: string
+      evidencePointers: readonly string[]
+    }>
+
+type CompilerValidationModel =
+  | Readonly<{
+      outcome: 'PASS'
+      checkIds: readonly string[]
+      coveredTargets: readonly string[]
+    }>
+  | Readonly<{
+      outcome: 'FAIL' | 'AMBIGUOUS'
+      reasonCode: string
+      actual: string
+      missingSubject: string
+      expectedProjection: string
+      evidencePointers: readonly string[]
+    }>
+
+export type GameIrCompilerDomainModel = Readonly<{
+  moduleId:
+    | 'gameplay'
+    | 'balance'
+    | 'world-scene'
+    | 'presentation'
+    | 'resource-realization'
+    | 'implementation-verification'
+  semantic: CompilerSemanticModel
+  validation?: CompilerValidationModel
+}>
+
+const compilerModuleIds = new Set<GameIrCompilerDomainModel['moduleId']>([
+  'gameplay',
+  'balance',
+  'world-scene',
+  'presentation',
+  'resource-realization',
+  'implementation-verification',
+])
+
+function compilerRecord(value: unknown): value is { readonly [key: string]: unknown } {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+}
+
+function compilerJson(value: unknown): value is CompilerJsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every(compilerJson)
+  if (!compilerRecord(value)) return false
+  return Object.keys(value).every(key => compilerJson(value[key]))
+}
+
+function compilerStrings(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string' && item.length > 0)
+}
+
+function compilerExact(value: { readonly [key: string]: unknown }, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort()
+  const expected = [...keys].sort()
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
+}
+
+function validCompilerModel(value: unknown): value is GameIrCompilerDomainModel {
+  if (!compilerRecord(value) || !compilerExact(value, ['moduleId', 'semantic', ...(Object.hasOwn(value, 'validation') ? ['validation'] : [])]) || !compilerModuleIds.has(value.moduleId as GameIrCompilerDomainModel['moduleId'])) return false
+  const semantic = value.semantic
+  if (!compilerRecord(semantic)) return false
+  if (semantic.outcome === 'PROJECTED') {
+    if (!compilerExact(semantic, ['outcome', 'nodes', 'sourceClaims']) || !Array.isArray(semantic.nodes) || !Array.isArray(semantic.sourceClaims)) return false
+    if (!semantic.nodes.every(compilerJson) || !semantic.sourceClaims.every(compilerJson)) return false
+  } else {
+    if (!compilerExact(semantic, ['outcome', 'reasonCode', 'actual', 'missingSubject', 'expectedProjection', 'evidencePointers']) || !['FAIL', 'AMBIGUOUS'].includes(String(semantic.outcome))) return false
+    if ([semantic.reasonCode, semantic.actual, semantic.missingSubject, semantic.expectedProjection].some(item => typeof item !== 'string' || item.length === 0) || !compilerStrings(semantic.evidencePointers)) return false
+  }
+  if (!Object.hasOwn(value, 'validation')) return true
+  const validation = value.validation
+  if (!compilerRecord(validation)) return false
+  if (validation.outcome === 'PASS')
+    return compilerExact(validation, ['outcome', 'checkIds', 'coveredTargets']) && compilerStrings(validation.checkIds) && compilerStrings(validation.coveredTargets)
+  return compilerExact(validation, ['outcome', 'reasonCode', 'actual', 'missingSubject', 'expectedProjection', 'evidencePointers']) && ['FAIL', 'AMBIGUOUS'].includes(String(validation.outcome)) && typeof validation.reasonCode === 'string' && validation.reasonCode.length > 0 && typeof validation.actual === 'string' && validation.actual.length > 0 && typeof validation.missingSubject === 'string' && validation.missingSubject.length > 0 && typeof validation.expectedProjection === 'string' && validation.expectedProjection.length > 0 && compilerStrings(validation.evidencePointers)
+}
+
+const compilerDomainModelSchema = z.custom<GameIrCompilerDomainModel>(validCompilerModel, 'invalid Game IR compiler domain model')
+
+/** Compiler output is a model-only DTO. Checkpoint, source-envelope, READY,
+ * and publication authority remain service-owned and are never accepted. */
 export const gameIrCompilerTerminalSchema = z.object({
   workerType: z.literal('game-ir-compiler'),
   status: z.enum(['completed', 'failed', 'blocked']),
@@ -21,7 +124,7 @@ export const gameIrCompilerTerminalSchema = z.object({
   revision: z.string().min(1),
   compileRequestDigest: z.string().regex(/^[a-f0-9]{64}$/),
   foundationReadyReceiptDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  domainResults: z.array(z.unknown()).optional(),
+  domainResults: z.array(compilerDomainModelSchema).optional(),
   reason: z.string().min(1).optional(),
 }).strict().superRefine((value, context) => {
   if (value.status === 'completed' && (!value.domainResults || value.domainResults.length === 0))
@@ -41,7 +144,12 @@ const foundationFactEvidenceSchema = z
   .strict()
 
 const foundationFactKeySchema = z.string().min(1)
-const foundationFactValueSchema = z.unknown().refine(value => value !== undefined, {
+const foundationFactValueSchema = z.union([
+  z.string(),
+  z.number().finite(),
+  z.boolean(),
+  z.array(z.union([z.string(), z.number().finite(), z.boolean()])),
+]).refine(value => value !== undefined, {
   message: 'present foundation fact requires value',
 })
 const foundationFactModelResultSchema = z.discriminatedUnion('status', [

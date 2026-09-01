@@ -171,12 +171,25 @@ export type GameIrCompilationProgressIdentity = Readonly<{
   terminalDigest: string
 }>
 
+export type GameIrCompilationDiagnostic = Readonly<{
+  phase: 'GAME_IR_COMPILATION'
+  step: string
+  taskId: string
+  workerType: 'game-ir-compiler'
+  reasonCode: string
+  expected: string
+  actual: string
+  diagnosticRef: string
+  recoveryAction: string
+}>
+
 export type GameIrState =
   | Readonly<{
       status: 'compiling'
       identity: GameIrCompilationIdentity
       latestCheckpoint?: GameIrCheckpointRef
       diagnosticRef?: string
+      diagnostic?: GameIrCompilationDiagnostic
       progressIdentity?: GameIrCompilationProgressIdentity
     }>
   | Readonly<{
