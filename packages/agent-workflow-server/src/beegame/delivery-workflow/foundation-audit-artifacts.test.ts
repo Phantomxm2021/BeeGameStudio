@@ -244,10 +244,19 @@ describe('foundation audit artifacts', () => {
       const markerPath = join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/COMMITTED.json')
       const manifestPath = join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/manifest.json')
       const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
+      const sectionIndexPath = join(workspacePath, '.beegame/audit/foundation/revision-derived/derived/section-index.json')
+      const sectionIndexArtifact = JSON.parse(await readFile(sectionIndexPath, 'utf8')) as Record<string, unknown>
+      expect(Object.keys(sectionIndexArtifact).sort()).toEqual(['digest', 'documentDigests', 'revision', 'sections'])
+      expect(sectionIndexArtifact.revision).toBe('revision-derived')
+      expect(sectionIndexArtifact.documentDigests).toEqual(staged.documentDigests)
       expect(manifest.catalogVersion).toBe(FOUNDATION_FACT_CATALOG_VERSION)
       expect(manifest.catalogKeys).toEqual(FOUNDATION_FACT_CATALOG.map(item => item.key))
       const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
       await writeFile(markerPath, `${JSON.stringify({ ...marker, factStoreDigest: 'f'.repeat(64) })}\n`)
+      await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })).rejects.toThrow('binding')
+      await writeFile(markerPath, `${JSON.stringify(marker)}\n`)
+      const { documentDigests: _documentDigests, ...sectionWithoutDocumentDigests } = sectionIndexArtifact
+      await writeFile(sectionIndexPath, `${JSON.stringify(sectionWithoutDocumentDigests)}\n`)
       await expect(loadCommittedFoundationDerivedArtifacts({ workspacePath, revision: 'revision-derived' })).rejects.toThrow('binding')
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })

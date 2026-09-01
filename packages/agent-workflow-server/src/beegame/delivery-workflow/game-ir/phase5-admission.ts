@@ -25,6 +25,7 @@ import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
 import {
   canonicalGameIrJson,
   compareCodeUnits,
+  digestGameIrSourceSectionIndex,
   digestGameIrValue,
   parseGameIrModuleCandidate,
   type GameIrModuleCandidate,
@@ -40,7 +41,6 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from '../types'
-import { digestSectionIndex } from '../foundation-section-index'
 import {
   createSemanticFidelityPrimitives,
   sectionEvidencePointer,
@@ -897,7 +897,7 @@ function packetParseRequest(
     confirmedBriefDigest: '0'.repeat(64),
     documentDigests,
     sectionIndexPath: '.beegame/foundation/section-index.json',
-    sectionIndexDigest: digestSectionIndex(authoritySectionIndex),
+    sectionIndexDigest: digestGameIrSourceSectionIndex(authoritySectionIndex),
     authority: {
       kind: 'review',
       reviewDigest: '0'.repeat(64),

@@ -22,7 +22,8 @@ const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const packetWorker =
     request.workerType === 'foundation-fact-extractor' ||
-    request.workerType === 'foundation-semantic-reviewer'
+    request.workerType === 'foundation-semantic-reviewer' ||
+    request.workerType === 'game-ir-compiler'
   if (packetWorker) return buildPacketWorkerPrompt(request)
   if (request.workerType === 'foundation-document-reviser')
     return buildFoundationRevisionWorkerPrompt(request)

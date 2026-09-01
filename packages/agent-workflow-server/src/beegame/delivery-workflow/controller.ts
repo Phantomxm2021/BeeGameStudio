@@ -106,7 +106,7 @@ import { buildFoundationRevisionBatches } from './foundation-revision-batches'
 import { evaluateFoundationRevisionRoundPolicy } from './foundation-revision-round-policy'
 import { analyzeFoundationImpact } from './foundation-impact-analysis'
 import { buildFoundationSectionIndex } from './foundation-section-index'
-import { digestSectionIndex } from './foundation-section-index'
+import { digestGameIrSourceSectionIndex } from './game-ir/model'
 import { admitFoundationSemanticRecheckResult, buildFoundationSemanticRecheckPacket, digestFoundationSemanticRecheckResult, rebuildFoundationImpactedFacts, validateFoundationPatch } from './foundation-patch-validation'
 import type { FoundationSemanticRecheckPacket } from './foundation-patch-validation'
 import {
@@ -191,11 +191,24 @@ async function buildGameIrSourcePackets(input: {
   receipt: import('./game-ir/contracts').FoundationReadyReceipt
 }): Promise<Readonly<Record<GameIrDomainId, GameIrDomainSourceEnvelope>>> {
   const workspace = resolve(input.workspacePath)
-  const sectionArtifact = JSON.parse(await readSecureWorkspaceFile(workspace, input.receipt.sectionIndexPath)) as { revision?: unknown; sections?: unknown; digest?: unknown }
-  if (!sectionArtifact || typeof sectionArtifact !== 'object' || Object.keys(sectionArtifact).sort().join('\0') !== 'digest\0revision\0sections' || !Array.isArray(sectionArtifact.sections) || sectionArtifact.revision !== input.receipt.foundationRevision || sectionArtifact.digest !== input.receipt.sectionIndexDigest)
+  const sectionArtifact = JSON.parse(await readSecureWorkspaceFile(workspace, input.receipt.sectionIndexPath)) as { revision?: unknown; documentDigests?: unknown; sections?: unknown; digest?: unknown }
+  const sectionArtifactKeys = sectionArtifact && typeof sectionArtifact === 'object' ? Object.keys(sectionArtifact).sort().join('\0') : ''
+  const documentDigests = sectionArtifact && typeof sectionArtifact === 'object' && Array.isArray(sectionArtifact.documentDigests) ? sectionArtifact.documentDigests : []
+  const validDocumentDigests = documentDigests.length === CANONICAL_FOUNDATION_DOCUMENTS.length && documentDigests.every(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+    const value = item as Record<string, unknown>
+    return Object.keys(value).sort().join('\0') === 'digest\0path' && typeof value.path === 'string' && CANONICAL_FOUNDATION_DOCUMENTS.includes(value.path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]) && typeof value.digest === 'string' && /^[a-f0-9]{64}$/.test(value.digest)
+  }) && new Set(documentDigests.map(item => (item as { path: unknown }).path)).size === CANONICAL_FOUNDATION_DOCUMENTS.length
+  const expectedDocumentDigests = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: input.receipt.documentDigests[path] }))
+  if (sectionArtifactKeys !== 'digest\0documentDigests\0revision\0sections' || !validDocumentDigests || !sameDocumentDigests(documentDigests as Array<{ path: string; digest: string }>, expectedDocumentDigests) || sectionArtifact.revision !== input.receipt.foundationRevision || !Array.isArray(sectionArtifact.sections) || sectionArtifact.digest !== input.receipt.sectionIndexDigest)
     throw new Error('Foundation READY Section Index artifact is invalid')
   const sectionIndex = sectionArtifact.sections as readonly import('./foundation-section-index').SectionRef[]
-  if (digestSectionIndex(sectionIndex) !== input.receipt.sectionIndexDigest)
+  const validSectionIndex = sectionIndex.length > 0 && sectionIndex.every(section => {
+    if (!section || typeof section !== 'object') return false
+    const value = section as Record<string, unknown>
+    return Object.keys(value).sort().join('\0') === 'digest\0documentPath\0endLine\0heading\0sectionId\0startLine' && CANONICAL_FOUNDATION_DOCUMENTS.includes(value.documentPath as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]) && typeof value.sectionId === 'string' && value.sectionId.length > 0 && typeof value.heading === 'string' && value.heading.length > 0 && Number.isSafeInteger(value.startLine) && Number.isSafeInteger(value.endLine) && (value.startLine as number) > 0 && (value.endLine as number) >= (value.startLine as number) && typeof value.digest === 'string' && /^[a-f0-9]{64}$/.test(value.digest)
+  })
+  if (!validSectionIndex || digestGameIrSourceSectionIndex(sectionIndex) !== input.receipt.sectionIndexDigest)
     throw new Error('Foundation READY Section Index digest mismatch')
   const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => {
     const bytes = await readSecureWorkspaceFile(workspace, path)
@@ -273,11 +286,33 @@ export function canonicalCompilerDomainResults(
     const model = value as Record<string, unknown>
     if (model.outcome === 'PROJECTED') return { outcome: 'PROJECTED', nodes: normalize(model.nodes, 'nodes'), sourceClaims: normalize(model.sourceClaims, 'sourceClaims') }
     if (model.outcome === 'PASS') return { outcome: 'PASS', checkIds: normalize(model.checkIds, 'checkIds'), coveredTargets: normalize(model.coveredTargets, 'coveredTargets') }
-    return { outcome: model.outcome, reasonCode: canonicalReason(model.reasonCode, fallback), missingSubject: model.missingSubject, evidencePointers: normalize(model.evidencePointers, 'evidencePointers') }
+    return {
+      outcome: model.outcome,
+      reasonCode: canonicalReason(model.reasonCode, fallback),
+      actual: model.actual,
+      missingSubject: model.missingSubject,
+      expectedProjection: model.expectedProjection,
+      evidencePointers: normalize(model.evidencePointers, 'evidencePointers'),
+    }
   }
   return [...results]
     .map(model => ({ ...model, semantic: normalizeOutcome(model.semantic, 'semantic_failure'), ...(model.validation ? { validation: normalizeOutcome(model.validation, 'validation_failure') } : {}) }))
     .sort((left, right) => left.moduleId.localeCompare(right.moduleId)) as readonly GameIrCompilerDomainModel[]
+}
+
+/** Reduce compiler prose to stable material tokens for durable progress identity. */
+export function canonicalCompilerFailureReason(reason: unknown): string {
+  const text = typeof reason === 'string' ? reason.toLowerCase().trim() : ''
+  if (!text) return 'compiler-failure'
+  const normalized = text
+    .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, '<volatile>')
+    .replace(/[a-f0-9]{64}/g, '<volatile>')
+    .replace(/\b\d{4}-\d{2}-\d{2}t[^\s]+/g, '<volatile>')
+    .replace(/\b\d+\b/g, '<volatile>')
+    .replace(/[^a-z0-9_<>'-]+/g, ' ')
+  const stop = new Set(['a', 'an', 'and', 'at', 'by', 'for', 'from', 'in', 'is', 'of', 'the', 'to', 'with', 'was'])
+  const tokens = [...new Set(normalized.split(/\s+/).filter(token => token && !stop.has(token) && token !== '<volatile>'))].sort()
+  return tokens.length ? tokens.join('|') : 'compiler-failure'
 }
 
 function compareGameIrValues(left: unknown, right: unknown): number {
@@ -799,12 +834,13 @@ export function createDeliveryWorkflowController(input: {
       const contractSourcePackets = request.contract.sourcePackets
       if (!contractSourcePackets || digestGameIrValue(contractSourcePackets) !== digestGameIrValue(sourcePackets))
         throw new Error('Game IR compiler source packet authority is stale')
+      const failureReason = result.status === 'completed' ? undefined : canonicalCompilerFailureReason(result.reason)
       const progressIdentity = {
         inputDigest: digestGameIrValue({ identity: state.identity, compileRequest: admittedRequest }),
-        diagnosticDigest: digestGameIrValue(result.status === 'completed' ? undefined : { reasonCode: 'compiler_failed' }),
+        diagnosticDigest: digestGameIrValue(result.status === 'completed' ? undefined : { reasonCode: 'compiler_failed', reason: failureReason }),
         candidateDigest: digestGameIrValue(canonicalCompilerDomainResults(result.domainResults)),
         checkpointJournalDigest: digestGameIrValue(state.latestCheckpoint ?? undefined),
-        terminalDigest: digestGameIrValue({ status: result.status, domainResults: canonicalCompilerDomainResults(result.domainResults), reasonCode: result.status === 'completed' ? undefined : 'compiler_failed' }),
+        terminalDigest: digestGameIrValue({ status: result.status, domainResults: canonicalCompilerDomainResults(result.domainResults), reasonCode: result.status === 'completed' ? undefined : 'compiler_failed', reason: failureReason }),
       }
       const saveCompilerAttention = async (reasonCode: string, expected: string, actual: string): Promise<void> => {
         const durable = await store.load()
@@ -847,7 +883,7 @@ export function createDeliveryWorkflowController(input: {
         if (next.status === 'running') await resumeUnlocked(next)
       }
       if (result.status !== 'completed') {
-        await saveCompilerAttention('compilation', 'admitted domain results', 'compiler terminal did not provide an admitted result set')
+        await saveCompilerAttention('compilation', 'admitted domain results', `compiler terminal failed: ${failureReason}`)
         return
       }
       if (!result.domainResults) {
@@ -2725,7 +2761,6 @@ export function createDeliveryWorkflowController(input: {
           confirmedBriefDigest: run.confirmedBriefDigest,
         })
         const identitySeed = digestGameIrValue({
-          runId: run.runId,
           foundationRevision: foundationReadyReceipt.foundationRevision,
           foundationReadyReceiptDigest: foundationReadyReceipt.receiptDigest,
         }).slice(0, 24)

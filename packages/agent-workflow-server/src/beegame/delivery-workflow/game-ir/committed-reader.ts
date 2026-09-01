@@ -138,7 +138,7 @@ export type GameIrSourceMaps = Readonly<Record<GameIrModuleId, GameIrSourceMap>>
 export type GameIrDependencyGraph = Readonly<{
   schemaVersion: 'game-ir-dependency-graph.v1'
   foundationRevision: string
-  edges: readonly Readonly<{ kind: string; type: string; from: string; to: string; targetType?: string }>[]
+  edges: readonly Readonly<{ kind: string; type?: string; from: string; to: string; targetType?: string }>[]
 }>
 export type GameIrSemanticEvidence = Readonly<{
   phase: string
@@ -166,15 +166,116 @@ export type GameIrManifest = Readonly<{
 
 const SHA256 = /^[a-f0-9]{64}$/
 
-const projectionPayloadSchema: z.ZodType<ProjectionPayload> = z.custom<ProjectionPayload>(
-  value => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-    const payload = value as { kind?: unknown; value?: unknown }
-    return typeof payload.kind === 'string' && payload.kind.includes('.') &&
-      !!payload.value && typeof payload.value === 'object' && !Array.isArray(payload.value)
-  },
-  'invalid discriminated projection payload',
-)
+const textValue = z.string().min(1)
+const textArray = z.array(textValue)
+const implementationTargetValueSchema = z.object({
+  label: textValue,
+  runtime: textValue,
+  platforms: textArray,
+  projectRoots: textArray,
+}).strict()
+const implementationUnitValueSchema = z.object({
+  label: textValue,
+  responsibility: textValue,
+  ownedPaths: textArray,
+}).strict()
+const implementationScenarioValueSchema = z.object({
+  label: textValue,
+  precondition: textValue,
+  action: textValue,
+  expectedOutcome: textValue,
+}).strict()
+const implementationInvariantValueSchema = z.object({
+  label: textValue,
+  assertion: textValue,
+  scope: z.enum(['runtime', 'state', 'numeric', 'resource', 'persistence']),
+}).strict()
+const implementationEvidenceValueSchema = z.object({
+  label: textValue,
+  kind: z.enum(['unit-test', 'integration-test', 'build', 'runtime-observation', 'visual-observation', 'audio-observation', 'file-inspection']),
+  expected: textValue,
+  artifactPaths: textArray.optional(),
+}).strict()
+
+const resourceLogicalValueSchema = z.object({
+  requirementId: textValue,
+  resourceKind: z.enum(['model', 'mesh', 'material', 'texture', 'rig', 'animation', 'audio', 'music', 'vfx', 'shader', 'ui-asset', 'font', 'scene', 'prefab', 'content', 'config']),
+  runtimeRole: textValue,
+}).strict()
+const resourceSourcingPolicySchema = z.object({
+  allowedSourceKinds: textArray,
+  licenseConstraints: textArray,
+  responsibleParty: textValue,
+  handoffCriteria: textArray,
+}).strict()
+const resourceCoverageSchema = z.object({
+  assetKinds: textArray.optional(),
+  usageTags: textArray.optional(),
+  capabilities: textArray.optional(),
+  relationKinds: textArray.optional(),
+  embeddedKinds: textArray.optional(),
+}).strict()
+const resourceAcquisitionValueSchema = z.object({
+  required: z.boolean(),
+  dimensions: textArray,
+  assetKinds: textArray,
+  usageTags: textArray,
+  capabilities: textArray,
+  styles: textArray,
+  sourcingPolicy: resourceSourcingPolicySchema,
+  name: textValue.optional(),
+  purpose: textValue.optional(),
+  coverage: z.array(resourceCoverageSchema).optional(),
+}).strict()
+const resourceDeliveryTargetValueSchema = z.object({
+  assetFormatCapabilities: textArray,
+  platform: textValue.optional(),
+  runtime: textValue.optional(),
+}).strict()
+const resourceVariantValueSchema = z.object({
+  activation: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('required') }).strict(),
+    z.object({ kind: z.literal('alternative'), groupId: textValue }).strict(),
+    z.object({
+      kind: z.literal('conditional'),
+      predicate: z.object({
+        field: z.enum(['platform', 'runtime', 'asset-format-capability']),
+        operator: z.enum(['eq', 'contains']),
+        value: textValue,
+      }).strict(),
+    }).strict(),
+  ]),
+}).strict()
+const resourceAssertionSchema = z.object({
+  operator: z.enum(['eq', 'lte', 'gte', 'range', 'one-of']),
+  value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  values: z.array(z.union([z.string(), z.number()])).optional(),
+  min: z.number().optional(),
+  max: z.number().optional(),
+  unit: textValue.optional(),
+}).strict()
+const resourceArtifactValueSchema = z.object({
+  artifactClass: z.enum(['runtime-resource', 'content-definition', 'generated-output']),
+  path: textValue,
+  format: textValue,
+  runtimeRole: textValue,
+  codec: textValue.optional(),
+  technicalConstraints: z.array(z.object({ name: textValue, assertion: resourceAssertionSchema }).strict()).optional(),
+  budgets: z.array(z.object({ metric: textValue, limit: z.number(), unit: textValue }).strict()).optional(),
+}).strict()
+
+const projectionPayloadSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('implementation-verification.target'), value: implementationTargetValueSchema }).strict(),
+  z.object({ kind: z.literal('implementation-verification.unit'), value: implementationUnitValueSchema }).strict(),
+  z.object({ kind: z.literal('implementation-verification.acceptance-scenario'), value: implementationScenarioValueSchema }).strict(),
+  z.object({ kind: z.literal('implementation-verification.invariant'), value: implementationInvariantValueSchema }).strict(),
+  z.object({ kind: z.literal('implementation-verification.evidence-requirement'), value: implementationEvidenceValueSchema }).strict(),
+  z.object({ kind: z.literal('resource-realization.logical-resource'), value: resourceLogicalValueSchema }).strict(),
+  z.object({ kind: z.literal('resource-realization.acquisition-profile'), value: resourceAcquisitionValueSchema }).strict(),
+  z.object({ kind: z.literal('resource-realization.delivery-target'), value: resourceDeliveryTargetValueSchema }).strict(),
+  z.object({ kind: z.literal('resource-realization.variant'), value: resourceVariantValueSchema }).strict(),
+  z.object({ kind: z.literal('resource-realization.delivery-artifact'), value: resourceArtifactValueSchema }).strict(),
+])
 
 function fail(message: string): never {
   throw new Error(`invalid committed Game IR: ${message}`)
@@ -245,7 +346,7 @@ function sourceMap(module: GameIrModuleCandidate, revision: string): GameIrSourc
   } as GameIrSourceMap
 }
 
-function dependencyGraph(candidate: GameIrCandidate): RecordValue {
+function dependencyGraph(candidate: GameIrCandidate): GameIrDependencyGraph {
   const edges = candidate.modules.flatMap(module =>
     module.nodes.flatMap(node => [
       ...Object.entries(node.bindings).flatMap(([pointer, binding]) =>
@@ -301,11 +402,11 @@ function nodesOf<K extends ProjectionKind>(module: GameIrModuleCandidate, kind: 
           references: Object.freeze(node.references.map(reference => Object.freeze({ ...reference }))),
           edges: Object.freeze(node.edges.map(edge => Object.freeze({ ...edge }))),
           bindings: Object.freeze({ ...node.bindings }),
-          payload: Object.freeze({ kind, value: projectionValue(kind, node.value) }) as unknown as Extract<ProjectionPayload, { kind: K }>,
-        }),
+          payload: Object.freeze({ kind, value: projectionValue(kind, node.value) }),
+        }) as ProjectionNode,
       ),
   )
-  return values as unknown as readonly Extract<ProjectionNode, { kind: K }>[]
+  return values as readonly Extract<ProjectionNode, { kind: K }>[]
 }
 
 function projections(candidate: GameIrCandidate): Pick<GameIrPublishedReader, 'executionProjection' | 'resourceProjection' | 'acceptanceProjection'> {
@@ -427,7 +528,7 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
   const modules: GameIrModuleCandidate[] = []
   const moduleDigests: Record<string, string> = {}
   const sourceMapDigests: Record<string, string> = {}
-  const sourceMaps: Record<string, Readonly<Record<string, unknown>>> = {}
+  const sourceMaps: Partial<Record<GameIrModuleId, GameIrSourceMap>> = {}
   const rawModules: Array<Readonly<{ moduleId: string; nodes: unknown }>> = []
   for (const [index, raw] of moduleEntries.entries()) {
     const entry = record(raw, `manifest module[${index}]`)
@@ -449,7 +550,7 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
     const sourceDigest = digestBytes(sourceBytes)
     if (sourceDigest !== entry.sourceMapDigest || sourceDigest !== readyReceipt.sourceMapDigests[entry.moduleId as keyof typeof readyReceipt.sourceMapDigests]) fail(`source map ${entry.moduleId} digest mismatch`)
     same(source, sourceMap(parsed, request.foundation.foundationRevision), `source map ${entry.moduleId}`)
-    sourceMaps[entry.moduleId] = source
+    sourceMaps[entry.moduleId as GameIrModuleId] = sourceMap(parsed, request.foundation.foundationRevision)
     sourceMapDigests[entry.moduleId] = sourceDigest
   }
   const ordered = modules.map(module => module.moduleId)
@@ -470,7 +571,38 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
   exact(marker, ['schemaVersion', 'status', 'authorityDigest', 'manifestDigest', 'candidateDigest', 'compileRequestDigest', 'publicationId', 'foundationRevision', 'foundationReceiptDigest', 'moduleDigests', 'sourceMapDigests', 'dependencyGraphDigest'], 'COMMITTED marker')
   if (marker.schemaVersion !== 'game-ir-commit.v1' || marker.status !== 'committed' || marker.manifestDigest !== readyReceipt.manifestDigest || marker.candidateDigest !== candidateDigest || marker.compileRequestDigest !== manifest.compileRequestDigest || marker.publicationId !== request.publicationId || marker.foundationRevision !== request.foundation.foundationRevision || marker.foundationReceiptDigest !== request.foundation.receiptDigest || digestGameIrValue(marker.moduleDigests) !== digestGameIrValue(moduleDigests) || digestGameIrValue(marker.sourceMapDigests) !== digestGameIrValue(sourceMapDigests) || marker.dependencyGraphDigest !== dependencyDigest) fail('COMMITTED marker mismatch')
   const projectionValues = projections(candidate)
+  const typedSourceMaps: Record<GameIrModuleId, GameIrSourceMap> = {
+    gameplay: sourceMaps.gameplay!,
+    balance: sourceMaps.balance!,
+    'world-scene': sourceMaps['world-scene']!,
+    presentation: sourceMaps.presentation!,
+    'resource-realization': sourceMaps['resource-realization']!,
+    'implementation-verification': sourceMaps['implementation-verification']!,
+  }
+  const typedManifest: GameIrManifest = {
+    schemaVersion: 'game-ir-manifest.v1',
+    gameIrSchemaVersion: 'game-ir.v1',
+    publicationId: manifest.publicationId as string,
+    foundationRevision: manifest.foundationRevision as string,
+    foundationReceiptDigest: manifest.foundationReceiptDigest as string,
+    compileRequestDigest: manifest.compileRequestDigest as string,
+    compileRequest: request,
+    candidateDigest: manifest.candidateDigest as string,
+    semanticEvidence: semanticEvidence as readonly GameIrSemanticEvidence[],
+    modules: moduleEntries.map(entry => {
+      const item = record(entry, 'manifest module')
+      return {
+        moduleId: item.moduleId as GameIrModuleId,
+        path: item.path as string,
+        digest: item.digest as string,
+        sourceMapPath: item.sourceMapPath as string,
+        sourceMapDigest: item.sourceMapDigest as string,
+      }
+    }),
+    dependencyGraphPath: manifest.dependencyGraphPath as string,
+    dependencyGraphDigest: manifest.dependencyGraphDigest as string,
+  }
   const evidenceDigest = digestGameIrValue(semanticEvidence)
   const closureDigest = digestGameIrValue({ candidateDigest, semanticEvidence, manifestDigest: readyReceipt.manifestDigest, dependencyGraphDigest: dependencyDigest })
-  return Object.freeze({ foundationReadyReceipt, readyReceipt, candidate, modules: Object.freeze(modules), sourceMap: sourceMaps as unknown as GameIrSourceMaps, sourceMaps: Object.freeze(sourceMaps) as unknown as GameIrSourceMaps, dependencyGraph: dependency as unknown as GameIrDependencyGraph, semanticEvidence: semanticEvidence as readonly GameIrSemanticEvidence[], manifest: manifest as unknown as GameIrManifest, ...projectionValues, digests: Object.freeze({ candidate: candidateDigest, manifest: readyReceipt.manifestDigest, dependencyGraph: dependencyDigest, modules: Object.freeze(moduleDigests) as Readonly<Record<GameIrModuleId, string>>, sourceMaps: Object.freeze(sourceMapDigests) as Readonly<Record<GameIrModuleId, string>>, evidence: evidenceDigest, closure: closureDigest }) })
+  return Object.freeze({ foundationReadyReceipt, readyReceipt, candidate, modules: Object.freeze(modules), sourceMap: Object.freeze(typedSourceMaps), sourceMaps: Object.freeze(typedSourceMaps), dependencyGraph: dependency as GameIrDependencyGraph, semanticEvidence: semanticEvidence as readonly GameIrSemanticEvidence[], manifest: typedManifest, ...projectionValues, digests: Object.freeze({ candidate: candidateDigest, manifest: readyReceipt.manifestDigest, dependencyGraph: dependencyDigest, modules: Object.freeze(moduleDigests) as Readonly<Record<GameIrModuleId, string>>, sourceMaps: Object.freeze(sourceMapDigests) as Readonly<Record<GameIrModuleId, string>>, evidence: evidenceDigest, closure: closureDigest }) })
 }

@@ -73,6 +73,7 @@ export const WORKER_TYPES = [
   'foundation-fact-extractor',
   'foundation-semantic-reviewer',
   'foundation-document-reviser',
+  'game-ir-compiler',
   'resource-planner',
   'resource-curator',
   'resource-content-author',

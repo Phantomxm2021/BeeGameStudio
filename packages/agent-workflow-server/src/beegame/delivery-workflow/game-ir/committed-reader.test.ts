@@ -18,6 +18,7 @@ import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST, FOUNDATION_SEMANTIC_CHECKS } from '
 import { CANONICAL_FOUNDATION_DOCUMENTS, DELIVERY_RUN_SCHEMA_VERSION, type DeliveryRun } from '../types'
 import { digestGameIrValue } from './model'
 import { relativeFoundationAuditArtifactPaths } from '../foundation-audit-artifacts'
+import { canonicalCompilerFailureReason, canonicalCompilerDomainResults } from '../controller'
 
 function readerAuthority() {
   const fixture = implementationVerificationFixture()
@@ -57,6 +58,27 @@ function readerStep(phase: 'phase4' | 'phase5' | 'phase6' | 'phase7', authority:
 }
 
 describe('committed Game IR reader', () => {
+  test('canonicalizes compiler failure reasons and preserves material diagnostics', () => {
+    expect(canonicalCompilerFailureReason('source digest mismatch at 2026-09-01T00:00:00Z id 123')).toBe(
+      canonicalCompilerFailureReason('digest mismatch source at 2026-09-02T00:00:00Z id 456'),
+    )
+    expect(canonicalCompilerFailureReason('source digest mismatch')).not.toBe(
+      canonicalCompilerFailureReason('publication digest mismatch'),
+    )
+    const failed = canonicalCompilerDomainResults([{
+      moduleId: 'gameplay',
+      semantic: {
+        outcome: 'FAIL',
+        reasonCode: 'missing-source',
+        actual: 'observed source',
+        missingSubject: 'loop',
+        expectedProjection: 'one loop',
+        evidencePointers: ['docs/GDD.md#loop'],
+      },
+    }])!
+    expect(failed[0]!.semantic).toMatchObject({ actual: 'observed source', expectedProjection: 'one loop' })
+  })
+
   test('exposes the single workspace/run-bound reader entry point', async () => {
     await expect(
       readCommittedGameIr({ workspacePath: '/tmp/missing-game-ir', deliveryRun: {} as never }),

@@ -37,6 +37,9 @@ export async function readSecureWorkspaceFile(
   const canonicalRelative = relative(root, canonicalTarget)
   if (canonicalRelative.startsWith('..') || canonicalRelative.includes(`${sep}..${sep}`) || canonicalRelative !== relativePath)
     throw new Error('secure file target is a symlink or not the canonical workspace file')
+  const canonicalTargetBeforeOpen = await lstat(canonicalTarget)
+  if (!canonicalTargetBeforeOpen.isFile())
+    throw new Error('secure file target is not a regular file')
 
   let parent = root
   for (const component of relative(root, dirname(target)).split(sep).filter(Boolean)) {
@@ -57,6 +60,23 @@ export async function readSecureWorkspaceFile(
       parentAfterOpen.ino !== parentBeforeOpen.ino
     )
       throw new Error('secure file parent changed during open')
+    let canonicalTargetAfterOpen: string
+    try {
+      canonicalTargetAfterOpen = await realpath(target)
+    } catch {
+      throw new Error('secure file target changed during open')
+    }
+    if (canonicalTargetAfterOpen !== canonicalTarget)
+      throw new Error('secure file target changed during open')
+    const targetAfterOpen = await lstat(canonicalTargetAfterOpen)
+    if (
+      !targetAfterOpen.isFile() ||
+      targetAfterOpen.dev !== info.dev ||
+      targetAfterOpen.ino !== info.ino ||
+      canonicalTargetBeforeOpen.dev !== info.dev ||
+      canonicalTargetBeforeOpen.ino !== info.ino
+    )
+      throw new Error('secure file target changed during open')
     return await handle.readFile('utf8')
   } finally {
     await handle.close()

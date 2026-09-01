@@ -63,13 +63,16 @@ describe('delivery worker complete document boundary', () => {
       },
     }]
     let started: WorkerDispatchRequest | undefined
+    let submittedPrompt = ''
     const sessions = {
       start: (request: WorkerDispatchRequest) => {
         started = request
         return { id: 'compiler-session' }
       },
       updateAuthToken: () => undefined,
-      sendWithDisplay: async () => undefined,
+      sendWithDisplay: async (_sessionId: string, prompt: string) => {
+        submittedPrompt = prompt
+      },
       events: () => events,
       get: () => ({ status: 'running', turnStatus: 'completed', createdAt: new Date() }),
       waitForWorkflowWorkerIdle: async () => undefined,
@@ -93,8 +96,15 @@ describe('delivery worker complete document boundary', () => {
         foundationReadyReceiptDigest: 'b'.repeat(64),
         compileRequest: { taskId: 'task-compiler' },
         foundationReadyReceipt: { receiptDigest: 'b'.repeat(64) },
+        sourcePackets: [{ packetId: 'packet-1', source: 'immutable source authority' }],
       },
     } as never)
+    await port.submit('dispatch-compiler', 'caller prompt must not replace the dispatcher packet')
+    expect(submittedPrompt).toContain('"sourcePackets":[{"packetId":"packet-1","source":"immutable source authority"}]')
+    expect(submittedPrompt).toContain('The packet is the sole input for this task.')
+    expect(submittedPrompt).not.toContain('caller prompt must not replace')
+    expect(submittedPrompt).not.toContain('confirmedBriefContext')
+    expect(submittedPrompt).not.toContain('Workspace root:')
     const terminal = await port.waitForTerminal!('dispatch-compiler')
     expect(started?.workflowJsonSchema).toBeDefined()
     expect(parseWorkerTerminalResult(terminal)).toMatchObject({

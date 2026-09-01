@@ -26,6 +26,7 @@ import {
   canonicalizeGameIrSourceSections,
   canonicalGameIrJson,
   compareCodeUnits,
+  digestGameIrSourceSectionIndex,
   digestGameIrValue,
   type GameIrCandidate,
   type GameIrModuleCandidate,
@@ -35,7 +36,6 @@ import {
   type GameIrPublishedModuleEvidence,
   type ImplementationVerificationAssemblyAuthority,
 } from './implementation-verification-assembler'
-import { digestSectionIndex } from '../foundation-section-index'
 
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const publicationLocks = new Map<string, Promise<unknown>>()
@@ -527,7 +527,7 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     ),
   )
   if (
-    digestSectionIndex(sectionIndex) !== request.foundation.sectionIndexDigest
+    digestGameIrSourceSectionIndex(sectionIndex) !== request.foundation.sectionIndexDigest
   )
     fail(
       'publication authority Section Index does not match Foundation receipt',

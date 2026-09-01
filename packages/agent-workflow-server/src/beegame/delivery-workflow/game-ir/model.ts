@@ -9,10 +9,6 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from '../types'
-import {
-  digestSectionIndex,
-  type SectionRef,
-} from '../foundation-section-index'
 
 export type GameIrSourceBinding =
   | Readonly<{
@@ -140,6 +136,26 @@ export function canonicalizeGameIrSourceSections(
       sourceSectionCanonicalKey(right),
     ),
   )
+}
+
+export function digestGameIrSourceSectionIndex(
+  sections: readonly GameIrSourceSection[],
+): string {
+  const canonical = [...sections]
+    .map(section => ({
+      documentPath: section.documentPath,
+      sectionId: section.sectionId,
+      heading: section.heading,
+      startLine: section.startLine,
+      endLine: section.endLine,
+      digest: section.digest,
+    }))
+    .sort((left, right) =>
+      `${left.documentPath}\0${left.startLine}\0${left.sectionId}`.localeCompare(
+        `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
+      ),
+    )
+  return createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex')
 }
 
 function nonEmptyText(value: unknown, label: string): string {
@@ -380,7 +396,7 @@ function sourceSectionMap(
   }
   const index = canonicalizeGameIrSourceSections(normalized)
   if (
-    digestSectionIndex(index as readonly SectionRef[]) !==
+    digestGameIrSourceSectionIndex(index) !==
     request.foundation.sectionIndexDigest
   )
     fail('source sections do not match the receipt section index digest')

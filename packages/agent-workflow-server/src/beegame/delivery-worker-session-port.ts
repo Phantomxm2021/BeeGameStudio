@@ -368,7 +368,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
     },
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
-      const packetWorker = request.workerType === 'foundation-fact-extractor' || request.workerType === 'foundation-semantic-reviewer'
+      const packetWorker = request.workerType === 'foundation-fact-extractor' || request.workerType === 'foundation-semantic-reviewer' || request.workerType === 'game-ir-compiler'
       const revisionWorker = request.workerType === 'foundation-document-reviser'
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
@@ -494,7 +494,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const request = requests.get(dispatchId)
       const packetWorker =
         request?.workerType === 'foundation-fact-extractor' ||
-        request?.workerType === 'foundation-semantic-reviewer'
+        request?.workerType === 'foundation-semantic-reviewer' ||
+        request?.workerType === 'game-ir-compiler'
       const revisionWorker = request?.workerType === 'foundation-document-reviser'
       const confirmedBriefContext =
         packetWorker || revisionWorker
@@ -549,7 +550,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const workerPrompt = [
         ...(packetWorker || revisionWorker ? [] : [languageInstruction]),
         ...(packetWorker || revisionWorker ? [] : [confirmedBriefContext, documentAuthorAuthorityBlock]),
-        (packetWorker || revisionWorker) && request && request.contract.packet
+        (packetWorker || revisionWorker) && request && (request.contract.packet || request.workerType === 'game-ir-compiler')
           ? buildWorkerPrompt(request)
           : prompt,
         ...(packetWorker || revisionWorker

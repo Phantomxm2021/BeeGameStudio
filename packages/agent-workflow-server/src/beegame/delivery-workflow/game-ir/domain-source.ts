@@ -8,6 +8,7 @@ import {
 import {
   canonicalizeGameIrSourceSections,
   compareCodeUnits,
+  digestGameIrSourceSectionIndex,
   digestGameIrValue,
   type GameIrSourceSection,
 } from './model'
@@ -15,7 +16,6 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from '../types'
-import { digestSectionIndex } from '../foundation-section-index'
 
 export type GameIrDomainId =
   | 'gameplay'
@@ -348,7 +348,7 @@ export function buildGameIrDomainSourceEnvelope(
     if (!fullIndex.some(section => section.documentPath === documentPath))
       fail('sectionIndex must contain all eight canonical documents')
   }
-  if (digestSectionIndex(fullIndex) !== request.foundation.sectionIndexDigest)
+  if (digestGameIrSourceSectionIndex(fullIndex) !== request.foundation.sectionIndexDigest)
     fail('sectionIndex digest does not match the Foundation receipt')
 
   const expectedDocuments = canonicalGameIrModuleSourceDocuments(moduleId)
@@ -435,7 +435,7 @@ export function validateGameIrDomainSourceEnvelope(
       fail('authority Section Index must contain all eight canonical documents')
   }
   if (
-    digestSectionIndex(authoritySectionIndex) !==
+    digestGameIrSourceSectionIndex(authoritySectionIndex) !==
     request.foundation.sectionIndexDigest
   )
     fail('authority Section Index digest does not match the Foundation receipt')
