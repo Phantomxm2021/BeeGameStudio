@@ -554,7 +554,7 @@ async function createWorkerRecoveryRun(input: {
       })
       await writeFile(
         join(input.workspacePath, path),
-        '# Acceptance\n- [ ] CHECK-001 source: docs/GDD.md implement: Execute the synthetic action expected: observable result evidence: runtime\n',
+        '# Acceptance\n- [ ] CHECK-001 [docs/GDD.md#core_loop] Execute the synthetic action with runtime evidence.\n',
       )
     }
   }
