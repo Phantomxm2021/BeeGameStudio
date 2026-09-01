@@ -46,6 +46,7 @@ import {
 import type { AuditIssue } from './foundation-issue-registry'
 import {
   parseGameIrCompileRequest,
+  parseFoundationReadyReceipt,
   type FoundationReadyReceipt,
   type GameIrCompileRequest,
 } from './game-ir/contracts'
@@ -1427,6 +1428,28 @@ export function createDeliveryDispatcher(options: {
         throw new Error(
           'worker terminal result does not match dispatch contract',
         )
+      if (request && result.workerType === 'game-ir-compiler') {
+        const state = run.gameIrState
+        if (!state || state.status !== 'compiling')
+          throw new Error('Game IR compiler terminal has no compiling authority')
+        const compileRequest = parseGameIrCompileRequest(request.contract.compileRequest)
+        const foundationReadyReceipt = parseFoundationReadyReceipt(request.contract.foundationReadyReceipt)
+        if (
+          result.runId !== request.runId ||
+          result.dispatchId !== dispatchId ||
+          result.taskId !== request.taskId ||
+          result.revision !== request.revision ||
+          request.runId !== run.runId ||
+          request.taskId !== state.identity.taskId ||
+          request.revision !== state.identity.foundationRevision ||
+          compileRequest.taskId !== state.identity.taskId ||
+          compileRequest.publicationId !== state.identity.publicationId ||
+          foundationReadyReceipt.receiptDigest !== state.identity.foundationReadyReceiptDigest ||
+          result.compileRequestDigest !== digestGameIrValue(compileRequest) ||
+          result.foundationReadyReceiptDigest !== foundationReadyReceipt.receiptDigest
+        )
+          throw new Error('Game IR compiler terminal identity does not match dispatch authority')
+      }
       if (request && result.workerType === 'implementation-worker')
         await persistImplementationEvidence({
           workspacePath: request.workspacePath,

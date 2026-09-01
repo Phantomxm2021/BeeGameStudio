@@ -69,7 +69,7 @@ import {
   type GameIrCompilerDomainModel,
 } from './worker-contracts'
 import { recordFoundationFailure } from './foundation-authoring-batch'
-import { readFile } from 'node:fs/promises'
+import { lstat, readFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { extractNormalizedFoundationFacts, buildFoundationFactPackets, mergeFoundationFactResults, validateFoundationFactResults, type FoundationFactPacket, type FoundationFactReceipt } from './foundation-fact-extraction'
@@ -194,11 +194,18 @@ async function buildGameIrSourcePackets(input: {
   const indexRelative = relative(workspace, indexPath)
   if (!indexRelative || indexRelative === '..' || indexRelative.startsWith(`..${sep}`))
     throw new Error('Foundation READY Section Index path escapes the workspace')
+  const indexInfo = await lstat(indexPath)
+  if (!indexInfo.isFile() || indexInfo.isSymbolicLink())
+    throw new Error('Foundation READY Section Index is not a canonical regular file')
   const sectionIndex = JSON.parse(await readFile(indexPath, 'utf8')) as readonly import('./foundation-section-index').SectionRef[]
   if (digestSectionIndex(sectionIndex) !== input.receipt.sectionIndexDigest)
     throw new Error('Foundation READY Section Index digest mismatch')
   const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => {
-    const bytes = await readFile(join(input.workspacePath, path), 'utf8')
+    const documentPath = join(workspace, path)
+    const documentInfo = await lstat(documentPath)
+    if (!documentInfo.isFile() || documentInfo.isSymbolicLink())
+      throw new Error(`Foundation READY document is not a canonical regular file: ${path}`)
+    const bytes = await readFile(documentPath, 'utf8')
     if (createHash('sha256').update(bytes, 'utf8').digest('hex') !== input.receipt.documentDigests[path])
       throw new Error(`Foundation READY document digest mismatch: ${path}`)
     return [path, bytes] as const

@@ -39,6 +39,29 @@ describe('committed Game IR reader', () => {
     expect(() => parseWorkerTerminalResult(terminal)).toThrow()
   })
 
+  test('accepts only strict semantic and validation DTOs from the compiler', () => {
+    const terminal = {
+      workerType: 'game-ir-compiler',
+      status: 'completed',
+      runId: 'run',
+      dispatchId: 'dispatch',
+      taskId: 'task',
+      revision: 'revision',
+      compileRequestDigest: 'a'.repeat(64),
+      foundationReadyReceiptDigest: 'b'.repeat(64),
+      domainResults: [{
+        moduleId: 'gameplay',
+        semantic: {
+          outcome: 'PROJECTED',
+          nodes: [],
+          sourceClaims: [],
+        },
+        mechanical: [],
+      }],
+    }
+    expect(() => parseWorkerTerminalResult(terminal)).toThrow()
+  })
+
   test('requires changed compiler progress to remain in the same identity loop', () => {
     const terminal = {
       workerType: 'game-ir-compiler',

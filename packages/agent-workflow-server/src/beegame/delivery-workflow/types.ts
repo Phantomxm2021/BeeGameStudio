@@ -147,7 +147,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 47 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 48 as const
 
 export type GameIrCompilationIdentity = Readonly<{
   runId: string
