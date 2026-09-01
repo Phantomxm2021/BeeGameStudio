@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core、Phase 4（Gameplay + Balance）、Phase 5（World + Presentation）与 Phase 6（Resource Realization）均已完成 implementation plan、independent final review 与 root verification，并 accepted；Phase 7–9 pending。完整 candidate assembly/publication、production routing/persistence 与 Chrome acceptance 仍不可用
+状态：设计已确认；Phase 3 Core、Phase 4（Gameplay + Balance）、Phase 5（World + Presentation）、Phase 6（Resource Realization）与 Phase 7（Implementation + Verification）均已完成 implementation plan、independent final review 与 root verification，并 accepted。Phase 8–9 pending：production routing/persistence、consumer migration、fresh workflow 与 Chrome acceptance 尚未执行；Game IR 的六域 assembly、Phase 7 authority-bound publication/recovery 已可用。
 
 日期：2026-08-30
 
@@ -316,7 +316,7 @@ Validator 不接受可重新贴 task/revision 身份的 detached module。服务
 
 V1 canonical domain modules 为 gameplay、balance、world-scene、presentation、resource-realization 与 implementation-verification；candidate/publication 按 code-unit 排序为 balance、gameplay、implementation-verification、presentation、resource-realization、world-scene。Core 是 compile request、binding、graph admission 与 publication 基础设施，不是第七个业务 module；没有独立 schema、producer 或职责的旧 `core` placeholder requirement 必须删除，不得用空 module、alias 或 derived index 恢复。六个 domain module 均不得缺失或为空。诊断 evidence pointer 优先精确到 owner Source Binding 的 document、section 与 sourcePointer；当诊断的正是 missing/ambiguous projection、尚不存在 binding 时，允许使用带 section digest 的 immutable `section:<document>#<section>@<digest>` pointer。裸 document/section identity 不可入场。
 
-本节与 Phase 7 Implementation/Verification 设计仅在未投入生产的 complete-candidate/publication completion boundary 上窄范围 supersede Phase 3–6 历史设计中的 seven-module、业务 `core` module、caller-supplied candidate/admissions 与 generic semantic-admission publication route；Phase 3–6 已验收的领域行为、commit 与证据不被重写。
+本节与已落地的 Phase 7 Implementation/Verification 设计，在 complete-candidate/publication completion boundary 上窄范围 supersede Phase 3–6 历史设计中的 seven-module、业务 `core` module、caller-supplied candidate/admissions 与 generic semantic-admission publication route。旧 route 已物理删除；Phase 3–6 已验收的领域行为、commit 与证据不被重写，仍使用的 shared fidelity primitives 与 domain adapters 继续保留。
 
 同一 input 支持两个不同且无法机械区分的合法映射时，Validator 必须返回 ambiguity diagnostic，并由 Stage 5 输出 FoundationDefectReport。不得用模型偏好、默认值或首次成功输出选择业务含义。
 
@@ -410,11 +410,12 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 - 加入 Game IR enabled/disabled parity test；
 - 加入 import boundary test。
 
-### Phase 3：Stage 5 独立 Core（已完成；production routing 仍不可达）
+### Phase 3：Stage 5 独立 Core（历史基础层已完成；部分 completion boundary 已由 Phase 7 supersede）
 
 - 已定义四个阶段接口；
-- 已落地 strict contracts、Foundation READY adapter、Core model、semantic admission、publication、recovery 和 parity；
-- 不实现 consumer migration，production routing 仍不可达。
+- 已落地并验收 strict contracts、Foundation READY adapter、Core model、shared semantic-fidelity primitives、publication/recovery 基础设施和 parity；
+- 历史的 caller-built complete-candidate、generic semantic-admission publication route 与七模块/业务 `core` 约定，已由 Phase 7 的六域 authority-bound assembly 取代并删除；不把旧 route 作为当前未实现项或兼容入口。
+- Consumer migration 与 production routing 不属于本阶段，仍由 Phase 8 执行。
 
 ### Phase 4：Gameplay + Balance（accepted after independent final review and root verification）
 
@@ -439,12 +440,12 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
   publication、controller/store/DeliveryRun/Foundation Issue、provider
   dispatch 和五个 placeholder module；protected 21-file parity 与 full
   server unreachable scan 保持通过。
-- Complete six-domain candidate assembly/publication、production
-  routing/persistence、Chrome acceptance remain unavailable；Phase 7–9 remain
-  unstarted。Phase 5 的 World/Presentation 实现、双 profile、Foundation
-  parity、AST isolation、Task 11、whole-branch independent review 与 root
-  verification 已全部完成并 accepted；Phase 6 Resource Realization 也已
-  完成并 accepted。Phase 7–9 仍未开始。
+- Phase 7 的 complete six-domain candidate assembly/publication 已完成并
+  accepted；production routing/persistence、consumer migration 与 Chrome
+  acceptance 尚未执行，分别属于 Phase 8–9。Phase 5 的 World/Presentation
+  实现、双 profile、Foundation parity、AST isolation、Task 11、whole-branch
+  independent review 与 root verification 已全部完成并 accepted；Phase 6
+  Resource Realization 也已完成并 accepted。
 
 ### Phase 5：World + Presentation（已 accepted）
 
@@ -483,9 +484,31 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
   `8407707bf`、`fba39debb`、`d78c33147`、`57ed546ab`、`42d9f8fdc`、
   `a440659d5`、`818051606`。
 
-### Phase 7：Implementation + Verification（未开始）
+### Phase 7：Implementation + Verification（已 implemented；independent final audit 与 root verification accepted）
 
-- 落地 implementation target、dependency、acceptance scenario、invariant 和 evidence trace。
+- 已落地唯一 Implementation/Verification domain producer、strict five-kind
+  schema/manifest、source-bound semantic projection 与独立 validation admission；
+  implementation target、dependency、acceptance scenario、invariant 和 evidence
+  trace 均进入同一六域 Game IR closure。
+- 已落地 complete six-domain assembly：assembler 从 replayable Phase 7
+  authority 重放 Phase 4–7 的 source、mechanical、semantic 与 validation
+  evidence，生成 canonical candidate、source map、dependency graph 和 closure
+  digest；不接受 caller-supplied candidate、detached admission 或 digest-only
+  PASS。
+- 已落地 Phase 7 authority-bound atomic publication/recovery：唯一
+  `GameIrPublicationAuthority` 驱动 PREPARED journal、私有 staging、完整目录
+  原子 rename、COMMITTED marker、recovery 与 committed validation；旧 generic
+  semantic-admission publication route 已删除，不保留 forwarding wrapper。
+- 已完成真实 READY parity、profile（最小、expanded、multi-artifact）、stage
+  boundary、身份/摘要重算、hidden/accessor/symbol、防篡改、持久化耐久性与并发
+  证据验证。最终证据：Game IR `465 pass / 0 fail / 4701 assertions`；root 与
+  server `typecheck` 通过；Biome 与 `git diff --check` 通过。
+- accepted commit chain（含纠正提交）：
+  `30625c71b` → `5c4b64896` → `c7694551a` → `2863744bd` →
+  `c06dce7b7` → `b541ecc8e` → `f7882793e` → `60639aa82` →
+  `70b2b6e5e` → `63a1539bc` → `3c3872dbc` → `f22e3dd20`。
+  其中 `c06dce7b7`、`60639aa82` 分别纠正 schema invariants 与 producer
+  authority；`f22e3dd20` 清除 Phase 7 audit residue 并完成最终边界测试。
 
 ### Phase 8：Consumer 单轨迁移（未开始）
 
@@ -506,7 +529,7 @@ Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority
 
 相同文档在 Game IR enabled/disabled 下必须产生完全相同的 Stage 3 tasks、Issue Registry、Stage 4 Patch packets、Targeted Recheck 和 Foundation READY receipt。
 
-Core Phase 已实现 strict contracts、Foundation READY adapter、Core model、旧 generic semantic admission、publication、recovery 和 parity；Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile、Foundation planning parity、Task 11 independent review、AST isolation/status gate 与最终 whole-branch/root verification 已完成并 accepted。Phase 6 Resource Realization 的唯一 schema/manifest、replaying assembler、resource-plan/profile projection、fidelity admission 与 prior schema closure 已完成并 accepted，且通过上述 Game IR、Foundation、typecheck、Biome/diff 与 Sol final evidence。Implementation/Verification 的领域 producer 仍未实现。因此此处 enabled 仅表示在 READY 后调用只读 receipt/compile-request boundary；production routing 仍不可达，不得为了 parity 伪造六个同构 placeholder candidate。Task 11 parity 测试调用真实 Phase 5 closure assembler，并在调用前后重新序列化同一 Foundation documents/state；不得只比较 receipt/compile-request，也不得使用 Task 9/10 测试 helper。完整 six-domain candidate parity、Phase 7 authority-bound publication 与旧 generic semantic-admission 删除要等 Phase 7 落地；Phase 8–9 分别负责 consumer migration 与真实验收。
+Core Phase 已实现并验收 strict contracts、Foundation READY adapter、Core model、shared semantic-fidelity primitives、publication/recovery 基础设施和 parity；历史 generic semantic-admission completion/publication route 已在 Phase 7 cutover 中 superseded 并删除。Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile、Foundation planning parity、Task 11 independent review、AST isolation/status gate 与最终 whole-branch/root verification 已完成并 accepted。Phase 6 Resource Realization 的唯一 schema/manifest、replaying assembler、resource-plan/profile projection、fidelity admission 与 prior schema closure 已完成并 accepted，且通过上述 Game IR、Foundation、typecheck、Biome/diff 与 Sol final evidence。Phase 7 Implementation/Verification producer、独立 admission、六域 complete-candidate assembly、authority-bound publication/recovery 与最终证据已完成并 accepted。因此此处 enabled 表示在 READY 后调用真实、只读且 authority-bound 的 Game IR closure；不得为了 parity 伪造同构 placeholder candidate。Task 11 parity 测试调用真实 Phase 5 closure assembler，并在调用前后重新序列化同一 Foundation documents/state；不得只比较 receipt/compile-request，也不得使用 Task 9/10 测试 helper。Phase 8 仍负责 consumer migration/production routing 与 persistence，Phase 9 负责 fresh workflow 和 Chrome 真实验收。
 
 ### 11.2 架构边界
 
