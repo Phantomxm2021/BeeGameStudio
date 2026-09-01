@@ -51,7 +51,7 @@ async function writeCommittedProjection(
 }
 
 describe('recovery projector foundation audit boundary', () => {
-  test('reconstructs and preserves the sole index-staged audit state after recovery', async () => {
+  test('rejects downstream recovery before the sole index-staged audit state has v46 handoff authority', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'foundation-recovery-cutover-'),
     )
@@ -175,13 +175,13 @@ describe('recovery projector foundation audit boundary', () => {
       })
       const run: DeliveryRun = {
         ...initial,
-        phase: 'RESOURCE_PREPARATION',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
         status: 'running',
         foundationDraftState: {
           completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
         },
         foundationAuditState,
-        resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
         createdAt: '2026-08-24T00:00:00.000Z',
         updatedAt: '2026-08-24T00:02:00.000Z',
       }
@@ -194,17 +194,19 @@ describe('recovery projector foundation audit boundary', () => {
         snapshotPath: join(workspacePath, '.beegame/workflow/run.json'),
         ownerId,
       })
-      const projected = await projectExactResumeRun({
+      await expect(projectExactResumeRun({
         inspection,
         events: acceptedEvents,
         workspacePath,
         ownerId,
         projectId,
         confirmedBriefContext,
+      })).rejects.toMatchObject({
+        code: 'recovery_checkpoint_missing',
+        message: 'snapshot has no durable identity for the exact unfinished unit',
       })
 
-      expect(projected.activeUnitId).toBe('resource:inventory')
-      expect(projected.run).toMatchObject({
+      expect(await store.load()).toMatchObject({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
         status: 'running',
