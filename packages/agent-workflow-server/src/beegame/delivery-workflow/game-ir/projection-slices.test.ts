@@ -218,9 +218,50 @@ describe('Game IR projection slices', () => {
             { id: 'same', kind: 'gameplay.state', value: {} },
           ],
           requiredCurrentNodes: [],
+          admittedCurrentNodes: [],
         },
       }),
     ).toThrow(/unique|sorted|conflict/i)
+  })
+
+  test('requires exactly three context fields and a sorted unique admitted prefix', () => {
+    expect(() =>
+      normalizeGameIrProjectionSliceContext({
+        moduleId: 'gameplay',
+        sliceId: 'gameplay.slice.1',
+        value: { availablePriorNodes: [], requiredCurrentNodes: [] },
+      }),
+    ).toThrow(/non-canonical|context/i)
+    const base = {
+      availablePriorNodes: [],
+      requiredCurrentNodes: [],
+    }
+    expect(() =>
+      normalizeGameIrProjectionSliceContext({
+        moduleId: 'gameplay',
+        sliceId: 'gameplay.slice.1',
+        value: {
+          ...base,
+          admittedCurrentNodes: [
+            { id: 'action.b', kind: 'gameplay.action' },
+            { id: 'action.a', kind: 'gameplay.action' },
+          ],
+        },
+      }),
+    ).toThrow(/sorted|unique/i)
+    expect(() =>
+      normalizeGameIrProjectionSliceContext({
+        moduleId: 'gameplay',
+        sliceId: 'gameplay.slice.1',
+        value: {
+          ...base,
+          admittedCurrentNodes: [
+            { id: 'action.a', kind: 'gameplay.action' },
+            { id: 'action.a', kind: 'gameplay.action' },
+          ],
+        },
+      }),
+    ).toThrow(/sorted|unique/i)
   })
 
   test('rejects whole-domain and future service fields at the slice boundary', () => {

@@ -221,7 +221,7 @@ function cloneContext(
       id: node.id,
       kind: node.kind,
     })),
-    admittedCurrentNodes: (context.admittedCurrentNodes ?? []).map(node => ({
+    admittedCurrentNodes: context.admittedCurrentNodes.map(node => ({
       id: node.id,
       kind: node.kind,
     })),
@@ -232,7 +232,6 @@ export function buildGameIrProjectionSliceAuthority(input: {
   packet: GameIrProjectionOperationPacket
   slice: GameIrProjectionSlice
   sliceContext: GameIrProjectionSliceContext
-  admittedCurrentNodes?: readonly Readonly<{ id: string; kind: string }>[]
   compileRequestDigest?: string
   foundationReadyReceiptDigest?: string
   retryDiagnostic?: GameIrProjectionRetryDiagnostic
@@ -290,7 +289,7 @@ export function buildGameIrProjectionSliceAuthority(input: {
     sourceFragments: visibleFragments,
     availablePriorNodes: context.availablePriorNodes,
     requiredCurrentNodes: context.requiredCurrentNodes,
-    admittedCurrentNodes: (input.admittedCurrentNodes ?? context.admittedCurrentNodes ?? []).map(node => ({
+    admittedCurrentNodes: context.admittedCurrentNodes.map(node => ({
       id: node.id,
       kind: node.kind,
     })),

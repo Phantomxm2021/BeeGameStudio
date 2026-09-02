@@ -93,13 +93,14 @@ function authorityFor(
         value: Record<string, unknown>
       }>
       requiredCurrentNodes: Array<{ id: string; kind: string }>
+      admittedCurrentNodes: Array<{ id: string; kind: string }>
     }
-    admittedCurrentNodes?: Array<{ id: string; kind: string }>
   } = {},
 ) {
   const context = options.context ?? {
     availablePriorNodes: [],
     requiredCurrentNodes: [],
+    admittedCurrentNodes: [],
   }
   const sliceId = options.sliceId ?? packet.source.moduleId + '.slice.0'
   const moduleId = packet.source.moduleId as (typeof GAME_IR_DOMAIN_IDS)[number]
@@ -111,9 +112,6 @@ function authorityFor(
     sliceContext: context,
     ...(options.retryDiagnostic
       ? { retryDiagnostic: options.retryDiagnostic }
-      : {}),
-    ...(options.admittedCurrentNodes
-      ? { admittedCurrentNodes: options.admittedCurrentNodes }
       : {}),
   })
 }
@@ -199,7 +197,7 @@ describe('Game IR projection slice authority source scope', () => {
   test('rejects stale compile and Foundation receipt digests and stale selected bytes', () => {
     const packet = projectionPacket()
     const slice = deriveProjectionSlicePlan('gameplay').slices[0]!
-    const context = { availablePriorNodes: [], requiredCurrentNodes: [] }
+    const context = { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] }
     expect(() =>
       buildGameIrProjectionSliceAuthority({
         packet: packet as never,
@@ -241,6 +239,7 @@ describe('Game IR projection slice authority source scope', () => {
           },
         ],
         requiredCurrentNodes: [],
+        admittedCurrentNodes: [],
       },
     })
     const second = authorityFor(projectionPacket('gameplay.slice.1'), {
@@ -254,6 +253,7 @@ describe('Game IR projection slice authority source scope', () => {
           },
         ],
         requiredCurrentNodes: [],
+        admittedCurrentNodes: [],
       },
     })
     expect(renderGameIrProjectionSliceAuthority(first)).toBe(
@@ -273,8 +273,8 @@ describe('Game IR projection slice authority source scope', () => {
           { id: 'prior-state', kind: 'gameplay.state', value: { label: 'Start' } },
         ],
         requiredCurrentNodes: [{ id: 'current-state', kind: 'gameplay.state' }],
+        admittedCurrentNodes: [{ id: 'admitted-state', kind: 'gameplay.state' }],
       },
-      admittedCurrentNodes: [{ id: 'admitted-state', kind: 'gameplay.state' }],
       retryDiagnostic: {
         scope: 'record',
         sliceId: 'gameplay.slice.1',
@@ -289,6 +289,27 @@ describe('Game IR projection slice authority source scope', () => {
     expect(rendered).toContain('prior-state')
     expect(rendered).toContain('admitted-state')
     expect(rendered).not.toContain('e0.0 —')
+  })
+
+  test('cannot override the admitted prefix outside the normalized context', () => {
+    const packet = projectionPacket('gameplay.slice.1')
+    const authority = buildGameIrProjectionSliceAuthority({
+      packet: packet as never,
+      slice: deriveProjectionSlicePlan('gameplay').slices[1]!,
+      sliceContext: {
+        availablePriorNodes: [],
+        requiredCurrentNodes: [],
+        admittedCurrentNodes: [
+          { id: 'context-prefix', kind: 'gameplay.action' },
+        ],
+      },
+      admittedCurrentNodes: [
+        { id: 'forged-prefix', kind: 'gameplay.action' },
+      ],
+    } as never)
+    expect(authority.admittedCurrentNodes).toEqual([
+      { id: 'context-prefix', kind: 'gameplay.action' },
+    ])
   })
 
   test('keeps direct prior dependencies and excludes irrelevant prior nodes', () => {
@@ -308,6 +329,7 @@ describe('Game IR projection slice authority source scope', () => {
           },
         ],
         requiredCurrentNodes: [],
+        admittedCurrentNodes: [],
       },
     })
     expect(authority.availablePriorNodes.map(node => node.id)).toEqual([
@@ -321,6 +343,7 @@ describe('Game IR projection slice authority source scope', () => {
         { id: 'prior-state', kind: 'gameplay.state', value: { label: 'Start' } },
       ],
       requiredCurrentNodes: [],
+      admittedCurrentNodes: [],
     }
     authorityFor(projectionPacket(), { context })
     expect(Object.isFrozen(context)).toBe(false)

@@ -1268,6 +1268,7 @@ describe('worker prompts', () => {
         sliceContext: {
           availablePriorNodes: [],
           requiredCurrentNodes: [],
+          admittedCurrentNodes: [],
         },
         packet,
       },
@@ -1418,7 +1419,7 @@ describe('worker prompts', () => {
       contract: {
         kind: 'projection',
         currentSlice: 'gameplay.slice.0',
-        sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [] },
+        sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] },
         compileRequestDigest: digestGameIrValue(packet.source.compileRequest),
         foundationReadyReceiptDigest: packet.source.compileRequest.foundation.receiptDigest,
         packet,
@@ -1451,7 +1452,7 @@ describe('worker prompts', () => {
       contract: {
         kind: 'projection',
         currentSlice: 'gameplay.slice.0',
-        sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [] },
+        sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] },
         packet,
       },
     })
@@ -1477,7 +1478,7 @@ describe('worker prompts', () => {
         contract: {
           kind: 'projection',
           currentSlice: 'gameplay.slice.0',
-          sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [] },
+          sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] },
           retryDiagnostic: {
             scope: 'record',
             sliceId: 'gameplay.slice.0',
@@ -1506,7 +1507,7 @@ describe('worker prompts', () => {
         contract: {
           kind: 'projection',
           currentSlice: 'gameplay.slice.0',
-          sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [] },
+          sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] },
           retryDiagnostic,
           packet,
         },

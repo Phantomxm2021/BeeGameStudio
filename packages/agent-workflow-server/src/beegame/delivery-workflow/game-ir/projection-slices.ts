@@ -130,7 +130,7 @@ export type GameIrProjectionSliceContext = Readonly<{
     value: Readonly<Record<string, unknown>>
   }>[]
   requiredCurrentNodes: readonly Readonly<{ id: string; kind: string }>[]
-  admittedCurrentNodes?: readonly Readonly<{ id: string; kind: string }>[]
+  admittedCurrentNodes: readonly Readonly<{ id: string; kind: string }>[]
 }>
 
 export type GameIrProjectionRetryDiagnostic =
@@ -168,16 +168,11 @@ export function normalizeGameIrProjectionSliceContext(input: {
   )
     throw new Error('Game IR projection slice context must be a plain object')
   const value = input.value as Record<string, unknown>
-  const hasCanonicalKeys = exactContextKeys(value, [
+  if (!exactContextKeys(value, [
     'availablePriorNodes',
     'requiredCurrentNodes',
     'admittedCurrentNodes',
-  ])
-  const hasLegacyKeys = exactContextKeys(value, [
-    'availablePriorNodes',
-    'requiredCurrentNodes',
-  ])
-  if (!hasCanonicalKeys && !hasLegacyKeys)
+  ]))
     throw new Error('Game IR projection slice context is non-canonical')
   const plan = deriveProjectionSlicePlan(input.moduleId)
   const currentIndex = plan.slices.findIndex(
@@ -264,7 +259,7 @@ export function normalizeGameIrProjectionSliceContext(input: {
       false,
     ),
     admittedCurrentNodes: normalizeTargets(
-      value.admittedCurrentNodes ?? [],
+      value.admittedCurrentNodes,
       'admittedCurrentNodes',
       currentKinds,
       false,
