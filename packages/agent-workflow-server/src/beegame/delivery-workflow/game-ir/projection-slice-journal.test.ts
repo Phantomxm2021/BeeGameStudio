@@ -785,6 +785,58 @@ describe('Game IR projection slice journal', () => {
     }
   })
 
+  test('durably appends multiple records in one call without freezing the next append', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = fixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
+      )
+      const records = [
+        {
+          fragmentId,
+          node: {
+            id: 'condition.a',
+            kind: 'gameplay.condition',
+            value: { expression: { kind: 'boolean', value: true } },
+            references: [],
+            edges: [],
+          },
+        },
+        {
+          fragmentId,
+          node: {
+            id: 'condition.b',
+            kind: 'gameplay.condition',
+            value: { expression: { kind: 'boolean', value: false } },
+            references: [],
+            edges: [],
+          },
+        },
+      ] as const
+      await expect(journal.appendRecords(records)).resolves.toEqual({
+        acceptedCount: 2,
+      })
+      expect(journal.currentSliceRecordPrefix).toEqual([
+        { id: 'condition.a', kind: 'gameplay.condition' },
+        { id: 'condition.b', kind: 'gameplay.condition' },
+      ])
+      const firstDigests = journal.currentSliceRecordDigests
+      const reloaded = await loadGameIrProjectionSliceJournal(input)
+      expect(reloaded.currentSliceRecordDigests).toEqual(firstDigests)
+      await reloaded.completeCurrentSlice()
+      expect(reloaded.entries[0]!.semantic.nodes.map(node => node.id)).toEqual([
+        'condition.a',
+        'condition.b',
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('replays an exact prefix idempotently and diagnoses conflicts or descending IDs', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {

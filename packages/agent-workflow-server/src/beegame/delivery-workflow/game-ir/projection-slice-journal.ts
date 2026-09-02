@@ -1519,11 +1519,11 @@ export class GameIrProjectionSliceJournal {
         ...body,
         recordDigest: digestGameIrValue(body),
       }
-      pendingRecords.push(record)
+      pendingRecords = [...pendingRecords, record]
       const pending = {
         sliceId: slice.sliceId,
         predecessorDigest,
-        records: Object.freeze(pendingRecords),
+        records: Object.freeze([...pendingRecords]),
       }
       this.state = await persist(this.path, {
         ...this.state,
