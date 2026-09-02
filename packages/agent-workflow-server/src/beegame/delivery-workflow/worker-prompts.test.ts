@@ -1280,6 +1280,8 @@ describe('worker prompts', () => {
     expect(prompt).toContain(
       'edges[].type, edges[].targetId, and edges[].targetType',
     )
+    expect(prompt).toContain('referencePolicy')
+    expect(prompt).toContain('exact-edge-targets')
     expect(prompt).not.toContain('projectionContract exposes relationships')
   })
 

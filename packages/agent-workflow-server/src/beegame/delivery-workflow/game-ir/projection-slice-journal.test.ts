@@ -308,6 +308,35 @@ describe('Game IR projection slice journal', () => {
       )
       await journal.append(emptyCompletion(first!.sliceId))
       await journal.append(emptyCompletion(second!.sliceId))
+      await journal.appendRecords(
+        [
+          {
+            fragmentId,
+            node: {
+              id: 'balance.cost.admitted',
+              kind: 'balance.cost',
+              value: { label: 'Admitted cost' },
+              references: [
+                {
+                  targetId: 'balance.variable.hp',
+                  targetType: 'balance.variable',
+                },
+              ],
+              edges: [
+                {
+                  type: 'amount',
+                  targetId: 'balance.variable.hp',
+                  targetType: 'balance.variable',
+                },
+              ],
+            },
+          },
+        ],
+        third!.sliceId,
+      )
+      const prefixBefore = journal.currentSliceRecordPrefix
+      const digestsBefore = journal.currentSliceRecordDigests
+      const pendingDigestBefore = journal.snapshot.pendingSlice?.pendingDigest
       const result = await journal.appendRecords(
         [
           {
@@ -333,11 +362,50 @@ describe('Game IR projection slice journal', () => {
       expect(result.diagnostic?.reason).toMatch(
         /relationship references do not match role edges/i,
       )
+      expect(result.diagnostic?.reason).toContain(
+        'expected target IDs [balance.variable.missing]',
+      )
+      expect(result.diagnostic?.reason).toContain('received target IDs []')
       expect(journal.entries.map(entry => entry.sliceId)).toEqual([
         first!.sliceId,
         second!.sliceId,
       ])
-      expect(journal.currentSliceRecordPrefix).toEqual([])
+      expect(journal.currentSliceRecordPrefix).toEqual(prefixBefore)
+      expect(journal.currentSliceRecordDigests).toEqual(digestsBefore)
+      expect(journal.snapshot.pendingSlice?.pendingDigest).toBe(
+        pendingDigestBefore,
+      )
+      const corrected = await journal.appendRecords(
+        [
+          {
+            fragmentId,
+            node: {
+              id: 'balance.cost.invalid',
+              kind: 'balance.cost',
+              value: { label: 'Corrected cost' },
+              references: [
+                {
+                  targetId: 'balance.variable.missing',
+                  targetType: 'balance.variable',
+                },
+              ],
+              edges: [
+                {
+                  type: 'amount',
+                  targetId: 'balance.variable.missing',
+                  targetType: 'balance.variable',
+                },
+              ],
+            },
+          },
+        ],
+        third!.sliceId,
+      )
+      expect(corrected.acceptedCount).toBe(1)
+      expect(journal.currentSliceRecordPrefix).toEqual([
+        ...prefixBefore,
+        { id: 'balance.cost.invalid', kind: 'balance.cost' },
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

@@ -104,6 +104,9 @@ export type BalanceRelationshipRole = Readonly<{
   required: boolean
   singleton: boolean
 }>
+export type BalanceReferencePolicy = Readonly<{
+  kind: 'exact-edge-targets'
+}>
 
 const role = (
   targetKinds: readonly string[],
@@ -114,6 +117,9 @@ const role = (
     required: options.required === true,
     singleton: options.singleton === true,
   })
+
+const EXACT_EDGE_TARGETS_REFERENCE_POLICY: BalanceReferencePolicy =
+  Object.freeze({ kind: 'exact-edge-targets' })
 
 /** The single schema-owned authority for Balance kinds, values, and roles. */
 export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
@@ -197,6 +203,7 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
       }),
       unit: role(['balance.unit'], { required: true, singleton: true }),
     }),
+    referencePolicy: EXACT_EDGE_TARGETS_REFERENCE_POLICY,
   }),
   'balance.economy-sink': Object.freeze({
     valueJsonSchema: projectionValueSchema({
@@ -209,6 +216,7 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
       }),
       unit: role(['balance.unit'], { required: true, singleton: true }),
     }),
+    referencePolicy: EXACT_EDGE_TARGETS_REFERENCE_POLICY,
   }),
   'balance.progression-curve': Object.freeze({
     valueJsonSchema: projectionValueSchema({
@@ -237,6 +245,7 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
         singleton: true,
       }),
     }),
+    referencePolicy: EXACT_EDGE_TARGETS_REFERENCE_POLICY,
   }),
   'balance.cost': Object.freeze({
     valueJsonSchema: projectionValueSchema({
@@ -248,6 +257,7 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
         singleton: true,
       }),
     }),
+    referencePolicy: EXACT_EDGE_TARGETS_REFERENCE_POLICY,
   }),
   'balance.reward-cost-binding': Object.freeze({
     valueJsonSchema: projectionValueSchema({
@@ -261,6 +271,7 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
         singleton: true,
       }),
     }),
+    referencePolicy: EXACT_EDGE_TARGETS_REFERENCE_POLICY,
   }),
 } as const)
 
@@ -591,12 +602,14 @@ function validateRoles(
 }
 
 function exactRoleReferences(node: GameIrNode): void {
+  const manifest =
+    BALANCE_DOMAIN_MANIFEST[
+      node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST
+    ]
   if (
-    node.kind !== 'balance.economy-source' &&
-    node.kind !== 'balance.economy-sink' &&
-    node.kind !== 'balance.reward' &&
-    node.kind !== 'balance.cost' &&
-    node.kind !== 'balance.reward-cost-binding'
+    !manifest ||
+    !('referencePolicy' in manifest) ||
+    manifest.referencePolicy?.kind !== 'exact-edge-targets'
   )
     return
   const edgeTargets = node.edges
@@ -609,7 +622,9 @@ function exactRoleReferences(node: GameIrNode): void {
     edgeTargets.length !== referenceTargets.length ||
     edgeTargets.some((targetId, index) => targetId !== referenceTargets[index])
   )
-    fail(`node ${node.id} relationship references do not match role edges`)
+    fail(
+      `node ${node.id} relationship references do not match role edges: expected target IDs [${edgeTargets.join(', ')}], received target IDs [${referenceTargets.join(', ')}]`,
+    )
 }
 
 function parseVariableValue(

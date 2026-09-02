@@ -73,6 +73,24 @@ describe('Game IR worker operation contracts', () => {
     }
   })
 
+  test('exposes Balance reference policy only for kinds governed by it', () => {
+    const contract = buildGameIrProjectionContract('balance')
+    for (const kind of [
+      'balance.economy-source',
+      'balance.economy-sink',
+      'balance.reward',
+      'balance.cost',
+      'balance.reward-cost-binding',
+    ])
+      expect(
+        contract.nodes.find(node => node.kind === kind)?.referencePolicy,
+      ).toEqual({ kind: 'exact-edge-targets' })
+    expect(
+      contract.nodes.find(node => node.kind === 'balance.progression-curve')
+        ?.referencePolicy,
+    ).toBeUndefined()
+  })
+
   test('does not allow the known schema-valid producer-invalid gameplay projection', () => {
     const schema = buildGameIrProjectionSliceAdmissionJsonSchema(
       'gameplay',

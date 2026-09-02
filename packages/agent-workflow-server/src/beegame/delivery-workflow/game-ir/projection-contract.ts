@@ -1,4 +1,7 @@
-import { BALANCE_DOMAIN_MANIFEST } from './balance-schema'
+import {
+  BALANCE_DOMAIN_MANIFEST,
+  type BalanceReferencePolicy,
+} from './balance-schema'
 import { GAMEPLAY_DOMAIN_MANIFEST } from './gameplay-schema'
 import { IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST } from './implementation-verification-schema'
 import { PRESENTATION_DOMAIN_MANIFEST } from './presentation-schema'
@@ -25,9 +28,11 @@ type ManifestRelationship = Readonly<{
   singleton?: boolean
   cardinality?: string
 }>
+type ManifestReferencePolicy = BalanceReferencePolicy
 type ManifestEntry = Readonly<{
   valueJsonSchema: Readonly<Record<string, unknown>>
   relationships: Readonly<Record<string, ManifestRelationship>>
+  referencePolicy?: ManifestReferencePolicy
 }>
 
 const manifests: Record<
@@ -56,6 +61,7 @@ export type GameIrProjectionRelationshipContract = Readonly<{
   singleton: boolean
   cardinality: string
 }>
+export type GameIrProjectionReferencePolicy = BalanceReferencePolicy
 
 export type GameIrProjectionContract = Readonly<{
   moduleId: GameIrProjectionModuleId
@@ -63,6 +69,7 @@ export type GameIrProjectionContract = Readonly<{
     kind: string
     value: GameIrProjectionValueContract
     relationships: readonly GameIrProjectionRelationshipContract[]
+    referencePolicy?: GameIrProjectionReferencePolicy
   }>[]
   relationships: readonly GameIrProjectionRelationshipContract[]
   sourceEvidence: Readonly<{
@@ -124,6 +131,9 @@ export function buildGameIrProjectionContract(
         kind,
         value: valueContract(entry),
         relationships: Object.freeze(relationships),
+        ...(entry.referencePolicy
+          ? { referencePolicy: Object.freeze({ ...entry.referencePolicy }) }
+          : {}),
       })
     })
   const relationships = Object.freeze(

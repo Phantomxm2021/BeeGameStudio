@@ -326,10 +326,10 @@ export function renderGameIrProjectionSliceAuthority(
     '',
     '### Node value contracts',
     '',
-    '| kind | required | optional | fields | edge rules |',
-    '| --- | --- | --- | --- | --- |',
+    '| kind | required | optional | fields | edge rules | reference policy |',
+    '| --- | --- | --- | --- | --- | --- |',
     ...authority.slice.nodes.map(node =>
-      `| ${node.kind} | ${tableCell(node.value.required)} | ${tableCell(node.value.optional)} | ${tableCell(node.value.fields)} | ${tableCell(node.relationships)} |`,
+      `| ${node.kind} | ${tableCell(node.value.required)} | ${tableCell(node.value.optional)} | ${tableCell(node.value.fields)} | ${tableCell(node.relationships)} | ${tableCell(node.referencePolicy ?? '')} |`,
     ),
     '',
     '## Dependency context',
