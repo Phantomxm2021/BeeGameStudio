@@ -7,12 +7,15 @@ import {
 } from './types'
 import { foundationFactDefinition } from './foundation-fact-definitions'
 import {
-  buildGameIrEvidenceFragmentCatalog,
   deriveProjectionSlicePlan,
   normalizeGameIrProjectionSliceContext,
   type GameIrProjectionSlice,
 } from './game-ir/projection-slices'
 import { canonicalGameIrJson } from './game-ir/model'
+import {
+  buildGameIrProjectionSliceAuthority,
+  renderGameIrProjectionSliceAuthority,
+} from './game-ir/projection-slice-authority'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Judge quality by distinct implementable decisions and traceability, not document length. Use the minimum sufficient headings, tables, rows, diagrams and examples. Do not expand a contract purpose phrase by phrase into H3 headings. Represent each decision in one authoritative prose, table or diagram representation; elsewhere use a stable owner reference. Do not narrate tables or diagrams. Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate. Record a genuinely N/A item once with its reason and impact; never invent a system. Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets. Treat each section as the final decision record: Complete every required section and production material, omit only equivalent repetition, and keep rationale to the minimum needed for a production decision.'
@@ -169,25 +172,61 @@ function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
 }
 
 function formatPacketContract(request: WorkerDispatchRequest): string {
-  const packet = request.contract.packet
-  const currentSlice =
+  const isGameIrProjection =
     request.workerType === 'game-ir-compiler' &&
     request.contract.kind === 'projection'
-      ? packet
-        ? gameIrProjectionSliceForRequest(request)
-        : gameIrProjectionSliceFromContinuation(request)
-      : undefined
+  const packet = request.contract.packet
+  if (isGameIrProjection) {
+    if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+      throw new Error(
+        'Game IR projection requires one immutable operation packet',
+      )
+    const currentSlice = gameIrProjectionSliceForRequest(request)
+    const sliceContext = projectionSliceContextForRequest(request, currentSlice)
+    const retryDiagnostic = request.contract.retryDiagnostic
+    const authority = buildGameIrProjectionSliceAuthority({
+      packet: packet as Parameters<
+        typeof buildGameIrProjectionSliceAuthority
+      >[0]['packet'],
+      slice: currentSlice,
+      sliceContext,
+      compileRequestDigest:
+        typeof request.contract.compileRequestDigest === 'string'
+          ? request.contract.compileRequestDigest
+          : undefined,
+      foundationReadyReceiptDigest:
+        typeof request.contract.foundationReadyReceiptDigest === 'string'
+          ? request.contract.foundationReadyReceiptDigest
+          : undefined,
+      ...(retryDiagnostic &&
+      typeof retryDiagnostic === 'object' &&
+      !Array.isArray(retryDiagnostic) &&
+      typeof (retryDiagnostic as Record<string, unknown>).sliceId === 'string' &&
+      typeof (retryDiagnostic as Record<string, unknown>).reason === 'string'
+        ? {
+            retryDiagnostic: {
+              scope:
+                typeof (retryDiagnostic as Record<string, unknown>).scope ===
+                'string'
+                  ? ((retryDiagnostic as Record<string, unknown>)
+                      .scope as 'slice' | 'record')
+                  : 'slice',
+              ...(retryDiagnostic as Record<string, unknown>),
+            } as Parameters<
+              typeof buildGameIrProjectionSliceAuthority
+            >[0]['retryDiagnostic'],
+          }
+        : {}),
+    })
+    return renderGameIrProjectionSliceAuthority(authority)
+  }
   const projected =
     packet && typeof packet === 'object' && !Array.isArray(packet)
       ? projectPacketForModel(
           request.workerType,
           packet as Record<string, unknown>,
-          currentSlice,
         )
       : undefined
-  const sliceContext = currentSlice
-    ? projectionSliceContextForRequest(request, currentSlice)
-    : undefined
   const contract: Record<string, unknown> = {
     workerType: request.workerType,
     ...(typeof request.contract.kind === 'string'
@@ -203,37 +242,6 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
       ? { correctionDiagnostic: request.contract.correctionDiagnostic }
       : {}),
     ...(projected ? { packet: projected } : {}),
-    ...(currentSlice
-      ? {
-          currentSlice: {
-            sliceId: currentSlice.sliceId,
-            nodeKinds: currentSlice.nodeKinds,
-            dependencyContext: sliceContext,
-            ...(request.contract.retryDiagnostic
-              ? { retryDiagnostic: request.contract.retryDiagnostic }
-              : {}),
-          },
-        }
-      : {}),
-    ...(!packet && currentSlice && Array.isArray(request.contract.progress)
-      ? { progress: request.contract.progress }
-      : {}),
-  }
-  if (!packet && currentSlice) {
-    delete contract.currentSlice
-    return JSON.stringify({
-      ...contract,
-      ...(typeof request.contract.packetDigest === 'string'
-        ? { packetDigest: request.contract.packetDigest }
-        : {}),
-      currentSlice: {
-        ...currentSlice,
-        dependencyContext: sliceContext,
-        ...(request.contract.retryDiagnostic
-          ? { retryDiagnostic: request.contract.retryDiagnostic }
-          : {}),
-      },
-    })
   }
   return JSON.stringify(contract)
 }
@@ -263,34 +271,6 @@ function projectionSliceContextForRequest(
     sliceId: slice.sliceId,
     value: request.contract.sliceContext,
   })
-}
-
-function gameIrProjectionSliceFromContinuation(
-  request: WorkerDispatchRequest,
-): GameIrProjectionSlice {
-  const candidate = request.contract.currentSlice
-  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
-    throw new Error(
-      'Game IR projection continuation is missing its exact current slice',
-    )
-  const expected = canonicalGameIrJson(candidate)
-  const modules = [
-    'gameplay',
-    'balance',
-    'world-scene',
-    'presentation',
-    'resource-realization',
-    'implementation-verification',
-  ] as const
-  for (const moduleId of modules) {
-    const slice = deriveProjectionSlicePlan(moduleId).slices.find(
-      item => item.sliceId === (candidate as Record<string, unknown>).sliceId,
-    )
-    if (slice && canonicalGameIrJson(slice) === expected) return slice
-  }
-  throw new Error(
-    'Game IR projection continuation current slice is stale or non-canonical',
-  )
 }
 
 function gameIrProjectionSliceForRequest(
@@ -463,7 +443,6 @@ function modelIssue(
 function projectPacketForModel(
   workerType: WorkerDispatchRequest['workerType'],
   packet: Record<string, unknown>,
-  currentSlice?: GameIrProjectionSlice,
 ): Record<string, unknown> {
   if (workerType === 'foundation-fact-extractor') {
     return {
@@ -523,7 +502,7 @@ function projectPacketForModel(
     return projected
   }
   if (workerType === 'game-ir-compiler')
-    return projectGameIrPacketForModel(packet, currentSlice)
+    return projectGameIrValidationPacket(packet)
   return packet
 }
 
@@ -580,42 +559,6 @@ function modelGameIrValidationSection(
   return { ...ref, bytes: section.bytes }
 }
 
-function modelGameIrSource(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return undefined
-  const source = value as Record<string, unknown>
-  if (typeof source.moduleId !== 'string') return undefined
-  const sectionBytes = source.sectionBytes
-  if (
-    !sectionBytes ||
-    typeof sectionBytes !== 'object' ||
-    Array.isArray(sectionBytes)
-  )
-    return { moduleId: source.moduleId }
-  const sections = Array.isArray(source.sectionIndex)
-    ? source.sectionIndex.flatMap(section => {
-        const projected = modelGameIrSection(section)
-        if (!projected) return []
-        const key = `${projected.documentPath}#${projected.sectionId}`
-        return Object.hasOwn(sectionBytes, key) ? [projected] : []
-      })
-    : []
-  const catalog = buildGameIrEvidenceFragmentCatalog({
-    sectionIndex: sections as Array<{
-      documentPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
-      sectionId: string
-      heading?: string
-    }>,
-    sectionBytes: sectionBytes as Record<string, string>,
-  })
-  return {
-    moduleId: source.moduleId,
-    sections: catalog.modelSections,
-  }
-}
-
 function projectGameIrDependencies(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(projectGameIrDependencies)
   if (!value || typeof value !== 'object') return value
@@ -644,75 +587,6 @@ function modelGameIrModule(
   return { moduleId: module.moduleId, nodes: module.nodes }
 }
 
-function modelGameIrProjectionContract(
-  value: unknown,
-  nodeKinds?: readonly string[],
-): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return undefined
-  const contract = value as Record<string, unknown>
-  if (typeof contract.moduleId !== 'string') return undefined
-  const rawNodes = Array.isArray(contract.nodes) ? contract.nodes : undefined
-  const selectedNodes = nodeKinds
-    ? nodeKinds
-        .map(kind =>
-          rawNodes?.find(
-            node =>
-              node &&
-              typeof node === 'object' &&
-              !Array.isArray(node) &&
-              (node as Record<string, unknown>).kind === kind,
-          ),
-        )
-        .filter(node => node !== undefined)
-    : rawNodes
-  const nodes = selectedNodes
-    ? selectedNodes.map(node => {
-        if (!node || typeof node !== 'object' || Array.isArray(node))
-          return node
-        const { relationships, ...nodeWithoutRelationships } = node as Record<
-          string,
-          unknown
-        >
-        return {
-          ...nodeWithoutRelationships,
-          ...(Array.isArray(relationships)
-            ? {
-                edgeRules: relationships.map(rule => {
-                  if (!rule || typeof rule !== 'object' || Array.isArray(rule))
-                    return rule
-                  const { nodeKind: _nodeKind, ...edgeRule } = rule as Record<
-                    string,
-                    unknown
-                  >
-                  return edgeRule
-                }),
-              }
-            : {}),
-        }
-      })
-    : undefined
-  return {
-    moduleId: contract.moduleId,
-    ...(nodes ? { nodes } : {}),
-    output: {
-      nodeFields: ['id', 'kind', 'value', 'references', 'edges'],
-      referenceFields: ['targetId', 'targetType'],
-      edgeFields: ['type', 'targetId', 'targetType'],
-      requiredEdgeFields: ['type', 'targetId', 'targetType'],
-      edgeMapping: {
-        'edges[].type': 'edgeRules[].role',
-        'edges[].targetId': 'target node id',
-        'edges[].targetType': 'target node kind',
-      },
-    },
-    ...(contract.sourceEvidence &&
-    typeof contract.sourceEvidence === 'object' &&
-    !Array.isArray(contract.sourceEvidence)
-      ? { sourceEvidence: contract.sourceEvidence }
-      : {}),
-  }
-}
 
 function projectGameIrValidationPacket(
   packet: Record<string, unknown>,
@@ -748,26 +622,6 @@ function projectGameIrValidationPacket(
     if (Object.hasOwn(packet, key))
       projected[key] = projectGameIrDependencies(packet[key])
   }
-  return projected
-}
-
-function projectGameIrPacketForModel(
-  packet: Record<string, unknown>,
-  currentSlice?: GameIrProjectionSlice,
-): Record<string, unknown> {
-  const isValidation =
-    typeof packet.moduleBytes === 'string' || Array.isArray(packet.checkIds)
-  if (isValidation) return projectGameIrValidationPacket(packet)
-  const projected: Record<string, unknown> = {}
-  const source = modelGameIrSource(packet.source)
-  if (source) projected.source = source
-  const projectionContract = modelGameIrProjectionContract(
-    packet.projectionContract,
-    currentSlice?.nodeKinds,
-  )
-  if (projectionContract) projected.projectionContract = projectionContract
-  if (Object.hasOwn(packet, 'dependencies'))
-    projected.dependencies = projectGameIrDependencies(packet.dependencies)
   return projected
 }
 

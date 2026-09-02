@@ -1,11 +1,58 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { buildWorkerPrompt } from './worker-prompts'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import { digestGameIrValue } from './game-ir/model'
+import { sourceSectionsForGameIrProjectionSlice } from './game-ir/projection-slice-authority'
 
 function countOccurrences(value: string, needle: string): number {
   return value.split(needle).length - 1
+}
+
+function syntheticProjectionPacket(sliceId = 'gameplay.slice.0') {
+  const compileRequest = {
+    taskId: 'projection-task',
+    foundation: {
+      foundationRevision: 'revision',
+      receiptDigest: 'r'.repeat(64),
+    },
+  }
+  const selectors = sourceSectionsForGameIrProjectionSlice(sliceId)
+  const sectionIndex = selectors.map((selector, index) => {
+    const text = `SYNTHETIC_AUTHORITY_${index}`
+    return {
+      documentPath: selector.documentPath,
+      sectionId: selector.sectionId,
+      heading: selector.sectionId,
+      startLine: index + 1,
+      endLine: index + 1,
+      digest: createHash('sha256').update(text).digest('hex'),
+    }
+  })
+  return {
+    schemaVersion: 'synthetic-projection-packet.v1',
+    packetDigest: 'p'.repeat(64),
+    source: {
+      schemaVersion: 'game-ir-domain-source.v1',
+      taskId: compileRequest.taskId,
+      moduleId: 'gameplay',
+      compileRequest,
+      authoritySectionIndex: sectionIndex,
+      sectionIndex,
+      sectionBytes: Object.fromEntries(
+        sectionIndex.map((section, index) => [
+          `${section.documentPath}#${section.sectionId}`,
+          `SYNTHETIC_AUTHORITY_${index}`,
+        ]),
+      ),
+      sourceDigest: 's'.repeat(64),
+    },
+    semanticPacket: {},
+    projectionContract: { moduleId: 'gameplay', nodes: [], relationships: [], sourceEvidence: {} },
+    dependencies: {},
+  }
 }
 
 describe('worker prompts', () => {
@@ -1171,7 +1218,8 @@ describe('worker prompts', () => {
     expect(prompt).toContain('health pool')
   })
 
-  test('projects a Game IR projection packet to source semantics and target catalogs only', () => {
+  test('projects a Game IR projection packet to selected Markdown authority', () => {
+    const packet = syntheticProjectionPacket()
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -1188,191 +1236,20 @@ describe('worker prompts', () => {
           availablePriorNodes: [],
           requiredCurrentNodes: [{ id: 'state-start', kind: 'gameplay.state' }],
         },
-        retryDiagnostic: {
-          sliceId: 'gameplay.slice.0',
-          reason: 'gameplay module must declare an initial state',
-        },
-        packet: {
-          schemaVersion: 'game-ir-gameplay-projection-operation-packet.v1',
-          packetDigest: 'a'.repeat(64),
-          source: {
-            schemaVersion: 'game-ir-domain-source.v1',
-            taskId: 'task',
-            moduleId: 'gameplay',
-            compileRequest: {
-              taskId: 'task',
-              foundation: {
-                foundationRevision: 'rev',
-                receiptDigest: 'b'.repeat(64),
-              },
-            },
-            authoritySectionIndex: [
-              {
-                documentPath: 'docs/GDD.md',
-                sectionId: 'loop',
-                heading: 'Loop',
-                startLine: 1,
-                endLine: 3,
-                digest: 'c'.repeat(64),
-              },
-            ],
-            sectionIndex: [
-              {
-                documentPath: 'docs/GDD.md',
-                sectionId: 'loop',
-                heading: 'Loop',
-                startLine: 1,
-                endLine: 3,
-                digest: 'c'.repeat(64),
-              },
-            ],
-            sectionBytes: { 'docs/GDD.md#loop': 'PLAYER_LOOP_SENTINEL' },
-            sourceDigest: 'd'.repeat(64),
-          },
-          semanticPacket: {
-            schemaVersion: 'game-ir-domain-semantic-packet.v1',
-            taskId: 'task',
-            moduleId: 'gameplay',
-            foundationRevision: 'rev',
-            sourceDigest: 'd'.repeat(64),
-            mechanicalReceiptDigest: 'e'.repeat(64),
-            allowedNodeKinds: ['gameplay.state'],
-            allowedRelationshipTypes: [],
-            allowedEvidencePointers: [],
-            forbiddenTargets: [],
-            packetDigest: 'f'.repeat(64),
-          },
-          projectionContract: {
-            moduleId: 'gameplay',
-            nodes: [
-              {
-                kind: 'gameplay.state',
-                value: {
-                  required: ['label'],
-                  optional: [],
-                  fields: { label: { type: 'string' } },
-                },
-                relationships: [],
-              },
-            ],
-            relationships: [
-              {
-                nodeKind: 'gameplay.state',
-                role: 'obsolete-top-level-copy',
-                targetKinds: [],
-                required: false,
-                singleton: false,
-                cardinality: 'zero-or-more',
-              },
-            ],
-            sourceEvidence: {
-              nodeCoverage:
-                'each emitted node ID appears in exactly one evidence group',
-              grouping:
-                'one or more node IDs per service-owned evidence fragment',
-              fragmentId:
-                'exact source.sections[].evidenceFragments[].fragmentId',
-            },
-          },
-          dependencies: {
-            gameplayTargets: [{ id: 'state-start', kind: 'gameplay.state' }],
-            requiredBalanceTargets: [],
-            phase4ClosureDigest: '1'.repeat(64),
-          },
-        },
-      },
-    })
-    const contract = JSON.parse(
-      prompt
-        .split('\n')
-        .find(line => line.startsWith('Model packet contract: '))!
-        .slice('Model packet contract: '.length),
-    ) as Record<string, unknown> & {
-      packet: Record<string, unknown>
-      currentSlice: unknown
-    }
-    const packet = contract.packet
-    expect(contract.currentSlice).toEqual({
-      sliceId: 'gameplay.slice.0',
-      nodeKinds: [
-        'gameplay.condition',
-        'gameplay.effect',
-        'gameplay.entity',
-        'gameplay.event',
-        'gameplay.outcome',
-        'gameplay.state',
-      ],
-      dependencyContext: {
-        availablePriorNodes: [],
-        requiredCurrentNodes: [{ id: 'state-start', kind: 'gameplay.state' }],
-      },
-      retryDiagnostic: {
-        sliceId: 'gameplay.slice.0',
-        reason: 'gameplay module must declare an initial state',
-      },
-    })
-    expect(packet).toEqual({
-      source: {
-        moduleId: 'gameplay',
-        sections: [
-          {
-            documentPath: 'docs/GDD.md',
-            sectionId: 'loop',
-            heading: 'Loop',
-            evidenceFragments: [
-              { fragmentId: 'e0.0', text: 'PLAYER_LOOP_SENTINEL' },
-            ],
-          },
-        ],
-      },
-      projectionContract: {
-        moduleId: 'gameplay',
-        nodes: [
-          {
-            kind: 'gameplay.state',
-            value: {
-              required: ['label'],
-              optional: [],
-              fields: { label: { type: 'string' } },
-            },
-            edgeRules: [],
-          },
-        ],
-        output: {
-          nodeFields: ['id', 'kind', 'value', 'references', 'edges'],
-          referenceFields: ['targetId', 'targetType'],
-          edgeFields: ['type', 'targetId', 'targetType'],
-          requiredEdgeFields: ['type', 'targetId', 'targetType'],
-          edgeMapping: {
-            'edges[].type': 'edgeRules[].role',
-            'edges[].targetId': 'target node id',
-            'edges[].targetType': 'target node kind',
-          },
-        },
-        sourceEvidence: {
-          nodeCoverage:
-            'each emitted node ID appears in exactly one evidence group',
-          grouping: 'one or more node IDs per service-owned evidence fragment',
-          fragmentId: 'exact source.sections[].evidenceFragments[].fragmentId',
-        },
-      },
-      dependencies: {
-        gameplayTargets: [{ id: 'state-start', kind: 'gameplay.state' }],
-        requiredBalanceTargets: [],
+        packet,
       },
     })
     expect(prompt).toContain('model contract is the sole input')
     expect(prompt).toContain('current dependency-frontier slice')
     expect(prompt).not.toContain('correctionDiagnostic')
-    expect(prompt).not.toContain('obsolete-top-level-copy')
-    expect(prompt).toContain('PLAYER_LOOP_SENTINEL')
-    expect(prompt).not.toContain('compileRequest')
+    expect(prompt).toContain('SYNTHETIC_AUTHORITY_0')
     expect(prompt).not.toContain('authoritySectionIndex')
     expect(prompt).not.toContain('semanticPacket')
     expect(prompt).not.toContain('packetDigest')
   })
 
   test('uses unambiguous edge rules and declares the durable edge DTO in the model contract', () => {
+    const packet = syntheticProjectionPacket('gameplay.slice.1')
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -1389,89 +1266,12 @@ describe('worker prompts', () => {
           availablePriorNodes: [],
           requiredCurrentNodes: [],
         },
-        packet: {
-          source: { moduleId: 'gameplay' },
-          projectionContract: {
-            moduleId: 'gameplay',
-            nodes: [
-              {
-                kind: 'gameplay.transition',
-                value: {
-                  required: ['label'],
-                  optional: [],
-                  fields: { label: { type: 'string' } },
-                },
-                relationships: [
-                  {
-                    nodeKind: 'gameplay.transition',
-                    role: 'on',
-                    targetKinds: ['gameplay.action'],
-                    required: true,
-                    singleton: true,
-                    cardinality: 'exactly-one',
-                  },
-                ],
-              },
-            ],
-            relationships: [
-              {
-                nodeKind: 'gameplay.transition',
-                role: 'on',
-                targetKinds: ['gameplay.action'],
-                required: true,
-                singleton: true,
-                cardinality: 'exactly-one',
-              },
-            ],
-          },
-        },
+        packet,
       },
     })
-    const contract = JSON.parse(
-      prompt
-        .split('\n')
-        .find(line => line.startsWith('Model packet contract: '))!
-        .slice('Model packet contract: '.length),
-    ) as {
-      packet: {
-        projectionContract: Record<string, unknown>
-        source: Record<string, unknown>
-      }
-    }
-    expect(contract.packet.projectionContract).toEqual({
-      moduleId: 'gameplay',
-      nodes: [
-        {
-          kind: 'gameplay.transition',
-          value: {
-            required: ['label'],
-            optional: [],
-            fields: { label: { type: 'string' } },
-          },
-          edgeRules: [
-            {
-              role: 'on',
-              targetKinds: ['gameplay.action'],
-              required: true,
-              singleton: true,
-              cardinality: 'exactly-one',
-            },
-          ],
-        },
-      ],
-      output: {
-        nodeFields: ['id', 'kind', 'value', 'references', 'edges'],
-        referenceFields: ['targetId', 'targetType'],
-        edgeFields: ['type', 'targetId', 'targetType'],
-        requiredEdgeFields: ['type', 'targetId', 'targetType'],
-        edgeMapping: {
-          'edges[].type': 'edgeRules[].role',
-          'edges[].targetId': 'target node id',
-          'edges[].targetType': 'target node kind',
-        },
-      },
-    })
-    expect(contract.packet.source).toEqual({ moduleId: 'gameplay' })
+    expect(prompt).toContain('SELECTED_AUTHORITY')
+    expect(prompt).toContain('causes')
+    expect(prompt).toContain('triggered-by')
     expect(prompt).toContain('edgeRules')
     expect(prompt).toContain(
       'edges[].type, edges[].targetId, and edges[].targetType',
@@ -1599,5 +1399,38 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('authoritySectionIndex')
     expect(prompt).not.toContain('moduleDigest')
     expect(prompt).not.toContain('targetManifestDigest')
+  })
+
+  test('projects Game IR slices as compact Markdown authority', () => {
+    const packet = syntheticProjectionPacket()
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'game-ir-compiler',
+      phase: 'GAME_IR_COMPILATION',
+      revision: 'revision',
+      allowedPaths: [],
+      contract: {
+        kind: 'projection',
+        currentSlice: 'gameplay.slice.0',
+        sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [] },
+        compileRequestDigest: digestGameIrValue(packet.source.compileRequest),
+        foundationReadyReceiptDigest: packet.source.compileRequest.foundation.receiptDigest,
+        packet,
+      },
+    })
+    expect(prompt).toContain('SELECTED_AUTHORITY')
+    expect(prompt).toContain('## Output contract')
+    expect(prompt).toContain('SYNTHETIC_AUTHORITY_0')
+    for (const forbidden of [
+      'authoritySectionIndex',
+      'sectionBytes',
+      'packetDigest',
+      'semanticPacket',
+      'FORBIDDEN_FULL_PACKET_MARKER',
+    ])
+      expect(prompt).not.toContain(forbidden)
   })
 })
