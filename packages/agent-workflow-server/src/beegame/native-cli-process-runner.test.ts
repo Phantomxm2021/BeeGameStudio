@@ -57,7 +57,16 @@ function startRuntime(
   })
 }
 
-function recordStreamCommand(mode: 'complete' | 'cumulative' | 'empty') {
+function recordStreamCommand(
+  mode:
+    | 'complete'
+    | 'cumulative'
+    | 'empty'
+    | 'invalid-nonterminal'
+    | 'incorrect-terminal'
+    | 'dsml'
+    | 'tool',
+) {
   const script = `
 const decoder = new TextDecoder(); let buffer = ''; let count = 0;
 for await (const chunk of Bun.stdin.stream()) {
@@ -69,12 +78,17 @@ for await (const chunk of Bun.stdin.stream()) {
     if (message.type !== 'user') continue; count += 1;
     const emit = text => console.log(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text } } }));
     if (count === 1) {
-      emit(${JSON.stringify('{"record":"node","id":"n1"}\n')});
+      if (${JSON.stringify(mode)} === 'invalid-nonterminal') emit(${JSON.stringify('{not-json-record}\n')});
+      else if (${JSON.stringify(mode)} === 'dsml') emit(${JSON.stringify('<tool_use name="Write">\n')});
+      else if (${JSON.stringify(mode)} === 'tool') console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Write', input: {} }] } }));
+      else emit(${JSON.stringify('{"record":"node","id":"n1"}\n')});
       if (${JSON.stringify(mode)} === 'cumulative') emit(${JSON.stringify('{"record":"node","id":"n1"}\n{"record":"node","id":"n1"}\n')});
       else if (${JSON.stringify(mode)} === 'empty') console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
       else console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'max_tokens' }));
     } else if (${JSON.stringify(mode)} !== 'empty') {
-      emit(${JSON.stringify('{"record":"done","sliceId":"slice-1"}\n')});
+      emit(${JSON.stringify(mode)} === 'incorrect-terminal'
+        ? ${JSON.stringify('{"record":"done","sliceId":"wrong-slice"}\n')}
+        : ${JSON.stringify('{"record":"done","sliceId":"slice-1"}\n')});
       console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
     } else {
       console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
@@ -306,6 +320,181 @@ describe('native CLI process runner', () => {
           '{"record":"node","id":"n1"}\n{"record":"done","sliceId":"slice-1"}\n',
       }),
     ])
+    runtime.dispose?.()
+  })
+
+  test('passes a syntactically invalid non-terminal record to Stage 5 unchanged', async () => {
+    const runtime = await createNativeCliProcessRunner({
+      command: recordStreamCommand('invalid-nonterminal'),
+      observabilityFactory: () => ({
+        beginTurn: () => undefined,
+        observeStdoutChunk: () => undefined,
+        observeLine: () => undefined,
+        observeMessage: () => undefined,
+        finishTurn: () => undefined,
+        flush: async () => undefined,
+      }),
+    }).start({
+      sessionId: 'record-stream-session',
+      cwd: process.cwd(),
+      env: {},
+      workflowRecordStreamContract: {
+        version: 1,
+        terminalRecord: { record: 'done', sliceId: 'slice-1' },
+      },
+    })
+    const messages: Record<string, unknown>[] = []
+    await runtime.submit({
+      prompt: 'record stream',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(messages.at(-1)).toMatchObject({
+      type: 'result',
+      record_stream:
+        '{not-json-record}\n{"record":"done","sliceId":"slice-1"}\n',
+    })
+    runtime.dispose?.()
+  })
+
+  test('rejects DSML record-stream frames as provider protocol errors', async () => {
+    const runtime = await createNativeCliProcessRunner({
+      command: recordStreamCommand('dsml'),
+      observabilityFactory: () => ({
+        beginTurn: () => undefined,
+        observeStdoutChunk: () => undefined,
+        observeLine: () => undefined,
+        observeMessage: () => undefined,
+        finishTurn: () => undefined,
+        flush: async () => undefined,
+      }),
+    }).start({
+      sessionId: 'record-stream-session',
+      cwd: process.cwd(),
+      env: {},
+      workflowRecordStreamContract: {
+        version: 1,
+        terminalRecord: { record: 'done', sliceId: 'slice-1' },
+      },
+    })
+    await expect(
+      runtime.submit({
+        prompt: 'record stream',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow(
+      'provider_stream_protocol_error: record_stream emitted a DSML frame',
+    )
+    runtime.dispose?.()
+  })
+
+  test('rejects record-stream tool frames as provider protocol errors', async () => {
+    const runtime = await createNativeCliProcessRunner({
+      command: recordStreamCommand('tool'),
+      observabilityFactory: () => ({
+        beginTurn: () => undefined,
+        observeStdoutChunk: () => undefined,
+        observeLine: () => undefined,
+        observeMessage: () => undefined,
+        finishTurn: () => undefined,
+        flush: async () => undefined,
+      }),
+    }).start({
+      sessionId: 'record-stream-session',
+      cwd: process.cwd(),
+      env: {},
+      workflowRecordStreamContract: {
+        version: 1,
+        terminalRecord: { record: 'done', sliceId: 'slice-1' },
+      },
+    })
+    await expect(
+      runtime.submit({
+        prompt: 'record stream',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow(
+      'provider_stream_protocol_error: record_stream emitted a tool or DSML frame',
+    )
+    runtime.dispose?.()
+  })
+
+  test('rejects an incorrect record-stream terminal as a provider protocol error', async () => {
+    const runtime = await createNativeCliProcessRunner({
+      command: recordStreamCommand('incorrect-terminal'),
+      observabilityFactory: () => ({
+        beginTurn: () => undefined,
+        observeStdoutChunk: () => undefined,
+        observeLine: () => undefined,
+        observeMessage: () => undefined,
+        finishTurn: () => undefined,
+        flush: async () => undefined,
+      }),
+    }).start({
+      sessionId: 'record-stream-session',
+      cwd: process.cwd(),
+      env: {},
+      workflowRecordStreamContract: {
+        version: 1,
+        terminalRecord: { record: 'done', sliceId: 'slice-1' },
+      },
+    })
+    await expect(
+      runtime.submit({
+        prompt: 'record stream',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow(
+      'provider_stream_protocol_error: record_stream terminal record did not match the expected slice',
+    )
+    runtime.dispose?.()
+  })
+
+  test('rejects a blank physical record-stream line as a provider protocol error', async () => {
+    const script = `
+for await (const chunk of Bun.stdin.stream()) {
+  const text = new TextDecoder().decode(chunk);
+  if (!text.includes('"type":"user"')) continue;
+  console.log('');
+}
+`
+    const runtime = await createNativeCliProcessRunner({
+      command: [process.execPath, '-e', script],
+      observabilityFactory: () => ({
+        beginTurn: () => undefined,
+        observeStdoutChunk: () => undefined,
+        observeLine: () => undefined,
+        observeMessage: () => undefined,
+        finishTurn: () => undefined,
+        flush: async () => undefined,
+      }),
+    }).start({
+      sessionId: 'record-stream-session',
+      cwd: process.cwd(),
+      env: {},
+      workflowRecordStreamContract: {
+        version: 1,
+        terminalRecord: { record: 'done', sliceId: 'slice-1' },
+      },
+    })
+    await expect(
+      runtime.submit({
+        prompt: 'record stream',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow(
+      'provider_stream_protocol_error: record_stream emitted an internal blank line',
+    )
     runtime.dispose?.()
   })
 

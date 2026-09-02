@@ -549,6 +549,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     if (message.type === 'stream_event') {
       const text = streamedRecordText(message)
       if (text) {
+        this.observability.observeRecordStreamChunk?.(
+          Buffer.from(text, 'utf8'),
+        )
         turn.recordStreamContinuationPending = false
         if (
           turn.recordStreamOutput &&
@@ -594,6 +597,15 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         )
     ) {
       await this.completeRecordStreamTurn(turn)
+      return
+    }
+    if (terminal) {
+      await this.rejectRecordStreamTurn(
+        turn,
+        new Error(
+          'provider_stream_protocol_error: record_stream terminal record did not match the expected slice',
+        ),
+      )
       return
     }
     const responseMadeProgress = turn.recordStreamResponseOutput.length > 0
@@ -1080,30 +1092,7 @@ function assertRecordStreamLines(raw: string): void {
       throw new Error(
         'provider_stream_protocol_error: record_stream emitted an internal blank line',
       )
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(line)
-    } catch {
-      throw new Error(
-        'provider_stream_protocol_error: record_stream emitted malformed JSON',
-      )
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-      throw new Error(
-        'provider_stream_protocol_error: record_stream records must be JSON objects',
-      )
   }
-  const doneIndex = completeLines.findIndex(line => {
-    try {
-      return (JSON.parse(line) as Record<string, unknown>).record === 'done'
-    } catch {
-      return false
-    }
-  })
-  if (doneIndex >= 0 && doneIndex !== completeLines.length - 1)
-    throw new Error(
-      'provider_stream_protocol_error: record_stream terminal record must be the final record',
-    )
 }
 
 function recordStreamTerminal(raw: string): string | undefined {
@@ -1113,7 +1102,10 @@ function recordStreamTerminal(raw: string): string | undefined {
   if (!last) return undefined
   try {
     const parsed = JSON.parse(last)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    return parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        (parsed as Record<string, unknown>).record === 'done'
       ? stableJson(parsed)
       : undefined
   } catch {

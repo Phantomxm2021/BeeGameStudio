@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +9,59 @@ import {
 } from './runtime-observability'
 
 describe('passive native runtime observability', () => {
+  test('records event timing and record chunk digests without record bodies', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-progress-'))
+    let nowMs = Date.parse('2026-09-02T10:00:00.000Z')
+    const chunk = Buffer.from('{"record":"node","secret":"PRIVATE"}\n')
+    try {
+      const observer = createRuntimeObservability({
+        workspacePath,
+        sessionId: 'session-progress',
+        provider: 'anthropic',
+        model: 'model-1',
+        clock: () => new Date(nowMs),
+      })
+      observer.beginTurn({ requestId: 'request-progress' })
+      nowMs += 100
+      observer.observeMessage({ type: 'stream_event' })
+      nowMs += 100
+      observer.observeRecordStreamChunk(chunk)
+      nowMs += 100
+      observer.finishTurn({ outcome: 'success' })
+      await observer.flush()
+
+      const raw = await readFile(
+        join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
+        'utf8',
+      )
+      const records = raw
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line))
+      expect(records).toContainEqual(
+        expect.objectContaining({
+          type: 'record_stream_chunk',
+          bytes: chunk.byteLength,
+          digest: createHash('sha256').update(chunk).digest('hex'),
+        }),
+      )
+      expect(records.at(-1)).toEqual(
+        expect.objectContaining({
+          type: 'turn_terminal',
+          firstEventAt: '2026-09-02T10:00:00.100Z',
+          lastEventAt: '2026-09-02T10:00:00.100Z',
+          stdoutByteCount: 0,
+          eventCount: 1,
+          outcome: 'success',
+        }),
+      )
+      expect(raw).not.toContain('PRIVATE')
+      expect(raw).not.toContain('{"record":"node"')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('records stdout byte gaps without persisting streamed content', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-byte-gap-'))
     let nowMs = Date.parse('2026-08-12T10:00:00.000Z')

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, appendFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
@@ -18,7 +19,18 @@ type RuntimeObservationInput = {
   streamGapObservationMs?: number
 }
 
-export type RuntimeObservability = ReturnType<typeof createRuntimeObservability>
+type RuntimeObservabilityImplementation = ReturnType<
+  typeof createRuntimeObservability
+>
+
+// Keep custom/passive observers source-compatible while the native runner
+// adopts the optional record-stream digest hook.
+export type RuntimeObservability = Omit<
+  RuntimeObservabilityImplementation,
+  'observeRecordStreamChunk'
+> & {
+  observeRecordStreamChunk?: (chunk: Uint8Array) => void
+}
 
 export function createRuntimeObservability(input: RuntimeObservationInput) {
   const path = runtimeObservationPath(input.workspacePath)
@@ -31,6 +43,8 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
   let eventCount = 0
   let byteCount = 0
   let lastEventType = ''
+  let firstEventAt: string | undefined
+  let lastEventAt: string | undefined
   let turnActive = false
   let stdoutChunkCount = 0
   let stdoutByteCount = 0
@@ -63,6 +77,8 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
       eventCount = 0
       byteCount = 0
       lastEventType = ''
+      firstEventAt = undefined
+      lastEventAt = undefined
       turnActive = true
       stdoutChunkCount = 0
       stdoutByteCount = 0
@@ -110,8 +126,22 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
     observeLine(line: string): void {
       byteCount += Buffer.byteLength(line)
     },
+    observeRecordStreamChunk(chunk: Uint8Array): void {
+      if (!turnActive) return
+      enqueue({
+        type: 'record_stream_chunk',
+        timestamp: clock().toISOString(),
+        sessionId: input.sessionId,
+        requestId,
+        bytes: chunk.byteLength,
+        digest: createHash('sha256').update(chunk).digest('hex'),
+      })
+    },
     observeMessage(message: Record<string, unknown>): void {
       eventCount += 1
+      const eventAt = clock().toISOString()
+      firstEventAt ??= eventAt
+      lastEventAt = eventAt
       lastEventType = stringField(message, 'type') || 'unknown'
       if (message.type !== 'assistant') return
       const envelope = objectField(message, 'message')
@@ -150,6 +180,8 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         eventCount,
         byteCount,
         lastEventType,
+        ...(firstEventAt ? { firstEventAt } : {}),
+        ...(lastEventAt ? { lastEventAt } : {}),
         stdoutChunkCount,
         stdoutByteCount,
         maxStdoutChunkGapMs,
