@@ -212,7 +212,15 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         },
         abort,
       }
-      this.observability.beginTurn({ requestId })
+      this.observability.beginTurn({
+        requestId,
+        promptByteCount: Buffer.byteLength(
+          typeof input.prompt === 'string'
+            ? input.prompt
+            : JSON.stringify(input.prompt),
+        ),
+        resumed: this.nativeSessionId !== undefined,
+      })
       this.write({
         type: 'user',
         uuid: requestId,

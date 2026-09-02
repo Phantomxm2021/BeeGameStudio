@@ -20,7 +20,11 @@ describe('passive native runtime observability', () => {
         clock: () => new Date(nowMs),
         streamGapObservationMs: 1_000,
       })
-      observer.beginTurn({ requestId: 'request-byte-gap' })
+      observer.beginTurn({
+        requestId: 'request-byte-gap',
+        promptByteCount: 12_345,
+        resumed: true,
+      })
       observer.observeStdoutChunk(Buffer.from('PRIVATE PARTIAL TOOL JSON'))
       nowMs += 3_500
       observer.observeStdoutChunk(Buffer.from('PRIVATE DOCUMENT BODY'))
@@ -36,6 +40,13 @@ describe('passive native runtime observability', () => {
         .trim()
         .split('\n')
         .map(line => JSON.parse(line))
+      expect(records[0]).toEqual(
+        expect.objectContaining({
+          type: 'turn_started',
+          promptByteCount: 12_345,
+          resumed: true,
+        }),
+      )
       expect(records).toContainEqual(
         expect.objectContaining({
           type: 'stdout_resumed',

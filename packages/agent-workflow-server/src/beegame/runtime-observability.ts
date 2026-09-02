@@ -54,7 +54,11 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
   }
 
   return {
-    beginTurn(turn: { requestId: string }): void {
+    beginTurn(turn: {
+      requestId: string
+      promptByteCount?: number
+      resumed?: boolean
+    }): void {
       requestId = turn.requestId
       eventCount = 0
       byteCount = 0
@@ -71,6 +75,10 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         requestId,
         provider: input.provider,
         model: input.model,
+        ...(turn.promptByteCount !== undefined
+          ? { promptByteCount: turn.promptByteCount }
+          : {}),
+        ...(turn.resumed !== undefined ? { resumed: turn.resumed } : {}),
         ...(input.launchContract
           ? { launchContract: input.launchContract }
           : {}),
