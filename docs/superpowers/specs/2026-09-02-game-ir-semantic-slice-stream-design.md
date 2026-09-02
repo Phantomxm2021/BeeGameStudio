@@ -1,6 +1,6 @@
 # Game IR Stateless Semantic Slice Compilation Design
 
-**Status:** revised after real-provider acceptance on 2026-09-02; pending renewed review.
+**Status:** revised after real-provider acceptance and confirmed on 2026-09-02.
 
 ## Purpose
 
