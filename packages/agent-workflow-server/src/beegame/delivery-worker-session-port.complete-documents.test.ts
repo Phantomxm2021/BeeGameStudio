@@ -28,7 +28,7 @@ function projectionPacket(input: {
   revision: string
   receiptDigest: string
   sliceId: string
-  authorityMarker?: string
+  sectionMarkers?: Record<string, string>
   fullPacketMarker?: string
 }) {
   const compileRequest = {
@@ -50,7 +50,7 @@ function projectionPacket(input: {
       ) === index,
   )
   const sections = selectors.map((selector, index) => {
-    const bytes = `${input.authorityMarker ?? 'SESSION_PORT_AUTHORITY'}_${index}`
+    const bytes = `${input.sectionMarkers?.[selector.sectionId] ?? 'SESSION_PORT_AUTHORITY'}_${index}`
       return {
         ...selector,
         digest: createHash('sha256').update(bytes).digest('hex'),
@@ -251,15 +251,13 @@ describe('delivery worker complete document boundary', () => {
   })
 
   test('starts a fresh projection session for every slice without rebinding or full packet prompts', async () => {
-    const prompts: string[] = []
     const startedSessionIds: string[] = []
     const startedInputs: Array<{
       workflowDispatchId?: string
       resumeSessionId?: string
     }> = []
-    const sends: Array<{ dispatchId: string; sessionId: string }> = []
+    const sends: Array<{ sessionId: string; prompt: string }> = []
     const eventsBySession = new Map<string, Array<Record<string, unknown>>>()
-    const sessionDispatches = new Map<string, string>()
     const disposedSessionIds: string[] = []
     const sessions = {
       start: (input: {
@@ -272,8 +270,6 @@ describe('delivery worker complete document boundary', () => {
         const id = `projection-session-${startedSessionIds.length + 1}`
         startedSessionIds.push(id)
         startedInputs.push(input)
-        if (input.workflowDispatchId)
-          sessionDispatches.set(id, input.workflowDispatchId)
         const sliceId = input.workflowRecordStreamContract?.terminalRecord
           ?.sliceId
         eventsBySession.set(id, [
@@ -292,11 +288,7 @@ describe('delivery worker complete document boundary', () => {
       },
       updateAuthToken: () => undefined,
       sendWithDisplay: async (sessionId: string, prompt: string) => {
-        prompts.push(prompt)
-        sends.push({
-          dispatchId: sessionDispatches.get(sessionId) ?? 'unknown',
-          sessionId,
-        })
+        sends.push({ sessionId, prompt })
       },
       workflowRecordStreamEvents: (sessionId: string) =>
         eventsBySession.get(sessionId) ?? [],
@@ -313,6 +305,17 @@ describe('delivery worker complete document boundary', () => {
     const port = createBeeGameDeliveryWorkerPort({
       sessions: sessions as never,
       userId: 'user',
+    })
+    const packet = projectionPacket({
+      taskId: 'task-packet-once',
+      revision: 'revision',
+      receiptDigest: 'b'.repeat(64),
+      sliceId: 'gameplay.slice.0',
+      sectionMarkers: {
+        challenge_recovery: 'AUTHORITY_FIRST',
+        vision: 'AUTHORITY_SECOND',
+      },
+      fullPacketMarker: 'old-whole-packet-route',
     })
     const request = (
       dispatchId: string,
@@ -333,17 +336,7 @@ describe('delivery worker complete document boundary', () => {
         kind: 'projection',
         currentSlice,
         sliceContext: EMPTY_SLICE_CONTEXT,
-        packet: projectionPacket({
-          taskId: 'task-packet-once',
-          revision: 'revision',
-          receiptDigest: 'b'.repeat(64),
-          sliceId: currentSlice,
-          authorityMarker:
-            currentSlice === 'gameplay.slice.0'
-              ? 'AUTHORITY_FIRST'
-              : 'AUTHORITY_SECOND',
-          fullPacketMarker: 'old-whole-packet-route',
-        }),
+        packet,
         compileRequestDigest: digestGameIrValue({
           taskId: 'task-packet-once',
           foundation: {
@@ -360,9 +353,11 @@ describe('delivery worker complete document boundary', () => {
     })
 
     const first = request('dispatch-slice-0', 'gameplay.slice.0')
+    expect(first.contract.packet).toBe(packet)
     await port.start(first)
     await port.submit('dispatch-slice-0', 'ignored')
     const second = request('dispatch-slice-1', 'gameplay.slice.1')
+    expect(second.contract.packet).toBe(packet)
     await port.start(second)
     await port.submit('dispatch-slice-1', 'ignored')
     await expect(
@@ -371,25 +366,17 @@ describe('delivery worker complete document boundary', () => {
 
     expect(startedSessionIds).toHaveLength(2)
     expect(new Set(startedSessionIds).size).toBe(2)
-    expect(prompts).toHaveLength(2)
-    expect(prompts[0]).toContain('## Current slice')
-    expect(prompts[1]).toContain('## Current slice')
-    expect(prompts[1]).toContain('gameplay.slice.1')
-    expect(prompts[0]).toContain('AUTHORITY_FIRST')
-    expect(prompts[0]).not.toContain('AUTHORITY_SECOND')
-    expect(prompts[1]).toContain('AUTHORITY_SECOND')
-    expect(prompts[1]).not.toContain('AUTHORITY_FIRST')
-    expect(prompts.every(prompt => !prompt.includes('FORBIDDEN_FULL_PACKET_MARKER'))).toBe(true)
-
     expect(sends).toHaveLength(2)
-    expect(sends[0]).toEqual({
-      dispatchId: 'dispatch-slice-0',
-      sessionId: startedSessionIds[0],
-    })
-    expect(sends[1]).toEqual({
-      dispatchId: 'dispatch-slice-1',
-      sessionId: startedSessionIds[1],
-    })
+    expect(sends[0]?.sessionId).toBe(startedSessionIds[0])
+    expect(sends[1]?.sessionId).toBe(startedSessionIds[1])
+    expect(sends[0]?.prompt).toContain('## Current slice')
+    expect(sends[1]?.prompt).toContain('## Current slice')
+    expect(sends[1]?.prompt).toContain('gameplay.slice.1')
+    expect(sends[0]?.prompt).toContain('AUTHORITY_FIRST')
+    expect(sends[0]?.prompt).not.toContain('AUTHORITY_SECOND')
+    expect(sends[1]?.prompt).toContain('AUTHORITY_SECOND')
+    expect(sends[1]?.prompt).not.toContain('AUTHORITY_FIRST')
+    expect(sends.every(send => !send.prompt.includes('FORBIDDEN_FULL_PACKET_MARKER'))).toBe(true)
     expect(startedInputs.every(input => !('resumeSessionId' in input))).toBe(
       true,
     )
