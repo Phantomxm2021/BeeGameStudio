@@ -712,29 +712,6 @@ function assertGameIrTerminal(input: {
   }
 }
 
-function projectionHasLaterSlice(request: WorkerDispatchRequest): boolean {
-  if (
-    request.workerType !== 'game-ir-compiler' ||
-    request.contract.kind !== 'projection'
-  )
-    return false
-  const packet = request.contract.packet
-  const source =
-    packet && typeof packet === 'object' && !Array.isArray(packet)
-      ? (packet as Record<string, unknown>).source
-      : undefined
-  const moduleId =
-    source && typeof source === 'object' && !Array.isArray(source)
-      ? (source as Record<string, unknown>).moduleId
-      : undefined
-  const currentSlice = request.contract.currentSlice
-  if (typeof moduleId !== 'string' || typeof currentSlice !== 'string')
-    return false
-  const slices = deriveProjectionSlicePlan(moduleId as never).slices
-  const index = slices.findIndex(slice => slice.sliceId === currentSlice)
-  return index >= 0 && index < slices.length - 1
-}
-
 function assertProjectionProgress(
   moduleId: string,
   currentSlice: string,
@@ -1247,9 +1224,6 @@ export function createDeliveryDispatcher(options: {
               stopReason: 'stale delivery dispatch superseded by durable state',
             }
           : {}),
-        preserveSession:
-          existing.status === 'completed' &&
-          projectionHasLaterSlice(existing.request ?? request),
       })
     }
     const dispatchId = request.dispatchId ?? randomUUID()
@@ -3154,16 +3128,7 @@ export function createDeliveryDispatcher(options: {
       // The durable run/event journal is the worker's retained evidence. The
       // private transport session is disposable once a terminal result exists.
       if (!draftSessionPreserved || !terminalHandlerCompleted)
-        releaseDispatch(dispatchId, {
-          preserveSession:
-            terminalHandlerCompleted &&
-            (request?.contract.authoringMode === 'parallel-draft' ||
-              (request?.workerType === 'game-ir-compiler' &&
-                request.contract.kind === 'projection' &&
-                projectionHasLaterSlice(request) &&
-                'status' in result &&
-                result.status === 'completed')),
-        })
+        releaseDispatch(dispatchId)
     }
     return { record: completed, result }
   }

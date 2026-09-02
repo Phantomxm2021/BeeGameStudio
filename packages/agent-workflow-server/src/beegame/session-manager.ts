@@ -709,15 +709,6 @@ export type BeeGameSessionUsageBillingBackend = {
   ) => RecordUsageResult | Promise<RecordUsageResult>
 }
 
-export class WorkflowWorkerRebindError extends Error {
-  readonly code = 'native_resume_unavailable' as const
-
-  constructor(message: string) {
-    super(message)
-    this.name = 'WorkflowWorkerRebindError'
-  }
-}
-
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly dashboardDataRoot: string
@@ -1397,47 +1388,6 @@ export class BeeGameSessionManager {
     if (record.workflowUsageWriteError) {
       throw record.workflowUsageWriteError
     }
-  }
-
-  async rebindWorkflowWorker(
-    sessionId: string,
-    binding: {
-      runId: string
-      dispatchId: string
-      workerType: string
-      workflowJsonSchema?: Record<string, unknown>
-      workflowRecordStreamContract?: WorkflowRecordStreamContract
-    },
-  ): Promise<void> {
-    const record = this.sessions.get(sessionId)
-    if (!record?.workflowWorker)
-      throw new Error('workflow worker session is unavailable')
-    await this.waitForWorkflowWorkerIdle(sessionId)
-    if (binding.workflowJsonSchema && binding.workflowRecordStreamContract)
-      throw new Error(
-        'A workflow rebind may use either StructuredOutput or record_stream, not both',
-      )
-    const hasTransportBinding =
-      Object.hasOwn(binding, 'workflowJsonSchema') ||
-      Object.hasOwn(binding, 'workflowRecordStreamContract')
-    if (hasTransportBinding && !record.nativeSessionId)
-      throw new WorkflowWorkerRebindError(
-        'native resume session ID is required for workflow transport rebind',
-      )
-    record.workflowRunId = binding.runId
-    record.workflowDispatchId = binding.dispatchId
-    record.workflowWorkerType = binding.workerType
-    if (hasTransportBinding) {
-      disposeRunner(record.runner)
-      record.runner = null
-      record.workflowJsonSchema = binding.workflowJsonSchema
-        ? structuredClone(binding.workflowJsonSchema)
-        : undefined
-      record.workflowRecordStreamContract = binding.workflowRecordStreamContract
-        ? structuredClone(binding.workflowRecordStreamContract)
-        : undefined
-    }
-    this.persistRuntimeSnapshot(record)
   }
 
   async waitForWorkflowWorkerIdle(sessionId: string): Promise<void> {

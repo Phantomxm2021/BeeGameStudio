@@ -55,7 +55,6 @@ import type {
 import {
   selectFoundationFactFastRuntime,
   selectFoundationSemanticRuntime,
-  WorkflowWorkerRebindError,
 } from './session-manager'
 import { mapModelConfigToRuntime } from '@bee-game-studio/agent-workflow'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
@@ -363,35 +362,6 @@ function assertGameIrOperationRequest(
       throw new Error(`Game IR compiler ${label} is invalid`)
 }
 
-type LiveGameIrProjectionSession = {
-  sessionId: string
-  packetDigest: string
-  packet: Record<string, unknown>
-  packetSent: boolean
-}
-
-function gameIrProjectionPacketDigest(request: WorkerDispatchRequest): string {
-  const packet = request.contract.packet
-  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
-    throw new Error('Game IR projection packet is missing')
-  const packetDigest = (packet as Record<string, unknown>).packetDigest
-  if (typeof packetDigest !== 'string' || !/^[a-f0-9]{64}$/.test(packetDigest))
-    throw new Error('Game IR projection packet digest is invalid')
-  return packetDigest
-}
-
-function gameIrProjectionSessionKey(
-  request: WorkerDispatchRequest,
-  packetDigest: string,
-): string {
-  return [
-    request.runId,
-    request.taskId ?? '',
-    gameIrProjectionModuleForRequest(request),
-    packetDigest,
-  ].join('\0')
-}
-
 export async function buildDocumentAuthorAuthorityBlock(
   request: WorkerDispatchRequest,
   onProjection?: (projection: FoundationAuthorityProjection) => void,
@@ -547,11 +517,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
     string,
     FoundationAuthorityProjection
   >()
-  const eventOffsets = new Map<string, number>()
-  const liveGameIrProjectionSessions = new Map<
-    string,
-    LiveGameIrProjectionSession
-  >()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.workflowRecordStreamEvents === 'function'
       ? input.sessions.workflowRecordStreamEvents(sessionId)
@@ -615,59 +580,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         })
       }
       const authToken = await input.getAuthToken?.()
-      const projectionPacketDigest =
-        gameIrOperation === 'projection'
-          ? gameIrProjectionPacketDigest(request)
-          : undefined
-      const projectionKey =
-        gameIrOperation === 'projection' && projectionPacketDigest
-          ? gameIrProjectionSessionKey(request, projectionPacketDigest)
-          : undefined
-      let existingProjection = projectionKey
-        ? liveGameIrProjectionSessions.get(projectionKey)
-        : undefined
-      let sessionId: string | undefined
-      if (existingProjection) {
-        const live = input.sessions.get(existingProjection.sessionId)
-        if (!live || live.status !== 'running') {
-          liveGameIrProjectionSessions.delete(projectionKey!)
-          existingProjection = undefined
-        } else {
-          if (typeof input.sessions.rebindWorkflowWorker !== 'function')
-            throw new Error('live Game IR projection session cannot be rebound')
-          try {
-            await input.sessions.rebindWorkflowWorker(
-              existingProjection.sessionId,
-              {
-                runId: request.runId,
-                dispatchId,
-                workerType: request.workerType,
-                workflowRecordStreamContract:
-                  gameIrProjectionRecordStreamContract(request),
-              },
-            )
-            sessionId = existingProjection.sessionId
-          } catch (error) {
-            // A schema-changing rebind is safe only when the native runner can
-            // resume the existing context. If it cannot, retire the binding
-            // and session before starting a fresh context that receives the
-            // immutable packet again. Otherwise a failed rebind would leave
-            // the live map pointing at a session the next dispatch cannot
-            // safely reuse.
-            const staleSessionId = existingProjection.sessionId
-            await disposeWorkflowSession(staleSessionId)
-            liveGameIrProjectionSessions.delete(projectionKey!)
-            existingProjection = undefined
-            if (
-              !(error instanceof WorkflowWorkerRebindError) ||
-              error.code !== 'native_resume_unavailable'
-            )
-              throw error
-          }
-        }
-      }
-      if (sessionId === undefined)
-        sessionId = input.sessions.start({
+      const sessionId = input.sessions.start({
           workspacePath: request.workspacePath,
           projectId: request.projectId,
           userId: input.userId,
@@ -787,22 +700,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
               }
             : {}),
         }).id
-      if (projectionKey && !existingProjection)
-        liveGameIrProjectionSessions.set(projectionKey, {
-          sessionId,
-          packetDigest: projectionPacketDigest!,
-          packet: request.contract.packet as Record<string, unknown>,
-          packetSent: false,
-        })
       sessions.set(dispatchId, sessionId)
       requests.set(dispatchId, { ...request, dispatchId })
       documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
-      eventOffsets.set(
-        dispatchId,
-        existingProjection && sessionId === existingProjection.sessionId
-          ? sessionEvents(sessionId).length
-          : 0,
-      )
       records.set(dispatchId, {
         dispatchId,
         workerType: request.workerType,
@@ -876,43 +776,16 @@ export function createBeeGameDeliveryWorkerPort(input: {
           : request?.workerType === 'resource-curator'
             ? 'Use ResourceLibrary match_requirements once, then CommitResourceInventory as the only mutation and terminal operation.'
             : ''
-      const liveProjection =
-        request?.workerType === 'game-ir-compiler' &&
-        request.contract.kind === 'projection' &&
-        request.contract.packet
-          ? liveGameIrProjectionSessions.get(
-              gameIrProjectionSessionKey(
-                request,
-                gameIrProjectionPacketDigest(request),
-              ),
-            )
-          : undefined
-      const promptRequest =
-        liveProjection?.packetSent && request
-          ? (() => {
-              const { packet: _packet, ...contractWithoutPacket } =
-                request.contract
-              return {
-                ...request,
-                contract: {
-                  ...contractWithoutPacket,
-                  packet: liveProjection.packet,
-                  packetDigest: liveProjection.packetDigest,
-                  currentSlice: gameIrProjectionSliceForRequest(request),
-                },
-              }
-            })()
-          : request
       const workerPrompt = [
         ...(packetWorker || revisionWorker ? [] : [languageInstruction]),
         ...(packetWorker || revisionWorker
           ? []
           : [confirmedBriefContext, documentAuthorAuthorityBlock]),
         (packetWorker || revisionWorker) &&
-        promptRequest &&
-        (Object.hasOwn(promptRequest.contract, 'packet') ||
-          promptRequest.workerType === 'game-ir-compiler')
-          ? buildWorkerPrompt(promptRequest)
+        request &&
+        (Object.hasOwn(request.contract, 'packet') ||
+          request.workerType === 'game-ir-compiler')
+          ? buildWorkerPrompt(request)
           : prompt,
         ...(packetWorker || revisionWorker
           ? []
@@ -939,7 +812,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
-      if (liveProjection) liveProjection.packetSent = true
     },
     async stop(dispatchId, reason) {
       const sessionId = sessions.get(dispatchId)
@@ -978,17 +850,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
           await disposeWorkflowSession(sessionId)
         }
       } finally {
-        if (!options?.preserveSession) {
-          for (const [key, live] of liveGameIrProjectionSessions)
-            if (live.sessionId === sessionId)
-              liveGameIrProjectionSessions.delete(key)
-        }
         sessions.delete(dispatchId)
         records.delete(dispatchId)
         requests.delete(dispatchId)
         documentAuthorityBlocks.delete(dispatchId)
         documentAuthorityProjections.delete(dispatchId)
-        eventOffsets.delete(dispatchId)
       }
     },
     async status(dispatchId) {
@@ -1031,7 +897,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ),
         ) ||
         hasInFlightTool(
-          sessionEvents(sessionId).slice(eventOffsets.get(dispatchId) ?? 0),
+          sessionEvents(sessionId),
           terminalToolName,
         )
       )
@@ -1043,8 +909,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       // Recovery policy belongs to the dispatcher. A transport-level fixed
       // deadline would fail a worker that is still making durable progress.
       while (true) {
-        const eventOffset = eventOffsets.get(dispatchId) ?? 0
-        const events = sessionEvents(sessionId).slice(eventOffset)
+        const events = sessionEvents(sessionId)
         const request = requests.get(dispatchId)
         if (
           request?.workerType === 'game-ir-compiler' &&
@@ -1129,7 +994,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ) {
             if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
               await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-            terminalEvents = sessionEvents(sessionId).slice(eventOffset)
+            terminalEvents = sessionEvents(sessionId)
           }
           const drainedFailure = [...terminalEvents]
             .reverse()

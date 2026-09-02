@@ -16,7 +16,6 @@ import type {
   FoundationDocumentPath,
   WorkerDispatchRequest,
 } from './delivery-workflow/types'
-import { WorkflowWorkerRebindError } from './session-manager'
 
 const EMPTY_SLICE_CONTEXT = {
   availablePriorNodes: [],
@@ -243,7 +242,7 @@ describe('delivery worker complete document boundary', () => {
     ).rejects.toThrow(/operation kind/i)
   })
 
-  test('sends one projection packet once and reuses the live session for the next slice', async () => {
+  test('starts a fresh projection session for every slice without rebinding or full packet prompts', async () => {
     const prompts: string[] = []
     const events: Array<Record<string, unknown>> = [
       {
@@ -257,25 +256,28 @@ describe('delivery worker complete document boundary', () => {
         },
       },
     ]
-    let starts = 0
-    let rebinds = 0
+    const startedSessionIds: string[] = []
+    const rebindCalls: string[] = []
+    let disposed = 0
     const sessions = {
       start: () => {
-        starts += 1
-        return { id: 'live-projection-session' }
+        const id = `projection-session-${startedSessionIds.length + 1}`
+        startedSessionIds.push(id)
+        return { id }
       },
       updateAuthToken: () => undefined,
       sendWithDisplay: async (_sessionId: string, prompt: string) => {
         prompts.push(prompt)
       },
       events: () => events,
-      get: () => ({
+      get: (sessionId: string) => ({
         status: 'running',
         turnStatus: 'idle',
         createdAt: new Date(),
+        id: sessionId,
       }),
-      rebindWorkflowWorker: async () => {
-        rebinds += 1
+      disposeWorkflowWorker: async () => {
+        disposed += 1
       },
     }
     const port = createBeeGameDeliveryWorkerPort({
@@ -322,15 +324,41 @@ describe('delivery worker complete document boundary', () => {
       },
     })
 
-    await port.start(request('dispatch-slice-0', 'gameplay.slice.0'))
+    const first = request('dispatch-slice-0', 'gameplay.slice.0')
+    const firstPacket: Record<string, unknown> = {
+      ...(first.contract.packet as Record<string, unknown>),
+      dependencies: { FORBIDDEN_FULL_PACKET_MARKER: true },
+    }
+    firstPacket.packetDigest = digestGameIrValue(
+      Object.fromEntries(
+        Object.entries(firstPacket).filter(
+          ([key]) => key !== 'packetDigest',
+        ),
+      ),
+    )
+    first.contract.packet = firstPacket
+    await port.start(first)
     await port.submit('dispatch-slice-0', 'ignored')
-    await port.start(request('dispatch-slice-1', 'gameplay.slice.1'))
+    const second = request('dispatch-slice-1', 'gameplay.slice.1')
+    const secondPacket: Record<string, unknown> = {
+      ...(second.contract.packet as Record<string, unknown>),
+      dependencies: { FORBIDDEN_FULL_PACKET_MARKER: true },
+    }
+    secondPacket.packetDigest = digestGameIrValue(
+      Object.fromEntries(
+        Object.entries(secondPacket).filter(
+          ([key]) => key !== 'packetDigest',
+        ),
+      ),
+    )
+    second.contract.packet = secondPacket
+    await port.start(second)
     await port.submit('dispatch-slice-1', 'ignored')
     setTimeout(
       () =>
         events.push({
           id: 2,
-          sessionId: 'live-projection-session',
+          sessionId: 'projection-session-2',
           type: 'result',
           text: '',
           createdAt: new Date(),
@@ -344,364 +372,17 @@ describe('delivery worker complete document boundary', () => {
       port.waitForTerminal!('dispatch-slice-1'),
     ).resolves.toMatchObject({ sliceId: 'gameplay.slice.1' })
 
-    expect(starts).toBe(1)
-    expect(rebinds).toBe(1)
+    expect(startedSessionIds).toHaveLength(2)
+    expect(new Set(startedSessionIds).size).toBe(2)
+    expect(rebindCalls).toHaveLength(0)
     expect(prompts).toHaveLength(2)
     expect(prompts[0]).toContain('## Current slice')
     expect(prompts[1]).toContain('## Current slice')
     expect(prompts[1]).toContain('gameplay.slice.1')
-    expect(prompts[1]).not.toContain('projectionContract')
-    expect(prompts[1]).not.toContain('semanticPacket')
-    expect(prompts[1]).not.toContain('sectionBytes')
-    expect(prompts[1]).not.toContain('PLAYER_LOOP_SENTINEL')
+    expect(prompts.every(prompt => !prompt.includes('FORBIDDEN_FULL_PACKET_MARKER'))).toBe(true)
 
     await port.close!('dispatch-slice-1')
-    await port.start(request('dispatch-slice-2', 'gameplay.slice.0'))
-    await port.submit('dispatch-slice-2', 'ignored')
-    expect(starts).toBe(2)
-    expect(prompts[2]).toContain('## Current slice')
-  })
-
-  test('resends the packet when the previous live session never accepted a turn', async () => {
-    const prompts: string[] = []
-    let starts = 0
-    const sessions = {
-      start: () => {
-        starts += 1
-        return { id: 'live-retry-session' }
-      },
-      updateAuthToken: () => undefined,
-      sendWithDisplay: async (_sessionId: string, prompt: string) => {
-        prompts.push(prompt)
-      },
-      get: () => ({
-        status: 'running',
-        turnStatus: 'idle',
-        createdAt: new Date(),
-      }),
-      rebindWorkflowWorker: async () => undefined,
-    }
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions: sessions as never,
-      userId: 'user',
-    })
-    const packet = projectionPacket({
-      taskId: 'task-packet-retry',
-      revision: 'revision',
-      receiptDigest: 'd'.repeat(64),
-      sliceId: 'gameplay.slice.0',
-    })
-    const request = (dispatchId: string): WorkerDispatchRequest => ({
-      dispatchId,
-      runId: 'run-packet-retry',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'game-ir-compiler',
-      phase: 'GAME_IR_COMPILATION',
-      taskId: 'task-packet-retry',
-      revision: 'revision',
-      allowedPaths: [],
-      projectReadScope: 'empty',
-      contract: {
-        kind: 'projection',
-        currentSlice: 'gameplay.slice.0',
-        sliceContext: EMPTY_SLICE_CONTEXT,
-        packet,
-        compileRequestDigest: digestGameIrValue({
-          taskId: 'task-packet-retry',
-          foundation: {
-            foundationRevision: 'revision',
-            receiptDigest: 'd'.repeat(64),
-          },
-        }),
-        foundationReadyReceiptDigest: 'd'.repeat(64),
-      },
-    })
-    await port.start(request('dispatch-retry-0'))
-    await port.start(request('dispatch-retry-1'))
-    await port.submit('dispatch-retry-1', 'ignored')
-    expect(starts).toBe(1)
-    expect(prompts[0]).toContain('## Current slice')
-  })
-
-  test('retires a non-resumable live session before retrying with the packet', async () => {
-    const prompts: string[] = []
-    let starts = 0
-    let disposed = 0
-    const sessions = {
-      start: () => {
-        starts += 1
-        return { id: `non-resumable-session-${starts}` }
-      },
-      updateAuthToken: () => undefined,
-      sendWithDisplay: async (_sessionId: string, prompt: string) => {
-        prompts.push(prompt)
-      },
-      get: () => ({
-        status: 'running',
-        turnStatus: 'idle',
-        createdAt: new Date(),
-      }),
-      rebindWorkflowWorker: async () => {
-        throw new WorkflowWorkerRebindError(
-          'native resume session ID is required',
-        )
-      },
-      disposeWorkflowWorker: async () => {
-        disposed += 1
-      },
-    }
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions: sessions as never,
-      userId: 'user',
-    })
-    const packet = projectionPacket({
-      taskId: 'task-non-resumable',
-      revision: 'revision',
-      receiptDigest: 'f'.repeat(64),
-      sliceId: 'gameplay.slice.0',
-    })
-    const request = (
-      dispatchId: string,
-      currentSlice: string,
-    ): WorkerDispatchRequest => ({
-      dispatchId,
-      runId: 'run-non-resumable',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'game-ir-compiler',
-      phase: 'GAME_IR_COMPILATION',
-      taskId: 'task-non-resumable',
-      revision: 'revision',
-      allowedPaths: [],
-      projectReadScope: 'empty',
-      contract: {
-        kind: 'projection',
-        currentSlice,
-        sliceContext: EMPTY_SLICE_CONTEXT,
-        packet,
-        compileRequestDigest: digestGameIrValue({
-          taskId: 'task-non-resumable',
-          foundation: {
-            foundationRevision: 'revision',
-            receiptDigest: 'f'.repeat(64),
-          },
-        }),
-        foundationReadyReceiptDigest: 'f'.repeat(64),
-      },
-    })
-
-    await port.start(request('dispatch-non-resumable-0', 'gameplay.slice.0'))
-    await port.start(request('dispatch-non-resumable-1', 'gameplay.slice.1'))
-    await port.submit('dispatch-non-resumable-1', 'ignored')
-
-    expect(starts).toBe(2)
     expect(disposed).toBe(1)
-    expect(prompts[0]).toContain('## Current slice')
-  })
-
-  test('does not create a fresh session for an unexpected rebind failure', async () => {
-    let starts = 0
-    let disposed = 0
-    const sessions = {
-      start: () => {
-        starts += 1
-        return { id: `unexpected-rebind-session-${starts}` }
-      },
-      updateAuthToken: () => undefined,
-      get: () => ({
-        status: 'running',
-        turnStatus: 'idle',
-        createdAt: new Date(),
-      }),
-      rebindWorkflowWorker: async () => {
-        throw new Error('schema persistence failed')
-      },
-      disposeWorkflowWorker: async () => {
-        disposed += 1
-      },
-    }
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions: sessions as never,
-      userId: 'user',
-    })
-    const packet = projectionPacket({
-      taskId: 'task-unexpected-rebind',
-      revision: 'revision',
-      receiptDigest: 'a'.repeat(64),
-      sliceId: 'gameplay.slice.0',
-    })
-    const request = (
-      dispatchId: string,
-      currentSlice: string,
-    ): WorkerDispatchRequest => ({
-      dispatchId,
-      runId: 'run-unexpected-rebind',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'game-ir-compiler',
-      phase: 'GAME_IR_COMPILATION',
-      taskId: 'task-unexpected-rebind',
-      revision: 'revision',
-      allowedPaths: [],
-      projectReadScope: 'empty',
-      contract: {
-        kind: 'projection',
-        currentSlice,
-        sliceContext: EMPTY_SLICE_CONTEXT,
-        packet,
-        compileRequestDigest: digestGameIrValue({
-          taskId: 'task-unexpected-rebind',
-          foundation: {
-            foundationRevision: 'revision',
-            receiptDigest: 'a'.repeat(64),
-          },
-        }),
-        foundationReadyReceiptDigest: 'a'.repeat(64),
-      },
-    })
-
-    await port.start(request('dispatch-unexpected-0', 'gameplay.slice.0'))
-    await expect(
-      port.start(request('dispatch-unexpected-1', 'gameplay.slice.1')),
-    ).rejects.toThrow('schema persistence failed')
-    expect(starts).toBe(1)
-    expect(disposed).toBe(1)
-  })
-
-  test('blocks retry when retiring a non-resumable session fails', async () => {
-    let starts = 0
-    const sessions = {
-      start: () => {
-        starts += 1
-        return { id: `dispose-failure-session-${starts}` }
-      },
-      updateAuthToken: () => undefined,
-      get: () => ({
-        status: 'running',
-        turnStatus: 'idle',
-        createdAt: new Date(),
-      }),
-      rebindWorkflowWorker: async () => {
-        throw new WorkflowWorkerRebindError(
-          'native resume session ID is required',
-        )
-      },
-      disposeWorkflowWorker: async () => {
-        throw new Error('session disposal failed')
-      },
-    }
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions: sessions as never,
-      userId: 'user',
-    })
-    const request = (
-      dispatchId: string,
-      currentSlice: string,
-    ): WorkerDispatchRequest => ({
-      dispatchId,
-      runId: 'run-dispose-failure',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'game-ir-compiler',
-      phase: 'GAME_IR_COMPILATION',
-      taskId: 'task-dispose-failure',
-      revision: 'revision',
-      allowedPaths: [],
-      projectReadScope: 'empty',
-      contract: {
-        kind: 'projection',
-        currentSlice,
-        sliceContext: EMPTY_SLICE_CONTEXT,
-        packet: projectionPacket({
-          taskId: 'task-dispose-failure',
-          revision: 'revision',
-          receiptDigest: 'b'.repeat(64),
-          sliceId: currentSlice,
-        }),
-        compileRequestDigest: digestGameIrValue({
-          taskId: 'task-dispose-failure',
-          foundation: {
-            foundationRevision: 'revision',
-            receiptDigest: 'b'.repeat(64),
-          },
-        }),
-        foundationReadyReceiptDigest: 'b'.repeat(64),
-      },
-    })
-
-    await port.start(request('dispatch-dispose-failure-0', 'gameplay.slice.0'))
-    await expect(
-      port.start(request('dispatch-dispose-failure-1', 'gameplay.slice.1')),
-    ).rejects.toThrow('session disposal failed')
-    await expect(
-      port.start(request('dispatch-dispose-failure-2', 'gameplay.slice.1')),
-    ).rejects.toThrow('session disposal failed')
-    expect(starts).toBe(1)
-  })
-
-  test('binds a fresh session after the previous projection session stops', async () => {
-    const prompts: string[] = []
-    let starts = 0
-    let status: 'running' | 'stopped' = 'running'
-    const sessions = {
-      start: () => {
-        starts += 1
-        return { id: `projection-session-${starts}` }
-      },
-      updateAuthToken: () => undefined,
-      sendWithDisplay: async (_sessionId: string, prompt: string) => {
-        prompts.push(prompt)
-      },
-      get: () => ({ status, turnStatus: 'idle', createdAt: new Date() }),
-      rebindWorkflowWorker: async () => undefined,
-    }
-    const port = createBeeGameDeliveryWorkerPort({
-      sessions: sessions as never,
-      userId: 'user',
-    })
-    const request: WorkerDispatchRequest = {
-      dispatchId: 'dispatch-stopped-0',
-      runId: 'run-stopped',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'game-ir-compiler',
-      phase: 'GAME_IR_COMPILATION',
-      taskId: 'task-stopped',
-      revision: 'revision',
-      allowedPaths: [],
-      projectReadScope: 'empty',
-      contract: {
-        kind: 'projection',
-        currentSlice: 'gameplay.slice.0',
-        sliceContext: EMPTY_SLICE_CONTEXT,
-        packet: projectionPacket({
-          taskId: 'task-stopped',
-          revision: 'revision',
-          receiptDigest: 'e'.repeat(64),
-          sliceId: 'gameplay.slice.0',
-        }),
-        compileRequestDigest: digestGameIrValue({
-          taskId: 'task-stopped',
-          foundation: {
-            foundationRevision: 'revision',
-            receiptDigest: 'e'.repeat(64),
-          },
-        }),
-        foundationReadyReceiptDigest: 'e'.repeat(64),
-      },
-    }
-    await port.start(request)
-    status = 'stopped'
-    await port.start({ ...request, dispatchId: 'dispatch-stopped-1' })
-    await port.submit('dispatch-stopped-1', 'ignored')
-    expect(starts).toBe(2)
-    expect(prompts[0]).toContain('## Current slice')
   })
 
   test('rejects a caller-supplied Game IR schema before session creation', async () => {

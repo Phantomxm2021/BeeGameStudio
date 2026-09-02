@@ -294,7 +294,7 @@ describe('Game IR dispatch crash windows', () => {
     expect(closed).toEqual([{}])
   })
 
-  test('preserves the transport after a completed projection slice with a later slice', async () => {
+  test('closes the transport after every completed projection slice', async () => {
     const workspace = await mkdtemp(
       join(tmpdir(), 'game-ir-non-final-slice-close-'),
     )
@@ -321,7 +321,7 @@ describe('Game IR dispatch crash windows', () => {
     })
 
     await dispatcher.completeDispatch(request.dispatchId!, terminal(request))
-    expect(closed).toEqual([{ preserveSession: true }])
+    expect(closed).toEqual([{}])
   })
 
   test('rejects a projection packet that tries to use the old source-missing identity fallback', async () => {

@@ -197,9 +197,16 @@ describe('BeeGame session runtime resilience', () => {
     await waitForIdle(manager, session.id)
     const events = manager.events(session.id)
     expect(events.some(event => event.type === 'assistant.partial')).toBe(false)
+    expect(events.find(event => event.type === 'result')?.payload).toMatchObject(
+      {
+        record_stream_type: 'ndjson',
+        record_stream_bytes: Buffer.byteLength(stream, 'utf8'),
+        record_stream_lines: 2,
+      },
+    )
     expect(
-      events.find(event => event.type === 'result')?.payload?.record_stream,
-    ).toBe(stream)
+      events.find(event => event.type === 'result')?.payload,
+    ).not.toHaveProperty('record_stream')
     expect(JSON.stringify(manager.transcript(session.id))).not.toContain(stream)
     const rawLog = await readFile(
       join(
@@ -2260,155 +2267,6 @@ describe('BeeGame session runtime resilience', () => {
     expect(recorded).toHaveLength(2)
     expect(recorded[1]!.total_tokens).toBeGreaterThan(recorded[0]!.total_tokens)
     manager.dispose()
-  })
-
-  test('rebinds a live workflow worker with a new schema and native resume identity', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-rebind-'))
-    const starts: BeeGameSessionRunnerStartInput[] = []
-    const runner: BeeGameSessionRunner = {
-      start: async input => {
-        starts.push(input)
-        input.onNativeSessionId?.('11111111-1111-4111-8111-111111111111')
-        return {
-          submit: async ({ onMessage }) => {
-            onMessage({
-              type: 'result',
-              subtype: 'success',
-              is_error: false,
-            } as DashboardSDKMessage)
-          },
-          stop: () => undefined,
-        }
-      },
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath: join(root, 'workspace'),
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-rebind',
-      workflowDispatchId: 'dispatch-0',
-      workflowWorkerType: 'game-ir-compiler',
-      workflowJsonSchema: {
-        type: 'object',
-        properties: { slice: { const: 0 } },
-      },
-    })
-    await manager.send(session.id, 'slice 0')
-    await waitForIdle(manager, session.id)
-    await manager.rebindWorkflowWorker(session.id, {
-      runId: 'run-rebind',
-      dispatchId: 'dispatch-1',
-      workerType: 'game-ir-compiler',
-      workflowJsonSchema: {
-        type: 'object',
-        properties: { slice: { const: 1 } },
-      },
-    })
-    await manager.send(session.id, 'slice 1')
-    await waitForIdle(manager, session.id)
-
-    expect(starts).toHaveLength(2)
-    expect(starts[1]?.resumeSessionId).toBe(
-      '11111111-1111-4111-8111-111111111111',
-    )
-    expect(starts[1]?.workflowJsonSchema).toEqual({
-      type: 'object',
-      properties: { slice: { const: 1 } },
-    })
-    await manager.disposeWorkflowWorker(session.id)
-  })
-
-  test('rebinds the sole record-stream lane without retaining a JSON schema', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-record-stream-rebind-'))
-    const starts: BeeGameSessionRunnerStartInput[] = []
-    const runner: BeeGameSessionRunner = {
-      start: async input => {
-        starts.push(input)
-        input.onNativeSessionId?.('22222222-2222-4222-8222-222222222222')
-        return {
-          submit: async ({ onMessage }) => {
-            onMessage({
-              type: 'result',
-              subtype: 'success',
-              is_error: false,
-            } as DashboardSDKMessage)
-          },
-          stop: () => undefined,
-        }
-      },
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath: join(root, 'workspace'),
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-record-rebind',
-      workflowDispatchId: 'dispatch-0',
-      workflowWorkerType: 'game-ir-compiler',
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'gameplay.slice.0' },
-      },
-    })
-    await manager.send(session.id, 'slice 0')
-    await waitForIdle(manager, session.id)
-    await manager.rebindWorkflowWorker(session.id, {
-      runId: 'run-record-rebind',
-      dispatchId: 'dispatch-1',
-      workerType: 'game-ir-compiler',
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'gameplay.slice.1' },
-      },
-    })
-    await manager.send(session.id, 'slice 1')
-    await waitForIdle(manager, session.id)
-
-    expect(starts).toHaveLength(2)
-    expect(starts[1]?.resumeSessionId).toBe(
-      '22222222-2222-4222-8222-222222222222',
-    )
-    expect(starts[1]?.workflowJsonSchema).toBeUndefined()
-    expect(starts[1]?.workflowRecordStreamContract).toEqual({
-      version: 1,
-      terminalRecord: { record: 'done', sliceId: 'gameplay.slice.1' },
-    })
-    await manager.disposeWorkflowWorker(session.id)
-  })
-
-  test('rejects a schema-changing rebind without a native resume identity', async () => {
-    root = await mkdtemp(
-      join(tmpdir(), 'beegame-workflow-rebind-no-native-id-'),
-    )
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async () => undefined,
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath: join(root, 'workspace'),
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-rebind-no-id',
-      workflowDispatchId: 'dispatch-0',
-      workflowWorkerType: 'game-ir-compiler',
-      workflowJsonSchema: { type: 'object' },
-    })
-    await expect(
-      manager.rebindWorkflowWorker(session.id, {
-        runId: 'run-rebind-no-id',
-        dispatchId: 'dispatch-1',
-        workerType: 'game-ir-compiler',
-        workflowJsonSchema: {
-          type: 'object',
-          properties: { slice: { const: 1 } },
-        },
-      }),
-    ).rejects.toThrow(/native resume session/i)
-    await manager.disposeWorkflowWorker(session.id)
   })
 
   test('bounds failed usage retries and does not append billing errors after stop', async () => {
