@@ -183,7 +183,11 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
       )
     const currentSlice = gameIrProjectionSliceForRequest(request)
     const sliceContext = projectionSliceContextForRequest(request, currentSlice)
-    const retryDiagnostic = request.contract.retryDiagnostic
+    const retryDiagnostic = projectionRetryDiagnosticForRequest(
+      request.contract.retryDiagnostic,
+      currentSlice.sliceId,
+      sliceContext.requiredCurrentNodes.map(node => node.id),
+    )
     const authority = buildGameIrProjectionSliceAuthority({
       packet: packet as Parameters<
         typeof buildGameIrProjectionSliceAuthority
@@ -198,25 +202,7 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
         typeof request.contract.foundationReadyReceiptDigest === 'string'
           ? request.contract.foundationReadyReceiptDigest
           : undefined,
-      ...(retryDiagnostic &&
-      typeof retryDiagnostic === 'object' &&
-      !Array.isArray(retryDiagnostic) &&
-      typeof (retryDiagnostic as Record<string, unknown>).sliceId === 'string' &&
-      typeof (retryDiagnostic as Record<string, unknown>).reason === 'string'
-        ? {
-            retryDiagnostic: {
-              scope:
-                typeof (retryDiagnostic as Record<string, unknown>).scope ===
-                'string'
-                  ? ((retryDiagnostic as Record<string, unknown>)
-                      .scope as 'slice' | 'record')
-                  : 'slice',
-              ...(retryDiagnostic as Record<string, unknown>),
-            } as Parameters<
-              typeof buildGameIrProjectionSliceAuthority
-            >[0]['retryDiagnostic'],
-          }
-        : {}),
+      ...(retryDiagnostic ? { retryDiagnostic } : {}),
     })
     return renderGameIrProjectionSliceAuthority(authority)
   }
@@ -244,6 +230,52 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
     ...(projected ? { packet: projected } : {}),
   }
   return JSON.stringify(contract)
+}
+
+function projectionRetryDiagnosticForRequest(
+  value: unknown,
+  currentSliceId: string,
+  requiredCurrentNodeIds: readonly string[],
+): Parameters<typeof buildGameIrProjectionSliceAuthority>[0]['retryDiagnostic'] {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Game IR projection retry diagnostic is invalid')
+  const diagnostic = value as Record<string, unknown>
+  const scope = diagnostic.scope
+  const expectedKeys =
+    scope === 'slice'
+      ? ['reason', 'scope', 'sliceId']
+      : scope === 'record'
+        ? ['fragmentId', 'reason', 'recordId', 'scope', 'sliceId']
+        : undefined
+  const keys = Object.keys(diagnostic).sort()
+  if (!expectedKeys || keys.join('\n') !== expectedKeys.join('\n'))
+    throw new Error('Game IR projection retry diagnostic is invalid')
+  if (
+    typeof diagnostic.sliceId !== 'string' ||
+    diagnostic.sliceId !== currentSliceId ||
+    typeof diagnostic.reason !== 'string'
+  )
+    throw new Error('Game IR projection retry diagnostic is invalid')
+  if (scope === 'slice')
+    return {
+      scope,
+      sliceId: diagnostic.sliceId,
+      reason: diagnostic.reason,
+    }
+  if (
+    typeof diagnostic.recordId !== 'string' ||
+    typeof diagnostic.fragmentId !== 'string' ||
+    !requiredCurrentNodeIds.includes(diagnostic.recordId)
+  )
+    throw new Error('Game IR projection retry diagnostic is invalid')
+  return {
+    scope: 'record',
+    sliceId: diagnostic.sliceId,
+    recordId: diagnostic.recordId,
+    fragmentId: diagnostic.fragmentId,
+    reason: diagnostic.reason,
+  }
 }
 
 function projectionSliceContextForRequest(
@@ -788,7 +820,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'game-ir-compiler':
       if (request.contract.kind === 'projection')
-        return 'Project only the current dependency-frontier slice from the immutable operation packet; never project or assemble the complete domain. The currentSlice contract is the sole node-kind authority for this turn: use only its exact node kinds, value properties/types, and per-node edgeRules roles/targetKinds/cardinality; do not invent fields or generic edge names. If currentSlice.retryDiagnostic is present, correct that exact admitted failure in this slice; it is not product authority and does not authorize another slice. Every emitted node must satisfy every edgeRules cardinality: exactly-one and at-least-one roles cannot be omitted, and singleton roles cannot repeat. dependencyContext is binding admitted graph state: emit every requiredCurrentNodes item with its exact id and kind; when an edge or reference targets an admitted kind, use the exact availablePriorNodes id, kind, and value semantics, including terminal and outcome values. Emit nodes uniquely sorted by id; sort each references array by targetId then targetType and each edges array by type then targetId then targetType. The service rejects rather than repairs non-canonical order. Emit each node with exactly the declared node fields; references use {targetId,targetType}; every edge requires edges[].type, edges[].targetId, and edges[].targetType, mapping edgeRules[].role to type and the selected target identity to targetId/targetType. Bind every node to exactly one fragmentId selected from source.sections[].evidenceFragments. The service derives sourceEvidenceGroups and canonical semantic targets; never output either of them. Never copy or synthesize source text and never output subjects, documentPath, sectionId, excerpt, byte offsets, sourcePointer, literal, occurrence, or serialized edge/reference JSON in evidence. Do not validate or assemble other slices, write checkpoints, publish, or provide service identity.'
+        return 'Project only the current dependency-frontier slice from the immutable operation packet; never project or assemble the complete domain. The `## Current slice` heading is the sole node-kind authority for this turn: use only its exact node kinds, value properties/types, and per-node `edgeRules` roles/targetKinds/cardinality; do not invent fields or generic edge names. If the `## Retry diagnostic` heading is present, correct that exact admitted failure in this slice; it is not product authority and does not authorize another slice. Every emitted node must satisfy every `edgeRules` cardinality: exactly-one and at-least-one roles cannot be omitted, and singleton roles cannot repeat. The `## Dependency context` heading is binding admitted graph state: emit every required current-node item with its exact id and kind; when an edge or reference targets an admitted kind, use the exact available prior-node id, kind, and value semantics, including terminal and outcome values. Emit nodes uniquely sorted by id; sort each references array by targetId then targetType and each edges array by type then targetId then targetType. The service rejects rather than repairs non-canonical order. Emit each node with exactly the declared node fields; references use {targetId,targetType}; every edge requires edges[].type, edges[].targetId, and edges[].targetType, mapping `edgeRules[].role` to type and the selected target identity to targetId/targetType. Bind every node to exactly one fragmentId selected from the rendered `## Source fragments` heading. The service derives source evidence groups and canonical semantic targets; never output either of them. Never copy or synthesize source text and never output subjects, documentPath, sectionId, excerpt, byte offsets, sourcePointer, literal, occurrence, or serialized edge/reference JSON in evidence. The rendered `## Output contract` heading is binding: emit strict JSONL node records and exactly one final done record. Do not validate or assemble other slices, write checkpoints, publish, or provide service identity.'
       if (request.contract.kind === 'validation')
         return 'Perform only the assigned domain validation from the immutable operation packet. Return one validation result for this operation: PASS with checkIds and coveredTargets, or FAIL/AMBIGUOUS with one concrete diagnostic. Do not project, assemble a complete candidate, write checkpoints, publish, or provide service identity.'
       throw new Error(

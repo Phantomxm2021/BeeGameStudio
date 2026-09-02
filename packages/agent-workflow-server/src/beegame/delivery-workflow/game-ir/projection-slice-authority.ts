@@ -8,6 +8,7 @@ import {
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
 import {
+  buildGameIrEvidenceFragmentCatalog,
   deriveProjectionSlicePlan,
   type GameIrProjectionSlice,
   type GameIrProjectionSliceContext,
@@ -60,6 +61,9 @@ const refs = (
 
 const selectorKey = (selector: GameIrProjectionSliceSourceSelector): string =>
   `${selector.documentPath}#${selector.sectionId}`
+
+const sha256 = (text: string): string =>
+  createHash('sha256').update(text, 'utf8').digest('hex')
 
 const RAW_GAME_IR_SLICE_SOURCE_SECTIONS = {
   'gameplay.slice.0': refs('docs/GDD.md', ['core_loop', 'rules_systems', 'states_flow', 'progression', 'content_narrative', 'challenge_recovery', 'material.game-state-flow']),
@@ -158,9 +162,6 @@ export type GameIrProjectionSliceAuthority = Readonly<{
   retryDiagnostic?: GameIrProjectionRetryDiagnostic
 }>
 
-const sha256 = (text: string): string =>
-  createHash('sha256').update(text, 'utf8').digest('hex')
-
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const nested of Object.values(value as Record<string, unknown>))
@@ -174,38 +175,57 @@ function selectedSourceFragments(
   source: GameIrDomainSourceEnvelope,
   selectors: readonly GameIrProjectionSliceSourceSelector[],
 ): GameIrProjectionSliceAuthority['sourceFragments'] {
-  const byKey = new Map(
+  const selectedKeys = new Set(selectors.map(selectorKey))
+  const sectionIndex = new Map(
     source.sectionIndex.map(section => [selectorKey(section), section]),
   )
-  const fragments: Array<{
-    fragmentId: string
-    documentPath: FoundationDocumentPath
-    sectionId: string
-    text: string
-  }> = []
-  selectors.forEach((selector, sectionIndex) => {
-    const section = byKey.get(selectorKey(selector))
+  for (const selector of selectors) {
+    const key = selectorKey(selector)
+    const section = sectionIndex.get(key)
     if (!section)
-      throw new Error(`Game IR projection source section is missing: ${selectorKey(selector)}`)
-    const text = source.sectionBytes[selectorKey(selector)]
+      throw new Error(`Game IR projection source section is missing: ${key}`)
+    const text = source.sectionBytes[key]
     if (text === undefined)
-      throw new Error(`Game IR projection source bytes are missing: ${selectorKey(selector)}`)
+      throw new Error(`Game IR projection source bytes are missing: ${key}`)
     if (sha256(text) !== section.digest)
-      throw new Error(`Game IR projection source bytes are stale: ${selectorKey(selector)}`)
-    const lines = text.split(/\r?\n/u)
-    lines.forEach((line, lineIndex) => {
-      if (line.length === 0) return
-      fragments.push({
-        fragmentId: `e${sectionIndex}.${lineIndex}`,
-        documentPath: selector.documentPath,
-        sectionId: selector.sectionId,
-        text: line,
-      })
-    })
+      throw new Error(`Game IR projection source bytes are stale: ${key}`)
+  }
+  const catalog = buildGameIrEvidenceFragmentCatalog({
+    sectionIndex: source.sectionIndex,
+    sectionBytes: source.sectionBytes,
   })
+  const fragments = catalog.fragments
+    .filter(fragment =>
+      selectedKeys.has(`${fragment.documentPath}#${fragment.sectionId}`),
+    )
+    .map(fragment => ({
+      fragmentId: fragment.fragmentId,
+      documentPath: fragment.documentPath,
+      sectionId: fragment.sectionId,
+      text: fragment.excerpt,
+    }))
   if (fragments.length === 0)
     throw new Error('Game IR projection authority has no source fragments')
   return Object.freeze(fragments.map(fragment => Object.freeze(fragment)))
+}
+
+function cloneContext(
+  context: GameIrProjectionSliceContext,
+): GameIrProjectionSliceContext {
+  return {
+    availablePriorNodes: context.availablePriorNodes.map(node => ({
+      id: node.id,
+      kind: node.kind,
+      value: JSON.parse(canonicalGameIrJson(node.value)) as Record<
+        string,
+        unknown
+      >,
+    })),
+    requiredCurrentNodes: context.requiredCurrentNodes.map(node => ({
+      id: node.id,
+      kind: node.kind,
+    })),
+  }
 }
 
 export function buildGameIrProjectionSliceAuthority(input: {
@@ -251,6 +271,7 @@ export function buildGameIrProjectionSliceAuthority(input: {
       throw new Error('Game IR projection retry diagnostic fragment is stale')
     visibleFragments = Object.freeze(selected)
   }
+  const context = cloneContext(input.sliceContext)
   return freeze({
     schemaVersion: 'game-ir-projection-slice-authority.v1',
     identity: {
@@ -262,10 +283,13 @@ export function buildGameIrProjectionSliceAuthority(input: {
     moduleId,
     slice: canonicalSlice,
     sourceFragments: visibleFragments,
-    availablePriorNodes: input.sliceContext.availablePriorNodes,
-    requiredCurrentNodes: input.sliceContext.requiredCurrentNodes,
-    admittedCurrentNodes: input.admittedCurrentNodes ?? [],
-    ...(retryDiagnostic ? { retryDiagnostic } : {}),
+    availablePriorNodes: context.availablePriorNodes,
+    requiredCurrentNodes: context.requiredCurrentNodes,
+    admittedCurrentNodes: (input.admittedCurrentNodes ?? []).map(node => ({
+      id: node.id,
+      kind: node.kind,
+    })),
+    ...(retryDiagnostic ? { retryDiagnostic: { ...retryDiagnostic } } : {}),
   })
 }
 

@@ -1433,4 +1433,59 @@ describe('worker prompts', () => {
     ])
       expect(prompt).not.toContain(forbidden)
   })
+
+  test('describes Markdown authority headings instead of the removed JSON projection fields', () => {
+    const packet = syntheticProjectionPacket()
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'game-ir-compiler',
+      phase: 'GAME_IR_COMPILATION',
+      revision: 'revision',
+      allowedPaths: [],
+      contract: {
+        kind: 'projection',
+        currentSlice: 'gameplay.slice.0',
+        sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [] },
+        packet,
+      },
+    })
+    expect(prompt).toContain('## Current slice')
+    expect(prompt).toContain('## Dependency context')
+    expect(prompt).toContain('## Source fragments')
+    expect(prompt).not.toContain('currentSlice.retryDiagnostic')
+    expect(prompt).not.toContain('dependencyContext')
+    expect(prompt).not.toContain('source.sections[].evidenceFragments')
+  })
+
+  test('rejects a retry diagnostic that does not match the exact slice or record union', () => {
+    const packet = syntheticProjectionPacket()
+    expect(() =>
+      buildWorkerPrompt({
+        runId: 'run',
+        ownerId: 'owner',
+        projectId: 'project',
+        workspacePath: '/workspace',
+        workerType: 'game-ir-compiler',
+        phase: 'GAME_IR_COMPILATION',
+        revision: 'revision',
+        allowedPaths: [],
+        contract: {
+          kind: 'projection',
+          currentSlice: 'gameplay.slice.0',
+          sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [] },
+          retryDiagnostic: {
+            scope: 'record',
+            sliceId: 'gameplay.slice.0',
+            recordId: 'state-start',
+            fragmentId: 'e0.0',
+            reason: 'record failed',
+          },
+          packet,
+        },
+      }),
+    ).toThrow(/retry diagnostic is invalid/)
+  })
 })
