@@ -667,6 +667,7 @@ function parseFormulaValue(node: GameIrNode): {
     node.value.expression,
     node.references.length,
     usedReferences,
+    `node ${node.id} formula expression`,
   )
   const outputUnitReferenceIndex = referenceIndex(
     node.value.outputUnitReferenceIndex,
@@ -821,6 +822,7 @@ export function combineDimensions(
   left: readonly BalanceDimension[],
   right: readonly BalanceDimension[],
   direction: 1 | -1,
+  label = 'inferred dimension exponent is not a finite integer',
 ): readonly BalanceDimension[] {
   const exponents = new Map<string, number>()
   for (const dimension of left)
@@ -829,7 +831,7 @@ export function combineDimensions(
     const exponent =
       (exponents.get(dimension.base) ?? 0) + direction * dimension.exponent
     if (!Number.isSafeInteger(exponent))
-      fail('inferred dimension exponent is not a finite integer')
+      fail(label)
     if (exponent === 0) exponents.delete(dimension.base)
     else exponents.set(dimension.base, exponent)
   }
@@ -842,6 +844,7 @@ function combineScale(
   left: BalanceUnit,
   right: BalanceUnit,
   direction: 1 | -1,
+  label = 'inferred unit scale is not a finite rational',
 ): Readonly<{ numerator: number; denominator: number }> {
   const numerator =
     direction === 1
@@ -856,8 +859,8 @@ function combineScale(
     !Number.isSafeInteger(denominator) ||
     denominator === 0
   )
-    fail('inferred unit scale is not a finite rational')
-  return canonicalScale({ numerator, denominator }, 'inferred unit scale')
+    fail(label)
+  return canonicalScale({ numerator, denominator }, label)
 }
 
 function unitForNode(
@@ -929,8 +932,14 @@ function unitForNode(
         left.dimensions,
         right.dimensions,
         binary.operator === 'multiply' ? 1 : -1,
+        `node ${node.id} inferred dimension exponent is not a finite integer`,
       ),
-      scale: combineScale(left, right, binary.operator === 'multiply' ? 1 : -1),
+      scale: combineScale(
+        left,
+        right,
+        binary.operator === 'multiply' ? 1 : -1,
+        `node ${node.id} inferred unit scale is not a finite rational`,
+      ),
     }
   }
   const inferred = infer(expression)

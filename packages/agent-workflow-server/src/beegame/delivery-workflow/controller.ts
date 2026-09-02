@@ -1367,6 +1367,7 @@ export function createDeliveryWorkflowController(input: {
         actual: string,
         diagnosticIdentity = progressIdentity,
         retryDiagnostic?: GameIrProjectionRetryDiagnostic,
+        requiresAction = false,
       ): Promise<void> => {
         const normalizedReason = retryDiagnostic
           ? retryDiagnosticActual(
@@ -1387,9 +1388,10 @@ export function createDeliveryWorkflowController(input: {
           state.progressIdentity !== undefined &&
           digestGameIrValue(state.progressIdentity) ===
             digestGameIrValue(reasonBoundIdentity)
-        const status = unchanged
-          ? ('needs_action' as const)
-          : ('running' as const)
+        const status =
+          requiresAction || unchanged
+            ? ('needs_action' as const)
+            : ('running' as const)
         const attended = await persist(
           {
             ...run,
@@ -1411,9 +1413,11 @@ export function createDeliveryWorkflowController(input: {
                 expected: operation.step,
                 actual: normalizedReason,
                 diagnosticRef,
-                recoveryAction: unchanged
-                  ? 'resolve the unchanged operation diagnostic, then retry the same compilation identity'
-                  : 'retry the same compilation identity',
+                recoveryAction: requiresAction
+                  ? 'resolve the operation diagnostic, then retry the same compilation identity'
+                  : unchanged
+                    ? 'resolve the unchanged operation diagnostic, then retry the same compilation identity'
+                    : 'retry the same compilation identity',
               },
               progressIdentity: reasonBoundIdentity,
             },
@@ -1518,14 +1522,17 @@ export function createDeliveryWorkflowController(input: {
           error instanceof Error
             ? error.message
             : 'Game IR operation admission failed'
+        let unattributed = false
         if (
           operation.operation === 'projection' &&
           projectionJournal &&
           !projectionJournal.nextSlice
-        )
-          await projectionJournal.invalidate(
-            projectionJournal.ownerSliceIdForDiagnostic(actual),
-          )
+        ) {
+          const ownerSliceId =
+            projectionJournal.ownerSliceIdForDiagnostic(actual)
+          if (ownerSliceId) await projectionJournal.invalidate(ownerSliceId)
+          else unattributed = true
+        }
         const nativeCandidate =
           operation.operation === 'projection'
             ? 'records' in result
@@ -1544,7 +1551,12 @@ export function createDeliveryWorkflowController(input: {
               : nativeCandidate,
           reason: actual,
         })
-        await persistCompilerDiagnostic(actual, admissionIdentity)
+        await persistCompilerDiagnostic(
+          actual,
+          admissionIdentity,
+          undefined,
+          unattributed,
+        )
         return
       }
       const checkpoint = await writeGameIrStageCheckpoint({

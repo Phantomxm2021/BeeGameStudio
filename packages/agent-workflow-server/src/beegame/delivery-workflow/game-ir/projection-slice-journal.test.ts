@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { digestGameIrValue } from './model'
 import { deriveProjectionSlicePlan } from './projection-slices'
 import { buildGameplayProjectionOperationPacket } from './gameplay-producer'
+import { buildBalanceProjectionOperationPacket } from './balance-producer'
 import { realAuthority } from './resource-realization-test-helpers'
 import {
   createGameIrProjectionSliceJournal,
@@ -42,6 +43,35 @@ function fixture(journalPath: string): GameIrProjectionSliceJournalInput {
     operationStep: 'phase4/gameplay/projection',
     packet,
     slicePlan: deriveProjectionSlicePlan('gameplay'),
+  }
+}
+
+function balanceFixture(
+  journalPath: string,
+): GameIrProjectionSliceJournalInput {
+  const authority = realAuthority().phase5Authority.phase4Authority.balance
+  const packet = buildBalanceProjectionOperationPacket({
+    source: authority.source,
+    mechanical: authority.mechanical,
+    gameplay: realAuthority().phase5Authority.phase4Authority.gameplay,
+  })
+  const identity: GameIrCompilationIdentity = {
+    runId: 'run-1',
+    taskId: authority.source.taskId,
+    publicationId: authority.source.compileRequest.publicationId,
+    confirmedBriefDigest:
+      authority.source.compileRequest.foundation.confirmedBriefDigest,
+    foundationRevision:
+      authority.source.compileRequest.foundation.foundationRevision,
+    foundationReadyReceiptDigest:
+      authority.source.compileRequest.foundation.receiptDigest,
+  }
+  return {
+    journalPath,
+    identity,
+    operationStep: 'phase4/balance/projection',
+    packet,
+    slicePlan: deriveProjectionSlicePlan('balance'),
   }
 }
 
@@ -221,6 +251,102 @@ describe('Game IR projection slice journal', () => {
         journal.slicePlan.slices.length,
       )
       expect('complete' in journal).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('invalidates only the formula owner after all balance slices are complete', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const [first, second, third, fourth] = journal.slicePlan.slices
+      const sourceUnit =
+        realAuthority().phase5Authority.phase4Authority.balance.semantic
+          .nodes[0]!
+      const { bindings: _bindings, producerMode: _producerMode, ...unit } =
+        sourceUnit as typeof sourceUnit & {
+          bindings?: unknown
+          producerMode?: unknown
+        }
+      await journal.append({
+        status: 'completed',
+        sliceId: first!.sliceId,
+        semantic: {
+          nodes: [unit],
+          sourceEvidenceGroups: [
+            {
+              nodeIds: [unit.id],
+              fragmentId: firstEvidenceFragmentId(
+                input,
+                input.packet.source.sectionIndex[0]!.documentPath,
+                input.packet.source.sectionIndex[0]!.sectionId,
+              ),
+            },
+          ],
+        },
+      } as unknown as GameIrProjectionSliceCompletion)
+      await journal.append({
+        status: 'completed',
+        sliceId: second!.sliceId,
+        semantic: {
+          nodes: [
+            {
+              id: 'balance.formula.bad',
+              kind: 'balance.formula',
+              value: {
+                label: 'Bad formula',
+                expression: {
+                  kind: 'literal',
+                  value: 1,
+                  unitReferenceIndex: 0,
+                },
+                outputUnitReferenceIndex: 0,
+              },
+              references: [
+                { targetId: 'balance-unit', targetType: 'balance.unit' },
+              ],
+              edges: [],
+            },
+          ],
+          sourceEvidenceGroups: [
+            {
+              nodeIds: ['balance.formula.bad'],
+              fragmentId: firstEvidenceFragmentId(
+                input,
+                input.packet.source.sectionIndex[0]!.documentPath,
+                input.packet.source.sectionIndex[0]!.sectionId,
+              ),
+            },
+          ],
+        },
+      } as unknown as GameIrProjectionSliceCompletion)
+      await journal.append(emptyCompletion(third!.sliceId))
+      await journal.append(emptyCompletion(fourth!.sliceId))
+      const diagnostic =
+        'invalid Balance module: node balance.formula.bad formula expression.right.unit reference index is out of range'
+      const owner = journal.ownerSliceIdForDiagnostic(diagnostic)
+      expect(owner).toBe(second!.sliceId)
+      await journal.invalidate(owner!)
+      expect(journal.entries.map(entry => entry.sliceId)).toEqual([
+        first!.sliceId,
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('does not attribute an unknown module-level diagnostic to a slice', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      for (const slice of journal.slicePlan.slices)
+        await journal.append(emptyCompletion(slice.sliceId))
+      expect(journal.ownerSliceIdForDiagnostic('unknown closure failure')).toBe(
+        undefined,
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -458,9 +584,9 @@ describe('Game IR projection slice journal', () => {
         journal.ownerSliceIdForDiagnostic(
           'gameplay module must declare at least one state',
         ),
-      ).toBe('gameplay.slice.0')
+      ).toBeUndefined()
       expect(journal.ownerSliceIdForDiagnostic('unknown closure failure')).toBe(
-        'gameplay.slice.0',
+        undefined,
       )
     } finally {
       await rm(root, { recursive: true, force: true })

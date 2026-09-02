@@ -496,6 +496,61 @@ describe('Balance Game IR schema', () => {
     )
   })
 
+  test('includes the owning formula node in recursive expression diagnostics', () => {
+    const module = cloneModule()
+    nodeById(module, 'balance.formula.math').value.expression = {
+      kind: 'binary',
+      operator: 'add',
+      left: { kind: 'literal', value: 1, unitReferenceIndex: 0 },
+      right: { kind: 'literal', value: 1, unitReferenceIndex: 99 },
+    }
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(
+      /node balance\.formula\.math .*formula expression\.right\.unit reference index is out of range/i,
+    )
+  })
+
+  test('includes the owning formula node in inferred-unit diagnostics', () => {
+    const unit = (id: string) =>
+      node(id, 'balance.unit', {
+        symbol: id,
+        dimensions: [{ base: 'overflow', exponent: Number.MAX_SAFE_INTEGER }],
+        scale: { numerator: 1, denominator: 1 },
+      })
+    const formula = node(
+      'balance.formula.overflow',
+      'balance.formula',
+      {
+        label: 'Overflow',
+        expression: {
+          kind: 'binary',
+          operator: 'multiply',
+          left: { kind: 'literal', value: 1, unitReferenceIndex: 0 },
+          right: { kind: 'literal', value: 1, unitReferenceIndex: 1 },
+        },
+        outputUnitReferenceIndex: 0,
+      },
+      {
+        references: [
+          ref('balance.unit.a', 'balance.unit'),
+          ref('balance.unit.b', 'balance.unit'),
+        ],
+      },
+    )
+    const nodes = [
+      unit('balance.unit.a'),
+      unit('balance.unit.b'),
+      formula,
+    ].sort((left, right) =>
+      left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
+    )
+    expect(() =>
+      parseBalanceModule({
+        moduleId: 'balance',
+        nodes,
+      }),
+    ).toThrow(/node balance\.formula\.overflow .*inferred dimension exponent/i)
+  })
+
   test.each([
     [
       'dangling formula reference',

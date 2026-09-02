@@ -1304,44 +1304,46 @@ export class GameIrProjectionSliceJournal {
       ),
     )
   }
-  ownerSliceIdForDiagnostic(reason: string): string {
+  ownerSliceIdForDiagnostic(reason: string): string | undefined {
     const entries = this.state.entries
     const nodeOwners = new Map(
       entries.flatMap(entry =>
         entry.semantic.nodes.map(node => [node.id, entry.sliceId] as const),
       ),
     )
-    const indexed = /\bnodes?\[(\d+)\]/u.exec(reason)?.[1]
-    if (indexed !== undefined) {
-      const nodes = entries
-        .flatMap(entry => entry.semantic.nodes)
-        .sort((left, right) => compareCodeUnits(left.id, right.id))
-      const owner = nodeOwners.get(nodes[Number(indexed)]?.id ?? '')
-      if (owner) return owner
-    }
-    const mentionedId = [...nodeOwners.keys()]
+    const exactNodeId = [...nodeOwners.keys()]
       .map(id => {
         const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
         const match = new RegExp(
           `(^|[^A-Za-z0-9._-])(${escaped})(?=$|[^A-Za-z0-9._-])`,
+          'u',
         ).exec(reason)
-        return { id, index: match ? match.index + match[1]!.length : -1 }
+        return match
+          ? { id, index: match.index + match[1]!.length }
+          : undefined
       })
-      .filter(match => match.index >= 0)
+      .filter(
+        (match): match is { id: string; index: number } =>
+          match !== undefined,
+      )
       .sort(
         (left, right) =>
           left.index - right.index || right.id.length - left.id.length,
       )[0]?.id
-    if (mentionedId) return nodeOwners.get(mentionedId)!
-    for (const slice of this.state.slicePlan.slices) {
-      if (
-        slice.nodeKinds.some(kind =>
-          reason.toLowerCase().includes(kind.split('.').at(-1)!.toLowerCase()),
-        )
-      )
-        return slice.sliceId
+    if (exactNodeId) return nodeOwners.get(exactNodeId)
+
+    const indexed = /(?:^|\/)nodes?\/(\d+)(?:\/|$)|\bnodes?\[(\d+)\]/u.exec(
+      reason,
+    )
+    const indexText = indexed?.[1] ?? indexed?.[2]
+    if (indexText !== undefined) {
+      const nodes = entries
+        .flatMap(entry => entry.semantic.nodes)
+        .sort((left, right) => compareCodeUnits(left.id, right.id))
+      const owner = nodeOwners.get(nodes[Number(indexText)]?.id ?? '')
+      if (owner) return owner
     }
-    return this.state.slicePlan.slices[0]!.sliceId
+    return undefined
   }
 
   async appendRecords(

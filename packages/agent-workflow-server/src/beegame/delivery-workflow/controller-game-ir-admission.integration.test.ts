@@ -365,7 +365,7 @@ describe('Game IR controller admission integration', () => {
     }
   })
 
-  test('invalidates only the owner slice after a full-module admission failure', async () => {
+  test('fails closed when a full-module admission failure has no unique owner', async () => {
     const fixture = await prepareFixture()
     try {
       const journal = await createGameIrProjectionSliceJournal(fixture.journalInput)
@@ -401,11 +401,12 @@ describe('Game IR controller admission integration', () => {
         terminal(finalRequest),
       )
       const invalidated = await loadGameIrProjectionSliceJournal(fixture.journalInput)
-      expect(invalidated.entries).toEqual([])
-      expect(invalidated.nextSlice?.sliceId).toBe('gameplay.slice.0')
-      expect(fixture.started.at(-1)?.contract.currentSlice).toBe('gameplay.slice.0')
+      expect(invalidated.entries).toHaveLength(2)
+      expect(invalidated.nextSlice).toBeUndefined()
+      expect(fixture.started).toHaveLength(0)
       const afterAdmissionFailure = await fixture.controller.store.load()
-      expect(afterAdmissionFailure?.activeDispatch?.dispatchId).not.toBe(setup?.activeDispatch?.dispatchId)
+      expect(afterAdmissionFailure?.activeDispatch).toBeUndefined()
+      expect(afterAdmissionFailure?.status).toBe('needs_action')
       expect(afterAdmissionFailure?.gameIrState && 'diagnostic' in afterAdmissionFailure.gameIrState ? afterAdmissionFailure.gameIrState.diagnostic?.actual : '').toContain('gameplay')
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
