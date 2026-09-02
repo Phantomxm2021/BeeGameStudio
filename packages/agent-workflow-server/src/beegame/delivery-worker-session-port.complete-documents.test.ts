@@ -338,7 +338,10 @@ describe('delivery worker complete document boundary', () => {
           revision: 'revision',
           receiptDigest: 'b'.repeat(64),
           sliceId: currentSlice,
-          authorityMarker: `SELECTED_AUTHORITY_${currentSlice}`,
+          authorityMarker:
+            currentSlice === 'gameplay.slice.0'
+              ? 'AUTHORITY_FIRST'
+              : 'AUTHORITY_SECOND',
           fullPacketMarker: 'old-whole-packet-route',
         }),
         compileRequestDigest: digestGameIrValue({
@@ -372,6 +375,10 @@ describe('delivery worker complete document boundary', () => {
     expect(prompts[0]).toContain('## Current slice')
     expect(prompts[1]).toContain('## Current slice')
     expect(prompts[1]).toContain('gameplay.slice.1')
+    expect(prompts[0]).toContain('AUTHORITY_FIRST')
+    expect(prompts[0]).not.toContain('AUTHORITY_SECOND')
+    expect(prompts[1]).toContain('AUTHORITY_SECOND')
+    expect(prompts[1]).not.toContain('AUTHORITY_FIRST')
     expect(prompts.every(prompt => !prompt.includes('FORBIDDEN_FULL_PACKET_MARKER'))).toBe(true)
 
     expect(sends).toHaveLength(2)
