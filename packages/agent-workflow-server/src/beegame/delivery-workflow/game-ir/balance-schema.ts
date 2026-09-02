@@ -106,6 +106,12 @@ export type BalanceRelationshipRole = Readonly<{
 }>
 export type BalanceReferencePolicy = Readonly<{
   kind: 'exact-edge-targets'
+}> | Readonly<{
+  kind: 'exact-single-index-reference'
+  cardinality: 'exactly-one'
+  targetKinds: readonly ['balance.unit']
+  indexField: 'unitReferenceIndex'
+  requiredIndex: 0
 }>
 
 const role = (
@@ -120,6 +126,13 @@ const role = (
 
 const EXACT_EDGE_TARGETS_REFERENCE_POLICY: BalanceReferencePolicy =
   Object.freeze({ kind: 'exact-edge-targets' })
+const EXACT_SINGLE_INDEX_REFERENCE_POLICY: BalanceReferencePolicy = Object.freeze({
+  kind: 'exact-single-index-reference',
+  cardinality: 'exactly-one',
+  targetKinds: Object.freeze(['balance.unit'] as const),
+  indexField: 'unitReferenceIndex',
+  requiredIndex: 0,
+})
 
 /** The single schema-owned authority for Balance kinds, values, and roles. */
 export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
@@ -161,6 +174,7 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
       ['minimum', 'maximum'],
     ),
     relationships: Object.freeze({}),
+    referencePolicy: EXACT_SINGLE_INDEX_REFERENCE_POLICY,
   }),
   'balance.parameter': Object.freeze({
     valueJsonSchema: projectionValueSchema(
@@ -174,6 +188,7 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
       ['minimum', 'maximum'],
     ),
     relationships: Object.freeze({}),
+    referencePolicy: EXACT_SINGLE_INDEX_REFERENCE_POLICY,
   }),
   'balance.formula': Object.freeze({
     valueJsonSchema: projectionValueSchema({
@@ -629,12 +644,12 @@ function exactRoleReferences(node: GameIrNode): void {
 
 function parseVariableValue(
   node: GameIrNode,
+  manifest: Pick<
+    (typeof BALANCE_DOMAIN_MANIFEST)[keyof typeof BALANCE_DOMAIN_MANIFEST],
+    'valueJsonSchema'
+  >,
 ): Readonly<Record<string, unknown>> {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
-  const manifest =
-    BALANCE_DOMAIN_MANIFEST[
-      node.kind as 'balance.variable' | 'balance.parameter'
-    ]
   const optionalFields = new Set<string>(
     projectionValueOptionalFields(manifest.valueJsonSchema),
   )
@@ -657,13 +672,7 @@ function parseVariableValue(
     fail(`node ${node.id} baseline is below minimum`)
   if (maximum !== undefined && node.value.baseline > maximum)
     fail(`node ${node.id} baseline is above maximum`)
-  const unitReferenceIndex = referenceIndex(
-    node.value.unitReferenceIndex,
-    node.references.length,
-    `node ${node.id} unit`,
-  )
-  if (node.references.length !== 1 || unitReferenceIndex !== 0)
-    fail(`node ${node.id} must reference exactly one unit`)
+  const unitReferenceIndex = node.value.unitReferenceIndex
   return {
     label,
     baseline: node.value.baseline,
@@ -671,6 +680,41 @@ function parseVariableValue(
     ...(maximum === undefined ? {} : { maximum }),
     unitReferenceIndex,
   }
+}
+
+function validateReferencePolicy(
+  node: GameIrNode,
+  policy: BalanceReferencePolicy | undefined,
+): Set<number> {
+  const consumedReferences = new Set<number>()
+  if (!policy) return consumedReferences
+  if (policy.kind === 'exact-edge-targets') {
+    exactRoleReferences(node)
+    for (let index = 0; index < node.references.length; index += 1)
+      consumedReferences.add(index)
+    return consumedReferences
+  }
+  const indexValue = node.value[policy.indexField]
+  if (
+    node.references.length !== 1 ||
+    indexValue !== policy.requiredIndex
+  ) {
+    const receivedIndex =
+      typeof indexValue === 'number' ? String(indexValue) : JSON.stringify(indexValue)
+    fail(
+      `node ${node.id} unit reference policy requires ${policy.cardinality} ${policy.targetKinds.join('/')} reference at index ${policy.requiredIndex}; received index ${receivedIndex} with ${node.references.length} reference${node.references.length === 1 ? '' : 's'}`,
+    )
+  }
+  const reference = node.references[policy.requiredIndex]
+  if (
+    !reference ||
+    !policy.targetKinds.some(targetKind => targetKind === reference.targetType)
+  )
+    fail(
+      `node ${node.id} unit reference must target ${policy.targetKinds.join('/')}`,
+    )
+  consumedReferences.add(policy.requiredIndex)
+  return consumedReferences
 }
 
 function parseFormulaValue(node: GameIrNode): {
@@ -755,7 +799,12 @@ function parseValue(node: GameIrNode): {
     }
   }
   if (node.kind === 'balance.variable' || node.kind === 'balance.parameter') {
-    return { value: parseVariableValue(node) }
+    return {
+      value: parseVariableValue(
+        node,
+        BALANCE_DOMAIN_MANIFEST[node.kind],
+      ),
+    }
   }
   if (node.kind === 'balance.formula') {
     const parsed = parseFormulaValue(node)
@@ -895,10 +944,20 @@ function unitForNode(
 ): BalanceUnit {
   if (node.kind === 'balance.unit') return units.get(node.id)!
   if (node.kind === 'balance.variable' || node.kind === 'balance.parameter') {
-    const reference = node.references[node.value.unitReferenceIndex as number]
+    const manifest =
+      BALANCE_DOMAIN_MANIFEST[node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST]
+    const policy =
+      'referencePolicy' in manifest ? manifest.referencePolicy : undefined
+    if (!policy || policy.kind !== 'exact-single-index-reference')
+      fail(`node ${node.id} has no unit reference policy`)
+    const reference =
+      node.references[node.value[policy.indexField] as number]
     if (!reference) fail(`node ${node.id} has no unit reference`)
     const unit = targets.get(reference.targetId)
-    if (!unit || unit.kind !== 'balance.unit')
+    if (
+      !unit ||
+      !policy.targetKinds.some(targetKind => targetKind === unit.kind)
+    )
       fail(`node ${node.id} unit reference is invalid`)
     return units.get(unit.id)!
   }
@@ -1065,28 +1124,16 @@ export function parseBalanceProjectionNode(
   validateReferences(node, targets, options)
   const parsedValue = parseValue(node)
   validateRoles(node, targets, options)
-  exactRoleReferences(node)
   const consumedReferences = parsedValue.consumedReferences ?? new Set<number>()
-  if (node.kind === 'balance.variable' || node.kind === 'balance.parameter') {
-    const unitReferenceIndex = parsedValue.value.unitReferenceIndex as number
-    consumedReferences.add(unitReferenceIndex)
-    const unitReference = node.references[unitReferenceIndex]
-    const unitTarget = unitReference && targets.get(unitReference.targetId)
-    if (
-      (!unitTarget && !options.allowUnknownTargets) ||
-      (unitTarget && unitTarget.kind !== 'balance.unit')
-    )
-      fail(`node ${node.id} unit reference must target balance.unit`)
-  } else if (
-    node.kind === 'balance.economy-source' ||
-    node.kind === 'balance.economy-sink' ||
-    node.kind === 'balance.reward' ||
-    node.kind === 'balance.cost' ||
-    node.kind === 'balance.reward-cost-binding'
-  ) {
-    for (let referenceIndex = 0; referenceIndex < node.references.length; referenceIndex += 1)
-      consumedReferences.add(referenceIndex)
-  }
+  const manifest =
+    BALANCE_DOMAIN_MANIFEST[node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST]
+  const policy =
+    'referencePolicy' in manifest ? manifest.referencePolicy : undefined
+  for (const referenceIndex of validateReferencePolicy(
+    node,
+    policy,
+  ))
+    consumedReferences.add(referenceIndex)
   assertReferenceConsumption(node, consumedReferences)
   return {
     ...node,

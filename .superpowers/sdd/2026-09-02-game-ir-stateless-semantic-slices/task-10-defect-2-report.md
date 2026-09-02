@@ -51,3 +51,28 @@ compiler instruction, and direct focused tests were changed. Reviewer,
 Revision, Checklist, UI, Foundation Stage 3/4, consumer Task 9–15 paths,
 retry/session reuse, caps, fallback paths, and rejected-record persistence
 were not changed.
+
+## Follow-up: Balance node-local unit reference policy
+
+The real `polar-station` retry exposed a second contract omission in the same
+Balance authority: `balance.variable` and `balance.parameter` declared only an
+integer `unitReferenceIndex`, while admission additionally required exactly
+one `balance.unit` reference at index `0`. The provider therefore received no
+machine-readable rule for the failing node-local index. The retry used a new
+session and new output, but reproduced the semantic error because the
+authority was incomplete; no candidate or session was reused.
+
+The manifest now owns an `exact-single-index-reference` policy containing the
+target kind, index field, exact cardinality, and required index. Projection
+contract generation, the node JSON Schema, Markdown authority, compiler
+instruction, and Balance admission all consume that policy. Direct admission
+diagnostics include expected and received index/reference count; schema-level
+rejection remains strict, and rejected records never enter the journal. A
+same-ID corrected replacement is accepted after an invalid record, with the
+admitted prefix and its digests unchanged.
+
+Follow-up verification: focused Balance/contract/authority/journal/prompt
+tests `129 pass, 0 fail` (1,990 assertions); typecheck pass; diff-check pass.
+The complete Game IR suite produced `633 pass, 1 fail` across 45 files; the
+sole failure is the pre-existing repository-root Foundation parity baseline
+guard for Stage 3/4 bytes, outside this change's files and scope.

@@ -274,6 +274,18 @@ describe('Game IR projection slice authority source scope', () => {
     expect(rendered).not.toContain('balance.progression-curve')
   })
 
+  test('renders Balance unit index policy from the domain manifest', () => {
+    const authority = authorityFor(projectionPacket('balance.slice.0'), {
+      sliceId: 'balance.slice.0',
+    })
+    const rendered = renderGameIrProjectionSliceAuthority(authority)
+    expect(rendered).toContain('exact-single-index-reference')
+    expect(rendered).toContain('exactly-one')
+    expect(rendered).toContain('unitReferenceIndex')
+    expect(rendered).toContain('balance.unit')
+    expect(rendered).toContain('requiredIndex')
+  })
+
   test('narrows record retries to the failed fragment while retaining direct context and admitted prefix', () => {
     const packet = projectionPacket('gameplay.slice.1')
     const authority = authorityFor(packet, {

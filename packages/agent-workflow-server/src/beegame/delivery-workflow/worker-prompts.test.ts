@@ -1283,6 +1283,8 @@ describe('worker prompts', () => {
     )
     expect(prompt).toContain('referencePolicy')
     expect(prompt).toContain('exact-edge-targets')
+    expect(prompt).toContain('exact-single-index-reference')
+    expect(prompt).toContain('requiredIndex')
     expect(prompt).not.toContain('projectionContract exposes relationships')
   })
 

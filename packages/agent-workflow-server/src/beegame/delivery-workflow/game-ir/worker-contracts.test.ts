@@ -75,6 +75,16 @@ describe('Game IR worker operation contracts', () => {
 
   test('exposes Balance reference policy only for kinds governed by it', () => {
     const contract = buildGameIrProjectionContract('balance')
+    for (const kind of ['balance.variable', 'balance.parameter'])
+      expect(
+        contract.nodes.find(node => node.kind === kind)?.referencePolicy,
+      ).toEqual({
+        kind: 'exact-single-index-reference',
+        cardinality: 'exactly-one',
+        targetKinds: ['balance.unit'],
+        indexField: 'unitReferenceIndex',
+        requiredIndex: 0,
+      })
     for (const kind of [
       'balance.economy-source',
       'balance.economy-sink',

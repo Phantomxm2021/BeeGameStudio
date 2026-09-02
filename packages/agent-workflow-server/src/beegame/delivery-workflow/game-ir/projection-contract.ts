@@ -164,6 +164,33 @@ type JsonSchema = Record<string, unknown>
 function nodeSchema(
   node: GameIrProjectionContract['nodes'][number],
 ): JsonSchema {
+  const referencePolicy = node.referencePolicy
+  const valueProperties = Object.fromEntries(
+    Object.entries(node.value.fields).map(([field, schema]) => {
+      if (
+        referencePolicy?.kind === 'exact-single-index-reference' &&
+        field === referencePolicy.indexField
+      )
+        return [field, { ...schema, const: referencePolicy.requiredIndex }]
+      return [field, schema]
+    }),
+  )
+  const referenceItems = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      targetId: {
+        type: 'string',
+        minLength: 1,
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$',
+      },
+      targetType:
+        referencePolicy?.kind === 'exact-single-index-reference'
+          ? { enum: referencePolicy.targetKinds }
+          : { type: 'string', minLength: 1 },
+    },
+    required: ['targetId', 'targetType'],
+  }
   const relationshipSchema =
     node.relationships.length === 0
       ? false
@@ -192,12 +219,6 @@ function nodeSchema(
             },
           })),
         }
-  const valueProperties = Object.fromEntries(
-    [...node.value.required, ...node.value.optional].map(field => [
-      field,
-      node.value.fields[field],
-    ]),
-  )
   return {
     type: 'object',
     additionalProperties: false,
@@ -216,19 +237,10 @@ function nodeSchema(
       },
       references: {
         type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            targetId: {
-              type: 'string',
-              minLength: 1,
-              pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$',
-            },
-            targetType: { type: 'string', minLength: 1 },
-          },
-          required: ['targetId', 'targetType'],
-        },
+        items: referenceItems,
+        ...(referencePolicy?.kind === 'exact-single-index-reference'
+          ? { minItems: 1, maxItems: 1 }
+          : {}),
       },
       edges: {
         type: 'array',

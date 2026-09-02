@@ -325,7 +325,7 @@ describe('Balance Game IR schema', () => {
     'non-finite value': /baseline.*finite/i,
     'lower bound above upper bound': /minimum cannot exceed maximum/i,
     'baseline outside bounds': /baseline is above maximum/i,
-    'missing unit reference': /unit.*reference.*range|exactly one unit/i,
+    'missing unit reference': /unit.*reference.*(?:range|exactly-one)/i,
     'wrong unit reference': /unit reference must target balance\.unit/i,
     'unknown value field': /unknown or missing fields/i,
   } as const
@@ -378,6 +378,32 @@ describe('Balance Game IR schema', () => {
         'triggered-by'
       ].targetKinds,
     ).toEqual(['gameplay.action', 'gameplay.event'])
+    expect(BALANCE_DOMAIN_MANIFEST['balance.variable'].referencePolicy).toEqual({
+      kind: 'exact-single-index-reference',
+      cardinality: 'exactly-one',
+      targetKinds: ['balance.unit'],
+      indexField: 'unitReferenceIndex',
+      requiredIndex: 0,
+    })
+    expect(BALANCE_DOMAIN_MANIFEST['balance.parameter'].referencePolicy).toEqual({
+      kind: 'exact-single-index-reference',
+      cardinality: 'exactly-one',
+      targetKinds: ['balance.unit'],
+      indexField: 'unitReferenceIndex',
+      requiredIndex: 0,
+    })
+    expect('referencePolicy' in BALANCE_DOMAIN_MANIFEST['balance.unit']).toBe(
+      false,
+    )
+  })
+
+  test('reports expected and received unit index/cardinality in direct Balance admission', () => {
+    const invalid = cloneModule()
+    const target = nodeById(invalid, 'balance.hp')
+    target.value.unitReferenceIndex = 1
+    expect(() => parseBalanceModule(invalid, gameplayTargets())).toThrow(
+      'node balance.hp unit reference policy requires exactly-one balance.unit reference at index 0; received index 1 with 1 reference',
+    )
   })
 
   test('keeps every admitted value field and optional field in the one manifest', () => {

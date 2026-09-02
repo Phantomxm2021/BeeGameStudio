@@ -314,6 +314,74 @@ describe('Game IR projection slice journal', () => {
     }
   })
 
+  test('preserves the Balance prefix when a unit index is invalid and accepts its corrected replacement', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const first = journal.slicePlan.slices[0]!
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
+      )
+      const sourceUnit =
+        realAuthority().phase5Authority.phase4Authority.balance.semantic.nodes[0]!
+      const { bindings: _bindings, producerMode: _producerMode, ...unit } =
+        sourceUnit as typeof sourceUnit & {
+          bindings?: unknown
+          producerMode?: unknown
+        }
+      const prefixUnit = { ...unit, id: 'balance.alpha-unit' }
+      await journal.appendRecords(
+        [{ fragmentId, node: prefixUnit }],
+        first.sliceId,
+      )
+      const prefixBefore = journal.currentSliceRecordPrefix
+      const digestsBefore = journal.currentSliceRecordDigests
+      const pendingDigestBefore = journal.snapshot.pendingSlice?.pendingDigest
+      const invalid = {
+        id: 'balance.parameter.body-cold-base',
+        kind: 'balance.parameter',
+        value: { label: 'Body cold base', baseline: 1, unitReferenceIndex: 1 },
+        references: [{ targetId: prefixUnit.id, targetType: 'balance.unit' }],
+        edges: [],
+      }
+      const rejected = await journal.appendRecords(
+        [{ fragmentId, node: invalid }],
+        first.sliceId,
+      )
+      expect(rejected.acceptedCount).toBe(0)
+      expect(rejected.diagnostic?.reason).toMatch(
+        /unitReferenceIndex must be equal to constant/i,
+      )
+      expect(journal.currentSliceRecordPrefix).toEqual(prefixBefore)
+      expect(journal.currentSliceRecordDigests).toEqual(digestsBefore)
+      expect(journal.snapshot.pendingSlice?.pendingDigest).toBe(
+        pendingDigestBefore,
+      )
+      const corrected = await journal.appendRecords(
+        [
+          {
+            fragmentId,
+            node: {
+              ...invalid,
+              value: { ...invalid.value, unitReferenceIndex: 0 },
+            },
+          },
+        ],
+        first.sliceId,
+      )
+      expect(corrected.acceptedCount).toBe(1)
+      expect(journal.currentSliceRecordPrefix).toEqual([
+        ...prefixBefore,
+        { id: invalid.id, kind: invalid.kind },
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('rejects a Balance relationship/reference mismatch before persisting the cost', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {

@@ -164,6 +164,36 @@ describe('Game IR projection slices', () => {
     ).toBe(true)
   })
 
+  test('mechanically enforces Balance single unit reference policy in slice schema', () => {
+    const slice = deriveProjectionSlicePlan('balance').slices[0]!
+    const validate = new Ajv().compile(
+      buildGameIrProjectionSliceAdmissionJsonSchema('balance', slice),
+    )
+    const invalid = {
+      status: 'completed',
+      sliceId: slice.sliceId,
+      semantic: {
+        nodes: [
+          {
+            id: 'balance.parameter.invalid',
+            kind: 'balance.parameter',
+            value: { label: 'Invalid', baseline: 1, unitReferenceIndex: 1 },
+            references: [
+              { targetId: 'balance.unit.seconds', targetType: 'balance.unit' },
+            ],
+            edges: [],
+          },
+        ],
+        sourceEvidenceGroups: [],
+      },
+    }
+    expect(validate(invalid)).toBe(false)
+    const missingReference = structuredClone(invalid)
+    missingReference.semantic.nodes[0]!.value.unitReferenceIndex = 0
+    missingReference.semantic.nodes[0]!.references = []
+    expect(validate(missingReference)).toBe(false)
+  })
+
   test('admits one canonical compact dependency context and rejects ID conflicts', () => {
     expect(
       normalizeGameIrProjectionSliceContext({
