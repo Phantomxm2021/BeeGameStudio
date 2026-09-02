@@ -43,7 +43,12 @@ import {
   GameIrStageCheckpointLoader,
   type GameIrProtocolStep,
 } from './game-ir/stage-checkpoint'
-import { cleanupGameIrProjectionSliceJournalAfterCheckpoint } from './game-ir/projection-slice-journal'
+import {
+  cleanupGameIrProjectionSliceJournalAfterCheckpoint,
+  gameIrProjectionSliceJournalPath,
+  loadGameIrProjectionSliceJournal,
+} from './game-ir/projection-slice-journal'
+import { deriveProjectionSlicePlan } from './game-ir/projection-slices'
 
 export {
   inspectWorkflowSnapshot,
@@ -182,6 +187,130 @@ function hasStaleFoundationWorkers(run: DeliveryRun): boolean {
           task.status === 'running' && task.dispatch?.status === 'running',
       ),
   )
+}
+
+function isStatelessGameIrProjectionDispatch(run: DeliveryRun): boolean {
+  const dispatch = run.activeDispatch
+  if (
+    run.status !== 'running' ||
+    run.phase !== 'GAME_IR_COMPILATION' ||
+    run.gameIrState?.status !== 'compiling' ||
+    dispatch?.workerType !== 'game-ir-compiler' ||
+    !['running', 'completed'].includes(dispatch.status)
+  )
+    return false
+  const kind = dispatch.request?.contract.kind
+  return kind === undefined || kind === 'projection'
+}
+
+async function verifyGameIrProjectionJournal(input: {
+  workspacePath: string
+  run: DeliveryRun
+}): Promise<void> {
+  const request = input.run.activeDispatch?.request
+  const packet = request?.contract.packet
+  const packetRecord =
+    packet && typeof packet === 'object' && !Array.isArray(packet)
+      ? (packet as Record<string, unknown>)
+      : undefined
+  const sourceValue = packetRecord?.source
+  const source =
+    sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue)
+      ? (sourceValue as Record<string, unknown>)
+      : undefined
+  if (
+    !packetRecord ||
+    !source ||
+    typeof source.moduleId !== 'string'
+  )
+    return
+  const moduleId = source.moduleId
+  const operationSteps: Record<string, GameIrProtocolStep> = {
+    gameplay: 'phase4/gameplay/projection',
+    balance: 'phase4/balance/projection',
+    'world-scene': 'phase5/world-scene/projection',
+    presentation: 'phase5/presentation/projection',
+    'resource-realization': 'phase6/resource-realization/projection',
+    'implementation-verification':
+      'phase7/implementation-verification/projection',
+  }
+  const operationStep = operationSteps[moduleId]
+  if (!operationStep) recoveryConflict('Game IR projection module is invalid')
+  const slicePlan = deriveProjectionSlicePlan(moduleId as never)
+  const journalPath = gameIrProjectionSliceJournalPath({
+    workspacePath: input.workspacePath,
+    identity: input.run.gameIrState!.identity,
+    operationStep,
+  })
+  try {
+    await loadGameIrProjectionSliceJournal({
+      journalPath,
+      identity: input.run.gameIrState!.identity,
+      operationStep,
+      packet: packet as never,
+      slicePlan,
+    })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+}
+
+async function detachStatelessGameIrProjection(input: {
+  store: RunStore
+  run: DeliveryRun
+  workspacePath: string
+  stopWorkspaceWorkers: (reason: string) => Promise<void>
+}): Promise<DeliveryRun> {
+  await verifyGameIrProjectionJournal({
+    workspacePath: input.workspacePath,
+    run: input.run,
+  })
+  try {
+    await input.stopWorkspaceWorkers(
+      'recovering stateless Game IR projection transport',
+    )
+  } catch (error) {
+    throw new WorkflowRecoveryTransactionError(
+      'stateless Game IR projection workers could not be stopped',
+      'recovery_worker_stop_failed',
+      { cause: error },
+    )
+  }
+  const lease = await input.store.mutationLock(input.run.runId)
+  try {
+    const inspection = await input.store.inspectWorkflowSnapshot()
+    const current = inspection.currentRun
+    if (!current || current.runId !== input.run.runId)
+      throw new WorkflowStoreError(
+        'workflow snapshot changed during Game IR recovery',
+        'recovery_snapshot_changed',
+      )
+    if (!isStatelessGameIrProjectionDispatch(current)) return current
+    const recovered = {
+      ...current,
+      activeDispatch: undefined,
+      blockedReason: undefined,
+      thinking: 'working' as const,
+    }
+    return input.store.commit(
+      recovered,
+      {
+        runId: recovered.runId,
+        type: 'game_ir_projection.recovered',
+        phase: recovered.phase,
+        status: recovered.status,
+        revision: recovered.revision,
+        ...(current.activeDispatch?.request?.contract.currentSlice
+          ? { currentSlice: current.activeDispatch.request.contract.currentSlice }
+          : {}),
+      },
+      undefined,
+      lease,
+    )
+  } finally {
+    await input.store.unlock(lease)
+  }
 }
 
 function recoveryConflict(message: string): never {
@@ -682,10 +811,19 @@ export async function recoverAndResumeRun(input: {
           currentRun =
             (await input.store.reconcile(async () => false)) ?? currentRun
         }
-        const gameIrTerminalActive =
+        let gameIrTerminalActive =
           currentRun.phase === 'GAME_IR_COMPILATION' &&
           currentRun.activeDispatch?.workerType === 'game-ir-compiler' &&
           currentRun.activeDispatch.terminalResult !== undefined
+        if (isStatelessGameIrProjectionDispatch(currentRun)) {
+          currentRun = await detachStatelessGameIrProjection({
+            store: input.store,
+            run: currentRun,
+            workspacePath,
+            stopWorkspaceWorkers: input.stopWorkspaceWorkers,
+          })
+          gameIrTerminalActive = false
+        }
         // The terminal is the first recovery input. Advancing a checkpoint
         // while it is still pending admission would skip the exact replay
         // boundary and could make the handler regenerate work.

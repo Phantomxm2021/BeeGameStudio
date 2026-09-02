@@ -11,6 +11,7 @@ import {
   standaloneProductionViolations,
 } from './stage-boundary-test-helpers'
 import { compareCodeUnits } from './model'
+import { renderGameIrProjectionSliceAuthority } from './projection-slice-authority'
 
 const deliveryWorkflowRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const serverSourceRoot = dirname(dirname(deliveryWorkflowRoot))
@@ -2193,6 +2194,53 @@ describe('Game IR stage boundary', () => {
     ).toEqual([])
   })
 
+  test('keeps production on one stateless projection track', async () => {
+    const files = await readProductionSourceFiles(serverSourceRoot)
+    const forbidden = [
+      'liveGameIrProjectionSessions',
+      'GameIrProjectionSessionKey',
+      'packetSent',
+      'sends one projection packet once',
+    ]
+    expect(
+      files.flatMap(file =>
+        forbidden
+          .filter(symbol => file.source.includes(symbol))
+          .map(symbol => `${file.path}:${symbol}`),
+      ),
+    ).toEqual([])
+
+    const prompt = renderGameIrProjectionSliceAuthority({
+      schemaVersion: 'game-ir-projection-slice-authority.v1',
+      identity: {
+        taskId: 'task',
+        foundationRevision: 'revision',
+        foundationReadyReceiptDigest: 'a'.repeat(64),
+        compileRequestDigest: 'b'.repeat(64),
+      },
+      moduleId: 'gameplay',
+      slice: {
+        sliceId: 'gameplay.slice.0',
+        nodeKinds: ['gameplay.state'],
+        nodes: [],
+      },
+      sourceFragments: [
+        {
+          fragmentId: 'e0.0',
+          documentPath: 'docs/GDD.md',
+          sectionId: 'core_loop',
+          text: 'source',
+        },
+      ],
+      availablePriorNodes: [],
+      requiredCurrentNodes: [],
+      admittedCurrentNodes: [],
+    })
+    expect(prompt).not.toContain('authoritySectionIndex')
+    expect(prompt).not.toContain('sectionBytes')
+    expect(prompt).not.toContain('game-ir-gameplay-projection-operation-packet.v1')
+  })
+
   test('permits the committed reader/writer only through the controller and dispatcher route', async () => {
     const files = await readProductionSourceFiles(serverSourceRoot)
     const routeFiles = files.filter(file =>
@@ -2305,6 +2353,10 @@ describe('Game IR stage boundary', () => {
           'identifier: gameIrTerminalActive',
           'import: ./game-ir/projection-slice-journal',
           'identifier: cleanupGameIrProjectionSliceJournalAfterCheckpoint',
+          'identifier: gameIrProjectionSliceJournalPath',
+          'identifier: loadGameIrProjectionSliceJournal',
+          'import: ./game-ir/projection-slices',
+          'identifier: deriveProjectionSlicePlan',
         ]),
       ],
       [
