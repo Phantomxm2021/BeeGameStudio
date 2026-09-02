@@ -1913,6 +1913,52 @@ describe('delivery workflow recovery', () => {
     }
   })
 
+  test('allows a request-less projection boundary before journal creation', async () => {
+    const fixture = await createProjectionRecoveryFixture()
+    workspace = fixture.workspacePath
+    try {
+      const persisted = await fixture.store.load()
+      if (!persisted?.activeDispatch)
+        throw new Error('projection fixture has no active dispatch')
+      const { request: _request, terminalResult: _terminalResult, ...requestlessDispatch } =
+        persisted.activeDispatch
+      await rm(fixture.journalInput.journalPath, { force: true })
+      await fixture.store.save({
+        ...persisted,
+        activeDispatch: requestlessDispatch,
+      })
+      const restarted = createDeliveryWorkflowController({
+        workspacePath: workspace,
+        ownerId: fixture.run.ownerId,
+        workerPort: fixture.workerPort,
+      })
+      let stopCount = 0
+      await recoverAndResumeRun({
+        store: createRunStore(workspace, fixture.run.ownerId),
+        workspacePath: workspace,
+        ownerId: fixture.run.ownerId,
+        projectId: fixture.run.projectId,
+        confirmedBriefContext: fixture.run.confirmedBriefContext,
+        stopWorkspaceWorkers: async () => {
+          stopCount += 1
+        },
+        resumeCurrentRun: run => restarted.resume(run),
+      })
+      expect(stopCount).toBe(1)
+      expect(fixture.started).toHaveLength(2)
+      expect(fixture.started[1]?.contract.currentSlice).toBe(
+        'gameplay.slice.0',
+      )
+      expect(
+        (fixture.started[1]?.contract.sliceContext as { admittedCurrentNodes?: unknown } | undefined)
+          ?.admittedCurrentNodes,
+      ).toEqual([])
+    } finally {
+      await rm(fixture.workspacePath, { recursive: true, force: true })
+      workspace = ''
+    }
+  })
+
   test('restarts a durably done terminal before promotion without duplicating the prefix', async () => {
     const fixture = await createProjectionRecoveryFixture()
     workspace = fixture.workspacePath

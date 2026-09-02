@@ -16,6 +16,29 @@ import { renderGameIrProjectionSliceAuthority } from './projection-slice-authori
 const deliveryWorkflowRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const serverSourceRoot = dirname(dirname(deliveryWorkflowRoot))
 
+type ProductionSourceFile = { path: string; source: string }
+
+const statelessProjectionForbiddenSymbols = [
+  'liveGameIrProjectionSessions',
+  'GameIrProjectionSessionKey',
+  'packetSent',
+  'sends one projection packet once',
+] as const
+
+async function statelessProjectionForbiddenViolations(
+  mutate?: (files: ProductionSourceFile[]) => ProductionSourceFile[],
+): Promise<string[]> {
+  const files = (await readSourceFilesRecursively(serverSourceRoot)).filter(
+    file => file.path.endsWith('.ts') && !file.path.endsWith('.test.ts'),
+  )
+  const scanned = mutate ? mutate(files) : files
+  return scanned.flatMap(file =>
+    statelessProjectionForbiddenSymbols
+      .filter(symbol => file.source.includes(symbol))
+      .map(symbol => `${file.path}:${symbol}`),
+  )
+}
+
 const gameIrContractFiles = ['contracts.ts'] as const
 
 const PHASE4_PRODUCTION_FILES = [
@@ -2195,22 +2218,7 @@ describe('Game IR stage boundary', () => {
   })
 
   test('keeps production on one stateless projection track', async () => {
-    const files = (await readSourceFilesRecursively(serverSourceRoot)).filter(
-      file => file.path.endsWith('.ts') && !file.path.endsWith('.test.ts'),
-    )
-    const forbidden = [
-      'liveGameIrProjectionSessions',
-      'GameIrProjectionSessionKey',
-      'packetSent',
-      'sends one projection packet once',
-    ]
-    expect(
-      files.flatMap(file =>
-        forbidden
-          .filter(symbol => file.source.includes(symbol))
-          .map(symbol => `${file.path}:${symbol}`),
-      ),
-    ).toEqual([])
+    expect(await statelessProjectionForbiddenViolations()).toEqual([])
 
     const prompt = renderGameIrProjectionSliceAuthority({
       schemaVersion: 'game-ir-projection-slice-authority.v1',
@@ -2244,23 +2252,21 @@ describe('Game IR stage boundary', () => {
   })
 
   test('detects a forbidden legacy symbol inserted into Game IR production', async () => {
-    const files = (await readSourceFilesRecursively(serverSourceRoot)).filter(
-      file => file.path.endsWith('.ts') && !file.path.endsWith('.test.ts'),
-    )
-    const target = files.find(file => file.path.endsWith('/game-ir/model.ts'))
-    expect(target).toBeDefined()
-    const mutated = files.map(file =>
-      file === target
-        ? { ...file, source: `${file.source}\nconst liveGameIrProjectionSessions = undefined\n` }
-        : file,
-    )
-    expect(
-      mutated.flatMap(file =>
-        file.source.includes('liveGameIrProjectionSessions')
-          ? [`${file.path}:liveGameIrProjectionSessions`]
-          : [],
-      ),
-    ).toEqual([`${target!.path}:liveGameIrProjectionSessions`])
+    let targetPath = ''
+    const violations = await statelessProjectionForbiddenViolations(files => {
+      const target = files.find(file => file.path.endsWith('/game-ir/model.ts'))
+      expect(target).toBeDefined()
+      targetPath = target!.path
+      return files.map(file =>
+        file === target
+          ? { ...file, source: `${file.source}\nconst liveGameIrProjectionSessions = undefined\n` }
+          : file,
+      )
+    })
+    expect(targetPath).toMatch(/\/game-ir\/model\.ts$/u)
+    expect(violations).toEqual([
+      `${targetPath}:liveGameIrProjectionSessions`,
+    ])
   })
 
   test('permits the committed reader/writer only through the controller and dispatcher route', async () => {
