@@ -9,6 +9,7 @@ import type { DeliveryRun, WorkerDispatchRequest } from './types'
 import type { RunStore } from './run-store'
 import { digestGameIrValue } from './game-ir/model'
 import { buildGameIrProjectionContract } from './game-ir/projection-contract'
+import { sourceSectionsForGameIrProjectionSlice } from './game-ir/projection-slice-authority'
 
 function fixture() {
   const identity = {
@@ -38,6 +39,23 @@ function fixture() {
     projectionContract: buildGameIrProjectionContract('gameplay'),
     dependencies: {},
   }
+  const sourceSections = sourceSectionsForGameIrProjectionSlice('gameplay.slice.0').map(
+    (selector, index) => {
+      const bytes = `DISPATCH_RECOVERY_AUTHORITY_${index}`
+      return {
+        ...selector,
+        digest: createHash('sha256').update(bytes).digest('hex'),
+        bytes,
+      }
+    },
+  )
+  ;(packetBody.source as Record<string, unknown>).sectionIndex = sourceSections.map(({ bytes: _, ...section }) => section)
+  ;(packetBody.source as Record<string, unknown>).sectionBytes = Object.fromEntries(
+    sourceSections.map(section => [
+      `${section.documentPath}#${section.sectionId}`,
+      section.bytes,
+    ]),
+  )
   const packet = { ...packetBody, packetDigest: digestGameIrValue(packetBody) }
   const compileRequestDigest = digestGameIrValue(
     packetBody.source.compileRequest,
@@ -62,6 +80,7 @@ function fixture() {
       sliceContext: {
         availablePriorNodes: [],
         requiredCurrentNodes: [],
+        admittedCurrentNodes: [],
       },
     },
   }
