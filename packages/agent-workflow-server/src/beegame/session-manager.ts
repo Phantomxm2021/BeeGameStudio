@@ -430,6 +430,7 @@ type SessionRecord = {
   /** Tool-use blocks observed before their streamed JSON input is complete. */
   streamingToolUses: Map<string, string>
   workflowRecordStreamSequence: number
+  workflowRecordStreamPayloads: Map<number, DashboardSDKMessage>
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
   emittedAssistantMessageIds: Set<string>
@@ -891,6 +892,7 @@ export class BeeGameSessionManager {
       toolUses: new Map(),
       streamingToolUses: new Map(),
       workflowRecordStreamSequence: 0,
+      workflowRecordStreamPayloads: new Map(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
@@ -1138,6 +1140,21 @@ export class BeeGameSessionManager {
       .filter(
         event => event.id > after && !isThinkingProtocolControlEvent(event),
       )
+      .map(event => formatBeeGameEventForDisplay(event, record.language))
+  }
+
+  /** Returns complete record-stream results only to the in-process workflow port. */
+  workflowRecordStreamEvents(sessionId: string, after = 0): BeeGameEvent[] {
+    const record = this.sessions.get(sessionId)
+    if (!record) throw new Error('Session not found')
+    return record.events
+      .filter(
+        event => event.id > after && !isThinkingProtocolControlEvent(event),
+      )
+      .map(event => {
+        const payload = record.workflowRecordStreamPayloads.get(event.id)
+        return payload ? { ...event, payload } : event
+      })
       .map(event => formatBeeGameEventForDisplay(event, record.language))
   }
 
@@ -1813,9 +1830,16 @@ export class BeeGameSessionManager {
           )
             this.append(record, 'usage', '', message)
           if (message.type === 'result' && 'record_stream' in message) {
-            this.append(record, 'result', 'Record stream accepted', message, {
-              persistTranscript: false,
-            })
+            const event = this.append(
+              record,
+              'result',
+              'Record stream accepted',
+              recordStreamEventMetadata(message),
+              {
+                persistTranscript: false,
+              },
+            )
+            record.workflowRecordStreamPayloads.set(event.id, message)
           }
           if (submittedTurnId)
             this.queueUsageRecord(record, submittedTurnId, message)
@@ -4359,18 +4383,19 @@ function appendProjectAgentRawLog(
     const digest = createHash('sha256')
       .update(semantic || serialized)
       .digest('hex')
-    const summary = record.workflowRecordStreamContract
-      ? {
-          sessionId: record.session.id,
-          ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
-          seq: ++record.workflowRecordStreamSequence,
-          bytes,
-          digest,
-          ...(message.is_error === true || Array.isArray(message.errors)
-            ? { error: streamErrorSummary(message) }
-            : {}),
-        }
-      : {
+    const summary =
+      typeof message.record_stream === 'string'
+        ? {
+            sessionId: record.session.id,
+            ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
+            seq: ++record.workflowRecordStreamSequence,
+            bytes,
+            digest,
+            ...(message.is_error === true || Array.isArray(message.errors)
+              ? { error: streamErrorSummary(message) }
+              : {}),
+          }
+        : {
           sessionId: record.session.id,
           ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
           createdAt: new Date().toISOString(),
@@ -4382,6 +4407,27 @@ function appendProjectAgentRawLog(
     })
   } catch {
     // Raw agent logs must never interrupt the active turn.
+  }
+}
+
+function recordStreamEventMetadata(
+  message: DashboardSDKMessage,
+): DashboardSDKMessage {
+  const stream = message.record_stream
+  if (typeof stream !== 'string')
+    return { type: 'result', record_stream_type: 'ndjson' }
+  return {
+    type: 'result',
+    record_stream_type: 'ndjson',
+    record_stream_digest: createHash('sha256')
+      .update(stream, 'utf8')
+      .digest('hex'),
+    record_stream_bytes: Buffer.byteLength(stream, 'utf8'),
+    record_stream_lines: stream.split('\n').filter(line => line.length > 0).length,
+    ...(typeof message.subtype === 'string' ? { subtype: message.subtype } : {}),
+    ...(typeof message.is_error === 'boolean'
+      ? { is_error: message.is_error }
+      : {}),
   }
 }
 

@@ -202,7 +202,6 @@ import {
 } from './game-ir/projection-slice-journal'
 import {
   deriveProjectionSlicePlan,
-  buildGameIrEvidenceFragmentCatalog,
   type GameIrProjectionRetryDiagnostic,
 } from './game-ir/projection-slices'
 import { commitGameIrPublication } from './game-ir/publication'
@@ -307,44 +306,6 @@ function retryDiagnosticFromActual(
     return undefined
   }
   return undefined
-}
-
-function matchesAdmittedRecordTerminal(
-  journal: Awaited<ReturnType<typeof createGameIrProjectionSliceJournal>>,
-  result: Extract<WorkerTerminalResult, { operation: 'projection' }>,
-  source: Parameters<typeof buildGameIrEvidenceFragmentCatalog>[0],
-): boolean {
-  if (result.status !== 'completed' || !result.done) return false
-  const entry = journal.entries.find(candidate => candidate.sliceId === result.sliceId)
-  if (!entry) return false
-  const catalog = buildGameIrEvidenceFragmentCatalog(source)
-  const fragmentForNode = new Map<string, string>()
-  for (const group of entry.semantic.sourceEvidenceGroups) {
-    const fragment = catalog.fragments.find(
-      candidate =>
-        candidate.documentPath === group.documentPath &&
-        candidate.sectionId === group.sectionId &&
-        candidate.excerpt === group.excerpt,
-    )
-    if (!fragment) return false
-    for (const subject of group.subjects) {
-      const match = /^node:(.+)#\/$/.exec(subject)
-      if (match) fragmentForNode.set(match[1]!, fragment.fragmentId)
-    }
-  }
-  const expected = entry.semantic.nodes.map(node =>
-    digestGameIrValue({
-      fragmentId: fragmentForNode.get(node.id),
-      node,
-    }),
-  )
-  const actual = result.records.map(record =>
-    digestGameIrValue({ fragmentId: record.fragmentId, node: record.node }),
-  )
-  return (
-    expected.length === actual.length &&
-    expected.every((digest, index) => digest === actual[index])
-  )
 }
 
 function markRevisionCommitTransient(error: unknown): never {
@@ -1475,45 +1436,39 @@ export function createDeliveryWorkflowController(input: {
             throw new Error(
               'Game IR projection terminal is missing its verified slice journal or records',
             )
-          if (!source)
-            throw new Error('Game IR projection source packet is unavailable')
-          if (
-            matchesAdmittedRecordTerminal(
-              projectionJournal,
-              result,
-              source,
-            )
-          ) {
-            // A crash may leave the accepted terminal in the durable run after
-            // its journal append. Replay is idempotent only for the exact
-            // record digest sequence already admitted for that slice.
-          } else {
-            if (!currentSliceId || result.sliceId !== currentSliceId)
-              throw new Error(
-                'Game IR projection terminal slice does not match the journal cursor or an admitted entry',
-              )
-            const admission = await projectionJournal.appendRecords(
-              result.records,
-            )
-            const retryDiagnostic =
-              admission.diagnostic ??
-              (!result.done
-                ? {
-                    scope: 'slice' as const,
-                    sliceId: result.sliceId,
-                    reason: result.reason,
-                  }
-                : undefined)
-            if (retryDiagnostic) {
-              await persistCompilerDiagnostic(
-                retryDiagnostic.reason,
-                progressIdentity,
-                retryDiagnostic,
-              )
-              return
-            }
-            await projectionJournal.completeCurrentSlice()
+          const admission = await projectionJournal.appendRecords(
+            result.records,
+            result.sliceId,
+          )
+          const admissionProgressIdentity = {
+            ...progressIdentity,
+            candidateDigest: digestGameIrValue(
+              projectionJournal.currentSliceRecordDigests,
+            ),
+            terminalDigest: digestGameIrValue(
+              projectionJournal.currentSliceRecordDigests,
+            ),
           }
+          if (admission.diagnostic && result.sliceId !== currentSliceId)
+            throw new Error(admission.diagnostic.reason)
+          const retryDiagnostic =
+            admission.diagnostic ??
+            (!result.done
+              ? {
+                  scope: 'slice' as const,
+                  sliceId: result.sliceId,
+                  reason: result.reason,
+                }
+              : undefined)
+          if (retryDiagnostic) {
+            await persistCompilerDiagnostic(
+              retryDiagnostic.reason,
+              admissionProgressIdentity,
+              retryDiagnostic,
+            )
+            return
+          }
+          if (!admission.replayed) await projectionJournal.completeCurrentSlice()
           if (projectionJournal.nextSlice) {
             const continued = await persist(
               {
@@ -1583,7 +1538,10 @@ export function createDeliveryWorkflowController(input: {
           inputDigest: progressIdentity.inputDigest,
           checkpointJournalDigest: progressIdentity.checkpointJournalDigest,
           operation: operation.step,
-          candidate: nativeCandidate,
+          candidate:
+            operation.operation === 'projection' && projectionJournal
+              ? projectionJournal.currentSliceRecordDigests
+              : nativeCandidate,
           reason: actual,
         })
         await persistCompilerDiagnostic(actual, admissionIdentity)

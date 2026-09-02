@@ -738,40 +738,6 @@ describe('Game IR projection slice journal', () => {
     }
   })
 
-  test('recognizes only an exact replay of the already-admitted terminal', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
-    try {
-      const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
-      const slice = journal.slicePlan.slices[0]!
-      const completion = emptyCompletion(slice.sliceId)
-      await journal.append(completion)
-      expect(journal.matchesAdmittedTerminal(completion)).toBe(true)
-      const second = journal.nextSlice!
-      const secondCompletion = emptyCompletion(second.sliceId)
-      await journal.append(secondCompletion)
-      expect(journal.matchesAdmittedTerminal(completion)).toBe(true)
-      expect(journal.matchesAdmittedTerminal(secondCompletion)).toBe(true)
-      expect(journal.nextSlice?.sliceId).toBe(
-        journal.slicePlan.slices[2]?.sliceId,
-      )
-      expect(
-        journal.matchesAdmittedTerminal({
-          ...completion,
-          semantic: { ...completion.semantic, nodes: [{ id: 'changed' }] },
-        } as never),
-      ).toBe(false)
-      expect(
-        journal.matchesAdmittedTerminal({
-          ...completion,
-          sliceId: journal.slicePlan.slices[2]?.sliceId,
-        } as never),
-      ).toBe(false)
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  })
-
   test('persists an admitted current-slice prefix and promotes it only on completion', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
@@ -799,13 +765,21 @@ describe('Game IR projection slice journal', () => {
       expect(journal.currentSliceRecordPrefix).toEqual([
         { id: 'condition.a', kind: 'gameplay.condition' },
       ])
+      expect(journal.currentSliceRecordDigests).toHaveLength(1)
+      expect(journal.currentSliceRecordDigests[0]).toMatch(/^[a-f0-9]{64}$/)
       const reloaded = await loadGameIrProjectionSliceJournal(input)
       expect(reloaded.currentSliceRecordPrefix).toEqual(
         journal.currentSliceRecordPrefix,
       )
+      expect(reloaded.currentSliceRecordDigests).toEqual(
+        journal.currentSliceRecordDigests,
+      )
       await reloaded.completeCurrentSlice()
       expect(reloaded.entries).toHaveLength(1)
       expect(reloaded.currentSliceRecordPrefix).toEqual([])
+      await expect(
+        reloaded.appendRecords([record], journal.slicePlan.slices[0]!.sliceId),
+      ).resolves.toEqual({ acceptedCount: 1, replayed: true })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

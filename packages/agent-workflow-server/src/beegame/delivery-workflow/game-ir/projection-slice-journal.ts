@@ -1289,6 +1289,11 @@ export class GameIrProjectionSliceJournal {
       })),
     )
   }
+  get currentSliceRecordDigests(): readonly string[] {
+    return clone(
+      (this.state.pendingSlice?.records ?? []).map(record => record.recordDigest),
+    )
+  }
   get nextSliceContext(): GameIrProjectionSliceContext {
     return clone(
       sliceContext(
@@ -1339,28 +1344,97 @@ export class GameIrProjectionSliceJournal {
     return this.state.slicePlan.slices[0]!.sliceId
   }
 
-  matchesAdmittedTerminal(
-    completion: GameIrProjectionSliceCompletion,
-  ): boolean {
-    const entry = this.state.entries.find(
-      candidate => candidate.sliceId === completion.sliceId,
-    )
-    if (!entry) return false
-    const slice = this.state.slicePlan.slices.find(
-      candidate => candidate.sliceId === completion.sliceId,
-    )
-    if (!slice) return false
-    try {
-      const normalized = normalizeCompletion(completion, slice, this.authority)
-      return digestGameIrValue(normalized.semantic) === entry.resultDigest
-    } catch {
-      return false
-    }
-  }
-
   async appendRecords(
     records: readonly GameIrProjectionNodeRecord[],
-  ): Promise<{ acceptedCount: number; diagnostic?: GameIrProjectionRetryDiagnostic }> {
+    sliceId?: string,
+  ): Promise<{
+    acceptedCount: number
+    replayed?: boolean
+    diagnostic?: GameIrProjectionRetryDiagnostic
+  }> {
+    const targetIndex = sliceId
+      ? this.state.slicePlan.slices.findIndex(
+          candidate => candidate.sliceId === sliceId,
+        )
+      : this.state.entries.length
+    if (targetIndex < 0) fail(`cannot append records for unknown slice ${sliceId}`)
+    if (targetIndex > this.state.entries.length)
+      fail(`cannot append records for stale slice ${sliceId}`)
+    if (targetIndex < this.state.entries.length) {
+      const entry = this.state.entries[targetIndex]!
+      const targetSlice = this.state.slicePlan.slices[targetIndex]!
+      const normalized: GameIrProjectionNodeRecord[] = []
+      for (const candidate of records) {
+        try {
+          const node = normalizeRecordNode(candidate, targetSlice, this.authority)
+          normalized.push(node)
+        } catch (error) {
+          const raw = candidate as unknown as Record<string, unknown>
+          const node = raw?.node as Record<string, unknown> | undefined
+          return {
+            acceptedCount: 0,
+            diagnostic: {
+              scope: 'record',
+              sliceId: targetSlice.sliceId,
+              recordId: typeof node?.id === 'string' ? node.id : '<unknown>',
+              fragmentId:
+                typeof raw?.fragmentId === 'string'
+                  ? raw.fragmentId
+                  : '<unknown>',
+              reason: error instanceof Error ? error.message : 'record is invalid',
+            },
+          }
+        }
+      }
+      const catalog = buildGameIrEvidenceFragmentCatalog({
+        sectionIndex: this.authority.source.sectionIndex,
+        sectionBytes: this.authority.source.sectionBytes,
+      })
+      const fragmentForNode = new Map<string, string>()
+      for (const group of entry.semantic.sourceEvidenceGroups) {
+        const fragment = catalog.fragments.find(
+          candidate =>
+            candidate.documentPath === group.documentPath &&
+            candidate.sectionId === group.sectionId &&
+            candidate.excerpt === group.excerpt,
+        )
+        if (!fragment) return { acceptedCount: 0 }
+        for (const subject of group.subjects) {
+          const match = /^node:(.+)#\/$/.exec(subject)
+          if (match) fragmentForNode.set(match[1]!, fragment.fragmentId)
+        }
+      }
+      const expected = entry.semantic.nodes.map(node =>
+        digestGameIrValue({
+          fragmentId: fragmentForNode.get(node.id),
+          node,
+        }),
+      )
+      const actual = normalized.map(record =>
+        digestGameIrValue({ fragmentId: record.fragmentId, node: record.node }),
+      )
+      if (
+        expected.length !== actual.length ||
+        expected.some((digest, index) => digest !== actual[index])
+      ) {
+        const first = records[0]
+        return {
+          acceptedCount: 0,
+          diagnostic: {
+            scope: 'record',
+            sliceId: targetSlice.sliceId,
+            recordId:
+              typeof first?.node?.id === 'string' ? first.node.id : '<unknown>',
+            fragmentId:
+              typeof first?.fragmentId === 'string'
+                ? first.fragmentId
+                : '<unknown>',
+            reason: `record replay conflicts with completed slice ${targetSlice.sliceId}`,
+          },
+        }
+      }
+      return { acceptedCount: records.length, replayed: true }
+    }
     const slice = this.state.slicePlan.slices[this.state.entries.length]
     if (!slice) fail('all slices are already completed')
     const previous = this.state.pendingSlice

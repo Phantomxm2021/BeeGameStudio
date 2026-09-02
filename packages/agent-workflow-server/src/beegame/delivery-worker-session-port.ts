@@ -553,9 +553,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
     LiveGameIrProjectionSession
   >()
   const sessionEvents = (sessionId: string) =>
-    typeof input.sessions.events === 'function'
-      ? input.sessions.events(sessionId)
-      : []
+    typeof input.sessions.workflowRecordStreamEvents === 'function'
+      ? input.sessions.workflowRecordStreamEvents(sessionId)
+      : typeof input.sessions.events === 'function'
+        ? input.sessions.events(sessionId)
+        : []
   const disposeWorkflowSession = async (sessionId: string) => {
     if (typeof input.sessions.disposeWorkflowWorker === 'function')
       await input.sessions.disposeWorkflowWorker(sessionId)
