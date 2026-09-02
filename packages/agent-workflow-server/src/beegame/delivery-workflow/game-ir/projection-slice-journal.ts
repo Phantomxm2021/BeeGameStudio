@@ -134,11 +134,9 @@ export function gameIrProjectionSliceJournalPath(input: {
     throw new Error(
       'projection journal path requires an exact projection operation step',
     )
-  const moduleId = input.operationStep.split('/')[1] as GameIrProjectionSlicePlan['moduleId']
   const key = digestGameIrValue({
     identity: input.identity,
     operationStep: input.operationStep,
-    slicePlanDigest: digestGameIrValue(deriveProjectionSlicePlan(moduleId)),
   })
   return resolve(
     input.workspacePath,

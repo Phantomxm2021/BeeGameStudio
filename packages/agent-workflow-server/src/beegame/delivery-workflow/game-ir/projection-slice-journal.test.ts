@@ -115,12 +115,12 @@ describe('Game IR projection slice journal', () => {
       operationStep: input.operationStep,
     })
     expect(first).toBe(second)
-    expect(first).toContain(
-      digestGameIrValue({
-        identity: input.identity,
-        operationStep: input.operationStep,
-        slicePlanDigest: digestGameIrValue(deriveProjectionSlicePlan('gameplay')),
-      }),
+    expect(first).toBe(
+      '/workspace/.beegame/.game-ir-private/projection-slices/' +
+        `${digestGameIrValue({
+          identity: input.identity,
+          operationStep: input.operationStep,
+        })}.json`,
     )
     expect(first).toContain('/.beegame/.game-ir-private/')
     expect(first).toMatch(/\.json$/)
@@ -155,7 +155,14 @@ describe('Game IR projection slice journal', () => {
   test('rejects duplicate, skipped, stale-plan, and tampered entries', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
-      const input = fixture(join(root, 'journal.json'))
+      const identityInput = fixture('/tmp/ignored-by-helper.json')
+      const input = fixture(
+        gameIrProjectionSliceJournalPath({
+          workspacePath: root,
+          identity: identityInput.identity,
+          operationStep: identityInput.operationStep,
+        }),
+      )
       const journal = await createGameIrProjectionSliceJournal(input)
       const [first, second] = journal.slicePlan.slices
       await expect(
@@ -167,11 +174,23 @@ describe('Game IR projection slice journal', () => {
       ).rejects.toThrow(/duplicate|next/i)
 
       const stalePlan = {
-        ...input,
-        slicePlan: deriveProjectionSlicePlan('balance'),
+        ...input.slicePlan,
+        slices: [...input.slicePlan.slices].reverse(),
       }
-      await expect(loadGameIrProjectionSliceJournal(stalePlan)).rejects.toThrow(
-        /plan|stale|binding/i,
+      const staleInput = { ...input, slicePlan: stalePlan }
+      expect(
+        gameIrProjectionSliceJournalPath({
+          workspacePath: root,
+          identity: input.identity,
+          operationStep: input.operationStep,
+        }),
+      ).toBe(input.journalPath)
+      const journalBeforeStaleLoad = await readFile(input.journalPath, 'utf8')
+      await expect(loadGameIrProjectionSliceJournal(staleInput)).rejects.toThrow(
+        /plan|stale/i,
+      )
+      expect(await readFile(input.journalPath, 'utf8')).toBe(
+        journalBeforeStaleLoad,
       )
 
       const bytes = await readFile(input.journalPath, 'utf8')
