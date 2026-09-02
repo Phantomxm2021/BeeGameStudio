@@ -618,33 +618,37 @@ describe('committed Game IR reader', () => {
       operation: 'projection',
       status: 'completed',
       sliceId: 'gameplay.slice.0',
+      records: [],
+      done: true,
       runId: 'run',
       dispatchId: 'dispatch',
       taskId: 'task',
       revision: 'revision',
       compileRequestDigest: 'a'.repeat(64),
       foundationReadyReceiptDigest: 'b'.repeat(64),
-      semantic: { nodes: [], sourceEvidenceGroups: [] },
     }
     expect(parseWorkerTerminalResult(projection)).toMatchObject({
       operation: 'projection',
       sliceId: 'gameplay.slice.0',
-      semantic: { nodes: [], sourceEvidenceGroups: [] },
+      records: [],
+      done: true,
     })
 
     const validation = {
       ...projection,
       operation: 'validation',
       sliceId: undefined,
-      semantic: undefined,
+      records: undefined,
+      done: undefined,
       validation: {
         outcome: 'PASS',
         checkIds: ['projection.completeness'],
         coveredTargets: ['gameplay.unit'],
       },
     }
-    delete (validation as { semantic?: unknown }).semantic
     delete (validation as { sliceId?: unknown }).sliceId
+    delete (validation as { records?: unknown }).records
+    delete (validation as { done?: unknown }).done
     expect(parseWorkerTerminalResult(validation)).toMatchObject({
       operation: 'validation',
       validation: { outcome: 'PASS' },
@@ -663,6 +667,8 @@ describe('committed Game IR reader', () => {
       revision: 'revision',
       compileRequestDigest: 'a'.repeat(64),
       foundationReadyReceiptDigest: 'b'.repeat(64),
+      records: [],
+      done: false,
       reason: 'projection operation needs repair',
     }
     expect(parseWorkerTerminalResult(terminal)).toMatchObject({
