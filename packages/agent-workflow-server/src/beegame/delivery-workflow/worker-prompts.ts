@@ -186,7 +186,6 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
     const retryDiagnostic = projectionRetryDiagnosticForRequest(
       request.contract.retryDiagnostic,
       currentSlice.sliceId,
-      sliceContext.requiredCurrentNodes.map(node => node.id),
     )
     const authority = buildGameIrProjectionSliceAuthority({
       packet: packet as Parameters<
@@ -235,7 +234,6 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
 function projectionRetryDiagnosticForRequest(
   value: unknown,
   currentSliceId: string,
-  requiredCurrentNodeIds: readonly string[],
 ): Parameters<typeof buildGameIrProjectionSliceAuthority>[0]['retryDiagnostic'] {
   if (value === undefined) return undefined
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -254,7 +252,8 @@ function projectionRetryDiagnosticForRequest(
   if (
     typeof diagnostic.sliceId !== 'string' ||
     diagnostic.sliceId !== currentSliceId ||
-    typeof diagnostic.reason !== 'string'
+    typeof diagnostic.reason !== 'string' ||
+    !diagnostic.reason.trim()
   )
     throw new Error('Game IR projection retry diagnostic is invalid')
   if (scope === 'slice')
@@ -266,7 +265,8 @@ function projectionRetryDiagnosticForRequest(
   if (
     typeof diagnostic.recordId !== 'string' ||
     typeof diagnostic.fragmentId !== 'string' ||
-    !requiredCurrentNodeIds.includes(diagnostic.recordId)
+    !diagnostic.recordId.trim() ||
+    !diagnostic.fragmentId.trim()
   )
     throw new Error('Game IR projection retry diagnostic is invalid')
   return {

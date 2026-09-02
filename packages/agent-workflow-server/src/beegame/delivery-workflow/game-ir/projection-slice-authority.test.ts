@@ -24,6 +24,7 @@ function projectionPacket(sliceId = 'gameplay.slice.0') {
       receiptDigest: 'r'.repeat(64),
     },
   }
+  const moduleId = sliceId.slice(0, sliceId.indexOf('.slice')) as (typeof GAME_IR_DOMAIN_IDS)[number]
   const selectors = sourceSectionsForGameIrProjectionSlice(sliceId)
   const sectionBytes = Object.fromEntries(
     selectors.map((selector, index) => [
@@ -41,17 +42,31 @@ function projectionPacket(sliceId = 'gameplay.slice.0') {
       digest: createHash('sha256').update(text).digest('hex'),
     }
   })
+  const unselectedSection = {
+    documentPath: 'docs/GDD.md' as const,
+    sectionId: 'scope_risks',
+    heading: 'scope_risks',
+    startLine: 1,
+    endLine: 1,
+    digest: createHash('sha256').update('UNSELECTED_AUTHORITY').digest('hex'),
+  }
+  sectionIndex.push(unselectedSection)
+  const sectionBytesWithUnselected = {
+    ...sectionBytes,
+    [`${unselectedSection.documentPath}#${unselectedSection.sectionId}`]:
+      'UNSELECTED_AUTHORITY',
+  }
   return {
     schemaVersion: 'game-ir-projection-operation-packet.v1',
     packetDigest: 'p'.repeat(64),
     source: {
       schemaVersion: 'game-ir-domain-source.v1',
       taskId: compileRequest.taskId,
-      moduleId: 'gameplay',
+      moduleId,
       compileRequest,
       authoritySectionIndex: sectionIndex,
       sectionIndex,
-      sectionBytes,
+      sectionBytes: sectionBytesWithUnselected,
       sourceDigest: 's'.repeat(64),
     },
     semanticPacket: {},
@@ -63,6 +78,7 @@ function projectionPacket(sliceId = 'gameplay.slice.0') {
 function authorityFor(
   packet = projectionPacket(),
   options: {
+    sliceId?: string
     retryDiagnostic?: {
       scope: 'record'
       sliceId: string
@@ -85,10 +101,11 @@ function authorityFor(
     availablePriorNodes: [],
     requiredCurrentNodes: [],
   }
-  const sliceId = packet.source.moduleId + '.slice.0'
+  const sliceId = options.sliceId ?? packet.source.moduleId + '.slice.0'
+  const moduleId = packet.source.moduleId as (typeof GAME_IR_DOMAIN_IDS)[number]
   return buildGameIrProjectionSliceAuthority({
     packet: packet as never,
-    slice: deriveProjectionSlicePlan('gameplay').slices.find(
+    slice: deriveProjectionSlicePlan(moduleId).slices.find(
       slice => slice.sliceId === sliceId,
     )!,
     sliceContext: context,
@@ -147,8 +164,15 @@ describe('Game IR projection slice authority source scope', () => {
       sectionBytes: packet.source.sectionBytes,
     })
     const authority = authorityFor(packet)
+    const selectedKeys = new Set(
+      sourceSectionsForGameIrProjectionSlice('gameplay.slice.0').map(
+        selector => `${selector.documentPath}#${selector.sectionId}`,
+      ),
+    )
     expect(authority.sourceFragments).toEqual(
-      catalog.fragments.map(fragment => ({
+      catalog.fragments.filter(fragment =>
+        selectedKeys.has(`${fragment.documentPath}#${fragment.sectionId}`),
+      ).map(fragment => ({
         fragmentId: fragment.fragmentId,
         documentPath: fragment.documentPath,
         sectionId: fragment.sectionId,
@@ -161,6 +185,15 @@ describe('Game IR projection slice authority source scope', () => {
       sectionId: packet.source.sectionIndex[1]!.sectionId,
       text: 'SECOND_SECTION_B',
     })
+    expect(catalog.fragments).toContainEqual({
+      fragmentId: `e${packet.source.sectionIndex.length - 1}.0`,
+      documentPath: 'docs/GDD.md',
+      sectionId: 'scope_risks',
+      excerpt: 'UNSELECTED_AUTHORITY',
+    })
+    expect(authority.sourceFragments).not.toContainEqual(
+      expect.objectContaining({ sectionId: 'scope_risks' }),
+    )
   })
 
   test('rejects stale compile and Foundation receipt digests and stale selected bytes', () => {
@@ -197,8 +230,32 @@ describe('Game IR projection slice authority source scope', () => {
   })
 
   test('renders byte-identical Markdown for equivalent canonical authority input', () => {
-    const first = authorityFor(projectionPacket())
-    const second = authorityFor(structuredClone(projectionPacket()))
+    const first = authorityFor(projectionPacket('gameplay.slice.1'), {
+      sliceId: 'gameplay.slice.1',
+      context: {
+        availablePriorNodes: [
+          {
+            id: 'prior-event',
+            kind: 'gameplay.event',
+            value: { metadata: { z: 2, a: 1 }, label: 'Event' },
+          },
+        ],
+        requiredCurrentNodes: [],
+      },
+    })
+    const second = authorityFor(projectionPacket('gameplay.slice.1'), {
+      sliceId: 'gameplay.slice.1',
+      context: {
+        availablePriorNodes: [
+          {
+            id: 'prior-event',
+            kind: 'gameplay.event',
+            value: { label: 'Event', metadata: { a: 1, z: 2 } },
+          },
+        ],
+        requiredCurrentNodes: [],
+      },
+    })
     expect(renderGameIrProjectionSliceAuthority(first)).toBe(
       renderGameIrProjectionSliceAuthority(second),
     )
@@ -208,8 +265,9 @@ describe('Game IR projection slice authority source scope', () => {
   })
 
   test('narrows record retries to the failed fragment while retaining direct context and admitted prefix', () => {
-    const packet = projectionPacket()
+    const packet = projectionPacket('gameplay.slice.1')
     const authority = authorityFor(packet, {
+      sliceId: 'gameplay.slice.1',
       context: {
         availablePriorNodes: [
           { id: 'prior-state', kind: 'gameplay.state', value: { label: 'Start' } },
@@ -219,7 +277,7 @@ describe('Game IR projection slice authority source scope', () => {
       admittedCurrentNodes: [{ id: 'admitted-state', kind: 'gameplay.state' }],
       retryDiagnostic: {
         scope: 'record',
-        sliceId: 'gameplay.slice.0',
+        sliceId: 'gameplay.slice.1',
         recordId: 'current-state',
         fragmentId: 'e1.0',
         reason: 'record failed validation',
@@ -231,6 +289,30 @@ describe('Game IR projection slice authority source scope', () => {
     expect(rendered).toContain('prior-state')
     expect(rendered).toContain('admitted-state')
     expect(rendered).not.toContain('e0.0 —')
+  })
+
+  test('keeps direct prior dependencies and excludes irrelevant prior nodes', () => {
+    const authority = authorityFor(projectionPacket('balance.slice.1'), {
+      sliceId: 'balance.slice.1',
+      context: {
+        availablePriorNodes: [
+          {
+            id: 'direct-parameter',
+            kind: 'balance.parameter',
+            value: { label: 'Direct' },
+          },
+          {
+            id: 'irrelevant-progression',
+            kind: 'balance.progression-curve',
+            value: { label: 'Irrelevant' },
+          },
+        ],
+        requiredCurrentNodes: [],
+      },
+    })
+    expect(authority.availablePriorNodes.map(node => node.id)).toEqual([
+      'direct-parameter',
+    ])
   })
 
   test('does not freeze caller-owned context while freezing the authority', () => {

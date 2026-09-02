@@ -1460,10 +1460,9 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('source.sections[].evidenceFragments')
   })
 
-  test('rejects a retry diagnostic that does not match the exact slice or record union', () => {
+  test('accepts a legal record retry even when its ID is not a required current node', () => {
     const packet = syntheticProjectionPacket()
-    expect(() =>
-      buildWorkerPrompt({
+    const prompt = buildWorkerPrompt({
         runId: 'run',
         ownerId: 'owner',
         projectId: 'project',
@@ -1485,7 +1484,49 @@ describe('worker prompts', () => {
           },
           packet,
         },
-      }),
-    ).toThrow(/retry diagnostic is invalid/)
+      })
+    expect(prompt).toContain('state-start')
+  })
+
+  test('rejects unknown, extra, empty, and mismatched retry diagnostics', () => {
+    const packet = syntheticProjectionPacket()
+    const buildWithRetry = (retryDiagnostic: Record<string, unknown>) =>
+      buildWorkerPrompt({
+        runId: 'run',
+        ownerId: 'owner',
+        projectId: 'project',
+        workspacePath: '/workspace',
+        workerType: 'game-ir-compiler',
+        phase: 'GAME_IR_COMPILATION',
+        revision: 'revision',
+        allowedPaths: [],
+        contract: {
+          kind: 'projection',
+          currentSlice: 'gameplay.slice.0',
+          sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [] },
+          retryDiagnostic,
+          packet,
+        },
+      })
+    for (const retryDiagnostic of [
+      { scope: 'unknown', sliceId: 'gameplay.slice.0', reason: 'failed' },
+      {
+        scope: 'slice',
+        sliceId: 'gameplay.slice.0',
+        reason: 'failed',
+        extra: true,
+      },
+      {
+        scope: 'record',
+        sliceId: 'gameplay.slice.0',
+        recordId: '',
+        fragmentId: 'e0.0',
+        reason: 'failed',
+      },
+      { scope: 'slice', sliceId: 'gameplay.slice.1', reason: 'failed' },
+    ])
+      expect(() => buildWithRetry(retryDiagnostic)).toThrow(
+        /retry diagnostic is invalid/,
+      )
   })
 })

@@ -211,16 +211,19 @@ function selectedSourceFragments(
 
 function cloneContext(
   context: GameIrProjectionSliceContext,
+  directDependencyKinds: ReadonlySet<string>,
 ): GameIrProjectionSliceContext {
   return {
-    availablePriorNodes: context.availablePriorNodes.map(node => ({
-      id: node.id,
-      kind: node.kind,
-      value: JSON.parse(canonicalGameIrJson(node.value)) as Record<
-        string,
-        unknown
-      >,
-    })),
+    availablePriorNodes: context.availablePriorNodes
+      .filter(node => directDependencyKinds.has(node.kind))
+      .map(node => ({
+        id: node.id,
+        kind: node.kind,
+        value: JSON.parse(canonicalGameIrJson(node.value)) as Record<
+          string,
+          unknown
+        >,
+      })),
     requiredCurrentNodes: context.requiredCurrentNodes.map(node => ({
       id: node.id,
       kind: node.kind,
@@ -271,7 +274,12 @@ export function buildGameIrProjectionSliceAuthority(input: {
       throw new Error('Game IR projection retry diagnostic fragment is stale')
     visibleFragments = Object.freeze(selected)
   }
-  const context = cloneContext(input.sliceContext)
+  const directDependencyKinds = new Set(
+    input.slice.nodes.flatMap(node =>
+      node.relationships.flatMap(relationship => relationship.targetKinds),
+    ),
+  )
+  const context = cloneContext(input.sliceContext, directDependencyKinds)
   return freeze({
     schemaVersion: 'game-ir-projection-slice-authority.v1',
     identity: {
