@@ -124,7 +124,7 @@ const ROOT = resolve(
   '../../../../../../',
 )
 setDefaultTimeout(30_000)
-const BASELINE = 'b47641f33'
+const BASELINE = '725f665a0'
 const PHASE_STARTED_AT = '2026-08-24T00:00:00.000Z'
 const WORKER_KEY: FoundationFactKey = 'game.win_conditions'
 const VALUES: Record<FoundationFactKey, string> = {
@@ -1632,7 +1632,7 @@ async function controllerIssuePlan(fixture: Fixture, workspacePath: string) {
   }
 }
 
-describe('Foundation parity against stable baseline b47641f33', () => {
+describe('Foundation parity against stable baseline 725f665a0', () => {
   test('keeps the complete 21-file Stage 3/4 protected manifest', () => {
     expect(FOUNDATION_PROTECTED_FILES).toHaveLength(21)
     expect(new Set(FOUNDATION_PROTECTED_FILES).size).toBe(21)
