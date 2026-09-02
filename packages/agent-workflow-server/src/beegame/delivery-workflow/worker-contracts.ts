@@ -32,12 +32,6 @@ const projectionNodeSchema = z
     edges: z.array(projectionNodeEdgeSchema),
   })
   .strict()
-const projectionSourceEvidenceGroupSchema = z
-  .object({
-    nodeIds: z.array(gameIrText.regex(safeIdPattern)).min(1),
-    fragmentId: gameIrText.regex(/^e[0-9]+\.[0-9]+$/),
-  })
-  .strict()
 const gameIrDiagnosticSchema = z
   .object({
     outcome: z.enum(['FAIL', 'AMBIGUOUS']),
@@ -46,12 +40,6 @@ const gameIrDiagnosticSchema = z
     missingSubject: gameIrText,
     expectedProjection: gameIrText,
     evidencePointers: z.array(gameIrText),
-  })
-  .strict()
-const gameIrSemanticModelSchema = z
-  .object({
-    nodes: z.array(projectionNodeSchema),
-    sourceEvidenceGroups: z.array(projectionSourceEvidenceGroupSchema),
   })
   .strict()
 const gameIrValidationModelSchema = z.discriminatedUnion('outcome', [
@@ -64,11 +52,18 @@ const gameIrValidationModelSchema = z.discriminatedUnion('outcome', [
     .strict(),
   gameIrDiagnosticSchema,
 ])
+const projectionRecordSchema = z
+  .object({
+    fragmentId: gameIrText.regex(/^e[0-9]+\.[0-9]+$/),
+    node: projectionNodeSchema,
+  })
+  .strict()
 const projectionCompletedSchema = z
   .object({
     status: z.literal('completed'),
     sliceId: gameIrText,
-    semantic: gameIrSemanticModelSchema,
+    records: z.array(projectionRecordSchema),
+    done: z.literal(true),
   })
   .strict()
 const validationCompletedSchema = z
@@ -85,13 +80,8 @@ export const gameIrProjectionModelPayloadSchema = z.discriminatedUnion(
       .object({
         status: z.literal('failed'),
         sliceId: gameIrText,
-        reason: gameIrText,
-      })
-      .strict(),
-    z
-      .object({
-        status: z.literal('blocked'),
-        sliceId: gameIrText,
+        records: z.array(projectionRecordSchema),
+        done: z.literal(false),
         reason: gameIrText,
       })
       .strict(),
@@ -135,7 +125,8 @@ export const gameIrProjectionTerminalSchema = z.discriminatedUnion('status', [
       operation: z.literal('projection'),
       status: z.literal('completed'),
       sliceId: gameIrText,
-      semantic: gameIrSemanticModelSchema,
+      records: z.array(projectionRecordSchema),
+      done: z.literal(true),
       ...gameIrServiceIdentityFields,
     })
     .strict(),
@@ -145,16 +136,8 @@ export const gameIrProjectionTerminalSchema = z.discriminatedUnion('status', [
       operation: z.literal('projection'),
       status: z.literal('failed'),
       sliceId: gameIrText,
-      reason: gameIrText,
-      ...gameIrServiceIdentityFields,
-    })
-    .strict(),
-  z
-    .object({
-      workerType: z.literal('game-ir-compiler'),
-      operation: z.literal('projection'),
-      status: z.literal('blocked'),
-      sliceId: gameIrText,
+      records: z.array(projectionRecordSchema),
+      done: z.literal(false),
       reason: gameIrText,
       ...gameIrServiceIdentityFields,
     })

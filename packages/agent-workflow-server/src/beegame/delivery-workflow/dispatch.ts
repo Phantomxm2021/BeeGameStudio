@@ -554,10 +554,24 @@ function assertGameIrOperationRequest(input: {
           : undefined
       if (
         !diagnostic ||
-        Object.keys(diagnostic).sort().join('\0') !== 'reason\0sliceId' ||
+        !(['reason', 'scope', 'sliceId'].every(key => key in diagnostic) ||
+          ['fragmentId', 'reason', 'recordId', 'scope', 'sliceId'].every(
+            key => key in diagnostic,
+          )) ||
+        !['reason\0scope\0sliceId', 'fragmentId\0reason\0recordId\0scope\0sliceId'].includes(
+          Object.keys(diagnostic).sort().join('\0'),
+        ) ||
+        (diagnostic.scope !== 'slice' && diagnostic.scope !== 'record') ||
         diagnostic.sliceId !== currentSlice ||
         typeof diagnostic.reason !== 'string' ||
-        !diagnostic.reason.trim()
+        !diagnostic.reason.trim() ||
+        (diagnostic.scope === 'record' &&
+          (typeof diagnostic.recordId !== 'string' ||
+            !diagnostic.recordId.trim() ||
+            typeof diagnostic.fragmentId !== 'string' ||
+            !diagnostic.fragmentId.trim())) ||
+        (diagnostic.scope === 'slice' &&
+          ('recordId' in diagnostic || 'fragmentId' in diagnostic))
       )
         throw new DispatchError(
           'blocked',

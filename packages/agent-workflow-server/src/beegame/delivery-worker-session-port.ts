@@ -366,6 +366,7 @@ function assertGameIrOperationRequest(
 type LiveGameIrProjectionSession = {
   sessionId: string
   packetDigest: string
+  packet: Record<string, unknown>
   packetSent: boolean
 }
 
@@ -788,6 +789,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         liveGameIrProjectionSessions.set(projectionKey, {
           sessionId,
           packetDigest: projectionPacketDigest!,
+          packet: request.contract.packet as Record<string, unknown>,
           packetSent: false,
         })
       sessions.set(dispatchId, sessionId)
@@ -892,6 +894,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 ...request,
                 contract: {
                   ...contractWithoutPacket,
+                  packet: liveProjection.packet,
                   packetDigest: liveProjection.packetDigest,
                   currentSlice: gameIrProjectionSliceForRequest(request),
                 },
@@ -1483,11 +1486,18 @@ function createDeterministicGameIrCompilerTerminal(input: {
             throw new Error(
               'Game IR projection result is missing native record_stream',
             )
-          return parseGameIrProjectionRecordStream({
+          const stream = parseGameIrProjectionRecordStream({
             expectedSliceId: gameIrProjectionSliceForRequest(input.request)
               .sliceId,
             text: recordStream,
           })
+          return {
+            status: stream.done ? ('completed' as const) : ('failed' as const),
+            sliceId: gameIrProjectionSliceForRequest(input.request).sliceId,
+            records: stream.records,
+            done: stream.done,
+            ...(stream.diagnostic ? { reason: stream.diagnostic } : {}),
+          }
         })()
       : (() => {
           const structured = resultPayload?.structured_output
@@ -1572,6 +1582,7 @@ function createGameIrCompilerFailureTerminal(input: {
     operation,
     status: 'failed',
     ...(sliceId ? { sliceId } : {}),
+    ...(operation === 'projection' ? { records: [], done: false } : {}),
     reason: input.reason,
     runId: input.request.runId,
     dispatchId,

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,8 @@ import {
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import { parseWorkerTerminalResult } from './delivery-workflow/worker-contracts'
 import { buildGameIrProjectionContract } from './delivery-workflow/game-ir/projection-contract'
+import { digestGameIrValue } from './delivery-workflow/game-ir/model'
+import { sourceSectionsForGameIrProjectionSlice } from './delivery-workflow/game-ir/projection-slice-authority'
 import type {
   FoundationDocumentPath,
   WorkerDispatchRequest,
@@ -18,7 +21,61 @@ import { WorkflowWorkerRebindError } from './session-manager'
 const EMPTY_SLICE_CONTEXT = {
   availablePriorNodes: [],
   requiredCurrentNodes: [],
+  admittedCurrentNodes: [],
 } as const
+
+function projectionPacket(input: {
+  taskId: string
+  revision: string
+  receiptDigest: string
+  sliceId: string
+}) {
+  const compileRequest = {
+    taskId: input.taskId,
+    foundation: {
+      foundationRevision: input.revision,
+      receiptDigest: input.receiptDigest,
+    },
+  }
+  const selectors = [
+    ...sourceSectionsForGameIrProjectionSlice('gameplay.slice.0'),
+    ...sourceSectionsForGameIrProjectionSlice('gameplay.slice.1'),
+  ].filter(
+    (selector, index, all) =>
+      all.findIndex(
+        candidate =>
+          candidate.documentPath === selector.documentPath &&
+          candidate.sectionId === selector.sectionId,
+      ) === index,
+  )
+  const sections = selectors.map((selector, index) => {
+      const bytes = `SESSION_PORT_AUTHORITY_${index}`
+      return {
+        ...selector,
+        digest: createHash('sha256').update(bytes).digest('hex'),
+        bytes,
+      }
+    })
+  const body = {
+    schemaVersion: 'game-ir-gameplay-projection-operation-packet.v1',
+    source: {
+      moduleId: 'gameplay',
+      taskId: input.taskId,
+      compileRequest,
+      sectionIndex: sections.map(({ bytes: _, ...section }) => section),
+      sectionBytes: Object.fromEntries(
+        sections.map(section => [
+          `${section.documentPath}#${section.sectionId}`,
+          section.bytes,
+        ]),
+      ),
+    },
+    semanticPacket: { moduleId: 'gameplay', taskId: input.taskId },
+    projectionContract: buildGameIrProjectionContract('gameplay'),
+    dependencies: {},
+  }
+  return { ...body, packetDigest: digestGameIrValue(body) }
+}
 
 function canonicalSource(
   path: 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md',
@@ -101,13 +158,19 @@ describe('delivery worker complete document boundary', () => {
         kind: 'projection',
         currentSlice: 'gameplay.slice.0',
         sliceContext: EMPTY_SLICE_CONTEXT,
-        packet: {
-          packetDigest: 'a'.repeat(64),
-          schemaVersion: 'game-ir-gameplay-projection-operation-packet.v1',
-          source: { moduleId: 'gameplay' },
-          projectionContract: buildGameIrProjectionContract('gameplay'),
-        },
-        compileRequestDigest: 'a'.repeat(64),
+        packet: projectionPacket({
+          taskId: 'task-compiler',
+          revision: 'revision-compiler',
+          receiptDigest: 'b'.repeat(64),
+          sliceId: 'gameplay.slice.0',
+        }),
+        compileRequestDigest: digestGameIrValue({
+          taskId: 'task-compiler',
+          foundation: {
+            foundationRevision: 'revision-compiler',
+            receiptDigest: 'b'.repeat(64),
+          },
+        }),
         foundationReadyReceiptDigest: 'b'.repeat(64),
       },
     } as never)
@@ -115,7 +178,7 @@ describe('delivery worker complete document boundary', () => {
       'dispatch-compiler',
       'caller prompt must not replace the dispatcher packet',
     )
-    expect(submittedPrompt).toContain('"kind":"projection"')
+    expect(submittedPrompt).toContain('game-ir-compiler')
     expect(submittedPrompt).toContain(
       'The model contract is the sole input for this task.',
     )
@@ -141,23 +204,23 @@ describe('delivery worker complete document boundary', () => {
       dispatchId: 'dispatch-compiler',
       taskId: 'task-compiler',
       revision: 'revision-compiler',
-      compileRequestDigest: 'a'.repeat(64),
+      compileRequestDigest: digestGameIrValue({
+        taskId: 'task-compiler',
+        foundation: {
+          foundationRevision: 'revision-compiler',
+          receiptDigest: 'b'.repeat(64),
+        },
+      }),
       foundationReadyReceiptDigest: 'b'.repeat(64),
     })
     expect(terminal).toMatchObject({
       operation: 'projection',
       status: 'completed',
       sliceId: 'gameplay.slice.0',
-      semantic: { nodes: [], sourceEvidenceGroups: [] },
+      records: [],
+      done: true,
     })
-    expect(
-      (terminal as { semantic?: { outcome?: string; sourceClaims?: unknown } })
-        .semantic?.outcome,
-    ).toBeUndefined()
-    expect(
-      (terminal as { semantic?: { outcome?: string; sourceClaims?: unknown } })
-        .semantic?.sourceClaims,
-    ).toBeUndefined()
+    expect(terminal).not.toHaveProperty('semantic')
     const forgedPort = createBeeGameDeliveryWorkerPort({
       sessions: sessions as never,
       userId: 'user',
@@ -219,11 +282,6 @@ describe('delivery worker complete document boundary', () => {
       sessions: sessions as never,
       userId: 'user',
     })
-    const packet = {
-      packetDigest: 'a'.repeat(64),
-      source: { moduleId: 'gameplay' },
-      projectionContract: buildGameIrProjectionContract('gameplay'),
-    }
     const request = (
       dispatchId: string,
       currentSlice: string,
@@ -243,8 +301,19 @@ describe('delivery worker complete document boundary', () => {
         kind: 'projection',
         currentSlice,
         sliceContext: EMPTY_SLICE_CONTEXT,
-        packet,
-        compileRequestDigest: 'a'.repeat(64),
+        packet: projectionPacket({
+          taskId: 'task-packet-once',
+          revision: 'revision',
+          receiptDigest: 'b'.repeat(64),
+          sliceId: currentSlice,
+        }),
+        compileRequestDigest: digestGameIrValue({
+          taskId: 'task-packet-once',
+          foundation: {
+            foundationRevision: 'revision',
+            receiptDigest: 'b'.repeat(64),
+          },
+        }),
         foundationReadyReceiptDigest: 'b'.repeat(64),
         progress:
           currentSlice === 'gameplay.slice.1'
@@ -278,10 +347,9 @@ describe('delivery worker complete document boundary', () => {
     expect(starts).toBe(1)
     expect(rebinds).toBe(1)
     expect(prompts).toHaveLength(2)
-    expect(prompts[0]).not.toContain('"packetDigest":"' + 'a'.repeat(64) + '"')
-    expect(prompts[1]).toContain('"packetDigest":"' + 'a'.repeat(64) + '"')
+    expect(prompts[0]).toContain('## Current slice')
+    expect(prompts[1]).toContain('## Current slice')
     expect(prompts[1]).toContain('gameplay.slice.1')
-    expect(prompts[1]).toContain('gameplay.slice.0')
     expect(prompts[1]).not.toContain('projectionContract')
     expect(prompts[1]).not.toContain('semanticPacket')
     expect(prompts[1]).not.toContain('sectionBytes')
@@ -291,7 +359,7 @@ describe('delivery worker complete document boundary', () => {
     await port.start(request('dispatch-slice-2', 'gameplay.slice.0'))
     await port.submit('dispatch-slice-2', 'ignored')
     expect(starts).toBe(2)
-    expect(prompts[2]).toContain('projectionContract')
+    expect(prompts[2]).toContain('## Current slice')
   })
 
   test('resends the packet when the previous live session never accepted a turn', async () => {
@@ -317,11 +385,12 @@ describe('delivery worker complete document boundary', () => {
       sessions: sessions as never,
       userId: 'user',
     })
-    const packet = {
-      packetDigest: 'b'.repeat(64),
-      source: { moduleId: 'gameplay' },
-      projectionContract: buildGameIrProjectionContract('gameplay'),
-    }
+    const packet = projectionPacket({
+      taskId: 'task-packet-retry',
+      revision: 'revision',
+      receiptDigest: 'd'.repeat(64),
+      sliceId: 'gameplay.slice.0',
+    })
     const request = (dispatchId: string): WorkerDispatchRequest => ({
       dispatchId,
       runId: 'run-packet-retry',
@@ -339,7 +408,13 @@ describe('delivery worker complete document boundary', () => {
         currentSlice: 'gameplay.slice.0',
         sliceContext: EMPTY_SLICE_CONTEXT,
         packet,
-        compileRequestDigest: 'c'.repeat(64),
+        compileRequestDigest: digestGameIrValue({
+          taskId: 'task-packet-retry',
+          foundation: {
+            foundationRevision: 'revision',
+            receiptDigest: 'd'.repeat(64),
+          },
+        }),
         foundationReadyReceiptDigest: 'd'.repeat(64),
       },
     })
@@ -347,7 +422,7 @@ describe('delivery worker complete document boundary', () => {
     await port.start(request('dispatch-retry-1'))
     await port.submit('dispatch-retry-1', 'ignored')
     expect(starts).toBe(1)
-    expect(prompts[0]).toContain('projectionContract')
+    expect(prompts[0]).toContain('## Current slice')
   })
 
   test('retires a non-resumable live session before retrying with the packet', async () => {
@@ -381,11 +456,12 @@ describe('delivery worker complete document boundary', () => {
       sessions: sessions as never,
       userId: 'user',
     })
-    const packet = {
-      packetDigest: 'd'.repeat(64),
-      source: { moduleId: 'gameplay' },
-      projectionContract: buildGameIrProjectionContract('gameplay'),
-    }
+    const packet = projectionPacket({
+      taskId: 'task-non-resumable',
+      revision: 'revision',
+      receiptDigest: 'f'.repeat(64),
+      sliceId: 'gameplay.slice.0',
+    })
     const request = (
       dispatchId: string,
       currentSlice: string,
@@ -406,7 +482,13 @@ describe('delivery worker complete document boundary', () => {
         currentSlice,
         sliceContext: EMPTY_SLICE_CONTEXT,
         packet,
-        compileRequestDigest: 'e'.repeat(64),
+        compileRequestDigest: digestGameIrValue({
+          taskId: 'task-non-resumable',
+          foundation: {
+            foundationRevision: 'revision',
+            receiptDigest: 'f'.repeat(64),
+          },
+        }),
         foundationReadyReceiptDigest: 'f'.repeat(64),
       },
     })
@@ -417,7 +499,7 @@ describe('delivery worker complete document boundary', () => {
 
     expect(starts).toBe(2)
     expect(disposed).toBe(1)
-    expect(prompts[0]).toContain('projectionContract')
+    expect(prompts[0]).toContain('## Current slice')
   })
 
   test('does not create a fresh session for an unexpected rebind failure', async () => {
@@ -445,11 +527,12 @@ describe('delivery worker complete document boundary', () => {
       sessions: sessions as never,
       userId: 'user',
     })
-    const packet = {
-      packetDigest: 'e'.repeat(64),
-      source: { moduleId: 'gameplay' },
-      projectionContract: buildGameIrProjectionContract('gameplay'),
-    }
+    const packet = projectionPacket({
+      taskId: 'task-unexpected-rebind',
+      revision: 'revision',
+      receiptDigest: 'a'.repeat(64),
+      sliceId: 'gameplay.slice.0',
+    })
     const request = (
       dispatchId: string,
       currentSlice: string,
@@ -470,7 +553,13 @@ describe('delivery worker complete document boundary', () => {
         currentSlice,
         sliceContext: EMPTY_SLICE_CONTEXT,
         packet,
-        compileRequestDigest: 'f'.repeat(64),
+        compileRequestDigest: digestGameIrValue({
+          taskId: 'task-unexpected-rebind',
+          foundation: {
+            foundationRevision: 'revision',
+            receiptDigest: 'a'.repeat(64),
+          },
+        }),
         foundationReadyReceiptDigest: 'a'.repeat(64),
       },
     })
@@ -509,11 +598,6 @@ describe('delivery worker complete document boundary', () => {
       sessions: sessions as never,
       userId: 'user',
     })
-    const packet = {
-      packetDigest: 'f'.repeat(64),
-      source: { moduleId: 'gameplay' },
-      projectionContract: buildGameIrProjectionContract('gameplay'),
-    }
     const request = (
       dispatchId: string,
       currentSlice: string,
@@ -533,8 +617,19 @@ describe('delivery worker complete document boundary', () => {
         kind: 'projection',
         currentSlice,
         sliceContext: EMPTY_SLICE_CONTEXT,
-        packet,
-        compileRequestDigest: 'a'.repeat(64),
+        packet: projectionPacket({
+          taskId: 'task-dispose-failure',
+          revision: 'revision',
+          receiptDigest: 'b'.repeat(64),
+          sliceId: currentSlice,
+        }),
+        compileRequestDigest: digestGameIrValue({
+          taskId: 'task-dispose-failure',
+          foundation: {
+            foundationRevision: 'revision',
+            receiptDigest: 'b'.repeat(64),
+          },
+        }),
         foundationReadyReceiptDigest: 'b'.repeat(64),
       },
     })
@@ -585,12 +680,19 @@ describe('delivery worker complete document boundary', () => {
         kind: 'projection',
         currentSlice: 'gameplay.slice.0',
         sliceContext: EMPTY_SLICE_CONTEXT,
-        packet: {
-          packetDigest: 'c'.repeat(64),
-          source: { moduleId: 'gameplay' },
-          projectionContract: buildGameIrProjectionContract('gameplay'),
-        },
-        compileRequestDigest: 'd'.repeat(64),
+        packet: projectionPacket({
+          taskId: 'task-stopped',
+          revision: 'revision',
+          receiptDigest: 'e'.repeat(64),
+          sliceId: 'gameplay.slice.0',
+        }),
+        compileRequestDigest: digestGameIrValue({
+          taskId: 'task-stopped',
+          foundation: {
+            foundationRevision: 'revision',
+            receiptDigest: 'e'.repeat(64),
+          },
+        }),
         foundationReadyReceiptDigest: 'e'.repeat(64),
       },
     }
@@ -599,7 +701,7 @@ describe('delivery worker complete document boundary', () => {
     await port.start({ ...request, dispatchId: 'dispatch-stopped-1' })
     await port.submit('dispatch-stopped-1', 'ignored')
     expect(starts).toBe(2)
-    expect(prompts[0]).toContain('projectionContract')
+    expect(prompts[0]).toContain('## Current slice')
   })
 
   test('rejects a caller-supplied Game IR schema before session creation', async () => {
@@ -767,20 +869,31 @@ describe('delivery worker complete document boundary', () => {
         kind: 'projection',
         currentSlice: 'gameplay.slice.0',
         sliceContext: EMPTY_SLICE_CONTEXT,
-        packet: {
-          packetDigest: 'a'.repeat(64),
-          schemaVersion: 'game-ir-gameplay-projection-operation-packet.v1',
-          source: { moduleId: 'gameplay' },
-          projectionContract: buildGameIrProjectionContract('gameplay'),
-        },
-        compileRequestDigest: 'a'.repeat(64),
+        packet: projectionPacket({
+          taskId: 'task-failed-compiler',
+          revision: 'revision-failed-compiler',
+          receiptDigest: 'b'.repeat(64),
+          sliceId: 'gameplay.slice.0',
+        }),
+        compileRequestDigest: digestGameIrValue({
+          taskId: 'task-failed-compiler',
+          foundation: {
+            foundationRevision: 'revision-failed-compiler',
+            receiptDigest: 'b'.repeat(64),
+          },
+        }),
         foundationReadyReceiptDigest: 'b'.repeat(64),
       },
     } as never)
 
-    await expect(
-      port.waitForTerminal!('dispatch-failed-compiler'),
-    ).rejects.toThrow(/wrong slice/i)
+    const terminal = await port.waitForTerminal!('dispatch-failed-compiler')
+    expect(terminal).toMatchObject({
+      operation: 'projection',
+      status: 'failed',
+      records: [],
+      done: false,
+    })
+    expect((terminal as { reason: string }).reason).toMatch(/wrong slice/i)
     expect(stopCalls).toBe(0)
     expect(idleCalls).toBe(0)
   })

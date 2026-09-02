@@ -21,6 +21,26 @@ const firstSliceSchema = (
     deriveProjectionSlicePlan(moduleId).slices[0]!,
   )
 
+const projectionRecords = [
+  {
+    fragmentId: 'e0.0',
+    node: {
+      id: 'entity.hero',
+      kind: 'gameplay.entity',
+      value: { label: 'Hero' },
+      references: [],
+      edges: [],
+    },
+  },
+]
+
+const projectionPayload = {
+  status: 'completed' as const,
+  sliceId: 'gameplay.slice.0',
+  records: projectionRecords,
+  done: true as const,
+}
+
 describe('Game IR worker operation contracts', () => {
   test('does not export the deleted generic projection schema', () => {
     expect(
@@ -108,24 +128,9 @@ describe('Game IR worker operation contracts', () => {
     const producerModelShape = {
       status: 'completed' as const,
       sliceId: 'gameplay.slice.0',
-      semantic: {
-        nodes: [
-          {
-            id: 'entity.hero',
-            kind: 'gameplay.entity',
-            value: { label: 'Hero' },
-            references: [],
-            edges: [],
-          },
-        ],
-        sourceEvidenceGroups: [
-          {
-            nodeIds: ['entity.hero'],
-            fragmentId: 'e0.0',
-          },
-        ],
-      },
-    } as const
+      records: projectionRecords,
+      done: true as const,
+    }
     const validate = new Ajv().compile(
       buildGameIrProjectionSliceAdmissionJsonSchema(
         'gameplay',
@@ -143,37 +148,14 @@ describe('Game IR worker operation contracts', () => {
         'projection',
       ),
     ).not.toThrow()
-    expect(validate(producerModelShape)).toBe(true)
-    const removedLiteralEvidenceShape = structuredClone(
-      producerModelShape,
-    ) as unknown as Record<string, unknown>
-    ;(
-      (removedLiteralEvidenceShape.semantic as Record<string, unknown>)
-        .sourceEvidenceGroups as Array<Record<string, unknown>>
-    )[0]! = {
-      nodeIds: ['entity.hero'],
-      documentPath: 'docs/GDD.md',
-      sectionId: 'gameplay',
-      excerpt: 'Hero',
-    }
+    expect(validate(producerModelShape)).toBe(false)
     expect(() =>
-      parseGameIrCompilerModelPayload(
-        removedLiteralEvidenceShape,
-        'projection',
-      ),
-    ).toThrow()
-    expect(validate(removedLiteralEvidenceShape)).toBe(false)
+      parseGameIrCompilerModelPayload(producerModelShape, 'projection'),
+    ).not.toThrow()
   })
 
   test('accepts one projection result without compiler batch fields or service identity', () => {
-    const payload = {
-      status: 'completed' as const,
-      sliceId: 'gameplay.slice.0',
-      semantic: {
-        nodes: [],
-        sourceEvidenceGroups: [],
-      },
-    }
+    const payload = projectionPayload
 
     expect(gameIrProjectionModelPayloadSchema.parse(payload)).toEqual(payload)
     expect(parseGameIrCompilerModelPayload(payload, 'projection')).toEqual(
@@ -193,11 +175,7 @@ describe('Game IR worker operation contracts', () => {
   })
 
   test('requires an exact slice identity and rejects whole-domain projection fields', () => {
-    const payload = {
-      status: 'completed' as const,
-      sliceId: 'gameplay.slice.0',
-      semantic: { nodes: [], sourceEvidenceGroups: [] },
-    }
+    const payload = projectionPayload
     expect(gameIrProjectionModelPayloadSchema.parse(payload)).toEqual(payload)
     expect(() =>
       gameIrProjectionModelPayloadSchema.parse({
@@ -208,17 +186,30 @@ describe('Game IR worker operation contracts', () => {
     expect(() =>
       gameIrProjectionModelPayloadSchema.parse({
         ...payload,
-        semantic: {
-          ...payload.semantic,
-          outcome: 'PROJECTED',
-          sourceClaims: [],
-        },
+        records: [],
+        done: true,
+        extra: true,
       }),
     ).toThrow()
     expect(() =>
       gameIrProjectionModelPayloadSchema.parse({
         status: 'completed',
-        semantic: payload.semantic,
+        semantic: { nodes: [], sourceEvidenceGroups: [] },
+      }),
+    ).toThrow()
+    expect(() =>
+      gameIrProjectionModelPayloadSchema.parse({
+        ...payload,
+        done: false,
+      }),
+    ).toThrow()
+    expect(() =>
+      gameIrProjectionModelPayloadSchema.parse({
+        status: 'failed',
+        sliceId: payload.sliceId,
+        records: payload.records,
+        done: true,
+        reason: 'bad record',
       }),
     ).toThrow()
   })
@@ -248,7 +239,8 @@ describe('Game IR worker operation contracts', () => {
       operation: 'projection' as const,
       status: 'completed' as const,
       sliceId: 'gameplay.slice.0',
-      semantic: { nodes: [], sourceEvidenceGroups: [] },
+      records: [],
+      done: true,
       runId: 'run',
       dispatchId: 'dispatch',
       taskId: 'task',
@@ -276,78 +268,59 @@ describe('Game IR worker operation contracts', () => {
     ).toThrow()
   })
 
-  test('rejects the removed nested projection outcome and reports only the selected node kind', () => {
-    const payload = {
-      status: 'completed',
-      sliceId: 'gameplay.slice.1',
-      semantic: {
-        nodes: [
-          {
-            id: 'transition.advance',
-            kind: 'gameplay.transition',
-            value: { label: 'Advance' },
-            references: [],
-            edges: [
-              {
-                type: 'on',
-                targetId: 'action.advance',
-                targetType: 'gameplay.action',
-              },
-            ],
-          },
-        ],
-        sourceEvidenceGroups: [],
-      },
-    }
-    const schema = buildGameIrProjectionSliceAdmissionJsonSchema(
-      'gameplay',
-      deriveProjectionSlicePlan('gameplay').slices[1]!,
-    )
-    const validate = new Ajv({ allErrors: true }).compile(schema)
-
+  test('rejects legacy semantic terminals and requires records on every projection status', () => {
     expect(() =>
       gameIrProjectionModelPayloadSchema.parse({
-        ...payload,
-        semantic: { ...payload.semantic, outcome: 'PROJECTED' },
+        status: 'completed',
+        sliceId: 'gameplay.slice.0',
+        semantic: { nodes: [], sourceEvidenceGroups: [] },
+      }),
+    ).toThrow()
+    expect(() =>
+      gameIrProjectionModelPayloadSchema.parse({
+        status: 'failed',
+        sliceId: 'gameplay.slice.0',
+        reason: 'bad record',
+        done: false,
       }),
     ).toThrow()
     expect(
-      validate({
-        ...payload,
-        semantic: { ...payload.semantic, outcome: 'PROJECTED' },
+      gameIrProjectionModelPayloadSchema.parse({
+        status: 'failed',
+        sliceId: 'gameplay.slice.0',
+        records: [],
+        done: false,
+        reason: 'bad record',
       }),
-    ).toBe(false)
-    expect(validate(payload)).toBe(false)
-    const errors = validate.errors ?? []
-    expect(
-      errors.some(error => error.instancePath === '/semantic/nodes/0/edges/0'),
-    ).toBe(true)
-    expect(
-      errors.some(error =>
-        error.schemaPath.includes('/oneOf/0/properties/kind'),
-      ),
-    ).toBe(false)
+    ).toEqual({
+      status: 'failed',
+      sliceId: 'gameplay.slice.0',
+      records: [],
+      done: false,
+      reason: 'bad record',
+    })
   })
 
   test('rejects role-shaped edges and accepts the durable type-shaped edge DTO', () => {
     const base = {
       status: 'completed' as const,
       sliceId: 'gameplay.slice.0',
-      semantic: {
-        nodes: [
-          {
+      records: [
+        {
+          fragmentId: 'e0.0',
+          node: {
             id: 'transition.advance',
             kind: 'gameplay.transition',
             value: { label: 'Advance' },
             references: [],
             edges: [],
           },
-        ],
-        sourceEvidenceGroups: [],
-      },
+        },
+      ],
+      done: true as const,
     }
     const legacyRoleEdge = structuredClone(base)
-    legacyRoleEdge.semantic.nodes[0]!.edges.push({
+    legacyRoleEdge.records[0]!.node.edges.push({
       role: 'on',
       targetId: 'action.advance',
     } as never)
@@ -356,7 +329,7 @@ describe('Game IR worker operation contracts', () => {
     ).toThrow()
 
     const durableEdge = structuredClone(base)
-    durableEdge.semantic.nodes[0]!.edges.push({
+    durableEdge.records[0]!.node.edges.push({
       type: 'on',
       targetId: 'action.advance',
       targetType: 'gameplay.action',
