@@ -38,10 +38,12 @@ import {
   type GameIrProjectionSliceContext,
   type GameIrProjectionSlice,
   type GameIrProjectionSlicePlan,
+  type GameIrProjectionRetryDiagnostic,
 } from './projection-slices'
+import type { GameIrProjectionNodeRecord } from './projection-record-stream'
 
 export const GAME_IR_PROJECTION_SLICE_JOURNAL_SCHEMA_VERSION =
-  'game-ir-projection-slice-journal.v1' as const
+  'game-ir-projection-slice-journal.v2' as const
 
 const SHA256 = /^[a-f0-9]{64}$/
 const GENESIS_DIGEST = '0'.repeat(64)
@@ -66,6 +68,17 @@ export type GameIrProjectionSliceCompletion = Readonly<{
       fragmentId: string
     }>[]
   }>
+}>
+
+export type GameIrProjectionPendingSlice = Readonly<{
+  sliceId: string
+  predecessorDigest: string
+  records: readonly Readonly<{
+    fragmentId: string
+    node: GameIrProjectionSliceNode
+    recordDigest: string
+  }>[]
+  pendingDigest: string
 }>
 
 type GameIrProjectionSliceSemantic = Readonly<{
@@ -145,6 +158,7 @@ export type GameIrProjectionSliceJournalSnapshot = Readonly<{
   slicePlan: GameIrProjectionSlicePlan
   slicePlanDigest: string
   entries: readonly GameIrProjectionSliceJournalEntry[]
+  pendingSlice: GameIrProjectionPendingSlice | null
   journalDigest: string
 }>
 
@@ -611,11 +625,13 @@ function sliceContext(
   entries: readonly GameIrProjectionSliceJournalEntry[],
   slice: GameIrProjectionSlice | undefined,
   authority: Authority,
+  pendingSlice: GameIrProjectionPendingSlice | null = null,
 ): GameIrProjectionSliceContext {
   if (!slice)
     return Object.freeze({
       availablePriorNodes: Object.freeze([]),
       requiredCurrentNodes: Object.freeze([]),
+      admittedCurrentNodes: Object.freeze([]),
     })
   const currentKinds = new Set(slice.nodeKinds)
   const serviceOwned = serviceOwnedTargetIds(authority)
@@ -643,7 +659,16 @@ function sliceContext(
   const requiredCurrentNodes = [...required.values()].sort((left, right) =>
     compareCodeUnits(nodeTargetKey(left), nodeTargetKey(right)),
   )
-  return deepFreeze({ availablePriorNodes, requiredCurrentNodes })
+  const admittedCurrentNodes = (pendingSlice?.records ?? [])
+    .map(record => ({ id: record.node.id, kind: record.node.kind }))
+    .sort((left, right) =>
+      compareCodeUnits(nodeTargetKey(left), nodeTargetKey(right)),
+    )
+  return deepFreeze({
+    availablePriorNodes,
+    requiredCurrentNodes,
+    admittedCurrentNodes,
+  })
 }
 
 function assertRequiredCurrentNodes(
@@ -845,6 +870,49 @@ function normalizePersistedSemantic(
   }
 }
 
+function normalizeRecordNode(
+  record: GameIrProjectionNodeRecord,
+  slice: GameIrProjectionSlice,
+  authority: Authority,
+): GameIrProjectionNodeRecord {
+  const fragmentId = text(record.fragmentId, 'record fragmentId')
+  try {
+    resolveGameIrEvidenceFragment(
+      buildGameIrEvidenceFragmentCatalog({
+        sectionIndex: authority.source.sectionIndex,
+        sectionBytes: authority.source.sectionBytes,
+      }),
+      fragmentId,
+    )
+  } catch {
+    fail(`record ${record.node?.id ?? '<unknown>'} fragmentId is outside authority`)
+  }
+  const candidate = {
+    status: 'completed',
+    sliceId: slice.sliceId,
+    semantic: { nodes: [record.node], sourceEvidenceGroups: [] },
+  }
+  const validatorKey = `${authority.source.moduleId}\0${slice.sliceId}`
+  let validate = sliceValidators.get(validatorKey)
+  if (!validate) {
+    validate = ajv.compile(
+      buildGameIrProjectionSliceAdmissionJsonSchema(
+        authority.source.moduleId,
+        slice,
+      ),
+    )
+    sliceValidators.set(validatorKey, validate)
+  }
+  if (!validate(candidate))
+    fail(
+      `record node is outside the slice schema: ${ajv.errorsText(validate.errors)}`,
+    )
+  const node = admitCanonicalNodeCollections(
+    clone([record.node]) as GameIrProjectionSliceNode[],
+  )[0]!
+  return Object.freeze({ fragmentId, node })
+}
+
 function planDigest(plan: GameIrProjectionSlicePlan): string {
   return digestGameIrValue(plan)
 }
@@ -859,6 +927,89 @@ function snapshotBody(
   snapshot: Omit<GameIrProjectionSliceJournalSnapshot, 'journalDigest'>,
 ): Omit<GameIrProjectionSliceJournalSnapshot, 'journalDigest'> {
   return snapshot
+}
+
+function pendingBody(
+  pending: Omit<GameIrProjectionPendingSlice, 'pendingDigest'>,
+): Omit<GameIrProjectionPendingSlice, 'pendingDigest'> {
+  return pending
+}
+
+function pendingDigest(
+  pending: Omit<GameIrProjectionPendingSlice, 'pendingDigest'>,
+): string {
+  return digestGameIrValue(pendingBody(pending))
+}
+
+function normalizePendingSlice(
+  value: unknown,
+  entries: readonly GameIrProjectionSliceJournalEntry[],
+  slicePlan: GameIrProjectionSlicePlan,
+  authority: Authority,
+): GameIrProjectionPendingSlice | null {
+  if (value === null) return null
+  if (!isRecord(value)) fail('pendingSlice must be a plain object or null')
+  exactKeys(
+    value,
+    ['sliceId', 'predecessorDigest', 'records', 'pendingDigest'],
+    'pendingSlice',
+  )
+  const slice = slicePlan.slices[entries.length]
+  if (!slice) fail('pendingSlice exists after every slice is admitted')
+  const sliceId = text(value.sliceId, 'pendingSlice.sliceId')
+  if (sliceId !== slice.sliceId) fail('pendingSlice slice identity is stale')
+  const predecessorDigest = sha256(
+    value.predecessorDigest,
+    'pendingSlice.predecessorDigest',
+  )
+  const expectedPredecessor = entries.at(-1)?.entryDigest ?? GENESIS_DIGEST
+  if (predecessorDigest !== expectedPredecessor)
+    fail('pendingSlice predecessor chain is invalid')
+  if (!Array.isArray(value.records)) fail('pendingSlice.records must be an array')
+  const nodeIds = new Set(
+    entries.flatMap(entry => entry.semantic.nodes.map(node => node.id)),
+  )
+  let previousId: string | undefined
+  const records = value.records.map((raw, index) => {
+    if (!isRecord(raw)) fail(`pendingSlice.records[${index}] is invalid`)
+    exactKeys(
+      raw,
+      ['fragmentId', 'node', 'recordDigest'],
+      `pendingSlice.records[${index}]`,
+    )
+    const normalized = normalizeRecordNode(
+      {
+        fragmentId: raw.fragmentId as string,
+        node: raw.node as GameIrProjectionSliceNode,
+      },
+      slice,
+      authority,
+    )
+    if (
+      previousId !== undefined &&
+      compareCodeUnits(previousId, normalized.node.id) >= 0
+    )
+      fail('pendingSlice records must have strictly increasing node IDs')
+    previousId = normalized.node.id
+    if (nodeIds.has(normalized.node.id))
+      fail(`journal contains cross-slice duplicate node ID ${normalized.node.id}`)
+    nodeIds.add(normalized.node.id)
+    const body = {
+      fragmentId: normalized.fragmentId,
+      node: normalized.node,
+    }
+    const recordDigest = sha256(
+      raw.recordDigest,
+      `pendingSlice.records[${index}].recordDigest`,
+    )
+    if (recordDigest !== digestGameIrValue(body))
+      fail(`pendingSlice.records[${index}] digest mismatch`)
+    return deepFreeze({ ...body, recordDigest })
+  })
+  const body = { sliceId, predecessorDigest, records: Object.freeze(records) }
+  const digest = sha256(value.pendingDigest, 'pendingSlice.pendingDigest')
+  if (digest !== pendingDigest(body)) fail('pendingSlice digest mismatch')
+  return deepFreeze({ ...body, pendingDigest: digest })
 }
 
 function normalizeSnapshot(
@@ -877,6 +1028,7 @@ function normalizeSnapshot(
       'slicePlan',
       'slicePlanDigest',
       'entries',
+      'pendingSlice',
       'journalDigest',
     ],
     'journal',
@@ -985,6 +1137,12 @@ function normalizeSnapshot(
       fail('journal entry digest mismatch')
     entries.push(deepFreeze({ ...body, entryDigest }))
   }
+  const pendingSlice = normalizePendingSlice(
+    value.pendingSlice,
+    entries,
+    slicePlan,
+    authority,
+  )
   const body = {
     schemaVersion: GAME_IR_PROJECTION_SLICE_JOURNAL_SCHEMA_VERSION,
     identity,
@@ -993,6 +1151,7 @@ function normalizeSnapshot(
     slicePlan,
     slicePlanDigest,
     entries: Object.freeze(entries),
+    pendingSlice,
   }
   const journalDigest = sha256(value.journalDigest, 'journal journalDigest')
   if (journalDigest !== digestGameIrValue(snapshotBody(body)))
@@ -1063,6 +1222,7 @@ export class GameIrProjectionSliceJournal {
       slicePlan,
       slicePlanDigest: planDigest(slicePlan),
       entries: [],
+      pendingSlice: null,
     })
     return new GameIrProjectionSliceJournal(input.journalPath, authority, state)
   }
@@ -1121,12 +1281,21 @@ export class GameIrProjectionSliceJournal {
   get nextSlice(): GameIrProjectionSlice | undefined {
     return clone(this.state.slicePlan.slices[this.state.entries.length])
   }
+  get currentSliceRecordPrefix(): readonly Readonly<{ id: string; kind: string }>[] {
+    return clone(
+      (this.state.pendingSlice?.records ?? []).map(record => ({
+        id: record.node.id,
+        kind: record.node.kind,
+      })),
+    )
+  }
   get nextSliceContext(): GameIrProjectionSliceContext {
     return clone(
       sliceContext(
         this.state.entries,
         this.state.slicePlan.slices[this.state.entries.length],
         this.authority,
+        this.state.pendingSlice,
       ),
     )
   }
@@ -1189,6 +1358,143 @@ export class GameIrProjectionSliceJournal {
     }
   }
 
+  async appendRecords(
+    records: readonly GameIrProjectionNodeRecord[],
+  ): Promise<{ acceptedCount: number; diagnostic?: GameIrProjectionRetryDiagnostic }> {
+    const slice = this.state.slicePlan.slices[this.state.entries.length]
+    if (!slice) fail('all slices are already completed')
+    const previous = this.state.pendingSlice
+    const predecessorDigest = this.state.entries.at(-1)?.entryDigest ?? GENESIS_DIGEST
+    if (
+      previous &&
+      (previous.sliceId !== slice.sliceId ||
+        previous.predecessorDigest !== predecessorDigest)
+    )
+      fail('pendingSlice is detached from the journal cursor')
+    let pendingRecords = [...(previous?.records ?? [])]
+    let acceptedCount = 0
+    for (const candidate of records) {
+      let normalized: GameIrProjectionNodeRecord
+      try {
+        normalized = normalizeRecordNode(candidate, slice, this.authority)
+      } catch (error) {
+        const raw = candidate as unknown as Record<string, unknown>
+        const node = raw?.node as Record<string, unknown> | undefined
+        const recordId = typeof node?.id === 'string' ? node.id : '<unknown>'
+        const fragmentId =
+          typeof raw?.fragmentId === 'string' ? raw.fragmentId : '<unknown>'
+        return {
+          acceptedCount,
+          diagnostic: {
+            scope: 'record',
+            sliceId: slice.sliceId,
+            recordId,
+            fragmentId,
+            reason: error instanceof Error ? error.message : 'record is invalid',
+          },
+        }
+      }
+      const index = pendingRecords.findIndex(
+        record => record.node.id === normalized.node.id,
+      )
+      if (index >= 0) {
+        const existing = pendingRecords[index]!
+        if (same(existing, { ...normalized, recordDigest: existing.recordDigest })) {
+          acceptedCount += 1
+          continue
+        }
+        return {
+          acceptedCount,
+          diagnostic: {
+            scope: 'record',
+            sliceId: slice.sliceId,
+            recordId: normalized.node.id,
+            fragmentId: normalized.fragmentId,
+            reason: `record ${normalized.node.id} conflicts with its persisted prefix`,
+          },
+        }
+      }
+      const lastId = pendingRecords.at(-1)?.node.id
+      if (lastId !== undefined && compareCodeUnits(lastId, normalized.node.id) >= 0)
+        return {
+          acceptedCount,
+          diagnostic: {
+            scope: 'record',
+            sliceId: slice.sliceId,
+            recordId: normalized.node.id,
+            fragmentId: normalized.fragmentId,
+            reason: `record IDs must be strictly increasing after ${lastId}`,
+          },
+        }
+      const existingEntryNode = this.state.entries.some(entry =>
+        entry.semantic.nodes.some(node => node.id === normalized.node.id),
+      )
+      if (existingEntryNode)
+        return {
+          acceptedCount,
+          diagnostic: {
+            scope: 'record',
+            sliceId: slice.sliceId,
+            recordId: normalized.node.id,
+            fragmentId: normalized.fragmentId,
+            reason: `record ${normalized.node.id} duplicates a completed node`,
+          },
+        }
+      const body = { fragmentId: normalized.fragmentId, node: normalized.node }
+      const record = {
+        ...body,
+        recordDigest: digestGameIrValue(body),
+      }
+      pendingRecords.push(record)
+      const pending = {
+        sliceId: slice.sliceId,
+        predecessorDigest,
+        records: Object.freeze(pendingRecords),
+      }
+      this.state = await persist(this.path, {
+        ...this.state,
+        pendingSlice: {
+          ...pending,
+          pendingDigest: pendingDigest(pending),
+        },
+      })
+      acceptedCount += 1
+    }
+    return { acceptedCount }
+  }
+
+  async completeCurrentSlice(): Promise<GameIrProjectionSliceJournal> {
+    const slice = this.state.slicePlan.slices[this.state.entries.length]
+    if (!slice) fail('all slices are already completed')
+    const pending = this.state.pendingSlice
+    const grouped = new Map<string, string[]>()
+    for (const record of pending?.records ?? []) {
+      const ids = grouped.get(record.fragmentId) ?? []
+      ids.push(record.node.id)
+      grouped.set(record.fragmentId, ids)
+    }
+    const sourceEvidenceGroups = [...grouped.entries()]
+      .map(([fragmentId, nodeIds]) => ({
+        fragmentId,
+        nodeIds: [...nodeIds].sort(compareCodeUnits),
+      }))
+      .sort((left, right) =>
+        compareCodeUnits(
+          `${left.fragmentId}\0${left.nodeIds.join('\0')}`,
+          `${right.fragmentId}\0${right.nodeIds.join('\0')}`,
+        ),
+      )
+    await this.append({
+      status: 'completed',
+      sliceId: slice.sliceId,
+      semantic: {
+        nodes: (pending?.records ?? []).map(record => record.node),
+        sourceEvidenceGroups,
+      },
+    })
+    return this
+  }
+
   async append(
     completion: GameIrProjectionSliceCompletion,
   ): Promise<GameIrProjectionSliceJournal> {
@@ -1245,6 +1551,7 @@ export class GameIrProjectionSliceJournal {
     this.state = await persist(this.path, {
       ...this.state,
       entries: [...this.state.entries, entry],
+      pendingSlice: null,
     })
     return this
   }
@@ -1257,6 +1564,7 @@ export class GameIrProjectionSliceJournal {
     this.state = await persist(this.path, {
       ...this.state,
       entries: this.state.entries.slice(0, index),
+      pendingSlice: null,
     })
     return this
   }

@@ -25,6 +25,19 @@ const parse = (text: string) =>
   })
 
 describe('Game IR projection record stream', () => {
+  test('returns the valid record prefix and exact diagnostic at the first bad line', () => {
+    expect(parse(`${node('formula.a', 'e0.0')}\n{"record":"bad"}`)).toEqual({
+      records: [
+        expect.objectContaining({
+          fragmentId: 'e0.0',
+          node: expect.objectContaining({ id: 'formula.a' }),
+        }),
+      ],
+      done: false,
+      diagnostic: expect.stringMatching(/unknown record type/),
+    })
+  })
+
   test('assembles nodes and derives canonical evidence groups', () => {
     const result = parse(
       [
@@ -35,41 +48,33 @@ describe('Game IR projection record stream', () => {
       ].join('\n'),
     )
 
-    expect(result).toEqual({
-      status: 'completed',
-      sliceId: 'balance.slice.2',
-      semantic: {
-        nodes: [
-          expect.objectContaining({ id: 'formula.a' }),
-          expect.objectContaining({ id: 'formula.b' }),
-          expect.objectContaining({ id: 'formula.c' }),
-        ],
-        sourceEvidenceGroups: [
-          { fragmentId: 'e1.4', nodeIds: ['formula.b'] },
-          { fragmentId: 'e2.1', nodeIds: ['formula.a', 'formula.c'] },
-        ],
-      },
-    })
+    expect(result.done).toBe(true)
+    expect(result.records.map(record => record.node.id)).toEqual([
+      'formula.a',
+      'formula.b',
+      'formula.c',
+    ])
+    expect(result.records.map(record => record.fragmentId)).toEqual([
+      'e2.1',
+      'e1.4',
+      'e2.1',
+    ])
   })
 
   test('accepts an empty slice with only its done record', () => {
-    expect(parse(done())).toEqual({
-      status: 'completed',
-      sliceId: 'balance.slice.2',
-      semantic: { nodes: [], sourceEvidenceGroups: [] },
-    })
+    expect(parse(done())).toEqual({ records: [], done: true })
   })
 
   test('accepts one trailing line ending but rejects internal blank lines', () => {
-    expect(parse(`${done()}\n`)).toMatchObject({ status: 'completed' })
-    expect(() => parse(`${node('formula.a', 'e0.0')}\n\n${done()}`)).toThrow(
-      /blank|empty/i,
-    )
+    expect(parse(`${done()}\n`)).toEqual({ records: [], done: true })
+    expect(
+      parse(`${node('formula.a', 'e0.0')}\n\n${done()}`),
+    ).toMatchObject({ done: false, diagnostic: expect.stringMatching(/blank|empty/i) })
   })
 
   test('rejects malformed JSON and non-object records', () => {
-    expect(() => parse('{')).toThrow(/json|record/i)
-    expect(() => parse(`[1]\n${done()}`)).toThrow(/object|record/i)
+    expect(parse('{')).toMatchObject({ done: false, diagnostic: expect.stringMatching(/json|record/i) })
+    expect(parse(`[1]\n${done()}`)).toMatchObject({ done: false, diagnostic: expect.stringMatching(/object|record/i) })
   })
 
   test('rejects unknown fields on node and done records', () => {
@@ -77,44 +82,36 @@ describe('Game IR projection record stream', () => {
       node('formula.a', 'e0.0'),
     ) as Record<string, unknown>
     nodeWithUnknownField.extra = 1
-    expect(() => parse(JSON.stringify(nodeWithUnknownField))).toThrow(
-      /unknown|field|canonical/i,
-    )
-    expect(() => parse(`${done().slice(0, -1)},"extra":1}`)).toThrow(
-      /unknown|field|canonical/i,
-    )
+    expect(parse(JSON.stringify(nodeWithUnknownField))).toMatchObject({ done: false, diagnostic: expect.stringMatching(/unknown|field|canonical/i) })
+    expect(parse(`${done().slice(0, -1)},"extra":1}`)).toMatchObject({ done: false, diagnostic: expect.stringMatching(/unknown|field|canonical/i) })
   })
 
   test('rejects wrong slice IDs and empty fragment IDs', () => {
-    expect(() =>
+    expect(
       parse(
         node('formula.a', 'e0.0').replace('balance.slice.2', 'balance.slice.1'),
       ),
-    ).toThrow(/slice/i)
-    expect(() => parse(`${node('formula.a', '')}\n${done()}`)).toThrow(
-      /fragment/i,
-    )
+    ).toMatchObject({ done: false, diagnostic: expect.stringMatching(/slice/i) })
+    expect(parse(`${node('formula.a', '')}\n${done()}`)).toMatchObject({ done: false, diagnostic: expect.stringMatching(/fragment/i) })
   })
 
   test('rejects missing, duplicate, and premature done records', () => {
-    expect(() => parse(node('formula.a', 'e0.0'))).toThrow(/done|complete/i)
-    expect(() => parse(`${done()}\n${done()}`)).toThrow(/done|after|duplicate/i)
-    expect(() => parse(`${done()}\n${node('formula.a', 'e0.0')}`)).toThrow(
-      /done|after/i,
-    )
+    expect(parse(node('formula.a', 'e0.0'))).toMatchObject({ done: false, diagnostic: expect.stringMatching(/done|complete/i) })
+    expect(parse(`${done()}\n${done()}`)).toMatchObject({ done: false, diagnostic: expect.stringMatching(/done|after|duplicate/i) })
+    expect(parse(`${done()}\n${node('formula.a', 'e0.0')}`)).toMatchObject({ done: false, diagnostic: expect.stringMatching(/done|after/i) })
   })
 
   test('rejects duplicate or descending node IDs without repairing order', () => {
-    expect(() =>
+    expect(
       parse(
         `${node('formula.a', 'e0.0')}\n${node('formula.a', 'e0.1')}\n${done()}`,
       ),
-    ).toThrow(/id|order|duplicate/i)
-    expect(() =>
+    ).toMatchObject({ done: false, diagnostic: expect.stringMatching(/id|order|duplicate/i) })
+    expect(
       parse(
         `${node('formula.b', 'e0.0')}\n${node('formula.a', 'e0.1')}\n${done()}`,
       ),
-    ).toThrow(/id|order|ascending/i)
+    ).toMatchObject({ done: false, diagnostic: expect.stringMatching(/id|order|ascending/i) })
   })
 
   test('rejects an invalid node identity before assembling a completion', () => {
@@ -130,15 +127,16 @@ describe('Game IR projection record stream', () => {
         edges: [],
       },
     })
-    expect(() => parse(`${invalid}\n${done()}`)).toThrow(/node|id/i)
+    expect(parse(`${invalid}\n${done()}`)).toMatchObject({ done: false, diagnostic: expect.stringMatching(/node|id/i) })
   })
 
   test('uses code-unit ordering for non-ASCII node IDs and evidence groups', () => {
     const result = parse(
       [node('a', 'e2.0'), node('b', 'e10.0'), done()].join('\n'),
     )
-    expect(
-      result.semantic.sourceEvidenceGroups.map(group => group.fragmentId),
-    ).toEqual(['e10.0', 'e2.0'])
+    expect(result.records.map(record => record.fragmentId)).toEqual([
+      'e2.0',
+      'e10.0',
+    ])
   })
 })

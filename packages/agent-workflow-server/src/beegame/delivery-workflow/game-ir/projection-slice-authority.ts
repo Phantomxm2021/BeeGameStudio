@@ -10,6 +10,7 @@ import {
 import {
   buildGameIrEvidenceFragmentCatalog,
   deriveProjectionSlicePlan,
+  type GameIrProjectionRetryDiagnostic,
   type GameIrProjectionSlice,
   type GameIrProjectionSliceContext,
 } from './projection-slices'
@@ -130,15 +131,7 @@ export function sourceSectionsForGameIrProjectionSlice(
   return selectors
 }
 
-export type GameIrProjectionRetryDiagnostic =
-  | Readonly<{ scope: 'slice'; sliceId: string; reason: string }>
-  | Readonly<{
-      scope: 'record'
-      sliceId: string
-      recordId: string
-      fragmentId: string
-      reason: string
-    }>
+export type { GameIrProjectionRetryDiagnostic }
 
 export type GameIrProjectionSliceAuthority = Readonly<{
   schemaVersion: 'game-ir-projection-slice-authority.v1'
@@ -228,6 +221,10 @@ function cloneContext(
       id: node.id,
       kind: node.kind,
     })),
+    admittedCurrentNodes: (context.admittedCurrentNodes ?? []).map(node => ({
+      id: node.id,
+      kind: node.kind,
+    })),
   }
 }
 
@@ -293,7 +290,7 @@ export function buildGameIrProjectionSliceAuthority(input: {
     sourceFragments: visibleFragments,
     availablePriorNodes: context.availablePriorNodes,
     requiredCurrentNodes: context.requiredCurrentNodes,
-    admittedCurrentNodes: (input.admittedCurrentNodes ?? []).map(node => ({
+    admittedCurrentNodes: (input.admittedCurrentNodes ?? context.admittedCurrentNodes ?? []).map(node => ({
       id: node.id,
       kind: node.kind,
     })),
@@ -382,6 +379,7 @@ export function renderGameIrProjectionSliceAuthority(
     'Return only the strict raw NDJSON record stream for this exact slice.',
     'Each node record must contain record, sliceId, fragmentId and node.',
     'Emit only declared node fields: id, kind, value, references and edges.',
+    'For a resumed slice, emit only node IDs strictly after the final admitted current-prefix ID; emit done when the slice is complete.',
     'Finish with one done record for the exact sliceId.',
   )
   return `${lines.join('\n')}\n`

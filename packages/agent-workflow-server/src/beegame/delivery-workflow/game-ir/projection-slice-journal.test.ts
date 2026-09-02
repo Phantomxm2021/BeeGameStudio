@@ -771,4 +771,84 @@ describe('Game IR projection slice journal', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test('persists an admitted current-slice prefix and promotes it only on completion', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = fixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const authoritySection = input.packet.source.sectionIndex[0]!
+      const record = {
+        fragmentId: firstEvidenceFragmentId(
+          input,
+          authoritySection.documentPath,
+          authoritySection.sectionId,
+        ),
+        node: {
+          id: 'condition.a',
+          kind: 'gameplay.condition',
+          value: { expression: { kind: 'boolean', value: true } },
+          references: [],
+          edges: [],
+        },
+      } as const
+      await expect(journal.appendRecords([record])).resolves.toEqual({
+        acceptedCount: 1,
+      })
+      expect(journal.entries).toHaveLength(0)
+      expect(journal.currentSliceRecordPrefix).toEqual([
+        { id: 'condition.a', kind: 'gameplay.condition' },
+      ])
+      const reloaded = await loadGameIrProjectionSliceJournal(input)
+      expect(reloaded.currentSliceRecordPrefix).toEqual(
+        journal.currentSliceRecordPrefix,
+      )
+      await reloaded.completeCurrentSlice()
+      expect(reloaded.entries).toHaveLength(1)
+      expect(reloaded.currentSliceRecordPrefix).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('replays an exact prefix idempotently and diagnoses conflicts or descending IDs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = fixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
+      )
+      const record = {
+        fragmentId,
+        node: {
+          id: 'condition.a',
+          kind: 'gameplay.condition',
+          value: { expression: { kind: 'boolean', value: true } },
+          references: [],
+          edges: [],
+        },
+      } as const
+      await journal.appendRecords([record])
+      await expect(journal.appendRecords([record])).resolves.toEqual({
+        acceptedCount: 1,
+      })
+      const conflict = structuredClone(record) as any
+      conflict.node.value.expression.value = false
+      await expect(journal.appendRecords([conflict])).resolves.toMatchObject({
+        acceptedCount: 0,
+        diagnostic: { scope: 'record', recordId: 'condition.a' },
+      })
+      const descending = structuredClone(record) as any
+      descending.node.id = 'condition.0'
+      await expect(journal.appendRecords([descending])).resolves.toMatchObject({
+        acceptedCount: 0,
+        diagnostic: { scope: 'record', recordId: 'condition.0' },
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

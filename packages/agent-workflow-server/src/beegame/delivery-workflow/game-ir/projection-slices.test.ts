@@ -185,6 +185,9 @@ describe('Game IR projection slices', () => {
           requiredCurrentNodes: [
             { id: 'action.a', kind: 'gameplay.action' },
           ],
+          admittedCurrentNodes: [
+            { id: 'action.admitted', kind: 'gameplay.action' },
+          ],
         },
       }),
     ).toEqual({
@@ -201,6 +204,9 @@ describe('Game IR projection slices', () => {
         },
       ],
       requiredCurrentNodes: [{ id: 'action.a', kind: 'gameplay.action' }],
+      admittedCurrentNodes: [
+        { id: 'action.admitted', kind: 'gameplay.action' },
+      ],
     })
     expect(() =>
       normalizeGameIrProjectionSliceContext({

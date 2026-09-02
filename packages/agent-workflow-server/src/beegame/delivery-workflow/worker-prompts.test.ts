@@ -1235,6 +1235,7 @@ describe('worker prompts', () => {
         sliceContext: {
           availablePriorNodes: [],
           requiredCurrentNodes: [{ id: 'state-start', kind: 'gameplay.state' }],
+          admittedCurrentNodes: [{ id: 'state-admitted', kind: 'gameplay.state' }],
         },
         packet,
       },
@@ -1243,6 +1244,8 @@ describe('worker prompts', () => {
     expect(prompt).toContain('current dependency-frontier slice')
     expect(prompt).not.toContain('correctionDiagnostic')
     expect(prompt).toContain('SYNTHETIC_AUTHORITY_0')
+    expect(prompt).toContain('state-admitted')
+    expect(prompt).toContain('strictly after the final admitted current-prefix ID')
     expect(prompt).not.toContain('authoritySectionIndex')
     expect(prompt).not.toContain('semanticPacket')
     expect(prompt).not.toContain('packetDigest')

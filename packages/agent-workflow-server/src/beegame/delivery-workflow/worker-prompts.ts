@@ -193,6 +193,7 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
       >[0]['packet'],
       slice: currentSlice,
       sliceContext,
+      admittedCurrentNodes: sliceContext.admittedCurrentNodes ?? [],
       compileRequestDigest:
         typeof request.contract.compileRequestDigest === 'string'
           ? request.contract.compileRequestDigest
