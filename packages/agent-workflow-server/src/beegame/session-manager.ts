@@ -4363,6 +4363,13 @@ function appendProjectAgentRawLog(
     const digest = createHash('sha256')
       .update(semantic || serialized)
       .digest('hex')
+    const usage = getUsageFromEventPayload(message)
+    const isUsageEvent = usage.total_tokens > 0
+    const isResultEvent = message.type === 'result'
+    const hasErrorFields =
+      message.is_error === true ||
+      Array.isArray(message.errors) ||
+      typeof message.error === 'string'
     const summary =
       typeof message.record_stream === 'string'
         ? {
@@ -4371,10 +4378,25 @@ function appendProjectAgentRawLog(
             seq: ++record.workflowRecordStreamSequence,
             bytes,
             digest,
-            ...(message.is_error === true || Array.isArray(message.errors)
-              ? { error: streamErrorSummary(message) }
+            ...(hasErrorFields
+              ? safeProviderErrorMetadata(message)
               : {}),
           }
+        : isResultEvent || isUsageEvent || hasErrorFields
+          ? {
+              sessionId: record.session.id,
+              ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
+              createdAt: new Date().toISOString(),
+              type: isUsageEvent && !isResultEvent ? 'usage' : message.type,
+              ...(isResultEvent && typeof message.subtype === 'string'
+                ? { subtype: message.subtype }
+                : {}),
+              ...(isResultEvent && typeof message.is_error === 'boolean'
+                ? { is_error: message.is_error }
+                : {}),
+              ...(isUsageEvent ? { usage } : {}),
+              ...(hasErrorFields ? safeProviderErrorMetadata(message) : {}),
+            }
         : {
           sessionId: record.session.id,
           ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
@@ -4411,22 +4433,32 @@ function recordStreamEventMetadata(
   }
 }
 
-function streamErrorSummary(message: DashboardSDKMessage): string {
+function safeProviderErrorMetadata(
+  message: DashboardSDKMessage,
+): Record<string, unknown> {
+  const detail = providerErrorText(message)
+  return {
+    errorCode: providerErrorCode(message),
+    errorDigest: createHash('sha256').update(detail, 'utf8').digest('hex'),
+    errorBytes: Buffer.byteLength(detail, 'utf8'),
+  }
+}
+
+function providerErrorText(message: DashboardSDKMessage): string {
+  if (message.type === 'result') return getSDKExecutionErrorDetail(message)
   const errors = Array.isArray(message.errors)
     ? message.errors.filter(
         (value): value is string => typeof value === 'string',
       )
     : []
-  const detail = errors[0] ?? ''
-  return collapseLogLine(
-    [
-      typeof message.subtype === 'string' ? message.subtype : '',
-      message.is_error === true ? 'is_error' : '',
-      detail,
-    ]
-      .filter(Boolean)
-      .join(': '),
-  )
+  return errors[0] ?? (typeof message.error === 'string' ? message.error : '')
+}
+
+function providerErrorCode(message: DashboardSDKMessage): string {
+  if (message.type === 'result' && message.is_error === true)
+    return 'provider_error'
+  if (message.type === 'result') return 'provider_result'
+  return 'provider_event_error'
 }
 
 function updateProjectLogIndex(record: SessionRecord): void {

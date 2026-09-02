@@ -546,6 +546,15 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       )
       return
     }
+    if (recordStreamAssistantContainsDsml(message)) {
+      await this.rejectRecordStreamTurn(
+        turn,
+        new Error(
+          'provider_stream_protocol_error: record_stream emitted a DSML frame',
+        ),
+      )
+      return
+    }
     if (message.type === 'stream_event') {
       const text = streamedRecordText(message)
       if (text) {
@@ -1067,11 +1076,28 @@ function streamedRecordText(message: Record<string, unknown>): string {
     throw new Error(
       'provider_stream_protocol_error: record_stream emitted an empty text_delta',
     )
-  if (/<(?:tool_use|tool_result|function_call|invoke|dsml)\b|<\|/iu.test(text))
+  if (recordStreamTextContainsDsml(text))
     throw new Error(
       'provider_stream_protocol_error: record_stream emitted a DSML frame',
     )
   return text
+}
+
+function recordStreamAssistantContainsDsml(
+  message: Record<string, unknown>,
+): boolean {
+  if (message.type !== 'assistant') return false
+  return extractNativeContentBlocks(message).some(
+    block =>
+      stringField(block, 'type') === 'text' &&
+      recordStreamTextContainsDsml(stringField(block, 'text')),
+  )
+}
+
+function recordStreamTextContainsDsml(text: string): boolean {
+  return /<(?:tool_use|tool_result|function_call|invoke|dsml)\b|<\|/iu.test(
+    text,
+  )
 }
 
 function recordStreamUsage(message: Record<string, unknown>): boolean {

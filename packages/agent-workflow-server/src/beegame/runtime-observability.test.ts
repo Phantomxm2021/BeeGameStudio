@@ -9,6 +9,46 @@ import {
 } from './runtime-observability'
 
 describe('passive native runtime observability', () => {
+  test('records safe failure metadata without event timing or error text', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-failure-'))
+    const sentinel = 'PRIVATE_PROVIDER_FAILURE_BODY'
+    try {
+      const observer = createRuntimeObservability({
+        workspacePath,
+        sessionId: 'session-failure',
+        provider: 'anthropic',
+        model: 'model-1',
+        errorSink: () => undefined,
+      })
+      observer.beginTurn({ requestId: 'request-failure' })
+      observer.finishTurn({ outcome: 'error', error: new Error(sentinel) })
+      await observer.flush()
+
+      const raw = await readFile(
+        join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
+        'utf8',
+      )
+      const terminal = raw
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line))
+        .at(-1)
+      expect(terminal).toMatchObject({
+        type: 'turn_terminal',
+        outcome: 'error',
+        eventCount: 0,
+        stdoutByteCount: 0,
+        errorType: 'Error',
+        errorBytes: Buffer.byteLength(sentinel),
+        errorDigest: createHash('sha256').update(sentinel).digest('hex'),
+      })
+      expect(terminal).not.toHaveProperty('error', sentinel)
+      expect(raw).not.toContain(sentinel)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('records event timing and record chunk digests without record bodies', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-progress-'))
     let nowMs = Date.parse('2026-09-02T10:00:00.000Z')
@@ -225,7 +265,12 @@ describe('passive native runtime observability', () => {
           eventCount: 2,
           byteCount: 20,
           lastEventType: 'result',
-          error: 'api exploded request=req-provider',
+          errorType: 'Error',
+          errorCode: 'runtime_error',
+          errorBytes: Buffer.byteLength('api exploded request=req-provider'),
+          errorDigest: createHash('sha256')
+            .update('api exploded request=req-provider')
+            .digest('hex'),
         }),
         expect.objectContaining({
           type: 'document_receipt',

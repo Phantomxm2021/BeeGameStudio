@@ -124,4 +124,60 @@ describe('BeeGame SDK execution errors', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test('keeps provider error and usage bodies out of agent raw logs while retaining in-process diagnosis', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beegame-provider-error-'))
+    const workspace = join(root, 'workspace')
+    const dataRoot = join(root, 'data')
+    const sentinel = 'PRIVATE_PROVIDER_ERROR_AND_USAGE_BODY'
+    const runner = {
+      start: async () => ({
+        submit: async (input: { onMessage(message: Record<string, unknown>): void }) => {
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+            type: 'message_delta',
+              usage: { total_tokens: 1, marker: sentinel },
+            },
+          })
+          input.onMessage({
+            type: 'result',
+            subtype: 'error',
+            is_error: true,
+            result: sentinel,
+            errors: [sentinel],
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    try {
+      const manager = new BeeGameSessionManager(runner as never, dataRoot)
+      const session = manager.start({
+        workspacePath: workspace,
+        userId: 'user',
+        workflowWorker: true,
+        workflowRunId: 'run',
+        workflowDispatchId: 'dispatch',
+        workflowWorkerType: 'game-ir-compiler',
+      })
+      await manager.send(session.id, 'prompt')
+      await new Promise(resolve => setTimeout(resolve, 20))
+
+      const failed = manager
+        .events(session.id)
+        .find(item => item.type === 'turn.failed')
+      expect(failed?.text).toContain(sentinel)
+
+      const agentRawLog = await readFile(
+        join(workspace, '.beegame', 'workflow', 'logs', 'run', 'dispatch', 'agent.raw.jsonl'),
+        'utf8',
+      )
+      expect(agentRawLog).not.toContain(sentinel)
+      expect(agentRawLog).toContain('"type":"result"')
+      expect(agentRawLog).toContain('"type":"usage"')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

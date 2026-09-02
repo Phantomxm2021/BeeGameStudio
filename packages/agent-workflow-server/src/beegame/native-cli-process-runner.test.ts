@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   createNativeCliProcessRunner,
   nativeRuntimeEnvironment,
   nativeRuntimeCommand,
 } from './native-cli-process-runner'
+import { createRuntimeObservability } from './runtime-observability'
 
 const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
@@ -65,7 +70,8 @@ function recordStreamCommand(
     | 'invalid-nonterminal'
     | 'incorrect-terminal'
     | 'dsml'
-    | 'tool',
+    | 'tool'
+    | 'unicode',
 ) {
   const script = `
 const decoder = new TextDecoder(); let buffer = ''; let count = 0;
@@ -81,6 +87,7 @@ for await (const chunk of Bun.stdin.stream()) {
       if (${JSON.stringify(mode)} === 'invalid-nonterminal') emit(${JSON.stringify('{not-json-record}\n')});
       else if (${JSON.stringify(mode)} === 'dsml') emit(${JSON.stringify('<tool_use name="Write">\n')});
       else if (${JSON.stringify(mode)} === 'tool') console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Write', input: {} }] } }));
+      else if (${JSON.stringify(mode)} === 'unicode') emit(${JSON.stringify('节点😀\n')});
       else emit(${JSON.stringify('{"record":"node","id":"n1"}\n')});
       if (${JSON.stringify(mode)} === 'cumulative') emit(${JSON.stringify('{"record":"node","id":"n1"}\n{"record":"node","id":"n1"}\n')});
       else if (${JSON.stringify(mode)} === 'empty') console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
@@ -425,6 +432,48 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
+  test('rejects assistant text DSML after a valid record-stream prefix', async () => {
+    const script = `
+for await (const chunk of Bun.stdin.stream()) {
+  const text = new TextDecoder().decode(chunk);
+  if (!text.includes('"type":"user"')) continue;
+  console.log(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '{"record":"node","id":"n1"}\\n{"record":"done","sliceId":"slice-1"}\\n' } } }));
+  console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '<tool_use name="Write">' }] } }));
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
+}
+`
+    const runtime = await createNativeCliProcessRunner({
+      command: [process.execPath, '-e', script],
+      observabilityFactory: () => ({
+        beginTurn: () => undefined,
+        observeStdoutChunk: () => undefined,
+        observeLine: () => undefined,
+        observeMessage: () => undefined,
+        finishTurn: () => undefined,
+        flush: async () => undefined,
+      }),
+    }).start({
+      sessionId: 'record-stream-session',
+      cwd: process.cwd(),
+      env: {},
+      workflowRecordStreamContract: {
+        version: 1,
+        terminalRecord: { record: 'done', sliceId: 'slice-1' },
+      },
+    })
+    await expect(
+      runtime.submit({
+        prompt: 'record stream',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow(
+      'provider_stream_protocol_error: record_stream emitted a DSML frame',
+    )
+    runtime.dispose?.()
+  })
+
   test('rejects an incorrect record-stream terminal as a provider protocol error', async () => {
     const runtime = await createNativeCliProcessRunner({
       command: recordStreamCommand('incorrect-terminal'),
@@ -456,6 +505,44 @@ describe('native CLI process runner', () => {
       'provider_stream_protocol_error: record_stream terminal record did not match the expected slice',
     )
     runtime.dispose?.()
+  })
+
+  test('writes the exact UTF-8 digest and bytes for native record chunks', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'native-record-observe-'))
+    const chunk = Buffer.from('节点😀\n', 'utf8')
+    try {
+      const runtime = await createNativeCliProcessRunner({
+        command: recordStreamCommand('unicode'),
+        observabilityFactory: input => createRuntimeObservability(input),
+      }).start({
+        sessionId: 'record-stream-session',
+        cwd: workspacePath,
+        env: {},
+        workflowRecordStreamContract: {
+          version: 1,
+          terminalRecord: { record: 'done', sliceId: 'slice-1' },
+        },
+      })
+      await runtime.submit({
+        prompt: 'record stream',
+        signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => ({ behavior: 'deny' }),
+      })
+      await runtime.dispose?.()
+      const raw = await readFile(
+        join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
+        'utf8',
+      )
+      expect(raw).toContain(
+        JSON.stringify({
+          bytes: chunk.byteLength,
+          digest: createHash('sha256').update(chunk).digest('hex'),
+        }).slice(1, -1),
+      )
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
   })
 
   test('rejects a blank physical record-stream line as a provider protocol error', async () => {

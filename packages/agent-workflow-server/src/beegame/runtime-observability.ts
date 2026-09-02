@@ -166,9 +166,13 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
       error?: unknown
     }): void {
       const finishedAt = clock()
-      const error =
+      const errorText =
         result.error === undefined ? undefined : errorMessage(result.error)
-      if (error) safeErrorSink(errorSink, error)
+      if (errorText) safeErrorSink(errorSink, errorText)
+      const errorMetadata =
+        result.error === undefined
+          ? undefined
+          : safeErrorMetadata(result.error, errorText ?? '')
       enqueue({
         type: 'turn_terminal',
         timestamp: finishedAt.toISOString(),
@@ -189,7 +193,7 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
           lastStdoutChunkAtMs === undefined
             ? 0
             : Math.max(0, finishedAt.getTime() - lastStdoutChunkAtMs),
-        ...(error ? { error } : {}),
+        ...(errorMetadata ?? {}),
       })
       turnActive = false
     },
@@ -245,6 +249,21 @@ function safeErrorSink(sink: (message: string) => void, message: string): void {
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.slice(0, 4_096)
+}
+
+function safeErrorMetadata(
+  error: unknown,
+  message: string,
+): Record<string, unknown> {
+  const errorCode = message.startsWith('provider_stream_protocol_error:')
+    ? 'provider_stream_protocol_error'
+    : 'runtime_error'
+  return {
+    errorType: error instanceof Error ? error.name : typeof error,
+    errorCode,
+    errorDigest: createHash('sha256').update(message, 'utf8').digest('hex'),
+    errorBytes: Buffer.byteLength(message, 'utf8'),
+  }
 }
 
 function objectField(
