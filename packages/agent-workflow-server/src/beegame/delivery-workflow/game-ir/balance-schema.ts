@@ -3,6 +3,73 @@ import {
   type GameIrModuleCandidate,
   type GameIrNode,
 } from './model'
+import {
+  projectionArray,
+  projectionFiniteNumber,
+  projectionInteger,
+  projectionObject,
+  projectionRecursive,
+  projectionText,
+  projectionValueFields,
+  projectionValueOptionalFields,
+  projectionValueRequiredFields,
+  projectionValueSchema,
+} from './projection-schema'
+
+const BALANCE_FORMULA_EXPRESSION = projectionRecursive('expression', {
+  expression: {
+    anyOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'literal' },
+          value: { type: 'number' },
+          unitReferenceIndex: { type: 'integer', minimum: 0 },
+        },
+        required: ['kind', 'value', 'unitReferenceIndex'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'reference' },
+          referenceIndex: { type: 'integer', minimum: 0 },
+        },
+        required: ['kind', 'referenceIndex'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { enum: ['negate', 'absolute'] },
+          operand: { $ref: '#/$defs/expression' },
+        },
+        required: ['kind', 'operand'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'binary' },
+          operator: {
+            enum: [
+              'add',
+              'subtract',
+              'multiply',
+              'divide',
+              'minimum',
+              'maximum',
+            ],
+          },
+          left: { $ref: '#/$defs/expression' },
+          right: { $ref: '#/$defs/expression' },
+        },
+        required: ['kind', 'operator', 'left', 'right'],
+      },
+    ],
+  },
+})
 
 export type BalanceDimension = Readonly<{ base: string; exponent: number }>
 export type BalanceUnit = Readonly<{
@@ -51,37 +118,66 @@ const role = (
 /** The single schema-owned authority for Balance kinds, values, and roles. */
 export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
   'balance.unit': Object.freeze({
-    valueFields: Object.freeze(['symbol', 'dimensions', 'scale']),
+    valueJsonSchema: projectionValueSchema({
+      symbol: projectionText('unit symbol'),
+      dimensions: projectionArray(
+        projectionObject(
+          {
+            base: projectionText('dimension base'),
+            exponent: projectionInteger('dimension exponent'),
+          },
+          ['base', 'exponent'],
+          'unit dimension',
+        ),
+        'unit dimensions',
+        0,
+      ),
+      scale: projectionObject(
+        {
+          numerator: projectionInteger('scale numerator'),
+          denominator: projectionInteger('scale denominator'),
+        },
+        ['numerator', 'denominator'],
+        'unit scale',
+      ),
+    }),
     relationships: Object.freeze({}),
   }),
   'balance.variable': Object.freeze({
-    valueFields: Object.freeze([
-      'label',
-      'baseline',
-      'minimum',
-      'maximum',
-      'unitReferenceIndex',
-    ]),
-    optionalValueFields: Object.freeze(['minimum', 'maximum']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        label: projectionText('variable label'),
+        baseline: projectionFiniteNumber('baseline'),
+        minimum: projectionFiniteNumber('minimum'),
+        maximum: projectionFiniteNumber('maximum'),
+        unitReferenceIndex: projectionInteger('unit reference index', 0),
+      },
+      ['minimum', 'maximum'],
+    ),
     relationships: Object.freeze({}),
   }),
   'balance.parameter': Object.freeze({
-    valueFields: Object.freeze([
-      'label',
-      'baseline',
-      'minimum',
-      'maximum',
-      'unitReferenceIndex',
-    ]),
-    optionalValueFields: Object.freeze(['minimum', 'maximum']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        label: projectionText('parameter label'),
+        baseline: projectionFiniteNumber('baseline'),
+        minimum: projectionFiniteNumber('minimum'),
+        maximum: projectionFiniteNumber('maximum'),
+        unitReferenceIndex: projectionInteger('unit reference index', 0),
+      },
+      ['minimum', 'maximum'],
+    ),
     relationships: Object.freeze({}),
   }),
   'balance.formula': Object.freeze({
-    valueFields: Object.freeze([
-      'label',
-      'expression',
-      'outputUnitReferenceIndex',
-    ]),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('formula label'),
+      expression: BALANCE_FORMULA_EXPRESSION,
+      outputUnitReferenceIndex: projectionInteger(
+        'output unit reference index',
+        0,
+      ),
+    }),
     relationships: Object.freeze({
       'depends-on': role([
         'balance.variable',
@@ -91,7 +187,9 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'balance.economy-source': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('economy source label'),
+    }),
     relationships: Object.freeze({
       amount: role(['balance.variable', 'balance.formula'], {
         required: true,
@@ -101,7 +199,9 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'balance.economy-sink': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('economy sink label'),
+    }),
     relationships: Object.freeze({
       amount: role(['balance.variable', 'balance.formula'], {
         required: true,
@@ -111,11 +211,26 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'balance.progression-curve': Object.freeze({
-    valueFields: Object.freeze(['label', 'points']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('curve label'),
+      points: projectionArray(
+        projectionObject(
+          {
+            input: projectionFiniteNumber('curve input'),
+            output: projectionFiniteNumber('curve output'),
+          },
+          ['input', 'output'],
+          'curve point',
+        ),
+        'curve points',
+      ),
+    }),
     relationships: Object.freeze({}),
   }),
   'balance.reward': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('reward label'),
+    }),
     relationships: Object.freeze({
       amount: role(['balance.variable', 'balance.formula'], {
         required: true,
@@ -124,7 +239,9 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'balance.cost': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('cost label'),
+    }),
     relationships: Object.freeze({
       amount: role(['balance.variable', 'balance.formula'], {
         required: true,
@@ -133,7 +250,9 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'balance.reward-cost-binding': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('reward cost binding label'),
+    }),
     relationships: Object.freeze({
       reward: role(['balance.reward'], { required: true, singleton: true }),
       cost: role(['balance.cost'], { required: true, singleton: true }),
@@ -493,8 +612,10 @@ function parseVariableValue(
     BALANCE_DOMAIN_MANIFEST[
       node.kind as 'balance.variable' | 'balance.parameter'
     ]
-  const optionalFields = new Set<string>(manifest.optionalValueFields)
-  const fields = manifest.valueFields.filter(
+  const optionalFields = new Set<string>(
+    projectionValueOptionalFields(manifest.valueJsonSchema),
+  )
+  const fields = projectionValueFields(manifest.valueJsonSchema).filter(
     field => !optionalFields.has(field) || Object.hasOwn(node.value, field),
   )
   exactKeys(node.value, fields, `node ${node.id} value`)
@@ -536,7 +657,9 @@ function parseFormulaValue(node: GameIrNode): {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
   exactKeys(
     node.value,
-    BALANCE_DOMAIN_MANIFEST['balance.formula'].valueFields,
+    projectionValueRequiredFields(
+      BALANCE_DOMAIN_MANIFEST['balance.formula'].valueJsonSchema,
+    ),
     `node ${node.id} value`,
   )
   const usedReferences = new Set<number>()
@@ -595,7 +718,9 @@ function parseValue(node: GameIrNode): {
   if (node.kind === 'balance.unit') {
     exactKeys(
       node.value,
-      BALANCE_DOMAIN_MANIFEST['balance.unit'].valueFields,
+      projectionValueRequiredFields(
+        BALANCE_DOMAIN_MANIFEST['balance.unit'].valueJsonSchema,
+      ),
       `node ${node.id} value`,
     )
     return {
@@ -618,7 +743,9 @@ function parseValue(node: GameIrNode): {
   if (node.kind === 'balance.progression-curve') {
     exactKeys(
       node.value,
-      BALANCE_DOMAIN_MANIFEST['balance.progression-curve'].valueFields,
+      projectionValueRequiredFields(
+        BALANCE_DOMAIN_MANIFEST['balance.progression-curve'].valueJsonSchema,
+      ),
       `node ${node.id} value`,
     )
     return {
@@ -630,9 +757,10 @@ function parseValue(node: GameIrNode): {
   }
   const fields =
     BALANCE_DOMAIN_MANIFEST[node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST]
-      .valueFields
+      .valueJsonSchema
   if (!fields) fail(`node ${node.id} has an unknown kind`)
-  exactKeys(node.value, fields, `node ${node.id} value`)
+  const fieldNames = projectionValueRequiredFields(fields)
+  exactKeys(node.value, fieldNames, `node ${node.id} value`)
   return { value: { label: text(node.value.label, `node ${node.id} label`) } }
 }
 

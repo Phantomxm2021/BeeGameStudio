@@ -17,10 +17,7 @@ import {
   FOUNDATION_SEMANTIC_CHECKS,
 } from './foundation-semantic-audit'
 import { transitionDeliveryRun } from './transition'
-import {
-  CANONICAL_FOUNDATION_DOCUMENTS,
-  type DeliveryRun,
-} from './types'
+import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun } from './types'
 import { beginParallelFoundationAuthoring } from './foundation-authoring-batch'
 import type { AuditIssue } from './foundation-issue-registry'
 
@@ -37,12 +34,17 @@ const USAGE = {
 }
 
 function auditState(
-  overrides: Partial<Extract<FoundationAuditState['tasks'][number], { kind: 'document-facts' }>> = {},
+  overrides: Partial<
+    Extract<FoundationAuditState['tasks'][number], { kind: 'document-facts' }>
+  > = {},
   includeSecondTask = true,
 ): FoundationAuditState {
   const seed = createFoundationAuditState({
     revision: REVISION,
-    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: DIGEST })),
+    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+      path,
+      digest: DIGEST,
+    })),
     manifest: {
       revision: REVISION,
       status: 'index_staged',
@@ -68,24 +70,31 @@ function auditState(
         failureReason: MODEL_REASON,
         ...overrides,
       },
-      ...(includeSecondTask ? [{
-        taskId: 'facts-1',
-        kind: 'document-facts',
-        revision: REVISION,
-        packetDigest: DIGEST,
-        factKeyCount: 1,
-        modelTier: 'fast',
-        status: 'needs_action',
-        attempt: 0,
-        failureReason: MODEL_REASON,
-      }] : []),
+      ...(includeSecondTask
+        ? [
+            {
+              taskId: 'facts-1',
+              kind: 'document-facts',
+              revision: REVISION,
+              packetDigest: DIGEST,
+              factKeyCount: 1,
+              modelTier: 'fast',
+              status: 'needs_action',
+              attempt: 0,
+              failureReason: MODEL_REASON,
+            },
+          ]
+        : []),
     ],
   })
 }
 
 function auditRun(state: FoundationAuditState): DeliveryRun {
   return {
-    ...createTestDeliveryRun({ projectId: 'transition-retry', ownerId: 'transition-owner' }),
+    ...createTestDeliveryRun({
+      projectId: 'transition-retry',
+      ownerId: 'transition-owner',
+    }),
     phase: 'DOCUMENT_REVIEW',
     documentStep: 'FOUNDATION_REVIEW',
     status: 'needs_action',
@@ -98,7 +107,10 @@ test('retry revives only the selected failed foundation document', () => {
   const failedPath = 'docs/ASSET_PLAN.md' as const
   const draftState = beginParallelFoundationAuthoring(['docs/GDD.md'])
   const run: DeliveryRun = {
-    ...createTestDeliveryRun({ projectId: 'draft-retry', ownerId: 'draft-owner' }),
+    ...createTestDeliveryRun({
+      projectId: 'draft-retry',
+      ownerId: 'draft-owner',
+    }),
     phase: 'DOCUMENT_DRAFTING',
     documentStep: 'FOUNDATION_DRAFTING',
     status: 'needs_action',
@@ -127,7 +139,11 @@ test('retry revives only the selected failed foundation document', () => {
     retried.foundationDraftState.documents?.find(
       document => document.path === failedPath,
     ),
-  ).toMatchObject({ status: 'pending', dispatch: undefined, failureReason: undefined })
+  ).toMatchObject({
+    status: 'pending',
+    dispatch: undefined,
+    failureReason: undefined,
+  })
   expect(
     retried.foundationDraftState.documents?.find(
       document => document.path === 'docs/BALANCE_DESIGN.md',
@@ -136,11 +152,16 @@ test('retry revives only the selected failed foundation document', () => {
 })
 
 function semanticAuditState(
-  overrides: Partial<Extract<FoundationAuditState['tasks'][number], { kind: 'semantic' }>> = {},
+  overrides: Partial<
+    Extract<FoundationAuditState['tasks'][number], { kind: 'semantic' }>
+  > = {},
 ): FoundationAuditState {
   const seed = createFoundationAuditState({
     revision: REVISION,
-    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: DIGEST })),
+    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+      path,
+      digest: DIGEST,
+    })),
     manifest: {
       revision: REVISION,
       status: 'index_staged',
@@ -183,7 +204,7 @@ function semanticAuditState(
       checkId: check.checkId,
       packetDigest: DIGEST,
       modelTier: check.modelTier,
-      status: index === 0 ? 'needs_action' as const : 'pending' as const,
+      status: index === 0 ? ('needs_action' as const) : ('pending' as const),
       attempt: 0,
       ...(index === 0 ? overrides : {}),
     })),
@@ -198,7 +219,8 @@ function auditReadyState(): FoundationAuditState {
     ...state,
     status: 'audit_ready',
     tasks: state.tasks.map(task => {
-      if (task.kind !== 'semantic') throw new Error('audit-ready fixture requires semantic tasks')
+      if (task.kind !== 'semantic')
+        throw new Error('audit-ready fixture requires semantic tasks')
       return {
         ...task,
         status: 'completed' as const,
@@ -259,10 +281,21 @@ function revisionState(): FoundationAuditState {
       id: 'issue-0',
       severity: 'HIGH' as const,
       type: 'semantic' as const,
-      source: { documentPath: 'docs/GDD.md' as const, sectionId: 'vision', heading: 'Vision', startLine: 1, endLine: 1, digest: DIGEST },
+      source: {
+        documentPath: 'docs/GDD.md' as const,
+        sectionId: 'vision',
+        heading: 'Vision',
+        startLine: 1,
+        endLine: 1,
+        digest: DIGEST,
+      },
       expected: 'expected',
       actual: 'actual',
-      remediation: { kind: 'patch' as const, documentPath: 'docs/GDD.md' as const, sectionIds: ['vision'] },
+      remediation: {
+        kind: 'patch' as const,
+        documentPath: 'docs/GDD.md' as const,
+        sectionIds: ['vision'],
+      },
     } satisfies AuditIssue,
   }
   const documentTask = {
@@ -270,7 +303,11 @@ function revisionState(): FoundationAuditState {
     kind: 'document-revision' as const,
     revision: REVISION,
     round: 2 as const,
-    packetPath: foundationRevisionPacketPath(REVISION, 2, 'document-revision-0'),
+    packetPath: foundationRevisionPacketPath(
+      REVISION,
+      2,
+      'document-revision-0',
+    ),
     packetDigest: DIGEST,
     status: 'needs_action' as const,
     attempt: 0,
@@ -286,7 +323,10 @@ function revisionState(): FoundationAuditState {
   }
   const seed = createFoundationAuditState({
     revision: REVISION,
-    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: DIGEST })),
+    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+      path,
+      digest: DIGEST,
+    })),
     manifest: {
       revision: REVISION,
       status: 'index_staged',
@@ -297,27 +337,51 @@ function revisionState(): FoundationAuditState {
   return parseFoundationAuditState({
     ...seed,
     authority: {
-      issueAuthority: { kind: 'review', reviewDigest: DIGEST, issueRegistryDigest: DIGEST },
-      derivedDigests: { sectionIndex: DIGEST, factStore: DIGEST, manifest: DIGEST },
-      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: DIGEST })),
+      issueAuthority: {
+        kind: 'review',
+        reviewDigest: DIGEST,
+        issueRegistryDigest: DIGEST,
+      },
+      derivedDigests: {
+        sectionIndex: DIGEST,
+        factStore: DIGEST,
+        manifest: DIGEST,
+      },
+      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+        path,
+        digest: DIGEST,
+      })),
     },
-    roundBefore: { documentRevision: 'document-rev', issueRegistryDigest: DIGEST, issueAuthority: { kind: 'review', reviewDigest: DIGEST, issueRegistryDigest: DIGEST } },
+    roundBefore: {
+      documentRevision: 'document-rev',
+      issueRegistryDigest: DIGEST,
+      issueAuthority: {
+        kind: 'review',
+        reviewDigest: DIGEST,
+        issueRegistryDigest: DIGEST,
+      },
+    },
     revision: REVISION,
     round: 2,
     status: 'semantic_recheck',
     phaseStartedAt: OLD_PHASE,
     issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
     activeBundleId: 'revision-bundle-2',
-    revisionBundles: [{
-      bundleId: 'revision-bundle-2',
-      status: 'active' as const,
-      round: 2,
-      baseDocumentRevision: REVISION,
-      baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: DIGEST })),
-      remediationDigest: DIGEST,
-      taskIds: [semanticTask.taskId, documentTask.taskId],
-      frozenTaskIds: [],
-    }],
+    revisionBundles: [
+      {
+        bundleId: 'revision-bundle-2',
+        status: 'active' as const,
+        round: 2,
+        baseDocumentRevision: REVISION,
+        baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest: DIGEST,
+        })),
+        remediationDigest: DIGEST,
+        taskIds: [semanticTask.taskId, documentTask.taskId],
+        frozenTaskIds: [],
+      },
+    ],
     tasks: [semanticTask, documentTask],
   })
 }
@@ -332,7 +396,10 @@ function validationBoundaryState(): FoundationAuditState {
 
 function revisionRun(state: FoundationAuditState): DeliveryRun {
   return {
-    ...createTestDeliveryRun({ projectId: 'transition-retry-revision', ownerId: 'transition-owner' }),
+    ...createTestDeliveryRun({
+      projectId: 'transition-retry-revision',
+      ownerId: 'transition-owner',
+    }),
     phase: 'DOCUMENT_REVIEW',
     documentStep: 'FOUNDATION_REVIEW',
     status: 'needs_action',
@@ -351,7 +418,10 @@ function completedRevisionState(): FoundationAuditState {
         durationMs: 1,
         dispatch: {
           dispatchId: `dispatch-${task.taskId}`,
-          workerType: task.kind === 'document-revision' ? 'foundation-document-reviser' as const : 'foundation-semantic-reviewer' as const,
+          workerType:
+            task.kind === 'document-revision'
+              ? ('foundation-document-reviser' as const)
+              : ('foundation-semantic-reviewer' as const),
           phase: 'DOCUMENT_REVIEW' as const,
           taskId: task.taskId,
           revision: task.revision,
@@ -368,11 +438,16 @@ function completedRevisionState(): FoundationAuditState {
           status: 'completed' as const,
           attempt: 1,
           terminalDigest: DIGEST,
-          resultPath: foundationRevisionSemanticResultPath(task.revision, task.round, task.taskId),
+          resultPath: foundationRevisionSemanticResultPath(
+            task.revision,
+            task.round,
+            task.taskId,
+          ),
           resultDigest: DIGEST,
         }
       }
-      if (task.kind !== 'document-revision') throw new Error('completed fixture requires document revisions')
+      if (task.kind !== 'document-revision')
+        throw new Error('completed fixture requires document revisions')
       return {
         ...task,
         ...terminalEvidence,
@@ -404,7 +479,9 @@ describe('foundation retry transitions', () => {
     expect(retried.status).toBe('running')
     expect(retried.blockedReason).toBeUndefined()
     expect(state.tasks.map(task => task.status)).toEqual(['pending', 'pending'])
-    expect(state.tasks.every(task => task.failureReason === undefined)).toBe(true)
+    expect(state.tasks.every(task => task.failureReason === undefined)).toBe(
+      true,
+    )
     expect(state.phaseStartedAt).toBe(OLD_PHASE)
     expect(state.aggregateUsage).toEqual(USAGE)
   })
@@ -417,19 +494,23 @@ describe('foundation retry transitions', () => {
 
     expect(retried.status).toBe('running')
     expect(retried.blockedReason).toBeUndefined()
-    expect(state.tasks[0]).toMatchObject({ kind: 'semantic-recheck', status: 'pending' })
+    expect(state.tasks[0]).toMatchObject({
+      kind: 'semantic-recheck',
+      status: 'pending',
+    })
     expect(state.tasks[0]?.failureReason).toBeUndefined()
     expect(state.tasks[1]).toEqual(before.tasks[1])
     expect(state.status).toBe(before.status)
     expect(state.round).toBe(before.round)
     expect(state.authority).toEqual(before.authority)
     expect(state.phaseStartedAt).toBe(OLD_PHASE)
-
   })
 
   test('revives a document revision at attempt 2 on ordinary retry', () => {
     const seed = revisionState()
-    const documentTask = seed.tasks.find(task => task.kind === 'document-revision')!
+    const documentTask = seed.tasks.find(
+      task => task.kind === 'document-revision',
+    )!
     const actionableTask = {
       ...documentTask,
       attempt: 2,
@@ -471,6 +552,48 @@ describe('foundation retry transitions', () => {
     ])
   })
 
+  test('revives a failed semantic recheck on ordinary retry', () => {
+    const seed = revisionState()
+    const semanticTask = seed.tasks.find(task => task.kind === 'semantic-recheck')!
+    const reason = 'durable semantic terminal is invalid'
+    const failedTask = {
+      ...semanticTask,
+      attempt: 1,
+      status: 'needs_action' as const,
+      failureReason: reason,
+      dispatch: {
+        dispatchId: 'dispatch-semantic-recheck-0',
+        workerType: 'foundation-semantic-reviewer' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        taskId: semanticTask.taskId,
+        revision: semanticTask.revision,
+        status: 'failed' as const,
+        failureReason: reason,
+        startedAt: OLD_PHASE,
+        finishedAt: OLD_PHASE,
+      },
+    }
+    const state: FoundationAuditState = {
+      ...seed,
+      tasks: [failedTask],
+      revisionBundles: seed.revisionBundles?.map(bundle => ({
+        ...bundle,
+        taskIds: [semanticTask.taskId],
+      })),
+    }
+    const retried = transitionDeliveryRun(revisionRun(state), { type: 'retry' })
+
+    expect(retried.status).toBe('running')
+    expect(retried.foundationAuditState?.tasks).toEqual([
+      expect.objectContaining({
+        kind: 'semantic-recheck',
+        status: 'pending',
+        attempt: 1,
+        failureReason: undefined,
+      }),
+    ])
+  })
+
   test('re-enters a validating boundary without reviving completed workers', () => {
     const before = validationBoundaryState()
     const run = revisionRun(before)
@@ -495,10 +618,16 @@ describe('foundation retry transitions', () => {
       tasks: before.tasks.filter(task => task.kind === 'document-revision'),
       revisionBundles: before.revisionBundles?.map(bundle => ({
         ...bundle,
-        taskIds: bundle.taskIds.filter(taskId => before.tasks.some(task => task.taskId === taskId && task.kind === 'document-revision')),
+        taskIds: bundle.taskIds.filter(taskId =>
+          before.tasks.some(
+            task => task.taskId === taskId && task.kind === 'document-revision',
+          ),
+        ),
       })),
     }
-    const retried = transitionDeliveryRun(revisionRun(documentOnly), { type: 'retry' })
+    const retried = transitionDeliveryRun(revisionRun(documentOnly), {
+      type: 'retry',
+    })
 
     expect(retried.status).toBe('running')
     expect(retried.blockedReason).toBeUndefined()
@@ -514,20 +643,28 @@ describe('foundation retry transitions', () => {
       activeBundleId: undefined,
       revisionBundles: undefined,
     }
-    const retried = transitionDeliveryRun({
-      ...revisionRun(planning),
-      blockedReason: 'foundation revision planning materialization failed: transient store error',
-    }, { type: 'retry' })
+    const retried = transitionDeliveryRun(
+      {
+        ...revisionRun(planning),
+        blockedReason:
+          'foundation revision planning materialization failed: transient store error',
+      },
+      { type: 'retry' },
+    )
     expect(retried.status).toBe('running')
     expect(retried.foundationAuditState?.status).toBe('planning')
-
   })
 
   test('does not retry ineligible foundation failures', () => {
     const cases = [
       { label: 'attempt 1', override: { attempt: 1 } },
       { label: 'usage', override: { usage: USAGE } },
-      { label: 'integrity failure', override: { failureReason: 'foundation fact terminal identity mismatch' } },
+      {
+        label: 'integrity failure',
+        override: {
+          failureReason: 'foundation fact terminal identity mismatch',
+        },
+      },
       {
         label: 'dispatch',
         override: {
@@ -554,15 +691,17 @@ describe('foundation retry transitions', () => {
       expect(retried.foundationAuditState?.tasks, label).toEqual(before)
     }
 
-    const admittedRun = auditRun(semanticAuditState({
-      failureReason: 'foundation semantic balanced model is not configured',
-      admittedResult: {
-        checkId: FOUNDATION_SEMANTIC_CHECKS[0]!.checkId,
-        packetIdentity: DIGEST,
-        outcome: 'UNDECIDABLE',
-        reason: 'requires a fresh semantic result',
-      },
-    }))
+    const admittedRun = auditRun(
+      semanticAuditState({
+        failureReason: 'foundation semantic balanced model is not configured',
+        admittedResult: {
+          checkId: FOUNDATION_SEMANTIC_CHECKS[0]!.checkId,
+          packetIdentity: DIGEST,
+          outcome: 'UNDECIDABLE',
+          reason: 'requires a fresh semantic result',
+        },
+      }),
+    )
     const admittedBefore = admittedRun.foundationAuditState!.tasks
     const admittedRetry = transitionDeliveryRun(admittedRun, { type: 'retry' })
     expect(admittedRetry.status).toBe('needs_action')
@@ -571,28 +710,42 @@ describe('foundation retry transitions', () => {
 
     const resultPathState = revisionState()
     const resultPathTask = resultPathState.tasks.find(
-      (task): task is Extract<FoundationAuditState['tasks'][number], { kind: 'semantic-recheck' }> => task.kind === 'semantic-recheck',
+      (
+        task,
+      ): task is Extract<
+        FoundationAuditState['tasks'][number],
+        { kind: 'semantic-recheck' }
+      > => task.kind === 'semantic-recheck',
     )!
-    resultPathState.tasks = resultPathState.tasks.map(task => task.taskId === resultPathTask.taskId
-      ? {
-          ...resultPathTask,
-          resultPath: foundationRevisionSemanticResultPath(
-            resultPathTask.revision,
-            resultPathTask.round,
-            resultPathTask.taskId,
-          ),
-        }
-      : task)
+    resultPathState.tasks = resultPathState.tasks.map(task =>
+      task.taskId === resultPathTask.taskId
+        ? {
+            ...resultPathTask,
+            resultPath: foundationRevisionSemanticResultPath(
+              resultPathTask.revision,
+              resultPathTask.round,
+              resultPathTask.taskId,
+            ),
+          }
+        : task,
+    )
     const resultPathRun = revisionRun(resultPathState)
     const resultPathBefore = resultPathRun.foundationAuditState!.tasks
-    const resultPathRetry = transitionDeliveryRun(resultPathRun, { type: 'retry' })
+    const resultPathRetry = transitionDeliveryRun(resultPathRun, {
+      type: 'retry',
+    })
     expect(resultPathRetry.status).toBe('needs_action')
     expect(resultPathRetry.blockedReason).toBe(resultPathRun.blockedReason)
-    expect(resultPathRetry.foundationAuditState?.tasks).toEqual(resultPathBefore)
+    expect(resultPathRetry.foundationAuditState?.tasks).toEqual(
+      resultPathBefore,
+    )
 
     for (const [label, run] of [
       ['audit_ready', auditRun(auditReadyState())],
-      ['round-closing revision', revisionRun({ ...completedRevisionState(), status: 'round_closing' })],
+      [
+        'round-closing revision',
+        revisionRun({ ...completedRevisionState(), status: 'round_closing' }),
+      ],
     ] as const) {
       const retried = transitionDeliveryRun(run, { type: 'retry' })
       expect(retried.status, label).toBe('running')
@@ -603,7 +756,9 @@ describe('foundation retry transitions', () => {
 
 const GAME_IR_DIGEST = 'c'.repeat(64)
 const GAME_IR_BRIEF = 'confirmed brief for v46 transition'
-const GAME_IR_BRIEF_DIGEST = createHash('sha256').update(GAME_IR_BRIEF).digest('hex')
+const GAME_IR_BRIEF_DIGEST = createHash('sha256')
+  .update(GAME_IR_BRIEF)
+  .digest('hex')
 const GAME_IR_IDENTITY = {
   runId: 'transition-game-ir-run',
   taskId: 'game-ir-compile-task',
@@ -613,7 +768,8 @@ const GAME_IR_IDENTITY = {
   foundationReadyReceiptDigest: GAME_IR_DIGEST,
 } as const
 const GAME_IR_CHECKPOINT = {
-  checkpointPath: '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase4.json',
+  checkpointPath:
+    '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase4.json',
   checkpointDigest: GAME_IR_DIGEST,
 } as const
 
@@ -678,7 +834,7 @@ function gameIrReadyReceiptDigest(): string {
     .digest('hex')
 }
 
-describe('v46 Game IR and Checklist bridge transitions', () => {
+describe('Game IR and Checklist bridge transitions', () => {
   test('routes Foundation READY into the one durable Game IR compilation phase', () => {
     const next = transitionDeliveryRun(foundationReadyRun(), {
       type: 'game_ir_compilation_started',
@@ -728,6 +884,62 @@ describe('v46 Game IR and Checklist bridge transitions', () => {
     })
   })
 
+  test('atomically consumes the completed compiler dispatch when committing a checkpoint', () => {
+    const compiling = transitionDeliveryRun(foundationReadyRun(), {
+      type: 'game_ir_compilation_started',
+      identity: GAME_IR_IDENTITY,
+    } as never)
+    const terminal = {
+      ...compiling,
+      activeDispatch: {
+        dispatchId: 'game-ir-terminal',
+        workerType: 'game-ir-compiler',
+        phase: 'GAME_IR_COMPILATION',
+        taskId: GAME_IR_IDENTITY.taskId,
+        revision: GAME_IR_IDENTITY.foundationRevision,
+        status: 'completed',
+        startedAt: '2026-09-02T00:00:00.000Z',
+        finishedAt: '2026-09-02T00:01:00.000Z',
+        terminalResult: { status: 'completed' },
+      },
+      gameIrState: {
+        ...compiling.gameIrState!,
+        diagnosticRef: 'stale-diagnostic',
+        diagnostic: {
+          phase: 'GAME_IR_COMPILATION',
+          step: 'phase4/gameplay/projection',
+          taskId: GAME_IR_IDENTITY.taskId,
+          workerType: 'game-ir-compiler',
+          reasonCode: 'compilation',
+          expected: 'canonical projection',
+          actual: 'previous retry',
+          diagnosticRef: 'stale-diagnostic',
+          recoveryAction: 'retry',
+        },
+        progressIdentity: {
+          inputDigest: GAME_IR_DIGEST,
+          diagnosticDigest: GAME_IR_DIGEST,
+          candidateDigest: GAME_IR_DIGEST,
+          checkpointJournalDigest: GAME_IR_DIGEST,
+          terminalDigest: GAME_IR_DIGEST,
+        },
+      },
+    } as DeliveryRun
+
+    const checkpointed = transitionDeliveryRun(terminal, {
+      type: 'game_ir_checkpoint_committed',
+      checkpoint: GAME_IR_CHECKPOINT,
+      expectedPreviousCheckpoint: undefined,
+    } as never)
+
+    expect(checkpointed.activeDispatch).toBeUndefined()
+    expect(checkpointed.gameIrState).toEqual({
+      status: 'compiling',
+      identity: GAME_IR_IDENTITY,
+      latestCheckpoint: GAME_IR_CHECKPOINT,
+    })
+  })
+
   test('advances checkpoints with compare-and-swap and keeps repeats idempotent', () => {
     const compiling = transitionDeliveryRun(foundationReadyRun(), {
       type: 'game_ir_compilation_started',
@@ -739,7 +951,8 @@ describe('v46 Game IR and Checklist bridge transitions', () => {
       expectedPreviousCheckpoint: undefined,
     } as never)
     const nextCheckpoint = {
-      checkpointPath: '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase5.json',
+      checkpointPath:
+        '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase5.json',
       checkpointDigest: 'd'.repeat(64),
     }
     const second = transitionDeliveryRun(first, {
@@ -757,22 +970,28 @@ describe('v46 Game IR and Checklist bridge transitions', () => {
       expectedPreviousCheckpoint: GAME_IR_CHECKPOINT,
     } as never)
     expect(repeated.gameIrState).toMatchObject(second.gameIrState!)
-    expect(() => transitionDeliveryRun(second, {
-      type: 'game_ir_checkpoint_committed',
-      checkpoint: {
-        checkpointPath: '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase6.json',
-        checkpointDigest: 'e'.repeat(64),
-      },
-      expectedPreviousCheckpoint: GAME_IR_CHECKPOINT,
-    } as never)).toThrow()
-    expect(() => transitionDeliveryRun(second, {
-      type: 'game_ir_checkpoint_committed',
-      checkpoint: {
-        checkpointPath: '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase6.json',
-        checkpointDigest: 'e'.repeat(64),
-      },
-      expectedPreviousCheckpoint: undefined,
-    } as never)).toThrow()
+    expect(() =>
+      transitionDeliveryRun(second, {
+        type: 'game_ir_checkpoint_committed',
+        checkpoint: {
+          checkpointPath:
+            '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase6.json',
+          checkpointDigest: 'e'.repeat(64),
+        },
+        expectedPreviousCheckpoint: GAME_IR_CHECKPOINT,
+      } as never),
+    ).toThrow()
+    expect(() =>
+      transitionDeliveryRun(second, {
+        type: 'game_ir_checkpoint_committed',
+        checkpoint: {
+          checkpointPath:
+            '.beegame/ir/runs/transition-game-ir-run/checkpoints/phase6.json',
+          checkpointDigest: 'e'.repeat(64),
+        },
+        expectedPreviousCheckpoint: undefined,
+      } as never),
+    ).toThrow()
   })
 
   test('requires the bridge step before entering resource preparation', () => {
@@ -786,14 +1005,18 @@ describe('v46 Game IR and Checklist bridge transitions', () => {
         checkpoint: GAME_IR_CHECKPOINT,
         readyReceipt: gameIrReadyReceipt(),
         readyReceiptDigest: createHash('sha256')
-          .update(JSON.stringify(canonicalizeTransitionValue(gameIrReadyReceipt())))
+          .update(
+            JSON.stringify(canonicalizeTransitionValue(gameIrReadyReceipt())),
+          )
           .digest('hex'),
       },
     } as unknown as DeliveryRun
 
-    expect(() => transitionDeliveryRun(run, {
-      type: 'resource_preparation_required',
-    })).toThrow()
+    expect(() =>
+      transitionDeliveryRun(run, {
+        type: 'resource_preparation_required',
+      }),
+    ).toThrow()
 
     const bridging = transitionDeliveryRun(run, {
       type: 'checklist_bridge_started',

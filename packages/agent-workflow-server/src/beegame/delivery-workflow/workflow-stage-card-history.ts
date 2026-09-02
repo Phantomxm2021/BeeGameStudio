@@ -22,7 +22,10 @@ import type {
   ResourceProductionTask,
   WorkflowEvent,
 } from './types'
-import type { FoundationIssueSummary, FoundationRevisionRound } from './foundation-audit-state'
+import type {
+  FoundationIssueSummary,
+  FoundationRevisionRound,
+} from './foundation-audit-state'
 
 export type WorkflowStageCardTask = {
   id: string
@@ -513,9 +516,14 @@ export function projectCurrentStageCard(input: {
       run.foundationAuditState?.status === 'audit_ready')
       ? 'FOUNDATION_REVIEW'
       : undefined)
-  const message = run.status === 'running'
-    ? projectWorkflowCurrentMessage({ value: run.currentMessage, phase: run.phase, documentStep })
-    : ''
+  const message =
+    run.status === 'running'
+      ? projectWorkflowCurrentMessage({
+          value: run.currentMessage,
+          phase: run.phase,
+          documentStep,
+        })
+      : ''
   const blockedReason = stringValue(
     run.blockedReason ?? run.activeDispatch?.failureReason,
   )

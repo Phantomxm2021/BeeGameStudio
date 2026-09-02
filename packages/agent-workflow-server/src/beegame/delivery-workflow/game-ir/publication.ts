@@ -527,7 +527,8 @@ function buildPlan(authorityInput: GameIrPublicationAuthority): Plan {
     ),
   )
   if (
-    digestGameIrSourceSectionIndex(sectionIndex) !== request.foundation.sectionIndexDigest
+    digestGameIrSourceSectionIndex(sectionIndex) !==
+    request.foundation.sectionIndexDigest
   )
     fail(
       'publication authority Section Index does not match Foundation receipt',

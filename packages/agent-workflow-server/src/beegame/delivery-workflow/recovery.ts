@@ -39,7 +39,11 @@ import {
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
-import { GameIrStageCheckpointLoader } from './game-ir/stage-checkpoint'
+import {
+  GameIrStageCheckpointLoader,
+  type GameIrProtocolStep,
+} from './game-ir/stage-checkpoint'
+import { cleanupGameIrProjectionSliceJournalAfterCheckpoint } from './game-ir/projection-slice-journal'
 
 export {
   inspectWorkflowSnapshot,
@@ -100,6 +104,59 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined
 }
 
+export function checkpointCoversGameIrTerminal(
+  run: DeliveryRun,
+  checkpointStep: GameIrProtocolStep,
+): boolean {
+  const dispatch = run.activeDispatch
+  if (
+    run.phase !== 'GAME_IR_COMPILATION' ||
+    dispatch?.workerType !== 'game-ir-compiler' ||
+    dispatch.status !== 'completed'
+  )
+    return false
+  const request = dispatch.request
+  const contract = snapshotRecord(request?.contract)
+  const packet = snapshotRecord(contract?.packet)
+  const source = snapshotRecord(packet?.source)
+  const terminal = snapshotRecord(dispatch.terminalResult)
+  const operation = stringValue(contract?.kind)
+  const moduleId =
+    stringValue(packet?.moduleId) ?? stringValue(source?.moduleId)
+  return (
+    (operation === 'projection' || operation === 'validation') &&
+    terminal?.workerType === 'game-ir-compiler' &&
+    terminal.status === 'completed' &&
+    terminal.operation === operation &&
+    Boolean(moduleId) &&
+    checkpointStep.endsWith(`/${moduleId}/${operation}`)
+  )
+}
+
+async function consumeCheckpointedGameIrTerminal(
+  run: DeliveryRun,
+  workspacePath?: string,
+): Promise<DeliveryRun> {
+  const state = run.gameIrState
+  if (
+    !workspacePath ||
+    state?.status !== 'compiling' ||
+    !state.latestCheckpoint ||
+    !run.activeDispatch?.terminalResult
+  )
+    return run
+  const checkpoint = await new GameIrStageCheckpointLoader().load({
+    workspacePath,
+    deliveryRun: run,
+  })
+  if (!checkpointCoversGameIrTerminal(run, checkpoint.step)) return run
+  return transitionDeliveryRun(run, {
+    type: 'game_ir_checkpoint_committed',
+    checkpoint: state.latestCheckpoint,
+    expectedPreviousCheckpoint: state.latestCheckpoint,
+  })
+}
+
 function stringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every(item => typeof item === 'string')
     ? value
@@ -118,11 +175,11 @@ function sameStrings(
 
 function hasStaleFoundationWorkers(run: DeliveryRun): boolean {
   return Boolean(
-      run.status !== 'running' &&
-      run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(
-          task =>
-          task.status === 'running' &&
-          task.dispatch?.status === 'running',
+    run.status !== 'running' &&
+      run.foundationAuditState &&
+      foundationRuntimeTasks(run.foundationAuditState).some(
+        task =>
+          task.status === 'running' && task.dispatch?.status === 'running',
       ),
   )
 }
@@ -625,16 +682,43 @@ export async function recoverAndResumeRun(input: {
           currentRun =
             (await input.store.reconcile(async () => false)) ?? currentRun
         }
-        if (currentRun.phase === 'GAME_IR_COMPILATION' && currentRun.gameIrState?.status === 'compiling') {
+        const gameIrTerminalActive =
+          currentRun.phase === 'GAME_IR_COMPILATION' &&
+          currentRun.activeDispatch?.workerType === 'game-ir-compiler' &&
+          currentRun.activeDispatch.terminalResult !== undefined
+        // The terminal is the first recovery input. Advancing a checkpoint
+        // while it is still pending admission would skip the exact replay
+        // boundary and could make the handler regenerate work.
+        if (
+          !gameIrTerminalActive &&
+          currentRun.phase === 'GAME_IR_COMPILATION' &&
+          currentRun.gameIrState?.status === 'compiling'
+        ) {
           const lease = await input.store.mutationLock(currentRun.runId)
           try {
             const lockedSource = await input.store.inspectWorkflowSnapshot()
-            if (!lockedSource.currentRun) throw new WorkflowStoreError('workflow snapshot disappeared during checkpoint recovery', 'recovery_snapshot_changed')
+            if (!lockedSource.currentRun)
+              throw new WorkflowStoreError(
+                'workflow snapshot disappeared during checkpoint recovery',
+                'recovery_snapshot_changed',
+              )
             currentRun = lockedSource.currentRun
-            const recovered = await new GameIrStageCheckpointLoader().recover({ workspacePath, deliveryRun: currentRun })
-            const before = currentRun.gameIrState?.status === 'compiling' ? currentRun.gameIrState.latestCheckpoint : undefined
-            const after = recovered.gameIrState?.status === 'compiling' ? recovered.gameIrState.latestCheckpoint : undefined
-            if (after?.checkpointPath !== before?.checkpointPath || after?.checkpointDigest !== before?.checkpointDigest) {
+            const recovered = await new GameIrStageCheckpointLoader().recover({
+              workspacePath,
+              deliveryRun: currentRun,
+            })
+            const before =
+              currentRun.gameIrState?.status === 'compiling'
+                ? currentRun.gameIrState.latestCheckpoint
+                : undefined
+            const after =
+              recovered.gameIrState?.status === 'compiling'
+                ? recovered.gameIrState.latestCheckpoint
+                : undefined
+            if (
+              after?.checkpointPath !== before?.checkpointPath ||
+              after?.checkpointDigest !== before?.checkpointDigest
+            ) {
               currentRun = await input.store.replaceSnapshotIfDigest({
                 expectedDigest: lockedSource.digest,
                 run: recovered,
@@ -647,6 +731,25 @@ export async function recoverAndResumeRun(input: {
                   checkpoint: after,
                 },
                 lease,
+              })
+            }
+            const verified =
+              currentRun.gameIrState?.status === 'compiling' &&
+              currentRun.gameIrState.latestCheckpoint
+                ? await new GameIrStageCheckpointLoader().load({
+                    workspacePath,
+                    deliveryRun: currentRun,
+                  })
+                : undefined
+            if (verified?.step.endsWith('/projection')) {
+              const compilingState = currentRun.gameIrState
+              if (!compilingState || compilingState.status !== 'compiling')
+                recoveryConflict('Game IR recovery identity is missing')
+              await cleanupGameIrProjectionSliceJournalAfterCheckpoint({
+                workspacePath,
+                identity: compilingState.identity,
+                operationStep: verified.step,
+                deliveryRun: currentRun,
               })
             }
           } finally {
@@ -902,13 +1005,20 @@ async function acquireAndLoad(input: {
       ...(current.activeDispatch?.status === 'running'
         ? [current.activeDispatch]
         : []),
-      ...(current.foundationAuditState ? foundationRuntimeTasks(current.foundationAuditState) : [])
+      ...(current.foundationAuditState
+        ? foundationRuntimeTasks(current.foundationAuditState)
+        : []
+      )
         .filter(task => task.status === 'running' && task.dispatch)
         .map(task => task.dispatch!),
     ]
     if (!runningDispatches.length) return false
     if (!input.sessionIsOpen) return true
-    return (await Promise.all(runningDispatches.map(dispatch => input.sessionIsOpen!(dispatch)))).some(Boolean)
+    return (
+      await Promise.all(
+        runningDispatches.map(dispatch => input.sessionIsOpen!(dispatch)),
+      )
+    ).some(Boolean)
   })
   try {
     const run = await input.store.reconcile(
@@ -932,9 +1042,12 @@ export async function resumeRun(input: {
 }): Promise<DeliveryRun> {
   const acquired = await acquireAndLoad(input)
   try {
-    const foundationFactRunning = acquired.run.foundationAuditState !== undefined && foundationRuntimeTasks(acquired.run.foundationAuditState).some(
-      task => task.status === 'running' && task.dispatch?.status === 'running',
-    )
+    const foundationFactRunning =
+      acquired.run.foundationAuditState !== undefined &&
+      foundationRuntimeTasks(acquired.run.foundationAuditState).some(
+        task =>
+          task.status === 'running' && task.dispatch?.status === 'running',
+      )
     if (
       acquired.run.status === 'completed' ||
       acquired.run.activeDispatch?.status === 'running' ||
@@ -950,24 +1063,27 @@ export async function resumeRun(input: {
       input.workspacePath,
       input.store,
     )
+    acquired.run = await consumeCheckpointedGameIrTerminal(
+      acquired.run,
+      input.workspacePath,
+    )
     if (acquired.run.status === 'completed') return acquired.run
     const retryable =
       acquired.run.status === 'needs_action' ||
       acquired.run.status === 'blocked' ||
       acquired.run.status === 'stopped' ||
       acquired.run.status === 'failed'
-    const resumed =
-      (retryable
-        ? transitionDeliveryRun(
-            {
-              ...acquired.run,
-              activeDispatch: acquired.run.activeDispatch?.terminalResult
-                ? acquired.run.activeDispatch
-                : undefined,
-            },
-            { type: 'retry' },
-          )
-        : acquired.run)
+    const resumed = retryable
+      ? transitionDeliveryRun(
+          {
+            ...acquired.run,
+            activeDispatch: acquired.run.activeDispatch?.terminalResult
+              ? acquired.run.activeDispatch
+              : undefined,
+          },
+          { type: 'retry' },
+        )
+      : acquired.run
     return input.store.commit(
       resumed,
       {
@@ -1003,6 +1119,10 @@ export async function retryRun(input: {
       input.workspacePath,
       input.store,
     )
+    acquired.run = await consumeCheckpointedGameIrTerminal(
+      acquired.run,
+      input.workspacePath,
+    )
     // A successful retry can race a duplicate browser request or a stale
     // workflow-card snapshot. The first request has already resumed the same
     // durable run, so repeating it must be an idempotent read rather than an
@@ -1019,23 +1139,22 @@ export async function retryRun(input: {
         auditAssetContract(input.workspacePath),
       )
     const retryBaseRun = resourceRefresh
-        ? {
-            ...acquired.run,
-            resourceProductionState: {
-              currentTask: 'RESOURCE_INVENTORY' as const,
-            },
-          }
-        : acquired.run
+      ? {
+          ...acquired.run,
+          resourceProductionState: {
+            currentTask: 'RESOURCE_INVENTORY' as const,
+          },
+        }
+      : acquired.run
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
-    const resumed =
-      transitionDeliveryRun(
-        {
-          ...retryBaseRun,
-          activeDispatch: replayable ? retryBaseRun.activeDispatch : undefined,
-        },
-        { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },
-      )
+    const resumed = transitionDeliveryRun(
+      {
+        ...retryBaseRun,
+        activeDispatch: replayable ? retryBaseRun.activeDispatch : undefined,
+      },
+      { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },
+    )
     return input.store.commit(
       resumed,
       {
@@ -1073,11 +1192,17 @@ export async function stopRun(input: {
   for (const document of acquired.run.foundationDraftState.documents ?? [])
     if (document.dispatch?.status === 'running')
       dispatchIds.add(document.dispatch.dispatchId)
-  for (const task of acquired.run.foundationAuditState ? foundationRuntimeTasks(acquired.run.foundationAuditState) : [])
+  for (const task of acquired.run.foundationAuditState
+    ? foundationRuntimeTasks(acquired.run.foundationAuditState)
+    : [])
     if (task.dispatch?.status === 'running')
       dispatchIds.add(task.dispatch.dispatchId)
   const activeTaskIds = acquired.run.foundationAuditState
-    ? new Set(foundationRuntimeTasks(acquired.run.foundationAuditState).map(task => task.taskId))
+    ? new Set(
+        foundationRuntimeTasks(acquired.run.foundationAuditState).map(
+          task => task.taskId,
+        ),
+      )
     : new Set<string>()
   try {
     const stopped = transitionDeliveryRun(acquired.run, {
@@ -1118,8 +1243,19 @@ export async function stopRun(input: {
             foundationAuditState: {
               ...stopped.foundationAuditState,
               tasks: stopped.foundationAuditState.tasks.map(task =>
-                activeTaskIds.has(task.taskId) && task.dispatch?.status === 'running'
+                activeTaskIds.has(task.taskId) &&
+                task.status === 'running' &&
+                task.dispatch
                   ? (() => {
+                      if (task.dispatch!.status !== 'running')
+                        return projectTaskTerminalEvidence(
+                          {
+                            ...task,
+                            status: 'retryable' as const,
+                            failureReason: input.reason,
+                          } as FoundationAuditTask,
+                          task.dispatch!,
+                        )
                       const terminal = interruptedDispatch(task.dispatch!)
                       return projectTaskTerminalEvidence(
                         {

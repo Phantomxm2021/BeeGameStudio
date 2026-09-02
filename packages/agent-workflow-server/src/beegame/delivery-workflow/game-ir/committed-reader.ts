@@ -41,14 +41,20 @@ import type { DeliveryRun } from '../types'
 
 type RecordValue = Record<string, unknown>
 
-type ProjectionPayload = ImplementationVerificationProjectionPayload | ResourceRealizationProjectionPayload
+type ProjectionPayload =
+  | ImplementationVerificationProjectionPayload
+  | ResourceRealizationProjectionPayload
 
 type ProjectionNodeFor<P extends ProjectionPayload> = Readonly<{
   id: string
   kind: P['kind']
   producerMode: 'mechanical' | 'semantic' | 'derived'
   references: readonly Readonly<{ targetId: string; targetType: string }>[]
-  edges: readonly Readonly<{ type: string; targetId: string; targetType: string }>[]
+  edges: readonly Readonly<{
+    type: string
+    targetId: string
+    targetType: string
+  }>[]
   bindings: Readonly<Record<string, GameIrSourceBinding>>
   payload: P
 }>
@@ -61,27 +67,63 @@ export type GameIrProjectionNode = ProjectionNode
 
 export type GameIrExecutionProjection = Readonly<{
   moduleId: 'implementation-verification'
-  units: readonly Extract<ProjectionNode, { kind: 'implementation-verification.unit' }>[]
-  scenarios: readonly Extract<ProjectionNode, { kind: 'implementation-verification.acceptance-scenario' }>[]
-  invariants: readonly Extract<ProjectionNode, { kind: 'implementation-verification.invariant' }>[]
-  evidenceRequirements: readonly Extract<ProjectionNode, { kind: 'implementation-verification.evidence-requirement' }>[]
+  units: readonly Extract<
+    ProjectionNode,
+    { kind: 'implementation-verification.unit' }
+  >[]
+  scenarios: readonly Extract<
+    ProjectionNode,
+    { kind: 'implementation-verification.acceptance-scenario' }
+  >[]
+  invariants: readonly Extract<
+    ProjectionNode,
+    { kind: 'implementation-verification.invariant' }
+  >[]
+  evidenceRequirements: readonly Extract<
+    ProjectionNode,
+    { kind: 'implementation-verification.evidence-requirement' }
+  >[]
   digest: string
 }>
 
 export type GameIrResourceProjection = Readonly<{
   moduleId: 'resource-realization'
-  logicalResources: readonly Extract<ProjectionNode, { kind: 'resource-realization.logical-resource' }>[]
-  acquisitionProfiles: readonly Extract<ProjectionNode, { kind: 'resource-realization.acquisition-profile' }>[]
-  deliveryTargets: readonly Extract<ProjectionNode, { kind: 'resource-realization.delivery-target' }>[]
-  variants: readonly Extract<ProjectionNode, { kind: 'resource-realization.variant' }>[]
-  deliveryArtifacts: readonly Extract<ProjectionNode, { kind: 'resource-realization.delivery-artifact' }>[]
+  logicalResources: readonly Extract<
+    ProjectionNode,
+    { kind: 'resource-realization.logical-resource' }
+  >[]
+  acquisitionProfiles: readonly Extract<
+    ProjectionNode,
+    { kind: 'resource-realization.acquisition-profile' }
+  >[]
+  deliveryTargets: readonly Extract<
+    ProjectionNode,
+    { kind: 'resource-realization.delivery-target' }
+  >[]
+  variants: readonly Extract<
+    ProjectionNode,
+    { kind: 'resource-realization.variant' }
+  >[]
+  deliveryArtifacts: readonly Extract<
+    ProjectionNode,
+    { kind: 'resource-realization.delivery-artifact' }
+  >[]
   digest: string
 }>
 
 export type GameIrAcceptanceProjection = Readonly<{
-  scenarios: readonly Extract<ProjectionNode, { kind: 'implementation-verification.acceptance-scenario' }>[]
-  invariants: readonly Extract<ProjectionNode, { kind: 'implementation-verification.invariant' }>[]
-  evidenceRequirements: readonly Extract<ProjectionNode, { kind: 'implementation-verification.evidence-requirement' }>[]
+  scenarios: readonly Extract<
+    ProjectionNode,
+    { kind: 'implementation-verification.acceptance-scenario' }
+  >[]
+  invariants: readonly Extract<
+    ProjectionNode,
+    { kind: 'implementation-verification.invariant' }
+  >[]
+  evidenceRequirements: readonly Extract<
+    ProjectionNode,
+    { kind: 'implementation-verification.evidence-requirement' }
+  >[]
   digest: string
 }>
 
@@ -113,13 +155,23 @@ export type GameIrSourceMap = Readonly<{
   schemaVersion: 'game-ir-source-map.v1'
   foundationRevision: string
   moduleId: GameIrModuleId
-  bindings: readonly Readonly<{ nodeId: string; pointer: string; binding: GameIrSourceBinding }>[]
+  bindings: readonly Readonly<{
+    nodeId: string
+    pointer: string
+    binding: GameIrSourceBinding
+  }>[]
 }>
 export type GameIrSourceMaps = Readonly<Record<GameIrModuleId, GameIrSourceMap>>
 export type GameIrDependencyGraph = Readonly<{
   schemaVersion: 'game-ir-dependency-graph.v1'
   foundationRevision: string
-  edges: readonly Readonly<{ kind: string; type?: string; from: string; to: string; targetType?: string }>[]
+  edges: readonly Readonly<{
+    kind: string
+    type?: string
+    from: string
+    to: string
+    targetType?: string
+  }>[]
 }>
 export type GameIrSemanticEvidence = Readonly<{
   phase: string
@@ -140,7 +192,13 @@ export type GameIrManifest = Readonly<{
   compileRequest: ReturnType<typeof parseGameIrCompileRequest>
   candidateDigest: string
   semanticEvidence: readonly GameIrSemanticEvidence[]
-  modules: readonly Readonly<{ moduleId: GameIrModuleId; path: string; digest: string; sourceMapPath: string; sourceMapDigest: string }>[]
+  modules: readonly Readonly<{
+    moduleId: GameIrModuleId
+    path: string
+    digest: string
+    sourceMapPath: string
+    sourceMapDigest: string
+  }>[]
   dependencyGraphPath: string
   dependencyGraphDigest: string
 }>
@@ -164,9 +222,14 @@ function record(value: unknown, label: string): RecordValue {
   return value as RecordValue
 }
 
-function exact(value: RecordValue, keys: readonly string[], label: string): void {
+function exact(
+  value: RecordValue,
+  keys: readonly string[],
+  label: string,
+): void {
   const actual = Reflect.ownKeys(value)
-  if (actual.some(key => typeof key !== 'string')) fail(`${label} has a symbol key`)
+  if (actual.some(key => typeof key !== 'string'))
+    fail(`${label} has a symbol key`)
   for (const key of actual) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
     if (!descriptor || !descriptor.enumerable || !('value' in descriptor))
@@ -196,7 +259,11 @@ function same(left: unknown, right: unknown, label: string): void {
     fail(`${label} mismatch`)
 }
 
-async function readJson(root: string, path: string, label: string): Promise<RecordValue> {
+async function readJson(
+  root: string,
+  path: string,
+  label: string,
+): Promise<RecordValue> {
   try {
     return record(JSON.parse(await readSecureWorkspaceFile(root, path)), label)
   } catch (error) {
@@ -205,7 +272,10 @@ async function readJson(root: string, path: string, label: string): Promise<Reco
   }
 }
 
-function sourceMap(module: GameIrModuleCandidate, revision: string): GameIrSourceMap {
+function sourceMap(
+  module: GameIrModuleCandidate,
+  revision: string,
+): GameIrSourceMap {
   return {
     schemaVersion: 'game-ir-source-map.v1',
     foundationRevision: revision,
@@ -213,7 +283,11 @@ function sourceMap(module: GameIrModuleCandidate, revision: string): GameIrSourc
     bindings: module.nodes.flatMap(node =>
       Object.keys(node.bindings)
         .sort(compareCodeUnits)
-        .map(pointer => ({ nodeId: node.id, pointer, binding: node.bindings[pointer] })),
+        .map(pointer => ({
+          nodeId: node.id,
+          pointer,
+          binding: node.bindings[pointer],
+        })),
     ),
   } as GameIrSourceMap
 }
@@ -249,13 +323,22 @@ function dependencyGraph(candidate: GameIrCandidate): GameIrDependencyGraph {
       })),
     ]),
   )
-  edges.sort((left, right) => compareCodeUnits(canonicalGameIrJson(left), canonicalGameIrJson(right)))
-  return { schemaVersion: 'game-ir-dependency-graph.v1', foundationRevision: candidate.foundationRevision, edges }
+  edges.sort((left, right) =>
+    compareCodeUnits(canonicalGameIrJson(left), canonicalGameIrJson(right)),
+  )
+  return {
+    schemaVersion: 'game-ir-dependency-graph.v1',
+    foundationRevision: candidate.foundationRevision,
+    edges,
+  }
 }
 
 type ProjectionKind = ProjectionPayload['kind']
 
-function projectionPayload(node: GameIrModuleCandidate['nodes'][number], module: GameIrModuleCandidate): ProjectionPayload {
+function projectionPayload(
+  node: GameIrModuleCandidate['nodes'][number],
+  module: GameIrModuleCandidate,
+): ProjectionPayload {
   if (module.moduleId === IMPLEMENTATION_MODULE_ID)
     return parseImplementationVerificationProjectionPayload(node)
   if (module.moduleId === RESOURCE_MODULE_ID)
@@ -263,19 +346,27 @@ function projectionPayload(node: GameIrModuleCandidate['nodes'][number], module:
   return fail(`module ${module.moduleId} does not expose a consumer projection`)
 }
 
-function nodesOf<K extends ProjectionKind>(module: GameIrModuleCandidate, kind: K): readonly Extract<ProjectionNode, { kind: K }>[] {
+function nodesOf<K extends ProjectionKind>(
+  module: GameIrModuleCandidate,
+  kind: K,
+): readonly Extract<ProjectionNode, { kind: K }>[] {
   const values = Object.freeze(
     module.nodes
       .filter(node => node.kind === kind)
       .map(node => {
         const payload = projectionPayload(node, module)
-        if (payload.kind !== kind) fail(`projection kind ${kind} does not match its value`)
+        if (payload.kind !== kind)
+          fail(`projection kind ${kind} does not match its value`)
         return Object.freeze({
           id: node.id,
           kind,
           producerMode: node.producerMode,
-          references: Object.freeze(node.references.map(reference => Object.freeze({ ...reference }))),
-          edges: Object.freeze(node.edges.map(edge => Object.freeze({ ...edge }))),
+          references: Object.freeze(
+            node.references.map(reference => Object.freeze({ ...reference })),
+          ),
+          edges: Object.freeze(
+            node.edges.map(edge => Object.freeze({ ...edge })),
+          ),
           bindings: Object.freeze({ ...node.bindings }),
           payload: Object.freeze(payload),
         }) as ProjectionNode
@@ -284,27 +375,59 @@ function nodesOf<K extends ProjectionKind>(module: GameIrModuleCandidate, kind: 
   return values as readonly Extract<ProjectionNode, { kind: K }>[]
 }
 
-function projections(candidate: GameIrCandidate): Pick<GameIrPublishedReader, 'executionProjection' | 'resourceProjection' | 'acceptanceProjection'> {
-  const execution = candidate.modules.find(module => module.moduleId === IMPLEMENTATION_MODULE_ID)
-  const resource = candidate.modules.find(module => module.moduleId === RESOURCE_MODULE_ID)
+function projections(
+  candidate: GameIrCandidate,
+): Pick<
+  GameIrPublishedReader,
+  'executionProjection' | 'resourceProjection' | 'acceptanceProjection'
+> {
+  const execution = candidate.modules.find(
+    module => module.moduleId === IMPLEMENTATION_MODULE_ID,
+  )
+  const resource = candidate.modules.find(
+    module => module.moduleId === RESOURCE_MODULE_ID,
+  )
   if (!execution || !resource) fail('typed projection module is missing')
   const units = nodesOf(execution, 'implementation-verification.unit')
-  const scenarios = nodesOf(execution, 'implementation-verification.acceptance-scenario')
+  const scenarios = nodesOf(
+    execution,
+    'implementation-verification.acceptance-scenario',
+  )
   const invariants = nodesOf(execution, 'implementation-verification.invariant')
-  const evidenceRequirements = nodesOf(execution, 'implementation-verification.evidence-requirement')
+  const evidenceRequirements = nodesOf(
+    execution,
+    'implementation-verification.evidence-requirement',
+  )
   const executionProjection = Object.freeze({
     moduleId: IMPLEMENTATION_MODULE_ID,
     units,
     scenarios,
     invariants,
     evidenceRequirements,
-    digest: digestGameIrValue({ units, scenarios, invariants, evidenceRequirements }),
+    digest: digestGameIrValue({
+      units,
+      scenarios,
+      invariants,
+      evidenceRequirements,
+    }),
   })
-  const logicalResources = nodesOf(resource, 'resource-realization.logical-resource')
-  const acquisitionProfiles = nodesOf(resource, 'resource-realization.acquisition-profile')
-  const deliveryTargets = nodesOf(resource, 'resource-realization.delivery-target')
+  const logicalResources = nodesOf(
+    resource,
+    'resource-realization.logical-resource',
+  )
+  const acquisitionProfiles = nodesOf(
+    resource,
+    'resource-realization.acquisition-profile',
+  )
+  const deliveryTargets = nodesOf(
+    resource,
+    'resource-realization.delivery-target',
+  )
   const variants = nodesOf(resource, 'resource-realization.variant')
-  const deliveryArtifacts = nodesOf(resource, 'resource-realization.delivery-artifact')
+  const deliveryArtifacts = nodesOf(
+    resource,
+    'resource-realization.delivery-artifact',
+  )
   const resourceProjection = Object.freeze({
     moduleId: RESOURCE_MODULE_ID,
     logicalResources,
@@ -312,7 +435,13 @@ function projections(candidate: GameIrCandidate): Pick<GameIrPublishedReader, 'e
     deliveryTargets,
     variants,
     deliveryArtifacts,
-    digest: digestGameIrValue({ logicalResources, acquisitionProfiles, deliveryTargets, variants, deliveryArtifacts }),
+    digest: digestGameIrValue({
+      logicalResources,
+      acquisitionProfiles,
+      deliveryTargets,
+      variants,
+      deliveryArtifacts,
+    }),
   })
   const acceptanceProjection = Object.freeze({
     scenarios,
@@ -323,7 +452,11 @@ function projections(candidate: GameIrCandidate): Pick<GameIrPublishedReader, 'e
   return { executionProjection, resourceProjection, acceptanceProjection }
 }
 
-function validateSemanticEvidence(value: unknown, authority: NonNullable<GameIrReplayAuthority['phase7Authority']>, closure: ReturnType<typeof assembleImplementationVerificationClosure>): readonly RecordValue[] {
+function validateSemanticEvidence(
+  value: unknown,
+  authority: NonNullable<GameIrReplayAuthority['phase7Authority']>,
+  closure: ReturnType<typeof assembleImplementationVerificationClosure>,
+): readonly RecordValue[] {
   if (!Array.isArray(value)) fail('manifest semanticEvidence must be an array')
   const expected = new Map<string, RecordValue>()
   const phase4 = authority.phase6Authority.phase5Authority.phase4Authority
@@ -333,72 +466,220 @@ function validateSemanticEvidence(value: unknown, authority: NonNullable<GameIrR
   const phase6 = authority.phase6Authority
   const phase6Closure = closure.phase6
   const entries = [
-    ['phase4', 'balance', phase4.balance.source.sourceDigest, phase4.balance.mechanical.receiptDigest, phase4.balance.semantic.receiptDigest, phase4Closure.balance.projectionDigest],
-    ['phase4', 'gameplay', phase4.gameplay.source.sourceDigest, phase4.gameplay.mechanical.receiptDigest, phase4.gameplay.semantic.receiptDigest, phase4Closure.gameplay.projectionDigest],
-    ['phase7', IMPLEMENTATION_MODULE_ID, authority.implementationVerification.source.sourceDigest, authority.implementationVerification.mechanical.receiptDigest, authority.implementationVerification.semantic.receiptDigest, closure.implementationVerification.semanticValidationResultDigest, closure.implementationVerification.projectionDigest],
-    ['phase5', 'presentation', phase5.presentation.source.sourceDigest, phase5.presentation.mechanical.receiptDigest, phase5.presentation.semantic.receiptDigest, digestGameIrValue(phase5.presentation.validation), phase5Closure.presentation.projectionDigest],
-    ['phase6', RESOURCE_MODULE_ID, phase6.resourceRealization.source.sourceDigest, phase6.resourceRealization.mechanical.receiptDigest, phase6.resourceRealization.semantic.receiptDigest, digestGameIrValue(phase6.resourceRealization.validation), phase6Closure.resourceRealization.projectionDigest],
-    ['phase5', 'world-scene', phase5.worldScene.source.sourceDigest, phase5.worldScene.mechanical.receiptDigest, phase5.worldScene.semantic.receiptDigest, digestGameIrValue(phase5.worldScene.validation), phase5Closure.worldScene.projectionDigest],
+    [
+      'phase4',
+      'balance',
+      phase4.balance.source.sourceDigest,
+      phase4.balance.mechanical.receiptDigest,
+      phase4.balance.semantic.receiptDigest,
+      phase4Closure.balance.projectionDigest,
+    ],
+    [
+      'phase4',
+      'gameplay',
+      phase4.gameplay.source.sourceDigest,
+      phase4.gameplay.mechanical.receiptDigest,
+      phase4.gameplay.semantic.receiptDigest,
+      phase4Closure.gameplay.projectionDigest,
+    ],
+    [
+      'phase7',
+      IMPLEMENTATION_MODULE_ID,
+      authority.implementationVerification.source.sourceDigest,
+      authority.implementationVerification.mechanical.receiptDigest,
+      authority.implementationVerification.semantic.receiptDigest,
+      closure.implementationVerification.semanticValidationResultDigest,
+      closure.implementationVerification.projectionDigest,
+    ],
+    [
+      'phase5',
+      'presentation',
+      phase5.presentation.source.sourceDigest,
+      phase5.presentation.mechanical.receiptDigest,
+      phase5.presentation.semantic.receiptDigest,
+      digestGameIrValue(phase5.presentation.validation),
+      phase5Closure.presentation.projectionDigest,
+    ],
+    [
+      'phase6',
+      RESOURCE_MODULE_ID,
+      phase6.resourceRealization.source.sourceDigest,
+      phase6.resourceRealization.mechanical.receiptDigest,
+      phase6.resourceRealization.semantic.receiptDigest,
+      digestGameIrValue(phase6.resourceRealization.validation),
+      phase6Closure.resourceRealization.projectionDigest,
+    ],
+    [
+      'phase5',
+      'world-scene',
+      phase5.worldScene.source.sourceDigest,
+      phase5.worldScene.mechanical.receiptDigest,
+      phase5.worldScene.semantic.receiptDigest,
+      digestGameIrValue(phase5.worldScene.validation),
+      phase5Closure.worldScene.projectionDigest,
+    ],
   ] as const
   for (const entry of entries) {
-    const [phase, moduleId, sourceDigest, mechanicalReceiptDigest, semanticReceiptDigest, ...rest] = entry
-    const valueObject: RecordValue = { phase, moduleId, sourceDigest, mechanicalReceiptDigest, semanticReceiptDigest }
-    if (phase !== 'phase4') valueObject.semanticValidationResultDigest = rest.shift()
+    const [
+      phase,
+      moduleId,
+      sourceDigest,
+      mechanicalReceiptDigest,
+      semanticReceiptDigest,
+      ...rest
+    ] = entry
+    const valueObject: RecordValue = {
+      phase,
+      moduleId,
+      sourceDigest,
+      mechanicalReceiptDigest,
+      semanticReceiptDigest,
+    }
+    if (phase !== 'phase4')
+      valueObject.semanticValidationResultDigest = rest.shift()
     valueObject.projectionDigest = rest[0]
     expected.set(moduleId, valueObject)
   }
   const actual = value.map((item, index) => {
     const candidate = record(item, `manifest semanticEvidence[${index}]`)
-    exact(candidate, Object.keys(candidate), `manifest semanticEvidence[${index}]`)
-    if (typeof candidate.moduleId !== 'string' || !expected.has(candidate.moduleId)) fail('manifest semanticEvidence has an unknown module')
+    exact(
+      candidate,
+      Object.keys(candidate),
+      `manifest semanticEvidence[${index}]`,
+    )
+    if (
+      typeof candidate.moduleId !== 'string' ||
+      !expected.has(candidate.moduleId)
+    )
+      fail('manifest semanticEvidence has an unknown module')
     const canonical = expected.get(candidate.moduleId)!
-    exact(candidate, Object.keys(canonical), `manifest semanticEvidence[${index}]`)
+    exact(
+      candidate,
+      Object.keys(canonical),
+      `manifest semanticEvidence[${index}]`,
+    )
     same(candidate, canonical, `semantic evidence for ${candidate.moduleId}`)
     return candidate
   })
-  if (actual.length !== GAME_IR_CANONICAL_MODULE_IDS.length || new Set(actual.map(item => item.moduleId)).size !== actual.length)
+  if (
+    actual.length !== GAME_IR_CANONICAL_MODULE_IDS.length ||
+    new Set(actual.map(item => item.moduleId)).size !== actual.length
+  )
     fail('manifest semanticEvidence must cover each module exactly once')
   return Object.freeze(actual)
 }
 
-function assertIdentity(run: DeliveryRun, request: ReturnType<typeof parseGameIrCompileRequest>, receipt: FoundationReadyReceipt): void {
+function assertIdentity(
+  run: DeliveryRun,
+  request: ReturnType<typeof parseGameIrCompileRequest>,
+  receipt: FoundationReadyReceipt,
+): void {
   const state = run.gameIrState
-  if (!state || state.status !== 'ready') fail('DeliveryRun must point to a committed ready Game IR')
+  if (!state || state.status !== 'ready')
+    fail('DeliveryRun must point to a committed ready Game IR')
   const identity = state.identity
-  if (identity.runId !== run.runId || identity.taskId !== request.taskId || identity.publicationId !== request.publicationId || identity.confirmedBriefDigest !== run.confirmedBriefDigest || identity.foundationRevision !== receipt.foundationRevision || identity.foundationReadyReceiptDigest !== receipt.receiptDigest)
+  if (
+    identity.runId !== run.runId ||
+    identity.taskId !== request.taskId ||
+    identity.publicationId !== request.publicationId ||
+    identity.confirmedBriefDigest !== run.confirmedBriefDigest ||
+    identity.foundationRevision !== receipt.foundationRevision ||
+    identity.foundationReadyReceiptDigest !== receipt.receiptDigest
+  )
     fail('DeliveryRun and committed Game IR identities do not match')
-  if (digestGameIrValue(request.foundation) !== digestGameIrValue(receipt)) fail('compile request Foundation READY receipt mismatch')
-  if (state.readyReceiptDigest !== digestGameIrValue(state.readyReceipt)) fail('DeliveryRun ready receipt digest mismatch')
+  if (digestGameIrValue(request.foundation) !== digestGameIrValue(receipt))
+    fail('compile request Foundation READY receipt mismatch')
+  if (state.readyReceiptDigest !== digestGameIrValue(state.readyReceipt))
+    fail('DeliveryRun ready receipt digest mismatch')
 }
 
-export async function readCommittedGameIr(input: { workspacePath: string; deliveryRun: DeliveryRun }): Promise<Readonly<GameIrPublishedReader>> {
+export async function readCommittedGameIr(input: {
+  workspacePath: string
+  deliveryRun: DeliveryRun
+}): Promise<Readonly<GameIrPublishedReader>> {
   const keys = Object.keys(input).sort()
-  if (keys.length !== 2 || keys[0] !== 'deliveryRun' || keys[1] !== 'workspacePath') fail('reader accepts only workspacePath and deliveryRun')
+  if (
+    keys.length !== 2 ||
+    keys[0] !== 'deliveryRun' ||
+    keys[1] !== 'workspacePath'
+  )
+    fail('reader accepts only workspacePath and deliveryRun')
   const run = input.deliveryRun
   if (!run || typeof run !== 'object') fail('DeliveryRun is required')
   const state = run.gameIrState
-  if (!state || state.status !== 'ready') fail('DeliveryRun must contain ready Game IR state')
-  if (run.phase !== 'DOCUMENT_REVIEW' || run.documentStep !== 'CHECKLIST_DRAFTING') fail('committed Game IR reader requires Checklist drafting boundary')
+  if (!state || state.status !== 'ready')
+    fail('DeliveryRun must contain ready Game IR state')
+  if (
+    run.phase !== 'DOCUMENT_REVIEW' ||
+    run.documentStep !== 'CHECKLIST_DRAFTING'
+  )
+    fail('committed Game IR reader requires Checklist drafting boundary')
   if (!run.foundationAuditState) fail('Foundation READY state is missing')
-  const foundationReadyReceipt = projectFoundationReadyReceipt({ state: run.foundationAuditState, projectId: run.projectId, confirmedBriefDigest: run.confirmedBriefDigest })
-  const replay = await new GameIrStageCheckpointLoader().load({ workspacePath: input.workspacePath, deliveryRun: run })
-  const phase7Authority = replay.phase7Authority
-  if (!phase7Authority) fail('checkpoint does not contain the complete Phase 7 authority')
+  const foundationReadyReceipt = projectFoundationReadyReceipt({
+    state: run.foundationAuditState,
+    projectId: run.projectId,
+    confirmedBriefDigest: run.confirmedBriefDigest,
+  })
+  const replay = await new GameIrStageCheckpointLoader().load({
+    workspacePath: input.workspacePath,
+    deliveryRun: run,
+  })
+  const phase7Authority =
+    replay.status === 'closed' ? replay.authority.phase7Authority : undefined
+  if (!phase7Authority)
+    fail('checkpoint does not contain the complete Phase 7 authority')
   const source = phase7Authority.implementationVerification.source
   const request = parseGameIrCompileRequest(source.compileRequest)
   assertIdentity(run, request, foundationReadyReceipt)
-  if (request.publicationId !== state.identity.publicationId) fail('publication identity mismatch')
-  const readyReceipt = await validateCommittedGameIr({ workspacePath: input.workspacePath, publicationId: state.identity.publicationId, phase7Authority } satisfies GameIrPublicationAuthority)
-  if (digestGameIrValue(readyReceipt) !== state.readyReceiptDigest) fail('committed READY receipt digest mismatch')
+  if (request.publicationId !== state.identity.publicationId)
+    fail('publication identity mismatch')
+  const readyReceipt = await validateCommittedGameIr({
+    workspacePath: input.workspacePath,
+    publicationId: state.identity.publicationId,
+    phase7Authority,
+  } satisfies GameIrPublicationAuthority)
+  if (digestGameIrValue(readyReceipt) !== state.readyReceiptDigest)
+    fail('committed READY receipt digest mismatch')
   parseGameIrReadyReceipt(readyReceipt)
   const root = resolve(input.workspacePath, readyReceipt.committedPath, '..')
   const manifest = await readJson(root, 'manifest.json', 'manifest')
-  exact(manifest, ['schemaVersion', 'gameIrSchemaVersion', 'publicationId', 'foundationRevision', 'foundationReceiptDigest', 'compileRequestDigest', 'compileRequest', 'candidateDigest', 'semanticEvidence', 'modules', 'dependencyGraphPath', 'dependencyGraphDigest'], 'manifest')
-  if (manifest.schemaVersion !== 'game-ir-manifest.v1' || manifest.gameIrSchemaVersion !== 'game-ir.v1' || manifest.publicationId !== request.publicationId || manifest.foundationRevision !== request.foundation.foundationRevision || manifest.foundationReceiptDigest !== request.foundation.receiptDigest) fail('manifest identity mismatch')
-  if (manifest.compileRequestDigest !== digestBytes(canonicalGameIrJson(request))) fail('manifest compile request digest mismatch')
+  exact(
+    manifest,
+    [
+      'schemaVersion',
+      'gameIrSchemaVersion',
+      'publicationId',
+      'foundationRevision',
+      'foundationReceiptDigest',
+      'compileRequestDigest',
+      'compileRequest',
+      'candidateDigest',
+      'semanticEvidence',
+      'modules',
+      'dependencyGraphPath',
+      'dependencyGraphDigest',
+    ],
+    'manifest',
+  )
+  if (
+    manifest.schemaVersion !== 'game-ir-manifest.v1' ||
+    manifest.gameIrSchemaVersion !== 'game-ir.v1' ||
+    manifest.publicationId !== request.publicationId ||
+    manifest.foundationRevision !== request.foundation.foundationRevision ||
+    manifest.foundationReceiptDigest !== request.foundation.receiptDigest
+  )
+    fail('manifest identity mismatch')
+  if (
+    manifest.compileRequestDigest !== digestBytes(canonicalGameIrJson(request))
+  )
+    fail('manifest compile request digest mismatch')
   same(manifest.compileRequest, request, 'manifest compile request')
   const moduleEntries = manifest.modules
-  if (!Array.isArray(moduleEntries) || moduleEntries.length !== GAME_IR_CANONICAL_MODULE_IDS.length) fail('manifest must contain exactly six modules')
+  if (
+    !Array.isArray(moduleEntries) ||
+    moduleEntries.length !== GAME_IR_CANONICAL_MODULE_IDS.length
+  )
+    fail('manifest must contain exactly six modules')
   const sectionIndex = source.authoritySectionIndex
   const modules: GameIrModuleCandidate[] = []
   const moduleDigests: Record<string, string> = {}
@@ -407,44 +688,161 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
   const rawModules: Array<Readonly<{ moduleId: string; nodes: unknown }>> = []
   for (const [index, raw] of moduleEntries.entries()) {
     const entry = record(raw, `manifest module[${index}]`)
-    exact(entry, ['moduleId', 'path', 'digest', 'sourceMapPath', 'sourceMapDigest'], `manifest module[${index}]`)
-    if (typeof entry.moduleId !== 'string' || !GAME_IR_CANONICAL_MODULE_IDS.includes(entry.moduleId as never)) fail('manifest module is not canonical')
-    const moduleFile = await readJson(root, String(entry.path), `module ${entry.moduleId}`)
-    exact(moduleFile, ['schemaVersion', 'foundationRevision', 'moduleId', 'candidateDigest', 'nodes'], `module ${entry.moduleId}`)
-    if (moduleFile.schemaVersion !== 'game-ir-module.v1' || moduleFile.moduleId !== entry.moduleId || moduleFile.foundationRevision !== request.foundation.foundationRevision) fail(`module ${entry.moduleId} identity mismatch`)
+    exact(
+      entry,
+      ['moduleId', 'path', 'digest', 'sourceMapPath', 'sourceMapDigest'],
+      `manifest module[${index}]`,
+    )
+    if (
+      typeof entry.moduleId !== 'string' ||
+      !GAME_IR_CANONICAL_MODULE_IDS.includes(entry.moduleId as never)
+    )
+      fail('manifest module is not canonical')
+    const moduleFile = await readJson(
+      root,
+      String(entry.path),
+      `module ${entry.moduleId}`,
+    )
+    exact(
+      moduleFile,
+      [
+        'schemaVersion',
+        'foundationRevision',
+        'moduleId',
+        'candidateDigest',
+        'nodes',
+      ],
+      `module ${entry.moduleId}`,
+    )
+    if (
+      moduleFile.schemaVersion !== 'game-ir-module.v1' ||
+      moduleFile.moduleId !== entry.moduleId ||
+      moduleFile.foundationRevision !== request.foundation.foundationRevision
+    )
+      fail(`module ${entry.moduleId} identity mismatch`)
     const moduleBytes = canonicalGameIrJson(moduleFile) + '\n'
     const moduleDigest = digestBytes(moduleBytes)
-    if (moduleDigest !== entry.digest || moduleDigest !== readyReceipt.moduleDigests[entry.moduleId as keyof typeof readyReceipt.moduleDigests]) fail(`module ${entry.moduleId} digest mismatch`)
-    const parsed = parseGameIrModuleCandidate({ moduleId: entry.moduleId, nodes: moduleFile.nodes }, { request, sections: sectionIndex, externalModules: rawModules })
+    if (
+      moduleDigest !== entry.digest ||
+      moduleDigest !==
+        readyReceipt.moduleDigests[
+          entry.moduleId as keyof typeof readyReceipt.moduleDigests
+        ]
+    )
+      fail(`module ${entry.moduleId} digest mismatch`)
+    const parsed = parseGameIrModuleCandidate(
+      { moduleId: entry.moduleId, nodes: moduleFile.nodes },
+      { request, sections: sectionIndex, externalModules: rawModules },
+    )
     modules.push(parsed)
     rawModules.push({ moduleId: entry.moduleId, nodes: moduleFile.nodes })
     moduleDigests[entry.moduleId] = moduleDigest
-    const source = await readJson(root, String(entry.sourceMapPath), `source map ${entry.moduleId}`)
-    exact(source, ['schemaVersion', 'foundationRevision', 'moduleId', 'bindings'], `source map ${entry.moduleId}`)
+    const source = await readJson(
+      root,
+      String(entry.sourceMapPath),
+      `source map ${entry.moduleId}`,
+    )
+    exact(
+      source,
+      ['schemaVersion', 'foundationRevision', 'moduleId', 'bindings'],
+      `source map ${entry.moduleId}`,
+    )
     const sourceBytes = canonicalGameIrJson(source) + '\n'
     const sourceDigest = digestBytes(sourceBytes)
-    if (sourceDigest !== entry.sourceMapDigest || sourceDigest !== readyReceipt.sourceMapDigests[entry.moduleId as keyof typeof readyReceipt.sourceMapDigests]) fail(`source map ${entry.moduleId} digest mismatch`)
-    same(source, sourceMap(parsed, request.foundation.foundationRevision), `source map ${entry.moduleId}`)
-    sourceMaps[entry.moduleId as GameIrModuleId] = sourceMap(parsed, request.foundation.foundationRevision)
+    if (
+      sourceDigest !== entry.sourceMapDigest ||
+      sourceDigest !==
+        readyReceipt.sourceMapDigests[
+          entry.moduleId as keyof typeof readyReceipt.sourceMapDigests
+        ]
+    )
+      fail(`source map ${entry.moduleId} digest mismatch`)
+    same(
+      source,
+      sourceMap(parsed, request.foundation.foundationRevision),
+      `source map ${entry.moduleId}`,
+    )
+    sourceMaps[entry.moduleId as GameIrModuleId] = sourceMap(
+      parsed,
+      request.foundation.foundationRevision,
+    )
     sourceMapDigests[entry.moduleId] = sourceDigest
   }
   const ordered = modules.map(module => module.moduleId)
   same(ordered, GAME_IR_CANONICAL_MODULE_IDS, 'module order or coverage')
-  const candidate = parseGameIrCandidate({ schemaVersion: 'game-ir.v1', taskId: request.taskId, foundationRevision: request.foundation.foundationRevision, modules: rawModules }, { request, sections: sectionIndex })
+  const candidate = parseGameIrCandidate(
+    {
+      schemaVersion: 'game-ir.v1',
+      taskId: request.taskId,
+      foundationRevision: request.foundation.foundationRevision,
+      modules: rawModules,
+    },
+    { request, sections: sectionIndex },
+  )
   const candidateDigest = digestGameIrValue(candidate)
-  if (candidateDigest !== manifest.candidateDigest) fail('candidate digest mismatch')
+  if (candidateDigest !== manifest.candidateDigest)
+    fail('candidate digest mismatch')
   const closure = assembleImplementationVerificationClosure(phase7Authority)
-  if (candidateDigest !== closure.candidateDigest) fail('candidate is detached from checkpoint closure')
-  const dependency = await readJson(root, String(manifest.dependencyGraphPath), 'dependency graph')
-  exact(dependency, ['schemaVersion', 'foundationRevision', 'edges'], 'dependency graph')
+  if (candidateDigest !== closure.candidateDigest)
+    fail('candidate is detached from checkpoint closure')
+  const dependency = await readJson(
+    root,
+    String(manifest.dependencyGraphPath),
+    'dependency graph',
+  )
+  exact(
+    dependency,
+    ['schemaVersion', 'foundationRevision', 'edges'],
+    'dependency graph',
+  )
   const dependencyBytes = canonicalGameIrJson(dependency) + '\n'
   const dependencyDigest = digestBytes(dependencyBytes)
-  if (dependencyDigest !== manifest.dependencyGraphDigest || dependencyDigest !== readyReceipt.dependencyGraphDigest) fail('dependency graph digest mismatch')
+  if (
+    dependencyDigest !== manifest.dependencyGraphDigest ||
+    dependencyDigest !== readyReceipt.dependencyGraphDigest
+  )
+    fail('dependency graph digest mismatch')
   same(dependency, dependencyGraph(candidate), 'dependency graph')
-  const semanticEvidence = validateSemanticEvidence(manifest.semanticEvidence, phase7Authority, closure)
+  const semanticEvidence = validateSemanticEvidence(
+    manifest.semanticEvidence,
+    phase7Authority,
+    closure,
+  )
   const marker = await readJson(root, 'COMMITTED.json', 'COMMITTED marker')
-  exact(marker, ['schemaVersion', 'status', 'authorityDigest', 'manifestDigest', 'candidateDigest', 'compileRequestDigest', 'publicationId', 'foundationRevision', 'foundationReceiptDigest', 'moduleDigests', 'sourceMapDigests', 'dependencyGraphDigest'], 'COMMITTED marker')
-  if (marker.schemaVersion !== 'game-ir-commit.v1' || marker.status !== 'committed' || marker.manifestDigest !== readyReceipt.manifestDigest || marker.candidateDigest !== candidateDigest || marker.compileRequestDigest !== manifest.compileRequestDigest || marker.publicationId !== request.publicationId || marker.foundationRevision !== request.foundation.foundationRevision || marker.foundationReceiptDigest !== request.foundation.receiptDigest || digestGameIrValue(marker.moduleDigests) !== digestGameIrValue(moduleDigests) || digestGameIrValue(marker.sourceMapDigests) !== digestGameIrValue(sourceMapDigests) || marker.dependencyGraphDigest !== dependencyDigest) fail('COMMITTED marker mismatch')
+  exact(
+    marker,
+    [
+      'schemaVersion',
+      'status',
+      'authorityDigest',
+      'manifestDigest',
+      'candidateDigest',
+      'compileRequestDigest',
+      'publicationId',
+      'foundationRevision',
+      'foundationReceiptDigest',
+      'moduleDigests',
+      'sourceMapDigests',
+      'dependencyGraphDigest',
+    ],
+    'COMMITTED marker',
+  )
+  if (
+    marker.schemaVersion !== 'game-ir-commit.v1' ||
+    marker.status !== 'committed' ||
+    marker.manifestDigest !== readyReceipt.manifestDigest ||
+    marker.candidateDigest !== candidateDigest ||
+    marker.compileRequestDigest !== manifest.compileRequestDigest ||
+    marker.publicationId !== request.publicationId ||
+    marker.foundationRevision !== request.foundation.foundationRevision ||
+    marker.foundationReceiptDigest !== request.foundation.receiptDigest ||
+    digestGameIrValue(marker.moduleDigests) !==
+      digestGameIrValue(moduleDigests) ||
+    digestGameIrValue(marker.sourceMapDigests) !==
+      digestGameIrValue(sourceMapDigests) ||
+    marker.dependencyGraphDigest !== dependencyDigest
+  )
+    fail('COMMITTED marker mismatch')
   const projectionValues = projections(candidate)
   const typedSourceMaps: Record<GameIrModuleId, GameIrSourceMap> = {
     gameplay: sourceMaps.gameplay!,
@@ -478,6 +876,35 @@ export async function readCommittedGameIr(input: { workspacePath: string; delive
     dependencyGraphDigest: manifest.dependencyGraphDigest as string,
   }
   const evidenceDigest = digestGameIrValue(semanticEvidence)
-  const closureDigest = digestGameIrValue({ candidateDigest, semanticEvidence, manifestDigest: readyReceipt.manifestDigest, dependencyGraphDigest: dependencyDigest })
-  return Object.freeze({ foundationReadyReceipt, readyReceipt, candidate, modules: Object.freeze(modules), sourceMap: Object.freeze(typedSourceMaps), sourceMaps: Object.freeze(typedSourceMaps), dependencyGraph: dependency as GameIrDependencyGraph, semanticEvidence: semanticEvidence as readonly GameIrSemanticEvidence[], manifest: typedManifest, ...projectionValues, digests: Object.freeze({ candidate: candidateDigest, manifest: readyReceipt.manifestDigest, dependencyGraph: dependencyDigest, modules: Object.freeze(moduleDigests) as Readonly<Record<GameIrModuleId, string>>, sourceMaps: Object.freeze(sourceMapDigests) as Readonly<Record<GameIrModuleId, string>>, evidence: evidenceDigest, closure: closureDigest }) })
+  const closureDigest = digestGameIrValue({
+    candidateDigest,
+    semanticEvidence,
+    manifestDigest: readyReceipt.manifestDigest,
+    dependencyGraphDigest: dependencyDigest,
+  })
+  return Object.freeze({
+    foundationReadyReceipt,
+    readyReceipt,
+    candidate,
+    modules: Object.freeze(modules),
+    sourceMap: Object.freeze(typedSourceMaps),
+    sourceMaps: Object.freeze(typedSourceMaps),
+    dependencyGraph: dependency as GameIrDependencyGraph,
+    semanticEvidence: semanticEvidence as readonly GameIrSemanticEvidence[],
+    manifest: typedManifest,
+    ...projectionValues,
+    digests: Object.freeze({
+      candidate: candidateDigest,
+      manifest: readyReceipt.manifestDigest,
+      dependencyGraph: dependencyDigest,
+      modules: Object.freeze(moduleDigests) as Readonly<
+        Record<GameIrModuleId, string>
+      >,
+      sourceMaps: Object.freeze(sourceMapDigests) as Readonly<
+        Record<GameIrModuleId, string>
+      >,
+      evidence: evidenceDigest,
+      closure: closureDigest,
+    }),
+  })
 }

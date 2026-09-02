@@ -436,6 +436,12 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
   是唯一 policy，不是 fallback。
 - Missing/ambiguous semantic projection 使用 packet/source-bound、node-qualified
   discriminated diagnostic；不写入 Foundation state。
+- Domain projection 的模型输出使用唯一 service-owned semantic slice stream：
+  slice 由 projection contract 的 node-kind dependency graph 机械派生，逐片
+  strict-admit 到 operation-local digest journal；全部 slice 通过后才由既有
+  full-domain gate 写入唯一 canonical operation manifest。journal 不是第二
+  authority，manifest commit 后必须删除。禁止 complete-domain StructuredOutput、
+  token/byte/time/count 分片、compatibility reader 或第二 checkpoint/publication。
 - AST/static detector 对新增 production files 禁止 partial candidate、
   publication、controller/store/DeliveryRun/Foundation Issue、provider
   dispatch 和五个 placeholder module；protected 21-file parity 与 full

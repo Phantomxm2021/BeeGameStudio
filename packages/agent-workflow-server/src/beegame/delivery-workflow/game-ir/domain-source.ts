@@ -348,7 +348,10 @@ export function buildGameIrDomainSourceEnvelope(
     if (!fullIndex.some(section => section.documentPath === documentPath))
       fail('sectionIndex must contain all eight canonical documents')
   }
-  if (digestGameIrSourceSectionIndex(fullIndex) !== request.foundation.sectionIndexDigest)
+  if (
+    digestGameIrSourceSectionIndex(fullIndex) !==
+    request.foundation.sectionIndexDigest
+  )
     fail('sectionIndex digest does not match the Foundation receipt')
 
   const expectedDocuments = canonicalGameIrModuleSourceDocuments(moduleId)

@@ -53,9 +53,7 @@ import {
 import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
 import { digestGameIrValue } from '../beegame/delivery-workflow/game-ir/model'
-import {
-  commitAuthoredFoundationDocument,
-} from '../beegame/authored-document-receipt'
+import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
@@ -67,8 +65,16 @@ import {
   computeResourceInventoryRevision,
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
-import { createFoundationAuditState, parseFoundationAuditState } from '../beegame/delivery-workflow/foundation-audit-state'
-import { foundationRevisionPacketDigest, foundationRevisionPacketPath, foundationRevisionStagePath, writeFoundationRevisionPacket } from '../beegame/delivery-workflow/foundation-revision-stage'
+import {
+  createFoundationAuditState,
+  parseFoundationAuditState,
+} from '../beegame/delivery-workflow/foundation-audit-state'
+import {
+  foundationRevisionPacketDigest,
+  foundationRevisionPacketPath,
+  foundationRevisionStagePath,
+  writeFoundationRevisionPacket,
+} from '../beegame/delivery-workflow/foundation-revision-stage'
 import { FOUNDATION_AUDIT_PRODUCTION_MANIFEST } from '../beegame/delivery-workflow/foundation-audit-production-manifest'
 import {
   canonicalFoundationAuthorityProjectionBytes,
@@ -98,7 +104,10 @@ function syntheticFoundationReadyState(revision: string) {
   const reviewRoot = `.beegame/audit/foundation/${revision}/review/${reviewDigest}`
   const seed = createFoundationAuditState({
     revision,
-    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+    documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+      path,
+      digest,
+    })),
     manifest: {
       revision,
       status: 'index_staged',
@@ -106,24 +115,39 @@ function syntheticFoundationReadyState(revision: string) {
       sectionIndexDigest: digest,
     },
   })
-  const usage = { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  const usage = {
+    input_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  }
   return parseFoundationAuditState({
     ...seed,
     status: 'audit_ready',
     phaseStartedAt: '2026-01-01T00:00:00.000Z',
     derived: {
-      manifestPath: `.beegame/audit/foundation/${revision}/derived/manifest.json`, manifestDigest: digest,
-      markerPath: `.beegame/audit/foundation/${revision}/derived/COMMITTED.json`, markerDigest: digest,
-      factStorePath: `.beegame/audit/foundation/${revision}/derived/fact-store.json`, factStoreDigest: digest,
-      sectionIndexPath: `.beegame/audit/foundation/${revision}/derived/section-index.json`, sectionIndexDigest: digest,
+      manifestPath: `.beegame/audit/foundation/${revision}/derived/manifest.json`,
+      manifestDigest: digest,
+      markerPath: `.beegame/audit/foundation/${revision}/derived/COMMITTED.json`,
+      markerDigest: digest,
+      factStorePath: `.beegame/audit/foundation/${revision}/derived/fact-store.json`,
+      factStoreDigest: digest,
+      sectionIndexPath: `.beegame/audit/foundation/${revision}/derived/section-index.json`,
+      sectionIndexDigest: digest,
     },
     deterministic: {
       reviewDigest: digest,
-      issueRegistryPath: `.beegame/audit/foundation/${revision}/staging/review/issue-registry.json`, issueRegistryDigest: digest,
-      manifestPath: `.beegame/audit/foundation/${revision}/staging/review/manifest.json`, manifestDigest: digest,
-      markerPath: `.beegame/audit/foundation/${revision}/staging/review/COMMITTED.json`, markerDigest: digest,
+      issueRegistryPath: `.beegame/audit/foundation/${revision}/staging/review/issue-registry.json`,
+      issueRegistryDigest: digest,
+      manifestPath: `.beegame/audit/foundation/${revision}/staging/review/manifest.json`,
+      manifestDigest: digest,
+      markerPath: `.beegame/audit/foundation/${revision}/staging/review/COMMITTED.json`,
+      markerDigest: digest,
       catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
-      contractGraphDigest: digest, sectionIndexDigest: digest, factStoreDigest: digest,
+      contractGraphDigest: digest,
+      sectionIndexDigest: digest,
+      factStoreDigest: digest,
     },
     semantic: { aggregateUsage: usage },
     tasks: FOUNDATION_SEMANTIC_CHECKS.map(check => ({
@@ -149,14 +173,22 @@ function syntheticFoundationReadyState(revision: string) {
         finishedAt: '2026-01-01T00:00:00.000Z',
         terminalResult: {},
       },
-      admittedResult: { checkId: check.checkId, packetIdentity: digest, outcome: 'PASS' as const },
+      admittedResult: {
+        checkId: check.checkId,
+        packetIdentity: digest,
+        outcome: 'PASS' as const,
+      },
     })),
     review: {
       reviewDigest,
-      issueRegistryPath: `${reviewRoot}/issue-registry.json`, issueRegistryDigest: reviewDigest,
-      manifestPath: `${reviewRoot}/manifest.json`, manifestDigest: reviewDigest,
-      markerPath: `${reviewRoot}/COMMITTED.json`, markerDigest: reviewDigest,
-      sectionIndexDigest: digest, factStoreDigest: digest,
+      issueRegistryPath: `${reviewRoot}/issue-registry.json`,
+      issueRegistryDigest: reviewDigest,
+      manifestPath: `${reviewRoot}/manifest.json`,
+      manifestDigest: reviewDigest,
+      markerPath: `${reviewRoot}/COMMITTED.json`,
+      markerDigest: reviewDigest,
+      sectionIndexDigest: digest,
+      factStoreDigest: digest,
       semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest,
       issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
     },
@@ -210,7 +242,13 @@ async function materializeFoundationReadyState(
     semanticResultDigests: resultLedger,
     issues: [],
   })
-  const usage = { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  const usage = {
+    input_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  }
   const seed = createFoundationAuditState({
     revision,
     documentDigests: staged.documentDigests,
@@ -224,16 +262,23 @@ async function materializeFoundationReadyState(
     status: 'audit_ready',
     phaseStartedAt: '2026-01-01T00:00:00.000Z',
     derived: {
-      manifestPath: `${derivedRoot}/manifest.json`, manifestDigest: derived.digests.manifest,
-      markerPath: `${derivedRoot}/COMMITTED.json`, markerDigest: derived.digests.marker,
-      factStorePath: `${derivedRoot}/fact-store.json`, factStoreDigest: derived.digests.factStore,
-      sectionIndexPath: `${derivedRoot}/section-index.json`, sectionIndexDigest: derived.digests.sectionIndex,
+      manifestPath: `${derivedRoot}/manifest.json`,
+      manifestDigest: derived.digests.manifest,
+      markerPath: `${derivedRoot}/COMMITTED.json`,
+      markerDigest: derived.digests.marker,
+      factStorePath: `${derivedRoot}/fact-store.json`,
+      factStoreDigest: derived.digests.factStore,
+      sectionIndexPath: `${derivedRoot}/section-index.json`,
+      sectionIndexDigest: derived.digests.sectionIndex,
     },
     deterministic: {
       reviewDigest: deterministic.reviewDigest,
-      issueRegistryPath: `${deterministicRoot}/issue-registry.json`, issueRegistryDigest: deterministic.digests.issueRegistry,
-      manifestPath: `${deterministicRoot}/manifest.json`, manifestDigest: deterministic.digests.manifest,
-      markerPath: `${deterministicRoot}/COMMITTED.json`, markerDigest: deterministic.digests.marker,
+      issueRegistryPath: `${deterministicRoot}/issue-registry.json`,
+      issueRegistryDigest: deterministic.digests.issueRegistry,
+      manifestPath: `${deterministicRoot}/manifest.json`,
+      manifestDigest: deterministic.digests.manifest,
+      markerPath: `${deterministicRoot}/COMMITTED.json`,
+      markerDigest: deterministic.digests.marker,
       catalogVersion: deterministic.catalogVersion,
       contractGraphDigest: deterministic.contractGraphDigest,
       sectionIndexDigest: deterministic.sectionIndexDigest,
@@ -271,9 +316,12 @@ async function materializeFoundationReadyState(
     })),
     review: {
       reviewDigest: review.reviewDigest,
-      issueRegistryPath: `${reviewRoot}/issue-registry.json`, issueRegistryDigest: review.digests.issueRegistry,
-      manifestPath: `${reviewRoot}/manifest.json`, manifestDigest: review.digests.manifest,
-      markerPath: `${reviewRoot}/COMMITTED.json`, markerDigest: review.digests.marker,
+      issueRegistryPath: `${reviewRoot}/issue-registry.json`,
+      issueRegistryDigest: review.digests.issueRegistry,
+      manifestPath: `${reviewRoot}/manifest.json`,
+      manifestDigest: review.digests.manifest,
+      markerPath: `${reviewRoot}/COMMITTED.json`,
+      markerDigest: review.digests.marker,
       sectionIndexDigest: review.sectionIndexDigest,
       factStoreDigest: review.factStoreDigest,
       semanticManifestDigest: review.semanticManifestDigest,
@@ -285,7 +333,8 @@ async function materializeFoundationReadyState(
 /** Existing downstream recovery fixtures carry synthetic v46 authority refs. */
 function withSyntheticV46DownstreamAuthority(run: DeliveryRun): DeliveryRun {
   const digest = 'a'.repeat(64)
-  const foundationRevision = run.foundationAuditState?.revision ?? 'synthetic-foundation'
+  const foundationRevision =
+    run.foundationAuditState?.revision ?? 'synthetic-foundation'
   const moduleDigests = {
     balance: digest,
     gameplay: digest,
@@ -310,7 +359,9 @@ function withSyntheticV46DownstreamAuthority(run: DeliveryRun): DeliveryRun {
   const readyReceiptDigest = digestGameIrValue(readyReceipt)
   return {
     ...run,
-    foundationAuditState: run.foundationAuditState ?? syntheticFoundationReadyState(foundationRevision),
+    foundationAuditState:
+      run.foundationAuditState ??
+      syntheticFoundationReadyState(foundationRevision),
     gameIrState: {
       status: 'ready',
       identity: {
@@ -398,7 +449,8 @@ function exactResumeCheckpointsForWorker(
     workerType === 'foundation-fact-extractor' ||
     workerType === 'foundation-semantic-reviewer' ||
     workerType === 'foundation-document-reviser'
-  ) return []
+  )
+    return []
   if (workerType === 'game-ir-compiler')
     return ['before-dispatch', 'open', 'terminal-accepted']
   return EXACT_RESUME_WORKER_CHECKPOINTS.filter(
@@ -496,20 +548,36 @@ async function commitMatrixFoundationDocument(input: {
     input.body ?? matrixCompleteDocument(input.path),
   )
   const contract = getGameDocumentContract(input.path)
-  const documents = new Map(await Promise.all(
-    contract.upstreamSections.map(async source => [
-      source.path,
-      await readFile(join(input.workspacePath, source.path), 'utf8'),
-    ] as const),
-  ))
+  const documents = new Map(
+    await Promise.all(
+      contract.upstreamSections.map(
+        async source =>
+          [
+            source.path,
+            await readFile(join(input.workspacePath, source.path), 'utf8'),
+          ] as const,
+      ),
+    ),
+  )
   const projection = projectFoundationAuthority({
     targetPath: input.path,
-    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    availableUpstreamPaths: contract.upstreamSections.map(
+      source => source.path,
+    ),
     documents,
   })
-  const projectionPath = join(input.workspacePath, foundationProjectionRelativePath(input.dispatchId))
-  await mkdir(join(input.workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
-  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
+  const projectionPath = join(
+    input.workspacePath,
+    foundationProjectionRelativePath(input.dispatchId),
+  )
+  await mkdir(
+    join(input.workspacePath, '.beegame/workflow/document-projections'),
+    { recursive: true },
+  )
+  await writeFile(
+    projectionPath,
+    canonicalFoundationAuthorityProjectionBytes(projection),
+  )
   await commitAuthoredFoundationDocument({
     workspacePath: input.workspacePath,
     dispatchId: input.dispatchId,
@@ -622,17 +690,36 @@ async function matrixTerminal(input: {
     }
   }
   if (request.workerType === 'game-ir-compiler')
-    return {
-      workerType: request.workerType,
-      status: 'failed' as const,
-      runId: request.runId,
-      dispatchId: request.dispatchId!,
-      taskId: request.taskId!,
-      revision: request.revision,
-      compileRequestDigest: String(request.contract.compileRequestDigest),
-      foundationReadyReceiptDigest: String(request.contract.foundationReadyReceiptDigest),
-      reason: 'missing 1 required section',
-    }
+    return request.contract.kind === 'projection'
+      ? {
+          workerType: request.workerType,
+          operation: 'projection' as const,
+          sliceId: String(request.contract.currentSlice),
+          status: 'failed' as const,
+          runId: request.runId,
+          dispatchId: request.dispatchId!,
+          taskId: request.taskId!,
+          revision: request.revision,
+          compileRequestDigest: String(request.contract.compileRequestDigest),
+          foundationReadyReceiptDigest: String(
+            request.contract.foundationReadyReceiptDigest,
+          ),
+          reason: 'projection operation needs repair',
+        }
+      : {
+          workerType: request.workerType,
+          operation: 'validation' as const,
+          status: 'failed' as const,
+          runId: request.runId,
+          dispatchId: request.dispatchId!,
+          taskId: request.taskId!,
+          revision: request.revision,
+          compileRequestDigest: String(request.contract.compileRequestDigest),
+          foundationReadyReceiptDigest: String(
+            request.contract.foundationReadyReceiptDigest,
+          ),
+          reason: 'validation operation needs repair',
+        }
   if (request.workerType === 'resource-planner') {
     await writeBeeGameAssetManifest(workspacePath, {
       version: 8,
@@ -849,14 +936,17 @@ async function createWorkerRecoveryRun(input: {
     input.workspacePath,
     confirmedBriefDigest,
   )
-  const compilerFoundationAuditState = input.workerType === 'game-ir-compiler'
-    ? await materializeFoundationReadyState(input.workspacePath, documentRevision)
-    : undefined
+  const compilerFoundationAuditState =
+    input.workerType === 'game-ir-compiler'
+      ? await materializeFoundationReadyState(
+          input.workspacePath,
+          documentRevision,
+        )
+      : undefined
   let workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
-  const needsManifest = ![
-    'document-author',
-    'resource-planner',
-  ].includes(input.workerType)
+  const needsManifest = !['document-author', 'resource-planner'].includes(
+    input.workerType,
+  )
   const needsInventoryGap = input.workerType === 'resource-curator'
   const needsDeliveryArtifacts = [
     'atomic-task-planner',
@@ -991,7 +1081,9 @@ async function createWorkerRecoveryRun(input: {
       ...common,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
-      foundationDraftState: { completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS] },
+      foundationDraftState: {
+        completedPaths: [...CANONICAL_FOUNDATION_DOCUMENTS],
+      },
       foundationAuditState: compilerFoundationAuditState!,
       evidence: {},
       resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
@@ -1025,9 +1117,17 @@ async function createWorkerRecoveryRun(input: {
       },
     })
   if (input.workerType === 'atomic-task-planner')
-    return withSyntheticV46DownstreamAuthority({ ...common, phase: 'ATOMIC_TASK_PLANNING', tasks: [] })
+    return withSyntheticV46DownstreamAuthority({
+      ...common,
+      phase: 'ATOMIC_TASK_PLANNING',
+      tasks: [],
+    })
   if (input.workerType === 'implementation-worker')
-    return withSyntheticV46DownstreamAuthority({ ...common, phase: 'IMPLEMENTATION', tasks: [task] })
+    return withSyntheticV46DownstreamAuthority({
+      ...common,
+      phase: 'IMPLEMENTATION',
+      tasks: [task],
+    })
   const completedTask: AtomicTask = {
     ...task,
     status: 'completed',
@@ -1503,26 +1603,84 @@ describe('delivery workflow recovery', () => {
     const revision = 'recovery-facts'
     const seed = createFoundationAuditState({
       revision,
-      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+        path,
+        digest,
+      })),
+      manifest: {
+        revision,
+        status: 'index_staged',
+        catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+        sectionIndexDigest: digest,
+      },
     })
     const foundationAuditState = parseFoundationAuditState({
       ...seed,
       status: 'extracting_facts',
       phaseStartedAt: '2020-01-01T00:00:00.000Z',
-      tasks: [{
-        taskId: 'fact-0', kind: 'document-facts', revision, packetDigest: digest, factKeyCount: 1, modelTier: 'fast', status: 'completed', attempt: 1,
-        terminalDigest: digest, receiptPath: `.beegame/audit/foundation/${revision}/staging/receipts/fact-0.json`, receiptDigest: digest,
-        usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 }, durationMs: 42,
-        dispatch: { dispatchId: 'fact-dispatch', workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'fact-0', revision, status: 'completed', startedAt: '2020-01-01T00:00:00.000Z', finishedAt: '2020-01-01T00:00:01.000Z', terminalResult: { workerType: 'foundation-fact-extractor', status: 'completed', runId: 'run', dispatchId: 'fact-dispatch', taskId: 'fact-0', revision, packetDigest: digest, results: [] } },
-      }],
+      tasks: [
+        {
+          taskId: 'fact-0',
+          kind: 'document-facts',
+          revision,
+          packetDigest: digest,
+          factKeyCount: 1,
+          modelTier: 'fast',
+          status: 'completed',
+          attempt: 1,
+          terminalDigest: digest,
+          receiptPath: `.beegame/audit/foundation/${revision}/staging/receipts/fact-0.json`,
+          receiptDigest: digest,
+          usage: {
+            input_tokens: 10,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            completion_tokens: 2,
+            total_tokens: 12,
+          },
+          durationMs: 42,
+          dispatch: {
+            dispatchId: 'fact-dispatch',
+            workerType: 'foundation-fact-extractor',
+            phase: 'DOCUMENT_REVIEW',
+            taskId: 'fact-0',
+            revision,
+            status: 'completed',
+            startedAt: '2020-01-01T00:00:00.000Z',
+            finishedAt: '2020-01-01T00:00:01.000Z',
+            terminalResult: {
+              workerType: 'foundation-fact-extractor',
+              status: 'completed',
+              runId: 'run',
+              dispatchId: 'fact-dispatch',
+              taskId: 'fact-0',
+              revision,
+              packetDigest: digest,
+              results: [],
+            },
+          },
+        },
+      ],
     })
-    const run = { ...createTestDeliveryRun({ runId: 'recovery-durable-evidence', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'DOCUMENT_REVIEW' as const, documentStep: 'FOUNDATION_REVIEW' as const, status: 'needs_action' as const, blockedReason: 'durable evidence test', foundationAuditState }
+    const run = {
+      ...createTestDeliveryRun({
+        runId: 'recovery-durable-evidence',
+        projectId: 'recovery-project',
+        ownerId: RECOVERY_OWNER_ID,
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'needs_action' as const,
+      blockedReason: 'durable evidence test',
+      foundationAuditState,
+    }
     const store = createRunStore(workspace, RECOVERY_OWNER_ID)
     await store.save(run)
     const recovered = await resumeRun({ store, runId: run.runId })
     expect(recovered.foundationAuditState).toEqual(foundationAuditState)
-    expect(recovered.foundationAuditState?.phaseStartedAt).toBe('2020-01-01T00:00:00.000Z')
+    expect(recovered.foundationAuditState?.phaseStartedAt).toBe(
+      '2020-01-01T00:00:00.000Z',
+    )
     expect(recovered.foundationAuditState?.tasks[0]).toMatchObject({
       attempt: 1,
       usage: { total_tokens: 12 },
@@ -1540,8 +1698,16 @@ describe('delivery workflow recovery', () => {
     const digest = 'd'.repeat(64)
     const revision = 'terminal-retry'
     const documents = [
-      { taskId: 'revision-a', documentPath: 'docs/GDD.md' as const, sectionId: 'vision' },
-      { taskId: 'revision-b', documentPath: 'docs/LEVEL_SCENE_DESIGN.md' as const, sectionId: 'scene_flow' },
+      {
+        taskId: 'revision-a',
+        documentPath: 'docs/GDD.md' as const,
+        sectionId: 'vision',
+      },
+      {
+        taskId: 'revision-b',
+        documentPath: 'docs/LEVEL_SCENE_DESIGN.md' as const,
+        sectionId: 'scene_flow',
+      },
     ]
     const baseDocumentDigest = new Map<string, string>()
     for (const document of documents) {
@@ -1549,21 +1715,45 @@ describe('delivery workflow recovery', () => {
       const documentPath = join(workspace, document.documentPath)
       await mkdir(join(documentPath, '..'), { recursive: true })
       await writeFile(documentPath, markdown)
-      baseDocumentDigest.set(document.taskId, createHash('sha256').update(markdown).digest('hex'))
+      baseDocumentDigest.set(
+        document.taskId,
+        createHash('sha256').update(markdown).digest('hex'),
+      )
     }
     const packetDigests = new Map<string, string>()
     const packetPaths = new Map<string, string>()
     for (const document of documents) {
-      const packet = { schema: 'test-foundation-revision-packet', revision, round: 1, taskId: document.taskId, documentPath: document.documentPath, sections: [] }
+      const packet = {
+        schema: 'test-foundation-revision-packet',
+        revision,
+        round: 1,
+        taskId: document.taskId,
+        documentPath: document.documentPath,
+        sections: [],
+      }
       const packetDigest = foundationRevisionPacketDigest(packet)
       packetDigests.set(document.taskId, packetDigest)
-      packetPaths.set(document.taskId, await writeFoundationRevisionPacket({ workspacePath: workspace, revision, round: 1, taskId: document.taskId, documentPath: document.documentPath, packet, packetDigest }))
+      packetPaths.set(
+        document.taskId,
+        await writeFoundationRevisionPacket({
+          workspacePath: workspace,
+          revision,
+          round: 1,
+          taskId: document.taskId,
+          documentPath: document.documentPath,
+          packet,
+          packetDigest,
+        }),
+      )
     }
     const bundleId = `${revision}.bundle.1`
     const foundationAuditState = parseFoundationAuditState({
       ...createFoundationAuditState({
         revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
         manifest: {
           revision,
           status: 'index_staged',
@@ -1573,22 +1763,79 @@ describe('delivery workflow recovery', () => {
       }),
       status: 'revising' as const,
       authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        issueAuthority: {
+          kind: 'review' as const,
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
+        derivedDigests: {
+          sectionIndex: digest,
+          factStore: digest,
+          manifest: digest,
+        },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
       },
-      roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
+      roundBefore: {
+        documentRevision: 'revision-before',
+        issueRegistryDigest: digest,
+        issueAuthority: {
+          kind: 'review',
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
+      },
       round: 1 as const,
       activeBundleId: bundleId,
-      revisionBundles: [{ bundleId, status: 'active' as const, round: 1, baseDocumentRevision: revision, baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), remediationDigest: digest, taskIds: documents.map(document => document.taskId), frozenTaskIds: [] }],
+      revisionBundles: [
+        {
+          bundleId,
+          status: 'active' as const,
+          round: 1,
+          baseDocumentRevision: revision,
+          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+            path,
+            digest,
+          })),
+          remediationDigest: digest,
+          taskIds: documents.map(document => document.taskId),
+          frozenTaskIds: [],
+        },
+      ],
       phaseStartedAt: new Date().toISOString(),
       issueSummary: { total: 2, blocker: 0, high: 2, medium: 0, low: 0 },
       tasks: [
-        ...documents.map(document => ({ taskId: document.taskId, kind: 'document-revision' as const, revision, round: 1 as const, bundleId, packetPath: packetPaths.get(document.taskId)!, packetDigest: packetDigests.get(document.taskId)!, status: 'pending' as const, attempt: 0, documentPath: document.documentPath, issueIds: ['AUD-1'], sectionIds: [document.sectionId], stagedPath: foundationRevisionStagePath(revision, document.documentPath), baseDocumentDigest: baseDocumentDigest.get(document.taskId)!, dependencyDigests: {}, frozen: false })),
+        ...documents.map(document => ({
+          taskId: document.taskId,
+          kind: 'document-revision' as const,
+          revision,
+          round: 1 as const,
+          bundleId,
+          packetPath: packetPaths.get(document.taskId)!,
+          packetDigest: packetDigests.get(document.taskId)!,
+          status: 'pending' as const,
+          attempt: 0,
+          documentPath: document.documentPath,
+          issueIds: ['AUD-1'],
+          sectionIds: [document.sectionId],
+          stagedPath: foundationRevisionStagePath(
+            revision,
+            document.documentPath,
+          ),
+          baseDocumentDigest: baseDocumentDigest.get(document.taskId)!,
+          dependencyDigests: {},
+          frozen: false,
+        })),
       ],
     })
     const run = {
-      ...createTestDeliveryRun({ runId: 'terminal-retry', projectId: 'project', ownerId: RECOVERY_OWNER_ID }),
+      ...createTestDeliveryRun({
+        runId: 'terminal-retry',
+        projectId: 'project',
+        ownerId: RECOVERY_OWNER_ID,
+      }),
       phase: 'DOCUMENT_REVIEW' as const,
       documentStep: 'FOUNDATION_REVIEW' as const,
       foundationAuditState,
@@ -1597,9 +1844,13 @@ describe('delivery workflow recovery', () => {
     await store.save(run)
     const taskByDispatch = new Map<string, string>()
     let releaseSibling!: () => void
-    const siblingGate = new Promise<void>(resolve => { releaseSibling = resolve })
+    const siblingGate = new Promise<void>(resolve => {
+      releaseSibling = resolve
+    })
     const missingTerminal = () => {
-      const error = new Error('missing_required_terminal_submission: SubmitFoundationRevisionResult')
+      const error = new Error(
+        'missing_required_terminal_submission: SubmitFoundationRevisionResult',
+      )
       error.name = 'WorkerNeedsActionError'
       return error
     }
@@ -1608,7 +1859,10 @@ describe('delivery workflow recovery', () => {
       workerPort: {
         async start(request) {
           taskByDispatch.set(request.dispatchId!, request.taskId!)
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
         },
         async submit() {},
         async waitForTerminal(dispatchId) {
@@ -1617,7 +1871,9 @@ describe('delivery workflow recovery', () => {
         },
         async stop() {},
         async close() {},
-        async status() { throw new Error('not used') },
+        async status() {
+          throw new Error('not used')
+        },
       },
     })
     const request = (taskId: string): WorkerDispatchRequest => ({
@@ -1629,50 +1885,110 @@ describe('delivery workflow recovery', () => {
       phase: 'DOCUMENT_REVIEW',
       taskId,
       revision,
-      contract: { workerType: 'foundation-document-reviser', taskId, round: 1, documentPath: documents.find(document => document.taskId === taskId)!.documentPath, issueIds: ['AUD-1'], sectionIds: [documents.find(document => document.taskId === taskId)!.sectionId], stagedPath: foundationRevisionStagePath(revision, documents.find(document => document.taskId === taskId)!.documentPath), baseDocumentDigest: baseDocumentDigest.get(taskId)!, packetPath: packetPaths.get(taskId)!, packetDigest: packetDigests.get(taskId)! },
+      contract: {
+        workerType: 'foundation-document-reviser',
+        taskId,
+        round: 1,
+        documentPath: documents.find(document => document.taskId === taskId)!
+          .documentPath,
+        issueIds: ['AUD-1'],
+        sectionIds: [
+          documents.find(document => document.taskId === taskId)!.sectionId,
+        ],
+        stagedPath: foundationRevisionStagePath(
+          revision,
+          documents.find(document => document.taskId === taskId)!.documentPath,
+        ),
+        baseDocumentDigest: baseDocumentDigest.get(taskId)!,
+        packetPath: packetPaths.get(taskId)!,
+        packetDigest: packetDigests.get(taskId)!,
+      },
     })
 
     await dispatcher.dispatch(request('revision-a'))
     await dispatcher.waitForTerminalReconciliation()
     const firstAttempt = await store.load()
     expect(firstAttempt?.status).toBe('running')
-    expect(firstAttempt?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 1 })
+    expect(
+      firstAttempt?.foundationAuditState?.tasks.find(
+        task => task.taskId === 'revision-a',
+      ),
+    ).toMatchObject({ status: 'retryable', attempt: 1 })
 
     await dispatcher.dispatch(request('revision-b'))
     await dispatcher.dispatch(request('revision-a'))
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const current = await store.load()
-      const task = current?.foundationAuditState?.tasks.find(candidate => candidate.taskId === 'revision-a')
-      if (current?.status === 'running' && task?.status === 'retryable' && task.attempt === 2) break
+      const task = current?.foundationAuditState?.tasks.find(
+        candidate => candidate.taskId === 'revision-a',
+      )
+      if (
+        current?.status === 'running' &&
+        task?.status === 'retryable' &&
+        task.attempt === 2
+      )
+        break
       await new Promise(resolve => setTimeout(resolve, 5))
     }
     const afterSecondAttempt = await store.load()
     expect(afterSecondAttempt).toMatchObject({ status: 'running' })
-    expect(afterSecondAttempt?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 2 })
+    expect(
+      afterSecondAttempt?.foundationAuditState?.tasks.find(
+        task => task.taskId === 'revision-a',
+      ),
+    ).toMatchObject({ status: 'retryable', attempt: 2 })
     releaseSibling()
     await dispatcher.waitForTerminalReconciliation()
     const final = await store.load()
     expect(final).toMatchObject({ status: 'running' })
-    expect(final?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 2 })
-    expect(final?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-b')).toMatchObject({
+    expect(
+      final?.foundationAuditState?.tasks.find(
+        task => task.taskId === 'revision-a',
+      ),
+    ).toMatchObject({ status: 'retryable', attempt: 2 })
+    expect(
+      final?.foundationAuditState?.tasks.find(
+        task => task.taskId === 'revision-b',
+      ),
+    ).toMatchObject({
       status: 'retryable',
       attempt: 1,
-      dispatch: { status: 'failed', failureReason: 'missing_required_terminal_submission: SubmitFoundationRevisionResult' },
+      dispatch: {
+        status: 'failed',
+        failureReason:
+          'missing_required_terminal_submission: SubmitFoundationRevisionResult',
+      },
     })
 
     const stale = {
       ...final!,
       foundationAuditState: {
         ...final!.foundationAuditState!,
-        tasks: final!.foundationAuditState!.tasks.map(task => task.taskId === 'revision-a'
-          ? { ...task, status: 'running' as const, failureReason: undefined, dispatch: { ...task.dispatch!, status: 'running' as const, finishedAt: undefined, failureReason: undefined } }
-          : task),
+        tasks: final!.foundationAuditState!.tasks.map(task =>
+          task.taskId === 'revision-a'
+            ? {
+                ...task,
+                status: 'running' as const,
+                failureReason: undefined,
+                dispatch: {
+                  ...task.dispatch!,
+                  status: 'running' as const,
+                  finishedAt: undefined,
+                  failureReason: undefined,
+                },
+              }
+            : task,
+        ),
       },
     }
     await store.save(stale)
     const recovered = await store.reconcile(async () => false)
     expect(recovered).toMatchObject({ status: 'running' })
-    expect(recovered?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 2 })
+    expect(
+      recovered?.foundationAuditState?.tasks.find(
+        task => task.taskId === 'revision-a',
+      ),
+    ).toMatchObject({ status: 'retryable', attempt: 2 })
   })
 
   test('retryRun resumes a failed revision planning boundary without redispatching', async () => {
@@ -1682,7 +1998,10 @@ describe('delivery workflow recovery', () => {
     const revisionState = parseFoundationAuditState({
       ...createFoundationAuditState({
         revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
         manifest: {
           revision,
           status: 'index_staged',
@@ -1692,22 +2011,46 @@ describe('delivery workflow recovery', () => {
       }),
       status: 'planning' as const,
       authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        issueAuthority: {
+          kind: 'review' as const,
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
+        derivedDigests: {
+          sectionIndex: digest,
+          factStore: digest,
+          manifest: digest,
+        },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
       },
-      roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
+      roundBefore: {
+        documentRevision: 'revision-before',
+        issueRegistryDigest: digest,
+        issueAuthority: {
+          kind: 'review',
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
+      },
       round: 1 as const,
       phaseStartedAt: '2026-08-25T00:00:00.000Z',
       issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
       tasks: [],
     })
     const run = {
-      ...createTestDeliveryRun({ runId: 'revision-planning-retry', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }),
+      ...createTestDeliveryRun({
+        runId: 'revision-planning-retry',
+        projectId: 'recovery-project',
+        ownerId: RECOVERY_OWNER_ID,
+      }),
       phase: 'DOCUMENT_REVIEW' as const,
       documentStep: 'FOUNDATION_REVIEW' as const,
       status: 'needs_action' as const,
-      blockedReason: 'foundation revision planning materialization failed: transient store error',
+      blockedReason:
+        'foundation revision planning materialization failed: transient store error',
       foundationAuditState: revisionState,
     }
     const store = createRunStore(workspace, RECOVERY_OWNER_ID)
@@ -1756,7 +2099,10 @@ describe('delivery workflow recovery', () => {
     const foundationAuditState = parseFoundationAuditState({
       ...createFoundationAuditState({
         revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
         manifest: {
           revision,
           status: 'index_staged',
@@ -1766,14 +2112,29 @@ describe('delivery workflow recovery', () => {
       }),
       status: 'revising' as const,
       authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        issueAuthority: {
+          kind: 'review' as const,
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
+        derivedDigests: {
+          sectionIndex: digest,
+          factStore: digest,
+          manifest: digest,
+        },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
       },
       roundBefore: {
         documentRevision: 'revision-before',
         issueRegistryDigest: digest,
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
+        issueAuthority: {
+          kind: 'review' as const,
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
       },
       round: 1 as const,
       activeBundleId,
@@ -1783,7 +2144,10 @@ describe('delivery workflow recovery', () => {
           status: 'active' as const,
           round: 1 as const,
           baseDocumentRevision: revision,
-          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+            path,
+            digest,
+          })),
           remediationDigest: digest,
           taskIds: ['gdd-task'],
           frozenTaskIds: [],
@@ -1793,7 +2157,10 @@ describe('delivery workflow recovery', () => {
           status: 'superseded' as const,
           round: 1 as const,
           baseDocumentRevision: revision,
-          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+            path,
+            digest,
+          })),
           remediationDigest: digest,
           taskIds: ['old-task'],
           frozenTaskIds: [],
@@ -1845,17 +2212,25 @@ describe('delivery workflow recovery', () => {
       blockedReason: 'foundation revision requires action',
       foundationAuditState: {
         tasks: [
-          { taskId: 'gdd-task', status: 'needs_action', dispatch: { status: 'interrupted' } },
-          { taskId: 'old-task', status: 'running', dispatch: { status: 'running' } },
+          {
+            taskId: 'gdd-task',
+            status: 'needs_action',
+            dispatch: { status: 'interrupted' },
+          },
+          {
+            taskId: 'old-task',
+            status: 'running',
+            dispatch: { status: 'running' },
+          },
         ],
       },
     })
     expect(recovered.foundationAuditState?.tasks[0]?.failureReason).toBe(
       'foundation revision requires action',
     )
-    expect(recovered.foundationAuditState?.tasks[0]?.dispatch?.failureReason).toBe(
-      'foundation revision requires action',
-    )
+    expect(
+      recovered.foundationAuditState?.tasks[0]?.dispatch?.failureReason,
+    ).toBe('foundation revision requires action')
     expect(
       (await store.readEvents()).some(
         event => event.type === 'foundation.recovery.needs_action',
@@ -1901,28 +2276,68 @@ describe('delivery workflow recovery', () => {
   })
 
   test('reconcile projects orphaned foundation fact dispatch evidence onto the task', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'orphaned-foundation-fact-evidence-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'orphaned-foundation-fact-evidence-'),
+    )
     const digest = 'a'.repeat(64)
     const revision = 'orphaned-facts'
     const seed = createFoundationAuditState({
       revision,
-      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+        path,
+        digest,
+      })),
+      manifest: {
+        revision,
+        status: 'index_staged',
+        catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+        sectionIndexDigest: digest,
+      },
     })
     const foundationAuditState = parseFoundationAuditState({
       ...seed,
       status: 'extracting_facts',
       phaseStartedAt: '2020-01-01T00:00:00.000Z',
-      tasks: [{
-        taskId: 'fact-0', kind: 'document-facts', revision, packetDigest: digest, factKeyCount: 1, modelTier: 'fast', status: 'running', attempt: 1,
-        dispatch: {
-          dispatchId: 'fact-dispatch', workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'fact-0', revision, status: 'running',
-          startedAt: '2020-01-01T00:00:00.000Z',
-          usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 },
+      tasks: [
+        {
+          taskId: 'fact-0',
+          kind: 'document-facts',
+          revision,
+          packetDigest: digest,
+          factKeyCount: 1,
+          modelTier: 'fast',
+          status: 'running',
+          attempt: 1,
+          dispatch: {
+            dispatchId: 'fact-dispatch',
+            workerType: 'foundation-fact-extractor',
+            phase: 'DOCUMENT_REVIEW',
+            taskId: 'fact-0',
+            revision,
+            status: 'running',
+            startedAt: '2020-01-01T00:00:00.000Z',
+            usage: {
+              input_tokens: 10,
+              cache_read_tokens: 0,
+              cache_creation_tokens: 0,
+              completion_tokens: 2,
+              total_tokens: 12,
+            },
+          },
         },
-      }],
+      ],
     })
-    const run = { ...createTestDeliveryRun({ runId: 'orphaned-foundation-fact', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'DOCUMENT_REVIEW' as const, documentStep: 'FOUNDATION_REVIEW' as const, status: 'running' as const, foundationAuditState }
+    const run = {
+      ...createTestDeliveryRun({
+        runId: 'orphaned-foundation-fact',
+        projectId: 'recovery-project',
+        ownerId: RECOVERY_OWNER_ID,
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'running' as const,
+      foundationAuditState,
+    }
     const store = createRunStore(workspace, RECOVERY_OWNER_ID)
     await store.save(run)
     const recovered = await store.reconcile(async () => false)
@@ -1930,13 +2345,20 @@ describe('delivery workflow recovery', () => {
       status: 'retryable',
       usage: { total_tokens: 12 },
       durationMs: expect.any(Number),
-      failureReason: 'server stopped before the foundation fact terminal was admitted',
-      dispatch: { status: 'interrupted', failureReason: 'server stopped before the foundation fact terminal was admitted' },
+      failureReason:
+        'server stopped before the foundation fact terminal was admitted',
+      dispatch: {
+        status: 'interrupted',
+        failureReason:
+          'server stopped before the foundation fact terminal was admitted',
+      },
     })
   })
 
   test('reconcile projects orphaned revision dispatch evidence onto the sole audit task state', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'orphaned-foundation-revision-evidence-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'orphaned-foundation-revision-evidence-'),
+    )
     const digest = 'b'.repeat(64)
     const revision = 'orphaned-revision'
     const taskId = 'revision-task'
@@ -1946,65 +2368,138 @@ describe('delivery workflow recovery', () => {
     const foundationAuditState = parseFoundationAuditState({
       ...createFoundationAuditState({
         revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-        manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
+        manifest: {
+          revision,
+          status: 'index_staged',
+          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+          sectionIndexDigest: digest,
+        },
       }),
       status: 'revising' as const,
       authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        issueAuthority: {
+          kind: 'review' as const,
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
+        derivedDigests: {
+          sectionIndex: digest,
+          factStore: digest,
+          manifest: digest,
+        },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
       },
-      roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
+      roundBefore: {
+        documentRevision: 'revision-before',
+        issueRegistryDigest: digest,
+        issueAuthority: {
+          kind: 'review',
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
+      },
       round,
       activeBundleId: bundleId,
-      revisionBundles: [{ bundleId, status: 'active' as const, round, baseDocumentRevision: revision, baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), remediationDigest: digest, taskIds: [taskId], frozenTaskIds: [] }],
+      revisionBundles: [
+        {
+          bundleId,
+          status: 'active' as const,
+          round,
+          baseDocumentRevision: revision,
+          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+            path,
+            digest,
+          })),
+          remediationDigest: digest,
+          taskIds: [taskId],
+          frozenTaskIds: [],
+        },
+      ],
       phaseStartedAt: '2026-08-25T00:00:00.000Z',
       issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
-      tasks: [{
-        taskId,
-        kind: 'document-revision' as const,
-        revision,
-        round,
-        bundleId,
-        packetPath,
-        packetDigest: digest,
-        status: 'running' as const,
-        attempt: 1,
-        documentPath: 'docs/GDD.md' as const,
-        issueIds: ['AUD-1'],
-        sectionIds: ['vision'],
-        stagedPath: foundationRevisionStagePath(revision, 'docs/GDD.md'),
-        baseDocumentDigest: digest,
-        dependencyDigests: {},
-        frozen: false,
-        dispatch: {
-          dispatchId: 'revision-dispatch',
-          workerType: 'foundation-document-reviser' as const,
-          phase: 'DOCUMENT_REVIEW' as const,
+      tasks: [
+        {
           taskId,
+          kind: 'document-revision' as const,
           revision,
+          round,
+          bundleId,
+          packetPath,
+          packetDigest: digest,
           status: 'running' as const,
-          request: { taskId, revision, contract: { packetDigest: digest, packetPath, round } },
-          startedAt: '2026-08-25T00:00:00.000Z',
-          usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 },
+          attempt: 1,
+          documentPath: 'docs/GDD.md' as const,
+          issueIds: ['AUD-1'],
+          sectionIds: ['vision'],
+          stagedPath: foundationRevisionStagePath(revision, 'docs/GDD.md'),
+          baseDocumentDigest: digest,
+          dependencyDigests: {},
+          frozen: false,
+          dispatch: {
+            dispatchId: 'revision-dispatch',
+            workerType: 'foundation-document-reviser' as const,
+            phase: 'DOCUMENT_REVIEW' as const,
+            taskId,
+            revision,
+            status: 'running' as const,
+            request: {
+              taskId,
+              revision,
+              contract: { packetDigest: digest, packetPath, round },
+            },
+            startedAt: '2026-08-25T00:00:00.000Z',
+            usage: {
+              input_tokens: 10,
+              cache_read_tokens: 0,
+              cache_creation_tokens: 0,
+              completion_tokens: 2,
+              total_tokens: 12,
+            },
+          },
         },
-      }],
+      ],
     })
-    const run = { ...createTestDeliveryRun({ runId: 'orphaned-foundation-revision', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'DOCUMENT_REVIEW' as const, documentStep: 'FOUNDATION_REVIEW' as const, status: 'running' as const, foundationAuditState }
+    const run = {
+      ...createTestDeliveryRun({
+        runId: 'orphaned-foundation-revision',
+        projectId: 'recovery-project',
+        ownerId: RECOVERY_OWNER_ID,
+      }),
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      status: 'running' as const,
+      foundationAuditState,
+    }
     const store = createRunStore(workspace, RECOVERY_OWNER_ID)
     await store.save(run)
 
     const recovered = await store.reconcile(async () => false)
-    expect(recovered).toMatchObject({ status: 'running', foundationAuditState: { status: 'revising' } })
+    expect(recovered).toMatchObject({
+      status: 'running',
+      foundationAuditState: { status: 'revising' },
+    })
     expect(recovered?.foundationAuditState?.tasks[0]).toMatchObject({
       status: 'retryable',
       usage: { total_tokens: 12 },
       durationMs: expect.any(Number),
-      failureReason: 'server stopped before the foundation revision terminal was admitted',
-      dispatch: { status: 'interrupted', failureReason: 'server stopped before the foundation revision terminal was admitted' },
+      failureReason:
+        'server stopped before the foundation revision terminal was admitted',
+      dispatch: {
+        status: 'interrupted',
+        failureReason:
+          'server stopped before the foundation revision terminal was admitted',
+      },
     })
-    expect((await store.readEvents()).at(-1)?.type).toBe('foundation.revision.recovered')
+    expect((await store.readEvents()).at(-1)?.type).toBe(
+      'foundation.revision.recovered',
+    )
   })
 
   test('defines every exact-resume checkpoint for every persisted worker type', () => {
@@ -2017,7 +2512,9 @@ describe('delivery workflow recovery', () => {
       'unit-accepted',
     ])
     expect(
-      WORKER_TYPES.flatMap(workerType => exactResumeCheckpointsForWorker(workerType)),
+      WORKER_TYPES.flatMap(workerType =>
+        exactResumeCheckpointsForWorker(workerType),
+      ),
     ).toHaveLength(45)
     expect(CANONICAL_RECEIPT_WORKERS).toEqual([
       'document-author',
@@ -2103,40 +2600,11 @@ describe('delivery workflow recovery', () => {
               terminal,
             )
             if (workerType === 'game-ir-compiler')
-              expect((await store.load())?.activeDispatch?.terminalResult).toEqual(terminal)
+              expect(
+                (await store.load())?.activeDispatch?.terminalResult,
+              ).toEqual(terminal)
           }
           const recoveredStore = await resumeFromDisk(false)
-          if (
-            workerType === 'game-ir-compiler' &&
-            checkpoint === 'terminal-accepted'
-          ) {
-            const retryRun = await recoveredStore.load()
-            expect(started).toHaveLength(2)
-            expect(started.at(-1)?.contract.retryProgressIdentity).toBeString()
-            expect(retryRun?.gameIrState?.status === 'compiling'
-              ? retryRun.gameIrState.progressIdentity
-              : undefined).toBeDefined()
-            const retry = retryRun?.activeDispatch
-            expect(retry?.request?.workerType).toBe('game-ir-compiler')
-            const repeatedFailure = await matrixTerminal({
-              workspacePath: workspace,
-              request: retry!.request!,
-            })
-            await createDeliveryDispatcher({ store: recoveredStore, workerPort })
-              .completeDispatch(retry!.dispatchId, repeatedFailure)
-            const repeatedTerminalRun = await recoveredStore.load()
-            expect(repeatedTerminalRun?.gameIrState?.status === 'compiling'
-              ? repeatedTerminalRun.gameIrState.progressIdentity
-              : undefined).toBeDefined()
-            const attendedStore = await resumeFromDisk(false)
-            expect(await attendedStore.load()).toMatchObject({
-              status: 'needs_action',
-              gameIrState: {
-                status: 'compiling',
-                diagnostic: { reasonCode: 'compilation' },
-              },
-            })
-          }
           if (
             workerType === 'document-author' &&
             checkpoint === 'terminal-accepted'
@@ -2178,7 +2646,8 @@ describe('delivery workflow recovery', () => {
         }
 
         const expectedSameUnitDispatches =
-          workerType === 'game-ir-compiler' && checkpoint === 'terminal-accepted'
+          workerType === 'game-ir-compiler' &&
+          checkpoint === 'terminal-accepted'
             ? 2
             : 1
         expect(
@@ -2568,9 +3037,11 @@ describe('delivery workflow recovery', () => {
       if (CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never)) continue
       await writeFile(join(workspace, path), '# Acceptance\n')
     }
-    const documentRevision = await computeDocumentRevision(workspace, initial.confirmedBriefDigest)
+    const documentRevision = await computeDocumentRevision(
+      workspace,
+      initial.confirmedBriefDigest,
+    )
     const request: WorkerDispatchRequest = {
-
       dispatchId: commitContract.dispatchId,
       runId: initial.runId,
       ownerId: initial.ownerId,
@@ -2585,34 +3056,36 @@ describe('delivery workflow recovery', () => {
         ...commitContract,
       },
     }
-    await store.save(withSyntheticV46DownstreamAuthority({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      revision: { ...initial.revision, document: documentRevision },
-      status: 'failed',
-      resourceProductionState: {
-        currentTask: 'RESOURCE_CONTENT',
-        inventoryReceipt: {
-          revision: commitContract.inventoryRevision,
-          bindings: commitContract.inventoryBindings,
-          catalogObserved: true,
-          acceptedAt: new Date().toISOString(),
-        },
-      },
-      activeDispatch: {
-        dispatchId: commitContract.dispatchId,
-        workerType: 'resource-content-author',
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
         phase: 'RESOURCE_PREPARATION',
-        taskId: 'RESOURCE_CONTENT',
-        revision: request.revision,
+        revision: { ...initial.revision, document: documentRevision },
         status: 'failed',
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-        failureReason: 'transport result mapping failed',
-        request,
-      },
-      blockedReason: 'transport result mapping failed',
-    }))
+        resourceProductionState: {
+          currentTask: 'RESOURCE_CONTENT',
+          inventoryReceipt: {
+            revision: commitContract.inventoryRevision,
+            bindings: commitContract.inventoryBindings,
+            catalogObserved: true,
+            acceptedAt: new Date().toISOString(),
+          },
+        },
+        activeDispatch: {
+          dispatchId: commitContract.dispatchId,
+          workerType: 'resource-content-author',
+          phase: 'RESOURCE_PREPARATION',
+          taskId: 'RESOURCE_CONTENT',
+          revision: request.revision,
+          status: 'failed',
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          failureReason: 'transport result mapping failed',
+          request,
+        },
+        blockedReason: 'transport result mapping failed',
+      }),
+    )
 
     const retried = await retryRun({
       store,
@@ -3032,22 +3505,24 @@ describe('delivery workflow recovery', () => {
       startedRevision: initial.revision.workspace,
       evidenceRefs: [],
     }
-    await store.save(withSyntheticV46DownstreamAuthority({
-      ...initial,
-      phase: 'IMPLEMENTATION',
-      currentMessage: 'Preparing a file edit…',
-      activeTaskId: task.id,
-      tasks: [task],
-      activeDispatch: {
-        dispatchId: 'dispatch-1',
-        workerType: 'implementation-worker',
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
         phase: 'IMPLEMENTATION',
-        taskId: task.id,
-        revision: initial.revision.workspace,
-        status: 'running',
-        startedAt: new Date().toISOString(),
-      },
-    }))
+        currentMessage: 'Preparing a file edit…',
+        activeTaskId: task.id,
+        tasks: [task],
+        activeDispatch: {
+          dispatchId: 'dispatch-1',
+          workerType: 'implementation-worker',
+          phase: 'IMPLEMENTATION',
+          taskId: task.id,
+          revision: initial.revision.workspace,
+          status: 'running',
+          startedAt: new Date().toISOString(),
+        },
+      }),
+    )
 
     let lateUsageResult: DeliveryRun | null | undefined
     const stoppedTailUsage = {
@@ -3109,7 +3584,10 @@ describe('delivery workflow recovery', () => {
     const foundationAuditState = parseFoundationAuditState({
       ...createFoundationAuditState({
         revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
         manifest: {
           revision,
           status: 'index_staged',
@@ -3119,18 +3597,47 @@ describe('delivery workflow recovery', () => {
       }),
       status: 'revising' as const,
       authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        issueAuthority: {
+          kind: 'review' as const,
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
+        derivedDigests: {
+          sectionIndex: digest,
+          factStore: digest,
+          manifest: digest,
+        },
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
       },
       roundBefore: {
         documentRevision: 'revision-before',
         issueRegistryDigest: digest,
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
+        issueAuthority: {
+          kind: 'review' as const,
+          reviewDigest: digest,
+          issueRegistryDigest: digest,
+        },
       },
       round: 1,
       activeBundleId: bundleId,
-      revisionBundles: [{ bundleId, status: 'active' as const, round: 1, baseDocumentRevision: revision, baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), remediationDigest: digest, taskIds: documents.map((_, index) => `revision-${index}`), frozenTaskIds: [] }],
+      revisionBundles: [
+        {
+          bundleId,
+          status: 'active' as const,
+          round: 1,
+          baseDocumentRevision: revision,
+          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+            path,
+            digest,
+          })),
+          remediationDigest: digest,
+          taskIds: documents.map((_, index) => `revision-${index}`),
+          frozenTaskIds: [],
+        },
+      ],
       phaseStartedAt: new Date().toISOString(),
       issueSummary: { total: 4, blocker: 0, high: 4, medium: 0, low: 0 },
       tasks: documents.map((documentPath, index) => {
@@ -3177,7 +3684,11 @@ describe('delivery workflow recovery', () => {
     }
     await store.save(run)
     expect((await store.load())?.foundationAuditState?.tasks).toHaveLength(4)
-    expect((await store.load())?.foundationAuditState?.tasks.every(task => task.dispatch?.status === 'running')).toBe(true)
+    expect(
+      (await store.load())?.foundationAuditState?.tasks.every(
+        task => task.dispatch?.status === 'running',
+      ),
+    ).toBe(true)
 
     const stoppedDispatches: string[] = []
     const stoppedTailResults: Array<DeliveryRun | null> = []
@@ -3220,13 +3731,24 @@ describe('delivery workflow recovery', () => {
         }),
       ]),
     )
-    expect(stopped.foundationAuditState?.tasks.every(task => task.dispatch?.status === 'interrupted')).toBe(true)
-    expect(stoppedTailResults.every(result => result?.status === 'stopped')).toBe(true)
-    expect(stoppedTailResults.every(result => (result?.usage?.total_tokens ?? 0) > 0)).toBe(true)
+    expect(
+      stopped.foundationAuditState?.tasks.every(
+        task => task.dispatch?.status === 'interrupted',
+      ),
+    ).toBe(true)
+    expect(
+      stoppedTailResults.every(result => result?.status === 'stopped'),
+    ).toBe(true)
+    expect(
+      stoppedTailResults.every(
+        result => (result?.usage?.total_tokens ?? 0) > 0,
+      ),
+    ).toBe(true)
     expect(
       stoppedTailResults.every(result =>
         result?.foundationAuditState?.tasks.some(
-          task => task.usage?.total_tokens === 1 && task.durationMs !== undefined,
+          task =>
+            task.usage?.total_tokens === 1 && task.durationMs !== undefined,
         ),
       ),
     ).toBe(true)
@@ -3252,7 +3774,10 @@ describe('delivery workflow recovery', () => {
     const foundationAuditState = parseFoundationAuditState({
       ...createFoundationAuditState({
         revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
         manifest: {
           revision,
           status: 'index_staged',
@@ -3269,37 +3794,39 @@ describe('delivery workflow recovery', () => {
         completion_tokens: 0,
         total_tokens: 0,
       },
-      tasks: [{
-        taskId,
-        kind: 'document-facts' as const,
-        revision,
-        factKeyCount: 1,
-        modelTier: 'fast' as const,
-        packetDigest: digest,
-        status: 'running' as const,
-        attempt: 1,
-        dispatch: {
-          dispatchId,
-          workerType: 'foundation-fact-extractor' as const,
-          phase: 'DOCUMENT_REVIEW' as const,
+      tasks: [
+        {
           taskId,
+          kind: 'document-facts' as const,
           revision,
+          factKeyCount: 1,
+          modelTier: 'fast' as const,
+          packetDigest: digest,
           status: 'running' as const,
-          startedAt: new Date().toISOString(),
-          request: {
-            runId: 'stop-handler-race-run',
-            ownerId: RECOVERY_OWNER_ID,
-            projectId: 'stop-handler-race-project',
-            workspacePath: workspace,
-            workerType: 'foundation-fact-extractor',
-            phase: 'DOCUMENT_REVIEW',
-            revision,
-            allowedPaths: ['.beegame/audit/foundation/'],
+          attempt: 1,
+          dispatch: {
+            dispatchId,
+            workerType: 'foundation-fact-extractor' as const,
+            phase: 'DOCUMENT_REVIEW' as const,
             taskId,
-            contract: { packetDigest: digest },
+            revision,
+            status: 'running' as const,
+            startedAt: new Date().toISOString(),
+            request: {
+              runId: 'stop-handler-race-run',
+              ownerId: RECOVERY_OWNER_ID,
+              projectId: 'stop-handler-race-project',
+              workspacePath: workspace,
+              workerType: 'foundation-fact-extractor',
+              phase: 'DOCUMENT_REVIEW',
+              revision,
+              allowedPaths: ['.beegame/audit/foundation/'],
+              taskId,
+              contract: { packetDigest: digest },
+            },
           },
         },
-      }],
+      ],
     })
     const run = {
       ...createTestDeliveryRun({
@@ -3316,12 +3843,17 @@ describe('delivery workflow recovery', () => {
       store,
       workerPort: {
         async start(request) {
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
         },
         async submit() {},
         async stop() {},
         async close() {},
-        async status() { throw new Error('not used') },
+        async status() {
+          throw new Error('not used')
+        },
       },
       onTerminal: async () => {
         const admitted = (await store.load())!
@@ -3381,7 +3913,9 @@ describe('delivery workflow recovery', () => {
     ).rejects.toThrow('workflow project is locked')
 
     const stopped = await store.load()
-    const task = stopped?.foundationAuditState?.tasks.find(candidate => candidate.taskId === taskId)
+    const task = stopped?.foundationAuditState?.tasks.find(
+      candidate => candidate.taskId === taskId,
+    )
     expect(stopped).toMatchObject({
       status: 'stopped',
       foundationAuditState: { status: 'facts_staged' },
@@ -3512,24 +4046,26 @@ describe('delivery workflow recovery', () => {
       startedRevision: initial.revision.workspace,
       evidenceRefs: [],
     }
-    await store.save(withSyntheticV46DownstreamAuthority({
-      ...initial,
-      phase: 'IMPLEMENTATION',
-      status: 'stopped',
-      activeTaskId: task.id,
-      tasks: [task],
-      blockedReason: 'user stopped workflow',
-      activeDispatch: {
-        dispatchId: 'dispatch-1',
-        workerType: 'implementation-worker',
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
         phase: 'IMPLEMENTATION',
-        taskId: task.id,
-        revision: initial.revision.workspace,
-        status: 'interrupted',
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-      },
-    }))
+        status: 'stopped',
+        activeTaskId: task.id,
+        tasks: [task],
+        blockedReason: 'user stopped workflow',
+        activeDispatch: {
+          dispatchId: 'dispatch-1',
+          workerType: 'implementation-worker',
+          phase: 'IMPLEMENTATION',
+          taskId: task.id,
+          revision: initial.revision.workspace,
+          status: 'interrupted',
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
+      }),
+    )
 
     const continued = await retryRun({ store, runId: initial.runId })
 
@@ -3596,24 +4132,26 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save(withSyntheticV46DownstreamAuthority({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      status: 'failed',
-      blockedReason: 'resource inventory worker failed before commit',
-      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-      activeDispatch: {
-        dispatchId: 'dispatch-inventory',
-        workerType: 'resource-curator',
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
         phase: 'RESOURCE_PREPARATION',
-        taskId: 'RESOURCE_INVENTORY',
-        revision: initial.revision.document,
         status: 'failed',
-        failureReason: 'resource inventory worker failed before commit',
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-      },
-    }))
+        blockedReason: 'resource inventory worker failed before commit',
+        resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
+        activeDispatch: {
+          dispatchId: 'dispatch-inventory',
+          workerType: 'resource-curator',
+          phase: 'RESOURCE_PREPARATION',
+          taskId: 'RESOURCE_INVENTORY',
+          revision: initial.revision.document,
+          status: 'failed',
+          failureReason: 'resource inventory worker failed before commit',
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        },
+      }),
+    )
 
     const retried = await retryRun({ store, runId: initial.runId })
 
@@ -3635,11 +4173,13 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save(withSyntheticV46DownstreamAuthority({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      lastProgressAt: '2020-01-01T00:00:00.000Z',
-    }))
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
+        phase: 'RESOURCE_PREPARATION',
+        lastProgressAt: '2020-01-01T00:00:00.000Z',
+      }),
+    )
     const dispatcher = createDeliveryDispatcher({
       store,
       workerPort: {
@@ -3880,7 +4420,9 @@ describe('delivery workflow recovery', () => {
   })
 
   test('fails a parallel document closed without returning it to pending', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-dispatch-failure-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-foundation-dispatch-failure-'),
+    )
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-dispatch-failure',
@@ -3899,7 +4441,10 @@ describe('delivery workflow recovery', () => {
       store,
       workerPort: {
         async start(request) {
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
         },
         async submit() {
           throw new Error('canonical heading missing')
@@ -3947,7 +4492,9 @@ describe('delivery workflow recovery', () => {
   })
 
   test('does not automatically retry a failed parallel document', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-prior-failure-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-foundation-prior-failure-'),
+    )
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-prior-failure',
@@ -3971,7 +4518,10 @@ describe('delivery workflow recovery', () => {
       workerPort: {
         async start(request) {
           started.push(request)
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
         },
         async submit(_dispatchId, prompt) {
           prompts.push(prompt)
@@ -3988,7 +4538,9 @@ describe('delivery workflow recovery', () => {
     const run = (await store.load())!
     await controller.store.save(run)
 
-    await expect(controller.resume(run)).rejects.toThrow('provider disconnected')
+    await expect(controller.resume(run)).rejects.toThrow(
+      'provider disconnected',
+    )
     expect(started).toHaveLength(1)
     expect(prompts).toHaveLength(1)
     const failed = await controller.store.load()
@@ -4011,7 +4563,9 @@ describe('delivery workflow recovery', () => {
   })
 
   test('does not refill a failed parallel foundation slot while sibling evidence remains open', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-parallel-refill-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-foundation-parallel-refill-'),
+    )
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-parallel-refill',
       projectId: 'project-foundation-parallel-refill',
@@ -4054,9 +4608,15 @@ describe('delivery workflow recovery', () => {
       workerPort: {
         async start(request) {
           started.push(request)
-          if (request.taskId === 'docs/BALANCE_DESIGN.md' && !firstBalanceDispatchId)
+          if (
+            request.taskId === 'docs/BALANCE_DESIGN.md' &&
+            !firstBalanceDispatchId
+          )
             firstBalanceDispatchId = request.dispatchId
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
         },
         async submit() {},
         async stop() {},
@@ -4088,19 +4648,33 @@ describe('delivery workflow recovery', () => {
     ])
     rejectFirstBalanceTerminal!(new Error('balance heading missing'))
     await resuming
-    for (let index = 0; index < 400 && (await controller.store.load())?.status !== 'needs_action'; index += 1)
+    for (
+      let index = 0;
+      index < 400 && (await controller.store.load())?.status !== 'needs_action';
+      index += 1
+    )
       await new Promise(resolve => setTimeout(resolve, 5))
-    expect(started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md')).toHaveLength(1)
-    expect(started.filter(request => request.taskId === 'docs/ART_DIRECTION.md')).toHaveLength(1)
-    expect(started.filter(request => request.taskId === 'docs/UI_UX_SPEC.md')).toHaveLength(1)
-    expect(started.some(request => request.contract.priorFailureReason)).toBe(false)
+    expect(
+      started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md'),
+    ).toHaveLength(1)
+    expect(
+      started.filter(request => request.taskId === 'docs/ART_DIRECTION.md'),
+    ).toHaveLength(1)
+    expect(
+      started.filter(request => request.taskId === 'docs/UI_UX_SPEC.md'),
+    ).toHaveLength(1)
+    expect(started.some(request => request.contract.priorFailureReason)).toBe(
+      false,
+    )
     const saved = await controller.store.load()
     expect(saved?.status).toBe('needs_action')
     expect(saved?.blockedReason).toBe('balance heading missing')
   })
 
   test('does not automatically restart a failed initial document author', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-initial-foundation-retry-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-initial-foundation-retry-'),
+    )
     const initial = createTestDeliveryRun({
       runId: 'run-initial-foundation-retry',
       projectId: 'project-initial-foundation-retry',
@@ -4122,7 +4696,10 @@ describe('delivery workflow recovery', () => {
       workerPort: {
         async start(request) {
           started.push(request)
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
         },
         async submit(_dispatchId, prompt) {
           prompts.push(prompt)
@@ -4138,7 +4715,9 @@ describe('delivery workflow recovery', () => {
     })
     await controller.store.save(run)
 
-    await expect(controller.resume(run)).rejects.toThrow('initial provider disconnected')
+    await expect(controller.resume(run)).rejects.toThrow(
+      'initial provider disconnected',
+    )
     expect(started).toHaveLength(1)
     expect(prompts).toHaveLength(1)
     expect(await controller.store.load()).toMatchObject({
@@ -4149,7 +4728,9 @@ describe('delivery workflow recovery', () => {
   })
 
   test('keeps a parallel document WorkerNeedsActionError at the human boundary', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-needs-action-'))
+    workspace = await mkdtemp(
+      join(tmpdir(), 'beegame-foundation-needs-action-'),
+    )
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-needs-action',
@@ -4168,7 +4749,10 @@ describe('delivery workflow recovery', () => {
       store,
       workerPort: {
         async start(request) {
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
+          return {
+            sessionId: request.dispatchId!,
+            dispatchId: request.dispatchId!,
+          }
         },
         async submit() {},
         async waitForTerminal() {
@@ -4266,7 +4850,10 @@ describe('delivery workflow recovery', () => {
       workerPort: {
         async start(nextRequest) {
           started.push(nextRequest)
-          return { sessionId: nextRequest.dispatchId!, dispatchId: nextRequest.dispatchId! }
+          return {
+            sessionId: nextRequest.dispatchId!,
+            dispatchId: nextRequest.dispatchId!,
+          }
         },
         async submit() {},
         async stop() {},
@@ -4305,7 +4892,12 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await firstStore.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
+    await firstStore.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
+        phase: 'RESOURCE_PREPARATION',
+      }),
+    )
     const started: string[] = []
     const workerPort = {
       async start(request: WorkerDispatchRequest) {
@@ -4357,10 +4949,12 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save(withSyntheticV46DownstreamAuthority({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-    }))
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
+        phase: 'RESOURCE_PREPARATION',
+      }),
+    )
     const started: string[] = []
     let closeCalls = 0
     const dispatcher = createDeliveryDispatcher({
@@ -4423,7 +5017,12 @@ describe('delivery workflow recovery', () => {
       ownerId: 'owner-1',
       confirmedBriefDigest: 'brief-fallback-stop',
     })
-    await store.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
+        phase: 'RESOURCE_PREPARATION',
+      }),
+    )
     const transportStops: string[] = []
     const transportCloses: string[] = []
     const dispatcher = createDeliveryDispatcher({
@@ -4465,7 +5064,8 @@ describe('delivery workflow recovery', () => {
       runId: initial.runId,
       reason: 'user stopped workflow',
       sessionIsOpen: async () => true,
-      stopDispatch: dispatchId => dispatcher.stop(dispatchId, 'user stopped workflow'),
+      stopDispatch: dispatchId =>
+        dispatcher.stop(dispatchId, 'user stopped workflow'),
     })
     await new Promise(resolve => setTimeout(resolve, 0))
 
@@ -4490,7 +5090,12 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
+        phase: 'RESOURCE_PREPARATION',
+      }),
+    )
     let submitCount = 0
     const stopped: string[] = []
     const dispatcher = createDeliveryDispatcher({
@@ -4552,18 +5157,20 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
     })
     const startedAt = new Date().toISOString()
-    await store.save(withSyntheticV46DownstreamAuthority({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      activeDispatch: {
-        dispatchId: 'dispatch-current',
-        workerType: 'resource-planner',
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
         phase: 'RESOURCE_PREPARATION',
-        revision: initial.revision.document,
-        status: 'running',
-        startedAt,
-      },
-    }))
+        activeDispatch: {
+          dispatchId: 'dispatch-current',
+          workerType: 'resource-planner',
+          phase: 'RESOURCE_PREPARATION',
+          revision: initial.revision.document,
+          status: 'running',
+          startedAt,
+        },
+      }),
+    )
     const delta = {
       input_tokens: 10,
       cache_read_tokens: 20,
@@ -4592,7 +5199,7 @@ describe('delivery workflow recovery', () => {
     expect((await store.load())?.usage?.total_tokens).toBe(70)
   })
 
-   test('does not let display-only activity refresh durable progress', async () => {
+  test('does not let display-only activity refresh durable progress', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-durable-progress-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -4625,7 +5232,12 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
+        phase: 'RESOURCE_PREPARATION',
+      }),
+    )
     const dispatcher = createDeliveryDispatcher({
       store,
       workerPort: {
@@ -4716,7 +5328,12 @@ describe('delivery workflow recovery', () => {
       confirmedBriefDigest: 'brief-1',
       checklistApproved: true,
     })
-    await store.save(withSyntheticV46DownstreamAuthority({ ...initial, phase: 'RESOURCE_PREPARATION' }))
+    await store.save(
+      withSyntheticV46DownstreamAuthority({
+        ...initial,
+        phase: 'RESOURCE_PREPARATION',
+      }),
+    )
     const dispatcher = createDeliveryDispatcher({
       store,
       workerPort: {
@@ -4752,7 +5369,7 @@ describe('delivery workflow recovery', () => {
     })
   })
 
-   test('uses worker and document lane identity in dispatch idempotency keys', async () => {
+  test('uses worker and document lane identity in dispatch idempotency keys', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-dispatch-identity-'))
     const store = createRunStore(workspace, 'owner-1')
     const dispatcher = createDeliveryDispatcher({

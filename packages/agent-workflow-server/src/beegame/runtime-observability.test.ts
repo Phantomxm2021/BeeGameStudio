@@ -21,9 +21,7 @@ describe('passive native runtime observability', () => {
         streamGapObservationMs: 1_000,
       })
       observer.beginTurn({ requestId: 'request-byte-gap' })
-      observer.observeStdoutChunk(
-        Buffer.from('PRIVATE PARTIAL TOOL JSON'),
-      )
+      observer.observeStdoutChunk(Buffer.from('PRIVATE PARTIAL TOOL JSON'))
       nowMs += 3_500
       observer.observeStdoutChunk(Buffer.from('PRIVATE DOCUMENT BODY'))
       nowMs += 250
@@ -34,21 +32,28 @@ describe('passive native runtime observability', () => {
         join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
         'utf8',
       )
-      const records = raw.trim().split('\n').map(line => JSON.parse(line))
-      expect(records).toContainEqual(expect.objectContaining({
-        type: 'stdout_resumed',
-        gapMs: 3_500,
-        chunkBytes: Buffer.byteLength('PRIVATE DOCUMENT BODY'),
-      }))
-      expect(records.at(-1)).toEqual(expect.objectContaining({
-        type: 'turn_terminal',
-        stdoutChunkCount: 2,
-        stdoutByteCount:
-          Buffer.byteLength('PRIVATE PARTIAL TOOL JSON') +
-          Buffer.byteLength('PRIVATE DOCUMENT BODY'),
-        maxStdoutChunkGapMs: 3_500,
-        stdoutSilenceAtTerminalMs: 250,
-      }))
+      const records = raw
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line))
+      expect(records).toContainEqual(
+        expect.objectContaining({
+          type: 'stdout_resumed',
+          gapMs: 3_500,
+          chunkBytes: Buffer.byteLength('PRIVATE DOCUMENT BODY'),
+        }),
+      )
+      expect(records.at(-1)).toEqual(
+        expect.objectContaining({
+          type: 'turn_terminal',
+          stdoutChunkCount: 2,
+          stdoutByteCount:
+            Buffer.byteLength('PRIVATE PARTIAL TOOL JSON') +
+            Buffer.byteLength('PRIVATE DOCUMENT BODY'),
+          maxStdoutChunkGapMs: 3_500,
+          stdoutSilenceAtTerminalMs: 250,
+        }),
+      )
       expect(raw).not.toContain('PRIVATE PARTIAL TOOL JSON')
       expect(raw).not.toContain('PRIVATE DOCUMENT BODY')
     } finally {
@@ -88,12 +93,14 @@ describe('passive native runtime observability', () => {
       observer.observeMessage({
         type: 'assistant',
         message: {
-          content: [{
-            type: 'tool_use',
-            id: 'tool-1',
-            name: 'Write',
-            input: { content: 'SECRET PROMPT BODY' },
-          }],
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tool-1',
+              name: 'Write',
+              input: { content: 'SECRET PROMPT BODY' },
+            },
+          ],
         },
       })
       observer.observeMessage({ type: 'result', subtype: 'error' })
@@ -114,7 +121,10 @@ describe('passive native runtime observability', () => {
         join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
         'utf8',
       )
-      const records = raw.trim().split('\n').map(line => JSON.parse(line))
+      const records = raw
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line))
       expect(records).toEqual([
         expect.objectContaining({
           type: 'turn_started',

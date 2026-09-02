@@ -1306,11 +1306,12 @@ function buildProjectionRun(input: {
     activeUnitId === RESOURCE_GATE_UNIT_ID
   ) {
     phase = 'RESOURCE_PREPARATION'
-    resourceTask = activeUnitId === RESOURCE_INVENTORY_UNIT_ID
-      ? 'RESOURCE_INVENTORY'
-      : activeUnitId === RESOURCE_CONTENT_UNIT_ID
-        ? 'RESOURCE_CONTENT'
-        : 'RESOURCE_GATE'
+    resourceTask =
+      activeUnitId === RESOURCE_INVENTORY_UNIT_ID
+        ? 'RESOURCE_INVENTORY'
+        : activeUnitId === RESOURCE_CONTENT_UNIT_ID
+          ? 'RESOURCE_CONTENT'
+          : 'RESOURCE_GATE'
   } else if (activeUnitId === ATOMIC_PLAN_UNIT_ID) {
     phase = 'ATOMIC_TASK_PLANNING'
   } else if (
@@ -1392,10 +1393,15 @@ function buildProjectionRun(input: {
         }
       : {}),
     ...(input.snapshot?.gameIrState !== undefined
-      ? { gameIrState: input.snapshot.gameIrState as DeliveryRun['gameIrState'] }
+      ? {
+          gameIrState: input.snapshot.gameIrState as DeliveryRun['gameIrState'],
+        }
       : {}),
     ...(input.snapshot?.checklistBridgeState !== undefined
-      ? { checklistBridgeState: input.snapshot.checklistBridgeState as DeliveryRun['checklistBridgeState'] }
+      ? {
+          checklistBridgeState: input.snapshot
+            .checklistBridgeState as DeliveryRun['checklistBridgeState'],
+        }
       : {}),
     tasks: projectedTasks,
     evidence: {
@@ -1691,7 +1697,9 @@ export async function projectExactResumeRun(input: {
   if (storedFoundationAuditState) {
     try {
       const state = parseFoundationAuditState(storedFoundationAuditState)
-      const runningFactTasks = state.tasks.filter(task => task.status === 'running')
+      const runningFactTasks = state.tasks.filter(
+        task => task.status === 'running',
+      )
       if (runningFactTasks.length > 4)
         recoveryError(
           'recovery_checkpoint_conflict',
@@ -1702,15 +1710,34 @@ export async function projectExactResumeRun(input: {
         if (!dispatch) continue
         const request = dispatch.request
         const contract = request?.contract
-        if (dispatch.taskId !== task.taskId || dispatch.revision !== task.revision || (typeof request?.taskId === 'string' && request.taskId !== task.taskId) || (typeof request?.revision === 'string' && request.revision !== task.revision) || (contract && typeof contract === 'object' && 'packetDigest' in contract && contract.packetDigest !== task.packetDigest))
+        if (
+          dispatch.taskId !== task.taskId ||
+          dispatch.revision !== task.revision ||
+          (typeof request?.taskId === 'string' &&
+            request.taskId !== task.taskId) ||
+          (typeof request?.revision === 'string' &&
+            request.revision !== task.revision) ||
+          (contract &&
+            typeof contract === 'object' &&
+            'packetDigest' in contract &&
+            contract.packetDigest !== task.packetDigest)
+        )
           recoveryError(
             'recovery_checkpoint_conflict',
             `foundation fact recovery dispatch identity is inconsistent for ${task.taskId}`,
           )
       }
       if (
-        (state.status === 'facts_staged' || state.status === 'derived_committed') &&
-        !state.tasks.filter(task => task.kind === 'document-facts').every(task => task.status === 'completed' && task.receiptPath && task.receiptDigest)
+        (state.status === 'facts_staged' ||
+          state.status === 'derived_committed') &&
+        !state.tasks
+          .filter(task => task.kind === 'document-facts')
+          .every(
+            task =>
+              task.status === 'completed' &&
+              task.receiptPath &&
+              task.receiptDigest,
+          )
       )
         recoveryError(
           'recovery_checkpoint_missing',

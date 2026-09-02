@@ -22,7 +22,9 @@ export type RuntimeObservability = ReturnType<typeof createRuntimeObservability>
 
 export function createRuntimeObservability(input: RuntimeObservationInput) {
   const path = runtimeObservationPath(input.workspacePath)
-  const errorSink = input.errorSink ?? (message => console.error(`[Bee Game Studio API error] ${message}`))
+  const errorSink =
+    input.errorSink ??
+    (message => console.error(`[Bee Game Studio API error] ${message}`))
   const clock = input.clock ?? (() => new Date())
   const streamGapObservationMs = input.streamGapObservationMs ?? 30_000
   let requestId = ''
@@ -107,7 +109,8 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
       const envelope = objectField(message, 'message')
       const content = Array.isArray(envelope?.content) ? envelope.content : []
       for (const block of content) {
-        if (!block || typeof block !== 'object' || Array.isArray(block)) continue
+        if (!block || typeof block !== 'object' || Array.isArray(block))
+          continue
         const candidate = block as Record<string, unknown>
         if (candidate.type !== 'tool_use') continue
         enqueue({
@@ -120,9 +123,13 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         })
       }
     },
-    finishTurn(result: { outcome: 'success' | 'error' | 'aborted'; error?: unknown }): void {
+    finishTurn(result: {
+      outcome: 'success' | 'error' | 'aborted'
+      error?: unknown
+    }): void {
       const finishedAt = clock()
-      const error = result.error === undefined ? undefined : errorMessage(result.error)
+      const error =
+        result.error === undefined ? undefined : errorMessage(result.error)
       if (error) safeErrorSink(errorSink, error)
       enqueue({
         type: 'turn_terminal',
@@ -206,7 +213,7 @@ function objectField(
 ): Record<string, unknown> | undefined {
   const field = value[key]
   return field && typeof field === 'object' && !Array.isArray(field)
-    ? field as Record<string, unknown>
+    ? (field as Record<string, unknown>)
     : undefined
 }
 

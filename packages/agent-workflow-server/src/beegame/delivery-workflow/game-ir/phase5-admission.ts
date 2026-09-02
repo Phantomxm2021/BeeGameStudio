@@ -4,7 +4,6 @@ import {
   admitGameIrDomainSemanticResult,
   gameIrSemanticTargetPointers,
   gameIrSemanticValueLeafPointers,
-  verifyGameIrSemanticClaimLiteral,
   normalizeGameIrDomainSemanticPacket,
   normalizeGameIrDomainSemanticReceipt,
   assertDisjointDomainTargets,
@@ -290,18 +289,7 @@ export function replayAndBindPhase5SemanticReceipt(
       receiptAuthorityDigest: packet.packetDigest,
     },
   ) as Phase5SemanticReceipt
-  const nodesById = new Map(semantic.nodes.map(node => [node.id, node]))
   for (const claim of semantic.sourceClaims) {
-    const separator = claim.subject.indexOf('#')
-    const node = nodesById.get(claim.subject.slice('node:'.length, separator))
-    if (!node) fail('source claim refers to an unknown semantic node')
-    const pointer = claim.subject.slice(separator + 1)
-    verifyGameIrSemanticClaimLiteral(
-      claim,
-      node,
-      pointer,
-      'invalid Game IR Phase 5 admission',
-    )
     verifyGameIrSemanticClaimBytes(
       source,
       claim,

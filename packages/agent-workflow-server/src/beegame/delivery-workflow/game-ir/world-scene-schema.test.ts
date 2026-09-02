@@ -310,8 +310,9 @@ function threeDimensionalModule(): MutableModule {
 describe('World/Scene Game IR schema', () => {
   test('exposes the closed ten-kind manifest', () => {
     expect(Object.keys(WORLD_SCENE_DOMAIN_MANIFEST)).toHaveLength(10)
-    expect(WORLD_SCENE_DOMAIN_MANIFEST['world-scene.scene']).toEqual({
-      valueFields: ['label', 'coordinateConvention'],
+    const { valueJsonSchema: _schema, ...sceneManifest } =
+      WORLD_SCENE_DOMAIN_MANIFEST['world-scene.scene']
+    expect(sceneManifest).toEqual({
       relationships: {
         root: {
           targetKinds: ['world-scene.node'],
@@ -319,6 +320,8 @@ describe('World/Scene Game IR schema', () => {
         },
       },
     })
+    for (const descriptor of Object.values(WORLD_SCENE_DOMAIN_MANIFEST))
+      expect(descriptor.valueJsonSchema).toBeDefined()
     expect(WORLD_SCENE_DOMAIN_MANIFEST['world-scene.route'].references).toEqual(
       {
         targetKinds: ['world-scene.node'],

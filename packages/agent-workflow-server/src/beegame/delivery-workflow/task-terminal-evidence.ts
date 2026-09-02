@@ -5,14 +5,14 @@ function dispatchDurationMs(record: DispatchRecord): number | undefined {
   if (!record.finishedAt) return undefined
   const startedAt = Date.parse(record.startedAt)
   const finishedAt = Date.parse(record.finishedAt)
-  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt)) return undefined
+  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt))
+    return undefined
   return Math.max(0, finishedAt - startedAt)
 }
 
-export function projectTaskTerminalEvidence<T extends FoundationAuditTask | FoundationRevisionTask>(
-  task: T,
-  record: DispatchRecord,
-): T {
+export function projectTaskTerminalEvidence<
+  T extends FoundationAuditTask | FoundationRevisionTask,
+>(task: T, record: DispatchRecord): T {
   if (record.status === 'running') return task
   const durationMs = dispatchDurationMs(record)
   // Business admission can classify a completed provider terminal as
@@ -21,11 +21,11 @@ export function projectTaskTerminalEvidence<T extends FoundationAuditTask | Foun
   // itself completed successfully. Preserve that durable admission reason;
   // an explicit record reason always wins, and a truly completed task clears
   // stale reasons.
-  const failureReason = record.failureReason ?? (
-    task.status === 'retryable' || task.status === 'needs_action'
+  const failureReason =
+    record.failureReason ??
+    (task.status === 'retryable' || task.status === 'needs_action'
       ? task.failureReason
-      : undefined
-  )
+      : undefined)
   return {
     ...task,
     dispatch: record,

@@ -31,6 +31,13 @@ import {
   createSemanticFidelityPrimitives,
   sectionEvidencePointer,
 } from './semantic-fidelity'
+import {
+  buildDomainProjectionEnvelope,
+  normalizeDomainProjectionEnvelope,
+  operationExactKeys,
+  operationIsRecord,
+  type DomainProjectionEnvelope,
+} from './operation-packet-primitives'
 
 const fidelity = createSemanticFidelityPrimitives(
   'invalid Resource Realization producer',
@@ -99,7 +106,67 @@ export type ResourceRealizationSemanticProjectionAuthority = Readonly<{
     mechanical: GameIrMechanicalProjectionReceipt
   }>
 }>
+export type ResourceRealizationProjectionOperationPacket =
+  DomainProjectionEnvelope<
+    Readonly<Record<never, never>>,
+    ResourceRealizationSemanticProjectionPacket,
+    'game-ir-resource-realization-projection-operation-packet.v1'
+  >
 
+export function buildResourceRealizationProjectionOperationPacket(
+  authority: ResourceRealizationSemanticProjectionAuthority,
+): ResourceRealizationProjectionOperationPacket {
+  const semanticPacket =
+    prepareResourceRealizationSemanticProjectionPacket(authority)
+  const source = validateGameIrDomainSourceEnvelope(
+    authority.resourceRealization.source,
+  )
+  return buildDomainProjectionEnvelope({
+    schemaVersion:
+      'game-ir-resource-realization-projection-operation-packet.v1',
+    moduleId: 'resource-realization',
+    source,
+    semanticPacket,
+    normalizeSemanticPacket: () => semanticPacket,
+    dependencies: {},
+  })
+}
+
+export function normalizeResourceRealizationProjectionOperationPacket(
+  value: unknown,
+  authority: ResourceRealizationSemanticProjectionAuthority,
+): ResourceRealizationProjectionOperationPacket {
+  const expected = buildResourceRealizationProjectionOperationPacket(authority)
+  return normalizeDomainProjectionEnvelope(value, {
+    schemaVersion:
+      'game-ir-resource-realization-projection-operation-packet.v1',
+    moduleId: 'resource-realization',
+    label: 'Resource Realization operation packet',
+    normalizeSemanticPacket: (
+      packet: unknown,
+      source: GameIrDomainSourceEnvelope,
+    ) => {
+      if (canonicalGameIrJson(source) !== canonicalGameIrJson(expected.source))
+        fail('Resource Realization source is stale or detached')
+      if (
+        canonicalGameIrJson(packet) !==
+        canonicalGameIrJson(expected.semanticPacket)
+      )
+        fail('Resource Realization semantic packet is stale or detached')
+      return expected.semanticPacket
+    },
+    parseDependencies: dependency => {
+      if (!operationIsRecord(dependency))
+        fail('Resource Realization operation dependencies must be an object')
+      operationExactKeys(
+        dependency,
+        [],
+        'Resource Realization operation dependencies',
+      )
+      return {}
+    },
+  })
+}
 export type ResourceRealizationSemanticReceipt = GameIrDomainSemanticReceipt &
   Readonly<{ moduleId: 'resource-realization' }>
 

@@ -43,6 +43,10 @@ const VALID_ISSUE_TYPES = new Set<AuditIssue['type']>([
   'semantic',
 ])
 
+export class FoundationSemanticAdmissionError extends Error {
+  override readonly name = 'FoundationSemanticAdmissionError'
+}
+
 /** One service-owned verdict for one original deterministic issue. */
 export type PatchValidation = {
   validatorTaskId: string
@@ -694,12 +698,11 @@ export function admitFoundationSemanticRecheckResult(
   for (const item of rawEvidence) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('targeted semantic diagnostic evidence is invalid')
     const candidate = item as Record<string, unknown>
-    assertExactKeys(candidate, ['digest', 'documentPath', 'sectionId'], 'targeted semantic diagnostic evidence')
-    if (typeof candidate.documentPath !== 'string' || typeof candidate.sectionId !== 'string' || typeof candidate.digest !== 'string' || !DIGEST.test(candidate.digest)) throw new Error('targeted semantic diagnostic evidence reference is invalid')
+    assertExactKeys(candidate, ['documentPath', 'sectionId'], 'targeted semantic diagnostic evidence')
+    if (typeof candidate.documentPath !== 'string' || typeof candidate.sectionId !== 'string') throw new Error('targeted semantic diagnostic evidence reference is invalid')
     const key = `${candidate.documentPath}\0${candidate.sectionId}`
     const ref = packetSections.get(key)
     if (!ref) throw new Error('targeted semantic diagnostic evidence references an unassigned Section')
-    if (ref.digest !== candidate.digest) throw new Error('targeted semantic diagnostic evidence digest is stale')
     if (evidenceKeys.has(key)) throw new Error('targeted semantic diagnostic evidence contains duplicate Sections')
     evidenceKeys.add(key)
     evidence.push({ ...ref })

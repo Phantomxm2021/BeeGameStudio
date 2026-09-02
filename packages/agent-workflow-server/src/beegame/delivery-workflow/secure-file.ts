@@ -16,7 +16,8 @@ export async function readSecureWorkspaceFile(
     relativePath.includes('\\') ||
     relativePath.includes('\0') ||
     relativePath.split('/').some(part => !part || part === '.' || part === '..')
-  ) throw new Error('secure file path is not a safe relative path')
+  )
+    throw new Error('secure file path is not a safe relative path')
   const target = resolve(root, relativePath)
   const rel = relative(root, target)
   if (rel.startsWith('..') || rel.includes(`${sep}..${sep}`))
@@ -35,24 +36,36 @@ export async function readSecureWorkspaceFile(
     throw new Error('secure file target does not exist')
   }
   const canonicalRelative = relative(root, canonicalTarget)
-  if (canonicalRelative.startsWith('..') || canonicalRelative.includes(`${sep}..${sep}`) || canonicalRelative !== relativePath)
-    throw new Error('secure file target is a symlink or not the canonical workspace file')
+  if (
+    canonicalRelative.startsWith('..') ||
+    canonicalRelative.includes(`${sep}..${sep}`) ||
+    canonicalRelative !== relativePath
+  )
+    throw new Error(
+      'secure file target is a symlink or not the canonical workspace file',
+    )
   const canonicalTargetBeforeOpen = await lstat(canonicalTarget)
   if (!canonicalTargetBeforeOpen.isFile())
     throw new Error('secure file target is not a regular file')
 
   let parent = root
-  for (const component of relative(root, dirname(target)).split(sep).filter(Boolean)) {
+  for (const component of relative(root, dirname(target))
+    .split(sep)
+    .filter(Boolean)) {
     parent = resolve(parent, component)
     const info = await lstat(parent)
     if (info.isSymbolicLink() || !info.isDirectory())
       throw new Error('secure file path contains a non-directory component')
   }
   const parentBeforeOpen = await lstat(parent)
-  const handle = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  const handle = await open(
+    target,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  )
   try {
     const info = await handle.stat()
-    if (!info.isFile()) throw new Error('secure file target is not a regular file')
+    if (!info.isFile())
+      throw new Error('secure file target is not a regular file')
     const parentAfterOpen = await lstat(parent)
     if (
       !parentAfterOpen.isDirectory() ||

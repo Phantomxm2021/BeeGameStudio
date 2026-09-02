@@ -32,7 +32,10 @@ import {
   foundationRuntimeTasks,
   isFoundationRevisionPhase,
 } from './foundation-audit-state'
-import type { FoundationAuditTask, FoundationRevisionTask } from './foundation-audit-state'
+import type {
+  FoundationAuditTask,
+  FoundationRevisionTask,
+} from './foundation-audit-state'
 
 export type { WorkflowEvent } from './types'
 
@@ -80,9 +83,10 @@ function now(): string {
 
 function foundationNeedsAction(run: DeliveryRun): boolean {
   return Boolean(
-    run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(
-      task => task.status === 'needs_action',
-    ),
+    run.foundationAuditState &&
+      foundationRuntimeTasks(run.foundationAuditState).some(
+        task => task.status === 'needs_action',
+      ),
   )
 }
 
@@ -279,7 +283,11 @@ function withDispatchUsage(
   const update = (dispatch: DispatchRecord | undefined) =>
     dispatch?.dispatchId === dispatchId ? { ...dispatch, usage } : dispatch
   const activeTaskIds = run.foundationAuditState
-    ? new Set(foundationRuntimeTasks(run.foundationAuditState).map(task => task.taskId))
+    ? new Set(
+        foundationRuntimeTasks(run.foundationAuditState).map(
+          task => task.taskId,
+        ),
+      )
     : new Set<string>()
   return {
     ...run,
@@ -299,7 +307,8 @@ function withDispatchUsage(
       ? {
           ...run.foundationAuditState,
           tasks: run.foundationAuditState.tasks.map(task =>
-            activeTaskIds.has(task.taskId) && task.dispatch?.dispatchId === dispatchId
+            activeTaskIds.has(task.taskId) &&
+            task.dispatch?.dispatchId === dispatchId
               ? { ...task, usage, dispatch: update(task.dispatch) }
               : task,
           ),
@@ -352,7 +361,10 @@ function paths(workspacePath: string) {
   }
 }
 
-export async function durableWrite(path: string, content: string): Promise<void> {
+export async function durableWrite(
+  path: string,
+  content: string,
+): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`
   const handle = await open(temporary, 'w')
@@ -481,7 +493,10 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return lease
   }
 
-  async function acquireMutationLease(runId: string, failFast = false): Promise<WorkflowLock> {
+  async function acquireMutationLease(
+    runId: string,
+    failFast = false,
+  ): Promise<WorkflowLock> {
     while (true) {
       try {
         return await enqueueMutation(filePaths.lock, () =>
@@ -499,7 +514,14 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         }
         const ownerProcessAlive = processIsAlive(active.processId)
         if (ownerProcessAlive && active.purpose === 'recovery') throw error
-        if (failFast && ownerProcessAlive && active.purpose === 'mutation' && active.ownerId === ownerId && active.processId === process.pid) throw error
+        if (
+          failFast &&
+          ownerProcessAlive &&
+          active.purpose === 'mutation' &&
+          active.ownerId === ownerId &&
+          active.processId === process.pid
+        )
+          throw error
         if (!ownerProcessAlive) {
           try {
             await enqueueMutation(filePaths.lock, async () => {
@@ -534,7 +556,10 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     }
   }
 
-  async function mutationLock(runId: string, failFast = false): Promise<WorkflowLock> {
+  async function mutationLock(
+    runId: string,
+    failFast = false,
+  ): Promise<WorkflowLock> {
     return acquireMutationLease(runId, failFast)
   }
 
@@ -1127,7 +1152,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         const staleTerminalTasks =
           run.status !== 'running'
             ? foundationRuntimeTasks(run.foundationAuditState).filter(
-                task => task.status === 'running' && task.dispatch?.status === 'running',
+                task =>
+                  task.status === 'running' &&
+                  task.dispatch?.status === 'running',
               )
             : []
         if (staleTerminalTasks.length) {
@@ -1140,8 +1167,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           const nextState = {
             ...run.foundationAuditState,
             tasks: tasks.map(task => {
-              if (!staleTaskIds.has(task.taskId) || !task.dispatch)
-                return task
+              if (!staleTaskIds.has(task.taskId) || !task.dispatch) return task
               const interruptedDispatch = {
                 ...task.dispatch,
                 status: 'interrupted' as const,
@@ -1175,10 +1201,19 @@ export function createRunStore(workspacePath: string, ownerId: string) {
             reason: blockedReason,
           })
         }
-        const runtimeTaskIds = new Set(foundationRuntimeTasks(run.foundationAuditState).map(task => task.taskId))
-        const runningTasks = tasks.filter(task => runtimeTaskIds.has(task.taskId) && task.status === 'running')
+        const runtimeTaskIds = new Set(
+          foundationRuntimeTasks(run.foundationAuditState).map(
+            task => task.taskId,
+          ),
+        )
+        const runningTasks = tasks.filter(
+          task => runtimeTaskIds.has(task.taskId) && task.status === 'running',
+        )
         if (runningTasks.length > 4)
-          throw new WorkflowStoreError('foundation recovery exceeds the four-worker limit', 'conflict')
+          throw new WorkflowStoreError(
+            'foundation recovery exceeds the four-worker limit',
+            'conflict',
+          )
         for (const task of tasks) {
           if (!runtimeTaskIds.has(task.taskId)) continue
           const dispatch = task.dispatch
@@ -1190,8 +1225,10 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           if (
             dispatch.taskId !== task.taskId ||
             dispatch.revision !== task.revision ||
-            (typeof request?.taskId === 'string' && request.taskId !== task.taskId) ||
-            (typeof request?.revision === 'string' && request.revision !== task.revision) ||
+            (typeof request?.taskId === 'string' &&
+              request.taskId !== task.taskId) ||
+            (typeof request?.revision === 'string' &&
+              request.revision !== task.revision) ||
             (contractRecord &&
               'packetDigest' in contractRecord &&
               contractRecord.packetDigest !== task.packetDigest) ||
@@ -1201,7 +1238,10 @@ export function createRunStore(workspacePath: string, ownerId: string) {
                 contractRecord.packetPath !== task.packetPath ||
                 contractRecord.round !== task.round))
           )
-            throw new WorkflowStoreError('foundation recovery dispatch identity is inconsistent', 'conflict')
+            throw new WorkflowStoreError(
+              'foundation recovery dispatch identity is inconsistent',
+              'conflict',
+            )
         }
         const unavailable: typeof tasks = []
         for (const task of runningTasks) {
@@ -1212,8 +1252,11 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           const nextState = {
             ...run.foundationAuditState,
             tasks: tasks.map(task => {
-              if (!unavailable.some(item => item.taskId === task.taskId)) return task
-              const hasPersistedTerminal = Boolean(task.dispatch?.terminalResult)
+              if (!unavailable.some(item => item.taskId === task.taskId))
+                return task
+              const hasPersistedTerminal = Boolean(
+                task.dispatch?.terminalResult,
+              )
               const failureReason = isFoundationRevisionTask(task)
                 ? 'server stopped before the foundation revision terminal was admitted'
                 : 'server stopped before the foundation fact terminal was admitted'
@@ -1223,7 +1266,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
                     status: hasPersistedTerminal
                       ? ('completed' as const)
                       : ('interrupted' as const),
-                    finishedAt: now(),
+                    finishedAt: task.dispatch.finishedAt ?? now(),
                     ...(hasPersistedTerminal ? {} : { failureReason }),
                   }
                 : undefined
@@ -1240,14 +1283,42 @@ export function createRunStore(workspacePath: string, ownerId: string) {
                 dispatch: terminal,
                 ...(hasPersistedTerminal ? {} : { failureReason }),
               }
-              return terminal ? projectTaskTerminalEvidence(recovered, terminal) : recovered
+              return terminal
+                ? projectTaskTerminalEvidence(recovered, terminal)
+                : recovered
             }),
           }
-          const nextStatus = foundationNeedsAction({ ...run, foundationAuditState: nextState }) ? 'needs_action' as const : 'running' as const
-          const eventType = isFoundationRevisionPhase(run.foundationAuditState.status)
+          const nextStatus = foundationNeedsAction({
+            ...run,
+            foundationAuditState: nextState,
+          })
+            ? ('needs_action' as const)
+            : ('running' as const)
+          const eventType = isFoundationRevisionPhase(
+            run.foundationAuditState.status,
+          )
             ? 'foundation.revision.recovered'
             : 'foundation.fact.recovered'
-          return commitUnlocked({ ...run, foundationAuditState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? run.blockedReason ?? 'foundation workflow requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: eventType, phase: run.phase, status: nextStatus, revision: run.revision })
+          return commitUnlocked(
+            {
+              ...run,
+              foundationAuditState: nextState,
+              status: nextStatus,
+              blockedReason:
+                nextStatus === 'needs_action'
+                  ? (run.blockedReason ??
+                    'foundation workflow requires action after recovery')
+                  : undefined,
+              thinking: nextStatus === 'running' ? 'working' : 'idle',
+            },
+            {
+              runId: run.runId,
+              type: eventType,
+              phase: run.phase,
+              status: nextStatus,
+              revision: run.revision,
+            },
+          )
         }
       }
       if (!run.activeDispatch || run.activeDispatch.status !== 'running') {
@@ -1256,7 +1327,9 @@ export function createRunStore(workspacePath: string, ownerId: string) {
           ...run,
           status: 'needs_action' as const,
           thinking: 'idle' as const,
-          blockedReason: run.blockedReason ?? 'foundation workflow requires action after recovery',
+          blockedReason:
+            run.blockedReason ??
+            'foundation workflow requires action after recovery',
         }
         return commitUnlocked(recovered, {
           runId: recovered.runId,
@@ -1305,12 +1378,14 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const usageDispatch =
         run.activeDispatch?.dispatchId === dispatchId
           ? run.activeDispatch
-          : run.foundationDraftState.documents?.find(
+          : (run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === dispatchId,
-            )?.dispatch
-          ?? (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(
-              task => task.dispatch?.dispatchId === dispatchId,
-          )?.dispatch : undefined)
+            )?.dispatch ??
+            (run.foundationAuditState
+              ? foundationRuntimeTasks(run.foundationAuditState).find(
+                  task => task.dispatch?.dispatchId === dispatchId,
+                )?.dispatch
+              : undefined))
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'
       const acceptsStoppedTailUsage =
@@ -1381,12 +1456,14 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const progressDispatch = progress.dispatchId
         ? run.activeDispatch?.dispatchId === progress.dispatchId
           ? run.activeDispatch
-          : run.foundationDraftState.documents?.find(
+          : (run.foundationDraftState.documents?.find(
               document => document.dispatch?.dispatchId === progress.dispatchId,
-            )?.dispatch
-            ?? (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(
-              task => task.dispatch?.dispatchId === progress.dispatchId,
-            )?.dispatch : undefined)
+            )?.dispatch ??
+            (run.foundationAuditState
+              ? foundationRuntimeTasks(run.foundationAuditState).find(
+                  task => task.dispatch?.dispatchId === progress.dispatchId,
+                )?.dispatch
+              : undefined))
         : undefined
       if (
         progress.dispatchId &&

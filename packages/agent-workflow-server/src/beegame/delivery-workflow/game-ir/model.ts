@@ -155,7 +155,9 @@ export function digestGameIrSourceSectionIndex(
         `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
       ),
     )
-  return createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex')
+  return createHash('sha256')
+    .update(JSON.stringify(canonical), 'utf8')
+    .digest('hex')
 }
 
 function nonEmptyText(value: unknown, label: string): string {

@@ -90,6 +90,7 @@ const implementationVerificationAssemblerPath =
 const modelPath = /(?:^|\/)model(?:\.ts)?$/
 const phase7AssemblerModelRuntime = new Set([
   'canonicalGameIrJson',
+  'compareCodeUnits',
   'digestGameIrValue',
   'parseGameIrCandidate',
 ])
@@ -590,7 +591,8 @@ function policyViolations(
           entry.path,
         )) &&
       (forbiddenPaths.test(entry.path) ||
-        (forbiddenClosurePath.test(entry.path) && policy !== 'phase6-producer') ||
+        (forbiddenClosurePath.test(entry.path) &&
+          policy !== 'phase6-producer') ||
         (policy === 'phase7-producer' &&
           forbiddenPhase7ClosurePath.test(entry.path)) ||
         ((policy === 'phase4' ||
@@ -825,7 +827,10 @@ function policyViolations(
   if (facts.providerDispatch)
     violations.add('provider-dispatch: provider dispatch call')
   for (const name of facts.identifiers) {
-    if (!['reader', 'checkpoint'].includes(policy) && (name === 'DeliveryRun' || name === 'FoundationIssue'))
+    if (
+      !['reader', 'checkpoint'].includes(policy) &&
+      (name === 'DeliveryRun' || name === 'FoundationIssue')
+    )
       violations.add(`identifier: ${name}`)
     if (
       (policy === 'phase5' ||
@@ -909,7 +914,9 @@ function futureModuleLiteralViolations(
   const allowedDeclaration =
     filename === 'domain-source.ts'
       ? 'GAME_IR_MODULE_SOURCE_DOCUMENTS'
-      : undefined
+      : filename === 'projection-contract.ts'
+        ? 'manifests'
+        : undefined
   return collectAstFacts(source, filename)
     .strings.filter(
       entry =>
@@ -1003,6 +1010,8 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
     return 'phase7-assembler'
   if (filename === 'committed-reader.ts') return 'reader'
   if (filename === 'stage-checkpoint.ts') return 'checkpoint'
+  if (filename === 'staged-compiler.ts') return 'checkpoint'
+  if (filename === 'projection-slice-journal.ts') return 'checkpoint'
   if (PHASE4_PRODUCTION_FILES.includes(filename as never)) return 'phase4'
   if (PHASE5_PRODUCTION_FILES.includes(filename as never)) return 'phase5'
   return 'other'
@@ -1453,8 +1462,8 @@ describe('Game IR stage boundary', () => {
        replay(input)`,
       `import * as model from './model'
        model.parseGameIrCandidate(input)`,
-      `import { compareCodeUnits as compare } from './model'
-       compare(input, input)`,
+      `import { canonicalizeGameIrSourceSections } from './model'
+       canonicalizeGameIrSourceSections(input)`,
       `import { assembleResourceRealizationClosure } from './resource-realization-assembler'
        assembleResourceRealizationClosure(input)
        const publication = prepareGameIrPublication(input)`,
@@ -2069,6 +2078,7 @@ describe('Game IR stage boundary', () => {
       'committed-reader.ts',
       'publication.ts',
       'stage-checkpoint.ts',
+      'staged-compiler.ts',
     ])
     expect(
       facts.flatMap(({ filename, facts: fileFacts }) =>
@@ -2076,12 +2086,7 @@ describe('Game IR stage boundary', () => {
           .filter(name => name === 'assembleImplementationVerificationClosure')
           .map(() => filename),
       ),
-    ).toEqual([
-      'committed-reader.ts',
-      'publication.ts',
-      'stage-checkpoint.ts',
-      'stage-checkpoint.ts',
-    ])
+    ).toEqual(['committed-reader.ts', 'publication.ts', 'stage-checkpoint.ts'])
     expect(
       facts.flatMap(({ filename, facts: fileFacts }) =>
         fileFacts.calls
@@ -2108,17 +2113,24 @@ describe('Game IR stage boundary', () => {
       'implementation-verification-producer.ts',
       'implementation-verification-schema.ts',
       'model.ts',
+      'operation-packet-primitives.ts',
       'phase5-admission.ts',
       'phase6-admission.ts',
       'phase7-admission.ts',
       'presentation-producer.ts',
       'presentation-schema.ts',
+      'projection-contract.ts',
+      'projection-record-stream.ts',
+      'projection-schema.ts',
+      'projection-slice-journal.ts',
+      'projection-slices.ts',
       'publication.ts',
       'resource-realization-assembler.ts',
       'resource-realization-producer.ts',
       'resource-realization-schema.ts',
       'semantic-fidelity.ts',
       'stage-checkpoint.ts',
+      'staged-compiler.ts',
       'world-presentation-assembler.ts',
       'world-scene-producer.ts',
       'world-scene-schema.ts',
@@ -2169,9 +2181,22 @@ describe('Game IR stage boundary', () => {
     }
   })
 
+  test('removes the obsolete whole-domain projection route from production', async () => {
+    const files = await readProductionSourceFiles(serverSourceRoot)
+    const obsolete =
+      /\b(?:sourcePackets|remainingDomainIds|domainResults|buildGameIrCompileContract|buildGameIrProjectionStructuredOutputJsonSchema|canonicalCompilerDomainResults|remainingGameIrDomainIds|admitGameIrCompilerResults)\b/u
+    expect(
+      files
+        .filter(file => !file.path.endsWith('.test.ts'))
+        .flatMap(file => (obsolete.test(file.source) ? [file.path] : [])),
+    ).toEqual([])
+  })
+
   test('permits the committed reader/writer only through the controller and dispatcher route', async () => {
     const files = await readProductionSourceFiles(serverSourceRoot)
-    const routeFiles = files.filter(file => /\/(?:controller|dispatch)\.ts$/.test(file.path))
+    const routeFiles = files.filter(file =>
+      /\/(?:controller|dispatch)\.ts$/.test(file.path),
+    )
     const routeViolations = standaloneProductionViolations(routeFiles)
     const allowedRouteImports = new Set([
       './game-ir/balance-producer',
@@ -2193,6 +2218,9 @@ describe('Game IR stage boundary', () => {
       './game-ir/resource-realization-assembler',
       './game-ir/resource-realization-producer',
       './game-ir/stage-checkpoint',
+      './game-ir/staged-compiler',
+      './game-ir/projection-slice-journal',
+      './game-ir/projection-slices',
       './game-ir/world-presentation-assembler',
       './game-ir/world-scene-producer',
     ])
@@ -2202,40 +2230,171 @@ describe('Game IR stage boundary', () => {
       'GAME_IR_MODULE_SOURCE_DOCUMENTS',
       'GameIrCheckpointRecord',
       'GameIrCompileRequest',
-      'GameIrCompilerAuthorities',
-      'GameIrCompilerDomainModel',
+      'GameIrCheckpointLoad',
+      'GameIrStagedRecords',
+      'gameIrCompilerAdmissionProgressIdentity',
+      'gameIrHandlerFailure',
       'GameIrDomainId',
       'GameIrDomainSourceEnvelope',
       'GameIrReplayAuthority',
       'GameIrStageCheckpointLoader',
+      'cleanupGameIrProjectionSliceJournalAfterCheckpoint',
+      'createGameIrProjectionSliceJournal',
+      'gameIrProjectionSliceJournalPath',
+      'deriveProjectionSlicePlan',
       'gameIrSchemaVersion',
       'gameIrState',
     ])
-    const unexpectedRouteViolations = routeViolations.filter(violation => {
-      const detail = violation.slice(violation.indexOf(': ') + 2)
-      if (detail.startsWith('import: ')) return !allowedRouteImports.has(detail.slice(8))
-      if (detail.startsWith('identifier: ')) return !allowedRouteIdentifiers.has(detail.slice(12))
-      return true
-    }).sort(compareCodeUnits)
+    const unexpectedRouteViolations = routeViolations
+      .filter(violation => {
+        const detail = violation.slice(violation.indexOf(': ') + 2)
+        if (detail.startsWith('import: '))
+          return !allowedRouteImports.has(detail.slice(8))
+        if (detail.startsWith('identifier: '))
+          return !allowedRouteIdentifiers.has(detail.slice(12))
+        return true
+      })
+      .sort(compareCodeUnits)
     expect(unexpectedRouteViolations).toEqual([])
     const allowedOutsideRoute = new Map<string, ReadonlySet<string>>([
-      ['beegame/delivery-worker-session-port.ts', new Set(['identifier: gameIrCompilerModelPayloadSchema', 'identifier: gameIrCompilerStructuredOutputJsonSchema', 'identifier: gameIrCompilerTerminalSchema'])],
-      ['beegame/delivery-workflow/recovery-projector.ts', new Set(['identifier: gameIrState'])],
-      ['beegame/delivery-workflow/recovery.ts', new Set(['import: ./game-ir/stage-checkpoint', 'identifier: GameIrStageCheckpointLoader', 'identifier: gameIrState'])],
-      ['beegame/delivery-workflow/schema.ts', new Set(['import: ./game-ir/contracts', 'import: ./game-ir/model', 'identifier: GameIrCheckpointRef', 'identifier: GameIrCompilationIdentity', 'identifier: GameIrReadyReceipt', 'identifier: GameIrState', 'identifier: gameIr', 'identifier: gameIrCheckpointRefSchema', 'identifier: gameIrCompilationIdentitySchema', 'identifier: gameIrPlacementIsValid', 'identifier: gameIrReadyReceiptDigest', 'identifier: gameIrReadyReceiptSchema', 'identifier: gameIrState', 'identifier: gameIrStateSchema'])],
-      ['beegame/delivery-workflow/transition.ts', new Set(['import: ./game-ir/contracts', 'import: ./game-ir/model', 'identifier: GameIrCheckpointRef', 'identifier: GameIrCompilationIdentity', 'identifier: GameIrReadyEventState', 'identifier: GameIrState', 'identifier: gameIrReadyReceiptDigest', 'identifier: gameIrState'])],
-      ['beegame/delivery-workflow/types.ts', new Set(['import: ./game-ir/contracts', 'identifier: GameIrCheckpointRef', 'identifier: GameIrCompilationDiagnostic', 'identifier: GameIrCompilationIdentity', 'identifier: GameIrCompilationProgressIdentity', 'identifier: GameIrReadyReceipt', 'identifier: GameIrState', 'identifier: gameIrReadyReceiptDigest', 'identifier: gameIrState'])],
-      ['beegame/delivery-workflow/worker-contracts.ts', new Set(['identifier: GameIrCompilerDomainModel', 'identifier: gameIrCompilerModelPayloadSchema', 'identifier: gameIrCompilerStructuredOutputJsonSchema', 'identifier: gameIrCompilerTerminalSchema'])],
-      ['beegame/delivery-workflow/workflow-display-message.ts', new Set(['identifier: GameIrCompilationDiagnostic'])],
+      [
+        'beegame/delivery-worker-session-port.ts',
+        new Set([
+          'identifier: GameIrProjectionModuleId',
+          'identifier: GameIrProjectionSlice',
+          'identifier: gameIrCompilerTerminalSchema',
+          'identifier: gameIrOperation',
+          'identifier: gameIrOperationForRequest',
+          'identifier: gameIrProjectionModuleForRequest',
+          'identifier: gameIrProjectionPacketDigest',
+          'identifier: gameIrProjectionSessionKey',
+          'identifier: gameIrProjectionSliceForRequest',
+          'identifier: gameIrProjectionRecordStreamContract',
+          'identifier: gameIrValidationStructuredOutputJsonSchema',
+          'identifier: parseGameIrCompilerModelPayload',
+          'identifier: parseGameIrProjectionRecordStream',
+          'import: ./delivery-workflow/game-ir/model',
+          'import: ./delivery-workflow/game-ir/projection-contract',
+          'import: ./delivery-workflow/game-ir/projection-slices',
+          'import: ./delivery-workflow/game-ir/projection-record-stream',
+          'import: ./delivery-workflow/game-ir/semantic-fidelity',
+        ]),
+      ],
+      [
+        'beegame/delivery-workflow/worker-prompts.ts',
+        new Set([
+          'identifier: GameIrProjectionSlice',
+          'identifier: gameIrProjectionSliceForRequest',
+          'identifier: gameIrProjectionSliceFromContinuation',
+          'import: ./game-ir/model',
+          'import: ./game-ir/projection-slices',
+        ]),
+      ],
+      [
+        'beegame/delivery-workflow/recovery-projector.ts',
+        new Set(['identifier: gameIrState']),
+      ],
+      [
+        'beegame/delivery-workflow/recovery.ts',
+        new Set([
+          'import: ./game-ir/stage-checkpoint',
+          'identifier: GameIrStageCheckpointLoader',
+          'identifier: GameIrProtocolStep',
+          'identifier: gameIrState',
+          'identifier: gameIrTerminalActive',
+          'import: ./game-ir/projection-slice-journal',
+          'identifier: cleanupGameIrProjectionSliceJournalAfterCheckpoint',
+        ]),
+      ],
+      [
+        'beegame/delivery-workflow/schema.ts',
+        new Set([
+          'import: ./game-ir/contracts',
+          'import: ./game-ir/model',
+          'identifier: GameIrCheckpointRef',
+          'identifier: GameIrCompilationIdentity',
+          'identifier: GameIrReadyReceipt',
+          'identifier: GameIrState',
+          'identifier: gameIr',
+          'identifier: gameIrCheckpointRefSchema',
+          'identifier: gameIrCompilationIdentitySchema',
+          'identifier: gameIrPlacementIsValid',
+          'identifier: gameIrReadyReceiptDigest',
+          'identifier: gameIrReadyReceiptSchema',
+          'identifier: gameIrState',
+          'identifier: gameIrStateSchema',
+        ]),
+      ],
+      [
+        'beegame/delivery-workflow/transition.ts',
+        new Set([
+          'import: ./game-ir/contracts',
+          'import: ./game-ir/model',
+          'identifier: GameIrCheckpointRef',
+          'identifier: GameIrCompilationIdentity',
+          'identifier: GameIrReadyEventState',
+          'identifier: GameIrState',
+          'identifier: gameIrReadyReceiptDigest',
+          'identifier: gameIrState',
+        ]),
+      ],
+      [
+        'beegame/delivery-workflow/types.ts',
+        new Set([
+          'import: ./game-ir/contracts',
+          'identifier: GameIrCheckpointRef',
+          'identifier: GameIrCompilationDiagnostic',
+          'identifier: GameIrCompilationIdentity',
+          'identifier: GameIrCompilationProgressIdentity',
+          'identifier: GameIrReadyReceipt',
+          'identifier: GameIrState',
+          'identifier: gameIrReadyReceiptDigest',
+          'identifier: gameIrState',
+        ]),
+      ],
+      [
+        'beegame/delivery-workflow/worker-contracts.ts',
+        new Set([
+          'identifier: GameIrCompilerOperation',
+          'identifier: GameIrProjectionModelPayload',
+          'identifier: GameIrValidationModelPayload',
+          'identifier: gameIrCompilerTerminalSchema',
+          'identifier: gameIrDiagnosticJsonSchema',
+          'identifier: gameIrDiagnosticSchema',
+          'identifier: gameIrJsonValue',
+          'identifier: gameIrProjectionModelPayloadSchema',
+          'identifier: gameIrProjectionTerminalSchema',
+          'identifier: gameIrSemanticModelSchema',
+          'identifier: gameIrSemanticTerminalSchema',
+          'identifier: gameIrServiceIdentityFields',
+          'identifier: gameIrText',
+          'identifier: gameIrValidationJsonSchema',
+          'identifier: gameIrValidationModelPayloadSchema',
+          'identifier: gameIrValidationModelSchema',
+          'identifier: gameIrValidationStructuredOutputJsonSchema',
+          'identifier: gameIrValidationTerminalSchema',
+        ]),
+      ],
+      [
+        'beegame/delivery-workflow/workflow-display-message.ts',
+        new Set(['identifier: GameIrCompilationDiagnostic']),
+      ],
     ])
     const forbiddenOutsideRoute = files
       .filter(file => !routeFiles.includes(file))
       .flatMap(file => {
         const relativePath = file.path.slice(serverSourceRoot.length + 1)
-        const allowed = allowedOutsideRoute.get(relativePath) ?? new Set<string>()
+        const allowed =
+          allowedOutsideRoute.get(relativePath) ?? new Set<string>()
         return boundaryViolations(file.source)
           .filter(violation => {
-            if (!violation.includes('game-ir') && !violation.includes('GameIr') && !violation.includes('gameIr') && !violation.includes('GAME_IR')) return false
+            if (
+              !violation.includes('game-ir') &&
+              !violation.includes('GameIr') &&
+              !violation.includes('gameIr') &&
+              !violation.includes('GAME_IR')
+            )
+              return false
             return !allowed.has(violation)
           })
           .map(violation => `${relativePath}: ${violation}`)

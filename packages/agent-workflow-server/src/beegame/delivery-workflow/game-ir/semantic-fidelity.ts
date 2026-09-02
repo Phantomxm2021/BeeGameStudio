@@ -6,6 +6,7 @@ import {
   type GameIrSourceSection,
 } from './model'
 import type { FoundationDocumentPath } from '../types'
+import { gameIrSemanticTargetPointers } from './domain-projection'
 
 export type GameIrSemanticCandidateNode = Readonly<{
   id: string
@@ -21,6 +22,13 @@ export type GameIrSemanticSourceClaim = Readonly<{
   sectionId: string
   sourcePointer: string
   literal: string
+}>
+
+export type GameIrSourceEvidenceGroup = Readonly<{
+  subjects: readonly string[]
+  documentPath: FoundationDocumentPath
+  sectionId: string
+  excerpt: string
 }>
 
 export type GameIrSemanticSourceSection = Readonly<{
@@ -89,6 +97,146 @@ export type SemanticSourceClaimAuthority = Readonly<{
   }>[]
   sectionBytes: Readonly<Record<string, string>>
 }>
+
+/**
+ * Bind model-supplied supporting excerpts to canonical byte ranges. The model
+ * never supplies offsets: only a unique occurrence in the immutable source
+ * section is admissible.
+ */
+export function deriveGameIrSemanticSourceClaims(
+  authority: SemanticSourceClaimAuthority,
+  nodes: readonly GameIrSemanticCandidateNode[],
+  groups: readonly GameIrSourceEvidenceGroup[],
+  errorPrefix = 'invalid Game IR semantic fidelity',
+): readonly GameIrSemanticSourceClaim[] {
+  const expectedTargets = gameIrSemanticTargetPointers(nodes)
+  const expected = new Set(expectedTargets)
+  const claimed = new Set<string>()
+  const claims: GameIrSemanticSourceClaim[] = []
+  const expandSelector = (selector: string): readonly string[] => {
+    const separator = selector.indexOf('#')
+    const nodePrefix = separator >= 0 ? selector.slice(0, separator + 1) : ''
+    const pointer = separator >= 0 ? selector.slice(separator + 1) : ''
+    if (!nodePrefix.startsWith('node:'))
+      fail(
+        errorPrefix,
+        `source evidence subject ${selector} is not a semantic target selector`,
+      )
+    if (expected.has(selector)) {
+      try {
+        if (parseGameIrTargetPointer(pointer) !== pointer)
+          fail(
+            errorPrefix,
+            `source evidence subject ${selector} is not canonical`,
+          )
+      } catch {
+        fail(
+          errorPrefix,
+          `source evidence subject ${selector} is not canonical`,
+        )
+      }
+      return [selector]
+    }
+    const expandable =
+      pointer === '/' ||
+      pointer === '/value' ||
+      pointer === '/references' ||
+      pointer === '/edges'
+    if (!expandable)
+      fail(
+        errorPrefix,
+        `source evidence subject ${selector} is not a semantic target selector`,
+      )
+    const prefix =
+      pointer === '/' ? `${nodePrefix}/` : `${nodePrefix}${pointer}/`
+    const expanded = expectedTargets.filter(target => target.startsWith(prefix))
+    if (expanded.length === 0)
+      fail(
+        errorPrefix,
+        `source evidence subject ${selector} is not a semantic target selector`,
+      )
+    return expanded
+  }
+  for (const [groupIndex, group] of groups.entries()) {
+    if (
+      !group ||
+      typeof group.excerpt !== 'string' ||
+      group.excerpt.length === 0
+    )
+      fail(
+        errorPrefix,
+        `source evidence group ${groupIndex} excerpt must be non-empty`,
+      )
+    if (!Array.isArray(group.subjects) || group.subjects.length === 0)
+      fail(
+        errorPrefix,
+        `source evidence group ${groupIndex} subjects must be non-empty`,
+      )
+    const section = authority.sectionIndex.find(
+      candidate =>
+        candidate.documentPath === group.documentPath &&
+        candidate.sectionId === group.sectionId,
+    )
+    if (!section)
+      fail(
+        errorPrefix,
+        `source evidence group ${groupIndex} is outside the exact source closure`,
+      )
+    const source =
+      authority.sectionBytes[`${group.documentPath}#${group.sectionId}`]
+    if (source === undefined)
+      fail(
+        errorPrefix,
+        `source evidence group ${groupIndex} source section bytes are missing`,
+      )
+    const start = source.indexOf(group.excerpt)
+    if (start < 0)
+      fail(
+        errorPrefix,
+        `source evidence group ${groupIndex} excerpt is not present in its section`,
+      )
+    if (source.indexOf(group.excerpt, start + 1) >= 0)
+      fail(
+        errorPrefix,
+        `source evidence group ${groupIndex} excerpt has multiple occurrences`,
+      )
+    const startBytes = Buffer.byteLength(source.slice(0, start), 'utf8')
+    const endBytes = startBytes + Buffer.byteLength(group.excerpt, 'utf8')
+    const pointer = `/bytes/${startBytes}/${endBytes}`
+    const subjects = [...group.subjects].sort(compareCodeUnits)
+    for (const selector of subjects) {
+      for (const subject of expandSelector(selector)) {
+        if (claimed.has(subject))
+          fail(
+            errorPrefix,
+            `source evidence subject ${subject} is bound more than once`,
+          )
+        claimed.add(subject)
+        claims.push(
+          Object.freeze({
+            subject,
+            documentPath: group.documentPath,
+            sectionId: group.sectionId,
+            sourcePointer: pointer,
+            literal: group.excerpt,
+          }),
+        )
+      }
+    }
+  }
+  if (claimed.size !== expected.size)
+    fail(
+      errorPrefix,
+      `source evidence must bind every semantic target exactly once (expected ${expected.size}, received ${claimed.size})`,
+    )
+  return Object.freeze(
+    claims.sort((left, right) => {
+      const a = `${left.subject}\0${left.sourcePointer}\0${left.literal}`
+      const b = `${right.subject}\0${right.sourcePointer}\0${right.literal}`
+      return compareCodeUnits(a, b)
+    }),
+  )
+}
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const SHA256 = /^[a-f0-9]{64}$/

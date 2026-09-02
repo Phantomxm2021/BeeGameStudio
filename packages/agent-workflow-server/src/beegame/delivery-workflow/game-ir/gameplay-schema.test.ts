@@ -20,6 +20,7 @@ import {
 } from './gameplay-schema'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { digestSectionIndex } from '../foundation-section-index'
+import { projectionValueFields } from './projection-schema'
 
 const sectionDigest = 'b'.repeat(64)
 const gameplaySection: GameIrSourceSection = {
@@ -307,9 +308,11 @@ function admittedModule(): GameIrModuleCandidate {
 
 describe('Gameplay Game IR schema', () => {
   test('exposes one closed manifest for kinds, value fields, and roles', () => {
-    expect(GAMEPLAY_DOMAIN_MANIFEST['gameplay.condition'].valueFields).toEqual([
-      'expression',
-    ])
+    expect(
+      projectionValueFields(
+        GAMEPLAY_DOMAIN_MANIFEST['gameplay.condition'].valueJsonSchema,
+      ),
+    ).toEqual(['expression'])
     expect(
       GAMEPLAY_DOMAIN_MANIFEST['gameplay.transition'].relationships.on
         .targetKinds,

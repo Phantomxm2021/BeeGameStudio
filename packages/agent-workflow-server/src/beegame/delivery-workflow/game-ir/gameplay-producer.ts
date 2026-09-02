@@ -11,7 +11,10 @@ import {
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
-import { GAMEPLAY_DOMAIN_MANIFEST } from './gameplay-schema'
+import {
+  GAMEPLAY_DOMAIN_MANIFEST,
+  parseGameplayModule,
+} from './gameplay-schema'
 import {
   compareCodeUnits,
   digestGameIrValue,
@@ -21,6 +24,17 @@ import {
   type GameIrNode,
 } from './model'
 import type { FoundationDocumentPath } from '../types'
+import {
+  createSemanticFidelityPrimitives,
+  verifyGameIrSemanticClaimBytes,
+} from './semantic-fidelity'
+import {
+  buildDomainProjectionEnvelope,
+  normalizeDomainProjectionEnvelope,
+  operationExactKeys,
+  operationIsRecord,
+  type DomainProjectionEnvelope,
+} from './operation-packet-primitives'
 
 const GAMEPLAY_NODE_KINDS = Object.freeze(
   Object.keys(GAMEPLAY_DOMAIN_MANIFEST).sort(compareCodeUnits),
@@ -35,8 +49,69 @@ const GAMEPLAY_RELATIONSHIP_TYPES = Object.freeze(
     ),
   ].sort(compareCodeUnits),
 )
+const fidelity = createSemanticFidelityPrimitives(
+  'invalid Gameplay semantic admission',
+)
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+export type GameplayProjectionOperationDependencies = Readonly<
+  Record<never, never>
+>
+export type GameplayProjectionOperationPacket = DomainProjectionEnvelope<
+  GameplayProjectionOperationDependencies,
+  GameIrDomainSemanticPacket,
+  'game-ir-gameplay-projection-operation-packet.v1'
+>
+
+export type GameplayProjectionOperationInput = Readonly<{
+  source: GameIrDomainSourceEnvelope
+  mechanical: GameIrMechanicalProjectionReceipt
+}>
+
+export function buildGameplayProjectionOperationPacket(
+  input: GameplayProjectionOperationInput,
+): GameplayProjectionOperationPacket {
+  if (!operationIsRecord(input))
+    throw new Error('invalid Gameplay operation input')
+  operationExactKeys(
+    input,
+    ['source', 'mechanical'],
+    'Gameplay operation input',
+  )
+  const source = validateGameIrDomainSourceEnvelope(input.source)
+  if (source.moduleId !== 'gameplay')
+    throw new Error('invalid Gameplay operation source module')
+  const semanticPacket = buildGameplaySemanticPacket({
+    source,
+    mechanical: input.mechanical,
+  })
+  return buildDomainProjectionEnvelope({
+    schemaVersion: 'game-ir-gameplay-projection-operation-packet.v1',
+    moduleId: 'gameplay',
+    source,
+    semanticPacket,
+    dependencies: {},
+  })
+}
+
+export function normalizeGameplayProjectionOperationPacket(
+  value: unknown,
+): GameplayProjectionOperationPacket {
+  if (!operationIsRecord(value))
+    throw new Error('invalid Gameplay operation packet')
+  return normalizeDomainProjectionEnvelope(value, {
+    schemaVersion: 'game-ir-gameplay-projection-operation-packet.v1',
+    moduleId: 'gameplay',
+    label: 'Gameplay operation packet',
+    parseDependencies: dependency => {
+      if (!operationIsRecord(dependency))
+        throw new Error('Gameplay operation dependencies must be an object')
+      operationExactKeys(dependency, [], 'Gameplay operation dependencies')
+      return {}
+    },
+  })
+}
 
 type GameplaySemanticNode = Readonly<{
   id: string
@@ -352,34 +427,6 @@ function semanticTargets(
   )
 }
 
-function normalizeSourcePointer(value: unknown, label: string): string {
-  const pointer = text(value, label)
-  if (!pointer.startsWith('/') || pointer.includes('\0'))
-    fail(`${label} must be a safe source pointer`)
-  if (
-    pointer
-      .split('/')
-      .slice(1)
-      .some(
-        segment => segment.length === 0 || segment === '.' || segment === '..',
-      )
-  )
-    fail(`${label} must be a safe source pointer`)
-  const segments = pointer.slice(1).split('/')
-  if (
-    segments.some(
-      segment =>
-        segment.includes('\\') ||
-        segment.includes('__proto__') ||
-        segment.includes('constructor') ||
-        segment.includes('prototype') ||
-        /~(?![01])/.test(segment),
-    )
-  )
-    fail(`${label} must be a safe source pointer`)
-  return pointer
-}
-
 function normalizeClaims(
   value: unknown,
   nodes: readonly GameplaySemanticNode[],
@@ -423,7 +470,7 @@ function normalizeClaims(
       subject: `node:${nodeId}#${pointer}`,
       documentPath,
       sectionId: safeId(entry.sectionId, `sourceClaims[${index}].sectionId`),
-      sourcePointer: normalizeSourcePointer(
+      sourcePointer: fidelity.normalizeSourcePointer(
         entry.sourcePointer,
         `sourceClaims[${index}].sourcePointer`,
       ),
@@ -656,6 +703,7 @@ export function admitGameplaySemanticResult(
 function validateSemanticReceipt(
   receipt: GameIrDomainSemanticReceipt,
   packet: GameIrDomainSemanticPacket,
+  source: GameIrDomainSourceEnvelope,
 ): GameIrDomainSemanticReceipt {
   if (!isRecord(receipt)) fail('semantic receipt must be a plain object')
   exactKeys(
@@ -712,6 +760,12 @@ function validateSemanticReceipt(
     nodes,
     packet.forbiddenTargets,
   )
+  for (const claim of claims)
+    verifyGameIrSemanticClaimBytes(
+      source,
+      claim,
+      'invalid Gameplay semantic admission',
+    )
   const body: Omit<GameIrDomainSemanticReceipt, 'receiptDigest'> = {
     schemaVersion: receipt.schemaVersion,
     outcome: 'PROJECTED',
@@ -748,7 +802,7 @@ export function prepareGameplayModule(input: {
     receipt: input.mechanical,
   })
   const packet = buildGameplaySemanticPacket({ source, mechanical })
-  const semantic = validateSemanticReceipt(input.semantic, packet)
+  const semantic = validateSemanticReceipt(input.semantic, packet, source)
   const sourceSections = new Map(
     source.sectionIndex.map(section => [
       `${section.documentPath}#${section.sectionId}`,
@@ -814,9 +868,34 @@ export function prepareGameplayModule(input: {
       expectedModuleId: 'gameplay',
     },
   )
+  const localNodeIds = new Set(coreAdmitted.nodes.map(node => node.id))
+  const externalTargets = new Map<string, GameIrNode>()
+  for (const node of coreAdmitted.nodes) {
+    for (const target of [...node.references, ...node.edges]) {
+      if (localNodeIds.has(target.targetId)) continue
+      if (!target.targetType.startsWith('balance.'))
+        fail(
+          `external target ${target.targetId} is not declared as a Balance node`,
+        )
+      const existing = externalTargets.get(target.targetId)
+      if (existing && existing.kind !== target.targetType)
+        fail(`external target ${target.targetId} has conflicting kinds`)
+      if (!existing)
+        externalTargets.set(target.targetId, {
+          id: target.targetId,
+          kind: target.targetType,
+          producerMode: 'derived',
+          value: {},
+          references: [],
+          edges: [],
+          bindings: {},
+        })
+    }
+  }
+  const gameplayAdmitted = parseGameplayModule(coreAdmitted, externalTargets)
   return Object.freeze({
     source,
-    module: coreAdmitted as GameIrModuleCandidate &
+    module: gameplayAdmitted as GameIrModuleCandidate &
       Readonly<{ moduleId: 'gameplay' }>,
     mechanicalReceiptDigest: mechanical.receiptDigest,
     semanticReceiptDigest: semantic.receiptDigest,

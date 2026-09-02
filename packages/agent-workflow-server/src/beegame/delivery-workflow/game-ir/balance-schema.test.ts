@@ -5,6 +5,10 @@ import {
   parseBalanceModule,
   type BalanceFormulaExpression,
 } from './balance-schema'
+import {
+  projectionValueFields,
+  projectionValueOptionalFields,
+} from './projection-schema'
 
 type MutableNode = {
   id: string
@@ -345,25 +349,25 @@ describe('Balance Game IR schema', () => {
   })
 
   test('exposes the closed relationship role manifest', () => {
-    expect(BALANCE_DOMAIN_MANIFEST['balance.variable'].valueFields).toEqual([
-      'label',
-      'baseline',
-      'minimum',
-      'maximum',
-      'unitReferenceIndex',
-    ])
     expect(
-      BALANCE_DOMAIN_MANIFEST['balance.variable'].optionalValueFields,
+      projectionValueFields(
+        BALANCE_DOMAIN_MANIFEST['balance.variable'].valueJsonSchema,
+      ),
+    ).toEqual(['label', 'baseline', 'minimum', 'maximum', 'unitReferenceIndex'])
+    expect(
+      projectionValueOptionalFields(
+        BALANCE_DOMAIN_MANIFEST['balance.variable'].valueJsonSchema,
+      ),
     ).toEqual(['minimum', 'maximum'])
-    expect(BALANCE_DOMAIN_MANIFEST['balance.parameter'].valueFields).toEqual([
-      'label',
-      'baseline',
-      'minimum',
-      'maximum',
-      'unitReferenceIndex',
-    ])
     expect(
-      BALANCE_DOMAIN_MANIFEST['balance.parameter'].optionalValueFields,
+      projectionValueFields(
+        BALANCE_DOMAIN_MANIFEST['balance.parameter'].valueJsonSchema,
+      ),
+    ).toEqual(['label', 'baseline', 'minimum', 'maximum', 'unitReferenceIndex'])
+    expect(
+      projectionValueOptionalFields(
+        BALANCE_DOMAIN_MANIFEST['balance.parameter'].valueJsonSchema,
+      ),
     ).toEqual(['minimum', 'maximum'])
     expect(
       BALANCE_DOMAIN_MANIFEST['balance.economy-source'].relationships.amount
@@ -384,15 +388,17 @@ describe('Balance Game IR schema', () => {
           node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST
         ]
       return Object.keys(node.value).filter(
-        field => !(manifest.valueFields as readonly string[]).includes(field),
+        field =>
+          !projectionValueFields(manifest.valueJsonSchema).includes(field),
       )
     })
     const invalidOptionalFields = [
       BALANCE_DOMAIN_MANIFEST['balance.variable'],
       BALANCE_DOMAIN_MANIFEST['balance.parameter'],
     ].flatMap(manifest =>
-      manifest.optionalValueFields.filter(
-        field => !(manifest.valueFields as readonly string[]).includes(field),
+      projectionValueOptionalFields(manifest.valueJsonSchema).filter(
+        field =>
+          !projectionValueFields(manifest.valueJsonSchema).includes(field),
       ),
     )
     expect(unlistedValueFields).toEqual([])

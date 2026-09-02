@@ -24,7 +24,10 @@ import {
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
-import type { GameIrMechanicalProjectionReceipt } from './domain-projection'
+import type {
+  GameIrDomainSemanticPacket,
+  GameIrMechanicalProjectionReceipt,
+} from './domain-projection'
 import {
   canonicalGameIrJson,
   compareCodeUnits,
@@ -40,6 +43,17 @@ import {
   parsePresentationModule,
   PRESENTATION_DOMAIN_MANIFEST,
 } from './presentation-schema'
+import {
+  buildDomainProjectionEnvelope,
+  deriveOperationTargets,
+  normalizeDomainProjectionEnvelope,
+  operationExactKeys,
+  operationIsRecord,
+  operationTargets,
+  emptyOperationMechanicalReceipt,
+  type DomainProjectionEnvelope,
+  type OperationTarget,
+} from './operation-packet-primitives'
 
 export type { WorldSceneModuleProjection } from './phase5-admission'
 
@@ -93,6 +107,33 @@ export type PresentationValidationPreparationAuthority = Readonly<{
     mechanical: GameIrMechanicalProjectionReceipt
     semantic: PresentationSemanticReceipt
   }>
+}>
+
+export type PresentationProjectionOperationPreparationAuthority = Readonly<{
+  phase4Authority: GameplayBalanceAssemblyAuthority
+  worldScene: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: WorldSceneSemanticReceipt
+    validation: WorldSceneSemanticValidationResult
+  }>
+}>
+
+export type PresentationProjectionOperationDependencies = Readonly<{
+  phase4ClosureDigest: string
+  worldSceneProjectionDigest: string
+  priorTargets: readonly OperationTarget[]
+}>
+export type PresentationProjectionOperationPacket = DomainProjectionEnvelope<
+  PresentationProjectionOperationDependencies,
+  GameIrDomainSemanticPacket,
+  'game-ir-presentation-projection-operation-packet.v1'
+>
+export type PresentationProjectionOperationInput = Readonly<{
+  source: GameIrDomainSourceEnvelope
+  mechanical: GameIrMechanicalProjectionReceipt
+  phase4Authority: GameplayBalanceAssemblyAuthority
+  worldScene: PresentationProjectionOperationPreparationAuthority['worldScene']
 }>
 
 type PreparedWorldAuthority = Readonly<{
@@ -383,6 +424,137 @@ function makeWorldProjection(
     semanticValidationResultDigest: digestGameIrValue(validation),
   }
   return projection<WorldSceneModuleProjection>(body)
+}
+
+export function preparePresentationProjectionOperationDependencies(
+  authority: PresentationProjectionOperationPreparationAuthority,
+): PresentationProjectionOperationDependencies {
+  const phase4 = assembleGameplayBalanceModules(authority.phase4Authority)
+  const source = validateGameIrDomainSourceEnvelope(authority.worldScene.source)
+  assertCrossSourceIdentity(authority.phase4Authority, [source])
+  const prepared = prepareWorld({
+    source,
+    mechanical: authority.worldScene.mechanical,
+    semantic: authority.worldScene.semantic,
+    phase4,
+  })
+  const validation = admitPhase5SemanticValidationResult(
+    prepared.packet,
+    authority.worldScene.validation,
+  )
+  const projection = makeWorldProjection(prepared, validation)
+  const allowed = externalTargetKinds(PRESENTATION_DOMAIN_MANIFEST)
+  const priorTargets = deriveOperationTargets(
+    [
+      ...phase4.gameplay.module.nodes,
+      ...phase4.balance.module.nodes,
+      ...projection.module.nodes,
+    ]
+      .filter(node => allowed.has(node.kind))
+      .map(node => ({ id: node.id, kind: node.kind })),
+    'Presentation operation priorTargets',
+  )
+  return Object.freeze({
+    phase4ClosureDigest: digestGameIrValue(phase4),
+    worldSceneProjectionDigest: projection.projectionDigest,
+    priorTargets,
+  })
+}
+
+export function buildPresentationProjectionOperationPacket(
+  input: PresentationProjectionOperationInput,
+): PresentationProjectionOperationPacket {
+  if (!isPlainRecord(input))
+    fail('Presentation operation input must be an object')
+  exactKeys(
+    input,
+    ['source', 'mechanical', 'phase4Authority', 'worldScene'],
+    'Presentation operation input',
+  )
+  const source = validateGameIrDomainSourceEnvelope(input.source)
+  if (source.moduleId !== 'presentation')
+    fail('Presentation operation source module is invalid')
+  const worldSource = validateGameIrDomainSourceEnvelope(
+    input.worldScene.source,
+  )
+  assertCrossSourceIdentity(input.phase4Authority, [worldSource, source])
+  const dependencies = preparePresentationProjectionOperationDependencies({
+    phase4Authority: input.phase4Authority,
+    worldScene: input.worldScene,
+  })
+  const semanticPacket = buildPresentationSemanticPacket({
+    source,
+    mechanical: input.mechanical,
+  })
+  return buildDomainProjectionEnvelope({
+    schemaVersion: 'game-ir-presentation-projection-operation-packet.v1',
+    moduleId: 'presentation',
+    source,
+    semanticPacket,
+    dependencies,
+  })
+}
+
+export function normalizePresentationProjectionOperationPacket(
+  value: unknown,
+  authority: PresentationProjectionOperationPreparationAuthority,
+): PresentationProjectionOperationPacket {
+  const normalized = normalizeDomainProjectionEnvelope(value, {
+    schemaVersion: 'game-ir-presentation-projection-operation-packet.v1',
+    moduleId: 'presentation',
+    label: 'Presentation operation packet',
+    parseDependencies: dependency => {
+      if (!isPlainRecord(dependency))
+        fail('Presentation operation dependencies must be an object')
+      exactKeys(
+        dependency,
+        ['phase4ClosureDigest', 'worldSceneProjectionDigest', 'priorTargets'],
+        'Presentation operation dependencies',
+      )
+      if (
+        typeof dependency.phase4ClosureDigest !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(dependency.phase4ClosureDigest)
+      )
+        fail('Presentation operation phase4 closure digest is invalid')
+      if (
+        typeof dependency.worldSceneProjectionDigest !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(dependency.worldSceneProjectionDigest)
+      )
+        fail('Presentation operation World/Scene projection digest is invalid')
+      return {
+        phase4ClosureDigest: dependency.phase4ClosureDigest,
+        worldSceneProjectionDigest: dependency.worldSceneProjectionDigest,
+        priorTargets: operationTargets(
+          dependency.priorTargets,
+          'Presentation operation priorTargets',
+        ),
+      }
+    },
+  })
+  const worldSource = validateGameIrDomainSourceEnvelope(
+    authority.worldScene.source,
+  )
+  assertCrossSourceIdentity(authority.phase4Authority, [
+    worldSource,
+    normalized.source,
+  ])
+  const expectedSemanticPacket = buildPresentationSemanticPacket({
+    source: normalized.source,
+    mechanical: emptyOperationMechanicalReceipt(normalized.source),
+  })
+  if (
+    canonicalGameIrJson(normalized.semanticPacket) !==
+    canonicalGameIrJson(expectedSemanticPacket)
+  )
+    fail('Presentation operation semantic packet is stale or detached')
+  const expectedDependencies =
+    preparePresentationProjectionOperationDependencies(authority)
+  if (
+    canonicalGameIrJson(normalized.dependencies) !==
+    canonicalGameIrJson(expectedDependencies)
+  )
+    fail('Presentation operation dependencies are stale or detached')
+  return normalized
 }
 
 type PreparedPresentation = Readonly<{

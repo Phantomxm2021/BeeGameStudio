@@ -35,11 +35,23 @@ describe('sanitizeWorkflowDisplayMessage', () => {
 
 describe('projectWorkflowCurrentMessage', () => {
   test('hides raw reviewer and reviser prose from the foundation review card', () => {
-    expect(projectWorkflowCurrentMessage({ value: 'I have what I need. Now I will rewrite it.', phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe('')
+    expect(
+      projectWorkflowCurrentMessage({
+        value: 'I have what I need. Now I will rewrite it.',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+      }),
+    ).toBe('')
   })
 
   test('keeps sanitized progress outside the foundation review boundary', () => {
-    expect(projectWorkflowCurrentMessage({ value: '正在编写验收清单。', phase: 'DOCUMENT_REVIEW', documentStep: 'CHECKLIST_DRAFTING' })).toBe('正在编写验收清单。')
+    expect(
+      projectWorkflowCurrentMessage({
+        value: '正在编写验收清单。',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_DRAFTING',
+      }),
+    ).toBe('正在编写验收清单。')
   })
 })
 

@@ -447,7 +447,9 @@ export type DeliveryWorkerPort = {
   /** Front-door validation for the fact worker's persisted fast model route. */
   assertFoundationFactFastReady?(request: WorkerDispatchRequest): Promise<void>
   /** Front-door validation for persisted semantic model tier routing. */
-  assertFoundationSemanticModelReady?(request: WorkerDispatchRequest): Promise<void>
+  assertFoundationSemanticModelReady?(
+    request: WorkerDispatchRequest,
+  ): Promise<void>
   start(
     request: WorkerDispatchRequest,
   ): Promise<{ sessionId: string; dispatchId: string }>

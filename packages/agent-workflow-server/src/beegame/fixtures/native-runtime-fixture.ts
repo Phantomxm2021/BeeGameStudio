@@ -3,7 +3,15 @@ export {}
 const decoder = new TextDecoder()
 let buffer = ''
 let userMessageCount = 0
-let markdownRecoveryMode: 'normal' | 'never' | 'twice' | 'empty_continuation' | 'malformed_once' | 'malformed_forever' = 'normal'
+let markdownRecoveryMode:
+  | 'normal'
+  | 'never'
+  | 'twice'
+  | 'empty_continuation'
+  | 'malformed_once'
+  | 'malformed_forever'
+  | 'unreachable_order' = 'normal'
+let structuredRecoveryMode: 'normal' | 'forever' | undefined
 
 const completeGddMarkdown = [
   '# Visible Markdown',
@@ -41,6 +49,10 @@ const malformedGddMarkdown = completeGddMarkdown.replace(
   '## Vision and Product PromiseSection detail without a heading boundary.\n',
 )
 
+const unreachableOrderGddMarkdown =
+  completeGddMarkdown.replace('## Production Materials\n', '') +
+  '\n## Production Materials\n'
+
 function emitMarkdownResponse(
   markdown: string,
   stopReason: string,
@@ -54,6 +66,35 @@ function emitMarkdownResponse(
   )
   process.stdout.write(
     `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: markdown, stop_reason: stopReason, session_id: '550e8400-e29b-41d4-a716-446655440000', received_user_count: userMessageCount, usage: stopReason ? { input_tokens: 12, output_tokens: 4 } : { input_tokens: 0, output_tokens: 0 } })}\n`,
+  )
+}
+
+function emitStructuredTruncation(userMessageCount: number): void {
+  const toolUseID = `structured-output-truncated-${userMessageCount}`
+  process.stdout.write(
+    `${JSON.stringify({ type: 'assistant', session_id: '550e8400-e29b-41d4-a716-446655440000', message: { role: 'assistant', content: [{ type: 'tool_use', id: toolUseID, name: 'StructuredOutput', input: {} }], stop_reason: 'tool_use' } })}\n`,
+  )
+  process.stdout.write(
+    `${JSON.stringify({ type: 'user', session_id: '550e8400-e29b-41d4-a716-446655440000', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseID, is_error: true, content: 'Output does not match required schema: root: must have required property version' }] } })}\n`,
+  )
+  process.stdout.write(
+    `${JSON.stringify({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'max_tokens' } } })}\n`,
+  )
+  process.stdout.write(
+    `${JSON.stringify({ type: 'stream_event', event: { type: 'message_stop' } })}\n`,
+  )
+  process.stdout.write(
+    `${JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, stop_reason: 'max_tokens', session_id: '550e8400-e29b-41d4-a716-446655440000', errors: ['provider output stopped at max_tokens'] })}\n`,
+  )
+}
+
+function emitStructuredSuccess(userMessageCount: number): void {
+  const toolUseID = `structured-output-success-${userMessageCount}`
+  process.stdout.write(
+    `${JSON.stringify({ type: 'assistant', session_id: '550e8400-e29b-41d4-a716-446655440000', message: { role: 'assistant', content: [{ type: 'tool_use', id: toolUseID, name: 'StructuredOutput', input: { version: 3 } }], stop_reason: 'tool_use' } })}\n`,
+  )
+  process.stdout.write(
+    `${JSON.stringify({ type: 'user', session_id: '550e8400-e29b-41d4-a716-446655440000', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseID, content: 'Structured output provided successfully' }] } })}\n`,
   )
 }
 
@@ -77,12 +118,14 @@ for await (const chunk of Bun.stdin.stream()) {
     const rawContent = (message.message as { content?: unknown } | undefined)
       ?.content
     const content = Array.isArray(rawContent)
-      ? (rawContent.find(
-          block =>
-            block &&
-            typeof block === 'object' &&
-            (block as { type?: string }).type === 'text',
-        ) as { text?: unknown } | undefined)?.text
+      ? (
+          rawContent.find(
+            block =>
+              block &&
+              typeof block === 'object' &&
+              (block as { type?: string }).type === 'text',
+          ) as { text?: unknown } | undefined
+        )?.text
       : rawContent
     if (content === 'error') {
       process.stdout.write(
@@ -98,6 +141,29 @@ for await (const chunk of Bun.stdin.stream()) {
       process.stdout.write(
         `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '', stop_reason: '', session_id: '550e8400-e29b-41d4-a716-446655440000', usage: { input_tokens: 0, output_tokens: 0 } })}\n`,
       )
+      continue
+    }
+    if (content === 'unreachable-markdown-order') {
+      markdownRecoveryMode = 'unreachable_order'
+      emitMarkdownResponse(
+        unreachableOrderGddMarkdown,
+        'end_turn',
+        userMessageCount,
+      )
+      continue
+    }
+    if (
+      userMessageCount > 1 &&
+      markdownRecoveryMode === 'unreachable_order' &&
+      typeof content === 'string' &&
+      content.includes('Continue the same raw Markdown response')
+    ) {
+      if (userMessageCount === 2)
+        emitMarkdownResponse('Unchanged.', 'end_turn', userMessageCount)
+      else
+        process.stdout.write(
+          `${JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, session_id: '550e8400-e29b-41d4-a716-446655440000', errors: ['continuation loop reached'] })}\n`,
+        )
       continue
     }
     if (
@@ -131,8 +197,7 @@ for await (const chunk of Bun.stdin.stream()) {
     ) {
       if (content === 'truncated-markdown-forever')
         markdownRecoveryMode = 'never'
-      if (content === 'truncated-markdown-twice')
-        markdownRecoveryMode = 'twice'
+      if (content === 'truncated-markdown-twice') markdownRecoveryMode = 'twice'
       if (content === 'truncated-markdown-empty-continuation')
         markdownRecoveryMode = 'empty_continuation'
       if (content === 'malformed-markdown-end-turn')
@@ -140,28 +205,40 @@ for await (const chunk of Bun.stdin.stream()) {
       if (content === 'malformed-markdown-end-turn-forever')
         markdownRecoveryMode = 'malformed_forever'
       const recovered = userMessageCount > 1
-      const recoveredMarkdown = markdownRecoveryMode === 'malformed_once' ||
-          markdownRecoveryMode === 'malformed_forever'
-        ? malformedGddMarkdown
-        : markdownRecoveryMode === 'twice' && userMessageCount === 2
-          ? completeGddMarkdown.slice(
-              completeGddMarkdown.indexOf('\n## Vision and Product Promise'),
-              completeGddMarkdown.indexOf('\n## Player Experience and Design Pillars'),
-            )
-        : markdownRecoveryMode === 'twice' && userMessageCount > 2
+      const recoveredMarkdown =
+        markdownRecoveryMode === 'malformed_once' ||
+        markdownRecoveryMode === 'malformed_forever'
+          ? malformedGddMarkdown
+          : markdownRecoveryMode === 'twice' && userMessageCount === 2
             ? completeGddMarkdown.slice(
-                completeGddMarkdown.indexOf('\n## Player Experience and Design Pillars'),
+                completeGddMarkdown.indexOf('\n## Vision and Product Promise'),
+                completeGddMarkdown.indexOf(
+                  '\n## Player Experience and Design Pillars',
+                ),
               )
-          : markdownRecoveryMode === 'empty_continuation' && recovered
-            ? ''
-        : recovered && markdownRecoveryMode === 'normal'
-          ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Vision and Product Promise'))
-          : '# Partial document\n## Executive Summary\nHalf sentence'
+            : markdownRecoveryMode === 'twice' && userMessageCount > 2
+              ? completeGddMarkdown.slice(
+                  completeGddMarkdown.indexOf(
+                    '\n## Player Experience and Design Pillars',
+                  ),
+                )
+              : markdownRecoveryMode === 'empty_continuation' && recovered
+                ? ''
+                : recovered && markdownRecoveryMode === 'normal'
+                  ? completeGddMarkdown.slice(
+                      completeGddMarkdown.indexOf(
+                        '\n## Vision and Product Promise',
+                      ),
+                    )
+                  : '# Partial document\n## Executive Summary\nHalf sentence'
       emitMarkdownResponse(
         recoveredMarkdown,
-        markdownRecoveryMode === 'malformed_once' || markdownRecoveryMode === 'malformed_forever'
+        markdownRecoveryMode === 'malformed_once' ||
+          markdownRecoveryMode === 'malformed_forever'
           ? 'end_turn'
-        : recovered && markdownRecoveryMode !== 'never' ? 'end_turn' : '',
+          : recovered && markdownRecoveryMode !== 'never'
+            ? 'end_turn'
+            : '',
         userMessageCount,
       )
       continue
@@ -215,6 +292,34 @@ for await (const chunk of Bun.stdin.stream()) {
           },
         })}\n`,
       )
+      continue
+    }
+    if (content === 'structured-failure-success-result') {
+      const toolUseID = 'structured-output-failure-success-result'
+      process.stdout.write(
+        `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: toolUseID, name: 'StructuredOutput', input: {} }], stop_reason: 'tool_use' } })}\n`,
+      )
+      process.stdout.write(
+        `${JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseID, is_error: true, content: 'schema failure' }] } })}\n`,
+      )
+      process.stdout.write(
+        `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: '550e8400-e29b-41d4-a716-446655440000', result: 'completed without structured output' })}\n`,
+      )
+      continue
+    }
+    if (
+      content === 'structured-truncated' ||
+      content === 'structured-truncated-forever' ||
+      (structuredRecoveryMode &&
+        typeof content === 'string' &&
+        content.includes('Continue the same StructuredOutput submission'))
+    ) {
+      if (content === 'structured-truncated') structuredRecoveryMode = 'normal'
+      if (content === 'structured-truncated-forever')
+        structuredRecoveryMode = 'forever'
+      if (structuredRecoveryMode === 'normal' && userMessageCount > 1)
+        emitStructuredSuccess(userMessageCount)
+      else emitStructuredTruncation(userMessageCount)
       continue
     }
     process.stdout.write(

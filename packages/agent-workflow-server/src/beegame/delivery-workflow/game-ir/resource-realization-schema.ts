@@ -28,6 +28,143 @@ import {
   parseWorldSceneModule,
 } from './world-scene-schema'
 import { createSemanticFidelityPrimitives } from './semantic-fidelity'
+import {
+  projectionArray,
+  projectionBoolean,
+  projectionEnum,
+  projectionStringArray,
+  projectionText,
+  projectionValueOptionalFields,
+  projectionValueRequiredFields,
+  projectionValueSchema,
+} from './projection-schema'
+
+const RESOURCE_SOURCING_POLICY = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    allowedSourceKinds: {
+      type: 'array',
+      minItems: 1,
+      items: { type: 'string', minLength: 1 },
+    },
+    licenseConstraints: {
+      type: 'array',
+      minItems: 1,
+      items: { type: 'string', minLength: 1 },
+    },
+    responsibleParty: { type: 'string', minLength: 1 },
+    handoffCriteria: {
+      type: 'array',
+      minItems: 1,
+      items: { type: 'string', minLength: 1 },
+    },
+  },
+  required: [
+    'allowedSourceKinds',
+    'licenseConstraints',
+    'responsibleParty',
+    'handoffCriteria',
+  ],
+} as const
+const RESOURCE_ACTIVATION = {
+  anyOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: { kind: { const: 'required' } },
+      required: ['kind'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { const: 'alternative' },
+        groupId: { type: 'string', minLength: 1 },
+      },
+      required: ['kind', 'groupId'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { const: 'conditional' },
+        predicate: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            field: { enum: ['platform', 'runtime', 'asset-format-capability'] },
+            operator: { enum: ['eq', 'contains'] },
+            value: { type: 'string', minLength: 1 },
+          },
+          required: ['field', 'operator', 'value'],
+        },
+      },
+      required: ['kind', 'predicate'],
+    },
+  ],
+} as const
+const RESOURCE_COVERAGE = {
+  type: 'array',
+  minItems: 1,
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      assetKinds: { type: 'array', items: { type: 'string', minLength: 1 } },
+      usageTags: { type: 'array', items: { type: 'string', minLength: 1 } },
+      capabilities: { type: 'array', items: { type: 'string', minLength: 1 } },
+      relationKinds: { type: 'array', items: { type: 'string', minLength: 1 } },
+      embeddedKinds: { type: 'array', items: { type: 'string', minLength: 1 } },
+    },
+    required: [],
+  },
+} as const
+const RESOURCE_ASSERTION = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    operator: { enum: ['eq', 'lte', 'gte', 'range', 'one-of'] },
+    value: {
+      anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }],
+    },
+    values: {
+      type: 'array',
+      items: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+    },
+    min: { type: 'number' },
+    max: { type: 'number' },
+    unit: { type: 'string', minLength: 1 },
+  },
+  required: ['operator'],
+} as const
+const RESOURCE_TECHNICAL_CONSTRAINTS = {
+  type: 'array',
+  minItems: 1,
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name: { type: 'string', minLength: 1 },
+      assertion: RESOURCE_ASSERTION,
+    },
+    required: ['name', 'assertion'],
+  },
+} as const
+const RESOURCE_BUDGETS = {
+  type: 'array',
+  minItems: 1,
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      metric: { type: 'string', minLength: 1 },
+      limit: { type: 'number' },
+      unit: { type: 'string', minLength: 1 },
+    },
+    required: ['metric', 'limit', 'unit'],
+  },
+} as const
 
 export type ResourceRealizationResourceKind =
   | 'model'
@@ -148,15 +285,29 @@ export type ResourceRealizationDeliveryArtifactValue = Readonly<{
 }>
 
 export type ResourceRealizationProjectionPayload =
-  | Readonly<{ kind: 'resource-realization.logical-resource'; value: ResourceRealizationLogicalResourceValue }>
-  | Readonly<{ kind: 'resource-realization.acquisition-profile'; value: ResourceRealizationAcquisitionProfileValue }>
-  | Readonly<{ kind: 'resource-realization.delivery-target'; value: ResourceRealizationDeliveryTargetValue }>
-  | Readonly<{ kind: 'resource-realization.variant'; value: ResourceRealizationVariantValue }>
-  | Readonly<{ kind: 'resource-realization.delivery-artifact'; value: ResourceRealizationDeliveryArtifactValue }>
+  | Readonly<{
+      kind: 'resource-realization.logical-resource'
+      value: ResourceRealizationLogicalResourceValue
+    }>
+  | Readonly<{
+      kind: 'resource-realization.acquisition-profile'
+      value: ResourceRealizationAcquisitionProfileValue
+    }>
+  | Readonly<{
+      kind: 'resource-realization.delivery-target'
+      value: ResourceRealizationDeliveryTargetValue
+    }>
+  | Readonly<{
+      kind: 'resource-realization.variant'
+      value: ResourceRealizationVariantValue
+    }>
+  | Readonly<{
+      kind: 'resource-realization.delivery-artifact'
+      value: ResourceRealizationDeliveryArtifactValue
+    }>
 
 type ResourceRealizationManifestEntry = Readonly<{
-  valueFields: readonly string[]
-  optionalValueFields?: readonly string[]
+  valueJsonSchema: Readonly<Record<string, unknown>>
   relationships: Readonly<Record<string, ResourceRealizationRelationshipRole>>
 }>
 
@@ -214,53 +365,73 @@ export const RESOURCE_REALIZATION_DOMAIN_MANIFEST: Readonly<
   Record<string, ResourceRealizationManifestEntry>
 > = Object.freeze({
   'resource-realization.logical-resource': Object.freeze({
-    valueFields: Object.freeze([
-      'requirementId',
-      'resourceKind',
-      'runtimeRole',
-    ]),
+    valueJsonSchema: projectionValueSchema({
+      requirementId: projectionText('logical resource requirement ID'),
+      resourceKind: projectionEnum(
+        RESOURCE_REALIZATION_RESOURCE_KINDS,
+        'resource kind',
+      ),
+      runtimeRole: projectionText('runtime role'),
+    }),
     relationships: Object.freeze({
       'required-by': role(PHASE5_TARGET_NODE_KINDS, 'at-least-one'),
     }),
   }),
   'resource-realization.acquisition-profile': Object.freeze({
-    valueFields: Object.freeze([
-      'required',
-      'dimensions',
-      'assetKinds',
-      'usageTags',
-      'capabilities',
-      'styles',
-      'sourcingPolicy',
-    ]),
-    optionalValueFields: Object.freeze(['name', 'purpose', 'coverage']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        required: projectionBoolean('whether resource is required'),
+        dimensions: projectionStringArray('resource dimensions'),
+        assetKinds: projectionStringArray('asset kinds'),
+        usageTags: projectionStringArray('usage tags'),
+        capabilities: projectionStringArray('capabilities'),
+        styles: projectionStringArray('styles'),
+        sourcingPolicy: RESOURCE_SOURCING_POLICY,
+        name: projectionText('profile name'),
+        purpose: projectionText('profile purpose'),
+        coverage: RESOURCE_COVERAGE,
+      },
+      ['name', 'purpose', 'coverage'],
+    ),
     relationships: Object.freeze({
       describes: role(['resource-realization.logical-resource'], 'exactly-one'),
     }),
   }),
   'resource-realization.delivery-target': Object.freeze({
-    valueFields: Object.freeze(['assetFormatCapabilities']),
-    optionalValueFields: Object.freeze(['platform', 'runtime']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        assetFormatCapabilities: projectionStringArray(
+          'asset format capabilities',
+        ),
+        platform: projectionText('target platform'),
+        runtime: projectionText('target runtime'),
+      },
+      ['platform', 'runtime'],
+    ),
     relationships: Object.freeze({}),
   }),
   'resource-realization.variant': Object.freeze({
-    valueFields: Object.freeze(['activation']),
+    valueJsonSchema: projectionValueSchema({ activation: RESOURCE_ACTIVATION }),
     relationships: Object.freeze({
       realizes: role(['resource-realization.logical-resource'], 'exactly-one'),
     }),
   }),
   'resource-realization.delivery-artifact': Object.freeze({
-    valueFields: Object.freeze([
-      'artifactClass',
-      'path',
-      'format',
-      'runtimeRole',
-    ]),
-    optionalValueFields: Object.freeze([
-      'codec',
-      'technicalConstraints',
-      'budgets',
-    ]),
+    valueJsonSchema: projectionValueSchema(
+      {
+        artifactClass: projectionEnum(
+          ['runtime-resource', 'content-definition', 'generated-output'],
+          'artifact class',
+        ),
+        path: projectionText('safe artifact path'),
+        format: projectionText('artifact format'),
+        runtimeRole: projectionText('artifact runtime role'),
+        codec: projectionText('artifact codec'),
+        technicalConstraints: RESOURCE_TECHNICAL_CONSTRAINTS,
+        budgets: RESOURCE_BUDGETS,
+      },
+      ['codec', 'technicalConstraints', 'budgets'],
+    ),
     relationships: Object.freeze({
       'part-of': role(['resource-realization.variant'], 'exactly-one'),
     }),
@@ -486,8 +657,8 @@ function parseProfile(node: GameIrNode): Readonly<Record<string, unknown>> {
   const descriptor = RESOURCE_REALIZATION_DOMAIN_MANIFEST[node.kind]!
   exactValueKeys(
     value,
-    descriptor.valueFields,
-    descriptor.optionalValueFields ?? [],
+    projectionValueRequiredFields(descriptor.valueJsonSchema),
+    projectionValueOptionalFields(descriptor.valueJsonSchema),
     `node ${node.id} value`,
   )
   const dimensions = sortedUniqueTextArray(
@@ -570,8 +741,8 @@ function parseTarget(node: GameIrNode): Readonly<Record<string, unknown>> {
   const descriptor = RESOURCE_REALIZATION_DOMAIN_MANIFEST[node.kind]!
   exactValueKeys(
     node.value,
-    descriptor.valueFields,
-    descriptor.optionalValueFields ?? [],
+    projectionValueRequiredFields(descriptor.valueJsonSchema),
+    projectionValueOptionalFields(descriptor.valueJsonSchema),
     `node ${node.id} value`,
   )
   const capabilities = sortedUniqueTextArray(
@@ -726,8 +897,8 @@ function parseArtifact(
   const descriptor = RESOURCE_REALIZATION_DOMAIN_MANIFEST[node.kind]!
   exactValueKeys(
     node.value,
-    descriptor.valueFields,
-    descriptor.optionalValueFields ?? [],
+    projectionValueRequiredFields(descriptor.valueJsonSchema),
+    projectionValueOptionalFields(descriptor.valueJsonSchema),
     `node ${node.id} value`,
   )
   const artifactClass = text(
@@ -840,19 +1011,37 @@ export function parseResourceRealizationProjectionPayload(
 ): ResourceRealizationProjectionPayload {
   switch (node.kind) {
     case 'resource-realization.logical-resource':
-      return { kind: node.kind, value: parseLogical(node) as ResourceRealizationLogicalResourceValue }
-    case 'resource-realization.acquisition-profile':
-      return { kind: node.kind, value: parseProfile(node) as ResourceRealizationAcquisitionProfileValue }
-    case 'resource-realization.delivery-target':
-      return { kind: node.kind, value: parseTarget(node) as ResourceRealizationDeliveryTargetValue }
-    case 'resource-realization.variant':
-      return { kind: node.kind, value: parseVariant(node) as ResourceRealizationVariantValue }
-    case 'resource-realization.delivery-artifact': {
-      const target = module.nodes.find(candidate => candidate.kind === 'resource-realization.delivery-target')
-      if (!target) return fail('module has no delivery target for artifact projection')
       return {
         kind: node.kind,
-        value: parseArtifact(node, parseTarget(target)) as ResourceRealizationDeliveryArtifactValue,
+        value: parseLogical(node) as ResourceRealizationLogicalResourceValue,
+      }
+    case 'resource-realization.acquisition-profile':
+      return {
+        kind: node.kind,
+        value: parseProfile(node) as ResourceRealizationAcquisitionProfileValue,
+      }
+    case 'resource-realization.delivery-target':
+      return {
+        kind: node.kind,
+        value: parseTarget(node) as ResourceRealizationDeliveryTargetValue,
+      }
+    case 'resource-realization.variant':
+      return {
+        kind: node.kind,
+        value: parseVariant(node) as ResourceRealizationVariantValue,
+      }
+    case 'resource-realization.delivery-artifact': {
+      const target = module.nodes.find(
+        candidate => candidate.kind === 'resource-realization.delivery-target',
+      )
+      if (!target)
+        return fail('module has no delivery target for artifact projection')
+      return {
+        kind: node.kind,
+        value: parseArtifact(
+          node,
+          parseTarget(target),
+        ) as ResourceRealizationDeliveryArtifactValue,
       }
     }
     default:

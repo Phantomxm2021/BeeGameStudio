@@ -24,6 +24,7 @@ import {
   type GameIrSourceSection,
 } from './model'
 import type { GameIrSemanticCandidateNode } from './semantic-fidelity'
+import type { SemanticValidationResult } from './semantic-fidelity'
 import {
   assembleResourceRealizationClosure,
   type ResourceRealizationAssemblyAuthority,
@@ -199,7 +200,7 @@ function phase6Fixture(
 ): {
   closure: ResourceRealizationClosure
   phase6Authority: ReturnType<typeof buildValidationAuthority> & {
-    resourceRealization: { validation: unknown }
+    resourceRealization: { validation: SemanticValidationResult }
   }
   priorModules: readonly GameIrModuleCandidate[]
   phase5Authority: ReturnType<typeof realAuthority>['phase5Authority']
@@ -621,7 +622,7 @@ export function implementationVerificationFixture(
   return {
     ...phase6,
     ...implementationVerificationFromPhase6Authority(
-      phase6.phase6Authority as ResourceRealizationAssemblyAuthority,
+      phase6.phase6Authority,
       options.expandedCount ?? 0,
     ),
   }

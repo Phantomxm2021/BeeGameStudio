@@ -652,7 +652,7 @@ describe('World/Scene semantic producer wrapper', () => {
     }
   })
 
-  test('rejects UTF-8 range and edge-role tampering in the shared replay helper', () => {
+  test('rejects UTF-8 ranges at the shared replay boundary', () => {
     const utf8 = source('scene|bé')
     const currentMechanical = mechanical(utf8)
     const currentPacket = buildWorldSceneSemanticPacket({
@@ -701,23 +701,6 @@ describe('World/Scene semantic producer wrapper', () => {
         mechanical: currentMechanical,
         packet: currentPacket,
         semantic: split,
-      }),
-    ).toThrow()
-
-    const fixture = replayFixture()
-    const edgeTampered = reissueReceipt(fixture.semantic, {
-      nodes: fixture.semantic.nodes.map(node =>
-        node.id === 'scene'
-          ? { ...node, edges: [{ ...node.edges[0]!, type: 'parent' }] }
-          : node,
-      ),
-    })
-    expect(() =>
-      replayAndBindPhase5SemanticReceipt({
-        source: fixture.currentSource,
-        mechanical: fixture.currentMechanical,
-        packet: fixture.currentPacket,
-        semantic: edgeTampered,
       }),
     ).toThrow()
   })

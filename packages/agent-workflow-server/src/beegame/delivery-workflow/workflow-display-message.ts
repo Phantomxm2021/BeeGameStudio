@@ -81,10 +81,14 @@ export function projectWorkflowDisplayReason(
   if (
     value !== null &&
     typeof value === 'object' &&
-    (value as Partial<GameIrCompilationDiagnostic>).phase === 'GAME_IR_COMPILATION' &&
-    (value as Partial<GameIrCompilationDiagnostic>).workerType === 'game-ir-compiler' &&
-    typeof (value as Partial<GameIrCompilationDiagnostic>).reasonCode === 'string' &&
-    typeof (value as Partial<GameIrCompilationDiagnostic>).diagnosticRef === 'string'
+    (value as Partial<GameIrCompilationDiagnostic>).phase ===
+      'GAME_IR_COMPILATION' &&
+    (value as Partial<GameIrCompilationDiagnostic>).workerType ===
+      'game-ir-compiler' &&
+    typeof (value as Partial<GameIrCompilationDiagnostic>).reasonCode ===
+      'string' &&
+    typeof (value as Partial<GameIrCompilationDiagnostic>).diagnosticRef ===
+      'string'
   ) {
     const diagnostic = value as GameIrCompilationDiagnostic
     const publication = diagnostic.reasonCode === 'publication'
@@ -115,7 +119,10 @@ export function projectWorkflowDisplayReason(
     }
   const reason = typeof value === 'string' ? value.trim() : ''
   if (!reason) return undefined
-  const normalized = reason.toLowerCase().replaceAll('-', ' ').replaceAll('_', ' ')
+  const normalized = reason
+    .toLowerCase()
+    .replaceAll('-', ' ')
+    .replaceAll('_', ' ')
   let code: WorkflowDisplayReasonCode = 'workflow_blocked'
   let message = 'Workflow is blocked and needs attention.'
 

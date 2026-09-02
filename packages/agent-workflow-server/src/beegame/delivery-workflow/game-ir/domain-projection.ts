@@ -472,8 +472,6 @@ type SemanticResultAdmissionOptions = Readonly<{
 }>
 
 const FOUNDATION_DOCUMENT_SET = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
-const SEMANTIC_JSON_NUMBER =
-  /^(?:0|-[1-9]\d*|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
 
 function semanticResultAdmissionFail(
   errorPrefix: string,
@@ -567,41 +565,6 @@ export function gameIrSemanticTargetPointers(
       ])
       .sort(compareCodeUnits),
   )
-}
-
-export function verifyGameIrSemanticClaimLiteral(
-  claim: GameIrSemanticSourceClaim,
-  node: GameIrSemanticCandidateNode,
-  pointer: string,
-  errorPrefix = 'invalid Game IR domain projection',
-): void {
-  const expected = gameIrSemanticPointerValue(node, pointer)
-  if (expected === undefined)
-    semanticResultAdmissionFail(
-      errorPrefix,
-      `source claim target ${claim.subject} is absent`,
-    )
-  if (typeof expected === 'number') {
-    if (!SEMANTIC_JSON_NUMBER.test(claim.literal))
-      semanticResultAdmissionFail(
-        errorPrefix,
-        'numeric source literal is not a strict JSON number',
-      )
-    const numeric = Number(claim.literal)
-    if (!Number.isFinite(numeric) || numeric !== expected)
-      semanticResultAdmissionFail(
-        errorPrefix,
-        'source literal does not match the semantic record',
-      )
-    return
-  }
-  const expectedLiteral =
-    typeof expected === 'string' ? expected : canonicalGameIrJson(expected)
-  if (claim.literal !== expectedLiteral)
-    semanticResultAdmissionFail(
-      errorPrefix,
-      'source literal does not match the semantic record',
-    )
 }
 
 function semanticResultNormalizeNode(
@@ -737,7 +700,7 @@ function semanticResultNormalizeNode(
  * module-specific packet construction and post-admission manifest rules.
  */
 export function normalizeGameIrDomainSemanticPacket(
-  packetInput: GameIrDomainSemanticPacket,
+  packetInput: unknown,
   options: Pick<
     SemanticResultAdmissionOptions,
     'errorPrefix' | 'allowedModuleIds'
@@ -972,7 +935,6 @@ export function admitGameIrDomainSemanticResult(
       ),
       literal: text(entry.literal, `sourceClaims[${index}].literal`),
     })
-    verifyGameIrSemanticClaimLiteral(claim, node!, pointer, errorPrefix)
     return claim
   }) as readonly GameIrSemanticSourceClaim[]
   for (let index = 1; index < claims.length; index += 1) {

@@ -558,12 +558,14 @@ export async function buildFoundationRevisionAuthority(input: {
   sourceDerivedDigests: { sectionIndex: string; factStore: string; manifest: string }
   sourceDocumentDigests: readonly { path: FoundationDocumentPath; digest: string }[]
   normalizedFacts: readonly unknown[]
+  candidateDocuments?: ReadonlyMap<FoundationDocumentPath, string>
 }): Promise<FoundationRevisionAuthority> {
   assertRevision(input.revision)
   assertBatch(input.batch)
   const canonicalPath = resolveProjectPath(input.workspacePath, input.batch.documentPath)
-  const markdown = (await readFile(canonicalPath)).toString('utf8')
-  const baseDocumentDigest = sha256(markdown)
+  const canonicalMarkdown = (await readFile(canonicalPath)).toString('utf8')
+  const markdown = input.candidateDocuments?.get(input.batch.documentPath) ?? canonicalMarkdown
+  const baseDocumentDigest = sha256(canonicalMarkdown)
   const requiredSectionIds = new Set<string>(input.batch.sectionIds)
   const issueRefs = new Set<string>()
   const evidenceDocumentPaths = new Set<FoundationDocumentPath>([
@@ -586,9 +588,10 @@ export async function buildFoundationRevisionAuthority(input: {
   const evidenceDocuments = await Promise.all(
     [...evidenceDocumentPaths].map(async documentPath => [
       documentPath,
-      documentPath === input.batch.documentPath
-        ? markdown
-        : (await readFile(resolveProjectPath(input.workspacePath, documentPath))).toString('utf8'),
+      input.candidateDocuments?.get(documentPath) ??
+        (documentPath === input.batch.documentPath
+          ? markdown
+          : (await readFile(resolveProjectPath(input.workspacePath, documentPath))).toString('utf8')),
     ] as const),
   )
   const slices = evidenceDocuments.flatMap(([documentPath, document]) =>

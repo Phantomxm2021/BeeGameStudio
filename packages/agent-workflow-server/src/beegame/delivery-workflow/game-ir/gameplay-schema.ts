@@ -3,6 +3,153 @@ import {
   type GameIrModuleCandidate,
   type GameIrNode,
 } from './model'
+import {
+  projectionBoolean,
+  projectionEnum,
+  projectionObject,
+  projectionRecursive,
+  projectionText,
+  projectionValueRequiredFields,
+  projectionValueSchema,
+} from './projection-schema'
+
+const GAMEPLAY_SCALAR_EXPRESSION_SCHEMA = projectionRecursive('scalar', {
+  scalar: {
+    anyOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'literal' },
+          value: {
+            anyOf: [
+              { type: 'string' },
+              { type: 'number' },
+              { type: 'boolean' },
+            ],
+          },
+        },
+        required: ['kind', 'value'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'reference' },
+          referenceIndex: { type: 'integer', minimum: 0 },
+        },
+        required: ['kind', 'referenceIndex'],
+      },
+    ],
+  },
+})
+const GAMEPLAY_CONDITION_EXPRESSION_SCHEMA = projectionRecursive('condition', {
+  scalar: {
+    anyOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'literal' },
+          value: {
+            anyOf: [
+              { type: 'string' },
+              { type: 'number' },
+              { type: 'boolean' },
+            ],
+          },
+        },
+        required: ['kind', 'value'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'reference' },
+          referenceIndex: { type: 'integer', minimum: 0 },
+        },
+        required: ['kind', 'referenceIndex'],
+      },
+    ],
+  },
+  condition: {
+    anyOf: [
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: { kind: { const: 'boolean' }, value: { type: 'boolean' } },
+        required: ['kind', 'value'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'reference' },
+          referenceIndex: { type: 'integer', minimum: 0 },
+        },
+        required: ['kind', 'referenceIndex'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'not' },
+          operand: { $ref: '#/$defs/condition' },
+        },
+        required: ['kind', 'operand'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { enum: ['all', 'any'] },
+          operands: {
+            type: 'array',
+            minItems: 1,
+            items: { $ref: '#/$defs/condition' },
+          },
+        },
+        required: ['kind', 'operands'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          kind: { const: 'compare' },
+          operator: { enum: ['eq', 'ne', 'lt', 'lte', 'gt', 'gte'] },
+          left: { $ref: '#/$defs/scalar' },
+          right: { $ref: '#/$defs/scalar' },
+        },
+        required: ['kind', 'operator', 'left', 'right'],
+      },
+    ],
+  },
+})
+const GAMEPLAY_EFFECT_EXPRESSION_SCHEMA = {
+  anyOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        operation: { enum: ['set', 'add'] },
+        targetReferenceIndex: { type: 'integer', minimum: 0 },
+        value: {
+          anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }],
+        },
+      },
+      required: ['operation', 'targetReferenceIndex', 'value'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        operation: { enum: ['remove', 'emit'] },
+        targetReferenceIndex: { type: 'integer', minimum: 0 },
+      },
+      required: ['operation', 'targetReferenceIndex'],
+    },
+  ],
+} as const
 
 export type GameplayScalarExpression =
   | Readonly<{
@@ -63,11 +210,15 @@ const role = (
 /** The single schema-owned authority for Gameplay kinds, values, and roles. */
 export const GAMEPLAY_DOMAIN_MANIFEST = Object.freeze({
   'gameplay.entity': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('entity label'),
+    }),
     relationships: Object.freeze({}),
   }),
   'gameplay.capability': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('capability label'),
+    }),
     relationships: Object.freeze({
       'belongs-to': role(['gameplay.entity'], {
         required: true,
@@ -76,14 +227,18 @@ export const GAMEPLAY_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'gameplay.action': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('action label'),
+    }),
     relationships: Object.freeze({
       requires: role(['gameplay.condition'], { required: true }),
       causes: role(['gameplay.effect', 'gameplay.event'], { required: true }),
     }),
   }),
   'gameplay.rule': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('rule label'),
+    }),
     relationships: Object.freeze({
       'triggered-by': role(['gameplay.event'], {
         required: true,
@@ -93,23 +248,38 @@ export const GAMEPLAY_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'gameplay.condition': Object.freeze({
-    valueFields: Object.freeze(['expression']),
+    valueJsonSchema: projectionValueSchema({
+      expression: GAMEPLAY_CONDITION_EXPRESSION_SCHEMA,
+    }),
     relationships: Object.freeze({}),
   }),
   'gameplay.effect': Object.freeze({
-    valueFields: Object.freeze(['effect']),
+    valueJsonSchema: projectionValueSchema({
+      effect: GAMEPLAY_EFFECT_EXPRESSION_SCHEMA,
+    }),
     relationships: Object.freeze({}),
   }),
   'gameplay.event': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('event label'),
+    }),
     relationships: Object.freeze({}),
   }),
   'gameplay.state': Object.freeze({
-    valueFields: Object.freeze(['label', 'initial', 'terminal']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('state label'),
+      initial: projectionBoolean('whether this is the initial state'),
+      terminal: projectionEnum(
+        ['none', 'success', 'failure'],
+        'terminal outcome',
+      ),
+    }),
     relationships: Object.freeze({}),
   }),
   'gameplay.transition': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('transition label'),
+    }),
     relationships: Object.freeze({
       from: role(['gameplay.state'], { required: true, singleton: true }),
       to: role(['gameplay.state'], { required: true, singleton: true }),
@@ -117,14 +287,19 @@ export const GAMEPLAY_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'gameplay.objective': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('objective label'),
+    }),
     relationships: Object.freeze({
       'succeeds-with': role(['gameplay.outcome'], { singleton: true }),
       'fails-with': role(['gameplay.outcome'], { singleton: true }),
     }),
   }),
   'gameplay.outcome': Object.freeze({
-    valueFields: Object.freeze(['label', 'result']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('outcome label'),
+      result: projectionEnum(['win', 'loss', 'neutral'], 'outcome result'),
+    }),
     relationships: Object.freeze({}),
   }),
 } as const)
@@ -327,9 +502,10 @@ function label(value: RecordValue, nodeId: string): string {
 
 function parseValue(node: GameIrNode): Readonly<Record<string, unknown>> {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
-  const fields =
+  const schema =
     GAMEPLAY_DOMAIN_MANIFEST[node.kind as keyof typeof GAMEPLAY_DOMAIN_MANIFEST]
-      .valueFields
+      .valueJsonSchema
+  const fields = projectionValueRequiredFields(schema)
   exactKeys(node.value, fields, `node ${node.id} value`)
   if (fields.length === 1 && fields[0] === 'label')
     return { label: label(node.value, node.id) }
@@ -525,7 +701,9 @@ function validateGraph(nodes: readonly ParsedNode[]): void {
       fail(`transition ${node.id} endpoint is not a state`)
     transitions.push({ node, from: from.targetId, to: to.targetId })
     if (fromState.value.terminal !== 'none')
-      fail(`terminal state ${fromState.id} has an outgoing transition`)
+      fail(
+        `transition ${node.id} leaves terminal state ${fromState.id}`,
+      )
   }
   const reachable = new Set(initial)
   const outgoing = new Map<string, string[]>()

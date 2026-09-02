@@ -287,9 +287,9 @@ function ownerRequirements(
 describe('Presentation Game IR schema', () => {
   test('exposes exactly twelve manifest kinds and manifest-owned requirement policy', () => {
     expect(Object.keys(PRESENTATION_DOMAIN_MANIFEST)).toHaveLength(12)
-    expect(PRESENTATION_DOMAIN_MANIFEST['presentation.ui-screen']).toEqual({
-      valueFields: ['label', 'modal'],
-      optionalValueFields: ['requirements'],
+    const { valueJsonSchema: _schema, ...screenManifest } =
+      PRESENTATION_DOMAIN_MANIFEST['presentation.ui-screen']
+    expect(screenManifest).toEqual({
       requirementPolicy: { kind: 'ui', runtimeRoles: ['screen'] },
       relationships: {
         'initial-state': {
@@ -306,6 +306,8 @@ describe('Presentation Game IR schema', () => {
         },
       },
     })
+    for (const descriptor of Object.values(PRESENTATION_DOMAIN_MANIFEST))
+      expect(descriptor.valueJsonSchema).toBeDefined()
     expect(
       PRESENTATION_DOMAIN_MANIFEST['presentation.audio-cue']?.requirementPolicy,
     ).toEqual({
@@ -621,8 +623,6 @@ describe('Presentation Game IR schema', () => {
   test('asserts every manifest entry, role, target list, cardinality, and policy exactly', () => {
     const expected = {
       'presentation.ui-screen': {
-        valueFields: ['label', 'modal'],
-        optionalValueFields: ['requirements'],
         requirementPolicy: { kind: 'ui', runtimeRoles: ['screen'] },
         relationships: {
           'initial-state': {
@@ -640,7 +640,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.ui-state': {
-        valueFields: ['label', 'terminal'],
         relationships: {
           screen: {
             targetKinds: ['presentation.ui-screen'],
@@ -657,7 +656,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.ui-action': {
-        valueFields: ['label', 'input'],
         relationships: {
           screen: {
             targetKinds: ['presentation.ui-screen'],
@@ -674,7 +672,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.feedback': {
-        valueFields: ['label', 'channel'],
         relationships: {
           on: {
             targetKinds: [
@@ -691,7 +688,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.camera-behavior': {
-        valueFields: ['label', 'mode', 'duration'],
         relationships: {
           region: {
             targetKinds: ['world-scene.camera-region'],
@@ -708,8 +704,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.animation-clip': {
-        valueFields: ['label', 'loop', 'playbackRate'],
-        optionalValueFields: ['requirements'],
         requirementPolicy: { kind: 'animation', runtimeRoles: ['clip'] },
         relationships: {
           target: {
@@ -719,7 +713,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.animation-state': {
-        valueFields: ['label'],
         relationships: {
           clip: {
             targetKinds: ['presentation.animation-clip'],
@@ -736,8 +729,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.vfx-cue': {
-        valueFields: ['label', 'trigger'],
-        optionalValueFields: ['requirements'],
         requirementPolicy: { kind: 'vfx', runtimeRoles: ['effect'] },
         relationships: {
           on: {
@@ -759,7 +750,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.audio-event': {
-        valueFields: ['label', 'spatial'],
         relationships: {
           on: {
             targetKinds: [
@@ -772,8 +762,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.audio-cue': {
-        valueFields: ['label', 'volume'],
-        optionalValueFields: ['requirements'],
         requirementPolicy: { kind: 'audio', runtimeRoles: ['cue', 'voice'] },
         relationships: {
           event: {
@@ -793,8 +781,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.music-state': {
-        valueFields: ['label', 'intensity'],
-        optionalValueFields: ['requirements'],
         requirementPolicy: { kind: 'music', runtimeRoles: ['music'] },
         relationships: {
           on: {
@@ -808,7 +794,6 @@ describe('Presentation Game IR schema', () => {
         },
       },
       'presentation.transition': {
-        valueFields: ['label', 'trigger'],
         relationships: {
           from: {
             targetKinds: ['presentation.ui-state'],
@@ -835,7 +820,12 @@ describe('Presentation Game IR schema', () => {
       Object.keys(PRESENTATION_DOMAIN_MANIFEST).sort(compareCodeUnits),
     ).toEqual(Object.keys(expected).sort(compareCodeUnits))
     for (const [kind, descriptor] of Object.entries(expected)) {
-      expect(PRESENTATION_DOMAIN_MANIFEST[kind]).toEqual(descriptor)
+      const { valueJsonSchema: _schema, ...manifestDescriptor } =
+        PRESENTATION_DOMAIN_MANIFEST[kind]
+      const expectedDescriptor = descriptor
+      expect(manifestDescriptor).toEqual(
+        expectedDescriptor as unknown as typeof manifestDescriptor,
+      )
       expect(PRESENTATION_DOMAIN_MANIFEST[kind]).not.toHaveProperty(
         'references',
       )

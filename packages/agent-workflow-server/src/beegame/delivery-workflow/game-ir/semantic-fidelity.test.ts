@@ -4,6 +4,7 @@ import {
   GAME_IR_SEMANTIC_AMBIGUOUS_REASON_CODES,
   GAME_IR_SEMANTIC_FAILURE_REASON_CODES,
   sectionEvidencePointer,
+  deriveGameIrSemanticSourceClaims,
   verifyGameIrSemanticClaimBytes,
   type GameIrSemanticAmbiguousReasonCode,
   type GameIrSemanticFailureReasonCode,
@@ -15,6 +16,168 @@ const phase5 = createSemanticFidelityPrimitives(
 )
 
 describe('shared semantic fidelity primitives', () => {
+  test('derives canonical claims from unique supporting excerpts without requiring IR serialization', () => {
+    const authority = {
+      sectionIndex: [
+        {
+          documentPath: 'docs/GDD.md' as const,
+          sectionId: 'rules',
+          digest: 'a'.repeat(64),
+        },
+      ],
+      sectionBytes: { 'docs/GDD.md#rules': 'Hero action consumes energy.' },
+    }
+    const nodes = [
+      {
+        id: 'hero',
+        kind: 'gameplay.entity',
+        value: { label: 'Hero' },
+        references: [],
+        edges: [
+          { type: 'causes', targetId: 'effect', targetType: 'gameplay.effect' },
+        ],
+      },
+    ] as const
+    const claims = deriveGameIrSemanticSourceClaims(authority, nodes, [
+      {
+        subjects: [
+          'node:hero#/edges/0',
+          'node:hero#/id',
+          'node:hero#/value/label',
+        ],
+        documentPath: 'docs/GDD.md',
+        sectionId: 'rules',
+        excerpt: 'Hero action consumes energy.',
+      },
+    ])
+    expect(claims).toHaveLength(3)
+    expect(claims[0]).toMatchObject({
+      literal: 'Hero action consumes energy.',
+      sourcePointer: '/bytes/0/28',
+    })
+    expect(
+      claims.every(
+        claim => claim.literal !== JSON.stringify(nodes[0].edges[0]),
+      ),
+    ).toBe(true)
+  })
+
+  test('expands canonical node and collection selectors into exact persisted targets', () => {
+    const authority = {
+      sectionIndex: [
+        {
+          documentPath: 'docs/GDD.md' as const,
+          sectionId: 'rules',
+          digest: 'a'.repeat(64),
+        },
+      ],
+      sectionBytes: { 'docs/GDD.md#rules': 'Hero action consumes energy.' },
+    }
+    const nodes = [
+      {
+        id: 'hero',
+        kind: 'gameplay.entity',
+        value: { label: 'Hero' },
+        references: [{ targetId: 'energy', targetType: 'balance.variable' }],
+        edges: [
+          { type: 'causes', targetId: 'effect', targetType: 'gameplay.effect' },
+        ],
+      },
+    ] as const
+
+    const rootClaims = deriveGameIrSemanticSourceClaims(authority, nodes, [
+      {
+        subjects: ['node:hero#/'],
+        documentPath: 'docs/GDD.md',
+        sectionId: 'rules',
+        excerpt: 'Hero action consumes energy.',
+      },
+    ])
+    expect(rootClaims.map(claim => claim.subject)).toEqual([
+      'node:hero#/edges/0',
+      'node:hero#/id',
+      'node:hero#/references/0',
+      'node:hero#/value/label',
+    ])
+
+    const splitClaims = deriveGameIrSemanticSourceClaims(authority, nodes, [
+      {
+        subjects: [
+          'node:hero#/id',
+          'node:hero#/value',
+          'node:hero#/references',
+          'node:hero#/edges',
+        ],
+        documentPath: 'docs/GDD.md',
+        sectionId: 'rules',
+        excerpt: 'Hero action consumes energy.',
+      },
+    ])
+    expect(splitClaims).toEqual(rootClaims)
+    expect(() =>
+      deriveGameIrSemanticSourceClaims(authority, nodes, [
+        {
+          subjects: ['node:hero#/', 'node:hero#/id'],
+          documentPath: 'docs/GDD.md',
+          sectionId: 'rules',
+          excerpt: 'Hero action consumes energy.',
+        },
+      ]),
+    ).toThrow(/bound more than once/)
+    expect(() =>
+      deriveGameIrSemanticSourceClaims(authority, nodes, [
+        {
+          subjects: ['node:hero#/edges/0/targetId'],
+          documentPath: 'docs/GDD.md',
+          sectionId: 'rules',
+          excerpt: 'Hero action consumes energy.',
+        },
+      ]),
+    ).toThrow(/not a semantic target selector/)
+  })
+
+  test('rejects repeated excerpts and missing or duplicated target bindings', () => {
+    const authority = {
+      sectionIndex: [
+        {
+          documentPath: 'docs/GDD.md' as const,
+          sectionId: 'rules',
+          digest: 'a'.repeat(64),
+        },
+      ],
+      sectionBytes: { 'docs/GDD.md#rules': 'Hero Hero' },
+    }
+    const nodes = [
+      {
+        id: 'hero',
+        kind: 'gameplay.entity',
+        value: { label: 'Hero' },
+        references: [],
+        edges: [],
+      },
+    ] as const
+    const group = {
+      subjects: ['node:hero#/id'],
+      documentPath: 'docs/GDD.md' as const,
+      sectionId: 'rules',
+      excerpt: 'Hero',
+    }
+    expect(() =>
+      deriveGameIrSemanticSourceClaims(authority, nodes, [group]),
+    ).toThrow(/multiple occurrences/)
+    const uniqueAuthority = {
+      ...authority,
+      sectionBytes: { 'docs/GDD.md#rules': 'Hero' },
+    }
+    expect(() =>
+      deriveGameIrSemanticSourceClaims(uniqueAuthority, nodes, [
+        { ...group, subjects: ['node:hero#/id', 'node:hero#/id'] },
+      ]),
+    ).toThrow(/bound more than once/)
+    expect(() =>
+      deriveGameIrSemanticSourceClaims(uniqueAuthority, nodes, []),
+    ).toThrow(/every semantic target exactly once/)
+  })
   test('preserves neutral source-section, reason-code, and evidence-pointer bytes', () => {
     const ref: GameIrSemanticSourceSection['ref'] = {
       documentPath: 'docs/GDD.md',
@@ -62,6 +225,43 @@ describe('shared semantic fidelity primitives', () => {
     ).toThrow(
       'invalid Game IR semantic fidelity: source pointer does not lie on UTF-8 code-point boundaries',
     )
+  })
+
+  test('derives byte ranges from UTF-8 offsets when the excerpt has a non-ASCII prefix', () => {
+    const authority = {
+      sectionIndex: [
+        {
+          documentPath: 'docs/GDD.md' as const,
+          sectionId: 'rules',
+          digest: 'c'.repeat(64),
+        },
+      ],
+      sectionBytes: { 'docs/GDD.md#rules': '前缀：Hero is ready.' },
+    }
+    const claims = deriveGameIrSemanticSourceClaims(
+      authority,
+      [
+        {
+          id: 'hero',
+          kind: 'gameplay.entity',
+          value: { label: 'Hero' },
+          references: [],
+          edges: [],
+        },
+      ],
+      [
+        {
+          subjects: ['node:hero#/id', 'node:hero#/value/label'],
+          documentPath: 'docs/GDD.md',
+          sectionId: 'rules',
+          excerpt: 'Hero',
+        },
+      ],
+    )
+    expect(claims[0]!.sourcePointer).toBe('/bytes/9/13')
+    expect(() =>
+      verifyGameIrSemanticClaimBytes(authority, claims[0]!),
+    ).not.toThrow()
   })
 
   test('admission preserves Phase 5 evidence-kind boundaries', () => {

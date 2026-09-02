@@ -13,6 +13,7 @@ import {
 } from './domain-source'
 import { BALANCE_DOMAIN_MANIFEST } from './balance-schema'
 import {
+  canonicalGameIrJson,
   compareCodeUnits,
   digestGameIrValue,
   parseGameIrModuleCandidate,
@@ -21,6 +22,25 @@ import {
   type GameIrSourceBinding,
   type GameIrNode,
 } from './model'
+import {
+  buildDomainProjectionEnvelope,
+  normalizeDomainProjectionEnvelope,
+  operationExactKeys,
+  operationIsRecord,
+  deriveOperationTargets,
+  operationTargets,
+  emptyOperationMechanicalReceipt,
+  type DomainProjectionEnvelope,
+  type OperationTarget,
+} from './operation-packet-primitives'
+import {
+  createSemanticFidelityPrimitives,
+  verifyGameIrSemanticClaimBytes,
+} from './semantic-fidelity'
+import {
+  prepareGameplayModule,
+  type GameIrDomainSemanticReceipt as GameplaySemanticReceipt,
+} from './gameplay-producer'
 
 const BALANCE_NODE_KINDS = Object.freeze(
   Object.keys(BALANCE_DOMAIN_MANIFEST).sort(compareCodeUnits),
@@ -35,6 +55,204 @@ const BALANCE_RELATIONSHIP_TYPES = Object.freeze(
   ].sort(compareCodeUnits),
 )
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const fidelity = createSemanticFidelityPrimitives(
+  'invalid Game IR Balance semantic admission',
+)
+
+export type BalanceProjectionOperationPacket = DomainProjectionEnvelope<
+  BalanceProjectionOperationDependencies,
+  GameIrDomainSemanticPacket,
+  'game-ir-balance-projection-operation-packet.v1'
+>
+export type BalanceProjectionOperationDependencies = Readonly<{
+  gameplayCandidateReceiptDigest: string
+  gameplayTargets: readonly OperationTarget[]
+  requiredBalanceTargets: readonly OperationTarget[]
+}>
+
+export type BalanceProjectionOperationInput = Readonly<{
+  source: GameIrDomainSourceEnvelope
+  mechanical: GameIrMechanicalProjectionReceipt
+  gameplay: Readonly<{
+    source: GameIrDomainSourceEnvelope
+    mechanical: GameIrMechanicalProjectionReceipt
+    semantic: GameplaySemanticReceipt
+  }>
+}>
+
+function balanceOperationIdentity(
+  source: GameIrDomainSourceEnvelope,
+  other: GameIrDomainSourceEnvelope,
+): void {
+  if (
+    source.taskId !== other.taskId ||
+    source.compileRequest.foundation.foundationRevision !==
+      other.compileRequest.foundation.foundationRevision ||
+    source.compileRequest.foundation.receiptDigest !==
+      other.compileRequest.foundation.receiptDigest ||
+    digestGameIrValue(source.compileRequest) !==
+      digestGameIrValue(other.compileRequest) ||
+    digestGameIrValue(source.authoritySectionIndex) !==
+      digestGameIrValue(other.authoritySectionIndex)
+  )
+    throw new Error('Balance operation gameplay authority is detached')
+}
+
+function gameplayTargetsFromNodes(
+  nodes: readonly Readonly<{ id: string; kind: string }>[],
+): readonly OperationTarget[] {
+  return deriveOperationTargets(
+    nodes.map(node => ({ id: node.id, kind: node.kind })),
+    'Balance operation gameplayTargets',
+  )
+}
+
+function requiredBalanceTargetsFromNodes(
+  nodes: readonly Readonly<{
+    references: readonly Readonly<{ targetId: string; targetType: string }>[]
+    edges: readonly Readonly<{
+      targetId: string
+      targetType: string
+    }>[]
+  }>[],
+): readonly OperationTarget[] {
+  return deriveOperationTargets(
+    nodes
+      .flatMap(node => [
+        ...node.references,
+        ...node.edges.map(edge => ({
+          targetId: edge.targetId,
+          targetType: edge.targetType,
+        })),
+      ])
+      .filter(target => target.targetType.startsWith('balance.'))
+      .map(target => ({ id: target.targetId, kind: target.targetType })),
+    'Balance operation requiredBalanceTargets',
+  )
+}
+
+function balanceOperationDependencies(
+  gameplayAuthority: BalanceProjectionOperationInput['gameplay'],
+): BalanceProjectionOperationDependencies {
+  const gameplaySource = validateGameIrDomainSourceEnvelope(
+    gameplayAuthority.source,
+  )
+  if (gameplaySource.moduleId !== 'gameplay')
+    throw new Error('invalid Balance operation Gameplay source module')
+  const gameplay = prepareGameplayModule(gameplayAuthority)
+  return {
+    gameplayCandidateReceiptDigest: gameplay.semanticReceiptDigest,
+    gameplayTargets: gameplayTargetsFromNodes(gameplay.module.nodes),
+    requiredBalanceTargets: requiredBalanceTargetsFromNodes(
+      gameplay.module.nodes,
+    ),
+  }
+}
+
+export function buildBalanceProjectionOperationPacket(
+  input: BalanceProjectionOperationInput,
+): BalanceProjectionOperationPacket {
+  if (!operationIsRecord(input))
+    throw new Error('invalid Balance operation input')
+  operationExactKeys(
+    input,
+    ['source', 'mechanical', 'gameplay'],
+    'Balance operation input',
+  )
+  if (!operationIsRecord(input.gameplay))
+    throw new Error('Balance operation gameplay input must be a plain object')
+  operationExactKeys(
+    input.gameplay,
+    ['source', 'mechanical', 'semantic'],
+    'Balance operation gameplay input',
+  )
+  const source = validateGameIrDomainSourceEnvelope(input.source)
+  if (source.moduleId !== 'balance')
+    throw new Error('invalid Balance operation source module')
+  const gameplaySource = validateGameIrDomainSourceEnvelope(
+    input.gameplay.source,
+  )
+  if (gameplaySource.moduleId !== 'gameplay')
+    throw new Error('invalid Balance operation Gameplay source module')
+  balanceOperationIdentity(source, gameplaySource)
+  const gameplayDependencies = balanceOperationDependencies(input.gameplay)
+  const semanticPacket = buildBalanceSemanticPacket({
+    source,
+    mechanical: input.mechanical,
+  })
+  return buildDomainProjectionEnvelope({
+    schemaVersion: 'game-ir-balance-projection-operation-packet.v1',
+    moduleId: 'balance',
+    source,
+    semanticPacket,
+    dependencies: gameplayDependencies,
+  })
+}
+
+export function normalizeBalanceProjectionOperationPacket(
+  value: unknown,
+  gameplayAuthority: BalanceProjectionOperationInput['gameplay'],
+): BalanceProjectionOperationPacket {
+  if (!operationIsRecord(value))
+    throw new Error('invalid Balance operation packet')
+  const normalized = normalizeDomainProjectionEnvelope(value, {
+    schemaVersion: 'game-ir-balance-projection-operation-packet.v1',
+    moduleId: 'balance',
+    label: 'Balance operation packet',
+    parseDependencies: dependency => {
+      if (!operationIsRecord(dependency))
+        throw new Error('Balance operation dependencies must be an object')
+      operationExactKeys(
+        dependency,
+        [
+          'gameplayCandidateReceiptDigest',
+          'gameplayTargets',
+          'requiredBalanceTargets',
+        ],
+        'Balance operation dependencies',
+      )
+      if (
+        typeof dependency.gameplayCandidateReceiptDigest !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(dependency.gameplayCandidateReceiptDigest)
+      )
+        throw new Error(
+          'Balance operation Gameplay candidate receipt digest is invalid',
+        )
+      return {
+        gameplayCandidateReceiptDigest:
+          dependency.gameplayCandidateReceiptDigest,
+        gameplayTargets: operationTargets(
+          dependency.gameplayTargets,
+          'Balance operation gameplayTargets',
+        ),
+        requiredBalanceTargets: operationTargets(
+          dependency.requiredBalanceTargets,
+          'Balance operation requiredBalanceTargets',
+        ),
+      }
+    },
+  })
+  const gameplaySource = validateGameIrDomainSourceEnvelope(
+    gameplayAuthority.source,
+  )
+  balanceOperationIdentity(normalized.source, gameplaySource)
+  const expectedSemanticPacket = buildBalanceSemanticPacket({
+    source: normalized.source,
+    mechanical: emptyOperationMechanicalReceipt(normalized.source),
+  })
+  if (
+    canonicalGameIrJson(normalized.semanticPacket) !==
+    canonicalGameIrJson(expectedSemanticPacket)
+  )
+    throw new Error('Balance operation semantic packet is stale or detached')
+  const expectedDependencies = balanceOperationDependencies(gameplayAuthority)
+  if (
+    canonicalGameIrJson(normalized.dependencies) !==
+    canonicalGameIrJson(expectedDependencies)
+  )
+    throw new Error('Balance operation dependencies are stale or detached')
+  return normalized
+}
 
 type BalanceSemanticNode = Readonly<{
   id: string
@@ -345,117 +563,6 @@ function semanticTargets(
   )
 }
 
-function normalizeSourcePointer(value: unknown, label: string): string {
-  const pointer = text(value, label)
-  const parts = pointer.split('/')
-  if (
-    parts.length !== 4 ||
-    parts[1] !== 'bytes' ||
-    !/^(?:0|[1-9]\d*)$/.test(parts[2]!) ||
-    !/^(?:0|[1-9]\d*)$/.test(parts[3]!)
-  )
-    fail(`${label} must be a canonical /bytes/<start>/<end> range`)
-  const start = Number(parts[2])
-  const end = Number(parts[3])
-  if (
-    !Number.isSafeInteger(start) ||
-    !Number.isSafeInteger(end) ||
-    start >= end
-  )
-    fail(`${label} must contain a non-empty byte range`)
-  return pointer
-}
-
-function byteRange(
-  pointer: string,
-  byteLength: number,
-  label: string,
-): { start: number; end: number } {
-  const normalized = normalizeSourcePointer(pointer, label)
-  const parts = normalized.split('/')
-  const start = Number(parts[2])
-  const end = Number(parts[3])
-  if (end > byteLength) fail(`${label} is outside the selected source bytes`)
-  return { start, end }
-}
-
-function valueAtSubject(node: BalanceSemanticNode, pointer: string): unknown {
-  if (pointer === '/id') return node.id
-  if (pointer.startsWith('/references/')) {
-    const index = Number(pointer.slice('/references/'.length))
-    return node.references[index]?.targetId
-  }
-  if (pointer.startsWith('/edges/')) {
-    const index = Number(pointer.slice('/edges/'.length))
-    return node.edges[index]?.targetId
-  }
-  if (pointer === '/value') return node.value
-  const segments = pointer
-    .slice('/value/'.length)
-    .split('/')
-    .map(segment => segment.replaceAll('~1', '/').replaceAll('~0', '~'))
-  let current: unknown = node.value
-  for (const segment of segments) {
-    if (Array.isArray(current)) current = current[Number(segment)]
-    else if (isRecord(current)) current = current[segment]
-    else return undefined
-  }
-  return current
-}
-
-function verifyClaimSemanticLiteral(
-  claim: BalanceSemanticClaim,
-  node: BalanceSemanticNode,
-  pointer: string,
-): void {
-  const expected = valueAtSubject(node, pointer)
-  if (typeof expected === 'number') {
-    if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(claim.literal))
-      fail('Balance numeric source literal is not a strict JSON number')
-    const numeric = Number(claim.literal)
-    if (!Number.isFinite(numeric) || numeric !== expected)
-      fail('Balance source literal does not match the semantic record')
-    return
-  }
-  if (typeof expected === 'string') {
-    if (claim.literal !== expected)
-      fail('Balance source literal does not match the semantic record')
-    return
-  }
-  const encoded = expected === null ? 'null' : JSON.stringify(expected)
-  if (claim.literal !== encoded)
-    fail('Balance source literal does not preserve the semantic value type')
-}
-
-function verifyClaimBytes(
-  source: GameIrDomainSourceEnvelope,
-  claim: BalanceSemanticClaim,
-): void {
-  const section = source.sectionIndex.find(
-    candidate =>
-      candidate.documentPath === claim.documentPath &&
-      candidate.sectionId === claim.sectionId,
-  )
-  if (!section) fail(`Balance source claim lies outside exact source sections`)
-  const bytes = source.sectionBytes[`${claim.documentPath}#${claim.sectionId}`]
-  if (bytes === undefined) fail('Balance source section bytes are missing')
-  const range = byteRange(
-    claim.sourcePointer,
-    Buffer.byteLength(bytes, 'utf8'),
-    'Balance source pointer',
-  )
-  let literal: string
-  try {
-    literal = new TextDecoder('utf-8', { fatal: true }).decode(
-      Buffer.from(bytes, 'utf8').subarray(range.start, range.end),
-    )
-  } catch {
-    fail('Balance source byte range is not valid UTF-8')
-  }
-  if (literal !== claim.literal)
-    fail('Balance source byte range does not exactly match its literal')
-}
-
 function normalizeClaims(
   value: unknown,
   source: GameIrDomainSourceEnvelope | undefined,
@@ -500,14 +607,18 @@ function normalizeClaims(
       subject: `node:${nodeId}#${pointer}`,
       documentPath: documentPath as BalanceSemanticClaim['documentPath'],
       sectionId: safeId(entry.sectionId, `sourceClaims[${index}].sectionId`),
-      sourcePointer: normalizeSourcePointer(
+      sourcePointer: fidelity.normalizeSourcePointer(
         entry.sourcePointer,
         `sourceClaims[${index}].sourcePointer`,
       ),
       literal: text(entry.literal, `sourceClaims[${index}].literal`),
     })
-    verifyClaimSemanticLiteral(claim, node!, pointer)
-    if (source) verifyClaimBytes(source, claim)
+    if (source)
+      verifyGameIrSemanticClaimBytes(
+        source,
+        claim,
+        'invalid Game IR Balance semantic admission',
+      )
     return claim
   })
   for (let index = 1; index < claims.length; index += 1) {

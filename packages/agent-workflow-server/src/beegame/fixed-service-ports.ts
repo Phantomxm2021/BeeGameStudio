@@ -20,13 +20,14 @@ const SERVICE_ENV: Readonly<Record<BeeGameFixedService, readonly string[]>> = {
   resources: ['BEEGAME_RESOURCE_PORT'],
 }
 
-const SERVICE_FLAGS: Readonly<Record<BeeGameFixedService, readonly string[]>> = {
-  frontend: ['--frontend-port'],
-  runtime: ['--runtime-port', '--api-port'],
-  billing: ['--billing-port'],
-  skills: ['--skills-port'],
-  resources: ['--resources-port'],
-}
+const SERVICE_FLAGS: Readonly<Record<BeeGameFixedService, readonly string[]>> =
+  {
+    frontend: ['--frontend-port'],
+    runtime: ['--runtime-port', '--api-port'],
+    billing: ['--billing-port'],
+    skills: ['--skills-port'],
+    resources: ['--resources-port'],
+  }
 
 export function assertFixedServicePortConfiguration(input: {
   argv: readonly string[]
@@ -36,8 +37,8 @@ export function assertFixedServicePortConfiguration(input: {
     const port = BEEGAME_FIXED_SERVICE_PORTS[service]
     for (const flag of SERVICE_FLAGS[service]) {
       if (
-        input.argv.some(argument =>
-          argument === flag || argument.startsWith(`${flag}=`),
+        input.argv.some(
+          argument => argument === flag || argument.startsWith(`${flag}=`),
         )
       )
         throw new Error(
@@ -57,26 +58,30 @@ export function resolveFixedServicePort(
   configured?: string,
 ): number {
   const port = BEEGAME_FIXED_SERVICE_PORTS[service]
-  if (configured !== undefined && configured !== '' && configured !== String(port))
+  if (
+    configured !== undefined &&
+    configured !== '' &&
+    configured !== String(port)
+  )
     throw new Error(
       `${SERVICE_ENV[service][0]} must use fixed ${service} port ${port}`,
     )
   return port
 }
 
-export async function assertFixedServicePortsAvailable(input: {
-  probe?: (port: number) => Promise<boolean>
-  owner?: (port: number) => Promise<string>
-} = {}): Promise<void> {
+export async function assertFixedServicePortsAvailable(
+  input: {
+    probe?: (port: number) => Promise<boolean>
+    owner?: (port: number) => Promise<string>
+  } = {},
+): Promise<void> {
   const probe = input.probe ?? portIsAvailable
   const owner = input.owner ?? portOwner
   for (const service of fixedServiceNames()) {
     const port = BEEGAME_FIXED_SERVICE_PORTS[service]
     if (await probe(port)) continue
     const evidence = (await owner(port)).trim() || 'owner unavailable'
-    throw new Error(
-      `${service} fixed port ${port} is occupied: ${evidence}`,
-    )
+    throw new Error(`${service} fixed port ${port} is occupied: ${evidence}`)
   }
 }
 

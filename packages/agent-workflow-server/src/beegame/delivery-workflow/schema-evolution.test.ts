@@ -7,13 +7,16 @@ import {
   tasksPlannedEventSchema,
   workflowUnitAcceptedEventSchema,
 } from './schema'
+import { DELIVERY_RUN_SCHEMA_VERSION, type DeliveryRun } from './types'
 import {
-  DELIVERY_RUN_SCHEMA_VERSION,
-  type DeliveryRun,
-} from './types'
-import { createFoundationAuditState, parseFoundationAuditState } from './foundation-audit-state'
+  createFoundationAuditState,
+  parseFoundationAuditState,
+} from './foundation-audit-state'
 import { FOUNDATION_AUDIT_PRODUCTION_MANIFEST } from './foundation-audit-production-manifest'
-import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST, FOUNDATION_SEMANTIC_CHECKS } from './foundation-semantic-audit'
+import {
+  FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
+  FOUNDATION_SEMANTIC_CHECKS,
+} from './foundation-semantic-audit'
 
 const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
   13: '263640f06ada501afb0421806f29215b83e54b4fb239591b9dc1256e8e4b5067',
@@ -89,8 +92,8 @@ describe('persisted workflow schema evolution', () => {
   })
 })
 
-const V46_DIGEST = 'a'.repeat(64)
-const V46_MODULES = [
+const CURRENT_DIGEST = 'a'.repeat(64)
+const CURRENT_MODULES = [
   'balance',
   'gameplay',
   'implementation-verification',
@@ -99,84 +102,161 @@ const V46_MODULES = [
   'world-scene',
 ] as const
 
-function v46Digest(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(canonicalize(value))).digest('hex')
+function currentDigest(value: unknown): string {
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalize(value)))
+    .digest('hex')
 }
 
-function v46Identity() {
+function currentIdentity() {
   return {
-    runId: 'run-v46',
-    taskId: 'compile-v46',
-    publicationId: 'publication-v46',
-    confirmedBriefDigest: V46_DIGEST,
+    runId: 'run-current',
+    taskId: 'compile-current',
+    publicationId: 'publication-current',
+    confirmedBriefDigest: CURRENT_DIGEST,
     foundationRevision: 'foundation-rev-1',
-    foundationReadyReceiptDigest: V46_DIGEST,
+    foundationReadyReceiptDigest: CURRENT_DIGEST,
   }
 }
 
-function v46ReadyReceipt() {
+function currentReadyReceipt() {
   return {
     schemaVersion: 'game-ir-ready-receipt.v1',
-    taskId: 'compile-v46',
-    publicationId: 'publication-v46',
+    taskId: 'compile-current',
+    publicationId: 'publication-current',
     gameIrSchemaVersion: 'game-ir.v1',
     foundationRevision: 'foundation-rev-1',
-    foundationReceiptDigest: V46_DIGEST,
-    manifestDigest: V46_DIGEST,
-    moduleDigests: Object.fromEntries(V46_MODULES.map(module => [module, V46_DIGEST])) as Record<(typeof V46_MODULES)[number], string>,
-    sourceMapDigests: Object.fromEntries(V46_MODULES.map(module => [module, V46_DIGEST])) as Record<(typeof V46_MODULES)[number], string>,
-    dependencyGraphDigest: V46_DIGEST,
-    committedPath: '.beegame/ir/game-ir.v1/revisions/foundation-rev-1/COMMITTED.json',
+    foundationReceiptDigest: CURRENT_DIGEST,
+    manifestDigest: CURRENT_DIGEST,
+    moduleDigests: Object.fromEntries(
+      CURRENT_MODULES.map(module => [module, CURRENT_DIGEST]),
+    ) as Record<(typeof CURRENT_MODULES)[number], string>,
+    sourceMapDigests: Object.fromEntries(
+      CURRENT_MODULES.map(module => [module, CURRENT_DIGEST]),
+    ) as Record<(typeof CURRENT_MODULES)[number], string>,
+    dependencyGraphDigest: CURRENT_DIGEST,
+    committedPath:
+      '.beegame/ir/game-ir.v1/revisions/foundation-rev-1/COMMITTED.json',
   }
 }
 
-function v46FoundationReadyState() {
-  const digest = V46_DIGEST
+function currentFoundationReadyState() {
+  const digest = CURRENT_DIGEST
   const revision = 'foundation-rev-1'
   const reviewDigest = 'b'.repeat(64)
   const reviewRoot = `.beegame/audit/foundation/${revision}/review/${reviewDigest}`
   const seed = createFoundationAuditState({
     revision,
     documentDigests: [
-      'docs/GDD.md', 'docs/TECHNICAL_DESIGN.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/BALANCE_DESIGN.md',
-      'docs/UI_UX_SPEC.md', 'docs/ART_DIRECTION.md', 'docs/AUDIO_DESIGN.md', 'docs/ASSET_PLAN.md',
+      'docs/GDD.md',
+      'docs/TECHNICAL_DESIGN.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+      'docs/BALANCE_DESIGN.md',
+      'docs/UI_UX_SPEC.md',
+      'docs/ART_DIRECTION.md',
+      'docs/AUDIO_DESIGN.md',
+      'docs/ASSET_PLAN.md',
     ].map(path => ({ path, digest })) as any,
-    manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+    manifest: {
+      revision,
+      status: 'index_staged',
+      catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+      sectionIndexDigest: digest,
+    },
   })
-  const usage = { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+  const usage = {
+    input_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  }
   const tasks = FOUNDATION_SEMANTIC_CHECKS.map(check => {
-    const taskId = `v46-semantic-${check.checkId}`
+    const taskId = `current-semantic-${check.checkId}`
     return {
-      taskId, kind: 'semantic' as const, revision, checkId: check.checkId, packetDigest: digest,
-      modelTier: check.modelTier, status: 'completed' as const, attempt: 1, terminalDigest: digest,
-      usage, durationMs: 0,
-      dispatch: { dispatchId: `v46-dispatch-${check.checkId}`, workerType: 'foundation-semantic-reviewer' as const, phase: 'DOCUMENT_REVIEW' as const, taskId, revision, status: 'completed' as const, startedAt: '2026-01-01T00:00:00.000Z', finishedAt: '2026-01-01T00:00:00.000Z', terminalResult: {} },
-      admittedResult: { checkId: check.checkId, packetIdentity: digest, outcome: 'PASS' as const },
+      taskId,
+      kind: 'semantic' as const,
+      revision,
+      checkId: check.checkId,
+      packetDigest: digest,
+      modelTier: check.modelTier,
+      status: 'completed' as const,
+      attempt: 1,
+      terminalDigest: digest,
+      usage,
+      durationMs: 0,
+      dispatch: {
+        dispatchId: `current-dispatch-${check.checkId}`,
+        workerType: 'foundation-semantic-reviewer' as const,
+        phase: 'DOCUMENT_REVIEW' as const,
+        taskId,
+        revision,
+        status: 'completed' as const,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: '2026-01-01T00:00:00.000Z',
+        terminalResult: {},
+      },
+      admittedResult: {
+        checkId: check.checkId,
+        packetIdentity: digest,
+        outcome: 'PASS' as const,
+      },
     }
   })
   return parseFoundationAuditState({
-    ...seed, status: 'audit_ready', phaseStartedAt: '2026-01-01T00:00:00.000Z',
+    ...seed,
+    status: 'audit_ready',
+    phaseStartedAt: '2026-01-01T00:00:00.000Z',
     derived: {
-      manifestPath: `.beegame/audit/foundation/${revision}/derived/manifest.json`, manifestDigest: digest,
-      markerPath: `.beegame/audit/foundation/${revision}/derived/COMMITTED.json`, markerDigest: digest,
-      factStorePath: `.beegame/audit/foundation/${revision}/derived/fact-store.json`, factStoreDigest: digest,
-      sectionIndexPath: `.beegame/audit/foundation/${revision}/derived/section-index.json`, sectionIndexDigest: digest,
+      manifestPath: `.beegame/audit/foundation/${revision}/derived/manifest.json`,
+      manifestDigest: digest,
+      markerPath: `.beegame/audit/foundation/${revision}/derived/COMMITTED.json`,
+      markerDigest: digest,
+      factStorePath: `.beegame/audit/foundation/${revision}/derived/fact-store.json`,
+      factStoreDigest: digest,
+      sectionIndexPath: `.beegame/audit/foundation/${revision}/derived/section-index.json`,
+      sectionIndexDigest: digest,
     },
-    deterministic: { reviewDigest: digest, issueRegistryPath: `.beegame/audit/foundation/${revision}/staging/review/issue-registry.json`, issueRegistryDigest: digest, manifestPath: `.beegame/audit/foundation/${revision}/staging/review/manifest.json`, manifestDigest: digest, markerPath: `.beegame/audit/foundation/${revision}/staging/review/COMMITTED.json`, markerDigest: digest, catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, contractGraphDigest: digest, sectionIndexDigest: digest, factStoreDigest: digest },
-    semantic: { aggregateUsage: usage }, tasks,
-    review: { reviewDigest, issueRegistryPath: `${reviewRoot}/issue-registry.json`, issueRegistryDigest: reviewDigest, manifestPath: `${reviewRoot}/manifest.json`, manifestDigest: reviewDigest, markerPath: `${reviewRoot}/COMMITTED.json`, markerDigest: reviewDigest, sectionIndexDigest: digest, factStoreDigest: digest, semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest, issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 } },
+    deterministic: {
+      reviewDigest: digest,
+      issueRegistryPath: `.beegame/audit/foundation/${revision}/staging/review/issue-registry.json`,
+      issueRegistryDigest: digest,
+      manifestPath: `.beegame/audit/foundation/${revision}/staging/review/manifest.json`,
+      manifestDigest: digest,
+      markerPath: `.beegame/audit/foundation/${revision}/staging/review/COMMITTED.json`,
+      markerDigest: digest,
+      catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
+      contractGraphDigest: digest,
+      sectionIndexDigest: digest,
+      factStoreDigest: digest,
+    },
+    semantic: { aggregateUsage: usage },
+    tasks,
+    review: {
+      reviewDigest,
+      issueRegistryPath: `${reviewRoot}/issue-registry.json`,
+      issueRegistryDigest: reviewDigest,
+      manifestPath: `${reviewRoot}/manifest.json`,
+      manifestDigest: reviewDigest,
+      markerPath: `${reviewRoot}/COMMITTED.json`,
+      markerDigest: reviewDigest,
+      sectionIndexDigest: digest,
+      factStoreDigest: digest,
+      semanticManifestDigest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.digest,
+      issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
+    },
   })
 }
 
-function v46Run(overrides: Record<string, unknown> = {}): DeliveryRun {
-  const readyReceipt = v46ReadyReceipt()
+function currentRun(overrides: Record<string, unknown> = {}): DeliveryRun {
+  const readyReceipt = currentReadyReceipt()
   return {
     schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-    runId: 'run-v46',
-    projectId: 'project-v46',
-    ownerId: 'owner-v46',
-    confirmedBriefDigest: V46_DIGEST,
-    confirmedBriefContext: 'v46 confirmed brief',
+    runId: 'run-current',
+    projectId: 'project-current',
+    ownerId: 'owner-current',
+    confirmedBriefDigest: CURRENT_DIGEST,
+    confirmedBriefContext: 'current confirmed brief',
     phase: 'DOCUMENT_REVIEW',
     documentStep: 'CHECKLIST_DRAFTING',
     status: 'running',
@@ -195,17 +275,18 @@ function v46Run(overrides: Record<string, unknown> = {}): DeliveryRun {
         'docs/ASSET_PLAN.md',
       ],
     },
-    foundationAuditState: v46FoundationReadyState(),
+    foundationAuditState: currentFoundationReadyState(),
     resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
     gameIrState: {
       status: 'ready',
-      identity: v46Identity(),
+      identity: currentIdentity(),
       checkpoint: {
-        checkpointPath: '.beegame/ir/runs/run-v46/checkpoints/phase7.json',
-        checkpointDigest: V46_DIGEST,
+        checkpointPath:
+          '.beegame/ir/runs/run-current/checkpoints/phase7/implementation-verification/validation/manifest.json',
+        checkpointDigest: CURRENT_DIGEST,
       },
       readyReceipt,
-      readyReceiptDigest: v46Digest(readyReceipt),
+      readyReceiptDigest: currentDigest(readyReceipt),
     },
     createdAt: '2026-09-01T00:00:00.000Z',
     updatedAt: '2026-09-01T00:00:00.000Z',
@@ -213,91 +294,131 @@ function v46Run(overrides: Record<string, unknown> = {}): DeliveryRun {
   } as unknown as DeliveryRun
 }
 
-function v46ReadyReceiptDigest(): string {
-  const state = v46Run().gameIrState
-  if (!state || state.status !== 'ready') throw new Error('v46 fixture must be ready')
+function currentReadyReceiptDigest(): string {
+  const state = currentRun().gameIrState
+  if (!state || state.status !== 'ready')
+    throw new Error('current fixture must be ready')
   return state.readyReceiptDigest
 }
 
-describe('v46 Game IR and Checklist bridge schema', () => {
-  test('accepts a strict ready v46 run and rejects the v45 shape', () => {
-    expect(parseDeliveryRun(v46Run()).schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
-    expect(() => parseDeliveryRun({ ...v46Run(), schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1 })).toThrow()
+describe('Game IR and Checklist bridge schema', () => {
+  test('accepts a strict ready current run and rejects the prior schema version', () => {
+    expect(parseDeliveryRun(currentRun()).schemaVersion).toBe(
+      DELIVERY_RUN_SCHEMA_VERSION,
+    )
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        schemaVersion: DELIVERY_RUN_SCHEMA_VERSION - 1,
+      }),
+    ).toThrow()
   })
 
   test('requires persisted Game IR state to retain Foundation READY authority and matching revision', () => {
-    expect(() => parseDeliveryRun({ ...v46Run(), foundationAuditState: undefined })).toThrow(/Foundation|audit_ready|revision_ready/i)
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      foundationAuditState: { ...v46Run().foundationAuditState!, status: 'index_staged' },
-    })).toThrow(/Foundation|audit_ready|revision_ready/i)
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      gameIrState: { ...v46Run().gameIrState!, identity: { ...v46Run().gameIrState!.identity, foundationRevision: 'other-revision' } },
-    })).toThrow(/revision|Foundation/i)
+    expect(() =>
+      parseDeliveryRun({ ...currentRun(), foundationAuditState: undefined }),
+    ).toThrow(/Foundation|audit_ready|revision_ready/i)
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        foundationAuditState: {
+          ...currentRun().foundationAuditState!,
+          status: 'index_staged',
+        },
+      }),
+    ).toThrow(/Foundation|audit_ready|revision_ready/i)
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        gameIrState: {
+          ...currentRun().gameIrState!,
+          identity: {
+            ...currentRun().gameIrState!.identity,
+            foundationRevision: 'other-revision',
+          },
+        },
+      }),
+    ).toThrow(/revision|Foundation/i)
   })
 
   test('rejects unknown or nullable legacy Game IR state', () => {
-    expect(() => parseDeliveryRun({ ...v46Run(), gameIrState: { status: 'unknown' } })).toThrow()
-    expect(() => parseDeliveryRun({ ...v46Run(), gameIrState: null })).toThrow()
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      gameIrState: { ...v46Run().gameIrState, unexpected: true },
-    })).toThrow()
+    expect(() =>
+      parseDeliveryRun({ ...currentRun(), gameIrState: { status: 'unknown' } }),
+    ).toThrow()
+    expect(() =>
+      parseDeliveryRun({ ...currentRun(), gameIrState: null }),
+    ).toThrow()
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        gameIrState: { ...currentRun().gameIrState, unexpected: true },
+      }),
+    ).toThrow()
   })
 
   test('rejects missing Foundation READY identity and missing checkpoint/publication', () => {
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      gameIrState: {
-        status: 'compiling',
-        identity: { ...v46Identity(), foundationReadyReceiptDigest: '' },
-      },
-    })).toThrow()
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_DRAFTING',
-      gameIrState: {
-        status: 'compiling',
-        identity: v46Identity(),
-      },
-    })).toThrow()
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        gameIrState: {
+          status: 'compiling',
+          identity: { ...currentIdentity(), foundationReadyReceiptDigest: '' },
+        },
+      }),
+    ).toThrow()
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_DRAFTING',
+        gameIrState: {
+          status: 'compiling',
+          identity: currentIdentity(),
+        },
+      }),
+    ).toThrow()
   })
 
   test('rejects direct resource entry and duplicate state pointers', () => {
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      phase: 'RESOURCE_PREPARATION',
-      gameIrState: undefined,
-    })).toThrow()
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      gameIrState: {
-        ...v46Run().gameIrState,
-        latestCheckpoint: {
-          checkpointPath: '.beegame/ir/runs/run-v46/checkpoints/phase7.json',
-          checkpointDigest: V46_DIGEST,
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        phase: 'RESOURCE_PREPARATION',
+        gameIrState: undefined,
+      }),
+    ).toThrow()
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        gameIrState: {
+          ...currentRun().gameIrState,
+          latestCheckpoint: {
+            checkpointPath:
+              '.beegame/ir/runs/run-current/checkpoints/phase7/implementation-verification/validation/manifest.json',
+            checkpointDigest: CURRENT_DIGEST,
+          },
         },
-      },
-    })).toThrow()
+      }),
+    ).toThrow()
   })
 
   test('requires an admitted bridge before resource preparation', () => {
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_BRIDGE',
-      checklistBridgeState: {
-        status: 'bridging',
-        identity: {
-          runId: 'run-v46',
-          taskId: 'bridge-v46',
-          checklistPublicationDigest: V46_DIGEST,
-          gameIrReadyReceiptDigest: V46_DIGEST,
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_BRIDGE',
+        checklistBridgeState: {
+          status: 'bridging',
+          identity: {
+            runId: 'run-current',
+            taskId: 'bridge-current',
+            checklistPublicationDigest: CURRENT_DIGEST,
+            gameIrReadyReceiptDigest: CURRENT_DIGEST,
+          },
         },
-      },
-    })).toThrow()
+      }),
+    ).toThrow()
   })
 
   test('requires ready Game IR and bridge state for every downstream phase', () => {
@@ -309,84 +430,98 @@ describe('v46 Game IR and Checklist bridge schema', () => {
       'ACCEPTANCE',
       'DELIVERY',
     ] as const) {
-      expect(() => parseDeliveryRun({
-        ...v46Run(),
-        phase,
-        documentStep: undefined,
-        gameIrState: undefined,
-      })).toThrow()
-      expect(() => parseDeliveryRun({
-        ...v46Run(),
-        phase,
-        documentStep: undefined,
-        checklistBridgeState: undefined,
-      })).toThrow()
+      expect(() =>
+        parseDeliveryRun({
+          ...currentRun(),
+          phase,
+          documentStep: undefined,
+          gameIrState: undefined,
+        }),
+      ).toThrow()
+      expect(() =>
+        parseDeliveryRun({
+          ...currentRun(),
+          phase,
+          documentStep: undefined,
+          checklistBridgeState: undefined,
+        }),
+      ).toThrow()
     }
   })
 
   test('closes state placement to its owning phase and step', () => {
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      phase: 'BRIEF_CONFIRMED',
-      documentStep: undefined,
-      gameIrState: { status: 'compiling', identity: v46Identity() },
-      checklistBridgeState: undefined,
-    })).toThrow()
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      phase: 'GAME_IR_COMPILATION',
-      documentStep: undefined,
-    })).toThrow()
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_BRIDGE',
-      checklistBridgeState: {
-        status: 'bridging',
-        identity: {
-          runId: 'run-v46',
-          taskId: 'bridge-v46',
-          checklistPublicationDigest: V46_DIGEST,
-          gameIrReadyReceiptDigest: v46ReadyReceiptDigest(),
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        phase: 'BRIEF_CONFIRMED',
+        documentStep: undefined,
+        gameIrState: { status: 'compiling', identity: currentIdentity() },
+        checklistBridgeState: undefined,
+      }),
+    ).toThrow()
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        phase: 'GAME_IR_COMPILATION',
+        documentStep: undefined,
+      }),
+    ).toThrow()
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_BRIDGE',
+        checklistBridgeState: {
+          status: 'bridging',
+          identity: {
+            runId: 'run-current',
+            taskId: 'bridge-current',
+            checklistPublicationDigest: CURRENT_DIGEST,
+            gameIrReadyReceiptDigest: currentReadyReceiptDigest(),
+          },
         },
-      },
-    })).not.toThrow()
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_BRIDGE',
-      checklistBridgeState: {
-        status: 'ready',
-        identity: {
-          runId: 'run-v46',
-          taskId: 'bridge-v46',
-          checklistPublicationDigest: V46_DIGEST,
-          gameIrReadyReceiptDigest: v46ReadyReceiptDigest(),
+      }),
+    ).not.toThrow()
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_BRIDGE',
+        checklistBridgeState: {
+          status: 'ready',
+          identity: {
+            runId: 'run-current',
+            taskId: 'bridge-current',
+            checklistPublicationDigest: CURRENT_DIGEST,
+            gameIrReadyReceiptDigest: currentReadyReceiptDigest(),
+          },
+          receiptPath: '.beegame/bridge.json',
+          receiptDigest: CURRENT_DIGEST,
         },
-        receiptPath: '.beegame/bridge.json',
-        receiptDigest: V46_DIGEST,
-      },
-    })).toThrow()
+      }),
+    ).toThrow()
   })
 
   test('rejects a bridge state that is not backed by ready Game IR', () => {
-    expect(() => parseDeliveryRun({
-      ...v46Run(),
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'CHECKLIST_BRIDGE',
-      gameIrState: {
-        status: 'compiling',
-        identity: v46Identity(),
-      },
-      checklistBridgeState: {
-        status: 'bridging',
-        identity: {
-          runId: 'run-v46',
-          taskId: 'bridge-v46',
-          checklistPublicationDigest: V46_DIGEST,
-          gameIrReadyReceiptDigest: V46_DIGEST,
+    expect(() =>
+      parseDeliveryRun({
+        ...currentRun(),
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_BRIDGE',
+        gameIrState: {
+          status: 'compiling',
+          identity: currentIdentity(),
         },
-      },
-    })).toThrow()
+        checklistBridgeState: {
+          status: 'bridging',
+          identity: {
+            runId: 'run-current',
+            taskId: 'bridge-current',
+            checklistPublicationDigest: CURRENT_DIGEST,
+            gameIrReadyReceiptDigest: CURRENT_DIGEST,
+          },
+        },
+      }),
+    ).toThrow()
   })
 })

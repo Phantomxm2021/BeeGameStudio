@@ -19,9 +19,10 @@ import { prepareImplementationVerificationSemanticValidationPacket } from './pha
 import type { ImplementationVerificationAssemblyAuthority } from './implementation-verification-assembler'
 import type { ResourceRealizationAssemblyAuthority } from './resource-realization-assembler'
 import {
-  GameIrStageCheckpointLoader,
+  GAME_IR_PROTOCOL_STEPS,
   GameIrStageCheckpointWriter,
   type GameIrCheckpointStep,
+  type GameIrProtocolStep,
 } from './stage-checkpoint'
 import { commitGameIrPublication, validateCommittedGameIr } from './publication'
 import { createRunStore } from '../run-store'
@@ -41,10 +42,6 @@ import {
 } from '../types'
 import { canonicalGameIrJson, digestGameIrValue } from './model'
 import { relativeFoundationAuditArtifactPaths } from '../foundation-audit-artifacts'
-import {
-  canonicalCompilerFailureReason,
-  canonicalCompilerDomainResults,
-} from '../controller'
 import {
   GAME_IR_CANONICAL_MODULE_IDS,
   GAME_IR_PUBLICATION_ROOT,
@@ -237,59 +234,88 @@ function readerRun(authority: ReturnType<typeof readerAuthority>): DeliveryRun {
 }
 
 function readerStep(
-  phase: 'phase4' | 'phase5' | 'phase6' | 'phase7',
+  step: GameIrProtocolStep,
   authority: ReturnType<typeof readerAuthority>['phase7Authority'],
 ): GameIrCheckpointStep {
   const p4 = authority.phase6Authority.phase5Authority.phase4Authority
   const p5 = authority.phase6Authority.phase5Authority
   const p6 = authority.phase6Authority
-  const values: Record<string, unknown> =
-    phase === 'phase4'
-      ? {
-          'phase4/gameplay/source': p4.gameplay.source,
-          'phase4/gameplay/mechanical': p4.gameplay.mechanical,
-          'phase4/gameplay/semantic': p4.gameplay.semantic,
-          'phase4/balance/source': p4.balance.source,
-          'phase4/balance/mechanical': p4.balance.mechanical,
-          'phase4/balance/semantic': p4.balance.semantic,
-        }
-      : phase === 'phase5'
-        ? {
-            'phase5/world-scene/source': p5.worldScene.source,
-            'phase5/world-scene/mechanical': p5.worldScene.mechanical,
-            'phase5/world-scene/semantic': p5.worldScene.semantic,
-            'phase5/world-scene/validation': p5.worldScene.validation,
-            'phase5/presentation/source': p5.presentation.source,
-            'phase5/presentation/mechanical': p5.presentation.mechanical,
-            'phase5/presentation/semantic': p5.presentation.semantic,
-            'phase5/presentation/validation': p5.presentation.validation,
-          }
-        : phase === 'phase6'
-          ? {
-              'phase6/resource-realization/source':
-                p6.resourceRealization.source,
-              'phase6/resource-realization/mechanical':
-                p6.resourceRealization.mechanical,
-              'phase6/resource-realization/semantic':
-                p6.resourceRealization.semantic,
-              'phase6/resource-realization/validation':
-                p6.resourceRealization.validation,
-            }
-          : {
-              'phase7/implementation-verification/source':
-                authority.implementationVerification.source,
-              'phase7/implementation-verification/mechanical':
-                authority.implementationVerification.mechanical,
-              'phase7/implementation-verification/semantic':
-                authority.implementationVerification.semantic,
-              'phase7/implementation-verification/validation':
-                authority.implementationVerification.validation,
-            }
+  const values: Record<string, unknown> = {
+    'phase4/gameplay/source': p4.gameplay.source,
+    'phase4/gameplay/mechanical': p4.gameplay.mechanical,
+    'phase4/gameplay/semantic': p4.gameplay.semantic,
+    'phase4/balance/source': p4.balance.source,
+    'phase4/balance/mechanical': p4.balance.mechanical,
+    'phase4/balance/semantic': p4.balance.semantic,
+    'phase5/world-scene/source': p5.worldScene.source,
+    'phase5/world-scene/mechanical': p5.worldScene.mechanical,
+    'phase5/world-scene/semantic': p5.worldScene.semantic,
+    'phase5/world-scene/validation': p5.worldScene.validation,
+    'phase5/presentation/source': p5.presentation.source,
+    'phase5/presentation/mechanical': p5.presentation.mechanical,
+    'phase5/presentation/semantic': p5.presentation.semantic,
+    'phase5/presentation/validation': p5.presentation.validation,
+    'phase6/resource-realization/source': p6.resourceRealization.source,
+    'phase6/resource-realization/mechanical': p6.resourceRealization.mechanical,
+    'phase6/resource-realization/semantic': p6.resourceRealization.semantic,
+    'phase6/resource-realization/validation': p6.resourceRealization.validation,
+    'phase7/implementation-verification/source':
+      authority.implementationVerification.source,
+    'phase7/implementation-verification/mechanical':
+      authority.implementationVerification.mechanical,
+    'phase7/implementation-verification/semantic':
+      authority.implementationVerification.semantic,
+    'phase7/implementation-verification/validation':
+      authority.implementationVerification.validation,
+  }
+  const kindsByStep: Record<GameIrProtocolStep, readonly string[]> = {
+    'phase4/gameplay/projection': [
+      'phase4/gameplay/source',
+      'phase4/gameplay/mechanical',
+      'phase4/gameplay/semantic',
+    ],
+    'phase4/balance/projection': [
+      'phase4/balance/source',
+      'phase4/balance/mechanical',
+      'phase4/balance/semantic',
+    ],
+    'phase5/world-scene/projection': [
+      'phase5/world-scene/source',
+      'phase5/world-scene/mechanical',
+      'phase5/world-scene/semantic',
+    ],
+    'phase5/world-scene/validation': ['phase5/world-scene/validation'],
+    'phase5/presentation/projection': [
+      'phase5/presentation/source',
+      'phase5/presentation/mechanical',
+      'phase5/presentation/semantic',
+    ],
+    'phase5/presentation/validation': ['phase5/presentation/validation'],
+    'phase6/resource-realization/projection': [
+      'phase6/resource-realization/source',
+      'phase6/resource-realization/mechanical',
+      'phase6/resource-realization/semantic',
+    ],
+    'phase6/resource-realization/validation': [
+      'phase6/resource-realization/validation',
+    ],
+    'phase7/implementation-verification/projection': [
+      'phase7/implementation-verification/source',
+      'phase7/implementation-verification/mechanical',
+      'phase7/implementation-verification/semantic',
+    ],
+    'phase7/implementation-verification/validation': [
+      'phase7/implementation-verification/validation',
+    ],
+  }
+  const [phase, domain, operation] = step.split('/')
   return {
-    phase,
-    records: Object.entries(values).map(([kind, record]) => ({
+    phase: phase as GameIrCheckpointStep['phase'],
+    domain: domain as GameIrCheckpointStep['domain'],
+    operation: operation as GameIrCheckpointStep['operation'],
+    records: kindsByStep[step].map(kind => ({
       kind,
-      record,
+      record: values[kind],
     })) as GameIrCheckpointStep['records'],
   }
 }
@@ -299,20 +325,11 @@ async function materializeReaderFixture(workspace: string) {
   let run = readerRun(authority)
   await createRunStore(workspace, run.ownerId).save(run)
   const writer = new GameIrStageCheckpointWriter()
-  for (const phase of ['phase4', 'phase5', 'phase6', 'phase7'] as const) {
+  for (const step of GAME_IR_PROTOCOL_STEPS) {
     const ref = await writer.write({
       workspacePath: workspace,
       deliveryRun: run,
-      step: readerStep(phase, authority.phase7Authority),
-      authority:
-        phase === 'phase4'
-          ? authority.phase7Authority.phase6Authority.phase5Authority
-              .phase4Authority
-          : phase === 'phase5'
-            ? authority.phase7Authority.phase6Authority.phase5Authority
-            : phase === 'phase6'
-              ? authority.phase7Authority.phase6Authority
-              : authority.phase7Authority,
+      step: readerStep(step, authority.phase7Authority),
     })
     run = {
       ...run,
@@ -551,44 +568,6 @@ const resealedPublicationMutations: ReadonlyArray<{
 ]
 
 describe('committed Game IR reader', () => {
-  test('canonicalizes compiler failure reasons and preserves material diagnostics', () => {
-    expect(
-      canonicalCompilerFailureReason(
-        'source digest mismatch at 2026-09-01T00:00:00Z id 123',
-      ),
-    ).toBe(
-      canonicalCompilerFailureReason(
-        'digest mismatch source at 2026-09-02T00:00:00Z id 456',
-      ),
-    )
-    expect(canonicalCompilerFailureReason('source digest mismatch')).not.toBe(
-      canonicalCompilerFailureReason('publication digest mismatch'),
-    )
-    expect(
-      canonicalCompilerFailureReason('missing 1 required section'),
-    ).not.toBe(canonicalCompilerFailureReason('missing 2 required sections'))
-    expect(
-      canonicalCompilerFailureReason('expected 4 modules, received 3'),
-    ).not.toBe(canonicalCompilerFailureReason('expected 6 modules, received 2'))
-    const failed = canonicalCompilerDomainResults([
-      {
-        moduleId: 'gameplay',
-        semantic: {
-          outcome: 'FAIL',
-          reasonCode: 'missing-source',
-          actual: 'observed source',
-          missingSubject: 'loop',
-          expectedProjection: 'one loop',
-          evidencePointers: ['docs/GDD.md#loop'],
-        },
-      },
-    ])!
-    expect(failed[0]!.semantic).toMatchObject({
-      actual: 'observed source',
-      expectedProjection: 'one loop',
-    })
-  })
-
   test('exposes the single workspace/run-bound reader entry point', async () => {
     await expect(
       readCommittedGameIr({
@@ -611,6 +590,7 @@ describe('committed Game IR reader', () => {
   test('rejects self-authorizing compiler checkpoint and READY fields', () => {
     const terminal = {
       workerType: 'game-ir-compiler',
+      operation: 'projection',
       status: 'completed',
       runId: 'run',
       dispatchId: 'dispatch',
@@ -618,7 +598,11 @@ describe('committed Game IR reader', () => {
       revision: 'revision',
       compileRequestDigest: 'a'.repeat(64),
       foundationReadyReceiptDigest: 'b'.repeat(64),
-      domainResults: [],
+      semantic: {
+        outcome: 'PROJECTED',
+        nodes: [],
+        sourceClaims: [],
+      },
       checkpoint: {
         checkpointPath: 'forged',
         checkpointDigest: 'c'.repeat(64),
@@ -628,42 +612,58 @@ describe('committed Game IR reader', () => {
     expect(() => parseWorkerTerminalResult(terminal)).toThrow()
   })
 
-  test('accepts only strict semantic and validation DTOs from the compiler', () => {
-    const terminal = {
+  test('accepts strict projection and validation DTOs from the compiler', () => {
+    const projection = {
       workerType: 'game-ir-compiler',
+      operation: 'projection',
       status: 'completed',
+      sliceId: 'gameplay.slice.0',
       runId: 'run',
       dispatchId: 'dispatch',
       taskId: 'task',
       revision: 'revision',
       compileRequestDigest: 'a'.repeat(64),
       foundationReadyReceiptDigest: 'b'.repeat(64),
-      domainResults: [
-        {
-          moduleId: 'gameplay',
-          semantic: {
-            outcome: 'PROJECTED',
-            nodes: [],
-            sourceClaims: [],
-          },
-          mechanical: [],
-        },
-      ],
+      semantic: { nodes: [], sourceEvidenceGroups: [] },
     }
-    expect(() => parseWorkerTerminalResult(terminal)).toThrow()
+    expect(parseWorkerTerminalResult(projection)).toMatchObject({
+      operation: 'projection',
+      sliceId: 'gameplay.slice.0',
+      semantic: { nodes: [], sourceEvidenceGroups: [] },
+    })
+
+    const validation = {
+      ...projection,
+      operation: 'validation',
+      sliceId: undefined,
+      semantic: undefined,
+      validation: {
+        outcome: 'PASS',
+        checkIds: ['projection.completeness'],
+        coveredTargets: ['gameplay.unit'],
+      },
+    }
+    delete (validation as { semantic?: unknown }).semantic
+    delete (validation as { sliceId?: unknown }).sliceId
+    expect(parseWorkerTerminalResult(validation)).toMatchObject({
+      operation: 'validation',
+      validation: { outcome: 'PASS' },
+    })
   })
 
   test('requires changed compiler progress to remain in the same identity loop', () => {
     const terminal = {
       workerType: 'game-ir-compiler',
+      operation: 'projection',
       status: 'failed',
+      sliceId: 'gameplay.slice.0',
       runId: 'run',
       dispatchId: 'dispatch',
       taskId: 'task',
       revision: 'revision',
       compileRequestDigest: 'a'.repeat(64),
       foundationReadyReceiptDigest: 'b'.repeat(64),
-      reason: 'domain result needs repair',
+      reason: 'projection operation needs repair',
     }
     expect(parseWorkerTerminalResult(terminal)).toMatchObject({
       status: 'failed',
@@ -724,7 +724,7 @@ describe('committed Game IR reader', () => {
               >
             ).latestCheckpoint!.checkpointPath.replace(
               /manifest\.json$/,
-              'records/phase7__implementation-verification__source.json',
+              'records/phase7__implementation-verification__validation.json',
             ),
           ),
         },

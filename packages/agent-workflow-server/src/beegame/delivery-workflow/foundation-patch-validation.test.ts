@@ -677,7 +677,7 @@ describe('semantic patch targeted recheck authority', () => {
       status: 'FAIL',
       diagnostic: {
         observedActual: 'the contradiction remains after the patch',
-        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
+        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId }],
         failureReasonCode: 'actual_persists',
       },
     }, { taskId: 'revision-task-1', issue: input.issue })
@@ -709,7 +709,7 @@ describe('semantic patch targeted recheck authority', () => {
     const section = packet.sections[0]!
     const diagnostic = {
       observedActual: 'the contradiction remains',
-      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
+      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId }],
       failureReasonCode: 'actual_persists' as const,
     }
     const admitted = admitFoundationSemanticRecheckResult(packet, { status: 'FAIL', diagnostic }, { taskId: 'revision-task-1', issue: input.issue })
@@ -726,7 +726,7 @@ describe('semantic patch targeted recheck authority', () => {
     const section = packet.sections[0]!
     const diagnostic = {
       observedActual: 'the contradiction remains',
-      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
+      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId }],
       failureReasonCode: 'actual_persists',
     } as const
 
@@ -734,7 +734,7 @@ describe('semantic patch targeted recheck authority', () => {
       status: 'FAIL', diagnostic: { ...diagnostic, unmetExpected: 'worker authority' },
     }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/unknown|authority|expected/i)
     expect(() => admitFoundationSemanticRecheckResult(packet, {
-      status: 'FAIL', diagnostic: { ...diagnostic, evidence: [{ documentPath: 'docs/GDD.md', sectionId: 'not-assigned', digest: 'a'.repeat(64) }] },
+      status: 'FAIL', diagnostic: { ...diagnostic, evidence: [{ documentPath: 'docs/GDD.md', sectionId: 'not-assigned' }] },
     }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/evidence|section|assigned/i)
     expect(() => admitFoundationSemanticRecheckResult(packet, {
       status: 'FAIL', diagnostic: { ...diagnostic, evidence: [] },
@@ -744,7 +744,7 @@ describe('semantic patch targeted recheck authority', () => {
     }, { taskId: 'revision-task-1', issue: { ...input.issue, expected: 'tampered expected' } })).toThrow(/expected|authority|packet/i)
   })
 
-  test('rejects generic semantic_issue_persists and diagnostics with tampered section digests', () => {
+  test('rejects generic semantic_issue_persists and worker-supplied section digests', () => {
     const input = snapshot()
     const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
     const section = packet.sections[0]!
@@ -752,7 +752,7 @@ describe('semantic patch targeted recheck authority', () => {
       status: 'FAIL' as const,
       diagnostic: {
         observedActual: 'the contradiction remains',
-        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
+        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId }],
         failureReasonCode: 'actual_persists',
       },
     }

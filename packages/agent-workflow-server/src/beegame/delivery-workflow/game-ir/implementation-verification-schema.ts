@@ -24,6 +24,14 @@ import {
   type GameIrNode,
   type GameIrSourceSection,
 } from './model'
+import {
+  projectionArray,
+  projectionEnum,
+  projectionStringArray,
+  projectionText,
+  projectionValueRequiredFields,
+  projectionValueSchema,
+} from './projection-schema'
 
 const role = (
   targetKinds: readonly string[],
@@ -50,16 +58,20 @@ const IMPLEMENTATION_VERIFICATION_CONSTRAINT_TARGET_KINDS = Object.freeze(
 )
 export const IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST = Object.freeze({
   'implementation-verification.target': Object.freeze({
-    valueFields: Object.freeze([
-      'label',
-      'runtime',
-      'platforms',
-      'projectRoots',
-    ]),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('verification target label'),
+      runtime: projectionText('runtime'),
+      platforms: projectionStringArray('target platforms'),
+      projectRoots: projectionStringArray('project roots'),
+    }),
     relationships: Object.freeze({}),
   }),
   'implementation-verification.unit': Object.freeze({
-    valueFields: Object.freeze(['label', 'responsibility', 'ownedPaths']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('unit label'),
+      responsibility: projectionText('unit responsibility'),
+      ownedPaths: projectionStringArray('owned project-relative paths'),
+    }),
     relationships: Object.freeze({
       targets: role(['implementation-verification.target'], 'exactly-one'),
       implements: role(
@@ -73,12 +85,12 @@ export const IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'implementation-verification.acceptance-scenario': Object.freeze({
-    valueFields: Object.freeze([
-      'label',
-      'precondition',
-      'action',
-      'expectedOutcome',
-    ]),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('acceptance scenario label'),
+      precondition: projectionText('scenario precondition'),
+      action: projectionText('scenario action'),
+      expectedOutcome: projectionText('expected outcome'),
+    }),
     relationships: Object.freeze({
       covers: role(
         IMPLEMENTATION_VERIFICATION_PRIOR_NODE_KINDS,
@@ -92,7 +104,14 @@ export const IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'implementation-verification.invariant': Object.freeze({
-    valueFields: Object.freeze(['label', 'assertion', 'scope']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('invariant label'),
+      assertion: projectionText('invariant assertion'),
+      scope: projectionEnum(
+        ['runtime', 'state', 'numeric', 'resource', 'persistence'],
+        'invariant scope',
+      ),
+    }),
     relationships: Object.freeze({
       constrains: role(
         IMPLEMENTATION_VERIFICATION_CONSTRAINT_TARGET_KINDS,
@@ -105,8 +124,26 @@ export const IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST = Object.freeze({
     }),
   }),
   'implementation-verification.evidence-requirement': Object.freeze({
-    valueFields: Object.freeze(['label', 'kind', 'expected']),
-    optionalValueFields: Object.freeze(['artifactPaths']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        label: projectionText('evidence requirement label'),
+        kind: projectionEnum(
+          [
+            'unit-test',
+            'integration-test',
+            'build',
+            'runtime-observation',
+            'visual-observation',
+            'audio-observation',
+            'file-inspection',
+          ],
+          'evidence kind',
+        ),
+        expected: projectionText('expected evidence'),
+        artifactPaths: projectionStringArray('evidence artifact paths'),
+      },
+      ['artifactPaths'],
+    ),
     relationships: Object.freeze({
       'owned-by': role(['implementation-verification.unit'], 'exactly-one'),
     }),
@@ -150,11 +187,26 @@ export type ImplementationVerificationEvidenceRequirementValue = Readonly<{
 }>
 
 export type ImplementationVerificationProjectionPayload =
-  | Readonly<{ kind: 'implementation-verification.target'; value: ImplementationVerificationTargetValue }>
-  | Readonly<{ kind: 'implementation-verification.unit'; value: ImplementationVerificationUnitValue }>
-  | Readonly<{ kind: 'implementation-verification.acceptance-scenario'; value: ImplementationVerificationAcceptanceScenarioValue }>
-  | Readonly<{ kind: 'implementation-verification.invariant'; value: ImplementationVerificationInvariantValue }>
-  | Readonly<{ kind: 'implementation-verification.evidence-requirement'; value: ImplementationVerificationEvidenceRequirementValue }>
+  | Readonly<{
+      kind: 'implementation-verification.target'
+      value: ImplementationVerificationTargetValue
+    }>
+  | Readonly<{
+      kind: 'implementation-verification.unit'
+      value: ImplementationVerificationUnitValue
+    }>
+  | Readonly<{
+      kind: 'implementation-verification.acceptance-scenario'
+      value: ImplementationVerificationAcceptanceScenarioValue
+    }>
+  | Readonly<{
+      kind: 'implementation-verification.invariant'
+      value: ImplementationVerificationInvariantValue
+    }>
+  | Readonly<{
+      kind: 'implementation-verification.evidence-requirement'
+      value: ImplementationVerificationEvidenceRequirementValue
+    }>
 
 const PRIOR_SEQUENCE = [
   'gameplay',
@@ -357,12 +409,14 @@ function admitPrior(
 
 function parseValue(node: GameIrNode): RecordValue {
   if (!record(node.value)) fail(`node ${node.id} value must be an object`)
+  const descriptor =
+    IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST[
+      node.kind as keyof typeof IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST
+    ]
+  if (!descriptor) fail(`node ${node.id} has an unknown kind`)
+  const fields = projectionValueRequiredFields(descriptor.valueJsonSchema)
   if (node.kind === 'implementation-verification.target') {
-    exact(
-      node.value,
-      ['label', 'runtime', 'platforms', 'projectRoots'],
-      `node ${node.id} value`,
-    )
+    exact(node.value, fields, `node ${node.id} value`)
     const roots = strings(
       node.value.projectRoots,
       `node ${node.id} projectRoots`,
@@ -377,11 +431,7 @@ function parseValue(node: GameIrNode): RecordValue {
     }
   }
   if (node.kind === 'implementation-verification.unit') {
-    exact(
-      node.value,
-      ['label', 'responsibility', 'ownedPaths'],
-      `node ${node.id} value`,
-    )
+    exact(node.value, fields, `node ${node.id} value`)
     return {
       label: text(node.value.label, 'label'),
       responsibility: text(node.value.responsibility, 'responsibility'),
@@ -389,11 +439,7 @@ function parseValue(node: GameIrNode): RecordValue {
     }
   }
   if (node.kind === 'implementation-verification.acceptance-scenario') {
-    exact(
-      node.value,
-      ['label', 'precondition', 'action', 'expectedOutcome'],
-      `node ${node.id} value`,
-    )
+    exact(node.value, fields, `node ${node.id} value`)
     return {
       label: text(node.value.label, 'label'),
       precondition: text(node.value.precondition, 'precondition'),
@@ -402,7 +448,7 @@ function parseValue(node: GameIrNode): RecordValue {
     }
   }
   if (node.kind === 'implementation-verification.invariant') {
-    exact(node.value, ['label', 'assertion', 'scope'], `node ${node.id} value`)
+    exact(node.value, fields, `node ${node.id} value`)
     const scope = text(node.value.scope, 'scope')
     if (!SCOPES.has(scope)) fail(`node ${node.id} scope is invalid`)
     return {
@@ -414,9 +460,7 @@ function parseValue(node: GameIrNode): RecordValue {
   exact(
     node.value,
     [
-      'label',
-      'kind',
-      'expected',
+      ...fields,
       ...(Object.hasOwn(node.value, 'artifactPaths') ? ['artifactPaths'] : []),
     ],
     `node ${node.id} value`,
@@ -447,15 +491,30 @@ export function parseImplementationVerificationProjectionPayload(
   const value = parseValue(node)
   switch (node.kind) {
     case 'implementation-verification.target':
-      return { kind: node.kind, value: value as ImplementationVerificationTargetValue }
+      return {
+        kind: node.kind,
+        value: value as ImplementationVerificationTargetValue,
+      }
     case 'implementation-verification.unit':
-      return { kind: node.kind, value: value as ImplementationVerificationUnitValue }
+      return {
+        kind: node.kind,
+        value: value as ImplementationVerificationUnitValue,
+      }
     case 'implementation-verification.acceptance-scenario':
-      return { kind: node.kind, value: value as ImplementationVerificationAcceptanceScenarioValue }
+      return {
+        kind: node.kind,
+        value: value as ImplementationVerificationAcceptanceScenarioValue,
+      }
     case 'implementation-verification.invariant':
-      return { kind: node.kind, value: value as ImplementationVerificationInvariantValue }
+      return {
+        kind: node.kind,
+        value: value as ImplementationVerificationInvariantValue,
+      }
     case 'implementation-verification.evidence-requirement':
-      return { kind: node.kind, value: value as ImplementationVerificationEvidenceRequirementValue }
+      return {
+        kind: node.kind,
+        value: value as ImplementationVerificationEvidenceRequirementValue,
+      }
     default:
       return fail(`node ${node.id} has an unknown projection kind`)
   }

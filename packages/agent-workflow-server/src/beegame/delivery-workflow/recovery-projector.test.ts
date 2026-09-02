@@ -34,20 +34,35 @@ async function writeCommittedProjection(
   targetPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
 ): Promise<void> {
   const contract = getGameDocumentContract(targetPath)
-  const documents = new Map(await Promise.all(
-    contract.upstreamSections.map(async source => [
-      source.path,
-      await readFile(join(workspacePath, source.path), 'utf8'),
-    ] as const),
-  ))
+  const documents = new Map(
+    await Promise.all(
+      contract.upstreamSections.map(
+        async source =>
+          [
+            source.path,
+            await readFile(join(workspacePath, source.path), 'utf8'),
+          ] as const,
+      ),
+    ),
+  )
   const projection = projectFoundationAuthority({
     targetPath,
-    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    availableUpstreamPaths: contract.upstreamSections.map(
+      source => source.path,
+    ),
     documents,
   })
-  const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
-  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
-  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
+  const projectionPath = join(
+    workspacePath,
+    foundationProjectionRelativePath(dispatchId),
+  )
+  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), {
+    recursive: true,
+  })
+  await writeFile(
+    projectionPath,
+    canonicalFoundationAuthorityProjectionBytes(projection),
+  )
 }
 
 describe('recovery projector foundation audit boundary', () => {
@@ -194,16 +209,19 @@ describe('recovery projector foundation audit boundary', () => {
         snapshotPath: join(workspacePath, '.beegame/workflow/run.json'),
         ownerId,
       })
-      await expect(projectExactResumeRun({
-        inspection,
-        events: acceptedEvents,
-        workspacePath,
-        ownerId,
-        projectId,
-        confirmedBriefContext,
-      })).rejects.toMatchObject({
+      await expect(
+        projectExactResumeRun({
+          inspection,
+          events: acceptedEvents,
+          workspacePath,
+          ownerId,
+          projectId,
+          confirmedBriefContext,
+        }),
+      ).rejects.toMatchObject({
         code: 'recovery_checkpoint_missing',
-        message: 'snapshot has no durable identity for the exact unfinished unit',
+        message:
+          'snapshot has no durable identity for the exact unfinished unit',
       })
 
       expect(await store.load()).toMatchObject({

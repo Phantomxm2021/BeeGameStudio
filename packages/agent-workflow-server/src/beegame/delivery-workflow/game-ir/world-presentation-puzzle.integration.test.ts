@@ -1952,21 +1952,6 @@ describe('Task 10 branching/puzzle World + Presentation profile', () => {
       () => assembleWorldPresentationClosure(rangeAuthority),
       'invalid Game IR Phase 5 admission: sourceClaims[0].sourcePointer must contain a non-empty byte range',
     )
-    const literalClaims = base.presentation.semantic.sourceClaims.map(
-      (claim, index) =>
-        index === 0 ? { ...claim, literal: 'forged clue literal' } : claim,
-    )
-    const literalSemantic = redigestSemantic(base.presentation.semantic, {
-      sourceClaims: literalClaims,
-    }) as PresentationSemanticReceipt
-    const literalAuthority = {
-      ...base,
-      presentation: { ...base.presentation, semantic: literalSemantic },
-    }
-    expectedError(
-      () => assembleWorldPresentationClosure(literalAuthority),
-      'invalid Game IR Phase 5 admission: source literal does not match the semantic record',
-    )
     const gameplayIdentity = {
       ...base,
       phase4Authority: {

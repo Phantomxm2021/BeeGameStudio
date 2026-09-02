@@ -3,6 +3,152 @@ import {
   type GameIrModuleCandidate,
   type GameIrNode,
 } from './model'
+import {
+  projectionArray,
+  projectionBoolean,
+  projectionEnum,
+  projectionFiniteNumber,
+  projectionInteger,
+  projectionText,
+  projectionValueRequiredFields,
+  projectionValueSchema,
+} from './projection-schema'
+
+const WORLD_VECTOR2 = {
+  type: 'object',
+  additionalProperties: false,
+  properties: { x: { type: 'number' }, y: { type: 'number' } },
+  required: ['x', 'y'],
+} as const
+const WORLD_VECTOR3 = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    x: { type: 'number' },
+    y: { type: 'number' },
+    z: { type: 'number' },
+  },
+  required: ['x', 'y', 'z'],
+} as const
+const WORLD_COORDINATE_CONVENTION = {
+  anyOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        dimensions: { const: '2d' },
+        xDirection: { enum: ['left', 'right'] },
+        yDirection: { enum: ['up', 'down'] },
+        distanceUnit: { enum: ['pixel', 'centimeter', 'meter'] },
+      },
+      required: ['dimensions', 'xDirection', 'yDirection', 'distanceUnit'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        dimensions: { const: '3d' },
+        handedness: { enum: ['left', 'right'] },
+        upAxis: { enum: ['+x', '-x', '+y', '-y', '+z', '-z'] },
+        forwardAxis: { enum: ['+x', '-x', '+y', '-y', '+z', '-z'] },
+        distanceUnit: { enum: ['centimeter', 'meter'] },
+      },
+      required: [
+        'dimensions',
+        'handedness',
+        'upAxis',
+        'forwardAxis',
+        'distanceUnit',
+      ],
+    },
+  ],
+} as const
+const WORLD_TRANSFORM = {
+  anyOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        dimensions: { const: '2d' },
+        space: { enum: ['local', 'world'] },
+        position: WORLD_VECTOR2,
+        rotationRadians: { type: 'number' },
+        scale: WORLD_VECTOR2,
+      },
+      required: ['dimensions', 'space', 'position', 'rotationRadians', 'scale'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        dimensions: { const: '3d' },
+        space: { enum: ['local', 'world'] },
+        position: WORLD_VECTOR3,
+        rotation: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' },
+            z: { type: 'number' },
+            w: { type: 'number' },
+          },
+          required: ['x', 'y', 'z', 'w'],
+        },
+        scale: WORLD_VECTOR3,
+      },
+      required: ['dimensions', 'space', 'position', 'rotation', 'scale'],
+    },
+  ],
+} as const
+const WORLD_GEOMETRY = {
+  anyOf: [
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: { kind: { const: 'rectangle' }, size: WORLD_VECTOR2 },
+      required: ['kind', 'size'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: { kind: { const: 'circle' }, radius: { type: 'number' } },
+      required: ['kind', 'radius'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { const: 'capsule-2d' },
+        radius: { type: 'number' },
+        length: { type: 'number' },
+      },
+      required: ['kind', 'radius', 'length'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: { kind: { const: 'box' }, size: WORLD_VECTOR3 },
+      required: ['kind', 'size'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: { kind: { const: 'sphere' }, radius: { type: 'number' } },
+      required: ['kind', 'radius'],
+    },
+    {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        kind: { const: 'capsule-3d' },
+        radius: { type: 'number' },
+        height: { type: 'number' },
+      },
+      required: ['kind', 'radius', 'height'],
+    },
+  ],
+} as const
 
 export type WorldSceneRelationshipCardinality =
   | 'exactly-one'
@@ -72,7 +218,7 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
   Record<
     string,
     Readonly<{
-      valueFields: readonly string[]
+      valueJsonSchema: Readonly<Record<string, unknown>>
       relationships: Readonly<Record<string, WorldSceneRelationshipRole>>
       references?: Readonly<{
         targetKinds: readonly string[]
@@ -85,13 +231,23 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
   >
 > = Object.freeze({
   'world-scene.scene': Object.freeze({
-    valueFields: Object.freeze(['label', 'coordinateConvention']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('scene label'),
+      coordinateConvention: WORLD_COORDINATE_CONVENTION,
+    }),
     relationships: Object.freeze({
       root: role(['world-scene.node'], 'exactly-one'),
     }),
   }),
   'world-scene.node': Object.freeze({
-    valueFields: Object.freeze(['label', 'nodeType', 'transform']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('scene node label'),
+      nodeType: projectionEnum(
+        ['container', 'anchor', 'volume', 'visual'],
+        'scene node type',
+      ),
+      transform: WORLD_TRANSFORM,
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
       parent: role(['world-scene.node'], 'zero-or-one'),
@@ -99,13 +255,19 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'world-scene.zone': Object.freeze({
-    valueFields: Object.freeze(['label', 'shape', 'transform']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('zone label'),
+      shape: WORLD_GEOMETRY,
+      transform: WORLD_TRANSFORM,
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
     }),
   }),
   'world-scene.entity-instance': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('entity instance label'),
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
       entity: role(['gameplay.entity'], 'exactly-one'),
@@ -114,7 +276,14 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'world-scene.route': Object.freeze({
-    valueFields: Object.freeze(['label', 'closed', 'waypointReferenceIndexes']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('route label'),
+      closed: projectionBoolean('whether route closes'),
+      waypointReferenceIndexes: projectionArray(
+        projectionInteger('waypoint reference index', 0),
+        'ordered waypoint reference indexes',
+      ),
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
     }),
@@ -127,7 +296,11 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'world-scene.spawn': Object.freeze({
-    valueFields: Object.freeze(['label', 'quantity', 'policy']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('spawn label'),
+      quantity: projectionInteger('positive spawn quantity', 1),
+      policy: projectionEnum(['once', 'wave', 'repeat'], 'spawn policy'),
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
       location: role(['world-scene.node'], 'exactly-one'),
@@ -135,7 +308,13 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'world-scene.encounter': Object.freeze({
-    valueFields: Object.freeze(['label', 'mode']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('encounter label'),
+      mode: projectionEnum(
+        ['triggered', 'patrol', 'scripted'],
+        'encounter mode',
+      ),
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
       zone: role(['world-scene.zone'], 'exactly-one'),
@@ -147,7 +326,14 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'world-scene.checkpoint': Object.freeze({
-    valueFields: Object.freeze(['label', 'ordinal', 'resetPolicy']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('checkpoint label'),
+      ordinal: projectionInteger('checkpoint ordinal', 0),
+      resetPolicy: projectionEnum(
+        ['restart', 'last-checkpoint', 'manual'],
+        'checkpoint reset policy',
+      ),
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
       location: role(['world-scene.node'], 'exactly-one'),
@@ -155,7 +341,12 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'world-scene.camera-region': Object.freeze({
-    valueFields: Object.freeze(['label', 'priority', 'blendIn', 'blendOut']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('camera region label'),
+      priority: projectionFiniteNumber('camera priority'),
+      blendIn: projectionFiniteNumber('camera blend-in duration'),
+      blendOut: projectionFiniteNumber('camera blend-out duration'),
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
       zone: role(['world-scene.zone'], 'exactly-one'),
@@ -163,7 +354,9 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'world-scene.objective-placement': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('objective placement label'),
+    }),
     relationships: Object.freeze({
       scene: role(['world-scene.scene'], 'exactly-one'),
       objective: role(['gameplay.objective'], 'exactly-one'),
@@ -447,7 +640,11 @@ function parseGeometry(value: unknown, label: string): WorldZoneGeometry {
 function parseValue(node: GameIrNode): Readonly<Record<string, unknown>> {
   if (!isRecord(node.value)) fail(`node ${node.id} value must be an object`)
   const descriptor = WORLD_SCENE_DOMAIN_MANIFEST[node.kind]
-  exactKeys(node.value, descriptor.valueFields, `node ${node.id} value`)
+  exactKeys(
+    node.value,
+    projectionValueRequiredFields(descriptor.valueJsonSchema),
+    `node ${node.id} value`,
+  )
   if (node.kind === 'world-scene.scene')
     return {
       label: label(node.value, node.id),

@@ -6,6 +6,13 @@ import {
   type WorkerDispatchRequest,
 } from './types'
 import { foundationFactDefinition } from './foundation-fact-definitions'
+import {
+  buildGameIrEvidenceFragmentCatalog,
+  deriveProjectionSlicePlan,
+  normalizeGameIrProjectionSliceContext,
+  type GameIrProjectionSlice,
+} from './game-ir/projection-slices'
+import { canonicalGameIrJson } from './game-ir/model'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Judge quality by distinct implementable decisions and traceability, not document length. Use the minimum sufficient headings, tables, rows, diagrams and examples. Do not expand a contract purpose phrase by phrase into H3 headings. Represent each decision in one authoritative prose, table or diagram representation; elsewhere use a stable owner reference. Do not narrate tables or diagrams. Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate. Record a genuinely N/A item once with its reason and impact; never invent a system. Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets. Treat each section as the final decision record: Complete every required section and production material, omit only equivalent repetition, and keep rationale to the minimum needed for a production decision.'
@@ -14,7 +21,7 @@ const FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION =
   'Use exactly one fact owner across the eight documents: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Every material is an owner representation for its declared facts and contains the single canonical representation. Define each fact once and use one representation per fact in its owner section or production material; elsewhere reference that owner instead of copying the fact. Use only this document and the contract-declared committed upstream section projection as content authority. Delegate responsibilities to a not-yet-generated downstream document by its canonical `Document Path` and discipline in ordinary Markdown; do not invent downstream facts, material IDs or inventory IDs. Keep stable IDs unambiguous and do not create aliases, placeholders or alternate spellings. The Executive Summary indexes authority, while each material owns the facts declared by its serialized authority rule. Do not restate the confirmed brief or upstream authority; downstream documents may specialize already-authorized behavior but must not redefine upstream rules.'
 
 const FOUNDATION_AUTHOR_CLOSURE_CHECK =
-  'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once; retain every required heading for N/A content and state its reason and impact. Return only the complete raw Markdown body.'
+  'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once. Use each reserved production-material H3 exactly once under the final `## Production Materials` heading; never place one inline in an owning prose section; retain every required heading for N/A content and state its reason and impact. Return only the complete raw Markdown body.'
 
 const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
   'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority; each Issue sourceSectionKey, expected, and actual must match its single-document authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
@@ -79,9 +86,9 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const canonicalArtifacts =
     foundationAuthorArtifacts ??
     (request.workerType === 'document-author' &&
-          request.contract.documentSet === 'checklist'
-        ? CANONICAL_PROJECT_DOCUMENTS
-        : CANONICAL_PROJECT_ARTIFACTS)
+    request.contract.documentSet === 'checklist'
+      ? CANONICAL_PROJECT_DOCUMENTS
+      : CANONICAL_PROJECT_ARTIFACTS)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
     streamedFoundationAuthor ? undefined : `Phase: ${request.phase}`,
@@ -125,15 +132,18 @@ function buildFoundationRevisionWorkerPrompt(
   if (typeof stagedPath !== 'string' || !stagedPath.trim())
     throw new Error('foundation revision worker requires one staged path')
   const absoluteStagedPath = resolve(request.workspacePath, stagedPath)
-  const priorFailureReason = typeof request.contract.priorFailureReason === 'string'
-    ? request.contract.priorFailureReason
-    : undefined
+  const priorFailureReason =
+    typeof request.contract.priorFailureReason === 'string'
+      ? request.contract.priorFailureReason
+      : undefined
   return [
     `Revision evidence: ${JSON.stringify(projectRevisionPacketForModel(packet as Record<string, unknown>))}`,
     `Assigned staged path: ${absoluteStagedPath}`,
     'The packet sectionIds are the complete write authority: only those sections may change. Every other section—including related, risk, consistency, dependency, and production-material sections—must remain byte-identical; do not edit them to keep prose synchronized. Read and edit only the assigned staged path. Unmarked Production Materials and audit appendices are outside the packet authority; do not edit them even when they appear related to an admitted Issue. Make every admitted Issue expected true and remove its actual. For fact/schema repairs, packet.factConstraints is binding authority: satisfy its extractionInstruction and sourceOfTruthDirection. If an extractionInstruction requires an explicit mapping table or other semantic structure, do not substitute a standalone fact declaration, formatting-only change, alias, compatibility prose, risk registration, wording qualification, or downstream reinterpretation. Call SubmitFoundationRevisionResult exactly once with status APPLIED and only the exact changedSectionIds; the service injects task, round, document, Issue and base-authority identity. Do not return terminal JSON or prose completion text.',
     ...(priorFailureReason
-      ? [`Automatic retry after the previous strict validation failure: ${priorFailureReason}. Correct that failure in the authorized packet sections only; do not broaden scope.`]
+      ? [
+          `Automatic retry after the previous strict validation failure: ${priorFailureReason}. Correct that failure in the authorized packet sections only; do not broaden scope.`,
+        ]
       : []),
   ].join('\n')
 }
@@ -142,9 +152,16 @@ function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
   const contract = formatPacketContract(request)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
-    'The packet is the sole input for this task. It is immutable service-owned authority.',
+    'The model contract is the sole input for this task. The packet inside it is immutable service-owned authority.',
     'Do not read project files, call Read, Grep or Glob, inspect the workspace, use native tools, write files, mutate the platform, or add context from any other source.',
-    'Return only the strict structured result for the assigned packet; do not return Markdown, prose explanations, or additional fields.',
+    request.workerType === 'game-ir-compiler' &&
+    request.contract.kind === 'projection'
+      ? 'Return only the strict raw NDJSON record stream for the assigned packet; do not return Markdown, prose explanations, wrappers, tools, or additional fields.'
+      : 'Return only the strict structured result for the assigned packet; do not return Markdown, prose explanations, or additional fields.',
+    request.workerType === 'game-ir-compiler' &&
+    request.contract.kind === 'projection'
+      ? 'The service owns the slice cursor; emit only the exact current slice result and never rewrite or regenerate an entire domain.'
+      : 'If correctionDiagnostic is present, use it only to correct the current operation output; it is not product authority and must not redefine the assigned operation.',
     workerInstruction(request),
     terminalInstruction(request),
     `Model packet contract: ${contract}`,
@@ -153,35 +170,191 @@ function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
 
 function formatPacketContract(request: WorkerDispatchRequest): string {
   const packet = request.contract.packet
-  const projected = packet && typeof packet === 'object' && !Array.isArray(packet)
-    ? projectPacketForModel(request.workerType, packet as Record<string, unknown>)
+  const currentSlice =
+    request.workerType === 'game-ir-compiler' &&
+    request.contract.kind === 'projection'
+      ? packet
+        ? gameIrProjectionSliceForRequest(request)
+        : gameIrProjectionSliceFromContinuation(request)
+      : undefined
+  const projected =
+    packet && typeof packet === 'object' && !Array.isArray(packet)
+      ? projectPacketForModel(
+          request.workerType,
+          packet as Record<string, unknown>,
+          currentSlice,
+        )
+      : undefined
+  const sliceContext = currentSlice
+    ? projectionSliceContextForRequest(request, currentSlice)
     : undefined
   const contract: Record<string, unknown> = {
     workerType: request.workerType,
-    ...(typeof request.contract.kind === 'string' ? { kind: request.contract.kind } : {}),
-    ...(typeof request.contract.checkId === 'string' ? { checkId: request.contract.checkId } : {}),
-    ...(projected ? { packet: projected } : {}),
-    ...(request.workerType === 'game-ir-compiler' && request.contract.sourcePackets
-      ? { sourcePackets: request.contract.sourcePackets }
+    ...(typeof request.contract.kind === 'string'
+      ? { kind: request.contract.kind }
       : {}),
-    ...(request.workerType === 'game-ir-compiler'
+    ...(typeof request.contract.checkId === 'string'
+      ? { checkId: request.contract.checkId }
+      : {}),
+    ...(!(
+      request.workerType === 'game-ir-compiler' &&
+      request.contract.kind === 'projection'
+    ) && Object.hasOwn(request.contract, 'correctionDiagnostic')
+      ? { correctionDiagnostic: request.contract.correctionDiagnostic }
+      : {}),
+    ...(projected ? { packet: projected } : {}),
+    ...(currentSlice
       ? {
-          runId: request.runId,
-          dispatchId: request.dispatchId,
-          taskId: request.taskId,
-          revision: request.revision,
-          compileRequestDigest: request.contract.compileRequestDigest,
-          foundationReadyReceiptDigest: request.contract.foundationReadyReceiptDigest,
-          remainingDomainIds: request.contract.remainingDomainIds,
-          ...(request.contract.resumeFrom ? { resumeFrom: request.contract.resumeFrom } : {}),
+          currentSlice: {
+            sliceId: currentSlice.sliceId,
+            nodeKinds: currentSlice.nodeKinds,
+            dependencyContext: sliceContext,
+            ...(request.contract.retryDiagnostic
+              ? { retryDiagnostic: request.contract.retryDiagnostic }
+              : {}),
+          },
         }
       : {}),
+    ...(!packet && currentSlice && Array.isArray(request.contract.progress)
+      ? { progress: request.contract.progress }
+      : {}),
+  }
+  if (!packet && currentSlice) {
+    delete contract.currentSlice
+    return JSON.stringify({
+      ...contract,
+      ...(typeof request.contract.packetDigest === 'string'
+        ? { packetDigest: request.contract.packetDigest }
+        : {}),
+      currentSlice: {
+        ...currentSlice,
+        dependencyContext: sliceContext,
+        ...(request.contract.retryDiagnostic
+          ? { retryDiagnostic: request.contract.retryDiagnostic }
+          : {}),
+      },
+    })
   }
   return JSON.stringify(contract)
 }
 
+function projectionSliceContextForRequest(
+  request: WorkerDispatchRequest,
+  slice: GameIrProjectionSlice,
+) {
+  const moduleId = (
+    [
+      'gameplay',
+      'balance',
+      'world-scene',
+      'presentation',
+      'resource-realization',
+      'implementation-verification',
+    ] as const
+  ).find(candidate =>
+    deriveProjectionSlicePlan(candidate).slices.some(
+      item => item.sliceId === slice.sliceId,
+    ),
+  )
+  if (!moduleId)
+    throw new Error('Game IR projection slice context module is missing')
+  return normalizeGameIrProjectionSliceContext({
+    moduleId,
+    sliceId: slice.sliceId,
+    value: request.contract.sliceContext,
+  })
+}
+
+function gameIrProjectionSliceFromContinuation(
+  request: WorkerDispatchRequest,
+): GameIrProjectionSlice {
+  const candidate = request.contract.currentSlice
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
+    throw new Error(
+      'Game IR projection continuation is missing its exact current slice',
+    )
+  const expected = canonicalGameIrJson(candidate)
+  const modules = [
+    'gameplay',
+    'balance',
+    'world-scene',
+    'presentation',
+    'resource-realization',
+    'implementation-verification',
+  ] as const
+  for (const moduleId of modules) {
+    const slice = deriveProjectionSlicePlan(moduleId).slices.find(
+      item => item.sliceId === (candidate as Record<string, unknown>).sliceId,
+    )
+    if (slice && canonicalGameIrJson(slice) === expected) return slice
+  }
+  throw new Error(
+    'Game IR projection continuation current slice is stale or non-canonical',
+  )
+}
+
+function gameIrProjectionSliceForRequest(
+  request: WorkerDispatchRequest,
+): GameIrProjectionSlice {
+  const packet = request.contract.packet
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+    throw new Error(
+      'Game IR projection requires one immutable operation packet',
+    )
+  const source = (packet as Record<string, unknown>).source
+  if (
+    !source ||
+    typeof source !== 'object' ||
+    Array.isArray(source) ||
+    typeof (source as Record<string, unknown>).moduleId !== 'string'
+  )
+    throw new Error('Game IR projection packet source module is missing')
+  const moduleId = (source as Record<string, unknown>).moduleId as Parameters<
+    typeof deriveProjectionSlicePlan
+  >[0]
+  const candidate = request.contract.currentSlice
+  const candidateSliceId =
+    typeof candidate === 'string'
+      ? candidate
+      : candidate &&
+          typeof candidate === 'object' &&
+          !Array.isArray(candidate) &&
+          typeof (candidate as Record<string, unknown>).sliceId === 'string'
+        ? (candidate as Record<string, unknown>).sliceId
+        : undefined
+  if (!candidateSliceId)
+    throw new Error(
+      'Game IR projection request is missing its exact current slice',
+    )
+  const canonical = deriveProjectionSlicePlan(moduleId).slices.find(
+    slice => slice.sliceId === candidateSliceId,
+  )
+  if (!canonical)
+    throw new Error('Game IR projection current slice is stale or detached')
+  if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+    const keys = Object.keys(candidate).sort()
+    if (
+      keys.length === 3 &&
+      keys[0] === 'nodeKinds' &&
+      keys[1] === 'nodes' &&
+      keys[2] === 'sliceId'
+    ) {
+      if (canonicalGameIrJson(candidate) !== canonicalGameIrJson(canonical))
+        throw new Error(
+          'Game IR projection current slice contract is not canonical',
+        )
+    } else if (keys.length !== 1 || keys[0] !== 'sliceId') {
+      throw new Error(
+        'Game IR projection current slice contract is not canonical',
+      )
+    }
+  }
+  return canonical
+}
+
 function semanticRef(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
   const ref = value as Record<string, unknown>
   if (typeof ref.documentPath !== 'string' || typeof ref.sectionId !== 'string')
     return undefined
@@ -192,15 +365,21 @@ function semanticRef(value: unknown): Record<string, unknown> | undefined {
   }
 }
 
-function modelSection(value: unknown, contentKey: 'text' | 'bytes'): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+function modelSection(
+  value: unknown,
+  contentKey: 'text' | 'bytes',
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
   const section = value as Record<string, unknown>
   const ref = semanticRef(section.ref ?? section)
   const content = section[contentKey]
   if (!ref || typeof content !== 'string') return undefined
   return {
     ...ref,
-    ...(typeof section.sectionKey === 'string' ? { sectionKey: section.sectionKey } : {}),
+    ...(typeof section.sectionKey === 'string'
+      ? { sectionKey: section.sectionKey }
+      : {}),
     content,
   }
 }
@@ -219,15 +398,25 @@ function projectItems<T>(
 }
 
 function modelFact(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
   const fact = value as Record<string, unknown>
   const source = semanticRef(fact.source)
-  if (typeof fact.key !== 'string' || source === undefined || !('value' in fact)) return undefined
+  if (
+    typeof fact.key !== 'string' ||
+    source === undefined ||
+    !('value' in fact)
+  )
+    return undefined
   return { key: fact.key, value: fact.value, source }
 }
 
-function modelIssue(value: unknown, includeId: boolean): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+function modelIssue(
+  value: unknown,
+  includeId: boolean,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
   const issue = value as Record<string, unknown>
   const source = semanticRef(issue.source)
   const remediation = issue.remediation
@@ -236,11 +425,22 @@ function modelIssue(value: unknown, includeId: boolean): Record<string, unknown>
     typeof issue.expected !== 'string' ||
     typeof issue.actual !== 'string' ||
     source === undefined ||
-    !remediation || typeof remediation !== 'object' || Array.isArray(remediation)
-  ) return undefined
+    !remediation ||
+    typeof remediation !== 'object' ||
+    Array.isArray(remediation)
+  )
+    return undefined
   const fix = remediation as Record<string, unknown>
-  const target = issue.target === undefined ? undefined : semanticRef(issue.target)
-  if (fix.kind !== 'patch' || typeof fix.documentPath !== 'string' || !Array.isArray(fix.sectionIds) || fix.sectionIds.some(sectionId => typeof sectionId !== 'string') || (issue.target !== undefined && target === undefined)) return undefined
+  const target =
+    issue.target === undefined ? undefined : semanticRef(issue.target)
+  if (
+    fix.kind !== 'patch' ||
+    typeof fix.documentPath !== 'string' ||
+    !Array.isArray(fix.sectionIds) ||
+    fix.sectionIds.some(sectionId => typeof sectionId !== 'string') ||
+    (issue.target !== undefined && target === undefined)
+  )
+    return undefined
   return {
     ...(includeId ? { id: issue.id } : {}),
     ...(typeof issue.severity === 'string' ? { severity: issue.severity } : {}),
@@ -254,65 +454,354 @@ function modelIssue(value: unknown, includeId: boolean): Record<string, unknown>
       documentPath: fix.documentPath,
       sectionIds: fix.sectionIds,
     },
-    ...(typeof issue.reasonCode === 'string' ? { reasonCode: issue.reasonCode } : {}),
+    ...(typeof issue.reasonCode === 'string'
+      ? { reasonCode: issue.reasonCode }
+      : {}),
   }
 }
 
 function projectPacketForModel(
   workerType: WorkerDispatchRequest['workerType'],
   packet: Record<string, unknown>,
+  currentSlice?: GameIrProjectionSlice,
 ): Record<string, unknown> {
   if (workerType === 'foundation-fact-extractor') {
     return {
       keys: Array.isArray(packet.keys) ? packet.keys : [],
       sections: Array.isArray(packet.sections)
-        ? projectItems(packet.sections, section => modelSection(section, 'text'), 'fact section')
+        ? projectItems(
+            packet.sections,
+            section => modelSection(section, 'text'),
+            'fact section',
+          )
         : [],
     }
   }
   if (workerType === 'foundation-semantic-reviewer') {
     const projected: Record<string, unknown> = {
-      ...(typeof packet.checkId === 'string' ? { checkId: packet.checkId } : {}),
+      ...(typeof packet.checkId === 'string'
+        ? { checkId: packet.checkId }
+        : {}),
       sections: Array.isArray(packet.sections)
-        ? projectItems(packet.sections, section => modelSection(section, 'bytes') ?? modelSection(section, 'text'), 'semantic section')
+        ? projectItems(
+            packet.sections,
+            section =>
+              modelSection(section, 'bytes') ?? modelSection(section, 'text'),
+            'semantic section',
+          )
         : [],
       facts: Array.isArray(packet.facts)
         ? projectItems(packet.facts, modelFact, 'semantic fact')
         : [],
       deterministicIssuePrefix: Array.isArray(packet.deterministicIssuePrefix)
-        ? projectItems(packet.deterministicIssuePrefix, issue => modelIssue(issue, false), 'deterministic issue')
+        ? projectItems(
+            packet.deterministicIssuePrefix,
+            issue => modelIssue(issue, false),
+            'deterministic issue',
+          )
         : [],
     }
-    if (typeof packet.expected === 'string') projected.expected = packet.expected
+    if (typeof packet.expected === 'string')
+      projected.expected = packet.expected
     if (typeof packet.actual === 'string') projected.actual = packet.actual
-    if (packet.patchOperation && typeof packet.patchOperation === 'object' && !Array.isArray(packet.patchOperation)) {
+    if (
+      packet.patchOperation &&
+      typeof packet.patchOperation === 'object' &&
+      !Array.isArray(packet.patchOperation)
+    ) {
       const operation = packet.patchOperation as Record<string, unknown>
       projected.patchOperation = {
         ...(typeof operation.kind === 'string' ? { kind: operation.kind } : {}),
-        ...(typeof operation.documentPath === 'string' ? { documentPath: operation.documentPath } : {}),
-        ...(typeof operation.sectionId === 'string' ? { sectionId: operation.sectionId } : {}),
+        ...(typeof operation.documentPath === 'string'
+          ? { documentPath: operation.documentPath }
+          : {}),
+        ...(typeof operation.sectionId === 'string'
+          ? { sectionId: operation.sectionId }
+          : {}),
       }
     }
     return projected
   }
+  if (workerType === 'game-ir-compiler')
+    return projectGameIrPacketForModel(packet, currentSlice)
   return packet
 }
 
-function projectRevisionPacketForModel(packet: Record<string, unknown>): Record<string, unknown> {
+const MODEL_SERVICE_FIELDS = new Set([
+  'schemaVersion',
+  'taskId',
+  'runId',
+  'dispatchId',
+  'ownerId',
+  'revision',
+  'compileRequest',
+  'compileRequestDigest',
+  'foundationRevision',
+  'foundationReceiptDigest',
+  'sourceDigest',
+  'mechanicalReceiptDigest',
+  'semanticReceiptDigest',
+  'packetDigest',
+  'authoritySectionIndex',
+  'authoritySectionIndexDigest',
+  'moduleDigest',
+  'targetManifestDigest',
+  'identity',
+])
+
+function modelGameIrSection(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
+  const section = value as Record<string, unknown>
+  if (
+    typeof section.documentPath !== 'string' ||
+    typeof section.sectionId !== 'string'
+  )
+    return undefined
   return {
-    ...(typeof packet.documentPath === 'string' ? { documentPath: packet.documentPath } : {}),
+    documentPath: section.documentPath,
+    sectionId: section.sectionId,
+    ...(typeof section.heading === 'string'
+      ? { heading: section.heading }
+      : {}),
+  }
+}
+
+function modelGameIrValidationSection(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
+  const section = value as Record<string, unknown>
+  const ref = modelGameIrSection(section.ref ?? section)
+  if (!ref || typeof section.bytes !== 'string') return undefined
+  return { ...ref, bytes: section.bytes }
+}
+
+function modelGameIrSource(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
+  const source = value as Record<string, unknown>
+  if (typeof source.moduleId !== 'string') return undefined
+  const sectionBytes = source.sectionBytes
+  if (
+    !sectionBytes ||
+    typeof sectionBytes !== 'object' ||
+    Array.isArray(sectionBytes)
+  )
+    return { moduleId: source.moduleId }
+  const sections = Array.isArray(source.sectionIndex)
+    ? source.sectionIndex.flatMap(section => {
+        const projected = modelGameIrSection(section)
+        if (!projected) return []
+        const key = `${projected.documentPath}#${projected.sectionId}`
+        return Object.hasOwn(sectionBytes, key) ? [projected] : []
+      })
+    : []
+  const catalog = buildGameIrEvidenceFragmentCatalog({
+    sectionIndex: sections as Array<{
+      documentPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
+      sectionId: string
+      heading?: string
+    }>,
+    sectionBytes: sectionBytes as Record<string, string>,
+  })
+  return {
+    moduleId: source.moduleId,
+    sections: catalog.modelSections,
+  }
+}
+
+function projectGameIrDependencies(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(projectGameIrDependencies)
+  if (!value || typeof value !== 'object') return value
+  if (
+    Object.getPrototypeOf(value) !== Object.prototype &&
+    Object.getPrototypeOf(value) !== null
+  )
+    return value
+  const result: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (MODEL_SERVICE_FIELDS.has(key) || key.toLowerCase().endsWith('digest'))
+      continue
+    result[key] = projectGameIrDependencies(child)
+  }
+  return result
+}
+
+function modelGameIrModule(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
+  const module = value as Record<string, unknown>
+  if (typeof module.moduleId !== 'string' || !Array.isArray(module.nodes))
+    return undefined
+  return { moduleId: module.moduleId, nodes: module.nodes }
+}
+
+function modelGameIrProjectionContract(
+  value: unknown,
+  nodeKinds?: readonly string[],
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined
+  const contract = value as Record<string, unknown>
+  if (typeof contract.moduleId !== 'string') return undefined
+  const rawNodes = Array.isArray(contract.nodes) ? contract.nodes : undefined
+  const selectedNodes = nodeKinds
+    ? nodeKinds
+        .map(kind =>
+          rawNodes?.find(
+            node =>
+              node &&
+              typeof node === 'object' &&
+              !Array.isArray(node) &&
+              (node as Record<string, unknown>).kind === kind,
+          ),
+        )
+        .filter(node => node !== undefined)
+    : rawNodes
+  const nodes = selectedNodes
+    ? selectedNodes.map(node => {
+        if (!node || typeof node !== 'object' || Array.isArray(node))
+          return node
+        const { relationships, ...nodeWithoutRelationships } = node as Record<
+          string,
+          unknown
+        >
+        return {
+          ...nodeWithoutRelationships,
+          ...(Array.isArray(relationships)
+            ? {
+                edgeRules: relationships.map(rule => {
+                  if (!rule || typeof rule !== 'object' || Array.isArray(rule))
+                    return rule
+                  const { nodeKind: _nodeKind, ...edgeRule } = rule as Record<
+                    string,
+                    unknown
+                  >
+                  return edgeRule
+                }),
+              }
+            : {}),
+        }
+      })
+    : undefined
+  return {
+    moduleId: contract.moduleId,
+    ...(nodes ? { nodes } : {}),
+    output: {
+      nodeFields: ['id', 'kind', 'value', 'references', 'edges'],
+      referenceFields: ['targetId', 'targetType'],
+      edgeFields: ['type', 'targetId', 'targetType'],
+      requiredEdgeFields: ['type', 'targetId', 'targetType'],
+      edgeMapping: {
+        'edges[].type': 'edgeRules[].role',
+        'edges[].targetId': 'target node id',
+        'edges[].targetType': 'target node kind',
+      },
+    },
+    ...(contract.sourceEvidence &&
+    typeof contract.sourceEvidence === 'object' &&
+    !Array.isArray(contract.sourceEvidence)
+      ? { sourceEvidence: contract.sourceEvidence }
+      : {}),
+  }
+}
+
+function projectGameIrValidationPacket(
+  packet: Record<string, unknown>,
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {}
+  if (
+    typeof packet.moduleId === 'string' &&
+    typeof packet.moduleBytes === 'string'
+  )
+    projected.candidate = {
+      moduleId: packet.moduleId,
+      moduleBytes: packet.moduleBytes,
+    }
+  if (Array.isArray(packet.sourceSections))
+    projected.sourceSections = projectItems(
+      packet.sourceSections,
+      modelGameIrValidationSection,
+      'Game IR validation source section',
+    )
+  if (Array.isArray(packet.priorModules))
+    projected.priorModules = projectItems(
+      packet.priorModules,
+      modelGameIrModule,
+      'Game IR validation prior module',
+    )
+  for (const key of [
+    'externalProjections',
+    'presentationRequirements',
+    'checkIds',
+    'requiredTargets',
+    'allowedEvidencePointers',
+  ]) {
+    if (Object.hasOwn(packet, key))
+      projected[key] = projectGameIrDependencies(packet[key])
+  }
+  return projected
+}
+
+function projectGameIrPacketForModel(
+  packet: Record<string, unknown>,
+  currentSlice?: GameIrProjectionSlice,
+): Record<string, unknown> {
+  const isValidation =
+    typeof packet.moduleBytes === 'string' || Array.isArray(packet.checkIds)
+  if (isValidation) return projectGameIrValidationPacket(packet)
+  const projected: Record<string, unknown> = {}
+  const source = modelGameIrSource(packet.source)
+  if (source) projected.source = source
+  const projectionContract = modelGameIrProjectionContract(
+    packet.projectionContract,
+    currentSlice?.nodeKinds,
+  )
+  if (projectionContract) projected.projectionContract = projectionContract
+  if (Object.hasOwn(packet, 'dependencies'))
+    projected.dependencies = projectGameIrDependencies(packet.dependencies)
+  return projected
+}
+
+function projectRevisionPacketForModel(
+  packet: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...(typeof packet.documentPath === 'string'
+      ? { documentPath: packet.documentPath }
+      : {}),
     ...(Array.isArray(packet.issueIds) ? { issueIds: packet.issueIds } : {}),
-    ...(Array.isArray(packet.sectionIds) ? { sectionIds: packet.sectionIds } : {}),
+    ...(Array.isArray(packet.sectionIds)
+      ? { sectionIds: packet.sectionIds }
+      : {}),
     issues: Array.isArray(packet.issues)
-      ? projectItems(packet.issues, issue => modelIssue(issue, true), 'revision issue')
+      ? projectItems(
+          packet.issues,
+          issue => modelIssue(issue, true),
+          'revision issue',
+        )
       : [],
     sections: Array.isArray(packet.sections)
-      ? projectItems(packet.sections, section => modelSection(section, 'text'), 'revision section')
+      ? projectItems(
+          packet.sections,
+          section => modelSection(section, 'text'),
+          'revision section',
+        )
       : [],
     normalizedFacts: Array.isArray(packet.normalizedFacts)
       ? projectItems(packet.normalizedFacts, modelFact, 'revision fact')
       : [],
-    ...(Array.isArray(packet.factConstraints) ? { factConstraints: packet.factConstraints } : {}),
+    ...(Array.isArray(packet.factConstraints)
+      ? { factConstraints: packet.factConstraints }
+      : {}),
   }
 }
 
@@ -366,6 +855,14 @@ function formatContract(request: WorkerDispatchRequest): string {
             : sections,
           productionMaterials: {
             heading: '## Production Materials',
+            reservedH3Headings: Array.isArray(productionMaterials)
+              ? productionMaterials.map(value => {
+                  const material = value as Record<string, unknown>
+                  return `### ${material.title}`
+                })
+              : [],
+            placement:
+              'each reserved H3 appears exactly once under the final ## Production Materials heading and never inline in an owning prose section',
             entries: Array.isArray(productionMaterials)
               ? productionMaterials.map(value => {
                   const material = value as Record<string, unknown>
@@ -389,12 +886,15 @@ function formatContract(request: WorkerDispatchRequest): string {
           closedHeadingSet: [
             '## Executive Summary',
             ...(Array.isArray(sections)
-              ? sections.map(value => `## ${(value as Record<string, unknown>).title}`)
+              ? sections.map(
+                  value => `## ${(value as Record<string, unknown>).title}`,
+                )
               : []),
             '## Production Materials',
           ],
           additionalH2: 'forbidden',
-          supportingContent: 'must be nested under one of the closed H2 headings',
+          supportingContent:
+            'must be nested under one of the closed H2 headings',
         },
       }
     }
@@ -433,7 +933,13 @@ function formatResourceContentContract(
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'game-ir-compiler':
-      return 'Compile only the service-bound Foundation READY request and immutable sourcePackets into the declared domain-specific Game IR stages. The contract identity fields runId, dispatchId, taskId, revision, compileRequestDigest, foundationReadyReceiptDigest, remainingDomainIds, and optional resumeFrom are service-bound context: do not invent or echo them in the model result. Submit only domainResults for the explicitly remaining domains; never submit checkpoint paths, READY receipts, publication markers, or self-assigned authority. Do not read old documents, journals, prior publications, or invent fallback authority.'
+      if (request.contract.kind === 'projection')
+        return 'Project only the current dependency-frontier slice from the immutable operation packet; never project or assemble the complete domain. The currentSlice contract is the sole node-kind authority for this turn: use only its exact node kinds, value properties/types, and per-node edgeRules roles/targetKinds/cardinality; do not invent fields or generic edge names. If currentSlice.retryDiagnostic is present, correct that exact admitted failure in this slice; it is not product authority and does not authorize another slice. Every emitted node must satisfy every edgeRules cardinality: exactly-one and at-least-one roles cannot be omitted, and singleton roles cannot repeat. dependencyContext is binding admitted graph state: emit every requiredCurrentNodes item with its exact id and kind; when an edge or reference targets an admitted kind, use the exact availablePriorNodes id, kind, and value semantics, including terminal and outcome values. Emit nodes uniquely sorted by id; sort each references array by targetId then targetType and each edges array by type then targetId then targetType. The service rejects rather than repairs non-canonical order. Emit each node with exactly the declared node fields; references use {targetId,targetType}; every edge requires edges[].type, edges[].targetId, and edges[].targetType, mapping edgeRules[].role to type and the selected target identity to targetId/targetType. Bind every node to exactly one fragmentId selected from source.sections[].evidenceFragments. The service derives sourceEvidenceGroups and canonical semantic targets; never output either of them. Never copy or synthesize source text and never output subjects, documentPath, sectionId, excerpt, byte offsets, sourcePointer, literal, occurrence, or serialized edge/reference JSON in evidence. Do not validate or assemble other slices, write checkpoints, publish, or provide service identity.'
+      if (request.contract.kind === 'validation')
+        return 'Perform only the assigned domain validation from the immutable operation packet. Return one validation result for this operation: PASS with checkIds and coveredTargets, or FAIL/AMBIGUOUS with one concrete diagnostic. Do not project, assemble a complete candidate, write checkpoints, publish, or provide service identity.'
+      throw new Error(
+        'Game IR worker requires one operation kind: projection or validation',
+      )
     case 'foundation-fact-extractor':
       return [
         'Extract only the declared fact keys from the exact packet sections.',
@@ -572,7 +1078,13 @@ function factExtractionInstructions(request: WorkerDispatchRequest): string[] {
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'game-ir-compiler':
-      return 'Return one compiler model payload conforming to the supplied schema. Completed output must include only domainResults for the explicitly remaining domains; failed or blocked output must include a concrete diagnostic reason. Identity, checkpoints, publication markers, and READY receipts are service-owned and forbidden in worker output.'
+      if (request.contract.kind === 'projection')
+        return 'Return raw NDJSON only, with no Markdown fence, prose, array wrapper, object wrapper, tool call, or blank line. Emit one line per node exactly as {"record":"node","sliceId":"<current exact sliceId>","fragmentId":"<one exact evidence fragmentId>","node":{...}}. After the final node emit exactly one terminal line {"record":"done","sliceId":"<current exact sliceId>"}. The done line must be last. When continuation is requested, continue from the exact byte where the stream stopped without repeating prior records. Identity, evidence groups, checkpoints, publication markers, READY receipts, sourceClaims, outcome and authority paths are service-owned and forbidden in worker output.'
+      if (request.contract.kind === 'validation')
+        return 'Return exactly one validation payload conforming to the supplied schema. A completed payload contains only validation; failed or blocked payloads contain only reason. Identity, checkpoints, publication markers, READY receipts, and authority paths are service-owned and forbidden in worker output.'
+      throw new Error(
+        'Game IR worker requires one operation kind: projection or validation',
+      )
     case 'foundation-fact-extractor':
       return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, and value; omit evidence and reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, and reason; omit evidence and value. The service binds immutable provenance from the packet owner section into the durable terminal.'
     case 'foundation-semantic-reviewer':

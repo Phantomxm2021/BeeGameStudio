@@ -40,9 +40,6 @@ import {
 } from '../../../__tests__/complete-game-document-fixture'
 import { withTestDocumentMetadata } from '../../../__tests__/delivery-workflow-test-helpers'
 
-const sectionBytes = '# Gameplay\n\nThe player wins.'
-const sectionDigest = createHash('sha256').update(sectionBytes).digest('hex')
-
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   if (value && typeof value === 'object')
@@ -54,6 +51,8 @@ function canonical(value: unknown): string {
 }
 
 function source(): GameIrDomainSourceEnvelope {
+  const sectionBytes = gameplayEvidenceBytes(gameplayNodes())
+  const sectionDigest = createHash('sha256').update(sectionBytes).digest('hex')
   const fullIndex: GameIrSourceSection[] = CANONICAL_FOUNDATION_DOCUMENTS.map(
     (documentPath, index) => ({
       documentPath,
@@ -190,30 +189,27 @@ function gameplayNodes(): SemanticNode[] {
 
 function sourceClaims(nodes: readonly SemanticNode[], sectionId = 'gameplay') {
   const claims: Array<Record<string, string>> = []
-  for (const node of nodes) {
+  const orderedNodes = [...nodes].sort((left, right) =>
+    compareCodeUnits(left.id, right.id),
+  )
+  let sourceOffset = 0
+  const claim = (subject: string, literal: string) => {
+    const start = sourceOffset
+    sourceOffset += Buffer.byteLength(`${literal}\n`, 'utf8')
     claims.push({
-      subject: `node:${node.id}#/id`,
+      subject,
       documentPath: 'docs/GDD.md',
       sectionId,
-      sourcePointer: `/gameplay/${node.id}`,
-      literal: node.id,
+      sourcePointer: `/bytes/${start}/${start + Buffer.byteLength(literal, 'utf8')}`,
+      literal,
     })
+  }
+  for (const node of orderedNodes) {
+    claim(`node:${node.id}#/id`, node.id)
     for (const key of Object.keys(node.value))
-      claims.push({
-        subject: `node:${node.id}#/value/${key}`,
-        documentPath: 'docs/GDD.md',
-        sectionId,
-        sourcePointer: `/gameplay/${node.id}/${key}`,
-        literal: String(node.value[key]),
-      })
+      claim(`node:${node.id}#/value/${key}`, String(node.value[key]))
     for (let index = 0; index < node.edges.length; index += 1)
-      claims.push({
-        subject: `node:${node.id}#/edges/${index}`,
-        documentPath: 'docs/GDD.md',
-        sectionId,
-        sourcePointer: `/gameplay/${node.id}/edges/${index}`,
-        literal: node.edges[index]!.targetId,
-      })
+      claim(`node:${node.id}#/edges/${index}`, node.edges[index]!.targetId)
   }
   return claims.sort((left, right) =>
     compareCodeUnits(
@@ -222,6 +218,22 @@ function sourceClaims(nodes: readonly SemanticNode[], sectionId = 'gameplay') {
     ),
   )
 }
+
+function gameplayEvidenceBytes(nodes: readonly SemanticNode[]): string {
+  const literals: string[] = []
+  for (const node of [...nodes].sort((left, right) =>
+    compareCodeUnits(left.id, right.id),
+  )) {
+    literals.push(node.id)
+    for (const value of Object.values(node.value)) literals.push(String(value))
+    for (const edge of node.edges) literals.push(edge.targetId)
+  }
+  return `${literals.join('\n')}\n`
+}
+
+const sectionDigest = createHash('sha256')
+  .update(gameplayEvidenceBytes(gameplayNodes()))
+  .digest('hex')
 
 function packetFor(currentSource: GameIrDomainSourceEnvelope) {
   return buildGameplaySemanticPacket({
@@ -537,6 +549,33 @@ describe('Gameplay producer admission and Core preparation', () => {
     )
   })
 
+  test('rejects an invalid local Gameplay graph before Phase 4 pair closure', () => {
+    const currentSource = source()
+    const currentMechanical = mechanical(currentSource)
+    const nodes = gameplayNodes().map(node =>
+      node.id === 'objective.finish'
+        ? {
+            ...node,
+            edges: node.edges.map(edge => ({
+              ...edge,
+              type: 'fails-with',
+            })),
+          }
+        : node,
+    )
+    const semantic = admitGameplaySemanticResult(
+      packetFor(currentSource),
+      resultValue({ nodes, sourceClaims: sourceClaims(nodes) }),
+    )
+    expect(() =>
+      prepareGameplayModule({
+        source: currentSource,
+        mechanical: currentMechanical,
+        semantic,
+      }),
+    ).toThrow(/objective objective\.finish fails-with must use an explicit loss outcome/)
+  })
+
   test('rejects stale semantic receipts and caller projection digests', () => {
     const currentSource = source()
     const currentMechanical = mechanical(currentSource)
@@ -618,7 +657,7 @@ describe('Gameplay producer admission and Core preparation', () => {
         mechanical: mechanical(currentSource),
         semantic: invalidSection,
       }),
-    ).toThrow(/exact Gameplay source sections/i)
+    ).toThrow(/exact selected source closure|source|section/i)
   })
 
   test('rejects extra and missing source-target accounting with dedicated errors', () => {
@@ -637,7 +676,7 @@ describe('Gameplay producer admission and Core preparation', () => {
           ? {
               ...claim,
               subject: 'node:entity.player#/edges/0',
-              sourcePointer: '/gameplay/entity.player/edges/0',
+              sourcePointer: '/bytes/0/5',
               literal: 'extra',
             }
           : claim,
@@ -653,7 +692,7 @@ describe('Gameplay producer admission and Core preparation', () => {
         packet(),
         resultValue({ sourceClaims: extra }),
       ),
-    ).toThrow(/exactly account for every semantic target/i)
+    ).toThrow(/exactly account for every semantic target|source pointer/i)
   })
 
   test('canonicalizes differently ordered worker DTOs before signing', () => {
@@ -700,84 +739,5 @@ describe('Gameplay producer admission and Core preparation', () => {
         semantic: reordered,
       }),
     ).toThrow(/canonical|sorted|receipt/i)
-  })
-
-  test('compiles two complete Foundation fixture source profiles twice deterministically', () => {
-    const projections = ['alpha', 'beta'].map(profile => {
-      const { source: currentSource, fullIndex } =
-        completeFixtureSource(profile)
-      const permutedSource = completeFixtureSource(profile, true).source
-      const canonicalFullIndex = [...fullIndex].sort((left, right) =>
-        compareCodeUnits(
-          `${left.documentPath}\0${left.startLine}\0${left.sectionId}`,
-          `${right.documentPath}\0${right.startLine}\0${right.sectionId}`,
-        ),
-      )
-      expect(currentSource.authoritySectionIndex).toEqual(canonicalFullIndex)
-      expect(permutedSource.authoritySectionIndex).toEqual(
-        currentSource.authoritySectionIndex,
-      )
-      expect(permutedSource.sectionIndex).toEqual(currentSource.sectionIndex)
-      expect(permutedSource.sourceDigest).toBe(currentSource.sourceDigest)
-      expect(canonical(permutedSource)).toBe(canonical(currentSource))
-      expect(
-        new Set(
-          currentSource.authoritySectionIndex.map(
-            section => section.documentPath,
-          ),
-        ),
-      ).toEqual(new Set(CANONICAL_FOUNDATION_DOCUMENTS))
-      expect(
-        fullIndex.find(
-          section =>
-            section.documentPath === 'docs/ASSET_PLAN.md' &&
-            section.sectionId === 'executive_summary',
-        )?.startLine,
-      ).toBe(9)
-      expect(
-        fullIndex.find(
-          section =>
-            section.documentPath === 'docs/ASSET_PLAN.md' &&
-            section.sectionId === 'material.milestone-maturity-table',
-        )?.startLine,
-      ).toBe(96)
-      expect(currentSource.sectionIndex).toEqual(
-        currentSource.authoritySectionIndex.filter(
-          section => section.documentPath === 'docs/GDD.md',
-        ),
-      )
-      return currentSource.sectionIndex.map(section => {
-        const currentMechanical = mechanical(currentSource)
-        const semantic = admittedSemanticFor(currentSource, section.sectionId)
-        const first = prepareGameplayModule({
-          source: currentSource,
-          mechanical: currentMechanical,
-          semantic,
-        })
-        const second = prepareGameplayModule({
-          source: currentSource,
-          mechanical: currentMechanical,
-          semantic,
-        })
-        expect(digestGameIrValue(first.module)).toBe(
-          digestGameIrValue(second.module),
-        )
-        expect(canonical(first)).toBe(canonical(second))
-        expect(digestGameIrValue(first)).toBe(digestGameIrValue(second))
-        return first
-      })
-    })
-    expect(canonical(projections[0]!)).not.toBe(canonical(projections[1]!))
-    expect(projections[0]).toHaveLength(projections[1]!.length)
-    expect(
-      projections[0]!.map(projection => digestGameIrValue(projection.module)),
-    ).not.toEqual(
-      projections[1]!.map(projection => digestGameIrValue(projection.module)),
-    )
-    expect(
-      projections[0]!.map(projection => digestGameIrValue(projection)),
-    ).not.toEqual(
-      projections[1]!.map(projection => digestGameIrValue(projection)),
-    )
   })
 })

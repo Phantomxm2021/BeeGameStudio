@@ -207,24 +207,30 @@ const gameIrStateSchema: z.ZodType<GameIrState> = z.discriminatedUnion(
         identity: gameIrCompilationIdentitySchema,
         latestCheckpoint: gameIrCheckpointRefSchema.optional(),
         diagnosticRef: z.string().min(1).optional(),
-        diagnostic: z.object({
-          phase: z.literal('GAME_IR_COMPILATION'),
-          step: z.string().min(1),
-          taskId: z.string().min(1),
-          workerType: z.literal('game-ir-compiler'),
-          reasonCode: z.string().min(1),
-          expected: z.string().min(1),
-          actual: z.string().min(1),
-          diagnosticRef: z.string().min(1),
-          recoveryAction: z.string().min(1),
-        }).strict().optional(),
-        progressIdentity: z.object({
-          inputDigest: sha256Schema,
-          diagnosticDigest: sha256Schema,
-          candidateDigest: sha256Schema,
-          checkpointJournalDigest: sha256Schema,
-          terminalDigest: sha256Schema,
-        }).strict().optional(),
+        diagnostic: z
+          .object({
+            phase: z.literal('GAME_IR_COMPILATION'),
+            step: z.string().min(1),
+            taskId: z.string().min(1),
+            workerType: z.literal('game-ir-compiler'),
+            reasonCode: z.string().min(1),
+            expected: z.string().min(1),
+            actual: z.string().min(1),
+            diagnosticRef: z.string().min(1),
+            recoveryAction: z.string().min(1),
+          })
+          .strict()
+          .optional(),
+        progressIdentity: z
+          .object({
+            inputDigest: sha256Schema,
+            diagnosticDigest: sha256Schema,
+            candidateDigest: sha256Schema,
+            checkpointJournalDigest: sha256Schema,
+            terminalDigest: sha256Schema,
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     z
@@ -232,7 +238,8 @@ const gameIrStateSchema: z.ZodType<GameIrState> = z.discriminatedUnion(
         status: z.literal('ready'),
         identity: gameIrCompilationIdentitySchema,
         checkpoint: gameIrCheckpointRefSchema,
-        readyReceipt: gameIrReadyReceiptSchema as unknown as z.ZodType<GameIrReadyReceipt>,
+        readyReceipt:
+          gameIrReadyReceiptSchema as unknown as z.ZodType<GameIrReadyReceipt>,
         readyReceiptDigest: sha256Schema,
       })
       .strict(),
@@ -676,11 +683,18 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
           message: 'downstream phases require an admitted Checklist bridge',
         })
     }
-    if (gameIr && (!run.foundationAuditState || !['audit_ready', 'revision_ready'].includes(run.foundationAuditState.status)))
+    if (
+      gameIr &&
+      (!run.foundationAuditState ||
+        !['audit_ready', 'revision_ready'].includes(
+          run.foundationAuditState.status,
+        ))
+    )
       context.addIssue({
         code: 'custom',
         path: ['foundationAuditState'],
-        message: 'persisted Game IR state requires Foundation audit_ready or revision_ready authority',
+        message:
+          'persisted Game IR state requires Foundation audit_ready or revision_ready authority',
       })
     const gameIrPlacementIsValid =
       !gameIr ||
@@ -712,14 +726,16 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       if (
         gameIr.readyReceipt.taskId !== gameIr.identity.taskId ||
         gameIr.readyReceipt.publicationId !== gameIr.identity.publicationId ||
-        gameIr.readyReceipt.foundationRevision !== gameIr.identity.foundationRevision ||
+        gameIr.readyReceipt.foundationRevision !==
+          gameIr.identity.foundationRevision ||
         gameIr.readyReceipt.foundationReceiptDigest !==
           gameIr.identity.foundationReadyReceiptDigest
       )
         context.addIssue({
           code: 'custom',
           path: ['gameIrState'],
-          message: 'Game IR ready receipt identity does not match compilation identity',
+          message:
+            'Game IR ready receipt identity does not match compilation identity',
         })
     }
     if (gameIr && gameIr.identity.runId !== run.runId)
@@ -728,7 +744,10 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         path: ['gameIrState', 'identity', 'runId'],
         message: 'Game IR identity is bound to a different run',
       })
-    if (gameIr && gameIr.identity.confirmedBriefDigest !== run.confirmedBriefDigest)
+    if (
+      gameIr &&
+      gameIr.identity.confirmedBriefDigest !== run.confirmedBriefDigest
+    )
       context.addIssue({
         code: 'custom',
         path: ['gameIrState', 'identity', 'confirmedBriefDigest'],
@@ -766,12 +785,14 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       if (
         bridge.identity.runId !== run.runId ||
         (gameIr?.status === 'ready' &&
-          bridge.identity.gameIrReadyReceiptDigest !== gameIr.readyReceiptDigest)
+          bridge.identity.gameIrReadyReceiptDigest !==
+            gameIr.readyReceiptDigest)
       )
         context.addIssue({
           code: 'custom',
           path: ['checklistBridgeState', 'identity'],
-          message: 'Checklist bridge identity is not bound to this run and ready Game IR',
+          message:
+            'Checklist bridge identity is not bound to this run and ready Game IR',
         })
     }
     if (run.documentStep === 'CHECKLIST_BRIDGE' && !bridge)
@@ -780,25 +801,19 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         path: ['checklistBridgeState'],
         message: 'Checklist bridge step requires bridge state',
       })
-    if (
-      run.documentStep === 'CHECKLIST_DRAFTING' &&
-      bridge !== undefined
-    )
+    if (run.documentStep === 'CHECKLIST_DRAFTING' && bridge !== undefined)
       context.addIssue({
         code: 'custom',
         path: ['checklistBridgeState'],
         message: 'Checklist bridge state cannot bypass Checklist drafting',
       })
-    if (
-      run.documentStep === 'CHECKLIST_BRIDGE' &&
-      bridge?.status === 'ready'
-    )
+    if (run.documentStep === 'CHECKLIST_BRIDGE' && bridge?.status === 'ready')
       context.addIssue({
         code: 'custom',
         path: ['checklistBridgeState', 'status'],
-        message: 'Checklist bridge ready state must advance to resource preparation',
+        message:
+          'Checklist bridge ready state must advance to resource preparation',
       })
-
   })
 
 export const parseDeliveryRun = (value: unknown): DeliveryRun =>

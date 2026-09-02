@@ -58,7 +58,9 @@ export function createPinnedRuntimeFetch(
   const pinnedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input)
     const parsed = parseUrl(url)
-    const approvedTarget = parsed ? approvedOrigins.get(parsed.origin) : undefined
+    const approvedTarget = parsed
+      ? approvedOrigins.get(parsed.origin)
+      : undefined
     const dispatcher = parsed ? dispatchers.get(parsed.origin) : undefined
     if (
       parsed &&
@@ -67,7 +69,11 @@ export function createPinnedRuntimeFetch(
     )
       throw new Error('Outbound URL is not permitted')
     return dispatcher
-      ? baseFetch(input, { ...init, redirect: 'error', dispatcher } as RequestInit)
+      ? baseFetch(input, {
+          ...init,
+          redirect: 'error',
+          dispatcher,
+        } as RequestInit)
       : approvedTarget
         ? baseFetch(input, { ...init, redirect: 'error' })
         : baseFetch(input, init)

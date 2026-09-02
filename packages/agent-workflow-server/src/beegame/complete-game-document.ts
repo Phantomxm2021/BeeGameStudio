@@ -12,7 +12,9 @@ function assertCanonicalMarkdownReferences(markdown: string): void {
   const canonical = new Set(CANONICAL_FOUNDATION_DOCUMENTS)
   for (const reference of markdown.matchAll(MARKDOWN_DOCUMENT_REFERENCE)) {
     if (!canonical.has(reference[0] as FoundationDocumentPath))
-      throw new Error(`complete game document contains non-canonical document reference: ${reference[0]}`)
+      throw new Error(
+        `complete game document contains non-canonical document reference: ${reference[0]}`,
+      )
   }
 }
 
@@ -32,7 +34,8 @@ function authoredHeadingScan(markdown: string): {
     const line = rawLine.trimStart()
     if (line.startsWith('```') || line.startsWith('~~~')) {
       const marker = line.slice(0, 3)
-      fence = fence === undefined ? marker : fence === marker ? undefined : fence
+      fence =
+        fence === undefined ? marker : fence === marker ? undefined : fence
       continue
     }
     if (fence) continue
@@ -43,8 +46,13 @@ function authoredHeadingScan(markdown: string): {
   return { headings, fenceOpen: fence !== undefined }
 }
 
-function authoredHeadings(markdown: string): Array<{ level: number; text: string }> {
-  return authoredHeadingScan(markdown).headings.map(({ level, text }) => ({ level, text }))
+function authoredHeadings(
+  markdown: string,
+): Array<{ level: number; text: string }> {
+  return authoredHeadingScan(markdown).headings.map(({ level, text }) => ({
+    level,
+    text,
+  }))
 }
 
 function validateSectionHeadingStructure(
@@ -81,7 +89,9 @@ function assertExactOrder(
     actual.length !== expected.length ||
     expected.some((value, index) => actual[index] !== value)
   )
-    throw new Error(`${label} must exactly match the canonical order for ${path}`)
+    throw new Error(
+      `${label} must exactly match the canonical order for ${path}`,
+    )
 }
 
 function assertProtocolMarkerIntegrity(
@@ -97,7 +107,9 @@ function assertProtocolMarkerIntegrity(
       trimmed.includes('<!-- beegame-material:')
     ) {
       if (!expected.has(trimmed)) {
-        const materialId = /<!-- beegame-material:([^\s>]+)[^>]*-->/.exec(trimmed)?.[1]
+        const materialId = /<!-- beegame-material:([^\s>]+)[^>]*-->/.exec(
+          trimmed,
+        )?.[1]
         const label = materialId ? `material ${materialId}` : 'protocol'
         throw new Error(
           `complete game document ${label} marker is malformed:line ${index + 1}`,
@@ -108,7 +120,10 @@ function assertProtocolMarkerIntegrity(
   const present = new Set(lines.map(line => line.trim()))
   for (const marker of materialMarkers) {
     if (!present.has(marker)) {
-      const materialId = marker.slice('<!-- beegame-material:'.length, -' -->'.length)
+      const materialId = marker.slice(
+        '<!-- beegame-material:'.length,
+        -' -->'.length,
+      )
       throw new Error(
         `complete game document production materials ${materialId} marker is missing`,
       )
@@ -124,25 +139,31 @@ export function assertMaterialFormat(
 ): void {
   assertMarkdownIntegrity(body, materialId, startLine)
   const lines = body.split('\n').map(line => line.trim())
-  const tableBlocks = lines.reduce<string[][]>((blocks, line) => {
-    if (!line.startsWith('|') || !line.endsWith('|')) return [...blocks, []]
-    const block = blocks.at(-1)
-    if (block) block.push(line)
-    else blocks.push([line])
-    return blocks
-  }, []).filter(block => block.length > 0)
+  const tableBlocks = lines
+    .reduce<string[][]>((blocks, line) => {
+      if (!line.startsWith('|') || !line.endsWith('|')) return [...blocks, []]
+      const block = blocks.at(-1)
+      if (block) block.push(line)
+      else blocks.push([line])
+      return blocks
+    }, [])
+    .filter(block => block.length > 0)
   const validTableBlock = (tableLines: readonly string[]) => {
     const widths = tableLines.map(line =>
-      line.split('').reduce(
-        (count, character, index, source) =>
-          character === '|' && source[index - 1] !== '\\' ? count + 1 : count,
-        0,
-      ),
+      line
+        .split('')
+        .reduce(
+          (count, character, index, source) =>
+            character === '|' && source[index - 1] !== '\\' ? count + 1 : count,
+          0,
+        ),
     )
-    return tableLines.length >= 3 &&
+    return (
+      tableLines.length >= 3 &&
       widths[0]! >= 3 &&
       widths.every(width => width === widths[0]) &&
       tableLines.some(line => line.includes('---'))
+    )
   }
   const valid =
     format === 'markdown_table' || format === 'evidence_register'
@@ -163,7 +184,9 @@ type OpenMarkdownFence = {
   language: string
 }
 
-function markdownFence(line: string): { marker: string; rest: string } | undefined {
+function markdownFence(
+  line: string,
+): { marker: string; rest: string } | undefined {
   const match = /^\s*(`{3,}|~{3,})(.*)$/.exec(line)
   return match ? { marker: match[1]!, rest: match[2]! } : undefined
 }
@@ -194,13 +217,17 @@ function assertMarkdownFenceAndInlineIntegrity(
       continue
     }
     if (open) continue
-    for (let character = 0; character < rawLine.length;) {
+    for (let character = 0; character < rawLine.length; ) {
       if (rawLine[character] !== '`') {
         character += 1
         continue
       }
       let slashes = 0
-      for (let previous = character - 1; previous >= 0 && rawLine[previous] === '\\'; previous -= 1)
+      for (
+        let previous = character - 1;
+        previous >= 0 && rawLine[previous] === '\\';
+        previous -= 1
+      )
         slashes += 1
       let length = 1
       while (rawLine[character + length] === '`') length += 1
@@ -239,7 +266,8 @@ function assertMarkdownTableIntegrity(
   startLine: number,
 ): void {
   const lines = body.split('\n').map(line => line.trim())
-  const isTableLine = (line: string) => line.startsWith('|') && line.endsWith('|')
+  const isTableLine = (line: string) =>
+    line.startsWith('|') && line.endsWith('|')
   const isDelimiter = (line: string) =>
     isTableLine(line) &&
     line
@@ -276,57 +304,111 @@ function assertMarkdownIntegrity(
 }
 
 /** Structural-only admission used before a native Markdown result is forwarded. */
-export function isCompleteGameDocumentMarkdownStructure(
+export type MarkdownStructureAssessment =
+  | { status: 'complete' }
+  | { status: 'appendable' }
+  | { status: 'unreachable'; reason: string }
+
+/**
+ * Classify whether an append-only Markdown continuation can still close the
+ * canonical structure. A misplaced canonical heading is terminal: appending
+ * text cannot move it or repair its order.
+ */
+export function assessGameDocumentMarkdownStructure(
   path: FoundationDocumentPath,
   value: string,
-): boolean {
+): MarkdownStructureAssessment {
   const body = value.trim()
-  if (!body) return false
+  if (!body) return { status: 'appendable' }
   const scan = authoredHeadingScan(body)
-  if (scan.fenceOpen) return false
   const contract = getGameDocumentContract(path)
-  if (!contract) return false
+  if (!contract)
+    return {
+      status: 'unreachable',
+      reason: `canonical document contract is unavailable for ${path}`,
+    }
   const expectedH2 = [
     'Executive Summary',
     ...contract.sections.map(section => section.title),
     'Production Materials',
   ]
-  const expectedH3 = contract.productionMaterials.map(material => material.title)
+  const expectedH3 = contract.productionMaterials.map(
+    material => material.title,
+  )
   const actualH2 = scan.headings
     .filter(heading => heading.level === 2)
     .map(heading => heading.text)
+  for (const [index, heading] of actualH2.entries()) {
+    const expected = expectedH2[index]
+    if (heading !== expected)
+      return {
+        status: 'unreachable',
+        reason: `H2 heading order cannot be completed by appending for ${path}: position ${index + 1} is "${heading}" but must be "${expected ?? 'absent'}"`,
+      }
+  }
   const productionHeading = scan.headings.find(
     heading => heading.level === 2 && heading.text === 'Production Materials',
   )
-  if (!productionHeading || !exactSequence(actualH2, expectedH2))
-    return false
-  const materialHeadings = scan.headings.filter(
-    heading => heading.level === 3 && heading.lineIndex > productionHeading.lineIndex,
+  const prematureMaterial = scan.headings.find(
+    heading =>
+      heading.level === 3 &&
+      expectedH3.includes(heading.text) &&
+      (productionHeading === undefined ||
+        heading.lineIndex < productionHeading.lineIndex),
   )
-  const actualH3 = materialHeadings.map(heading => heading.text)
-  if (!exactSequence(actualH3, expectedH3))
-    return false
-  return true
+  if (prematureMaterial)
+    return {
+      status: 'unreachable',
+      reason: `material heading order cannot be completed by appending for ${path}: "${prematureMaterial.text}" appears before "## Production Materials"; append-only continuation cannot move it after that section`,
+    }
+  if (actualH2.length < expectedH2.length) return { status: 'appendable' }
+  const actualH3 = scan.headings
+    .filter(
+      heading =>
+        heading.level === 3 &&
+        productionHeading !== undefined &&
+        heading.lineIndex > productionHeading.lineIndex,
+    )
+    .map(heading => heading.text)
+  for (const [index, heading] of actualH3.entries()) {
+    const expected = expectedH3[index]
+    if (heading !== expected)
+      return {
+        status: 'unreachable',
+        reason: `material heading order cannot be completed by appending for ${path}: position ${index + 1} after "## Production Materials" is "${heading}" but must be "${expected ?? 'absent'}"`,
+      }
+  }
+  if (actualH3.length < expectedH3.length || scan.fenceOpen)
+    return { status: 'appendable' }
+  return { status: 'complete' }
 }
 
-function exactSequence(actual: readonly string[], expected: readonly string[]): boolean {
-  return (
-    actual.length === expected.length &&
-    expected.every((heading, index) => actual[index] === heading)
-  )
+export function isCompleteGameDocumentMarkdownStructure(
+  path: FoundationDocumentPath,
+  value: string,
+): boolean {
+  return assessGameDocumentMarkdownStructure(path, value).status === 'complete'
 }
 
 function substantiveContentBlocks(lines: readonly string[]): string[] {
   const blocks: string[] = []
   let current: string[] = []
   const flush = () => {
-    const normalized = current.map(line => line.trim()).join(' ').trim()
+    const normalized = current
+      .map(line => line.trim())
+      .join(' ')
+      .trim()
     current = []
     if (normalized.length >= 160) blocks.push(normalized)
   }
   for (const line of lines) {
     const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('<!--') || trimmed === '---') {
+    if (
+      !trimmed ||
+      trimmed.startsWith('#') ||
+      trimmed.startsWith('<!--') ||
+      trimmed === '---'
+    ) {
       flush()
       continue
     }
@@ -354,7 +436,11 @@ function assertNonEmptyRange(
   end: number,
   label: string,
 ): void {
-  if (start < 0 || end <= start || !lines.slice(start + 1, end).some(line => line.trim()))
+  if (
+    start < 0 ||
+    end <= start ||
+    !lines.slice(start + 1, end).some(line => line.trim())
+  )
     throw new Error(`complete game document ${label} is empty or invalid`)
 }
 
@@ -363,8 +449,7 @@ function nextNonBlankLine(
   index: number,
 ): { index: number; value: string } | undefined {
   for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-    if (lines[cursor]!.trim())
-      return { index: cursor, value: lines[cursor]! }
+    if (lines[cursor]!.trim()) return { index: cursor, value: lines[cursor]! }
   }
   return undefined
 }
@@ -374,8 +459,12 @@ function completeDocumentBlocks(
   lines: readonly string[],
 ): CompleteDocumentBlock[] {
   const contract = getGameDocumentContract(path)
-  const sectionMarkers = contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->`)
-  const materialMarkers = contract.productionMaterials.map(material => `<!-- beegame-material:${material.materialId} -->`)
+  const sectionMarkers = contract.sections.map(
+    section => `<!-- beegame-section:${section.sectionId} -->`,
+  )
+  const materialMarkers = contract.productionMaterials.map(
+    material => `<!-- beegame-material:${material.materialId} -->`,
+  )
   const productionIndex = lines.indexOf('<!-- beegame-production-materials -->')
   const auditIndex = lines.indexOf('<!-- beegame-audit-appendix -->')
   const documentEnd = auditIndex >= 0 ? auditIndex : lines.length
@@ -392,16 +481,18 @@ function completeDocumentBlocks(
         startLine: (heading?.index ?? start) + 2,
       }
     }),
-    ...contract.productionMaterials.map((material, index): CompleteDocumentBlock => {
-      const start = materialIndexes[index]!
-      const end = materialIndexes[index + 1] ?? documentEnd
-      const heading = nextNonBlankLine(lines, start)
-      return {
-        id: `material.${material.materialId}`,
-        body: lines.slice((heading?.index ?? start) + 1, end).join('\n'),
-        startLine: (heading?.index ?? start) + 2,
-      }
-    }),
+    ...contract.productionMaterials.map(
+      (material, index): CompleteDocumentBlock => {
+        const start = materialIndexes[index]!
+        const end = materialIndexes[index + 1] ?? documentEnd
+        const heading = nextNonBlankLine(lines, start)
+        return {
+          id: `material.${material.materialId}`,
+          body: lines.slice((heading?.index ?? start) + 1, end).join('\n'),
+          startLine: (heading?.index ?? start) + 2,
+        }
+      },
+    ),
   ]
 }
 
@@ -421,12 +512,18 @@ export function normalizeCompleteGameDocumentProtocol(
     ['## Executive Summary', '<!-- beegame-executive-summary -->'],
     ...contract.sections.map(
       section =>
-        [`## ${section.title}`, `<!-- beegame-section:${section.sectionId} -->`] as const,
+        [
+          `## ${section.title}`,
+          `<!-- beegame-section:${section.sectionId} -->`,
+        ] as const,
     ),
     ['## Production Materials', '<!-- beegame-production-materials -->'],
     ...contract.productionMaterials.map(
       material =>
-        [`### ${material.title}`, `<!-- beegame-material:${material.materialId} -->`] as const,
+        [
+          `### ${material.title}`,
+          `<!-- beegame-material:${material.materialId} -->`,
+        ] as const,
     ),
   ])
   const recognizedMarkers = new Set(markerByHeading.values())
@@ -440,7 +537,9 @@ export function normalizeCompleteGameDocumentProtocol(
       trimmed === '<!-- beegame-executive-summary -->' ||
       trimmed === '<!-- beegame-production-materials -->'
     )
-      throw new Error('complete game document contains an unknown protocol marker')
+      throw new Error(
+        'complete game document contains an unknown protocol marker',
+      )
     return true
   })
 
@@ -450,7 +549,8 @@ export function normalizeCompleteGameDocumentProtocol(
     const line = rawLine.trimStart()
     if (line.startsWith('```') || line.startsWith('~~~')) {
       const marker = line.slice(0, 3)
-      fence = fence === undefined ? marker : fence === marker ? undefined : fence
+      fence =
+        fence === undefined ? marker : fence === marker ? undefined : fence
       return
     }
     if (fence || !markerByHeading.has(rawLine)) return
@@ -502,11 +602,15 @@ export function validateCompleteGameDocumentMarkdown(
   if (!lines[0]?.startsWith('# ') || lines[0].startsWith('## '))
     throw new Error('complete game document requires one document title')
   if (EMPTY_TEMPLATE_SENTENCES.some(sentence => body.includes(sentence)))
-    throw new Error('complete game document contains an empty template sentence')
+    throw new Error(
+      'complete game document contains an empty template sentence',
+    )
 
   const blocks = substantiveContentBlocks(lines)
   if (new Set(blocks).size !== blocks.length)
-    throw new Error('complete game document repeats a substantive content block')
+    throw new Error(
+      'complete game document repeats a substantive content block',
+    )
 
   const summaryMarker = '<!-- beegame-executive-summary -->'
   const productionMarker = '<!-- beegame-production-materials -->'
@@ -537,9 +641,15 @@ export function validateCompleteGameDocumentMarkdown(
   const documentEnd = auditIndex >= 0 ? auditIndex : lines.length
   const sectionIndexes = sectionMarkers.map(marker => lines.indexOf(marker))
   const materialIndexes = materialMarkers.map(marker => lines.indexOf(marker))
-  const blocksById = new Map(completeDocumentBlocks(path, lines).map(block => [block.id, block]))
-  const sectionBodies = contract.sections.map(section => blocksById.get(section.sectionId)!)
-  const materialBodies = contract.productionMaterials.map(material => blocksById.get(`material.${material.materialId}`)!)
+  const blocksById = new Map(
+    completeDocumentBlocks(path, lines).map(block => [block.id, block]),
+  )
+  const sectionBodies = contract.sections.map(
+    section => blocksById.get(section.sectionId)!,
+  )
+  const materialBodies = contract.productionMaterials.map(
+    material => blocksById.get(`material.${material.materialId}`)!,
+  )
   const orderedIndexes = [
     summaryIndex,
     ...sectionIndexes,
@@ -559,7 +669,9 @@ export function validateCompleteGameDocumentMarkdown(
 
   const summaryHeading = nextNonBlankLine(lines, summaryIndex)
   if (summaryHeading?.value !== '## Executive Summary')
-    throw new Error('complete game document executive summary heading is invalid')
+    throw new Error(
+      'complete game document executive summary heading is invalid',
+    )
   assertNonEmptyRange(
     lines,
     summaryHeading.index,
@@ -572,20 +684,34 @@ export function validateCompleteGameDocumentMarkdown(
     const end = sectionIndexes[index + 1] ?? productionIndex
     const heading = nextNonBlankLine(lines, start)
     if (heading?.value !== `## ${section.title}`)
-      throw new Error(`complete game document section title is invalid: ${section.sectionId}`)
-    assertNonEmptyRange(lines, heading.index, end, `section:${section.sectionId}`)
+      throw new Error(
+        `complete game document section title is invalid: ${section.sectionId}`,
+      )
+    assertNonEmptyRange(
+      lines,
+      heading.index,
+      end,
+      `section:${section.sectionId}`,
+    )
   })
   validateSectionHeadingStructure(sectionBodies)
 
-  if (nextNonBlankLine(lines, productionIndex)?.value !== '## Production Materials')
-    throw new Error('complete game document production materials heading is invalid')
+  if (
+    nextNonBlankLine(lines, productionIndex)?.value !==
+    '## Production Materials'
+  )
+    throw new Error(
+      'complete game document production materials heading is invalid',
+    )
 
   contract.productionMaterials.forEach((material, index) => {
     const start = materialIndexes[index]!
     const end = materialIndexes[index + 1] ?? documentEnd
     const heading = nextNonBlankLine(lines, start)
     if (heading?.value !== `### ${material.title}`)
-      throw new Error(`production material title is invalid: ${material.materialId}`)
+      throw new Error(
+        `production material title is invalid: ${material.materialId}`,
+      )
     const materialBody = materialBodies[index]!.body
     assertMaterialFormat(
       material.format,
@@ -600,7 +726,9 @@ export function validateCompleteGameDocumentMarkdown(
 
   if (auditIndex >= 0) {
     if (nextNonBlankLine(lines, auditIndex)?.value !== '## Audit Appendix')
-      throw new Error('complete game document audit appendix heading is invalid')
+      throw new Error(
+        'complete game document audit appendix heading is invalid',
+      )
     const acceptanceIndex = lines.indexOf(
       '### Acceptance Criteria',
       auditIndex + 1,

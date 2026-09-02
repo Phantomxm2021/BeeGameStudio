@@ -275,10 +275,15 @@ export function realAuthority(
   ]
   const valueAt = (node: Node, pointer: string): unknown => {
     if (pointer === '/id') return node.id
-    if (pointer.startsWith('/references/'))
-      return node.references[Number(pointer.slice('/references/'.length))]
-    if (pointer.startsWith('/edges/'))
-      return node.edges[Number(pointer.slice('/edges/'.length))]
+    if (pointer.startsWith('/references/')) {
+      const reference =
+        node.references[Number(pointer.slice('/references/'.length))]
+      return reference
+    }
+    if (pointer.startsWith('/edges/')) {
+      const edge = node.edges[Number(pointer.slice('/edges/'.length))]
+      return edge
+    }
     let current: unknown = node.value
     for (const segment of pointer.slice(7).split('/')) {
       if (current && typeof current === 'object')
@@ -536,7 +541,9 @@ export function realAuthority(
     documentDigests: Object.fromEntries(
       CANONICAL_FOUNDATION_DOCUMENTS.map(path => [path, hash(bytesFor(path))]),
     ) as Record<(typeof CANONICAL_FOUNDATION_DOCUMENTS)[number], string>,
-    sectionIndexPath: relativeFoundationAuditArtifactPaths('foundation-revision-1').sectionIndex.replace('/staging/', '/derived/'),
+    sectionIndexPath: relativeFoundationAuditArtifactPaths(
+      'foundation-revision-1',
+    ).sectionIndex.replace('/staging/', '/derived/'),
     sectionIndexDigest: digestSectionIndex(sectionIndex),
     authority: {
       kind: 'review' as const,

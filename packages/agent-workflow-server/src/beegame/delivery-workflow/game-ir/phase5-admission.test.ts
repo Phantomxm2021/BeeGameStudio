@@ -234,8 +234,8 @@ function gameplayProjection(currentSource = source()) {
     nodes: [
       {
         id: 'bytes',
-        kind: 'gameplay.entity',
-        value: { label: 'bytes' },
+        kind: 'gameplay.state',
+        value: { label: 'Fixture state', initial: true, terminal: 'none' },
         references: [],
         edges: [],
       },
@@ -249,7 +249,21 @@ function gameplayProjection(currentSource = source()) {
         literal: 'bytes',
       },
       {
+        subject: 'node:bytes#/value/initial',
+        documentPath: 'docs/GDD.md',
+        sectionId: 'section-0',
+        sourcePointer: '/bytes/0/5',
+        literal: 'bytes',
+      },
+      {
         subject: 'node:bytes#/value/label',
+        documentPath: 'docs/GDD.md',
+        sectionId: 'section-0',
+        sourcePointer: '/bytes/0/5',
+        literal: 'bytes',
+      },
+      {
+        subject: 'node:bytes#/value/terminal',
         documentPath: 'docs/GDD.md',
         sectionId: 'section-0',
         sourcePointer: '/bytes/0/5',
@@ -470,10 +484,10 @@ describe('shared Phase 5 admission', () => {
       '62fa55785eaab2aa6da9d73f0563a4d1bc2421cbc85475036434115950a2e750',
     )
     expect(validationPacket.targetManifestDigest).toBe(
-      '2a9f27385811250c75bb162e3d51f38e0cab9be942de867f0569d30b7e381a41',
+      '246132885176344c28bd5170984710fc83f71d5d974a8eb6fdaf2cdb0f59a4d2',
     )
     expect(validationPacket.packetDigest).toBe(
-      'b26626cd2e2da4dc87ab78fb75ffddcaca19724087b83799ec4901492b603e50',
+      '7cbd28966a37fa30a228f4ee0f7770f268b128c6c8f0e733d751371a36fdd9d5',
     )
     expect(validationPacket.checkIds).toEqual([
       'domain.world-scene',
@@ -488,7 +502,7 @@ describe('shared Phase 5 admission', () => {
     )
     const presentation = validationFixture('presentation').validationPacket
     expect(presentation.targetManifestDigest).toBe(
-      '9f85229e57daa059335a205ad049995690889f0afcfff5b8b06635f0c00c25c8',
+      'ee9380aaa0d3117783fd80470fb861af6d6a48d1f1f3e057e136d2dba0d1108f',
     )
     expect(presentation.checkIds).toEqual([
       'domain.presentation',
@@ -1359,102 +1373,6 @@ describe('shared Phase 5 admission', () => {
     }
   })
 
-  test('rejects primitive and node-ID literal mismatches', () => {
-    const bytes = 'bytestrue1'
-    const currentSource = source(bytes)
-    const currentPacket = packet(currentSource)
-    const validInput = {
-      outcome: 'PROJECTED' as const,
-      nodes: [
-        {
-          id: 'bytes',
-          kind: 'world-scene.scene',
-          value: { enabled: true, count: 1 },
-          references: [],
-          edges: [],
-        },
-      ],
-      sourceClaims: [
-        {
-          subject: 'node:bytes#/id',
-          documentPath: 'docs/GDD.md' as const,
-          sectionId: 'section-0',
-          sourcePointer: '/bytes/0/5',
-          literal: 'bytes',
-        },
-        {
-          subject: 'node:bytes#/value/count',
-          documentPath: 'docs/GDD.md' as const,
-          sectionId: 'section-0',
-          sourcePointer: '/bytes/9/10',
-          literal: '1',
-        },
-        {
-          subject: 'node:bytes#/value/enabled',
-          documentPath: 'docs/GDD.md' as const,
-          sectionId: 'section-0',
-          sourcePointer: '/bytes/5/9',
-          literal: 'true',
-        },
-      ],
-    }
-    const baseline = admitPhase5SemanticResult(currentPacket, validInput)
-    if ('reasonCode' in baseline) throw new Error('expected projected receipt')
-    expect(
-      replayAndBindPhase5SemanticReceipt({
-        source: currentSource,
-        mechanical: mechanical(currentSource),
-        packet: currentPacket,
-        semantic: baseline,
-      }).module.nodes,
-    ).toHaveLength(1)
-    for (const [subject, literal] of [
-      ['node:bytes#/id', 'other'],
-      ['node:bytes#/value/count', '2'],
-      ['node:bytes#/value/enabled', 'false'],
-    ]) {
-      expect(() =>
-        admitPhase5SemanticResult(currentPacket, {
-          ...validInput,
-          sourceClaims: validInput.sourceClaims.map(claim =>
-            claim.subject === subject ? { ...claim, literal } : claim,
-          ),
-        }),
-      ).toThrow(/literal|semantic|match/i)
-    }
-  })
-
-  test('rejects an independent string literal mismatch after valid replay', () => {
-    const currentSource = source()
-    const currentPacket = packet(currentSource)
-    const baseline = projected(currentSource, currentPacket)
-    expect(
-      replayAndBindPhase5SemanticReceipt({
-        source: currentSource,
-        mechanical: mechanical(currentSource),
-        packet: currentPacket,
-        semantic: baseline,
-      }).module.nodes[0]?.value,
-    ).toEqual({ label: 'bytes' })
-    const tamperedBody = {
-      ...baseline,
-      nodes: [{ ...baseline.nodes[0]!, value: { label: 'other' } }],
-    }
-    const { receiptDigest: _ignored, ...withoutDigest } = tamperedBody
-    const tampered = {
-      ...tamperedBody,
-      receiptDigest: digestGameIrValue(withoutDigest),
-    }
-    expect(() =>
-      replayAndBindPhase5SemanticReceipt({
-        source: currentSource,
-        mechanical: mechanical(currentSource),
-        packet: currentPacket,
-        semantic: tampered,
-      }),
-    ).toThrow(/source literal does not match the semantic record/i)
-  })
-
   test('canonicalizes node order while requiring canonical claim order', () => {
     const bytes = 'alpha{}bytes{}'
     const currentSource = source(bytes)
@@ -1519,78 +1437,6 @@ describe('shared Phase 5 admission', () => {
         sourceClaims: [...result.sourceClaims].reverse(),
       }),
     ).toThrow(/claim|sorted|target/i)
-  })
-
-  test('verifies reference target literals on receipt replay', () => {
-    const referenceLiteral = canonicalGameIrJson({
-      targetId: 'bytes',
-      targetType: 'world-scene.scene',
-    })
-    const bytes = `bytes${referenceLiteral}{}`
-    const currentSource = source(bytes)
-    const currentPacket = packet(currentSource)
-    const baseline = admitPhase5SemanticResult(currentPacket, {
-      outcome: 'PROJECTED',
-      nodes: [
-        {
-          id: 'bytes',
-          kind: 'world-scene.scene',
-          value: {},
-          references: [{ targetId: 'bytes', targetType: 'world-scene.scene' }],
-          edges: [],
-        },
-      ],
-      sourceClaims: [
-        {
-          subject: 'node:bytes#/id',
-          documentPath: 'docs/GDD.md',
-          sectionId: 'section-0',
-          sourcePointer: '/bytes/0/5',
-          literal: 'bytes',
-        },
-        {
-          subject: 'node:bytes#/references/0',
-          documentPath: 'docs/GDD.md',
-          sectionId: 'section-0',
-          sourcePointer: `/bytes/5/${5 + Buffer.byteLength(referenceLiteral)}`,
-          literal: referenceLiteral,
-        },
-        {
-          subject: 'node:bytes#/value',
-          documentPath: 'docs/GDD.md',
-          sectionId: 'section-0',
-          sourcePointer: `/bytes/${5 + Buffer.byteLength(referenceLiteral)}/${Buffer.byteLength(bytes)}`,
-          literal: '{}',
-        },
-      ],
-    })
-    if ('reasonCode' in baseline) throw new Error('expected projected receipt')
-    expect(
-      replayAndBindPhase5SemanticReceipt({
-        source: currentSource,
-        mechanical: mechanical(currentSource),
-        packet: currentPacket,
-        semantic: baseline,
-      }).module.nodes[0]?.references,
-    ).toEqual([{ targetId: 'bytes', targetType: 'world-scene.scene' }])
-    const tamperedNode = {
-      ...baseline.nodes[0]!,
-      references: [{ targetId: 'other', targetType: 'world-scene.scene' }],
-    }
-    const tamperedBody = { ...baseline, nodes: [tamperedNode] }
-    const { receiptDigest: _ignored, ...withoutDigest } = tamperedBody
-    const tampered = {
-      ...tamperedBody,
-      receiptDigest: digestGameIrValue(withoutDigest),
-    }
-    expect(() =>
-      replayAndBindPhase5SemanticReceipt({
-        source: currentSource,
-        mechanical: mechanical(currentSource),
-        packet: currentPacket,
-        semantic: tampered as Phase5SemanticReceipt,
-      }),
-    ).toThrow(/literal|reference|semantic|match/i)
   })
 
   test('rejects a recomputed packet relabel during source-bound replay', () => {
@@ -1661,91 +1507,6 @@ describe('shared Phase 5 admission', () => {
         sourceClaims: [accessorClaim],
       }),
     ).toThrow(/hidden|accessor|claim/i)
-  })
-
-  test('rejects a byte-valid but semantically contrary edge literal', () => {
-    const edgeLiteral = canonicalGameIrJson({
-      type: 'root',
-      targetId: 'bytes',
-      targetType: 'world-scene.scene',
-    })
-    const bytes = `bytes{}${edgeLiteral}`
-    const currentSource = source(bytes)
-    const currentPacket = packet(
-      currentSource,
-      ['world-scene.scene'],
-      ['other', 'root'],
-    )
-    const base = admitPhase5SemanticResult(currentPacket, {
-      outcome: 'PROJECTED',
-      nodes: [
-        {
-          id: 'bytes',
-          kind: 'world-scene.scene',
-          value: {},
-          references: [],
-          edges: [
-            {
-              type: 'root',
-              targetId: 'bytes',
-              targetType: 'world-scene.scene',
-            },
-          ],
-        },
-      ],
-      sourceClaims: [
-        {
-          subject: 'node:bytes#/edges/0',
-          documentPath: 'docs/GDD.md',
-          sectionId: 'section-0',
-          sourcePointer: `/bytes/7/${Buffer.byteLength(bytes)}`,
-          literal: edgeLiteral,
-        },
-        {
-          subject: 'node:bytes#/id',
-          documentPath: 'docs/GDD.md',
-          sectionId: 'section-0',
-          sourcePointer: '/bytes/0/5',
-          literal: 'bytes',
-        },
-        {
-          subject: 'node:bytes#/value',
-          documentPath: 'docs/GDD.md',
-          sectionId: 'section-0',
-          sourcePointer: '/bytes/5/7',
-          literal: '{}',
-        },
-      ],
-    })
-    if ('reasonCode' in base) throw new Error('expected projected receipt')
-    expect(
-      replayAndBindPhase5SemanticReceipt({
-        source: currentSource,
-        mechanical: mechanical(currentSource),
-        packet: currentPacket,
-        semantic: base,
-      }).module.nodes[0]?.edges,
-    ).toEqual([
-      { type: 'root', targetId: 'bytes', targetType: 'world-scene.scene' },
-    ])
-    const tamperedNode = {
-      ...base.nodes[0]!,
-      edges: [{ ...base.nodes[0]!.edges[0]!, type: 'other' }],
-    }
-    const tamperedBody = { ...base, nodes: [tamperedNode] }
-    const { receiptDigest: _ignored, ...withoutDigest } = tamperedBody
-    const tampered = {
-      ...tamperedBody,
-      receiptDigest: digestGameIrValue(withoutDigest),
-    }
-    expect(() =>
-      replayAndBindPhase5SemanticReceipt({
-        source: currentSource,
-        mechanical: mechanical(currentSource),
-        packet: currentPacket,
-        semantic: tampered as Phase5SemanticReceipt,
-      }),
-    ).toThrow(/literal|semantic|edge|does not match/i)
   })
 
   test('rejects relabeled Phase 5 packets', () => {

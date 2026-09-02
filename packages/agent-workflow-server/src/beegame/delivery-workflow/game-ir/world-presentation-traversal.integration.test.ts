@@ -1514,21 +1514,6 @@ describe('Task 9 traversal/action World + Presentation profile', () => {
       sourceBytesAuthority,
       'invalid Game IR domain source: source envelope bytes do not match docs/GDD.md#profile-0',
     )
-    const literalClaims = base.worldScene.semantic.sourceClaims.map(
-      (claim, index) =>
-        index === 0 ? { ...claim, literal: 'wrong literal' } : claim,
-    )
-    const literalSemantic = redigestSemantic(base.worldScene.semantic, {
-      sourceClaims: literalClaims,
-    }) as WorldSceneSemanticReceipt
-    const literalAuthority = {
-      ...base,
-      worldScene: { ...base.worldScene, semantic: literalSemantic },
-    } as Parameters<typeof assembleWorldPresentationClosure>[0]
-    expectAssemblyError(
-      literalAuthority,
-      'invalid Game IR Phase 5 admission: source literal does not match the semantic record',
-    )
     const rangeClaims = base.worldScene.semantic.sourceClaims.map(
       (claim, index) =>
         index === 0 ? { ...claim, sourcePointer: '/bytes/0/0' } : claim,

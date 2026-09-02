@@ -11,20 +11,38 @@ import {
   type ImplementationVerificationValidationPreparationAuthority,
 } from './phase7-admission'
 import {
+  buildImplementationVerificationSemanticPacket,
   prepareImplementationVerificationModule,
   type ImplementationVerificationSemanticReceipt,
 } from './implementation-verification-producer'
 import {
   canonicalGameIrJson,
+  compareCodeUnits,
   digestGameIrValue,
   parseGameIrCandidate,
   type GameIrCandidate,
   type GameIrModuleCandidate,
 } from './model'
-import type { GameIrDomainSourceEnvelope } from './domain-source'
-import type { GameIrMechanicalProjectionReceipt } from './domain-projection'
+import {
+  validateGameIrDomainSourceEnvelope,
+  type GameIrDomainSourceEnvelope,
+} from './domain-source'
+import type {
+  GameIrDomainSemanticPacket,
+  GameIrMechanicalProjectionReceipt,
+} from './domain-projection'
 import type { SemanticValidationResult } from './semantic-fidelity'
 import { createSemanticFidelityPrimitives } from './semantic-fidelity'
+import {
+  buildDomainProjectionEnvelope,
+  normalizeDomainProjectionEnvelope,
+  operationIsRecord,
+  operationTargets,
+  emptyOperationMechanicalReceipt,
+  type DomainProjectionEnvelope,
+  type OperationTarget,
+} from './operation-packet-primitives'
+import { IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST } from './implementation-verification-schema'
 
 const ERROR_PREFIX = 'invalid Game IR Implementation/Verification assembly'
 const { exactKeys } = createSemanticFidelityPrimitives(ERROR_PREFIX)
@@ -38,6 +56,179 @@ export type ImplementationVerificationAssemblyAuthority = Readonly<{
     validation: SemanticValidationResult
   }>
 }>
+
+export type ImplementationVerificationProjectionOperationDependencies =
+  Readonly<{
+    phase6ClosureDigest: string
+    priorTargets: readonly OperationTarget[]
+  }>
+export type ImplementationVerificationProjectionOperationPacket =
+  DomainProjectionEnvelope<
+    ImplementationVerificationProjectionOperationDependencies,
+    GameIrDomainSemanticPacket,
+    'game-ir-implementation-verification-projection-operation-packet.v1'
+  >
+export type ImplementationVerificationProjectionOperationInput = Readonly<{
+  phase6Authority: ResourceRealizationAssemblyAuthority
+  source: GameIrDomainSourceEnvelope
+  mechanical: GameIrMechanicalProjectionReceipt
+}>
+
+function implementationPriorTargets(
+  phase6: ResourceRealizationClosure,
+): readonly OperationTarget[] {
+  const local = new Set(
+    Object.keys(IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST),
+  )
+  const allowed = new Set<string>()
+  for (const descriptor of Object.values(
+    IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST,
+  ))
+    for (const relation of Object.values(descriptor.relationships))
+      for (const kind of relation.targetKinds)
+        if (!local.has(kind)) allowed.add(kind)
+  return operationTargets(
+    [
+      ...phase6.phase5.phase4.gameplay.module.nodes,
+      ...phase6.phase5.phase4.balance.module.nodes,
+      ...phase6.phase5.worldScene.module.nodes,
+      ...phase6.phase5.presentation.module.nodes,
+      ...phase6.resourceRealization.module.nodes,
+    ]
+      .filter(node => allowed.has(node.kind))
+      .map(node => ({ id: node.id, kind: node.kind }))
+      .sort((left, right) =>
+        compareCodeUnits(
+          `${left.id}\0${left.kind}`,
+          `${right.id}\0${right.kind}`,
+        ),
+      ),
+    'Implementation/Verification operation priorTargets',
+  )
+}
+
+function implementationOperationIdentity(
+  source: GameIrDomainSourceEnvelope,
+  phase6: ResourceRealizationClosure,
+): void {
+  if (
+    source.taskId !== phase6.taskId ||
+    source.compileRequest.foundation.foundationRevision !==
+      phase6.foundationRevision ||
+    source.compileRequest.foundation.receiptDigest !==
+      phase6.foundationReceiptDigest ||
+    digestGameIrValue(source.compileRequest) !== phase6.compileRequestDigest ||
+    digestGameIrValue(source.authoritySectionIndex) !==
+      phase6.authoritySectionIndexDigest
+  )
+    fail(
+      'Implementation/Verification operation source is detached from Phase 6 closure',
+    )
+}
+
+function implementationOperationDependencies(
+  phase6Authority: ResourceRealizationAssemblyAuthority,
+): Readonly<{
+  phase6: ResourceRealizationClosure
+  dependencies: ImplementationVerificationProjectionOperationDependencies
+}> {
+  const phase6 = assembleResourceRealizationClosure(phase6Authority)
+  return {
+    phase6,
+    dependencies: {
+      phase6ClosureDigest: phase6.closureDigest,
+      priorTargets: implementationPriorTargets(phase6),
+    },
+  }
+}
+
+export function buildImplementationVerificationProjectionOperationPacket(
+  input: ImplementationVerificationProjectionOperationInput,
+): ImplementationVerificationProjectionOperationPacket {
+  if (!isRecord(input))
+    fail('Implementation/Verification operation input must be an object')
+  exactKeys(
+    input,
+    ['phase6Authority', 'source', 'mechanical'],
+    'Implementation/Verification operation input',
+  )
+  const source = validateGameIrDomainSourceEnvelope(input.source)
+  if (source.moduleId !== 'implementation-verification')
+    fail('Implementation/Verification operation source module is invalid')
+  const { phase6, dependencies } = implementationOperationDependencies(
+    input.phase6Authority,
+  )
+  implementationOperationIdentity(source, phase6)
+  const semanticPacket = buildImplementationVerificationSemanticPacket({
+    source,
+    mechanical: input.mechanical,
+  })
+  return buildDomainProjectionEnvelope({
+    schemaVersion:
+      'game-ir-implementation-verification-projection-operation-packet.v1',
+    moduleId: 'implementation-verification',
+    source,
+    semanticPacket,
+    dependencies,
+  })
+}
+
+export function normalizeImplementationVerificationProjectionOperationPacket(
+  value: unknown,
+  phase6Authority: ResourceRealizationAssemblyAuthority,
+): ImplementationVerificationProjectionOperationPacket {
+  const normalized = normalizeDomainProjectionEnvelope(value, {
+    schemaVersion:
+      'game-ir-implementation-verification-projection-operation-packet.v1',
+    moduleId: 'implementation-verification',
+    label: 'Implementation/Verification operation packet',
+    parseDependencies: dependency => {
+      if (!operationIsRecord(dependency))
+        fail(
+          'Implementation/Verification operation dependencies must be an object',
+        )
+      exactKeys(
+        dependency,
+        ['phase6ClosureDigest', 'priorTargets'],
+        'Implementation/Verification operation dependencies',
+      )
+      if (
+        typeof dependency.phase6ClosureDigest !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(dependency.phase6ClosureDigest)
+      )
+        fail('Implementation/Verification phase6 closure digest is invalid')
+      return {
+        phase6ClosureDigest: dependency.phase6ClosureDigest,
+        priorTargets: operationTargets(
+          dependency.priorTargets,
+          'Implementation/Verification operation priorTargets',
+        ),
+      }
+    },
+  })
+  const { phase6, dependencies } =
+    implementationOperationDependencies(phase6Authority)
+  implementationOperationIdentity(normalized.source, phase6)
+  const expectedSemanticPacket = buildImplementationVerificationSemanticPacket({
+    source: normalized.source,
+    mechanical: emptyOperationMechanicalReceipt(normalized.source),
+  })
+  if (
+    canonicalGameIrJson(normalized.semanticPacket) !==
+    canonicalGameIrJson(expectedSemanticPacket)
+  )
+    fail(
+      'Implementation/Verification operation semantic packet is stale or detached',
+    )
+  if (
+    canonicalGameIrJson(normalized.dependencies) !==
+    canonicalGameIrJson(dependencies)
+  )
+    fail(
+      'Implementation/Verification operation dependencies are stale or detached',
+    )
+  return normalized
+}
 
 export type ImplementationVerificationModuleProjection = Readonly<{
   schemaVersion: 'game-ir-implementation-verification-module.v1'

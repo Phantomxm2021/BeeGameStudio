@@ -3,6 +3,53 @@ import {
   type GameIrModuleCandidate,
   type GameIrNode,
 } from './model'
+import {
+  projectionBoolean,
+  projectionEnum,
+  projectionFiniteNumber,
+  projectionText,
+  projectionValueFields,
+  projectionValueOptionalFields,
+  projectionValueSchema,
+} from './projection-schema'
+
+const PRESENTATION_TRIGGER = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    kind: {
+      enum: [
+        'automatic',
+        'event',
+        'action',
+        'state',
+        'world-scene',
+        'camera-region',
+      ],
+    },
+  },
+  required: ['kind'],
+} as const
+const PRESENTATION_REQUIREMENTS = {
+  type: 'array',
+  minItems: 1,
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      requirementId: {
+        type: 'string',
+        minLength: 1,
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$',
+      },
+      kind: { enum: ['ui', 'animation', 'vfx', 'audio', 'music'] },
+      runtimeRole: {
+        enum: ['screen', 'clip', 'effect', 'cue', 'voice', 'music'],
+      },
+    },
+    required: ['requirementId', 'kind', 'runtimeRole'],
+  },
+} as const
 
 export type PresentationRelationshipCardinality =
   | 'exactly-one'
@@ -38,8 +85,7 @@ export type PresentationLogicalResourceRequirement = Readonly<{
 }>
 
 type PresentationManifestEntry = Readonly<{
-  valueFields: readonly string[]
-  optionalValueFields?: readonly string[]
+  valueJsonSchema: Readonly<Record<string, unknown>>
   requirementPolicy?: PresentationRequirementPolicy
   relationships: Readonly<Record<string, PresentationRelationshipRole>>
 }>
@@ -59,8 +105,14 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
   Record<string, PresentationManifestEntry>
 > = Object.freeze({
   'presentation.ui-screen': Object.freeze({
-    valueFields: Object.freeze(['label', 'modal']),
-    optionalValueFields: Object.freeze(['requirements']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        label: projectionText('UI screen label'),
+        modal: projectionBoolean('whether the screen is modal'),
+        requirements: PRESENTATION_REQUIREMENTS,
+      },
+      ['requirements'],
+    ),
     requirementPolicy: requirement('ui', ['screen']),
     relationships: Object.freeze({
       'initial-state': role(['presentation.ui-state'], 'exactly-one'),
@@ -71,7 +123,10 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.ui-state': Object.freeze({
-    valueFields: Object.freeze(['label', 'terminal']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('UI state label'),
+      terminal: projectionBoolean('whether the UI state is terminal'),
+    }),
     relationships: Object.freeze({
       screen: role(['presentation.ui-screen'], 'exactly-one'),
       'driven-by': role(
@@ -81,7 +136,13 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.ui-action': Object.freeze({
-    valueFields: Object.freeze(['label', 'input']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('UI action label'),
+      input: projectionEnum(
+        ['button', 'pointer', 'key', 'gesture', 'system'],
+        'input kind',
+      ),
+    }),
     relationships: Object.freeze({
       screen: role(['presentation.ui-screen'], 'exactly-one'),
       invokes: role(['gameplay.action'], 'exactly-one'),
@@ -89,7 +150,13 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.feedback': Object.freeze({
-    valueFields: Object.freeze(['label', 'channel']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('feedback label'),
+      channel: projectionEnum(
+        ['text', 'icon', 'meter', 'haptic', 'flash'],
+        'feedback channel',
+      ),
+    }),
     relationships: Object.freeze({
       on: role(
         ['gameplay.event', 'gameplay.state', 'gameplay.action'],
@@ -99,7 +166,14 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.camera-behavior': Object.freeze({
-    valueFields: Object.freeze(['label', 'mode', 'duration']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('camera behavior label'),
+      mode: projectionEnum(
+        ['follow', 'fixed', 'blend', 'cut', 'shake'],
+        'camera mode',
+      ),
+      duration: projectionFiniteNumber('camera duration'),
+    }),
     relationships: Object.freeze({
       region: role(['world-scene.camera-region'], 'exactly-one'),
       on: role(
@@ -109,8 +183,15 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.animation-clip': Object.freeze({
-    valueFields: Object.freeze(['label', 'loop', 'playbackRate']),
-    optionalValueFields: Object.freeze(['requirements']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        label: projectionText('animation clip label'),
+        loop: projectionBoolean('whether animation loops'),
+        playbackRate: projectionFiniteNumber('animation playback rate'),
+        requirements: PRESENTATION_REQUIREMENTS,
+      },
+      ['requirements'],
+    ),
     requirementPolicy: requirement('animation', ['clip']),
     relationships: Object.freeze({
       target: role(
@@ -120,7 +201,9 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.animation-state': Object.freeze({
-    valueFields: Object.freeze(['label']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('animation state label'),
+    }),
     relationships: Object.freeze({
       clip: role(['presentation.animation-clip'], 'exactly-one'),
       on: role(
@@ -130,8 +213,17 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.vfx-cue': Object.freeze({
-    valueFields: Object.freeze(['label', 'trigger']),
-    optionalValueFields: Object.freeze(['requirements']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        label: projectionText('VFX cue label'),
+        trigger: projectionEnum(
+          ['instant', 'attached', 'persistent'],
+          'VFX trigger',
+        ),
+        requirements: PRESENTATION_REQUIREMENTS,
+      },
+      ['requirements'],
+    ),
     requirementPolicy: requirement('vfx', ['effect']),
     relationships: Object.freeze({
       on: role(
@@ -145,7 +237,10 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.audio-event': Object.freeze({
-    valueFields: Object.freeze(['label', 'spatial']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('audio event label'),
+      spatial: projectionBoolean('whether audio is spatial'),
+    }),
     relationships: Object.freeze({
       on: role(
         ['gameplay.event', 'gameplay.state', 'gameplay.action'],
@@ -154,8 +249,14 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.audio-cue': Object.freeze({
-    valueFields: Object.freeze(['label', 'volume']),
-    optionalValueFields: Object.freeze(['requirements']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        label: projectionText('audio cue label'),
+        volume: projectionFiniteNumber('audio cue volume'),
+        requirements: PRESENTATION_REQUIREMENTS,
+      },
+      ['requirements'],
+    ),
     requirementPolicy: requirement('audio', ['cue', 'voice']),
     relationships: Object.freeze({
       event: role(['presentation.audio-event'], 'exactly-one'),
@@ -172,8 +273,14 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.music-state': Object.freeze({
-    valueFields: Object.freeze(['label', 'intensity']),
-    optionalValueFields: Object.freeze(['requirements']),
+    valueJsonSchema: projectionValueSchema(
+      {
+        label: projectionText('music state label'),
+        intensity: projectionFiniteNumber('music intensity'),
+        requirements: PRESENTATION_REQUIREMENTS,
+      },
+      ['requirements'],
+    ),
     requirementPolicy: requirement('music', ['music']),
     relationships: Object.freeze({
       on: role(
@@ -183,7 +290,10 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
     }),
   }),
   'presentation.transition': Object.freeze({
-    valueFields: Object.freeze(['label', 'trigger']),
+    valueJsonSchema: projectionValueSchema({
+      label: projectionText('presentation transition label'),
+      trigger: PRESENTATION_TRIGGER,
+    }),
     relationships: Object.freeze({
       from: role(['presentation.ui-state'], 'exactly-one'),
       to: role(['presentation.ui-state'], 'exactly-one'),
@@ -385,7 +495,7 @@ function parseValue(
   const descriptor = PRESENTATION_DOMAIN_MANIFEST[node.kind]!
   allowedKeys(
     node.value,
-    [...descriptor.valueFields, ...(descriptor.optionalValueFields ?? [])],
+    projectionValueFields(descriptor.valueJsonSchema),
     `node ${node.id} value`,
   )
   const result: RecordValue = {
@@ -454,7 +564,9 @@ function parseValue(
     result.trigger = parseTrigger(node.value.trigger, `node ${node.id} trigger`)
   } else fail(`node ${node.id} has an unknown kind`)
   if (
-    descriptor.optionalValueFields?.includes('requirements') &&
+    projectionValueOptionalFields(descriptor.valueJsonSchema).includes(
+      'requirements',
+    ) &&
     Object.hasOwn(node.value, 'requirements')
   ) {
     if (node.value.requirements === undefined)

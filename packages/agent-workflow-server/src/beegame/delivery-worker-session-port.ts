@@ -31,13 +31,32 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationRevisionToolResultSchema, foundationSemanticModelPayloadSchema, foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema, gameIrCompilerModelPayloadSchema, gameIrCompilerStructuredOutputJsonSchema, gameIrCompilerTerminalSchema } from './delivery-workflow/worker-contracts'
+import {
+  buildFoundationFactStructuredOutputJsonSchema,
+  foundationDocumentReviserTerminalSchema,
+  foundationFactExtractorTerminalSchema,
+  foundationFactModelPayloadSchema,
+  foundationRevisionToolResultSchema,
+  foundationSemanticModelPayloadSchema,
+  foundationSemanticRecheckStructuredOutputJsonSchema,
+  foundationSemanticRecheckTerminalSchema,
+  foundationSemanticRecheckWorkerPayloadSchema,
+  foundationSemanticReviewerTerminalSchema,
+  foundationSemanticReviewerStructuredOutputJsonSchema,
+  gameIrCompilerTerminalSchema,
+  gameIrValidationStructuredOutputJsonSchema,
+  parseGameIrCompilerModelPayload,
+} from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
   BeeGameSessionLanguage,
 } from './session-manager'
-import { selectFoundationFactFastRuntime, selectFoundationSemanticRuntime } from './session-manager'
+import {
+  selectFoundationFactFastRuntime,
+  selectFoundationSemanticRuntime,
+  WorkflowWorkerRebindError,
+} from './session-manager'
 import { mapModelConfigToRuntime } from '@bee-game-studio/agent-workflow'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import {
@@ -62,6 +81,14 @@ import {
   type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
 import { buildChecklistAuthorityProjection } from './checklist-authority-projection'
+import { canonicalGameIrJson } from './delivery-workflow/game-ir/model'
+import { type GameIrProjectionModuleId } from './delivery-workflow/game-ir/projection-contract'
+import {
+  deriveProjectionSlicePlan,
+  normalizeGameIrProjectionSliceContext,
+  type GameIrProjectionSlice,
+} from './delivery-workflow/game-ir/projection-slices'
+import { parseGameIrProjectionRecordStream } from './delivery-workflow/game-ir/projection-record-stream'
 
 type FoundationFactPacketContract = {
   keys: FoundationFactKey[]
@@ -139,7 +166,8 @@ function foundationFactPacketForRequest(
     throw new Error('foundation fact extractor requires one complete packet')
   const completePacket = {
     keys: (packet as { keys: FoundationFactKey[] }).keys,
-    sections: (packet as { sections: FoundationFactPacketContract['sections'] }).sections,
+    sections: (packet as { sections: FoundationFactPacketContract['sections'] })
+      .sections,
   }
   for (const key of completePacket.keys)
     foundationFactOwnerSection(completePacket, key)
@@ -166,8 +194,7 @@ function assertFoundationStructuredOutputWithinInfrastructureBoundary(
   if (serialized === undefined)
     throw new Error('foundation structured output is not serializable')
   if (
-    Buffer.byteLength(serialized, 'utf8') >
-    FOUNDATION_WORKER_OUTPUT_MAX_BYTES
+    Buffer.byteLength(serialized, 'utf8') > FOUNDATION_WORKER_OUTPUT_MAX_BYTES
   ) {
     const error = new Error(
       `foundation structured output exceeds infrastructure boundary (${FOUNDATION_WORKER_OUTPUT_MAX_BYTES} bytes)`,
@@ -187,6 +214,181 @@ function taskTypeForWorker(
     workerType === 'implementation-worker'
     ? 'edit_turn'
     : 'agent_turn'
+}
+
+function gameIrOperationForRequest(
+  request: WorkerDispatchRequest,
+): 'projection' | 'validation' {
+  if (request.workerType !== 'game-ir-compiler')
+    throw new Error('Game IR operation requested for a non-Game IR worker')
+  if (
+    request.contract.kind === 'projection' ||
+    request.contract.kind === 'validation'
+  )
+    return request.contract.kind
+  throw new Error(
+    'Game IR worker requires one operation kind: projection or validation',
+  )
+}
+
+function gameIrProjectionModuleForRequest(
+  request: WorkerDispatchRequest,
+): GameIrProjectionModuleId {
+  if (request.workerType !== 'game-ir-compiler')
+    throw new Error(
+      'Game IR projection module requested for a non-Game IR worker',
+    )
+  const packet = request.contract.packet
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+    throw new Error('Game IR compiler requires one immutable operation packet')
+  const source = (packet as Record<string, unknown>).source
+  const projectionContract = (packet as Record<string, unknown>)
+    .projectionContract
+  if (
+    !source ||
+    typeof source !== 'object' ||
+    Array.isArray(source) ||
+    !projectionContract ||
+    typeof projectionContract !== 'object' ||
+    Array.isArray(projectionContract)
+  )
+    throw new Error(
+      'Game IR operation packet is missing its schema-owned projection contract',
+    )
+  const moduleId = (source as Record<string, unknown>).moduleId
+  const contractModuleId = (projectionContract as Record<string, unknown>)
+    .moduleId
+  if (
+    moduleId !== contractModuleId ||
+    ![
+      'gameplay',
+      'balance',
+      'world-scene',
+      'presentation',
+      'resource-realization',
+      'implementation-verification',
+    ].includes(moduleId as string)
+  )
+    throw new Error('Game IR operation packet projection contract is detached')
+  return moduleId as GameIrProjectionModuleId
+}
+
+function gameIrProjectionSliceForRequest(
+  request: WorkerDispatchRequest,
+): GameIrProjectionSlice {
+  const moduleId = gameIrProjectionModuleForRequest(request)
+  const candidate = request.contract.currentSlice
+  const sliceId =
+    typeof candidate === 'string'
+      ? candidate
+      : candidate &&
+          typeof candidate === 'object' &&
+          !Array.isArray(candidate) &&
+          typeof (candidate as Record<string, unknown>).sliceId === 'string'
+        ? (candidate as Record<string, unknown>).sliceId
+        : undefined
+  if (typeof sliceId !== 'string' || !sliceId)
+    throw new Error(
+      'Game IR projection request is missing its exact current slice',
+    )
+  const canonical = deriveProjectionSlicePlan(moduleId).slices.find(
+    slice => slice.sliceId === sliceId,
+  )
+  if (!canonical)
+    throw new Error('Game IR projection current slice is stale or detached')
+  normalizeGameIrProjectionSliceContext({
+    moduleId,
+    sliceId,
+    value: request.contract.sliceContext,
+  })
+  if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+    const keys = Object.keys(candidate).sort()
+    const nodeKinds = (candidate as Record<string, unknown>).nodeKinds
+    const nodes = (candidate as Record<string, unknown>).nodes
+    const exact =
+      keys.length === 3 &&
+      keys[0] === 'nodeKinds' &&
+      keys[1] === 'nodes' &&
+      keys[2] === 'sliceId'
+    if (exact) {
+      if (
+        canonicalGameIrJson({ sliceId, nodeKinds, nodes }) !==
+        canonicalGameIrJson(canonical)
+      )
+        throw new Error(
+          'Game IR projection current slice contract is not canonical',
+        )
+    } else if (keys.length !== 1 || keys[0] !== 'sliceId') {
+      throw new Error(
+        'Game IR projection current slice contract is not canonical',
+      )
+    }
+  }
+  return canonical
+}
+
+function gameIrProjectionRecordStreamContract(request: WorkerDispatchRequest) {
+  const slice = gameIrProjectionSliceForRequest(request)
+  return {
+    version: 1 as const,
+    terminalRecord: { record: 'done', sliceId: slice.sliceId },
+  }
+}
+
+function assertGameIrOperationRequest(
+  request: WorkerDispatchRequest,
+  dispatchId: string,
+): void {
+  const packet = request.contract.packet
+  if (
+    packet === null ||
+    typeof packet !== 'object' ||
+    Array.isArray(packet) ||
+    (Object.getPrototypeOf(packet) !== Object.prototype &&
+      Object.getPrototypeOf(packet) !== null)
+  )
+    throw new Error('Game IR operation packet is missing or invalid')
+  if (!request.runId || !dispatchId || !request.taskId || !request.revision)
+    throw new Error('Game IR compiler dispatch identity is incomplete')
+  if (request.contract.kind === 'projection')
+    gameIrProjectionSliceForRequest(request)
+  for (const [label, value] of [
+    ['compileRequestDigest', request.contract.compileRequestDigest],
+    [
+      'foundationReadyReceiptDigest',
+      request.contract.foundationReadyReceiptDigest,
+    ],
+  ] as const)
+    if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value))
+      throw new Error(`Game IR compiler ${label} is invalid`)
+}
+
+type LiveGameIrProjectionSession = {
+  sessionId: string
+  packetDigest: string
+  packetSent: boolean
+}
+
+function gameIrProjectionPacketDigest(request: WorkerDispatchRequest): string {
+  const packet = request.contract.packet
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+    throw new Error('Game IR projection packet is missing')
+  const packetDigest = (packet as Record<string, unknown>).packetDigest
+  if (typeof packetDigest !== 'string' || !/^[a-f0-9]{64}$/.test(packetDigest))
+    throw new Error('Game IR projection packet digest is invalid')
+  return packetDigest
+}
+
+function gameIrProjectionSessionKey(
+  request: WorkerDispatchRequest,
+  packetDigest: string,
+): string {
+  return [
+    request.runId,
+    request.taskId ?? '',
+    gameIrProjectionModuleForRequest(request),
+    packetDigest,
+  ].join('\0')
 }
 
 export async function buildDocumentAuthorAuthorityBlock(
@@ -297,7 +499,9 @@ export async function buildDocumentAuthorAuthorityBlock(
     targetExists
       ? `An existing ${targetPath} is present, but this stream must return a complete replacement Markdown body from current authority.`
       : `The assigned target is ${targetPath}.`,
-  ].filter(Boolean).join('\n\n')
+  ]
+    .filter(Boolean)
+    .join('\n\n')
 }
 
 async function durableWriteProjection(
@@ -343,6 +547,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
     FoundationAuthorityProjection
   >()
   const eventOffsets = new Map<string, number>()
+  const liveGameIrProjectionSessions = new Map<
+    string,
+    LiveGameIrProjectionSession
+  >()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
       ? input.sessions.events(sessionId)
@@ -356,20 +564,40 @@ export function createBeeGameDeliveryWorkerPort(input: {
   return {
     async assertFoundationFactFastReady(request) {
       if (request.workerType !== 'foundation-fact-extractor') return
-      const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
+      const runtime = input.modelConfigId
+        ? mapModelConfigToRuntime(input.modelConfigId)
+        : undefined
       if (runtime) selectFoundationFactFastRuntime(runtime, runtime.env)
     },
     async assertFoundationSemanticModelReady(request) {
       if (request.workerType !== 'foundation-semantic-reviewer') return
       const tier = request.contract.modelTier
-      if (tier !== 'fast' && tier !== 'balanced' && tier !== 'strong') throw new Error('foundation semantic model tier is missing')
-      const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
+      if (tier !== 'fast' && tier !== 'balanced' && tier !== 'strong')
+        throw new Error('foundation semantic model tier is missing')
+      const runtime = input.modelConfigId
+        ? mapModelConfigToRuntime(input.modelConfigId)
+        : undefined
       if (runtime) selectFoundationSemanticRuntime(runtime, runtime.env, tier)
     },
     async start(request: WorkerDispatchRequest) {
       const dispatchId = request.dispatchId ?? randomUUID()
-      const packetWorker = request.workerType === 'foundation-fact-extractor' || request.workerType === 'foundation-semantic-reviewer' || request.workerType === 'game-ir-compiler'
-      const revisionWorker = request.workerType === 'foundation-document-reviser'
+      if (
+        request.workerType === 'game-ir-compiler' &&
+        request.workflowJsonSchema !== undefined
+      )
+        throw new Error('Game IR StructuredOutput schema is service-owned')
+      const gameIrOperation =
+        request.workerType === 'game-ir-compiler'
+          ? gameIrOperationForRequest(request)
+          : undefined
+      if (request.workerType === 'game-ir-compiler')
+        assertGameIrOperationRequest(request, dispatchId)
+      const packetWorker =
+        request.workerType === 'foundation-fact-extractor' ||
+        request.workerType === 'foundation-semantic-reviewer' ||
+        request.workerType === 'game-ir-compiler'
+      const revisionWorker =
+        request.workerType === 'foundation-document-reviser'
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
@@ -384,49 +612,134 @@ export function createBeeGameDeliveryWorkerPort(input: {
         })
       }
       const authToken = await input.getAuthToken?.()
-      const session = input.sessions.start({
-        workspacePath: request.workspacePath,
-        projectId: request.projectId,
-        userId: input.userId,
-        ...(authToken ? { authToken } : {}),
-        ...(input.getAuthToken
-          ? { getValidAuthToken: input.getAuthToken }
-          : {}),
-        ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
-        ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
-        ...(input.language ? { language: input.language } : {}),
-        // Resource selection is a dedicated post-review capability. All
-        // other workers consume the resulting manifest as read-only input.
-        ...(request.workerType === 'resource-curator'
-          ? { resourceSelectionConfig: input.resourceSelectionConfig }
-          : {}),
-        workflowWorker: true,
-        workflowRunId: request.runId,
-        workflowDispatchId: dispatchId,
-        workflowWorkerType: request.workerType,
-        ...(request.workerType === 'document-author' && request.contract.documentSet === 'checklist'
-          ? { workflowAllowedTools: ['Write', 'Edit'] }
-          : {}),
-        ...(request.contract.modelTier === 'fast' || request.contract.modelTier === 'balanced' || request.contract.modelTier === 'strong' ? { workflowModelTier: request.contract.modelTier } : {}),
-        ...(request.workerType === 'foundation-document-reviser' ? { workflowRevisionContract: request.contract } : {}),
-        workflowAllowedPaths: request.allowedPaths ?? [],
-        ...(request.workerType === 'foundation-fact-extractor'
-          ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactSchemaForRequest(request) }
-          : request.workerType === 'foundation-semantic-reviewer'
-            ? { workflowJsonSchema: request.workflowJsonSchema ?? (typeof request.contract.issueId === 'string' ? foundationSemanticRecheckStructuredOutputJsonSchema : foundationSemanticReviewerStructuredOutputJsonSchema) as unknown as Record<string, unknown> }
-            : request.workerType === 'game-ir-compiler'
-              ? { workflowJsonSchema: request.workflowJsonSchema ?? gameIrCompilerStructuredOutputJsonSchema as unknown as Record<string, unknown> }
-          : {}),
-        ...(packetWorker
-          ? { workflowProjectReadScope: 'empty' as const }
-          : request.projectReadScope
-          ? { workflowProjectReadScope: request.projectReadScope }
-          : {}),
-        ...(request.workerType !== 'resource-content-author' &&
-        request.protectedPaths
-          ? { workflowProtectedPaths: [...request.protectedPaths] }
-          : {}),
-        ...(request.workerType === 'resource-content-author'
+      const projectionPacketDigest =
+        gameIrOperation === 'projection'
+          ? gameIrProjectionPacketDigest(request)
+          : undefined
+      const projectionKey =
+        gameIrOperation === 'projection' && projectionPacketDigest
+          ? gameIrProjectionSessionKey(request, projectionPacketDigest)
+          : undefined
+      let existingProjection = projectionKey
+        ? liveGameIrProjectionSessions.get(projectionKey)
+        : undefined
+      let sessionId: string | undefined
+      if (existingProjection) {
+        const live = input.sessions.get(existingProjection.sessionId)
+        if (!live || live.status !== 'running') {
+          liveGameIrProjectionSessions.delete(projectionKey!)
+          existingProjection = undefined
+        } else {
+          if (typeof input.sessions.rebindWorkflowWorker !== 'function')
+            throw new Error('live Game IR projection session cannot be rebound')
+          try {
+            await input.sessions.rebindWorkflowWorker(
+              existingProjection.sessionId,
+              {
+                runId: request.runId,
+                dispatchId,
+                workerType: request.workerType,
+                workflowRecordStreamContract:
+                  gameIrProjectionRecordStreamContract(request),
+              },
+            )
+            sessionId = existingProjection.sessionId
+          } catch (error) {
+            // A schema-changing rebind is safe only when the native runner can
+            // resume the existing context. If it cannot, retire the binding
+            // and session before starting a fresh context that receives the
+            // immutable packet again. Otherwise a failed rebind would leave
+            // the live map pointing at a session the next dispatch cannot
+            // safely reuse.
+            const staleSessionId = existingProjection.sessionId
+            await disposeWorkflowSession(staleSessionId)
+            liveGameIrProjectionSessions.delete(projectionKey!)
+            existingProjection = undefined
+            if (
+              !(error instanceof WorkflowWorkerRebindError) ||
+              error.code !== 'native_resume_unavailable'
+            )
+              throw error
+          }
+        }
+      }
+      if (sessionId === undefined)
+        sessionId = input.sessions.start({
+          workspacePath: request.workspacePath,
+          projectId: request.projectId,
+          userId: input.userId,
+          ...(authToken ? { authToken } : {}),
+          ...(input.getAuthToken
+            ? { getValidAuthToken: input.getAuthToken }
+            : {}),
+          ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
+          ...(input.modelConfigId
+            ? { modelConfigId: input.modelConfigId }
+            : {}),
+          ...(input.language ? { language: input.language } : {}),
+          // Resource selection is a dedicated post-review capability. All
+          // other workers consume the resulting manifest as read-only input.
+          ...(request.workerType === 'resource-curator'
+            ? { resourceSelectionConfig: input.resourceSelectionConfig }
+            : {}),
+          workflowWorker: true,
+          workflowRunId: request.runId,
+          workflowDispatchId: dispatchId,
+          workflowWorkerType: request.workerType,
+          ...(request.workerType === 'document-author' &&
+          request.contract.documentSet === 'checklist'
+            ? { workflowAllowedTools: ['Write', 'Edit'] }
+            : {}),
+          ...(request.contract.modelTier === 'fast' ||
+          request.contract.modelTier === 'balanced' ||
+          request.contract.modelTier === 'strong'
+            ? { workflowModelTier: request.contract.modelTier }
+            : {}),
+          ...(request.workerType === 'foundation-document-reviser'
+            ? { workflowRevisionContract: request.contract }
+            : {}),
+          workflowAllowedPaths: request.allowedPaths ?? [],
+          ...(request.workerType === 'foundation-fact-extractor'
+            ? {
+                workflowJsonSchema:
+                  request.workflowJsonSchema ??
+                  foundationFactSchemaForRequest(request),
+              }
+            : request.workerType === 'foundation-semantic-reviewer'
+              ? {
+                  workflowJsonSchema:
+                    request.workflowJsonSchema ??
+                    ((typeof request.contract.issueId === 'string'
+                      ? foundationSemanticRecheckStructuredOutputJsonSchema
+                      : foundationSemanticReviewerStructuredOutputJsonSchema) as unknown as Record<
+                      string,
+                      unknown
+                    >),
+                }
+              : request.workerType === 'game-ir-compiler'
+                ? gameIrOperation === 'projection'
+                  ? {
+                      workflowRecordStreamContract:
+                        gameIrProjectionRecordStreamContract(request),
+                    }
+                  : {
+                      workflowJsonSchema:
+                        gameIrValidationStructuredOutputJsonSchema as unknown as Record<
+                          string,
+                          unknown
+                        >,
+                    }
+                : {}),
+          ...(packetWorker
+            ? { workflowProjectReadScope: 'empty' as const }
+            : request.projectReadScope
+              ? { workflowProjectReadScope: request.projectReadScope }
+              : {}),
+          ...(request.workerType !== 'resource-content-author' &&
+          request.protectedPaths
+            ? { workflowProtectedPaths: [...request.protectedPaths] }
+            : {}),
+          ...(request.workerType === 'resource-content-author'
             ? {
                 workflowReadOnlyPaths: [
                   ...(Array.isArray(request.contract.authorityPaths)
@@ -442,39 +755,50 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 ],
               }
             : {}),
-        ...(isStreamedFoundationAuthoringTurn(request)
-          ? {
-              workflowMarkdownStreamContract: {
-                workspacePath: request.workspacePath,
-                runId: request.runId,
-                dispatchId,
-                targetPath: request.contract
-                  .foundationDocumentPath as FoundationDocumentPath,
-                maxBytes: FOUNDATION_WORKER_OUTPUT_MAX_BYTES,
-              },
-            }
-          : {}),
-        ...(request.workerType === 'resource-content-author'
-          ? {
-              workflowResourceContentCommitContract:
-                resourceContentCommitContractSchema.parse({
+          ...(isStreamedFoundationAuthoringTurn(request)
+            ? {
+                workflowMarkdownStreamContract: {
+                  workspacePath: request.workspacePath,
+                  runId: request.runId,
                   dispatchId,
-                  inventoryRevision: request.contract.inventoryRevision,
-                  baselineResourceRevision:
-                    request.contract.baselineResourceRevision,
-                  requiredRequirementIds:
-                    request.contract.requiredRequirementIds,
-                  verifiedResourceIds: request.contract.verifiedResourceIds,
-                  inventoryBindings: request.contract.inventoryBindings,
-                  writablePaths: request.contract.repairPaths ?? [],
-                }),
-            }
-          : {}),
-      })
-      sessions.set(dispatchId, session.id)
+                  targetPath: request.contract
+                    .foundationDocumentPath as FoundationDocumentPath,
+                  maxBytes: FOUNDATION_WORKER_OUTPUT_MAX_BYTES,
+                },
+              }
+            : {}),
+          ...(request.workerType === 'resource-content-author'
+            ? {
+                workflowResourceContentCommitContract:
+                  resourceContentCommitContractSchema.parse({
+                    dispatchId,
+                    inventoryRevision: request.contract.inventoryRevision,
+                    baselineResourceRevision:
+                      request.contract.baselineResourceRevision,
+                    requiredRequirementIds:
+                      request.contract.requiredRequirementIds,
+                    verifiedResourceIds: request.contract.verifiedResourceIds,
+                    inventoryBindings: request.contract.inventoryBindings,
+                    writablePaths: request.contract.repairPaths ?? [],
+                  }),
+              }
+            : {}),
+        }).id
+      if (projectionKey && !existingProjection)
+        liveGameIrProjectionSessions.set(projectionKey, {
+          sessionId,
+          packetDigest: projectionPacketDigest!,
+          packetSent: false,
+        })
+      sessions.set(dispatchId, sessionId)
       requests.set(dispatchId, { ...request, dispatchId })
       documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
-      eventOffsets.set(dispatchId, 0)
+      eventOffsets.set(
+        dispatchId,
+        existingProjection && sessionId === existingProjection.sessionId
+          ? sessionEvents(sessionId).length
+          : 0,
+      )
       records.set(dispatchId, {
         dispatchId,
         workerType: request.workerType,
@@ -484,7 +808,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         status: 'running',
         startedAt: new Date().toISOString(),
       })
-      return { sessionId: session.id, dispatchId }
+      return { sessionId, dispatchId }
     },
     async submit(dispatchId, prompt) {
       const sessionId = sessions.get(dispatchId)
@@ -496,12 +820,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request?.workerType === 'foundation-fact-extractor' ||
         request?.workerType === 'foundation-semantic-reviewer' ||
         request?.workerType === 'game-ir-compiler'
-      const revisionWorker = request?.workerType === 'foundation-document-reviser'
+      const revisionWorker =
+        request?.workerType === 'foundation-document-reviser'
       const confirmedBriefContext =
         packetWorker || revisionWorker
           ? undefined
-          : input.confirmedBriefContext ??
-            (await input.getConfirmedBriefContext?.())
+          : (input.confirmedBriefContext ??
+            (await input.getConfirmedBriefContext?.()))
       const languageInstruction = input.language
         ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
         : ''
@@ -533,10 +858,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request?.workerType === 'document-author'
           ? ''
           : request?.workerType === 'change-impact-analyzer'
-              ? 'Submit the analysis through SubmitChangeImpactResult exactly once. Do not author workflow evidence or return terminal JSON.'
-              : request?.workerType === 'question-answerer'
-                ? 'Submit the answer through SubmitQuestionAnswerResult exactly once. Do not author workflow evidence or return terminal JSON.'
-                : ''
+            ? 'Submit the analysis through SubmitChangeImpactResult exactly once. Do not author workflow evidence or return terminal JSON.'
+            : request?.workerType === 'question-answerer'
+              ? 'Submit the answer through SubmitQuestionAnswerResult exactly once. Do not author workflow evidence or return terminal JSON.'
+              : ''
       const revisionResultInstruction =
         request?.workerType === 'foundation-document-reviser'
           ? 'After editing only the assigned stage, call SubmitFoundationRevisionResult exactly once with status APPLIED and the exact changedSectionIds; do not return terminal JSON.'
@@ -547,11 +872,42 @@ export function createBeeGameDeliveryWorkerPort(input: {
           : request?.workerType === 'resource-curator'
             ? 'Use ResourceLibrary match_requirements once, then CommitResourceInventory as the only mutation and terminal operation.'
             : ''
+      const liveProjection =
+        request?.workerType === 'game-ir-compiler' &&
+        request.contract.kind === 'projection' &&
+        request.contract.packet
+          ? liveGameIrProjectionSessions.get(
+              gameIrProjectionSessionKey(
+                request,
+                gameIrProjectionPacketDigest(request),
+              ),
+            )
+          : undefined
+      const promptRequest =
+        liveProjection?.packetSent && request
+          ? (() => {
+              const { packet: _packet, ...contractWithoutPacket } =
+                request.contract
+              return {
+                ...request,
+                contract: {
+                  ...contractWithoutPacket,
+                  packetDigest: liveProjection.packetDigest,
+                  currentSlice: gameIrProjectionSliceForRequest(request),
+                },
+              }
+            })()
+          : request
       const workerPrompt = [
         ...(packetWorker || revisionWorker ? [] : [languageInstruction]),
-        ...(packetWorker || revisionWorker ? [] : [confirmedBriefContext, documentAuthorAuthorityBlock]),
-        (packetWorker || revisionWorker) && request && (request.contract.packet || request.workerType === 'game-ir-compiler')
-          ? buildWorkerPrompt(request)
+        ...(packetWorker || revisionWorker
+          ? []
+          : [confirmedBriefContext, documentAuthorAuthorityBlock]),
+        (packetWorker || revisionWorker) &&
+        promptRequest &&
+        (Object.hasOwn(promptRequest.contract, 'packet') ||
+          promptRequest.workerType === 'game-ir-compiler')
+          ? buildWorkerPrompt(promptRequest)
           : prompt,
         ...(packetWorker || revisionWorker
           ? []
@@ -572,10 +928,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
           records.get(dispatchId)?.workerType ?? 'question-answerer',
         ),
         displayKind: 'workflow_worker',
-        ...(!packetWorker && !revisionWorker && confirmedBriefContext ? { confirmedBriefContext } : {}),
+        ...(!packetWorker && !revisionWorker && confirmedBriefContext
+          ? { confirmedBriefContext }
+          : {}),
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
+      if (liveProjection) liveProjection.packetSent = true
     },
     async stop(dispatchId, reason) {
       const sessionId = sessions.get(dispatchId)
@@ -614,6 +973,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
           await disposeWorkflowSession(sessionId)
         }
       } finally {
+        if (!options?.preserveSession) {
+          for (const [key, live] of liveGameIrProjectionSessions)
+            if (live.sessionId === sessionId)
+              liveGameIrProjectionSessions.delete(key)
+        }
         sessions.delete(dispatchId)
         records.delete(dispatchId)
         requests.delete(dispatchId)
@@ -677,6 +1041,20 @@ export function createBeeGameDeliveryWorkerPort(input: {
         const eventOffset = eventOffsets.get(dispatchId) ?? 0
         const events = sessionEvents(sessionId).slice(eventOffset)
         const request = requests.get(dispatchId)
+        if (
+          request?.workerType === 'game-ir-compiler' &&
+          gameIrOperationForRequest(request) === 'validation'
+        ) {
+          const reason = lastFailedToolOutput(events, 'StructuredOutput')
+          if (reason) {
+            // StructuredOutput is the compiler's sole terminal channel. Admit
+            // the service-bound failure before cancellation: stopping here can
+            // reject the in-flight submit() first and race dispatcher admission.
+            // The dispatcher closes the disposable session after this terminal
+            // is persisted, so late native text cannot become a terminal.
+            return createGameIrCompilerFailureTerminal({ request, reason })
+          }
+        }
         if (request?.workerType === 'resource-curator') {
           const receipt = await readCurrentCommittedResourceInventoryReceipt(
             request.workspacePath,
@@ -718,7 +1096,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
         // Bee Game Studio still owns its normal turn completion. Drain the native
         // turn before the workflow controller is allowed to close the session.
         if (request?.workerType === 'foundation-fact-extractor') {
-          const factTerminal = createDeterministicFoundationFactTerminal({ request, events })
+          const factTerminal = createDeterministicFoundationFactTerminal({
+            request,
+            events,
+          })
           if (factTerminal) return factTerminal
         }
         if (request && hasCompletedStructuredSubmission(request, events)) {
@@ -765,8 +1146,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
               : undefined
             if (missingTerminal) throw missingTerminal
           }
-          if (result.type !== 'result')
-          {
+          if (result.type !== 'result') {
             const error = new Error(
               result.text || 'worker turn did not produce a terminal result',
             )
@@ -1038,13 +1418,23 @@ async function createDeterministicStructuredTerminal(input: {
         'canonical document completion must use its commit receipt',
       )
     case 'foundation-fact-extractor':
-      return createDeterministicFoundationFactTerminal(input) ?? (() => {
-        throw new Error('worker terminal result is missing a valid StructuredOutput fact result')
-      })()
+      return (
+        createDeterministicFoundationFactTerminal(input) ??
+        (() => {
+          throw new Error(
+            'worker terminal result is missing a valid StructuredOutput fact result',
+          )
+        })()
+      )
     case 'foundation-semantic-reviewer':
-      return createDeterministicFoundationSemanticTerminal(input) ?? (() => {
-        throw new Error('worker terminal result is missing a valid StructuredOutput semantic result')
-      })()
+      return (
+        createDeterministicFoundationSemanticTerminal(input) ??
+        (() => {
+          throw new Error(
+            'worker terminal result is missing a valid StructuredOutput semantic result',
+          )
+        })()
+      )
     case 'foundation-document-reviser':
       return createDeterministicFoundationRevisionTerminal(input)
     case 'atomic-task-planner':
@@ -1077,17 +1467,58 @@ function createDeterministicGameIrCompilerTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
-  const resultEvent = [...input.events].reverse().find(event => event.type === 'result')
-  const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
-    ? (resultEvent.payload as Record<string, unknown>).structured_output
-    : undefined
-  if (structured === undefined)
-    throw new Error('Game IR compiler result is missing native StructuredOutput')
-  assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
-  const payload = gameIrCompilerModelPayloadSchema.parse(structured)
+  const resultEvent = [...input.events]
+    .reverse()
+    .find(event => event.type === 'result')
+  const operation = gameIrOperationForRequest(input.request)
+  const resultPayload =
+    resultEvent?.payload && typeof resultEvent.payload === 'object'
+      ? (resultEvent.payload as Record<string, unknown>)
+      : undefined
+  const modelPayload =
+    operation === 'projection'
+      ? (() => {
+          const recordStream = resultPayload?.record_stream
+          if (typeof recordStream !== 'string')
+            throw new Error(
+              'Game IR projection result is missing native record_stream',
+            )
+          return parseGameIrProjectionRecordStream({
+            expectedSliceId: gameIrProjectionSliceForRequest(input.request)
+              .sliceId,
+            text: recordStream,
+          })
+        })()
+      : (() => {
+          const structured = resultPayload?.structured_output
+          if (structured === undefined)
+            throw new Error(
+              'Game IR validation result is missing native StructuredOutput',
+            )
+          assertFoundationStructuredOutputWithinInfrastructureBoundary(
+            structured,
+          )
+          return structured
+        })()
+  const parsedPayload = parseGameIrCompilerModelPayload(modelPayload, operation)
+  const payload =
+    operation === 'projection'
+      ? (() => {
+          const currentSlice = gameIrProjectionSliceForRequest(input.request)
+          if (
+            !('sliceId' in parsedPayload) ||
+            parsedPayload.sliceId !== currentSlice.sliceId
+          )
+            throw new Error(
+              'Game IR projection terminal slice identity is detached',
+            )
+          return parsedPayload
+        })()
+      : parsedPayload
   const dispatchId = input.request.dispatchId
   const compileRequestDigest = input.request.contract.compileRequestDigest
-  const foundationReadyReceiptDigest = input.request.contract.foundationReadyReceiptDigest
+  const foundationReadyReceiptDigest =
+    input.request.contract.foundationReadyReceiptDigest
   if (
     typeof dispatchId !== 'string' ||
     typeof input.request.runId !== 'string' ||
@@ -1101,7 +1532,47 @@ function createDeterministicGameIrCompilerTerminal(input: {
     throw new Error('Game IR compiler dispatch identity is incomplete')
   return gameIrCompilerTerminalSchema.parse({
     workerType: 'game-ir-compiler',
+    operation,
     ...payload,
+    runId: input.request.runId,
+    dispatchId,
+    taskId: input.request.taskId,
+    revision: input.request.revision,
+    compileRequestDigest,
+    foundationReadyReceiptDigest,
+  })
+}
+
+function createGameIrCompilerFailureTerminal(input: {
+  request: WorkerDispatchRequest
+  reason: string
+}) {
+  const operation = gameIrOperationForRequest(input.request)
+  const sliceId =
+    operation === 'projection'
+      ? gameIrProjectionSliceForRequest(input.request).sliceId
+      : undefined
+  const dispatchId = input.request.dispatchId
+  const compileRequestDigest = input.request.contract.compileRequestDigest
+  const foundationReadyReceiptDigest =
+    input.request.contract.foundationReadyReceiptDigest
+  if (
+    typeof dispatchId !== 'string' ||
+    typeof input.request.runId !== 'string' ||
+    typeof input.request.taskId !== 'string' ||
+    typeof input.request.revision !== 'string' ||
+    typeof compileRequestDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(compileRequestDigest) ||
+    typeof foundationReadyReceiptDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(foundationReadyReceiptDigest)
+  )
+    throw new Error('Game IR compiler dispatch identity is incomplete')
+  return gameIrCompilerTerminalSchema.parse({
+    workerType: 'game-ir-compiler',
+    operation,
+    status: 'failed',
+    ...(sliceId ? { sliceId } : {}),
+    reason: input.reason,
     runId: input.request.runId,
     dispatchId,
     taskId: input.request.taskId,
@@ -1115,22 +1586,34 @@ function createDeterministicFoundationFactTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }): ReturnType<typeof foundationFactExtractorTerminalSchema.parse> | undefined {
-  const resultEvent = [...input.events].reverse().find(event => event.type === 'result')
-  const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
-    ? (resultEvent.payload as Record<string, unknown>).structured_output
-    : undefined
+  const resultEvent = [...input.events]
+    .reverse()
+    .find(event => event.type === 'result')
+  const structured =
+    resultEvent?.payload &&
+    typeof resultEvent.payload === 'object' &&
+    'structured_output' in resultEvent.payload
+      ? (resultEvent.payload as Record<string, unknown>).structured_output
+      : undefined
   if (structured === undefined) return undefined
   assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
   const payload = foundationFactModelPayloadSchema.parse(structured)
   const packet = foundationFactPacketForRequest(input.request)
   const results = payload.results.map(result => {
     if (!isFoundationFactKey(result.key))
-      throw new Error(`foundation fact result has an unknown key: ${result.key}`)
+      throw new Error(
+        `foundation fact result has an unknown key: ${result.key}`,
+      )
     if (!packet.keys.includes(result.key))
-      throw new Error(`foundation fact result key is not assigned: ${result.key}`)
+      throw new Error(
+        `foundation fact result key is not assigned: ${result.key}`,
+      )
     return result.status === 'absent'
       ? result
-      : { ...result, evidence: foundationFactEvidenceForPacket(packet, result.key) }
+      : {
+          ...result,
+          evidence: foundationFactEvidenceForPacket(packet, result.key),
+        }
   })
   return foundationFactExtractorTerminalSchema.parse({
     workerType: 'foundation-fact-extractor',
@@ -1147,14 +1630,23 @@ function createDeterministicFoundationFactTerminal(input: {
 function createDeterministicFoundationSemanticTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
-}): ReturnType<typeof foundationSemanticReviewerTerminalSchema.parse> | undefined {
-  const resultEvent = [...input.events].reverse().find(event => event.type === 'result')
-  const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
-    ? (resultEvent.payload as Record<string, unknown>).structured_output : undefined
+}):
+  | ReturnType<typeof foundationSemanticReviewerTerminalSchema.parse>
+  | undefined {
+  const resultEvent = [...input.events]
+    .reverse()
+    .find(event => event.type === 'result')
+  const structured =
+    resultEvent?.payload &&
+    typeof resultEvent.payload === 'object' &&
+    'structured_output' in resultEvent.payload
+      ? (resultEvent.payload as Record<string, unknown>).structured_output
+      : undefined
   if (structured === undefined) return undefined
   assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
   if (typeof input.request.contract.issueId === 'string') {
-    const payload = foundationSemanticRecheckWorkerPayloadSchema.parse(structured)
+    const payload =
+      foundationSemanticRecheckWorkerPayloadSchema.parse(structured)
     return foundationSemanticRecheckTerminalSchema.parse({
       workerType: 'foundation-semantic-reviewer',
       status: 'completed',
@@ -1165,7 +1657,12 @@ function createDeterministicFoundationSemanticTerminal(input: {
       packetDigest: input.request.contract.packetDigest,
       outcome: payload.status,
       ...(payload.status === 'FAIL'
-        ? { diagnostic: { ...payload.diagnostic, scopeAssessment: 'repairable_in_scope' as const } }
+        ? {
+            diagnostic: {
+              ...payload.diagnostic,
+              scopeAssessment: 'repairable_in_scope' as const,
+            },
+          }
         : {}),
     })
   }
@@ -1188,15 +1685,27 @@ function createDeterministicFoundationRevisionTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
-  const event = [...input.events].reverse().find(candidate => candidate.type === 'tool.completed' && candidate.payload?.toolName === 'SubmitFoundationRevisionResult')
+  const event = [...input.events]
+    .reverse()
+    .find(
+      candidate =>
+        candidate.type === 'tool.completed' &&
+        candidate.payload?.toolName === 'SubmitFoundationRevisionResult',
+    )
   const output = event?.payload?.output
-  if (typeof output !== 'string') throw new Error('foundation revision terminal output is missing')
+  if (typeof output !== 'string')
+    throw new Error('foundation revision terminal output is missing')
   let value: unknown
-  try { value = JSON.parse(output) } catch { throw new Error('foundation revision terminal output is malformed') }
+  try {
+    value = JSON.parse(output)
+  } catch {
+    throw new Error('foundation revision terminal output is malformed')
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('foundation revision terminal output is not an object')
   const candidate = value as Record<string, unknown>
-  if (Object.hasOwn(candidate, 'data')) throw new Error('foundation revision terminal output envelope is invalid')
+  if (Object.hasOwn(candidate, 'data'))
+    throw new Error('foundation revision terminal output envelope is invalid')
   const declaration = foundationRevisionToolResultSchema.parse(candidate)
   return foundationDocumentReviserTerminalSchema.parse({
     workerType: 'foundation-document-reviser',

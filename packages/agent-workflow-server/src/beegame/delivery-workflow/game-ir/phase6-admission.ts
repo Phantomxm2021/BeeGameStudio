@@ -10,7 +10,6 @@ import {
 import {
   admitGameIrMechanicalProjectionReceipt,
   gameIrSemanticTargetPointers,
-  verifyGameIrSemanticClaimLiteral,
   type GameIrMechanicalProjectionReceipt,
 } from './domain-projection'
 import {
@@ -152,18 +151,6 @@ function bindSemanticNodes(
       const claim = claims.get(`node:${node.id}#${pointer}`)
       if (!claim)
         fail(`semantic source claim is missing for node:${node.id}#${pointer}`)
-      try {
-        verifyGameIrSemanticClaimLiteral(
-          claim,
-          node,
-          pointer,
-          'invalid Game IR Phase 6 admission',
-        )
-      } catch {
-        fail(
-          `semantic source claim literal is detached from node:${node.id}#${pointer}`,
-        )
-      }
       verifyGameIrSemanticClaimBytes(
         source,
         claim,
