@@ -64,11 +64,6 @@ import {
   gameIrProjectionSliceJournalPath,
   loadGameIrProjectionSliceJournal,
 } from '../beegame/delivery-workflow/game-ir/projection-slice-journal'
-import {
-  GAME_IR_STAGED_OPERATIONS,
-  stagedProjectionJournalCompletion,
-} from '../beegame/delivery-workflow/game-ir/staged-compiler'
-import { writeGameIrStageCheckpoint } from '../beegame/delivery-workflow/game-ir/stage-checkpoint'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
@@ -1289,6 +1284,83 @@ async function createProjectionRecoveryFixture() {
   }
 }
 
+function projectionTerminal(
+  request: WorkerDispatchRequest,
+  records: readonly unknown[],
+  done = true,
+  status: 'completed' | 'failed' = done ? 'completed' : 'failed',
+) {
+  return {
+    workerType: 'game-ir-compiler' as const,
+    operation: 'projection' as const,
+    status,
+    sliceId: String(request.contract.currentSlice),
+    records,
+    done,
+    ...(done ? {} : { reason: 'synthetic terminal stopped' }),
+    runId: request.runId,
+    dispatchId: request.dispatchId!,
+    taskId: request.taskId,
+    revision: request.revision,
+    compileRequestDigest: request.contract.compileRequestDigest,
+    foundationReadyReceiptDigest:
+      request.contract.foundationReadyReceiptDigest,
+  }
+}
+
+function crashStoreCommitOnEvent(store: ReturnType<typeof createRunStore>, eventType: string) {
+  const original = store.commit.bind(store)
+  const crashingCommit = (async (...args: Parameters<typeof store.commit>) => {
+    const committed = await original(...args)
+    if (
+      eventType === '*' ||
+      String(args[1].type).trim() === eventType.trim()
+    )
+      throw new Error(`synthetic crash: ${eventType}`)
+    return committed
+  }) as typeof store.commit
+  Object.defineProperty(store, 'commit', {
+    configurable: true,
+    value: crashingCommit,
+    writable: true,
+  })
+  return () => {
+    Object.defineProperty(store, 'commit', {
+      configurable: true,
+      value: original,
+      writable: true,
+    })
+  }
+}
+
+function crashStoreCommitAfterEvent(
+  store: ReturnType<typeof createRunStore>,
+  eventType: string,
+) {
+  const original = store.commit.bind(store)
+  let armed = false
+  const crashingCommit = (async (...args: Parameters<typeof store.commit>) => {
+    const committed = await original(...args)
+    if (armed || String(args[1].type).trim() === eventType.trim()) {
+      armed = true
+      throw new Error(`synthetic crash: ${eventType}`)
+    }
+    return committed
+  }) as typeof store.commit
+  Object.defineProperty(store, 'commit', {
+    configurable: true,
+    value: crashingCommit,
+    writable: true,
+  })
+  return () => {
+    Object.defineProperty(store, 'commit', {
+      configurable: true,
+      value: original,
+      writable: true,
+    })
+  }
+}
+
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
@@ -1715,62 +1787,68 @@ describe('delivery workflow recovery', () => {
   })
 
   test('hands an orphaned Game IR projection to a fresh dispatcher without provider session state', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-game-ir-recovery-'))
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    const base = createTestDeliveryRun({
-      runId: RECOVERY_RUN_ID,
-      projectId: RECOVERY_PROJECT_ID,
-      ownerId: RECOVERY_OWNER_ID,
-      confirmedBriefContext: RECOVERY_BRIEF,
-    })
-    const identity = {
-      runId: base.runId,
-      taskId: 'game-ir-recovery-task',
-      publicationId: 'game-ir-recovery-publication',
-      confirmedBriefDigest: base.confirmedBriefDigest,
-      foundationRevision: 'game-ir-recovery-revision',
-      foundationReadyReceiptDigest: 'a'.repeat(64),
+    const fixture = await createProjectionRecoveryFixture()
+    workspace = fixture.workspacePath
+    try {
+      let stopCount = 0
+      const fresh = createDeliveryWorkflowController({
+        workspacePath: workspace,
+        ownerId: fixture.run.ownerId,
+        workerPort: fixture.workerPort,
+      })
+      await recoverAndResumeRun({
+        store: createRunStore(workspace, fixture.run.ownerId),
+        workspacePath: workspace,
+        ownerId: fixture.run.ownerId,
+        projectId: fixture.run.projectId,
+        confirmedBriefContext: fixture.run.confirmedBriefContext,
+        stopWorkspaceWorkers: async () => {
+          stopCount += 1
+        },
+        resumeCurrentRun: run => fresh.resume(run),
+      })
+      expect(stopCount).toBe(1)
+      expect(fixture.started).toHaveLength(2)
+      expect(fixture.started[1]?.contract.currentSlice).toBe(
+        fixture.request.contract.currentSlice,
+      )
+      expect(
+        (fixture.started[1]?.contract.sliceContext as { admittedCurrentNodes?: unknown } | undefined)
+          ?.admittedCurrentNodes,
+      ).toEqual([])
+      expect(buildWorkerPrompt(fixture.started[1]!)).not.toContain(
+        'game-ir-gameplay-projection-operation-packet.v1',
+      )
+      expect(JSON.stringify(fixture.started[1])).not.toContain('sessionId')
+    } finally {
+      await rm(fixture.workspacePath, { recursive: true, force: true })
+      workspace = ''
     }
-    await store.save({
-      ...base,
-      phase: 'GAME_IR_COMPILATION',
-      status: 'running',
-      activeDispatch: {
-        dispatchId: 'old-provider-dispatch',
-        workerType: 'game-ir-compiler',
-        phase: 'GAME_IR_COMPILATION',
-        taskId: identity.taskId,
-        revision: identity.foundationRevision,
-        status: 'running',
-        startedAt: base.updatedAt,
-      },
-      foundationAuditState: syntheticFoundationReadyState(identity.foundationRevision),
-      gameIrState: { status: 'compiling', identity },
-    })
-
-    let resumed: DeliveryRun | undefined
-    await recoverAndResumeRun({
-      store,
-      workspacePath: workspace,
-      ownerId: RECOVERY_OWNER_ID,
-      projectId: RECOVERY_PROJECT_ID,
-      confirmedBriefContext: RECOVERY_BRIEF,
-      stopWorkspaceWorkers: async () => undefined,
-      resumeCurrentRun: async run => {
-        resumed = run
-      },
-    })
-
-    expect(resumed?.activeDispatch).toBeUndefined()
-    expect(resumed?.status).toBe('running')
   })
 
   test('restarts from a real pending-record journal with the exact admitted prefix', async () => {
     const fixture = await createProjectionRecoveryFixture()
     workspace = fixture.workspacePath
     try {
-      const journal = await loadGameIrProjectionSliceJournal(fixture.journalInput)
-      await journal.appendRecords([fixture.record])
+      const bad = {
+        ...fixture.record,
+        node: {
+          ...fixture.record.node,
+          id: 'state-z',
+          value: { label: 'invalid later node' },
+        },
+      }
+      const restoreCommit = crashStoreCommitOnEvent(
+        fixture.controller.store,
+        'game_ir_compilation.retryable',
+      )
+      await expect(
+        fixture.controller.dispatcher.completeDispatch(
+          fixture.request.dispatchId!,
+          projectionTerminal(fixture.request, [fixture.record, bad], false, 'failed'),
+        ),
+      ).rejects.toThrow(/synthetic crash/)
+      restoreCommit()
 
       const restartedStore = createRunStore(workspace, fixture.run.ownerId)
       const restarted = createDeliveryWorkflowController({
@@ -1806,38 +1884,50 @@ describe('delivery workflow recovery', () => {
     }
   })
 
+  test('fails closed when a persisted projection request loses its journal', async () => {
+    const fixture = await createProjectionRecoveryFixture()
+    workspace = fixture.workspacePath
+    try {
+      await rm(fixture.journalInput.journalPath, { force: true })
+      const restarted = createDeliveryWorkflowController({
+        workspacePath: workspace,
+        ownerId: fixture.run.ownerId,
+        workerPort: fixture.workerPort,
+      })
+      await expect(
+        recoverAndResumeRun({
+          store: createRunStore(workspace, fixture.run.ownerId),
+          workspacePath: workspace,
+          ownerId: fixture.run.ownerId,
+          projectId: fixture.run.projectId,
+          confirmedBriefContext: fixture.run.confirmedBriefContext,
+          stopWorkspaceWorkers: async () => undefined,
+          resumeCurrentRun: run => restarted.resume(run),
+        }),
+      ).rejects.toThrow(/journal/i)
+      expect(fixture.started).toHaveLength(1)
+      expect((await fixture.store.load())?.activeDispatch?.status).toBe('running')
+    } finally {
+      await rm(fixture.workspacePath, { recursive: true, force: true })
+      workspace = ''
+    }
+  })
+
   test('restarts a durably done terminal before promotion without duplicating the prefix', async () => {
     const fixture = await createProjectionRecoveryFixture()
     workspace = fixture.workspacePath
     try {
-      const journal = await loadGameIrProjectionSliceJournal(fixture.journalInput)
-      await journal.appendRecords([fixture.record])
-      const current = await fixture.store.load()
-      if (!current?.activeDispatch) throw new Error('missing active dispatch')
-      const terminal = {
-        workerType: 'game-ir-compiler' as const,
-        operation: 'projection' as const,
-        status: 'completed' as const,
-        sliceId: fixture.request.contract.currentSlice!,
-        records: [fixture.record],
-        done: true,
-        runId: fixture.request.runId,
-        dispatchId: fixture.request.dispatchId!,
-        taskId: fixture.request.taskId,
-        revision: fixture.request.revision,
-        compileRequestDigest: fixture.request.contract.compileRequestDigest,
-        foundationReadyReceiptDigest:
-          fixture.request.contract.foundationReadyReceiptDigest,
-      }
-      await fixture.store.save({
-        ...current,
-        activeDispatch: {
-          ...current.activeDispatch,
-          status: 'completed',
-          finishedAt: current.updatedAt,
-          terminalResult: terminal,
-        },
-      })
+      const restoreCommit = crashStoreCommitOnEvent(
+        fixture.controller.store,
+        'dispatch.completed',
+      )
+      await expect(
+        fixture.controller.dispatcher.completeDispatch(
+          fixture.request.dispatchId!,
+          projectionTerminal(fixture.request, [fixture.record]),
+        ),
+      ).rejects.toThrow(/synthetic crash/)
+      restoreCommit()
       const restarted = createDeliveryWorkflowController({
         workspacePath: workspace,
         ownerId: fixture.run.ownerId,
@@ -1857,11 +1947,11 @@ describe('delivery workflow recovery', () => {
       )
       expect(
         (fixture.started.at(-1)?.contract.sliceContext as { admittedCurrentNodes?: unknown } | undefined)?.admittedCurrentNodes,
-      ).toEqual([{ id: 'state-start', kind: 'gameplay.state' }])
+      ).toEqual([])
       expect(
         (await loadGameIrProjectionSliceJournal(fixture.journalInput))
           .currentSliceRecordPrefix,
-      ).toEqual([{ id: 'state-start', kind: 'gameplay.state' }])
+      ).toEqual([])
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
       workspace = ''
@@ -1872,9 +1962,26 @@ describe('delivery workflow recovery', () => {
     const fixture = await createProjectionRecoveryFixture()
     workspace = fixture.workspacePath
     try {
-      const journal = await loadGameIrProjectionSliceJournal(fixture.journalInput)
-      await journal.appendRecords([fixture.record])
-      await journal.completeCurrentSlice()
+      const restoreCommit = crashStoreCommitAfterEvent(
+        fixture.controller.store,
+        'game_ir_projection_slice_admitted',
+      )
+      await expect(
+        fixture.controller.dispatcher.completeDispatch(
+          fixture.request.dispatchId!,
+          projectionTerminal(fixture.request, [fixture.record]),
+        ),
+      ).rejects.toThrow(/synthetic crash/)
+      restoreCommit()
+      const afterCrashJournal = await loadGameIrProjectionSliceJournal(
+        fixture.journalInput,
+      )
+      expect(afterCrashJournal.entries).toHaveLength(1)
+      expect(afterCrashJournal.nextSlice?.sliceId).toBe('gameplay.slice.1')
+      expect(
+        (await createRunStore(workspace, fixture.run.ownerId).load())
+          ?.activeDispatch,
+      ).toBeUndefined()
       const restarted = createDeliveryWorkflowController({
         workspacePath: workspace,
         ownerId: fixture.run.ownerId,
@@ -1906,62 +2013,36 @@ describe('delivery workflow recovery', () => {
     const fixture = await createProjectionRecoveryFixture()
     workspace = fixture.workspacePath
     try {
-      const journal = await loadGameIrProjectionSliceJournal(fixture.journalInput)
-      await journal.appendRecords([fixture.record])
-      await journal.completeCurrentSlice()
-      for (const slice of journal.slicePlan.slices.slice(1))
-        await journal.append({
-          status: 'completed',
-          sliceId: slice.sliceId,
-          semantic: { nodes: [], sourceEvidenceGroups: [] },
-        })
-      const current = await fixture.store.load()
-      if (!current?.activeDispatch) throw new Error('missing active dispatch')
-      const terminal = {
-        workerType: 'game-ir-compiler' as const,
-        operation: 'projection' as const,
-        status: 'completed' as const,
-        sliceId: fixture.request.contract.currentSlice!,
-        records: [fixture.record],
-        done: true,
-        runId: fixture.request.runId,
-        dispatchId: fixture.request.dispatchId!,
-        taskId: fixture.request.taskId,
-        revision: fixture.request.revision,
-        compileRequestDigest: fixture.request.contract.compileRequestDigest,
-        foundationReadyReceiptDigest:
-          fixture.request.contract.foundationReadyReceiptDigest,
+      const plan = deriveProjectionSlicePlan('gameplay')
+      const restoreCommit = crashStoreCommitOnEvent(
+        fixture.controller.store,
+        'game_ir_checkpoint_committed',
+      )
+      let requestIndex = 0
+      while (requestIndex < plan.slices.length) {
+        const request = fixture.started[requestIndex++]
+        if (!request) throw new Error('projection slice dispatch was not started')
+        const finalSlice = request.contract.currentSlice === plan.slices.at(-1)?.sliceId
+        if (finalSlice) {
+          await expect(
+            fixture.controller.dispatcher.completeDispatch(
+              request.dispatchId!,
+              projectionTerminal(request, []),
+            ),
+          ).rejects.toThrow(/synthetic crash/)
+          break
+        }
+        await fixture.controller.dispatcher.completeDispatch(
+          request.dispatchId!,
+          projectionTerminal(
+            request,
+            request.contract.currentSlice === fixture.request.contract.currentSlice
+              ? [fixture.record]
+              : [],
+          ),
+        )
       }
-      const terminalRun = {
-        ...current,
-        activeDispatch: {
-          ...current.activeDispatch,
-          status: 'completed' as const,
-          finishedAt: current.updatedAt,
-          terminalResult: terminal,
-        },
-      }
-      const checkpoint = await writeGameIrStageCheckpoint({
-        workspacePath: workspace,
-        deliveryRun: terminalRun,
-        step: {
-          phase: 'phase4',
-          domain: 'gameplay',
-          operation: 'projection',
-          records: stagedProjectionJournalCompletion({
-            operation: GAME_IR_STAGED_OPERATIONS[0]!,
-            packet: fixture.request.contract.packet,
-            records: new Map(),
-            journal,
-          }),
-        },
-      })
-      const checkpointed = transitionDeliveryRun(terminalRun, {
-        type: 'game_ir_checkpoint_committed',
-        checkpoint,
-        expectedPreviousCheckpoint: undefined,
-      })
-      await fixture.store.save(checkpointed)
+      restoreCommit()
       const restarted = createDeliveryWorkflowController({
         workspacePath: workspace,
         ownerId: fixture.run.ownerId,

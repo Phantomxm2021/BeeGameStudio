@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, setDefaultTimeout, test } from 'bun:test'
 import { createDeliveryWorkflowController } from '../controller'
@@ -2070,15 +2070,22 @@ describe('Foundation parity against stable baseline b47641f33', () => {
     const violations = standaloneProductionViolations(
       await readProductionSourceFiles(serverSourceRoot),
     )
+    const allowedViolations = new Set([
+      'beegame/delivery-workflow/controller.ts|identifier: GameIrProjectionRetryDiagnostic',
+      'beegame/delivery-workflow/recovery.ts|identifier: gameIrProjectionSliceJournalPath',
+      'beegame/delivery-workflow/recovery.ts|import: ./game-ir/projection-slices',
+      'beegame/delivery-workflow/worker-prompts.ts|import: ./game-ir/projection-slice-authority',
+    ])
     expect(
       violations.filter(
-        violation =>
-          ![
-            'identifier: GameIrProjectionRetryDiagnostic',
-            'identifier: gameIrProjectionSliceJournalPath',
-            'import: ./game-ir/projection-slices',
-            'import: ./game-ir/projection-slice-authority',
-          ].some(allowed => violation.endsWith(`: ${allowed}`)),
+        violation => {
+          const marker = violation.indexOf(': ')
+          const path = violation.slice(0, marker)
+          const detail = violation.slice(marker + 2)
+          return !allowedViolations.has(
+            `${relative(serverSourceRoot, path)}|${detail}`,
+          )
+        },
       ),
     ).toEqual([])
   })

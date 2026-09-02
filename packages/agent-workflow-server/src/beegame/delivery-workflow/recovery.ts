@@ -251,7 +251,11 @@ async function verifyGameIrProjectionJournal(input: {
       slicePlan,
     })
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      throw new WorkflowStoreError(
+        'persisted Game IR projection request has no durable slice journal',
+        'recovery_checkpoint_missing',
+      )
     throw error
   }
 }

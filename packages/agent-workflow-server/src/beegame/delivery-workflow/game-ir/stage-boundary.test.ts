@@ -2195,7 +2195,9 @@ describe('Game IR stage boundary', () => {
   })
 
   test('keeps production on one stateless projection track', async () => {
-    const files = await readProductionSourceFiles(serverSourceRoot)
+    const files = (await readSourceFilesRecursively(serverSourceRoot)).filter(
+      file => file.path.endsWith('.ts') && !file.path.endsWith('.test.ts'),
+    )
     const forbidden = [
       'liveGameIrProjectionSessions',
       'GameIrProjectionSessionKey',
@@ -2239,6 +2241,26 @@ describe('Game IR stage boundary', () => {
     expect(prompt).not.toContain('authoritySectionIndex')
     expect(prompt).not.toContain('sectionBytes')
     expect(prompt).not.toContain('game-ir-gameplay-projection-operation-packet.v1')
+  })
+
+  test('detects a forbidden legacy symbol inserted into Game IR production', async () => {
+    const files = (await readSourceFilesRecursively(serverSourceRoot)).filter(
+      file => file.path.endsWith('.ts') && !file.path.endsWith('.test.ts'),
+    )
+    const target = files.find(file => file.path.endsWith('/game-ir/model.ts'))
+    expect(target).toBeDefined()
+    const mutated = files.map(file =>
+      file === target
+        ? { ...file, source: `${file.source}\nconst liveGameIrProjectionSessions = undefined\n` }
+        : file,
+    )
+    expect(
+      mutated.flatMap(file =>
+        file.source.includes('liveGameIrProjectionSessions')
+          ? [`${file.path}:liveGameIrProjectionSessions`]
+          : [],
+      ),
+    ).toEqual([`${target!.path}:liveGameIrProjectionSessions`])
   })
 
   test('permits the committed reader/writer only through the controller and dispatcher route', async () => {
