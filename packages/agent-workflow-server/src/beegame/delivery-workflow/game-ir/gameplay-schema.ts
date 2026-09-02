@@ -554,13 +554,6 @@ function cloneJson(value: unknown): unknown {
   return value
 }
 
-/** Domain-owned intrinsic value parsing for projection slice admission. */
-export function parseGameplayProjectionPayload(
-  node: GameIrNode,
-): Readonly<Record<string, unknown>> {
-  return parseValue(node)
-}
-
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const nested of Object.values(value as RecordValue)) deepFreeze(nested)
@@ -591,6 +584,8 @@ function assertNoEmbeddedTargetIds(
 }
 
 type ParsedNode = GameIrNode & { value: Readonly<Record<string, unknown>> }
+type KnownTarget = Pick<GameIrNode, 'id' | 'kind'>
+type NodeValidationOptions = Readonly<{ allowUnknownTargets?: boolean }>
 
 function targetMap(
   nodes: readonly GameIrNode[],
@@ -616,14 +611,17 @@ function targetMap(
 
 function validateReferences(
   node: GameIrNode,
-  targets: ReadonlyMap<string, GameIrNode>,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
 ): void {
   for (const reference of node.references) {
     const target = targets.get(reference.targetId)
-    if (!target)
+    if (!target) {
+      if (options.allowUnknownTargets) continue
       fail(
         `node ${node.id} reference targets unknown node ${reference.targetId}`,
       )
+    }
     if (target.kind !== reference.targetType)
       fail(
         `node ${node.id} reference target kind does not match ${reference.targetId}`,
@@ -631,8 +629,10 @@ function validateReferences(
   }
   for (const edge of node.edges) {
     const target = targets.get(edge.targetId)
-    if (!target)
+    if (!target) {
+      if (options.allowUnknownTargets) continue
       fail(`node ${node.id} edge targets unknown node ${edge.targetId}`)
+    }
     if (target.kind !== edge.targetType)
       fail(`node ${node.id} edge target kind does not match ${edge.targetId}`)
   }
@@ -640,7 +640,8 @@ function validateReferences(
 
 function validateRoles(
   node: GameIrNode,
-  targets: ReadonlyMap<string, GameIrNode>,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
 ): void {
   const manifest = GAMEPLAY_DOMAIN_MANIFEST[
     node.kind as keyof typeof GAMEPLAY_DOMAIN_MANIFEST
@@ -666,7 +667,7 @@ function validateRoles(
       )
     counts.set(edge.type, count)
     const target = targets.get(edge.targetId)
-    if (!target || target.kind !== edge.targetType)
+    if ((!target && !options.allowUnknownTargets) || (target && target.kind !== edge.targetType))
       fail(`node ${node.id} role target is invalid`)
   }
   if (manifest) {
@@ -754,6 +755,37 @@ function validateGraph(nodes: readonly ParsedNode[]): void {
   }
 }
 
+/**
+ * Parses one Gameplay node through the same local semantic rules used by the
+ * complete module parser. Aggregate state reachability stays below.
+ */
+export function parseGameplayProjectionNode(
+  node: GameIrNode,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
+): ParsedNode {
+  if (!isRecord(node)) fail(`node must be an object`)
+  if (typeof node.id !== 'string' || node.id.length === 0)
+    fail(`node has an invalid ID`)
+  if (typeof node.kind !== 'string' || !NODE_KINDS.has(node.kind))
+    fail(`node ${node.id} has an unknown kind`)
+  validateReferences(node, targets, options)
+  const parsedValue = parseValue(node)
+  assertNoEmbeddedTargetIds(
+    parsedValue,
+    new Set(targets.keys()),
+    `node ${node.id} value`,
+  )
+  validateRoles(node, targets, options)
+  return {
+    ...node,
+    value: parsedValue,
+    references: node.references.map(reference => ({ ...reference })),
+    edges: node.edges.map(edgeValue => ({ ...edgeValue })),
+    bindings: cloneJson(node.bindings) as GameIrNode['bindings'],
+  }
+}
+
 export function parseGameplayModule(
   module: GameIrModuleCandidate,
   externalTargets?: ReadonlyMap<string, GameIrNode>,
@@ -767,29 +799,7 @@ export function parseGameplayModule(
   for (let nodeIndex = 0; nodeIndex < localNodes.length; nodeIndex += 1) {
     const node = localNodes[nodeIndex]!
     if (!isRecord(node)) fail(`node ${nodeIndex} must be an object`)
-    const admittedNode = node as unknown as GameIrNode
-    if (typeof admittedNode.id !== 'string' || admittedNode.id.length === 0)
-      fail(`node ${nodeIndex} has an invalid ID`)
-    if (
-      typeof admittedNode.kind !== 'string' ||
-      !NODE_KINDS.has(admittedNode.kind)
-    )
-      fail(`node ${admittedNode.id} has an unknown kind`)
-    validateReferences(admittedNode, targets)
-    const parsedValue = parseValue(admittedNode)
-    assertNoEmbeddedTargetIds(
-      parsedValue,
-      new Set(targets.keys()),
-      `node ${admittedNode.id} value`,
-    )
-    validateRoles(admittedNode, targets)
-    parsed.push({
-      ...admittedNode,
-      value: parsedValue,
-      references: admittedNode.references.map(reference => ({ ...reference })),
-      edges: admittedNode.edges.map(edgeValue => ({ ...edgeValue })),
-      bindings: cloneJson(admittedNode.bindings) as GameIrNode['bindings'],
-    })
+    parsed.push(parseGameplayProjectionNode(node as unknown as GameIrNode, targets))
   }
   for (let nodeIndex = 1; nodeIndex < parsed.length; nodeIndex += 1) {
     if (compareCodeUnits(parsed[nodeIndex - 1]!.id, parsed[nodeIndex]!.id) >= 0)

@@ -295,6 +295,134 @@ describe('Game IR projection slice journal', () => {
     }
   })
 
+  test('rejects a Balance relationship/reference mismatch before persisting the cost', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const [first, second, third] = journal.slicePlan.slices
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
+      )
+      await journal.append(emptyCompletion(first!.sliceId))
+      await journal.append(emptyCompletion(second!.sliceId))
+      const result = await journal.appendRecords(
+        [
+          {
+            fragmentId,
+            node: {
+              id: 'balance.cost.invalid',
+              kind: 'balance.cost',
+              value: { label: 'Invalid cost' },
+              references: [],
+              edges: [
+                {
+                  type: 'amount',
+                  targetId: 'balance.variable.missing',
+                  targetType: 'balance.variable',
+                },
+              ],
+            },
+          },
+        ],
+        third!.sliceId,
+      )
+      expect(result.acceptedCount).toBe(0)
+      expect(result.diagnostic?.reason).toMatch(
+        /relationship references do not match role edges/i,
+      )
+      expect(journal.entries.map(entry => entry.sliceId)).toEqual([
+        first!.sliceId,
+        second!.sliceId,
+      ])
+      expect(journal.currentSliceRecordPrefix).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts a legal same-slice forward formula reference until slice closure', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const [first, second] = journal.slicePlan.slices
+      const sourceUnit =
+        realAuthority().phase5Authority.phase4Authority.balance.semantic.nodes[0]!
+      const { bindings: _bindings, producerMode: _producerMode, ...unit } =
+        sourceUnit as typeof sourceUnit & {
+          bindings?: unknown
+          producerMode?: unknown
+        }
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
+      )
+      await journal.append({
+        status: 'completed',
+        sliceId: first!.sliceId,
+        semantic: {
+          nodes: [unit],
+          sourceEvidenceGroups: [{ nodeIds: [unit.id], fragmentId }],
+        },
+      } as unknown as GameIrProjectionSliceCompletion)
+      const formulaA = {
+        id: 'balance.formula.a',
+        kind: 'balance.formula',
+        value: {
+          label: 'Forward formula',
+          expression: { kind: 'reference', referenceIndex: 1 },
+          outputUnitReferenceIndex: 0,
+        },
+        references: [
+          { targetId: unit.id, targetType: 'balance.unit' },
+          { targetId: 'balance.formula.b', targetType: 'balance.formula' },
+        ],
+        edges: [
+          {
+            type: 'depends-on',
+            targetId: 'balance.formula.b',
+            targetType: 'balance.formula',
+          },
+        ],
+      }
+      const formulaB = {
+        id: 'balance.formula.b',
+        kind: 'balance.formula',
+        value: {
+          label: 'Referenced formula',
+          expression: { kind: 'literal', value: 1, unitReferenceIndex: 0 },
+          outputUnitReferenceIndex: 0,
+        },
+        references: [{ targetId: unit.id, targetType: 'balance.unit' }],
+        edges: [],
+      }
+      await expect(
+        journal.appendRecords(
+          [
+            { fragmentId, node: formulaA },
+            { fragmentId, node: formulaB },
+          ],
+          second!.sliceId,
+        ),
+      ).resolves.toEqual({ acceptedCount: 2 })
+      expect(journal.currentSliceRecordPrefix).toEqual([
+        { id: formulaA.id, kind: formulaA.kind },
+        { id: formulaB.id, kind: formulaB.kind },
+      ])
+      await journal.completeCurrentSlice()
+      expect(journal.entries.map(entry => entry.sliceId)).toEqual([
+        first!.sliceId,
+        second!.sliceId,
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('exposes only a fully verified completed snapshot and never a raw merge completion path', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {

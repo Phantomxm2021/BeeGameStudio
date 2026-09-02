@@ -285,6 +285,8 @@ const SAFE_NUMBER = (value: unknown): value is number =>
 
 type RecordValue = Record<string, unknown>
 type ParsedNode = GameIrNode & { value: Readonly<Record<string, unknown>> }
+type KnownTarget = Pick<GameIrNode, 'id' | 'kind'>
+type NodeValidationOptions = Readonly<{ allowUnknownTargets?: boolean }>
 
 function fail(message: string): never {
   throw new Error(`invalid Balance module: ${message}`)
@@ -498,14 +500,17 @@ function parseExpression(
 
 function validateReferences(
   node: GameIrNode,
-  targets: ReadonlyMap<string, GameIrNode>,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
 ): void {
   for (const reference of node.references) {
     const target = targets.get(reference.targetId)
-    if (!target)
+    if (!target) {
+      if (options.allowUnknownTargets) continue
       fail(
         `node ${node.id} reference targets unknown node ${reference.targetId}`,
       )
+    }
     if (target.kind !== reference.targetType)
       fail(
         `node ${node.id} reference target kind does not match ${reference.targetId}`,
@@ -513,8 +518,10 @@ function validateReferences(
   }
   for (const edgeValue of node.edges) {
     const target = targets.get(edgeValue.targetId)
-    if (!target)
+    if (!target) {
+      if (options.allowUnknownTargets) continue
       fail(`node ${node.id} edge targets unknown node ${edgeValue.targetId}`)
+    }
     if (target.kind !== edgeValue.targetType)
       fail(
         `node ${node.id} edge target kind does not match ${edgeValue.targetId}`,
@@ -547,7 +554,8 @@ function targetMap(
 
 function validateRoles(
   node: GameIrNode,
-  targets: ReadonlyMap<string, GameIrNode>,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
 ): void {
   const manifest = BALANCE_DOMAIN_MANIFEST[
     node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST
@@ -573,7 +581,7 @@ function validateRoles(
         `node ${node.id} has duplicate singleton relationship role ${edgeValue.type}`,
       )
     counts.set(edgeValue.type, count)
-    if (!targets.has(edgeValue.targetId))
+    if (!targets.has(edgeValue.targetId) && !options.allowUnknownTargets)
       fail(`node ${node.id} role target is invalid`)
   }
   for (const [roleName, roleRule] of Object.entries(manifest)) {
@@ -773,13 +781,6 @@ function assertReferenceConsumption(
     if (!consumedReferences.has(index))
       fail(`node ${node.id} has an unused reference at index ${index}`)
   }
-}
-
-/** Domain-owned intrinsic value parsing for projection slice admission. */
-export function parseBalanceProjectionPayload(
-  node: GameIrNode,
-): Readonly<Record<string, unknown>> {
-  return parseValue(node).value
 }
 
 function assertNoEmbeddedTargetIds(
@@ -1031,6 +1032,56 @@ function assertEconomyUnitCoherence(
   }
 }
 
+/**
+ * Parses one Balance node through the same value/reference/role rules used by
+ * the complete module parser. Aggregate formula/economy closure stays below.
+ */
+export function parseBalanceProjectionNode(
+  node: GameIrNode,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
+): ParsedNode {
+  if (typeof node.id !== 'string' || node.id.length === 0)
+    fail('node has an invalid ID')
+  if (typeof node.kind !== 'string' || !NODE_KINDS.has(node.kind))
+    fail(`node ${node.id} has an unknown kind`)
+  if (!node.kind.startsWith('balance.'))
+    fail(`node ${node.id} has an invalid Balance kind`)
+  validateReferences(node, targets, options)
+  const parsedValue = parseValue(node)
+  validateRoles(node, targets, options)
+  exactRoleReferences(node)
+  const consumedReferences = parsedValue.consumedReferences ?? new Set<number>()
+  if (node.kind === 'balance.variable' || node.kind === 'balance.parameter') {
+    const unitReferenceIndex = parsedValue.value.unitReferenceIndex as number
+    consumedReferences.add(unitReferenceIndex)
+    const unitReference = node.references[unitReferenceIndex]
+    const unitTarget = unitReference && targets.get(unitReference.targetId)
+    if (
+      (!unitTarget && !options.allowUnknownTargets) ||
+      (unitTarget && unitTarget.kind !== 'balance.unit')
+    )
+      fail(`node ${node.id} unit reference must target balance.unit`)
+  } else if (
+    node.kind === 'balance.economy-source' ||
+    node.kind === 'balance.economy-sink' ||
+    node.kind === 'balance.reward' ||
+    node.kind === 'balance.cost' ||
+    node.kind === 'balance.reward-cost-binding'
+  ) {
+    for (let referenceIndex = 0; referenceIndex < node.references.length; referenceIndex += 1)
+      consumedReferences.add(referenceIndex)
+  }
+  assertReferenceConsumption(node, consumedReferences)
+  return {
+    ...node,
+    value: parsedValue.value,
+    references: node.references.map(reference => ({ ...reference })),
+    edges: node.edges.map(edgeValue => ({ ...edgeValue })),
+    bindings: cloneJson(node.bindings) as GameIrNode['bindings'],
+  }
+}
+
 export function parseBalanceModule(
   module: GameIrModuleCandidate,
   externalTargets?: ReadonlyMap<string, GameIrNode>,
@@ -1042,52 +1093,7 @@ export function parseBalanceModule(
   const targets = targetMap(localNodes, externalTargets)
   const parsed: ParsedNode[] = []
   for (let index = 0; index < localNodes.length; index += 1) {
-    const node = localNodes[index]!
-    if (typeof node.id !== 'string' || node.id.length === 0)
-      fail(`node ${index} has an invalid ID`)
-    if (typeof node.kind !== 'string' || !NODE_KINDS.has(node.kind))
-      fail(`node ${node.id} has an unknown kind`)
-    if (!node.kind.startsWith('balance.'))
-      fail(`node ${node.id} has an invalid Balance kind`)
-    validateReferences(node, targets)
-    const parsedValue = parseValue(node)
-    validateRoles(node, targets)
-    exactRoleReferences(node)
-    const consumedReferences =
-      parsedValue.consumedReferences ?? new Set<number>()
-    if (node.kind === 'balance.variable' || node.kind === 'balance.parameter') {
-      const unitReferenceIndex = parsedValue.value.unitReferenceIndex as number
-      consumedReferences.add(unitReferenceIndex)
-      const unitReference = node.references[unitReferenceIndex]
-      const unitTarget = unitReference && targets.get(unitReference.targetId)
-      if (!unitTarget || unitTarget.kind !== 'balance.unit')
-        fail(`node ${node.id} unit reference must target balance.unit`)
-    } else if (
-      node.kind === 'balance.economy-source' ||
-      node.kind === 'balance.economy-sink' ||
-      node.kind === 'balance.reward' ||
-      node.kind === 'balance.cost' ||
-      node.kind === 'balance.reward-cost-binding'
-    ) {
-      for (
-        let referenceIndex = 0;
-        referenceIndex < node.references.length;
-        referenceIndex += 1
-      )
-        consumedReferences.add(referenceIndex)
-    }
-    assertReferenceConsumption(node, consumedReferences)
-    parsed.push({
-      ...node,
-      value: parsedValue.value,
-      references: node.references.map(
-        (reference: GameIrNode['references'][number]) => ({ ...reference }),
-      ),
-      edges: node.edges.map((edgeValue: GameIrNode['edges'][number]) => ({
-        ...edgeValue,
-      })),
-      bindings: cloneJson(node.bindings) as GameIrNode['bindings'],
-    })
+    parsed.push(parseBalanceProjectionNode(localNodes[index]!, targets))
   }
   for (let index = 1; index < parsed.length; index += 1) {
     if (compareCodeUnits(parsed[index - 1]!.id, parsed[index]!.id) >= 0)

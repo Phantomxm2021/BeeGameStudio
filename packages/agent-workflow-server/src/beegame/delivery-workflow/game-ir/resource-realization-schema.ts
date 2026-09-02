@@ -440,6 +440,7 @@ export const RESOURCE_REALIZATION_DOMAIN_MANIFEST: Readonly<
 
 type RecordValue = Record<string, unknown>
 type ParsedNode = GameIrNode & { value: Readonly<Record<string, unknown>> }
+type NodeValidationOptions = Readonly<{ allowUnknownTargets?: boolean }>
 
 const fidelity = createSemanticFidelityPrimitives(
   'invalid Resource Realization module',
@@ -1049,6 +1050,25 @@ export function parseResourceRealizationProjectionPayload(
   }
 }
 
+/** Validate one node using the same value and relationship rules as the full parser. */
+export function parseResourceRealizationProjectionNode(
+  node: GameIrNode,
+  module: GameIrModuleCandidate,
+  targets: ReadonlyMap<string, GameIrNode>,
+  options: NodeValidationOptions = {},
+): ParsedNode {
+  const payload = parseResourceRealizationProjectionPayload(node, module)
+  validateEdges(node, targets, options)
+  validateRelationships(node)
+  return {
+    ...node,
+    value: payload.value,
+    references: [],
+    edges: node.edges.map(edge => ({ ...edge })),
+    bindings: structuredClone(node.bindings),
+  }
+}
+
 function targetMap(
   nodes: readonly GameIrNode[],
   priorNodes: readonly GameIrNode[],
@@ -1132,6 +1152,7 @@ function admitPriorModules(
 function validateEdges(
   node: GameIrNode,
   targets: ReadonlyMap<string, GameIrNode>,
+  options: NodeValidationOptions = {},
 ): void {
   strictArray(node.references, `node ${node.id} references`)
   if (node.references.length > 0)
@@ -1147,8 +1168,9 @@ function validateEdges(
     const targetId = safeId(entry.targetId, `node ${node.id} edge targetId`)
     const targetType = text(entry.targetType, `node ${node.id} edge targetType`)
     const target = targets.get(targetId)
-    if (!target) fail(`node ${node.id} edge targets unknown node ${targetId}`)
-    if (target.kind !== targetType)
+    if (!target && !options.allowUnknownTargets)
+      fail(`node ${node.id} edge targets unknown node ${targetId}`)
+    if (target && target.kind !== targetType)
       fail(`node ${node.id} edge target kind does not match ${targetId}`)
     const key = `${type}\0${targetId}\0${targetType}`
     if (seen.has(key)) fail(`node ${node.id} has duplicate relationship edge`)
@@ -1339,25 +1361,9 @@ export function parseResourceRealizationModule(
         fail(`node ${node.id} producer mode is invalid`)
     } else if (node.producerMode !== 'semantic')
       fail(`node ${node.id} producer mode must be semantic`)
-    validateEdges(node, targets)
-    validateRelationships(node)
-    let parsedValue: Readonly<Record<string, unknown>>
-    if (node.kind === 'resource-realization.logical-resource')
-      parsedValue = parseLogical(node)
-    else if (node.kind === 'resource-realization.acquisition-profile')
-      parsedValue = parseProfile(node)
-    else if (node.kind === 'resource-realization.delivery-target')
-      parsedValue = parseTarget(node)
-    else if (node.kind === 'resource-realization.variant')
-      parsedValue = parseVariant(node)
-    else parsedValue = parseArtifact(node, parseTarget(targetNodes[0]!))
-    parsed.push({
-      ...node,
-      value: parsedValue,
-      references: [],
-      edges: node.edges.map(edge => ({ ...edge })),
-      bindings: structuredClone(node.bindings),
-    })
+    parsed.push(
+      parseResourceRealizationProjectionNode(node, candidateModule, targets),
+    )
   }
   for (let index = 1; index < parsed.length; index += 1)
     if (compareCodeUnits(parsed[index - 1]!.id, parsed[index]!.id) >= 0)

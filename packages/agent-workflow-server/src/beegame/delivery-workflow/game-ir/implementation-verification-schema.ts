@@ -239,6 +239,10 @@ const SCOPES = new Set([
 ])
 type RecordValue = Record<string, unknown>
 type ParsedNode = GameIrNode & { value: RecordValue }
+type NodeValidationOptions = Readonly<{
+  allowUnknownTargets?: boolean
+  requireSemantic?: boolean
+}>
 
 function fail(message: string): never {
   throw new Error(`invalid Implementation/Verification module: ${message}`)
@@ -520,6 +524,86 @@ export function parseImplementationVerificationProjectionPayload(
   }
 }
 
+/** Validate one node with the canonical value and edge rules used by the full parser. */
+export function parseImplementationVerificationProjectionNode(
+  node: GameIrNode,
+  targets: ReadonlyMap<string, GameIrNode>,
+  options: NodeValidationOptions = {},
+): ParsedNode {
+  if (!node.kind.startsWith('implementation-verification.') || !LOCAL_KINDS.has(node.kind))
+    fail(`node ${node.id} has an unknown kind`)
+  if (options.requireSemantic && node.producerMode !== 'semantic')
+    fail(`node ${node.id} must be semantic-owned`)
+  if (node.references.length !== 0)
+    fail(`node ${node.id} references must be empty; use manifest edges`)
+  for (const item of node.edges) {
+    const target = targets.get(item.targetId)
+    if (!ALL_KINDS.has(item.targetType))
+      fail(`node ${node.id} edge target is invalid`)
+    if (!target && !(options.allowUnknownTargets && LOCAL_KINDS.has(item.targetType)))
+      fail(`node ${node.id} edge target is invalid`)
+    if (target && target.kind !== item.targetType)
+      fail(`node ${node.id} edge target is invalid`)
+  }
+  validateNodeRelationships(node, targets, options)
+  return {
+    ...node,
+    value: parseValue(node),
+    references: [...node.references],
+    edges: [...node.edges],
+    bindings: clone(node.bindings),
+  }
+}
+
+function validateNodeRelationships(
+  node: GameIrNode,
+  targets: ReadonlyMap<string, GameIrNode>,
+  options: NodeValidationOptions = {},
+): void {
+  const descriptor = IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST[
+    node.kind as keyof typeof IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST
+  ] as {
+    relationships: Readonly<
+      Record<
+        string,
+        {
+          targetKinds: readonly string[]
+          cardinality: string
+        }
+      >
+    >
+  }
+  if (!descriptor) fail(`node ${node.id} has an unknown kind`)
+  const counts = new Map<string, number>()
+  const seen = new Set<string>()
+  for (const item of node.edges) {
+    const target = targets.get(item.targetId)
+    if (!target && !options.allowUnknownTargets)
+      fail(`node ${node.id} edge target is invalid`)
+    if (target && target.kind !== item.targetType)
+      fail(`node ${node.id} edge target is invalid`)
+    const rule = descriptor.relationships[item.type]
+    if (!rule) fail(`node ${node.id} has unknown relationship role ${item.type}`)
+    if (!rule.targetKinds.includes(item.targetType))
+      fail(`node ${node.id} role ${item.type} has wrong target kind`)
+    const key = `${item.type}\0${item.targetId}\0${item.targetType}`
+    if (seen.has(key)) fail(`node ${node.id} has duplicate relationship edge`)
+    seen.add(key)
+    const count = (counts.get(item.type) ?? 0) + 1
+    counts.set(item.type, count)
+    if (rule.cardinality === 'exactly-one' && count > 1)
+      fail(`node ${node.id} relationship ${item.type} has invalid cardinality`)
+  }
+  for (const [name, rule] of Object.entries(descriptor.relationships)) {
+    const count = counts.get(name) ?? 0
+    if (
+      (rule.cardinality === 'exactly-one' && count !== 1) ||
+      (rule.cardinality === 'at-least-one' && count < 1)
+    )
+      fail(`node ${node.id} relationship ${name} has invalid cardinality`)
+  }
+}
+
 function parseCurrent(
   module: GameIrModuleCandidate,
   prior: ReadonlyMap<string, GameIrModuleCandidate>,
@@ -527,33 +611,12 @@ function parseCurrent(
   const targets = new Map<string, GameIrNode>()
   for (const item of prior.values())
     for (const node of item.nodes) targets.set(node.id, node)
-  const nodes: ParsedNode[] = module.nodes.map(node => {
-    if (
-      !node.kind.startsWith('implementation-verification.') ||
-      !LOCAL_KINDS.has(node.kind)
-    )
-      fail(`node ${node.id} has an unknown kind`)
-    if (node.producerMode !== 'semantic')
-      fail(`node ${node.id} must be semantic-owned`)
-    if (node.references.length !== 0)
-      fail(`node ${node.id} references must be empty; use manifest edges`)
-    for (const item of node.edges) {
-      const target = targets.get(item.targetId)
-      if (
-        (!target && !LOCAL_KINDS.has(item.targetType)) ||
-        (target && target.kind !== item.targetType) ||
-        !ALL_KINDS.has(item.targetType)
-      )
-        fail(`node ${node.id} edge target is invalid`)
-    }
-    return {
-      ...node,
-      value: parseValue(node),
-      references: [...node.references],
-      edges: [...node.edges],
-      bindings: clone(node.bindings),
-    }
-  })
+  for (const node of module.nodes) targets.set(node.id, node)
+  const nodes: ParsedNode[] = module.nodes.map(node =>
+    parseImplementationVerificationProjectionNode(node, targets, {
+      requireSemantic: true,
+    }),
+  )
   return { moduleId: 'implementation-verification', nodes }
 }
 
@@ -608,43 +671,7 @@ function validate(
     fail(
       'module requires one target, units, scenarios, invariants, and evidence',
     )
-  const descriptor = (kind: string) =>
-    IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST[
-      kind as keyof typeof IMPLEMENTATION_VERIFICATION_DOMAIN_MANIFEST
-    ] as {
-      relationships: Readonly<
-        Record<string, { targetKinds: readonly string[]; cardinality: string }>
-      >
-    }
-  for (const node of nodes) {
-    const counts = new Map<string, number>()
-    const seen = new Set<string>()
-    for (const item of node.edges) {
-      const target = all.get(item.targetId)
-      if (!target || target.kind !== item.targetType)
-        fail(`node ${node.id} edge target is invalid`)
-      const rule = descriptor(node.kind).relationships[item.type]
-      if (!rule)
-        fail(`node ${node.id} has unknown relationship role ${item.type}`)
-      const allowed = rule.targetKinds
-      if (!allowed.includes(item.targetType))
-        fail(`node ${node.id} role ${item.type} has wrong target kind`)
-      const key = `${item.type}\0${item.targetId}\0${item.targetType}`
-      if (seen.has(key)) fail(`node ${node.id} has duplicate relationship edge`)
-      seen.add(key)
-      counts.set(item.type, (counts.get(item.type) ?? 0) + 1)
-    }
-    for (const [name, rule] of Object.entries(
-      descriptor(node.kind).relationships,
-    )) {
-      const count = counts.get(name) ?? 0
-      if (
-        (rule.cardinality === 'exactly-one' && count !== 1) ||
-        (rule.cardinality === 'at-least-one' && count < 1)
-      )
-        fail(`node ${node.id} relationship ${name} has invalid cardinality`)
-    }
-  }
+  for (const node of nodes) validateNodeRelationships(node, all)
   const target = targets[0]!
   const roots = target.value.projectRoots as readonly string[]
   const owned: string[] = []

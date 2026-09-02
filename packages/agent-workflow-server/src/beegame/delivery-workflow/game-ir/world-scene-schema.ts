@@ -368,6 +368,8 @@ export const WORLD_SCENE_DOMAIN_MANIFEST: Readonly<
 
 type RecordValue = Record<string, unknown>
 type ParsedNode = GameIrNode & { value: Readonly<Record<string, unknown>> }
+type KnownTarget = Pick<GameIrNode, 'id' | 'kind'>
+type NodeValidationOptions = Readonly<{ allowUnknownTargets?: boolean }>
 const NODE_KINDS = new Set(Object.keys(WORLD_SCENE_DOMAIN_MANIFEST))
 const NODE_TYPES = new Set(['container', 'anchor', 'volume', 'visual'])
 const SPAWN_POLICIES = new Set(['once', 'wave', 'repeat'])
@@ -747,13 +749,6 @@ function parseValue(node: GameIrNode): Readonly<Record<string, unknown>> {
   fail(`node ${node.id} has an unknown kind`)
 }
 
-/** Domain-owned intrinsic value parsing for projection slice admission. */
-export function parseWorldSceneProjectionPayload(
-  node: GameIrNode,
-): Readonly<Record<string, unknown>> {
-  return parseValue(node)
-}
-
 function assertNoEmbeddedTargetIds(
   value: unknown,
   targetIds: ReadonlySet<string>,
@@ -799,7 +794,8 @@ function targetMap(
 }
 function validateReferences(
   node: GameIrNode,
-  targets: ReadonlyMap<string, GameIrNode>,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
 ): void {
   const metadata = WORLD_SCENE_DOMAIN_MANIFEST[node.kind].references
   if (!metadata && node.references.length > 0)
@@ -808,10 +804,12 @@ function validateReferences(
   let previous: string | undefined
   for (const reference of node.references) {
     const target = targets.get(reference.targetId)
-    if (!target)
+    if (!target) {
+      if (options.allowUnknownTargets) continue
       fail(
         `node ${node.id} reference targets unknown node ${reference.targetId}`,
       )
+    }
     if (target.kind !== reference.targetType)
       fail(
         `node ${node.id} reference target kind does not match ${reference.targetId}`,
@@ -832,8 +830,10 @@ function validateReferences(
   }
   for (const edge of node.edges) {
     const target = targets.get(edge.targetId)
-    if (!target)
+    if (!target) {
+      if (options.allowUnknownTargets) continue
       fail(`node ${node.id} edge targets unknown node ${edge.targetId}`)
+    }
     if (target.kind !== edge.targetType)
       fail(`node ${node.id} edge target kind does not match ${edge.targetId}`)
   }
@@ -852,7 +852,8 @@ function effectiveCardinality(
 function validateRoles(
   node: GameIrNode,
   value: Readonly<Record<string, unknown>>,
-  targets: ReadonlyMap<string, GameIrNode>,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
 ): void {
   const manifest = WORLD_SCENE_DOMAIN_MANIFEST[node.kind]
   const counts = new Map<string, number>()
@@ -867,7 +868,7 @@ function validateRoles(
     if (seen.has(key)) fail(`node ${node.id} has duplicate relationship edge`)
     seen.add(key)
     counts.set(edge.type, (counts.get(edge.type) ?? 0) + 1)
-    if (!targets.has(edge.targetId))
+    if (!targets.has(edge.targetId) && !options.allowUnknownTargets)
       fail(`node ${node.id} role target is invalid`)
   }
   for (const [name, rule] of Object.entries(manifest.relationships)) {
@@ -1047,6 +1048,32 @@ function validateGraph(nodes: readonly ParsedNode[]): void {
   }
 }
 
+/**
+ * Parses one World/Scene node through the same local semantic rules used by
+ * the complete module parser. Scene graph closure stays below.
+ */
+export function parseWorldSceneProjectionNode(
+  node: GameIrNode,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
+): ParsedNode {
+  const parsedValue = parseValue(node)
+  validateReferences(node, targets, options)
+  assertNoEmbeddedTargetIds(
+    parsedValue,
+    new Set(targets.keys()),
+    `node ${node.id} value`,
+  )
+  validateRoles(node, parsedValue, targets, options)
+  return {
+    ...node,
+    value: parsedValue,
+    references: node.references.map(reference => ({ ...reference })),
+    edges: node.edges.map(edgeValue => ({ ...edgeValue })),
+    bindings: cloneJson(node.bindings) as GameIrNode['bindings'],
+  }
+}
+
 export function parseWorldSceneModule(
   module: GameIrModuleCandidate,
   externalTargets?: ReadonlyMap<string, GameIrNode>,
@@ -1091,21 +1118,7 @@ export function parseWorldSceneModule(
       !Array.isArray(admittedNode.edges)
     )
       fail(`node ${admittedNode.id} references and edges must be arrays`)
-    validateReferences(admittedNode, targets)
-    const parsedValue = parseValue(admittedNode)
-    assertNoEmbeddedTargetIds(
-      parsedValue,
-      new Set(targets.keys()),
-      `node ${admittedNode.id} value`,
-    )
-    validateRoles(admittedNode, parsedValue, targets)
-    parsed.push({
-      ...admittedNode,
-      value: parsedValue,
-      references: admittedNode.references.map(reference => ({ ...reference })),
-      edges: admittedNode.edges.map(edge => ({ ...edge })),
-      bindings: cloneJson(admittedNode.bindings) as GameIrNode['bindings'],
-    })
+    parsed.push(parseWorldSceneProjectionNode(admittedNode, targets))
   }
   for (let index = 1; index < parsed.length; index += 1)
     if (compareCodeUnits(parsed[index - 1]!.id, parsed[index]!.id) >= 0)

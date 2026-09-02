@@ -16,12 +16,12 @@ import {
   type GameIrRelationshipEdge,
   type GameIrNode,
 } from './model'
-import { parseGameplayProjectionPayload } from './gameplay-schema'
-import { parseBalanceProjectionPayload } from './balance-schema'
-import { parseWorldSceneProjectionPayload } from './world-scene-schema'
-import { parsePresentationProjectionPayload } from './presentation-schema'
-import { parseResourceRealizationProjectionPayload } from './resource-realization-schema'
-import { parseImplementationVerificationProjectionPayload } from './implementation-verification-schema'
+import { parseGameplayProjectionNode } from './gameplay-schema'
+import { parseBalanceProjectionNode } from './balance-schema'
+import { parseWorldSceneProjectionNode } from './world-scene-schema'
+import { parsePresentationProjectionNode } from './presentation-schema'
+import { parseResourceRealizationProjectionNode } from './resource-realization-schema'
+import { parseImplementationVerificationProjectionNode } from './implementation-verification-schema'
 import { normalizeGameIrDomainSemanticPacket } from './domain-projection'
 import {
   validateGameIrDomainSourceEnvelope,
@@ -176,38 +176,89 @@ type Authority = Readonly<{
 }>
 
 /**
- * Runs only the domain-owned node value parser while the node is still
- * independently attributable. Graph-wide closure remains the final parser's
- * responsibility; this prevents intrinsic value errors from surviving into
- * full-module assembly without inventing future target nodes.
+ * Supplies the domain-owned targets needed for locally decidable node
+ * semantics. Record admission may defer unknown targets; slice completion and
+ * reload validate against the complete prior/current target boundary, while
+ * graph-wide closure remains the final parser's responsibility.
  */
+function knownTargets(
+  authority: Authority,
+  nodes: readonly GameIrProjectionSliceNode[],
+): ReadonlyMap<string, GameIrNode> {
+  const targets = new Map<string, GameIrNode>()
+  for (const node of nodes) targets.set(node.id, node as unknown as GameIrNode)
+  const addDescriptors = (value: unknown): void => {
+    if (!Array.isArray(value)) return
+    for (const candidate of value) {
+      if (!isRecord(candidate)) continue
+      if (typeof candidate.id !== 'string' || typeof candidate.kind !== 'string')
+        continue
+      const existing = targets.get(candidate.id)
+      if (existing && existing.kind !== candidate.kind)
+        fail(`known target ${candidate.id} has conflicting kinds`)
+      if (!existing)
+        targets.set(candidate.id, { id: candidate.id, kind: candidate.kind } as GameIrNode)
+    }
+  }
+  if (isRecord(authority.packet.dependencies)) {
+    for (const value of Object.values(authority.packet.dependencies))
+      addDescriptors(value)
+  }
+  if (isRecord(authority.semanticPacket))
+    addDescriptors(authority.semanticPacket.allowedPriorNodeTargets)
+  if (isRecord(authority.semanticPacket) &&
+      Array.isArray(authority.semanticPacket.presentationRequirements)) {
+    addDescriptors(
+      authority.semanticPacket.presentationRequirements.map(requirement =>
+        isRecord(requirement) && typeof requirement.requirementId === 'string'
+          ? {
+              id: `resource.requirement.${requirement.requirementId}`,
+              kind: 'resource-realization.logical-resource',
+            }
+          : requirement,
+      ),
+    )
+  }
+  return targets
+}
+
 function validateIntrinsicNodeSemantics(
   node: GameIrProjectionSliceNode,
   authority: Authority,
   priorNodes: readonly GameIrProjectionSliceNode[],
+  allowUnknownTargets: boolean,
 ): void {
   const canonicalNode = node as unknown as GameIrNode
+  const targets = knownTargets(authority, [...priorNodes, node])
+  const options = { allowUnknownTargets }
   switch (authority.source.moduleId) {
     case 'gameplay':
-      parseGameplayProjectionPayload(canonicalNode)
+      parseGameplayProjectionNode(canonicalNode, targets, options)
       return
     case 'balance':
-      parseBalanceProjectionPayload(canonicalNode)
+      parseBalanceProjectionNode(canonicalNode, targets, options)
       return
     case 'world-scene':
-      parseWorldSceneProjectionPayload(canonicalNode)
+      parseWorldSceneProjectionNode(canonicalNode, targets, options)
       return
     case 'presentation':
-      parsePresentationProjectionPayload(canonicalNode)
+      parsePresentationProjectionNode(canonicalNode, targets, options)
       return
     case 'resource-realization':
-      parseResourceRealizationProjectionPayload(canonicalNode, {
-        moduleId: 'resource-realization',
-        nodes: [...priorNodes, node] as unknown as readonly GameIrNode[],
-      })
+      parseResourceRealizationProjectionNode(
+        canonicalNode,
+        {
+          moduleId: 'resource-realization',
+          nodes: [...priorNodes, node] as unknown as readonly GameIrNode[],
+        },
+        targets,
+        { allowUnknownTargets },
+      )
       return
     case 'implementation-verification':
-      parseImplementationVerificationProjectionPayload(canonicalNode)
+      parseImplementationVerificationProjectionNode(canonicalNode, targets, {
+        allowUnknownTargets,
+      })
       return
   }
 }
@@ -839,7 +890,7 @@ function normalizeCompletion(
     clone(candidate.semantic.nodes) as GameIrProjectionSliceNode[],
   )
   for (const node of nodes)
-    validateIntrinsicNodeSemantics(node, authority, priorNodes)
+    validateIntrinsicNodeSemantics(node, authority, [...priorNodes, ...nodes], false)
   const sourceEvidenceGroups = normalizeGroups(
     candidate.semantic.sourceEvidenceGroups,
     authority.source,
@@ -898,7 +949,7 @@ function normalizePersistedSemantic(
     clone(value.nodes as readonly GameIrProjectionSliceNode[]),
   )
   for (const node of nodes)
-    validateIntrinsicNodeSemantics(node, authority, priorNodes)
+    validateIntrinsicNodeSemantics(node, authority, [...priorNodes, ...nodes], false)
   const sourceEvidenceGroups = normalizePersistedGroups(
     value.sourceEvidenceGroups,
   )
@@ -961,7 +1012,7 @@ function normalizeRecordNode(
   const node = admitCanonicalNodeCollections(
     clone([record.node]) as GameIrProjectionSliceNode[],
   )[0]!
-  validateIntrinsicNodeSemantics(node, authority, priorNodes)
+  validateIntrinsicNodeSemantics(node, authority, priorNodes, true)
   return Object.freeze({ fragmentId, node })
 }
 
@@ -1018,11 +1069,12 @@ function normalizePendingSlice(
   if (predecessorDigest !== expectedPredecessor)
     fail('pendingSlice predecessor chain is invalid')
   if (!Array.isArray(value.records)) fail('pendingSlice.records must be an array')
+  const rawRecords = value.records as readonly unknown[]
   const nodeIds = new Set(
     entries.flatMap(entry => entry.semantic.nodes.map(node => node.id)),
   )
   let previousId: string | undefined
-  const records = value.records.map((raw, index) => {
+  const records = rawRecords.map((raw, index) => {
     if (!isRecord(raw)) fail(`pendingSlice.records[${index}] is invalid`)
     exactKeys(
       raw,
@@ -1036,7 +1088,12 @@ function normalizePendingSlice(
       },
       slice,
       authority,
-      entries.flatMap(entry => entry.semantic.nodes),
+      [
+        ...entries.flatMap(entry => entry.semantic.nodes),
+        ...rawRecords
+          .slice(0, index)
+          .map(candidate => (candidate as Record<string, unknown>).node as GameIrProjectionSliceNode),
+      ],
     )
     if (
       previousId !== undefined &&
@@ -1426,9 +1483,12 @@ export class GameIrProjectionSliceJournal {
             candidate,
             targetSlice,
             this.authority,
-            this.state.entries
-              .slice(0, targetIndex)
-              .flatMap(entry => entry.semantic.nodes),
+            [
+              ...this.state.entries
+                .slice(0, targetIndex)
+                .flatMap(entry => entry.semantic.nodes),
+              ...entry.semantic.nodes,
+            ],
           )
           normalized.push(node)
         } catch (error) {
@@ -1517,7 +1577,10 @@ export class GameIrProjectionSliceJournal {
           candidate,
           slice,
           this.authority,
-          this.state.entries.flatMap(entry => entry.semantic.nodes),
+          [
+            ...this.state.entries.flatMap(entry => entry.semantic.nodes),
+            ...pendingRecords.map(record => record.node),
+          ],
         )
       } catch (error) {
         const raw = candidate as unknown as Record<string, unknown>

@@ -313,6 +313,12 @@ export const PRESENTATION_DOMAIN_MANIFEST: Readonly<
 
 type RecordValue = Record<string, unknown>
 type ParsedNode = GameIrNode & { value: Readonly<Record<string, unknown>> }
+type KnownTarget = Pick<GameIrNode, 'id' | 'kind'> &
+  Partial<Pick<GameIrNode, 'value'>>
+type NodeValidationOptions = Readonly<{
+  allowUnknownTargets?: boolean
+  requirementIds?: Set<string>
+}>
 const NODE_KINDS = new Set(Object.keys(PRESENTATION_DOMAIN_MANIFEST))
 const TRIGGER_KINDS = new Set([
   'automatic',
@@ -582,12 +588,6 @@ function parseValue(
 }
 
 /** Domain-owned intrinsic value parsing for projection slice admission. */
-export function parsePresentationProjectionPayload(
-  node: GameIrNode,
-): Readonly<Record<string, unknown>> {
-  return parseValue(node, new Set())
-}
-
 function manifestTargetKinds(): ReadonlySet<string> {
   const targetKinds = new Set<string>()
   for (const descriptor of Object.values(PRESENTATION_DOMAIN_MANIFEST))
@@ -628,7 +628,8 @@ function targetMap(
 }
 function validateEdges(
   node: GameIrNode,
-  targets: ReadonlyMap<string, GameIrNode>,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
 ): void {
   if (!Array.isArray(node.references) || !Array.isArray(node.edges))
     fail(`node ${node.id} references and edges must be arrays`)
@@ -650,7 +651,10 @@ function validateEdges(
       `node ${node.id} edge targetType`,
     )
     const target = targets.get(targetId)
-    if (!target) fail(`node ${node.id} edge targets unknown node ${targetId}`)
+    if (!target) {
+      if (options.allowUnknownTargets) continue
+      fail(`node ${node.id} edge targets unknown node ${targetId}`)
+    }
     if (target.kind !== targetType)
       fail(`node ${node.id} edge target kind does not match ${targetId}`)
     const key = `${type}\0${targetId}\0${targetType}`
@@ -667,8 +671,9 @@ function edge(
 function effectiveCardinality(
   node: ParsedNode,
   name: string,
-  targets: ReadonlyMap<string, GameIrNode>,
-): 'exactly-one' | 'zero-or-one' {
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
+): 'exactly-one' | 'zero-or-one' | undefined {
   const cardinality =
     PRESENTATION_DOMAIN_MANIFEST[node.kind]!.relationships[name]!.cardinality
   if (cardinality === 'transition-trigger-dependent') {
@@ -678,8 +683,14 @@ function effectiveCardinality(
   if (cardinality === 'audio-event-spatial-dependent') {
     const event = edge(node, 'event')
     const target = event ? targets.get(event.targetId) : undefined
-    if (!target || target.kind !== 'presentation.audio-event')
+    if (!target || target.kind !== 'presentation.audio-event') {
+      if (options.allowUnknownTargets && !target) return undefined
       fail(`node ${node.id} event target is invalid`)
+    }
+    if (!target.value) {
+      if (options.allowUnknownTargets) return undefined
+      fail(`node ${node.id} event target has no parsed value`)
+    }
     return (target.value as RecordValue).spatial === true
       ? 'exactly-one'
       : 'zero-or-one'
@@ -700,7 +711,8 @@ function triggerTargetKind(
 }
 function validateRoles(
   node: ParsedNode,
-  targets: ReadonlyMap<string, GameIrNode>,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
 ): void {
   const descriptor = PRESENTATION_DOMAIN_MANIFEST[node.kind]!
   const counts = new Map<string, number>()
@@ -710,13 +722,14 @@ function validateRoles(
       fail(`node ${node.id} has unknown relationship role ${candidate.type}`)
     if (!rule.targetKinds.includes(candidate.targetType))
       fail(`node ${node.id} role ${candidate.type} has wrong target kind`)
-    if (!targets.has(candidate.targetId))
+    if (!targets.has(candidate.targetId) && !options.allowUnknownTargets)
       fail(`node ${node.id} role target is invalid`)
     counts.set(candidate.type, (counts.get(candidate.type) ?? 0) + 1)
   }
   for (const [name, rule] of Object.entries(descriptor.relationships)) {
     const count = counts.get(name) ?? 0
-    const cardinality = effectiveCardinality(node, name, targets)
+    const cardinality = effectiveCardinality(node, name, targets, options)
+    if (cardinality === undefined) continue
     if (
       node.kind === 'presentation.transition' &&
       name === 'on' &&
@@ -853,6 +866,35 @@ function validateGraph(
   }
 }
 
+/**
+ * Parses one Presentation node through the same local semantic rules used by
+ * the complete module parser. UI graph reachability stays below.
+ */
+export function parsePresentationProjectionNode(
+  node: GameIrNode,
+  targets: ReadonlyMap<string, KnownTarget>,
+  options: NodeValidationOptions = {},
+): ParsedNode {
+  if (node.producerMode !== undefined && node.producerMode !== 'semantic')
+    fail(`node ${node.id} must be semantic-owned`)
+  validateEdges(node, targets, options)
+  const parsedValue = parseValue(node, options.requirementIds ?? new Set())
+  assertNoEmbeddedTargetIds(
+    parsedValue,
+    new Set(targets.keys()),
+    `node ${node.id} value`,
+  )
+  const parsedNode = {
+    ...node,
+    value: parsedValue,
+    references: [],
+    edges: node.edges.map(edgeValue => ({ ...edgeValue })),
+    bindings: cloneJson(node.bindings) as GameIrNode['bindings'],
+  } as ParsedNode
+  validateRoles(parsedNode, targets, options)
+  return parsedNode
+}
+
 export function parsePresentationModule(
   module: GameIrModuleCandidate,
   externalTargets?: ReadonlyMap<string, GameIrNode>,
@@ -882,22 +924,7 @@ export function parsePresentationModule(
     const node = value as GameIrNode
     if (node.producerMode !== 'semantic')
       fail(`node ${index} must be semantic-owned`)
-    validateEdges(node, targets)
-    const parsedValue = parseValue(node, requirementIds)
-    assertNoEmbeddedTargetIds(
-      parsedValue,
-      new Set(targets.keys()),
-      `node ${node.id} value`,
-    )
-    const parsedNode = {
-      ...node,
-      value: parsedValue,
-      references: [],
-      edges: node.edges.map(edgeValue => ({ ...edgeValue })),
-      bindings: cloneJson(node.bindings) as GameIrNode['bindings'],
-    } as ParsedNode
-    validateRoles(parsedNode, targets)
-    parsed.push(parsedNode)
+    parsed.push(parsePresentationProjectionNode(node, targets, { requirementIds }))
   }
   for (let index = 1; index < parsed.length; index += 1)
     if (compareCodeUnits(parsed[index - 1]!.id, parsed[index]!.id) >= 0)
