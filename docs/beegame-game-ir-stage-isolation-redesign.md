@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计已确认；Phase 3 Core、Phase 4（Gameplay + Balance）、Phase 5（World + Presentation）、Phase 6（Resource Realization）与 Phase 7（Implementation + Verification）均已完成 implementation plan、independent final review 与 root verification，并 accepted。Phase 8 的 production cutover 设计已经独立审计并准入 implementation plan，生产代码尚未执行；Phase 9 fresh workflow 与 Chrome acceptance 尚未执行。Game IR 的六域 assembly、Phase 7 authority-bound publication/recovery 已可用。
+状态：阶段边界与六域 canonical schema/assembly/publication 设计已确认；Phase 3–7 的领域合同和确定性服务端实现已经独立审计。后续真实 Chrome 验收否定了 projection transport 的 live-session packet-once 假设，因此 Stage 5 provider transport 重新开放，必须切换为无状态 semantic-slice compilation 后才能重新获得完整验收。Task 9–15 consumer migration 仍不得开始。
 
 日期：2026-08-30
 
@@ -417,10 +417,12 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 - 历史的 caller-built complete-candidate、generic semantic-admission publication route 与七模块/业务 `core` 约定，已由 Phase 7 的六域 authority-bound assembly 取代并删除；不把旧 route 作为当前未实现项或兼容入口。
 - Consumer migration 与 production routing 不属于本阶段，仍由 Phase 8 执行。
 
-### Phase 4：Gameplay + Balance（accepted after independent final review and root verification）
+### Phase 4：Gameplay + Balance（领域合同已 accepted；provider transport 重新开放）
 
 The final-review findings have been corrected, independently reviewed, and
-root-verified. Phase 4 is accepted. Production routing remains unreachable.
+root-verified for schema, admission and deterministic assembly. Later real-provider
+acceptance invalidated the packet-once transport assumption; that transport is
+not accepted and must be replaced without changing the accepted domain contract.
 
 - Gameplay 与 Balance 领域 schema、semantic admission、精确 source envelope
   和 immutable module projections 已落地；同一 pair assembler 每次重验两侧
@@ -442,6 +444,13 @@ root-verified. Phase 4 is accepted. Production routing remains unreachable.
   full-domain gate 写入唯一 canonical operation manifest。journal 不是第二
   authority，manifest commit 后必须删除。禁止 complete-domain StructuredOutput、
   token/byte/time/count 分片、compatibility reader 或第二 checkpoint/publication。
+- 每个 slice dispatch 必须是无状态、自包含的独立 provider request，只携带
+  当前 slice 所需的 READY-bound source fragments、直接依赖投影与 strict JSONL
+  record contract。禁止依赖 live session reuse、packet-once、prompt cache 或
+  provider resume；禁止 fresh-session fallback 重发完整 operation/domain packet。
+  Canonical JSON 仅由服务端 journal、assembler 与 publisher 持有，模型不得接收
+  或返回完整 domain JSON。该规则适用于全部六个 projection module，不是
+  Balance 特例。
 - AST/static detector 对新增 production files 禁止 partial candidate、
   publication、controller/store/DeliveryRun/Foundation Issue、provider
   dispatch 和五个 placeholder module；protected 21-file parity 与 full

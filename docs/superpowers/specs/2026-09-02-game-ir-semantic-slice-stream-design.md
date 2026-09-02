@@ -1,118 +1,257 @@
-# Game IR Semantic Slice Stream Design
+# Game IR Stateless Semantic Slice Compilation Design
 
-**Status:** approved for implementation on 2026-09-02.
+**Status:** revised after real-provider acceptance on 2026-09-02; pending renewed review.
 
-## Problem
+## Purpose
 
-The current Game IR projection protocol asks one model turn to return an entire domain as one `StructuredOutput` object. The real Gameplay acceptance produced 150 nodes and 77 evidence groups in a 46,426-byte JSON value. The provider first stopped at its natural 32,000-output-token boundary. A continued turn then produced a semantically complete candidate with one forbidden root `reason`; the protocol discarded that candidate and requested another complete serialization, which failed during provider transport retry.
+Compile the Foundation READY documents into one strict, revision-bound Game IR
+without sending or regenerating a complete domain payload in one model turn and
+without relying on a reusable provider session.
 
-The first slice implementation removed the complete-domain output, but real
-Chrome acceptance proved that `node-kind slice = one StructuredOutput` is still
-indivisible. `balance.slice.2` contains formula nodes whose recursive expression
-trees are data-dependent. The native provider emitted the tool argument as a
-sequence of cumulative DSML/JSON snapshots rather than true deltas: 208 stream
-frames repeatedly contained the growing semantic object, `agent.raw.jsonl`
-grew from about 447 KB to 1.7 MB after the tool had started, Chrome stopped
-responding, and the provider finally produced an empty tool identity. The
-journal was not the cause; the aggregate StructuredOutput transport was.
+The service remains the only owner of canonical Game IR JSON. Model calls are
+stateless semantic compilation requests: each request receives only the
+authority needed for one semantic slice and returns independent line records.
 
-JSON remains appropriate for committed canonical machine state. A complete
-domain or complete semantic slice is not an appropriate model-output unit.
+## Evidence and root cause
+
+Real Chrome acceptance invalidated the packet-once lifecycle assumption:
+
+- each Balance continuation started a new native provider process and Bee Game
+  session;
+- every retry resent a full prompt of roughly 122–160 KB;
+- one run streamed 1,218,645 stdout bytes over about 4 minutes 44 seconds;
+- the UI showed only a generic preparing state while hundreds or thousands of
+  provider events were still arriving;
+- Balance failures changed between unit-dimension ordering and formula
+  AST/reference consistency, causing large semantic payloads to be regenerated.
+
+The native CLI is effectively a one-turn process. The runtime closes stdin and
+terminates the native process after a successful record-stream turn. A design
+that requires the next slice to reuse that process is therefore not a valid
+provider-independent contract. Silent fallback to a fresh session and a full
+packet resend is a second execution track and must not exist.
+
+Large JSON is a multiplier, not the complete root cause. The unstable behavior
+comes from combining a large authority packet, aggregate generation, whole-unit
+retry and session reuse. Merely changing the same large payload to YAML or
+Markdown would preserve the same failure radius.
 
 ## Decision
 
-Each of the existing six projection operations uses one service-owned semantic
-slice record stream. Slices remain derived mechanically from the domain
-projection contract's node-kind dependency graph. Their order remains
-independent of token count, elapsed time, node count, provider behavior, or
-model choice.
+Stage 5 uses one stateless semantic-slice compiler for every Game IR projection
+module.
 
-The model returns raw NDJSON records, not a StructuredOutput tool call and not
-a JSON array. Each node record contains exactly one semantic node and its sole
-service-owned evidence fragment ID. The final record completes the current
-slice. Text frames must be true deltas. Cumulative frames, DSML, tool calls,
-empty tool identities and malformed record boundaries are provider protocol
-errors and are never interpreted as semantic output.
+For each slice the service:
 
-The exact immutable operation packet is supplied once when a live operation
-session starts. The transport validates and retains complete records across a
-provider continuation; the service strictly parses the completed record stream
-and appends the admitted slice to the operation-local journal. Recovery into a
-new session resupplies the same packet after journal verification. Once every
-declared slice is admitted, the service deterministically merges them and runs
-the existing full-domain admission and phase closure. Only then does it write
-the existing canonical operation manifest.
+1. derives the slice from the existing projection contract dependency graph;
+2. selects only the exact Foundation authority and admitted dependency facts
+   required by that slice;
+3. renders those facts as a compact, human-readable authority projection;
+4. starts an independent provider request;
+5. strictly parses one JSON object per physical output line;
+6. admits valid records into the operation-local digest journal;
+7. retries only rejected records or the owning slice;
+8. deterministically assembles and validates the complete canonical module;
+9. atomically publishes the existing canonical Game IR JSON.
 
-The journal is staging state, not a second authority. It is deleted after the canonical manifest is committed. Recovery revalidates its complete digest chain and resumes the exact next slice. A committed operation manifest supersedes and removes any stale journal.
+No step depends on provider resume, session affinity, a prior prompt cache or
+conversation memory. Replaying a request from persisted authority and journal
+state must produce the same service-owned input bytes.
 
-The ten canonical model-operation manifests and checkpoint v47 chain remain unchanged. A slice dispatch is internal work within one projection operation; it never creates another phase, publication, ready receipt, or consumer-visible authority.
+## Format responsibilities
+
+| Boundary | Format | Responsibility |
+| --- | --- | --- |
+| Foundation authority | Raw Markdown plus Section Index | Editable business authority from Stages 2–4 |
+| Model input | Compact Markdown field blocks and tables | Exact slice identity, contract, source fragments and admitted dependencies |
+| Model output | Strict JSONL node records | One independently parseable semantic node per line plus one `done` line |
+| Stage 5 staging | Canonical JSON journal entries | Tamper-evident admitted slice state |
+| Stage 5 publication | Canonical JSON | The only complete Game IR consumed downstream |
+
+YAML is not used at a machine boundary because implicit typing, whitespace and
+multiple equivalent encodings weaken strict admission. Pure Markdown is not
+used for model output because typed references and formula ASTs require exact
+machine validation. JSONL is retained only as a sequence of small independent
+records; the model never returns a complete domain JSON object or array.
+
+## Semantic slice definition
+
+A slice is derived from semantic dependencies, never from token, byte, record,
+node, attempt or elapsed-time limits. Examples include:
+
+- one formula dependency frontier;
+- one unit/variable frontier;
+- one gameplay rule and its condition/effect bindings;
+- one scene subtree and its direct runtime bindings;
+- one presentation event-binding frontier;
+- one logical resource and its delivery variants.
+
+The slice contract fixes allowed node kinds, value fields, edge roles and target
+kinds. The service may split a dependency frontier further only when the domain
+contract declares independently admissible semantic owners. Provider behavior
+and observed output size must never redefine the authority graph.
+
+## Minimal authority projection
+
+Every request is self-contained but does not contain the complete operation
+packet. It contains only:
+
+- compile, publication, Foundation revision and slice identities;
+- schema/contract digest and exact allowed node kinds;
+- exact source fragments selected from the READY-bound Section Index;
+- canonical IDs and fields of already admitted direct dependencies;
+- the strict JSONL record contract;
+- a precise diagnostic when retrying an invalid record or slice.
+
+The service owns source selection. A worker cannot request arbitrary additional
+documents or infer authority from a previous conversation. Source fragment IDs
+resolve mechanically to exact document, section, excerpt and byte range.
+
+Dependency summaries are projections of admitted canonical nodes, not copied
+model prose. They contain only fields required by the current contract.
 
 ## Output contract
 
-A projection slice transport contains one JSON object per physical line:
+Each physical line is one strict JSON object:
 
 ```jsonl
-{"record":"node","sliceId":"balance.slice.2","fragmentId":"fragment-id","node":{"id":"formula-id","kind":"balance.formula","value":{},"references":[],"edges":[]}}
-{"record":"done","sliceId":"balance.slice.2"}
+{"record":"node","sliceId":"balance.formula.frontier.2","fragmentId":"f-017","node":{"id":"balance.formula.f02","kind":"balance.formula","value":{},"references":[],"edges":[]}}
+{"record":"done","sliceId":"balance.formula.frontier.2"}
 ```
 
-The current slice contract fixes the only permitted node kinds, value fields,
-edge roles and target kinds. Node records must be in strict code-unit ID order.
-The service mechanically groups `fragmentId` values into canonical source
-evidence groups; this is derived authority, not output repair. A slice may be
-empty by emitting only its exact `done` record.
+The parser rejects unknown fields, blank internal lines, malformed JSON,
+duplicate or descending IDs, wrong slice IDs, missing or repeated `done`, and
+records after `done`. It never strips, repairs, reorders or translates output.
 
-Every record is exact and strict. Unknown fields, an internal blank line,
-duplicate or descending node IDs, an incorrect slice ID, a missing or repeated
-`done`, or any record after `done` is rejected. The service does not repair,
-strip, reorder, reinterpret or normalize model output into compliance.
+True text-delta continuation may be used inside one provider request when the
+provider streams a single response. It is transport behavior only and cannot
+carry authority into another request. Cumulative frames, DSML, tool-call frames
+and empty identities are provider protocol errors with no fallback parser.
 
-## Durable journal
+## Admission, repair and completion
 
-The operation-local journal is append-only and contains:
+Admission happens at the smallest independently owned record:
 
-- compilation identity and Foundation READY receipt digest;
-- operation step and immutable operation packet digest;
-- ordered service-derived slice contracts and their digest;
-- one admitted result per completed slice;
-- predecessor and entry digests forming one tamper-evident chain.
+- a valid record is persisted once and is not regenerated;
+- an invalid record is retried with its exact contract, dependencies, source
+  fragments and mechanical diagnostic;
+- if a full-module invariant identifies multiple records owned by one slice,
+  that slice and its successor digest chain are invalidated and rebuilt;
+- a Foundation business defect produces `FoundationDefectReport`; it is never
+  repaired by inventing Game IR facts;
+- repeating identical invalid bytes with the identical diagnostic and unchanged
+  authority is explicit proven no progress, not an arbitrary attempt timeout.
 
-There is no compatibility reader. An unknown schema, stale identity, changed packet, changed slice plan, duplicate slice, skipped predecessor, modified result, or invalid digest fails closed. The service never reconstructs an old whole-domain candidate from the journal.
+The operation becomes complete only after all declared slices are admitted and
+the existing full-domain schema, reference graph, source evidence and cross-domain
+checks pass. The existing canonical operation manifest is then written once.
+
+## Durable state and recovery
+
+The operation-local journal remains staging state, not a second authority. It
+binds compilation identity, Foundation READY receipt digest, slice-plan digest,
+admitted records and predecessor digests.
+
+After restart, the service verifies the journal and starts a fresh independent
+request for the exact next slice. It does not attempt to resume or reconstruct a
+provider session. A committed canonical operation manifest supersedes the
+journal, which is then deleted. Unknown schema, stale identity, changed source,
+changed plan or digest mismatch fails closed.
+
+## Stage isolation
+
+This design changes Stage 5 projection compilation only.
+
+- Stage 3 Foundation Reviewer must not import, read or validate Game IR.
+- Stage 4 Foundation Revision must not depend on Game IR parser, schema,
+  journal or publication state.
+- Checklist, Comprehensive Reviewer/Revision, UI and Task 9–15 consumer cutover
+  remain outside this change.
+- Canonical Game IR DTOs, ten operation manifests, publication receipt and
+  committed reader remain unchanged unless a separately reviewed schema defect
+  is proven.
+
+Protected Stage 3/4 path and behavior parity is a required gate. A Game IR
+failure cannot silently re-enter Reviewer/Revision or mutate Foundation state.
 
 ## Single-track deletion
 
-The implementation removes:
+The final implementation must delete, not retain behind flags:
 
-- the projection `workflowJsonSchema` / StructuredOutput route;
-- the complete-slice semantic JSON envelope and parser;
-- projection DSML/tool-call/fallback parsing;
-- projection continuation that resubmits an aggregate semantic candidate;
-- projection raw/transcript logging of semantic payload frames;
-- the dispatch identity fallback used when a staged packet has no `packet.source`;
-- tests and fixtures that admit either old aggregate projection protocol.
+- `liveGameIrProjectionSessions` and equivalent session-affinity state;
+- projection session rebinding and packet-bearing session identity;
+- full operation/domain packet rendering for model requests;
+- packet-once cache and digest-only continuation prompts;
+- fresh-session fallback that resends a full packet;
+- complete-domain and complete-slice StructuredOutput projection routes;
+- projection DSML/tool-call/compatibility parsers;
+- whole-domain correction and regeneration branches;
+- tests and fixtures asserting provider-session reuse.
 
-Validation operations may continue using their existing small StructuredOutput contract. Foundation Reviewer/Revision, Checklist, UI, Task 9–15, raw Markdown documents, canonical Game IR DTOs, committed reader and downstream consumers are outside this change.
+Validation operations may retain their existing small StructuredOutput contract
+because they do not share the projection payload or lifecycle. This is a
+different operation responsibility, not a second projection track.
 
-## Error and recovery behavior
+## Observability
 
-- Invalid slice output returns an exact slice-bound diagnostic and retries only that slice.
-- Repeating the same invalid slice candidate with the same diagnostic is explicit no progress; it is not hidden by another full-domain rewrite.
-- Provider truncation continues the same raw record stream without repeating
-  completed text. It cannot discard prior admitted slices.
-- A cumulative frame, DSML frame, empty tool identity or malformed record
-  stream fails as `provider_stream_protocol_error`; there is no fallback parser.
-- A process restart loads and verifies the journal, then dispatches the exact next slice.
-- Full-domain admission failure identifies the owning slice from the node kind/evidence subject and reopens only that slice after invalidating it and its successor digest chain. It never mutates an admitted slice silently.
-- No business token, time, attempt, slice-count, node-count, or byte-count cap is introduced.
+Every provider request records safe metadata:
 
-## Acceptance
+- module, slice and retry identity;
+- provider session ID;
+- prompt and output byte counts;
+- first-event, last-event and terminal timestamps;
+- parsed/admitted/rejected record counts;
+- diagnostic code and digest;
+- whether any full-packet marker was detected.
 
-Automated acceptance must additionally prove true incremental frames, NDJSON
-record parsing, cumulative-frame/DSML/tool rejection, continuation without
-replay, semantic-payload-free raw/transcript logs, and static unreachability of
-the projection StructuredOutput route. It must still prove strict slice scope,
-deterministic ordering, cross-slice references, evidence completeness, tamper
-rejection, exact recovery, operation-manifest uniqueness, stale-journal cleanup
-and unchanged validation behavior.
+Prompt bodies, semantic payloads and secrets are not written to runtime logs.
+The metadata must distinguish active provider streaming, deterministic
+validation, retry and proven no progress. Changing how the UI presents that
+metadata is a separate task after Stage 5 stabilizes and is outside this design.
 
-Chrome acceptance runs the existing real project from its current Foundation READY authority through all six committed Game IR modules and pauses before Checklist. UI status is insufficient: logs, run state, journal cleanup, ten-operation manifest chain, publication, committed reader, module content, source claims, dependency graph, tokens, duration, retries and recovery are inspected. Metrics are observations, not thresholds.
+Metrics are evidence, not admission limits. The design introduces no fixed
+token, byte, time, attempt or record cap.
+
+## Migration order
+
+1. Freeze and mechanically protect Stage 3/4 behavior.
+2. Add failing tests that reproduce fresh-session full-packet resend.
+3. Implement the stateless minimal authority projection and record-level retry.
+4. Cut Balance over first because it exercises units, formulas and recursive
+   references, while using shared compiler infrastructure only.
+5. Run mock fault matrices before real-provider acceptance.
+6. Cut the other five projection modules to the same compiler.
+7. Delete packet-once, full-packet and fallback production paths in the same
+   cutover; do not leave a compatibility window.
+8. Run complete Game IR publication/reader verification.
+9. Run fresh Chrome workflows on multiple structurally different projects and
+   stop before Checklist.
+10. Only after Stage 5 acceptance, resume Task 9–15 consumer migration.
+
+## Verification
+
+Automated tests must prove:
+
+- every slice succeeds in a fresh provider session;
+- no prompt contains the complete domain or operation packet;
+- an invalid formula, unit, source binding or reference retries only its owner;
+- admitted records are never regenerated;
+- crash recovery resumes from the exact journal cursor without session state;
+- malformed JSONL, cumulative frames and compatibility shapes fail closed;
+- deterministic assembly produces byte-identical canonical output;
+- no packet-once/full-packet/fallback production route remains reachable;
+- Stage 3/4 protected parity remains unchanged.
+
+Chrome acceptance must use at least three projects with different structures:
+formula-heavy, scene/resource-heavy and interaction/state-heavy. For each run,
+inspect logs, journal cleanup, ten-operation manifest chain, publication,
+committed reader, module content, source claims and dependency graph. Record
+actual tokens, duration, bytes and retries without assigning arbitrary pass/fail
+thresholds.
+
+## Completion criteria
+
+The design is complete only when all six projection modules use the stateless
+compiler, the old projection paths are absent from production code, the
+canonical Game IR is published successfully for all acceptance profiles, and
+Reviewer/Revision parity remains unchanged.
