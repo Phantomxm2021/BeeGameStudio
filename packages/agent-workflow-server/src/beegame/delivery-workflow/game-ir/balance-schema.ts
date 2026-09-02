@@ -775,6 +775,13 @@ function assertReferenceConsumption(
   }
 }
 
+/** Domain-owned intrinsic value parsing for projection slice admission. */
+export function parseBalanceProjectionPayload(
+  node: GameIrNode,
+): Readonly<Record<string, unknown>> {
+  return parseValue(node).value
+}
+
 function assertNoEmbeddedTargetIds(
   value: unknown,
   targetIds: ReadonlySet<string>,

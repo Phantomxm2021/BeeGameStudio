@@ -14,7 +14,14 @@ import {
   digestGameIrValue,
   type GameIrReference,
   type GameIrRelationshipEdge,
+  type GameIrNode,
 } from './model'
+import { parseGameplayProjectionPayload } from './gameplay-schema'
+import { parseBalanceProjectionPayload } from './balance-schema'
+import { parseWorldSceneProjectionPayload } from './world-scene-schema'
+import { parsePresentationProjectionPayload } from './presentation-schema'
+import { parseResourceRealizationProjectionPayload } from './resource-realization-schema'
+import { parseImplementationVerificationProjectionPayload } from './implementation-verification-schema'
 import { normalizeGameIrDomainSemanticPacket } from './domain-projection'
 import {
   validateGameIrDomainSourceEnvelope,
@@ -167,6 +174,43 @@ type Authority = Readonly<{
   source: GameIrDomainSourceEnvelope
   semanticPacket: unknown
 }>
+
+/**
+ * Runs only the domain-owned node value parser while the node is still
+ * independently attributable. Graph-wide closure remains the final parser's
+ * responsibility; this prevents intrinsic value errors from surviving into
+ * full-module assembly without inventing future target nodes.
+ */
+function validateIntrinsicNodeSemantics(
+  node: GameIrProjectionSliceNode,
+  authority: Authority,
+  priorNodes: readonly GameIrProjectionSliceNode[],
+): void {
+  const canonicalNode = node as unknown as GameIrNode
+  switch (authority.source.moduleId) {
+    case 'gameplay':
+      parseGameplayProjectionPayload(canonicalNode)
+      return
+    case 'balance':
+      parseBalanceProjectionPayload(canonicalNode)
+      return
+    case 'world-scene':
+      parseWorldSceneProjectionPayload(canonicalNode)
+      return
+    case 'presentation':
+      parsePresentationProjectionPayload(canonicalNode)
+      return
+    case 'resource-realization':
+      parseResourceRealizationProjectionPayload(canonicalNode, {
+        moduleId: 'resource-realization',
+        nodes: [...priorNodes, node] as unknown as readonly GameIrNode[],
+      })
+      return
+    case 'implementation-verification':
+      parseImplementationVerificationProjectionPayload(canonicalNode)
+      return
+  }
+}
 
 function fail(message: string): never {
   throw new Error(`invalid Game IR projection slice journal: ${message}`)
@@ -757,6 +801,7 @@ function normalizeCompletion(
   value: unknown,
   slice: GameIrProjectionSlice,
   authority: Authority,
+  priorNodes: readonly GameIrProjectionSliceNode[],
 ): NormalizedSemantic {
   if (!isRecord(value)) fail('slice completion must be a plain object')
   exactKeys(value, ['status', 'sliceId', 'semantic'], 'slice completion')
@@ -793,6 +838,8 @@ function normalizeCompletion(
   const nodes = admitCanonicalNodeCollections(
     clone(candidate.semantic.nodes) as GameIrProjectionSliceNode[],
   )
+  for (const node of nodes)
+    validateIntrinsicNodeSemantics(node, authority, priorNodes)
   const sourceEvidenceGroups = normalizeGroups(
     candidate.semantic.sourceEvidenceGroups,
     authority.source,
@@ -819,6 +866,7 @@ function normalizePersistedSemantic(
   value: unknown,
   slice: GameIrProjectionSlice,
   authority: Authority,
+  priorNodes: readonly GameIrProjectionSliceNode[],
 ): NormalizedSemantic {
   if (!isRecord(value)) fail('persisted slice semantic must be a plain object')
   exactKeys(
@@ -849,6 +897,8 @@ function normalizePersistedSemantic(
   const nodes = admitCanonicalNodeCollections(
     clone(value.nodes as readonly GameIrProjectionSliceNode[]),
   )
+  for (const node of nodes)
+    validateIntrinsicNodeSemantics(node, authority, priorNodes)
   const sourceEvidenceGroups = normalizePersistedGroups(
     value.sourceEvidenceGroups,
   )
@@ -874,6 +924,7 @@ function normalizeRecordNode(
   record: GameIrProjectionNodeRecord,
   slice: GameIrProjectionSlice,
   authority: Authority,
+  priorNodes: readonly GameIrProjectionSliceNode[],
 ): GameIrProjectionNodeRecord {
   const fragmentId = text(record.fragmentId, 'record fragmentId')
   try {
@@ -910,6 +961,7 @@ function normalizeRecordNode(
   const node = admitCanonicalNodeCollections(
     clone([record.node]) as GameIrProjectionSliceNode[],
   )[0]!
+  validateIntrinsicNodeSemantics(node, authority, priorNodes)
   return Object.freeze({ fragmentId, node })
 }
 
@@ -984,6 +1036,7 @@ function normalizePendingSlice(
       },
       slice,
       authority,
+      entries.flatMap(entry => entry.semantic.nodes),
     )
     if (
       previousId !== undefined &&
@@ -1090,6 +1143,7 @@ function normalizeSnapshot(
       raw.semantic,
       slice,
       authority,
+      entries.flatMap(entry => entry.semantic.nodes),
     )
     assertRelationshipCardinality(slice, normalized.semantic.nodes)
     assertRequiredCurrentNodes(
@@ -1368,7 +1422,14 @@ export class GameIrProjectionSliceJournal {
       const normalized: GameIrProjectionNodeRecord[] = []
       for (const candidate of records) {
         try {
-          const node = normalizeRecordNode(candidate, targetSlice, this.authority)
+          const node = normalizeRecordNode(
+            candidate,
+            targetSlice,
+            this.authority,
+            this.state.entries
+              .slice(0, targetIndex)
+              .flatMap(entry => entry.semantic.nodes),
+          )
           normalized.push(node)
         } catch (error) {
           const raw = candidate as unknown as Record<string, unknown>
@@ -1452,7 +1513,12 @@ export class GameIrProjectionSliceJournal {
     for (const candidate of records) {
       let normalized: GameIrProjectionNodeRecord
       try {
-        normalized = normalizeRecordNode(candidate, slice, this.authority)
+        normalized = normalizeRecordNode(
+          candidate,
+          slice,
+          this.authority,
+          this.state.entries.flatMap(entry => entry.semantic.nodes),
+        )
       } catch (error) {
         const raw = candidate as unknown as Record<string, unknown>
         const node = raw?.node as Record<string, unknown> | undefined
@@ -1583,7 +1649,12 @@ export class GameIrProjectionSliceJournal {
       fail(
         `slice ${completion.sliceId} is not the exact next slice ${slice.sliceId}`,
       )
-    const normalized = normalizeCompletion(completion, slice, authority)
+    const normalized = normalizeCompletion(
+      completion,
+      slice,
+      authority,
+      this.state.entries.flatMap(entry => entry.semantic.nodes),
+    )
     assertRelationshipCardinality(slice, normalized.semantic.nodes)
     assertRequiredCurrentNodes(
       this.state.entries,

@@ -554,6 +554,13 @@ function cloneJson(value: unknown): unknown {
   return value
 }
 
+/** Domain-owned intrinsic value parsing for projection slice admission. */
+export function parseGameplayProjectionPayload(
+  node: GameIrNode,
+): Readonly<Record<string, unknown>> {
+  return parseValue(node)
+}
+
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const nested of Object.values(value as RecordValue)) deepFreeze(nested)

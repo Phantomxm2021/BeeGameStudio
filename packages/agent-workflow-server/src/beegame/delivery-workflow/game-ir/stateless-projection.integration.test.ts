@@ -721,7 +721,6 @@ describe('stateless Balance projection fault matrix', () => {
       const terminal = await providerTurn(h, 'balance.slice.0', { stream: recordStream('balance.slice.0', badRecords) })
       expect(terminal.status).toBe('completed')
       const previousAttempt = h.log.attempts[attemptsBefore]!
-      await finishEmptySlices(h)
       const goodRecords = recordsFor(h.source.balance, 'balance.slice.0', [good])
       const goodDigest = digestGameIrValue(goodRecords[0])
       const corrected = await providerTurn(h, 'balance.slice.0', {
@@ -744,8 +743,6 @@ describe('stateless Balance projection fault matrix', () => {
       const bad = formula({ kind: 'reference', referenceIndex: 1 })
       const previousAttempt = h.log.attempts.filter(item => item.sliceId === 'balance.slice.1').at(-1)!
       await complete(h, 'balance.slice.1', [bad])
-      await complete(h, 'balance.slice.2', [])
-      await complete(h, 'balance.slice.3', [])
       const diagnosticState = (await h.controller.store.load())?.gameIrState
       expect(diagnosticState?.status === 'compiling' ? diagnosticState.diagnostic?.actual : '').toMatch(/reference index|formula/i)
       const unitDigest = h.journal.entries[0]!.entryDigest

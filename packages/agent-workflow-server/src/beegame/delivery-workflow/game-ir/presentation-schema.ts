@@ -580,6 +580,14 @@ function parseValue(
   }
   return result
 }
+
+/** Domain-owned intrinsic value parsing for projection slice admission. */
+export function parsePresentationProjectionPayload(
+  node: GameIrNode,
+): Readonly<Record<string, unknown>> {
+  return parseValue(node, new Set())
+}
+
 function manifestTargetKinds(): ReadonlySet<string> {
   const targetKinds = new Set<string>()
   for (const descriptor of Object.values(PRESENTATION_DOMAIN_MANIFEST))

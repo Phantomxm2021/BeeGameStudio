@@ -746,6 +746,14 @@ function parseValue(node: GameIrNode): Readonly<Record<string, unknown>> {
     return { label: label(node.value, node.id) }
   fail(`node ${node.id} has an unknown kind`)
 }
+
+/** Domain-owned intrinsic value parsing for projection slice admission. */
+export function parseWorldSceneProjectionPayload(
+  node: GameIrNode,
+): Readonly<Record<string, unknown>> {
+  return parseValue(node)
+}
+
 function assertNoEmbeddedTargetIds(
   value: unknown,
   targetIds: ReadonlySet<string>,

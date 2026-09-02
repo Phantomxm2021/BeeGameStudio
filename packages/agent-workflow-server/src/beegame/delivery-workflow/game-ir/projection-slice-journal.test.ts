@@ -239,6 +239,62 @@ describe('Game IR projection slice journal', () => {
     }
   })
 
+  test('rejects an intrinsically invalid Balance unit before slice persistence', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const sourceUnit =
+        realAuthority().phase5Authority.phase4Authority.balance.semantic
+          .nodes[0]!
+      const { bindings: _bindings, producerMode: _producerMode, ...unit } =
+        sourceUnit as typeof sourceUnit & {
+          bindings?: unknown
+          producerMode?: unknown
+        }
+      const invalid = {
+        ...unit,
+        id: 'balance.unit.invalid',
+        value: {
+          ...unit.value,
+          dimensions: [
+            { base: 'z', exponent: 1 },
+            { base: 'a', exponent: 1 },
+          ],
+        },
+      }
+      const validResult = await journal.appendRecords([
+        {
+          fragmentId: firstEvidenceFragmentId(
+            input,
+            input.packet.source.sectionIndex[0]!.documentPath,
+            input.packet.source.sectionIndex[0]!.sectionId,
+          ),
+          node: unit,
+        },
+      ], journal.slicePlan.slices[0]!.sliceId)
+      expect(validResult.acceptedCount).toBe(1)
+      const result = await journal.appendRecords([
+        {
+          fragmentId: firstEvidenceFragmentId(
+            input,
+            input.packet.source.sectionIndex[0]!.documentPath,
+            input.packet.source.sectionIndex[0]!.sectionId,
+          ),
+          node: invalid,
+        },
+      ], journal.slicePlan.slices[0]!.sliceId)
+      expect(result.acceptedCount).toBe(0)
+      expect(result.diagnostic?.reason).toMatch(/dimensions.*sorted/i)
+      expect(journal.entries).toHaveLength(0)
+      expect(journal.currentSliceRecordPrefix).toEqual([
+        { id: unit.id, kind: unit.kind },
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('exposes only a fully verified completed snapshot and never a raw merge completion path', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
