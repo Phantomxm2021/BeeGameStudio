@@ -28,6 +28,8 @@ function projectionPacket(input: {
   revision: string
   receiptDigest: string
   sliceId: string
+  authorityMarker?: string
+  fullPacketMarker?: string
 }) {
   const compileRequest = {
     taskId: input.taskId,
@@ -48,7 +50,7 @@ function projectionPacket(input: {
       ) === index,
   )
   const sections = selectors.map((selector, index) => {
-      const bytes = `SESSION_PORT_AUTHORITY_${index}`
+    const bytes = `${input.authorityMarker ?? 'SESSION_PORT_AUTHORITY'}_${index}`
       return {
         ...selector,
         digest: createHash('sha256').update(bytes).digest('hex'),
@@ -69,7 +71,13 @@ function projectionPacket(input: {
         ]),
       ),
     },
-    semanticPacket: { moduleId: 'gameplay', taskId: input.taskId },
+    semanticPacket: {
+      moduleId: 'gameplay',
+      taskId: input.taskId,
+      ...(input.fullPacketMarker
+        ? { FORBIDDEN_FULL_PACKET_MARKER: input.fullPacketMarker }
+        : {}),
+    },
     projectionContract: buildGameIrProjectionContract('gameplay'),
     dependencies: {},
   }
@@ -244,40 +252,62 @@ describe('delivery worker complete document boundary', () => {
 
   test('starts a fresh projection session for every slice without rebinding or full packet prompts', async () => {
     const prompts: string[] = []
-    const events: Array<Record<string, unknown>> = [
-      {
-        id: 1,
-        sessionId: 'live-projection-session',
-        type: 'result',
-        text: '',
-        createdAt: new Date(),
-        payload: {
-          record_stream: '{"record":"done","sliceId":"gameplay.slice.0"}\n',
-        },
-      },
-    ]
     const startedSessionIds: string[] = []
-    const rebindCalls: string[] = []
-    let disposed = 0
+    const startedInputs: Array<{
+      workflowDispatchId?: string
+      resumeSessionId?: string
+    }> = []
+    const sends: Array<{ dispatchId: string; sessionId: string }> = []
+    const eventsBySession = new Map<string, Array<Record<string, unknown>>>()
+    const sessionDispatches = new Map<string, string>()
+    const disposedSessionIds: string[] = []
     const sessions = {
-      start: () => {
+      start: (input: {
+        workflowDispatchId?: string
+        resumeSessionId?: string
+        workflowRecordStreamContract?: {
+          terminalRecord?: { sliceId?: string }
+        }
+      }) => {
         const id = `projection-session-${startedSessionIds.length + 1}`
         startedSessionIds.push(id)
+        startedInputs.push(input)
+        if (input.workflowDispatchId)
+          sessionDispatches.set(id, input.workflowDispatchId)
+        const sliceId = input.workflowRecordStreamContract?.terminalRecord
+          ?.sliceId
+        eventsBySession.set(id, [
+          {
+            id: 1,
+            sessionId: id,
+            type: 'result',
+            text: '',
+            createdAt: new Date(),
+            payload: {
+              record_stream: `{"record":"done","sliceId":"${sliceId}"}\n`,
+            },
+          },
+        ])
         return { id }
       },
       updateAuthToken: () => undefined,
-      sendWithDisplay: async (_sessionId: string, prompt: string) => {
+      sendWithDisplay: async (sessionId: string, prompt: string) => {
         prompts.push(prompt)
+        sends.push({
+          dispatchId: sessionDispatches.get(sessionId) ?? 'unknown',
+          sessionId,
+        })
       },
-      events: () => events,
+      workflowRecordStreamEvents: (sessionId: string) =>
+        eventsBySession.get(sessionId) ?? [],
       get: (sessionId: string) => ({
         status: 'running',
         turnStatus: 'idle',
         createdAt: new Date(),
         id: sessionId,
       }),
-      disposeWorkflowWorker: async () => {
-        disposed += 1
+      disposeWorkflowWorker: async (sessionId: string) => {
+        disposedSessionIds.push(sessionId)
       },
     }
     const port = createBeeGameDeliveryWorkerPort({
@@ -308,6 +338,8 @@ describe('delivery worker complete document boundary', () => {
           revision: 'revision',
           receiptDigest: 'b'.repeat(64),
           sliceId: currentSlice,
+          authorityMarker: `SELECTED_AUTHORITY_${currentSlice}`,
+          fullPacketMarker: 'old-whole-packet-route',
         }),
         compileRequestDigest: digestGameIrValue({
           taskId: 'task-packet-once',
@@ -325,63 +357,79 @@ describe('delivery worker complete document boundary', () => {
     })
 
     const first = request('dispatch-slice-0', 'gameplay.slice.0')
-    const firstPacket: Record<string, unknown> = {
-      ...(first.contract.packet as Record<string, unknown>),
-      dependencies: { FORBIDDEN_FULL_PACKET_MARKER: true },
-    }
-    firstPacket.packetDigest = digestGameIrValue(
-      Object.fromEntries(
-        Object.entries(firstPacket).filter(
-          ([key]) => key !== 'packetDigest',
-        ),
-      ),
-    )
-    first.contract.packet = firstPacket
     await port.start(first)
     await port.submit('dispatch-slice-0', 'ignored')
     const second = request('dispatch-slice-1', 'gameplay.slice.1')
-    const secondPacket: Record<string, unknown> = {
-      ...(second.contract.packet as Record<string, unknown>),
-      dependencies: { FORBIDDEN_FULL_PACKET_MARKER: true },
-    }
-    secondPacket.packetDigest = digestGameIrValue(
-      Object.fromEntries(
-        Object.entries(secondPacket).filter(
-          ([key]) => key !== 'packetDigest',
-        ),
-      ),
-    )
-    second.contract.packet = secondPacket
     await port.start(second)
     await port.submit('dispatch-slice-1', 'ignored')
-    setTimeout(
-      () =>
-        events.push({
-          id: 2,
-          sessionId: 'projection-session-2',
-          type: 'result',
-          text: '',
-          createdAt: new Date(),
-          payload: {
-            record_stream: '{"record":"done","sliceId":"gameplay.slice.1"}\n',
-          },
-        }),
-      10,
-    )
     await expect(
       port.waitForTerminal!('dispatch-slice-1'),
     ).resolves.toMatchObject({ sliceId: 'gameplay.slice.1' })
 
     expect(startedSessionIds).toHaveLength(2)
     expect(new Set(startedSessionIds).size).toBe(2)
-    expect(rebindCalls).toHaveLength(0)
     expect(prompts).toHaveLength(2)
     expect(prompts[0]).toContain('## Current slice')
     expect(prompts[1]).toContain('## Current slice')
     expect(prompts[1]).toContain('gameplay.slice.1')
     expect(prompts.every(prompt => !prompt.includes('FORBIDDEN_FULL_PACKET_MARKER'))).toBe(true)
 
+    expect(sends).toHaveLength(2)
+    expect(sends[0]).toEqual({
+      dispatchId: 'dispatch-slice-0',
+      sessionId: startedSessionIds[0],
+    })
+    expect(sends[1]).toEqual({
+      dispatchId: 'dispatch-slice-1',
+      sessionId: startedSessionIds[1],
+    })
+    expect(startedInputs.every(input => !('resumeSessionId' in input))).toBe(
+      true,
+    )
+    expect(Object.keys(sessions).some(key => /rebind|resume/i.test(key))).toBe(
+      false,
+    )
+    await port.close!('dispatch-slice-0')
     await port.close!('dispatch-slice-1')
+    expect(disposedSessionIds).toEqual(startedSessionIds)
+  })
+
+  test('disposes a worker session even when stopping it fails', async () => {
+    let disposed = 0
+    const sessions = {
+      start: () => ({ id: 'stop-failure-session' }),
+      updateAuthToken: () => undefined,
+      get: () => ({
+        status: 'running',
+        turnStatus: 'idle',
+        createdAt: new Date(),
+      }),
+      stop: () => {
+        throw new Error('stop failed')
+      },
+      disposeWorkflowWorker: async () => {
+        disposed += 1
+      },
+    }
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions: sessions as never,
+      userId: 'user',
+    })
+    await port.start({
+      dispatchId: 'dispatch-stop-failure',
+      runId: 'run-stop-failure',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'question-answerer',
+      phase: 'BRIEF_CONFIRMED',
+      revision: 'revision',
+      contract: {},
+    } as never)
+
+    await expect(port.close!('dispatch-stop-failure')).rejects.toThrow(
+      'stop failed',
+    )
     expect(disposed).toBe(1)
   })
 

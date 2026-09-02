@@ -2269,6 +2269,72 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
+  test('removes a workflow session after idle draining fails', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-dispose-idle-failure-'))
+    const manager = new BeeGameSessionManager(
+      {
+        start: async () => ({
+          submit: async () => undefined,
+          stop: () => undefined,
+        }),
+      },
+      root,
+    )
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-dispose-idle-failure',
+      workflowDispatchId: 'dispatch-dispose-idle-failure',
+      workflowWorkerType: 'question-answerer',
+    })
+    manager.waitForWorkflowWorkerIdle = async () => {
+      throw new Error('idle drain failed')
+    }
+
+    await expect(manager.disposeWorkflowWorker(session.id)).rejects.toThrow(
+      'idle drain failed',
+    )
+    expect(manager.get(session.id)).toBeUndefined()
+  })
+
+  test('removes a workflow session after usage flushing fails', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-dispose-usage-failure-'))
+    let attempts = 0
+    const manager = new BeeGameSessionManager(
+      {
+        start: async () => ({
+          submit: async input => input.onMessage(usageMessage(10)),
+          stop: () => undefined,
+        }),
+      },
+      root,
+      () => ({}),
+      {
+        recordUsage: async () => {
+          attempts += 1
+          throw new Error('usage flush failed')
+        },
+      },
+    )
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-dispose-usage-failure',
+      workflowDispatchId: 'dispatch-dispose-usage-failure',
+      workflowWorkerType: 'question-answerer',
+    })
+    await manager.send(session.id, 'continue')
+    for (let wait = 0; wait < 100 && attempts < 3; wait += 1)
+      await new Promise(resolve => setTimeout(resolve, 5))
+
+    await expect(manager.disposeWorkflowWorker(session.id)).rejects.toThrow(
+      /workflow run disappeared before usage was persisted|usage flush failed/,
+    )
+    expect(manager.get(session.id)).toBeUndefined()
+  })
+
   test('bounds failed usage retries and does not append billing errors after stop', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-usage-stop-'))
     let attempts = 0

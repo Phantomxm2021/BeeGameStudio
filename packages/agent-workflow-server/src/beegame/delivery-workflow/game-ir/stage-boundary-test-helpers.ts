@@ -175,8 +175,6 @@ export function standaloneProductionViolations(
         'identifier: gameIrOperation',
         'identifier: gameIrOperationForRequest',
         'identifier: gameIrProjectionModuleForRequest',
-        'identifier: gameIrProjectionPacketDigest',
-        'identifier: gameIrProjectionSessionKey',
         'identifier: gameIrProjectionSliceForRequest',
         'identifier: gameIrProjectionRecordStreamContract',
         'identifier: gameIrValidationStructuredOutputJsonSchema',

@@ -1369,16 +1369,46 @@ export class BeeGameSessionManager {
   async disposeWorkflowWorker(sessionId: string): Promise<void> {
     const record = this.sessions.get(sessionId)
     if (!record?.workflowWorker) return
-    if (record.session.status === 'running') this.stop(sessionId)
-    await this.waitForWorkflowWorkerIdle(sessionId)
-    await rm(record.transcriptPath, { force: true })
-    await rm(
-      getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
-      { force: true },
-    )
-    if (record.nativeRuntimeCwd)
-      await rm(record.nativeRuntimeCwd, { recursive: true, force: true })
-    this.sessions.delete(sessionId)
+    let firstError: unknown
+    const capture = (error: unknown): void => {
+      firstError ??= error
+    }
+    try {
+      if (record.session.status === 'running') {
+        try {
+          this.stop(sessionId)
+        } catch (error) {
+          capture(error)
+        }
+      }
+      try {
+        await this.waitForWorkflowWorkerIdle(sessionId)
+      } catch (error) {
+        capture(error)
+      }
+      try {
+        await rm(record.transcriptPath, { force: true })
+      } catch (error) {
+        capture(error)
+      }
+      try {
+        await rm(
+          getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
+          { force: true },
+        )
+      } catch (error) {
+        capture(error)
+      }
+      if (record.nativeRuntimeCwd)
+        try {
+          await rm(record.nativeRuntimeCwd, { recursive: true, force: true })
+        } catch (error) {
+          capture(error)
+        }
+    } finally {
+      this.sessions.delete(sessionId)
+    }
+    if (firstError) throw firstError
   }
 
   async flushWorkflowUsage(sessionId: string): Promise<void> {

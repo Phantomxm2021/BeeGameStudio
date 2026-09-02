@@ -839,15 +839,31 @@ export function createBeeGameDeliveryWorkerPort(input: {
         await input.sessions.disposeWorkflowDispatch?.(dispatchId)
         return
       }
+      let firstError: unknown
       try {
         if (!options?.preserveSession) {
-          const session = input.sessions.get(sessionId)
+          let session: ReturnType<BeeGameSessionManager['get']> | undefined
+          try {
+            session = input.sessions.get(sessionId)
+          } catch (error) {
+            firstError = error
+          }
           if (
+            !firstError &&
             session?.status === 'running' &&
             typeof input.sessions.stop === 'function'
-          )
-            input.sessions.stop(sessionId)
-          await disposeWorkflowSession(sessionId)
+          ) {
+            try {
+              input.sessions.stop(sessionId)
+            } catch (error) {
+              firstError = error
+            }
+          }
+          try {
+            await disposeWorkflowSession(sessionId)
+          } catch (error) {
+            firstError ??= error
+          }
         }
       } finally {
         sessions.delete(dispatchId)
@@ -856,6 +872,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         documentAuthorityBlocks.delete(dispatchId)
         documentAuthorityProjections.delete(dispatchId)
       }
+      if (firstError) throw firstError
     },
     async status(dispatchId) {
       const sessionId = sessions.get(dispatchId)
