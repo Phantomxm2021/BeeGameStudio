@@ -62,7 +62,7 @@ export type FoundationRevisionPrepared = {
 export type FoundationPublicationSemanticRecheckResult = FoundationSemanticRecheckResult
 
 export type FoundationRevisionDeclaration =
-  | { status: 'APPLIED'; changedSectionIds: string[] }
+  | { status: 'APPLIED' }
 
 export type FoundationRevisionPublicationResult = {
   status: 'committed'
@@ -385,8 +385,8 @@ function validateSemanticResult(value: unknown): FoundationPublicationSemanticRe
 function validateRevisionDeclaration(value: unknown): FoundationRevisionDeclaration {
   assertObject(value, 'revision declaration')
   if (value.status === 'APPLIED') {
-    assertExactKeys(value, ['changedSectionIds', 'status'], 'revision declaration')
-    return { status: 'APPLIED', changedSectionIds: strings(value.changedSectionIds, 'revision declaration changedSectionIds') }
+    assertExactKeys(value, ['status'], 'revision declaration')
+    return { status: 'APPLIED' }
   }
   throw new Error('revision declaration status is invalid')
 }
@@ -438,10 +438,6 @@ async function buildPrepared(input: FoundationRevisionPublicationInput): Promise
     receiptByPath.set(receipt.documentPath, receipt)
   }
   if (receiptByPath.size !== batchByPath.size) throw new Error('revision batch coverage is incomplete')
-  for (const [index, declaration] of declarations.entries()) {
-    const receipt = receipts[index]
-    if (!receipt || declaration.status !== 'APPLIED' || !sameSet(declaration.changedSectionIds, receipt.changedSectionIds)) throw new Error('revision declaration changedSectionIds disagree with active receipt')
-  }
   const allIssueIds = batches.flatMap(batch => batch.issueIds)
   if (new Set(allIssueIds).size !== allIssueIds.length) throw new Error('revision issue coverage contains duplicate IDs')
   const resolvedIssueIds = new Set(allIssueIds)
@@ -527,7 +523,7 @@ function assertReplayMatches(input: FoundationRevisionPublicationInput, prepared
   const batches = input.batches.map(validateBatch)
   for (const batch of batches) {
     const preparedDocument = docs.get(batch.documentPath)
-    if (!preparedDocument || !sameSet(batch.issueIds, preparedDocument.issueIds) || !sameSet(batch.sectionIds, preparedDocument.changedSectionIds)) throw new Error('publication batch does not match PREPARED authority')
+    if (!preparedDocument || !sameSet(batch.issueIds, preparedDocument.issueIds) || !preparedDocument.changedSectionIds.every(sectionId => batch.sectionIds.includes(sectionId))) throw new Error('publication batch does not match PREPARED authority')
   }
   const receipts = input.receipts.map(value => validateReceipt(value, input.revision))
   for (const receipt of receipts) {
@@ -538,7 +534,7 @@ function assertReplayMatches(input: FoundationRevisionPublicationInput, prepared
   assertFoundationRevisionPublishableEvidence({ revisionDeclarations: declarations }, input.patchValidations, input.semanticRecheckResults)
   for (const [index, declaration] of declarations.entries()) {
     const receipt = receipts[index]
-    if (declaration.status !== 'APPLIED' || !receipt || !sameSet(declaration.changedSectionIds, receipt.changedSectionIds)) throw new Error('publication declaration changedSectionIds do not match receipt authority')
+    if (declaration.status !== 'APPLIED' || !receipt) throw new Error('publication declaration does not match receipt authority')
     const preparedDocument = receipt ? docs.get(receipt.documentPath) : undefined
     if (!preparedDocument || receiptDigest(receipt) !== preparedDocument.receiptDigest) throw new Error('publication declaration receipt does not match PREPARED authority')
   }

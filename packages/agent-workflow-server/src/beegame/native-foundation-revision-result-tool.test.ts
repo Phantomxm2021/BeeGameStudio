@@ -33,7 +33,19 @@ afterEach(async () =>
 
 function canonicalDocumentBody(): string {
   const contract = getGameDocumentContract(documentPath)
-  return `# GDD\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`).join('\n')}`
+  const sections = contract.sections
+    .map(
+      section =>
+        `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`,
+    )
+    .join('\n')
+  const materials = contract.productionMaterials
+    .map(
+      material =>
+        `<!-- beegame-material:${material.materialId} -->\n### ${material.title}\n\nmaterial ${material.materialId}\n`,
+    )
+    .join('\n')
+  return `# GDD\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nsummary authority\n\n${sections}<!-- beegame-production-materials -->\n## Production Materials\n\n${materials}<!-- beegame-audit-appendix -->\n## Audit Appendix\n\naudit metadata\n`
 }
 
 function canonicalDocument(
@@ -61,7 +73,11 @@ async function workspaceWithStage() {
   return { workspace, stage, staged }
 }
 
-function createTool(workspacePath: string, onReceipt?: (receipt: RevisionTaskReceipt) => void) {
+function createTool(
+  workspacePath: string,
+  onReceipt?: (receipt: RevisionTaskReceipt) => void,
+  expectedSectionIds: readonly string[] = changedSectionIds,
+) {
   return createNativeFoundationRevisionResultTool({
     buildTool: definition => definition,
     workspacePath,
@@ -70,17 +86,14 @@ function createTool(workspacePath: string, onReceipt?: (receipt: RevisionTaskRec
     expectedTaskId: taskId,
     expectedDocumentPath: documentPath,
     expectedIssueIds: issueIds,
-    expectedSectionIds: changedSectionIds,
+    expectedSectionIds,
     onReceipt,
   }) as Tool
 }
 
-const declaration = {
-  status: 'APPLIED',
-  changedSectionIds: [...changedSectionIds],
-} as const
+const declaration = { status: 'APPLIED' } as const
 
-test('accepts only the bounded declaration and derives the full receipt from local bytes', async () => {
+test('derives the exact changed sections from canonical and final staged bytes', async () => {
   const { workspace, stage } = await workspaceWithStage()
   let received: RevisionTaskReceipt | undefined
   const tool = createTool(workspace, receipt => {
@@ -100,7 +113,7 @@ test('accepts only the bounded declaration and derives the full receipt from loc
     issueIds: [...issueIds],
     baseDocumentDigest: createHash('sha256').update(canonical).digest('hex'),
     stagedDocumentDigest: createHash('sha256').update(finalStaged).digest('hex'),
-    changedSectionIds: [...declaration.changedSectionIds],
+    changedSectionIds: [...changedSectionIds],
     stagedPath: stage.stagedPath,
   }
   expect(received).toEqual({
@@ -138,23 +151,125 @@ test('rejects caller-supplied path and digest evidence before it can enter the r
   const tool = createTool(workspace, () => {
     received = true
   })
-  const fabricated = { ...declaration, stagedPath: '../outside.md', baseDocumentDigest: 'a'.repeat(64), stagedDocumentDigest: 'b'.repeat(64), terminalDigest: 'c'.repeat(64) }
+  const fabricated = { status: 'APPLIED', changedSectionIds: ['vision'] }
 
   expect(tool.inputSchema.safeParse(fabricated).success).toBe(false)
   await expect(tool.call(fabricated)).rejects.toThrow()
   expect(received).toBe(false)
 })
 
-test('rejects stale identity, missing stage, and empty stage bytes', async () => {
+test('rejects model-supplied changed sections', async () => {
+  const { workspace } = await workspaceWithStage()
+  const tool = createTool(workspace)
+  expect(tool.inputSchema.safeParse({ status: 'APPLIED', changedSectionIds: ['vision'] }).success).toBe(false)
+  await expect(tool.call({ status: 'APPLIED', changedSectionIds: ['vision'] })).rejects.toThrow()
+})
+
+test('rejects missing and empty stages', async () => {
   const { workspace, stage } = await workspaceWithStage()
   const tool = createTool(workspace)
-  await expect(tool.call({ ...declaration, changedSectionIds: ['rules_systems'] })).rejects.toThrow(/section/i)
 
   await rm(join(workspace, stage.stagedPath))
   await expect(tool.call(declaration)).rejects.toThrow(/read|stage|file/i)
 
   await writeFile(join(workspace, stage.stagedPath), '')
   await expect(tool.call(declaration)).rejects.toThrow(/empty/i)
+})
+
+test('accepts five changed sections under six-section authority and receipts exactly five', async () => {
+  const { workspace, stage } = await workspaceWithStage()
+  const authority = getGameDocumentContract(documentPath).sections.map(
+    section => section.sectionId,
+  ).slice(0, 6)
+  expect(authority).toHaveLength(6)
+  const changed = authority.slice(0, 5)
+  let received: RevisionTaskReceipt | undefined
+  const tool = createNativeFoundationRevisionResultTool({
+    buildTool: definition => definition,
+    workspacePath: workspace,
+    expectedRevision: revision,
+    expectedRound: 1,
+    expectedTaskId: taskId,
+    expectedDocumentPath: documentPath,
+    expectedIssueIds: issueIds,
+    expectedSectionIds: authority,
+    onReceipt: receipt => {
+      received = receipt
+    },
+  }) as Tool
+  let revised = canonicalDocument()
+  for (const sectionId of changed)
+    revised = revised.replace(`original ${sectionId}`, `revised ${sectionId}`)
+  await writeFile(join(workspace, stage.stagedPath), revised)
+
+  await expect(tool.call(declaration)).resolves.toMatchObject({
+    data: { status: 'APPLIED' },
+  })
+  expect(received?.changedSectionIds).toEqual(changed)
+})
+
+test('fails closed when the staged document has no changed section', async () => {
+  const authority = getGameDocumentContract(documentPath).sections.map(
+    section => section.sectionId,
+  )
+  const { workspace, stage } = await workspaceWithStage()
+  await writeFile(
+    join(workspace, stage.stagedPath),
+    await readFile(join(workspace, documentPath)),
+  )
+  const tool = createTool(workspace, undefined, authority)
+  await expect(tool.call(declaration)).rejects.toThrow(/change|section/i)
+})
+
+test('fails closed when a changed section exceeds packet authority', async () => {
+  const { workspace, stage } = await workspaceWithStage()
+  const tool = createTool(workspace, undefined, ['vision'])
+  const stagedPath = join(workspace, stage.stagedPath)
+  await writeFile(
+    stagedPath,
+    (await readFile(stagedPath, 'utf8')).replace(
+      'original rules_systems',
+      'revised rules_systems',
+    ),
+  )
+  await expect(tool.call(declaration)).rejects.toThrow(/outside|authority/i)
+})
+
+test('fails closed when a section marker changes', async () => {
+  const { workspace, stage } = await workspaceWithStage()
+  const tool = createTool(workspace, undefined, [
+    ...getGameDocumentContract(documentPath).sections.map(
+      section => section.sectionId,
+    ),
+  ])
+  const stagedPath = join(workspace, stage.stagedPath)
+  await writeFile(
+    stagedPath,
+    (await readFile(stagedPath, 'utf8')).replace(
+      '<!-- beegame-section:vision -->',
+      '<!-- broken -->',
+    ),
+  )
+  await expect(tool.call(declaration)).rejects.toThrow(/section|marker|contract/i)
+})
+
+test('fails closed when section marker order changes', async () => {
+  const { workspace, stage } = await workspaceWithStage()
+  const tool = createTool(workspace, undefined, [
+    ...getGameDocumentContract(documentPath).sections.map(
+      section => section.sectionId,
+    ),
+  ])
+  const stagedPath = join(workspace, stage.stagedPath)
+  const staged = await readFile(stagedPath, 'utf8')
+  await writeFile(
+    stagedPath,
+    staged
+      .replace('<!-- beegame-section:vision -->', '<!-- beegame-section:swap -->')
+      .replace('<!-- beegame-section:core_loop -->', '<!-- beegame-section:vision -->')
+      .replace('<!-- beegame-section:swap -->', '<!-- beegame-section:core_loop -->'),
+  )
+  await expect(tool.call(declaration)).rejects.toThrow(/section|marker|contract/i)
 })
 
 test('commits service-owned metadata once and keeps replay idempotent', async () => {

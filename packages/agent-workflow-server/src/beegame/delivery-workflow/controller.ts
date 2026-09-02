@@ -4782,7 +4782,6 @@ export function createDeliveryWorkflowController(input: {
       receipts,
       revisionDeclarations: receipts.map(receipt => ({
         status: 'APPLIED' as const,
-        changedSectionIds: receipt.changedSectionIds,
       })),
       patchOperations: operations,
       patchValidations,

@@ -29,7 +29,7 @@ import {
   foundationPatchOperationsDigest,
   type PatchOperation,
 } from './foundation-revision-stage'
-import type { SectionRef } from './foundation-section-index'
+import { canonicalFoundationBlockIds, type SectionRef } from './foundation-section-index'
 import type { FoundationDocumentPath, FoundationRevisionRound } from './types'
 
 type DocumentInput = ReadonlyMap<string, string> | Record<string, string>
@@ -436,6 +436,8 @@ function validateAdmittedIssue(
       : true).sort(compareStable)
   if (issueKeys.length !== expectedKeys.length || issueKeys.some((key, index) => key !== expectedKeys[index]))
     throw new Error('foundation admitted issue shape is invalid')
+  const indexed = new Map(sectionIndex.map(section => [sectionKey(section), section]))
+  const canonicalSections = new Set(canonicalFoundationBlockIds(documentPath))
   if (
     typeof issue.id !== 'string' || issue.id.trim().length === 0 ||
     !['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(issue.severity) ||
@@ -445,10 +447,13 @@ function validateAdmittedIssue(
     issue.remediation.kind !== 'patch' ||
     issue.remediation.documentPath !== documentPath ||
     issue.remediation.sectionIds.length === 0 ||
-    issue.remediation.sectionIds.some(sectionId => !allowedSections.has(`${documentPath}\0${sectionId}`))
+    new Set(issue.remediation.sectionIds).size !== issue.remediation.sectionIds.length ||
+    issue.remediation.sectionIds.some(sectionId =>
+      !canonicalSections.has(sectionId) ||
+      !indexed.has(`${documentPath}\0${sectionId}`)) ||
+    !issue.remediation.sectionIds.some(sectionId => allowedSections.has(`${documentPath}\0${sectionId}`))
   )
     throw new Error('foundation admitted issue fix target is outside the patch')
-  const indexed = new Map(sectionIndex.map(section => [sectionKey(section), section]))
   for (const candidate of [issue.source, issue.target].filter(Boolean)) {
     const exact = candidate && indexed.get(sectionKey(candidate))
     if (!candidate || !exact || exact.heading !== candidate.heading || exact.startLine !== candidate.startLine || exact.endLine !== candidate.endLine || exact.digest !== candidate.digest)

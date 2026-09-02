@@ -714,7 +714,7 @@ describe('foundation fact runtime controller integration', () => {
       round,
       batches: [{ documentPath: roundTask.documentPath, sectionIds: roundTask.sectionIds, issueIds: roundTask.issueIds }],
       receipts: [roundReceipt],
-      revisionDeclarations: [{ status: 'APPLIED' as const, changedSectionIds: [...roundReceipt.changedSectionIds] }],
+      revisionDeclarations: [{ status: 'APPLIED' as const }],
       patchOperations: operations,
       patchValidations: [],
       semanticRecheckResults: [{ taskId: roundTask.taskId, issueId: roundTask.issueIds[0]!, packetDigest: roundTask.packetDigest, status: 'PASS' }],

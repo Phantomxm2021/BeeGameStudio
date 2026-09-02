@@ -768,7 +768,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
               : ''
       const revisionResultInstruction =
         request?.workerType === 'foundation-document-reviser'
-          ? 'After editing only the assigned stage, call SubmitFoundationRevisionResult exactly once with status APPLIED and the exact changedSectionIds; do not return terminal JSON.'
+          ? 'After editing only the assigned stage, call SubmitFoundationRevisionResult exactly once with status APPLIED; do not return terminal JSON.'
           : ''
       const assetManifestInstruction =
         request?.workerType === 'resource-planner'

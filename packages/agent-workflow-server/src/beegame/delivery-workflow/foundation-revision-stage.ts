@@ -1002,7 +1002,7 @@ export async function deriveFoundationPatchOperations(input: {
     } satisfies PatchOperation
   })
   for (const issue of input.issues) {
-    if (issue.remediation.kind !== 'patch' || issue.remediation.sectionIds.some(sectionId => !changedIds.includes(sectionId)))
+    if (issue.remediation.kind !== 'patch' || issue.remediation.sectionIds.every(sectionId => !changedIds.includes(sectionId)))
       throw new Error('revision admitted issue target was not changed')
   }
   const boundIssueIds = [...new Set(operations.flatMap(operation => operation.issueIds))]

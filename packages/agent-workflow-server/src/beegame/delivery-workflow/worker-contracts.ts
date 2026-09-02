@@ -749,20 +749,8 @@ export const foundationRevisionDeclarationSchema = z.discriminatedUnion(
     z
       .object({
         status: z.literal('APPLIED'),
-        changedSectionIds: z.array(z.string().min(1)).min(1),
       })
-      .strict()
-      .superRefine((value, context) => {
-        if (
-          new Set(value.changedSectionIds).size !==
-          value.changedSectionIds.length
-        )
-          context.addIssue({
-            code: 'custom',
-            path: ['changedSectionIds'],
-            message: 'changedSectionIds must be unique',
-          })
-      }),
+      .strict(),
   ],
 )
 

@@ -358,7 +358,7 @@ describe('delivery worker session credentials', () => {
       expect(starts[0]?.workflowRevisionContract).not.toHaveProperty('packet')
       await port.submit(
         'dispatch-revision',
-        `Immutable revision packet: {"sections":[]}\nAssigned staged path: ${join(workspacePath, stage.stagedPath)}\nRead and edit only the assigned staged path. After the revision, call SubmitFoundationRevisionResult exactly once with status APPLIED and the exact changedSectionIds; do not return terminal JSON or prose completion text.`,
+        `Immutable revision packet: {"sections":[]}\nAssigned staged path: ${join(workspacePath, stage.stagedPath)}\nRead and edit only the assigned staged path. After the revision, call SubmitFoundationRevisionResult exactly once with status APPLIED; do not return terminal JSON or prose completion text.`,
       )
       expect(prompts[0]).toContain(join(workspacePath, stage.stagedPath))
       expect(prompts[0]).not.toContain('CONFIRMED_SENTINEL')

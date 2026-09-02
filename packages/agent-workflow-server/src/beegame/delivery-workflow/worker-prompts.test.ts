@@ -1039,6 +1039,7 @@ describe('worker prompts', () => {
     expect(prompt).toContain(
       'Automatic retry after the previous strict validation failure: revision changed an unauthorized section',
     )
+    expect(prompt).not.toContain('changedSectionIds')
     expect(prompt).toContain('factConstraints')
     expect(prompt).toContain('left side of an explicit mapping table')
     expect(prompt).toContain('do not substitute a standalone fact declaration')
