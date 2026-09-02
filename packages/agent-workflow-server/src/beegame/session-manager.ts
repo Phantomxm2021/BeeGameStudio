@@ -4364,7 +4364,7 @@ function appendProjectAgentRawLog(
       .update(semantic || serialized)
       .digest('hex')
     const usage = getUsageFromEventPayload(message)
-    const isUsageEvent = usage.total_tokens > 0
+    const isUsageEvent = hasRecognizedUsagePayload(message)
     const isResultEvent = message.type === 'result'
     const hasErrorFields =
       message.is_error === true ||
@@ -4442,6 +4442,24 @@ function safeProviderErrorMetadata(
     errorDigest: createHash('sha256').update(detail, 'utf8').digest('hex'),
     errorBytes: Buffer.byteLength(detail, 'utf8'),
   }
+}
+
+function hasRecognizedUsagePayload(message: DashboardSDKMessage): boolean {
+  const usage = getUsageRecord(message)
+  if (!usage) return false
+  return Object.keys(usage).some(key =>
+    [
+      'input_tokens',
+      'prompt_tokens',
+      'output_tokens',
+      'completion_tokens',
+      'cache_read_input_tokens',
+      'cache_read_tokens',
+      'cache_creation_input_tokens',
+      'cache_creation_tokens',
+      'total_tokens',
+    ].includes(key),
+  )
 }
 
 function providerErrorText(message: DashboardSDKMessage): string {

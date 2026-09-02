@@ -136,8 +136,9 @@ describe('BeeGame SDK execution errors', () => {
           input.onMessage({
             type: 'stream_event',
             event: {
-            type: 'message_delta',
-              usage: { total_tokens: 1, marker: sentinel },
+              type: 'message_delta',
+              text: sentinel,
+              usage: { total_tokens: 0, marker: sentinel },
             },
           })
           input.onMessage({
