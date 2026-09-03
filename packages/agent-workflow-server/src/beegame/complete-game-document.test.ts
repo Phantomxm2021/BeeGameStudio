@@ -220,6 +220,34 @@ describe('native complete game document validation', () => {
     ).toBe(true)
   })
 
+  test.each([
+    [
+      'rejects a non-empty candidate without a title',
+      assetStructure().replace('# Asset Plan', ''),
+    ],
+    [
+      'rejects a title after a non-empty first line',
+      `Preamble\n\n${assetStructure()}`,
+    ],
+    [
+      'rejects multiple authored H1 headings',
+      assetStructure().replace('# Asset Plan', '# Asset Plan\n\n# Another Title'),
+    ],
+  ])('%s as structurally invalid', (_, markdown) => {
+    expect(
+      classifyGameDocumentMarkdownStructure('docs/ASSET_PLAN.md', markdown),
+    ).toEqual({
+      kind: 'structurally_invalid',
+      reason: expect.stringMatching(/title|H1/i),
+    })
+  })
+
+  test('keeps an empty candidate suffix-incomplete', () => {
+    expect(
+      classifyGameDocumentMarkdownStructure('docs/ASSET_PLAN.md', ' \n\t'),
+    ).toEqual({ kind: 'suffix_incomplete' })
+  })
+
   test('accepts separate rectangular tables with different schemas in one material', () => {
     const body = [
       '| Event | Cue | Bus |',

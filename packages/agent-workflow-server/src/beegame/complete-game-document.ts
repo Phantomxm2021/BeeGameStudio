@@ -288,6 +288,13 @@ export function classifyGameDocumentMarkdownStructure(
   const body = value.trim()
   if (!body) return { kind: 'suffix_incomplete' }
   const scan = authoredHeadingScan(body)
+  const authoredH1 = scan.headings.filter(heading => heading.level === 1)
+  const firstNonBlankLine = body.split('\n').findIndex(line => line.trim())
+  if (authoredH1.length !== 1 || authoredH1[0]!.lineIndex !== firstNonBlankLine)
+    return {
+      kind: 'structurally_invalid',
+      reason: 'document requires one authored H1 title on the first non-blank line',
+    }
   const contract = getGameDocumentContract(path)
   if (!contract)
     return {
