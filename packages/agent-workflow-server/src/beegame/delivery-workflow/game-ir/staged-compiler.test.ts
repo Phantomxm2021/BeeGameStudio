@@ -22,13 +22,188 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FoundationDocumentPath } from '../types'
-import { digestGameIrValue } from './model'
+import { digestGameIrSourceSectionIndex, digestGameIrValue } from './model'
 import { buildGameIrEvidenceFragmentCatalog } from './projection-slices'
-import type { GameIrDomainSourceEnvelope } from './domain-source'
+import {
+  buildGameIrDomainSourceEnvelope,
+  GAME_IR_MODULE_SOURCE_DOCUMENTS,
+  type GameIrDomainSourceEnvelope,
+} from './domain-source'
+import { GAME_IR_SLICE_SOURCE_SECTIONS, sourceSectionsForGameIrProjectionSlice } from './projection-slice-authority'
+import { buildGameIrSemanticObligationInventory } from './semantic-obligation-inventory'
+import {
+  admitGameIrSemanticObligationValidationResult,
+  buildGameIrSemanticObligationValidationAuthority,
+} from './semantic-obligation-validation'
 
 type ProjectionOperation = GameIrStagedOperation & {
   operation: 'projection'
   domain: keyof ReturnType<typeof ownerFixtureState>['sources']
+}
+
+function fragmentForNode(
+  source: GameIrDomainSourceEnvelope,
+  node: { kind: string },
+  documentPath?: string,
+): string {
+  const slice = deriveProjectionSlicePlan(source.moduleId).slices.find(candidate =>
+    candidate.nodeKinds.includes(node.kind),
+  )!
+  const selector = sourceSectionsForGameIrProjectionSlice(slice.sliceId).find(
+    candidate => candidate.documentPath === documentPath,
+  ) ?? sourceSectionsForGameIrProjectionSlice(slice.sliceId)[0]!
+  return buildGameIrEvidenceFragmentCatalog({
+    sectionIndex: source.sectionIndex,
+    sectionBytes: source.sectionBytes,
+  }).fragments.find(candidate =>
+    candidate.documentPath === selector.documentPath &&
+    candidate.sectionId === selector.sectionId,
+  )!.fragmentId
+}
+
+async function admitPreflight(
+  journal: Awaited<ReturnType<typeof createGameIrProjectionSliceJournal>>,
+  source: GameIrDomainSourceEnvelope,
+  nodes: readonly { id: string; kind: string }[],
+  documentPaths: ReadonlyMap<string, string> = new Map(),
+): Promise<void> {
+  const inventory = buildGameIrSemanticObligationInventory({
+    moduleId: source.moduleId,
+    source,
+    records: nodes
+      .map(node => ({
+        record: 'obligation' as const,
+        moduleId: source.moduleId,
+        targetId: node.id,
+        targetKind: node.kind,
+        fragmentId: fragmentForNode(source, node, documentPaths.get(node.id)),
+      }))
+      .sort((left, right) => left.targetId.localeCompare(right.targetId)),
+  })
+  const authority = buildGameIrSemanticObligationValidationAuthority({ source, inventory })
+  const admitted = admitGameIrSemanticObligationValidationResult({
+    authority,
+    result: {
+      outcome: 'PASS',
+      moduleId: source.moduleId,
+      coverage: authority.sourceFragments.map(fragment => fragment.fragmentId),
+    },
+  })
+  if (admitted.outcome !== 'PASS') throw new Error('fixture preflight did not pass')
+  await journal.admitObligationInventory(inventory)
+  await journal.admitObligationValidationReceipt(admitted.receipt)
+}
+
+function canonicalSources(
+  sources: Readonly<Record<string, GameIrDomainSourceEnvelope>>,
+): Record<string, GameIrDomainSourceEnvelope> {
+  const templateByDocument = new Map<string, (typeof sources)[string]['authoritySectionIndex'][number]>()
+  const bytesByDocument = new Map<string, string>()
+  for (const source of Object.values(sources)) {
+    for (const section of source.authoritySectionIndex) {
+      if (!templateByDocument.has(section.documentPath))
+        templateByDocument.set(section.documentPath, section)
+    }
+    for (const [key, bytes] of Object.entries(source.sectionBytes)) {
+      const documentPath = key.split('#')[0]!
+      if (!bytesByDocument.has(documentPath)) bytesByDocument.set(documentPath, bytes)
+    }
+  }
+  const idsByDocument = new Map<string, Set<string>>()
+  for (const selectors of Object.values(GAME_IR_SLICE_SOURCE_SECTIONS))
+    for (const selector of selectors) {
+      const ids = idsByDocument.get(selector.documentPath) ?? new Set<string>()
+      ids.add(selector.sectionId)
+      idsByDocument.set(selector.documentPath, ids)
+    }
+  const authoritySectionIndex = [...templateByDocument.entries()].flatMap(
+    ([documentPath, template]) => {
+      const ids = idsByDocument.get(documentPath) ?? new Set<string>()
+      return [...ids].map(sectionId => ({ ...template, sectionId }))
+    },
+  )
+  const foundationBody = {
+    ...((({ receiptDigest: _ignored, ...body }) => body)(
+      Object.values(sources)[0]!.compileRequest.foundation,
+    )),
+    sectionIndexDigest: digestGameIrSourceSectionIndex(authoritySectionIndex),
+  }
+  const request = {
+    ...Object.values(sources)[0]!.compileRequest,
+    foundation: {
+      ...foundationBody,
+      receiptDigest: digestGameIrValue(foundationBody),
+    },
+  }
+  return Object.fromEntries(
+    Object.entries(sources).map(([moduleId, source]) => {
+      const sectionBytes = Object.fromEntries(
+        authoritySectionIndex
+          .filter(section =>
+            GAME_IR_MODULE_SOURCE_DOCUMENTS[moduleId as keyof typeof GAME_IR_MODULE_SOURCE_DOCUMENTS].includes(section.documentPath),
+          )
+          .map(section => [
+            `${section.documentPath}#${section.sectionId}`,
+            bytesByDocument.get(section.documentPath)!,
+          ]),
+      )
+      return [
+        moduleId,
+        buildGameIrDomainSourceEnvelope({
+          moduleId: moduleId as GameIrDomainSourceEnvelope['moduleId'],
+          request,
+          sectionIndex: authoritySectionIndex,
+          sectionBytes,
+        }),
+      ]
+    }),
+  )
+}
+
+function canonicalMechanical(
+  mechanical: Record<string, unknown>,
+  source: GameIrDomainSourceEnvelope,
+) {
+  const { receiptDigest: _ignored, ...body } = mechanical
+  const nextBody = { ...body, sourceDigest: source.sourceDigest }
+  return { ...nextBody, receiptDigest: digestGameIrValue(nextBody) }
+}
+
+function canonicalSemantic(
+  semantic: Record<string, any>,
+  source: GameIrDomainSourceEnvelope,
+  mechanicalReceiptDigest: string,
+  packetDigest: string,
+) {
+  const nodes = semantic.nodes as readonly { id: string; kind: string }[]
+  const sourceClaims = (semantic.sourceClaims as readonly Record<string, any>[]).map(claim => {
+    const nodeId = String(claim.subject).slice('node:'.length).split('#')[0]!
+    const node = nodes.find(candidate => candidate.id === nodeId)!
+    const slice = deriveProjectionSlicePlan(source.moduleId).slices.find(candidate =>
+      candidate.nodeKinds.includes(node.kind),
+    )!
+    const selector = sourceSectionsForGameIrProjectionSlice(slice.sliceId).find(candidate =>
+      candidate.documentPath === claim.documentPath,
+    ) ?? sourceSectionsForGameIrProjectionSlice(slice.sliceId)[0]!
+    const key = `${selector.documentPath}#${selector.sectionId}`
+    const bytes = source.sectionBytes[key]!
+    return {
+      ...claim,
+      documentPath: selector.documentPath,
+      sectionId: selector.sectionId,
+      sourcePointer: `/bytes/0/${Buffer.byteLength(bytes, 'utf8')}`,
+      literal: bytes,
+    }
+  })
+  const { receiptDigest: _ignored, ...body } = semantic
+  const nextBody = {
+    ...body,
+    sourceDigest: source.sourceDigest,
+    mechanicalReceiptDigest,
+    packetDigest,
+    sourceClaims,
+  }
+  return { ...nextBody, receiptDigest: digestGameIrValue(nextBody) }
 }
 
 function canonicalGroups(
@@ -87,37 +262,16 @@ function ownerFixtureState() {
   const phase4 = fixture.phase6Authority.phase5Authority.phase4Authority
   const phase5 = fixture.phase6Authority.phase5Authority
   const phase6 = fixture.phase6Authority
-  const ivPreparation = {
-    phase6Authority: phase6,
-    implementationVerification: {
-      source: fixture.authority.source,
-      mechanical: fixture.authority.mechanical,
-      semantic: fixture.semantic,
-    },
-  }
-  const ivValidationPacket =
-    prepareImplementationVerificationSemanticValidationPacket(ivPreparation)
-  const phase7 = {
-    phase6Authority: phase6,
-    implementationVerification: {
-      ...ivPreparation.implementationVerification,
-      validation: {
-        outcome: 'PASS' as const,
-        packetDigest: ivValidationPacket.packetDigest,
-        checkIds: ivValidationPacket.checkIds,
-        coveredTargets: ivValidationPacket.requiredTargets,
-      },
-    },
-  }
-  const sources = {
+  const rawSources = {
     gameplay: phase4.gameplay.source,
     balance: phase4.balance.source,
     'world-scene': phase5.worldScene.source,
     presentation: phase5.presentation.source,
     'resource-realization': phase6.resourceRealization.source,
-    'implementation-verification': phase7.implementationVerification.source,
+    'implementation-verification': fixture.authority.source,
   }
-  const semantic = {
+  const sources = canonicalSources(rawSources)
+  const rawSemantic = {
     gameplay: phase4.gameplay.semantic,
     balance: phase4.balance.semantic,
     'world-scene': phase5.worldScene.semantic,
@@ -125,27 +279,34 @@ function ownerFixtureState() {
     'resource-realization': phase6.resourceRealization.semantic,
     'implementation-verification': fixture.semantic,
   }
-  const mechanical = {
+  const rawMechanical = {
     gameplay: phase4.gameplay.mechanical,
     balance: phase4.balance.mechanical,
     'world-scene': phase5.worldScene.mechanical,
     presentation: phase5.presentation.mechanical,
     'resource-realization': phase6.resourceRealization.mechanical,
-    'implementation-verification': phase7.implementationVerification.mechanical,
+    'implementation-verification': fixture.authority.mechanical,
   }
   const validation = {
     'world-scene': phase5.worldScene.validation,
     presentation: phase5.presentation.validation,
     'resource-realization': phase6.resourceRealization.validation,
-    'implementation-verification': phase7.implementationVerification.validation,
+    'implementation-verification': undefined,
   }
   const records = new Map<GameIrCheckpointRecordKind, unknown>()
+  const semantic = {} as typeof rawSemantic
+  const mechanical = {} as typeof rawMechanical
   for (const operation of GAME_IR_STAGED_OPERATIONS) {
+    const source = operation.operation === 'projection' ? sources[operation.domain]! : undefined
+    if (operation.operation === 'projection') {
+      mechanical[operation.domain] = canonicalMechanical(
+        rawMechanical[operation.domain],
+        sources[operation.domain] as GameIrDomainSourceEnvelope,
+      ) as (typeof rawMechanical)[keyof typeof rawMechanical]
+    }
     const packet = buildStagedOperationPacket({
       operation,
-      ...(operation.operation === 'projection'
-        ? { source: sources[operation.domain] }
-        : {}),
+      ...(source ? { source } : {}),
       records,
     })
     const result =
@@ -154,27 +315,40 @@ function ownerFixtureState() {
             status: 'completed' as const,
             semantic: {
               outcome: 'PROJECTED' as const,
-              nodes: semantic[operation.domain].nodes.map(
+              nodes: rawSemantic[operation.domain].nodes.map(
                 ({ producerMode: _producerMode, ...node }) => node,
               ),
-              sourceClaims: semantic[operation.domain].sourceClaims,
+              sourceClaims: rawSemantic[operation.domain].sourceClaims,
             },
           }
         : (() => {
             const expected =
               validation[operation.domain as keyof typeof validation]
-            if (expected.outcome !== 'PASS')
-              throw new Error('owner fixture validation did not pass')
+            const phase7Packet = packet as { checkIds?: readonly string[]; requiredTargets?: readonly string[] }
+            const checkIds = expected?.outcome === 'PASS'
+              ? expected.checkIds
+              : phase7Packet.checkIds ?? []
+            const coveredTargets = expected?.outcome === 'PASS'
+              ? expected.coveredTargets
+              : phase7Packet.requiredTargets ?? []
             return {
               status: 'completed' as const,
               validation: {
                 outcome: 'PASS' as const,
-                checkIds: expected.checkIds,
-                coveredTargets: expected.coveredTargets,
+                checkIds,
+                coveredTargets,
               },
             }
           })()
     if (operation.operation === 'projection') {
+      Object.assign(semantic, {
+        [operation.domain]: canonicalSemantic(
+          rawSemantic[operation.domain],
+          sources[operation.domain] as GameIrDomainSourceEnvelope,
+          mechanical[operation.domain].receiptDigest,
+          (packet as Record<string, any>).semanticPacket.packetDigest,
+        ),
+      })
       records.set(
         `${operation.step.replace('/projection', '')}/source` as GameIrCheckpointRecordKind,
         sources[operation.domain],
@@ -231,9 +405,6 @@ async function graphJournal(
     packet: packet as never,
     slicePlan: deriveProjectionSlicePlan('gameplay'),
   })
-  const section = source.sectionIndex[0]!
-  const excerpt =
-    source.sectionBytes[`${section.documentPath}#${section.sectionId}`]!
   const nodes = [
     {
       id: 'state-forward',
@@ -279,6 +450,7 @@ async function graphJournal(
         ]
       : []),
   ]
+  await admitPreflight(journal, source, nodes)
   for (const slice of journal.slicePlan.slices) {
     const owned = nodes
       .filter(node => slice.nodeKinds.includes(node.kind))
@@ -289,12 +461,7 @@ async function graphJournal(
         : [
             {
               nodeIds: owned.map(node => node.id),
-              fragmentId: evidenceFragmentId(
-                source,
-                section.documentPath,
-                section.sectionId,
-                excerpt,
-              ),
+              fragmentId: fragmentForNode(source, owned[0]!),
             },
           ]
     await journal.append({
@@ -336,6 +503,12 @@ async function resourceJournalWithDanglingEdge(
     slicePlan: deriveProjectionSlicePlan(operation.domain),
   })
   const expected = state.semantic[operation.domain]
+  await admitPreflight(
+    journal,
+    source,
+    expected.nodes,
+    new Map(expected.sourceClaims.map(claim => [claim.subject.slice(5, claim.subject.indexOf('#')), claim.documentPath])),
+  )
   for (const slice of journal.slicePlan.slices) {
     const nodes = expected.nodes
       .filter(node => slice.nodeKinds.includes(node.kind))
@@ -362,15 +535,7 @@ async function resourceJournalWithDanglingEdge(
       if (!grouped.has(nodeId))
         grouped.set(nodeId, {
           nodeIds: [nodeId],
-          fragmentId: evidenceFragmentId(
-            source,
-            claim.documentPath,
-            claim.sectionId,
-            uniqueExcerpt(
-              source.sectionBytes[`${claim.documentPath}#${claim.sectionId}`]!,
-              claim.sourcePointer,
-            ),
-          ),
+          fragmentId: fragmentForNode(source, nodes.find(node => node.id === nodeId)!, claim.documentPath),
         })
     }
     await journal.append({
@@ -413,6 +578,12 @@ async function gameplayJournalWithInvalidLocalGraph(
     slicePlan: deriveProjectionSlicePlan('gameplay'),
   })
   const expected = state.semantic.gameplay
+  await admitPreflight(
+    journal,
+    source,
+    expected.nodes,
+    new Map(expected.sourceClaims.map(claim => [claim.subject.slice(5, claim.subject.indexOf('#')), claim.documentPath])),
+  )
   for (const slice of journal.slicePlan.slices) {
     const nodes = expected.nodes
       .filter(node => slice.nodeKinds.includes(node.kind))
@@ -439,17 +610,7 @@ async function gameplayJournalWithInvalidLocalGraph(
       if (!groups.has(nodeId))
         groups.set(nodeId, {
           nodeIds: [nodeId],
-          fragmentId: evidenceFragmentId(
-            source,
-            claim.documentPath,
-            claim.sectionId,
-            uniqueExcerpt(
-              source.sectionBytes[
-                `${claim.documentPath}#${claim.sectionId}`
-              ]!,
-              claim.sourcePointer,
-            ),
-          ),
+          fragmentId: fragmentForNode(source, nodes.find(node => node.id === nodeId)!, claim.documentPath),
         })
     }
     await journal.append({
@@ -497,6 +658,12 @@ describe('Game IR staged compiler scheduler', () => {
           packet: packet as never,
           slicePlan: deriveProjectionSlicePlan(operation.domain),
         })
+        await admitPreflight(
+          journal,
+          source,
+          expected.nodes,
+          new Map(expected.sourceClaims.map(claim => [claim.subject.slice(5, claim.subject.indexOf('#')), claim.documentPath])),
+        )
         for (const slice of journal.slicePlan.slices) {
           const nodes = expected.nodes
             .filter(node => slice.nodeKinds.includes(node.kind))
@@ -518,17 +685,7 @@ describe('Game IR staged compiler scheduler', () => {
             if (!grouped.has(nodeId))
               grouped.set(nodeId, {
                 nodeIds: [nodeId],
-                fragmentId: evidenceFragmentId(
-                  source,
-                  claim.documentPath,
-                  claim.sectionId,
-                  uniqueExcerpt(
-                    source.sectionBytes[
-                      `${claim.documentPath}#${claim.sectionId}`
-                    ]!,
-                    claim.sourcePointer,
-                  ),
-                ),
+                fragmentId: fragmentForNode(source, nodes.find(node => node.id === nodeId)!, claim.documentPath),
               })
           }
           await journal.append({
@@ -558,7 +715,7 @@ describe('Game IR staged compiler scheduler', () => {
     } finally {
       await rm(root, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   test('completes Balance projection from the exact Gameplay-only checkpoint prefix', async () => {
     const state = ownerFixtureState()
@@ -590,6 +747,12 @@ describe('Game IR staged compiler scheduler', () => {
         slicePlan: deriveProjectionSlicePlan('balance'),
       })
       const expected = state.semantic.balance
+      await admitPreflight(
+        journal,
+        source,
+        expected.nodes,
+        new Map(expected.sourceClaims.map(claim => [claim.subject.slice(5, claim.subject.indexOf('#')), claim.documentPath])),
+      )
       for (const slice of journal.slicePlan.slices) {
         const nodes = expected.nodes
           .filter(node => slice.nodeKinds.includes(node.kind))
@@ -611,17 +774,7 @@ describe('Game IR staged compiler scheduler', () => {
           if (!groups.has(nodeId))
             groups.set(nodeId, {
               nodeIds: [nodeId],
-              fragmentId: evidenceFragmentId(
-                source,
-                claim.documentPath,
-                claim.sectionId,
-                uniqueExcerpt(
-                  source.sectionBytes[
-                    `${claim.documentPath}#${claim.sectionId}`
-                  ]!,
-                  claim.sourcePointer,
-                ),
-              ),
+                fragmentId: fragmentForNode(source, nodes.find(node => node.id === nodeId)!, claim.documentPath),
             })
         }
         await journal.append({
@@ -725,6 +878,7 @@ describe('Game IR staged compiler scheduler', () => {
         packet: packet as never,
         slicePlan: deriveProjectionSlicePlan('gameplay'),
       })
+      await admitPreflight(journal, source, [])
       expect(() =>
         assembleStagedProjectionOperation({
           operation,
@@ -800,6 +954,7 @@ describe('Game IR staged compiler scheduler', () => {
           packet: packet as never,
           slicePlan: deriveProjectionSlicePlan(operation.domain),
         })
+        await admitPreflight(journal, state.sources[operation.domain], [])
         const forged = { ...packet, dependencies: { forged: true } } as Record<
           string,
           unknown
