@@ -114,6 +114,76 @@ describe('worker prompts', () => {
     }
   })
 
+  test('includes one literal contract-derived Markdown skeleton for each foundation author mode', () => {
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      const path = 'docs/ASSET_PLAN.md' as const
+      const prompt = buildWorkerPrompt({
+        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+        allowedPaths: [path],
+        contract: {
+          documentSet: 'foundation', authoringMode, foundationDocumentPath: path,
+          completeDocumentContract: getGameDocumentContract(path),
+        },
+      })
+      const serialized = JSON.parse(prompt.split('\n').find(line => line.startsWith('{'))!) as {
+        completeDocumentContract: {
+          mechanicalMarkdownProtocol: {
+            literalMarkdownSkeleton: string
+            closedHeadingSet: string[]
+            productionMaterials: { entries: Array<{ heading: string }> }
+          }
+        }
+      }
+      const protocol = serialized.completeDocumentContract.mechanicalMarkdownProtocol
+      const expectedHeadings = [
+        ...protocol.closedHeadingSet,
+        ...protocol.productionMaterials.entries.map(entry => entry.heading),
+      ]
+
+      expect(typeof protocol.literalMarkdownSkeleton).toBe('string')
+      expect(protocol.literalMarkdownSkeleton).toContain('# <document title>')
+      expect(protocol.literalMarkdownSkeleton).toContain('## Production Materials')
+      let previous = -1
+      for (const heading of expectedHeadings) {
+        const position = protocol.literalMarkdownSkeleton.indexOf(heading)
+        expect(position).toBeGreaterThan(previous)
+        expect(protocol.literalMarkdownSkeleton.split(heading).length - 1).toBe(1)
+        previous = position
+      }
+      expect(prompt).toContain('canonical material H3 headings are forbidden before Production Materials')
+    }
+  })
+
+  test('gives Asset authors resource-production quality rules without leaking them to GDD authors', () => {
+    const buildPrompt = (foundationDocumentPath: 'docs/ASSET_PLAN.md' | 'docs/GDD.md') =>
+      buildWorkerPrompt({
+        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+        allowedPaths: [foundationDocumentPath],
+        contract: {
+          documentSet: 'foundation', authoringMode: 'initial', foundationDocumentPath,
+          completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
+        },
+      })
+    const assetPrompt = buildPrompt('docs/ASSET_PLAN.md')
+    const assetRules = [
+      'one inventory ID per independently acquireable/authorable/licensable/replaceable/acceptable delivery unit',
+      'one inventory ID may map to multiple delivery files or encoding variants',
+      'per-unit mapping from upstream Art/Audio/UI requirements instead of category collapse',
+      'repeated metadata stays inside its one owner material without a second profile schema',
+      'planned fields separated from evidence-backed observed fields',
+      'no `verified`, `available`, current maturity, or delivery receipt claim without evidence',
+      'exact derivable mappings, otherwise an explicit `unresolvedRef`',
+      'Asset H2 sections to policy, context, rationale, and owner-material references',
+      'per-inventory rows, mappings, quantities, evidence, current status, and milestones remain only in the five owner materials',
+    ]
+    for (const rule of assetRules) expect(assetPrompt).toContain(rule)
+
+    const gddPrompt = buildPrompt('docs/GDD.md')
+    for (const rule of assetRules) expect(gddPrompt).not.toContain(rule)
+  })
+
   test('aligns shared foundation authority instructions across all initial and parallel authors', () => {
     const expectedSharedInstructions = [
       'Use exactly one fact owner across the eight documents:',

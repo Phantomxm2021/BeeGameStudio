@@ -14,7 +14,7 @@ const FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION =
   'Use exactly one fact owner across the eight documents: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Every material is an owner representation for its declared facts and contains the single canonical representation. Define each fact once and use one representation per fact in its owner section or production material; elsewhere reference that owner instead of copying the fact. Use only this document and the contract-declared committed upstream section projection as content authority. Delegate responsibilities to a not-yet-generated downstream document by its canonical `Document Path` and discipline in ordinary Markdown; do not invent downstream facts, material IDs or inventory IDs. Keep stable IDs unambiguous and do not create aliases, placeholders or alternate spellings. The Executive Summary indexes authority, while each material owns the facts declared by its serialized authority rule. Do not restate the confirmed brief or upstream authority; downstream documents may specialize already-authorized behavior but must not redefine upstream rules.'
 
 const FOUNDATION_AUTHOR_CLOSURE_CHECK =
-  'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once; retain every required heading for N/A content and state its reason and impact. Return only the complete raw Markdown body.'
+  'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once; retain every required heading for N/A content and state its reason and impact. Use mechanicalMarkdownProtocol.literalMarkdownSkeleton as the one literal ordered skeleton. canonical material H3 headings are forbidden before Production Materials (the literal `## Production Materials` heading). Return only the complete raw Markdown body.'
 
 const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
   'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority; each Issue sourceSectionKey, expected, and actual must match its single-document authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
@@ -329,56 +329,74 @@ function formatContract(request: WorkerDispatchRequest): string {
         productionMaterials,
         ...authorDocumentContract
       } = completeDocumentContract as Record<string, unknown>
+      const mechanicalMarkdownProtocol = {
+        documentTitle: {
+          position: 'first_non_blank_line',
+          headingPrefix: '# ',
+        },
+        executiveSummary: {
+          heading: '## Executive Summary',
+        },
+        sections: Array.isArray(sections)
+          ? sections.map(value => {
+              const section = value as Record<string, unknown>
+              return {
+                ...section,
+                heading: `## ${section.title}`,
+              }
+            })
+          : sections,
+        productionMaterials: {
+          heading: '## Production Materials',
+          entries: Array.isArray(productionMaterials)
+            ? productionMaterials.map(value => {
+                const material = value as Record<string, unknown>
+                const serialization = material.serialization
+                const serializationRule =
+                  serialization === 'markdown_table'
+                    ? 'Markdown table only: include a header row, a separator row, and data rows; do not use a fenced code block, YAML, JSON, or a key-value list.'
+                    : serialization === 'mermaid'
+                      ? 'Mermaid only: use one fenced ```mermaid block; do not replace it with prose, JSON, YAML, or a key-value list.'
+                      : serialization === 'inline_svg'
+                        ? 'Inline SVG only: use one inline <svg>...</svg> block; do not replace it with a fenced code block, JSON, YAML, or a key-value list.'
+                        : undefined
+                return {
+                  ...material,
+                  heading: `### ${material.title}`,
+                  ...(serializationRule ? { serializationRule } : {}),
+                }
+              })
+            : productionMaterials,
+        },
+        closedHeadingSet: [
+          '## Executive Summary',
+          ...(Array.isArray(sections)
+            ? sections.map(value => `## ${(value as Record<string, unknown>).title}`)
+            : []),
+          '## Production Materials',
+        ],
+        additionalH2: 'forbidden',
+        supportingContent: 'must be nested under one of the closed H2 headings',
+      }
+      const literalMarkdownSkeleton = [
+        '# <document title>',
+        '',
+        mechanicalMarkdownProtocol.executiveSummary.heading,
+        '',
+        ...(Array.isArray(mechanicalMarkdownProtocol.sections)
+          ? mechanicalMarkdownProtocol.sections.flatMap(section => [section.heading, '', '...'])
+          : []),
+        mechanicalMarkdownProtocol.productionMaterials.heading,
+        '',
+        ...(Array.isArray(mechanicalMarkdownProtocol.productionMaterials.entries)
+          ? mechanicalMarkdownProtocol.productionMaterials.entries.flatMap(entry => [entry.heading, '', '...'])
+          : []),
+      ].join('\n')
       contractWithoutDuplicatedBrief.completeDocumentContract = {
         ...authorDocumentContract,
         mechanicalMarkdownProtocol: {
-          documentTitle: {
-            position: 'first_non_blank_line',
-            headingPrefix: '# ',
-          },
-          executiveSummary: {
-            heading: '## Executive Summary',
-          },
-          sections: Array.isArray(sections)
-            ? sections.map(value => {
-                const section = value as Record<string, unknown>
-                return {
-                  ...section,
-                  heading: `## ${section.title}`,
-                }
-              })
-            : sections,
-          productionMaterials: {
-            heading: '## Production Materials',
-            entries: Array.isArray(productionMaterials)
-              ? productionMaterials.map(value => {
-                  const material = value as Record<string, unknown>
-                  const serialization = material.serialization
-                  const serializationRule =
-                    serialization === 'markdown_table'
-                      ? 'Markdown table only: include a header row, a separator row, and data rows; do not use a fenced code block, YAML, JSON, or a key-value list.'
-                      : serialization === 'mermaid'
-                        ? 'Mermaid only: use one fenced ```mermaid block; do not replace it with prose, JSON, YAML, or a key-value list.'
-                        : serialization === 'inline_svg'
-                          ? 'Inline SVG only: use one inline <svg>...</svg> block; do not replace it with a fenced code block, JSON, YAML, or a key-value list.'
-                          : undefined
-                  return {
-                    ...material,
-                    heading: `### ${material.title}`,
-                    ...(serializationRule ? { serializationRule } : {}),
-                  }
-                })
-              : productionMaterials,
-          },
-          closedHeadingSet: [
-            '## Executive Summary',
-            ...(Array.isArray(sections)
-              ? sections.map(value => `## ${(value as Record<string, unknown>).title}`)
-              : []),
-            '## Production Materials',
-          ],
-          additionalH2: 'forbidden',
-          supportingContent: 'must be nested under one of the closed H2 headings',
+          ...mechanicalMarkdownProtocol,
+          literalMarkdownSkeleton,
         },
       }
     }
