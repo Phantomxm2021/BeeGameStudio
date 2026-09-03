@@ -1042,6 +1042,31 @@ function pendingDigest(
   return digestGameIrValue(pendingBody(pending))
 }
 
+function firstMentionedNodeId(
+  reason: string,
+  nodeIds: readonly string[],
+): string | undefined {
+  return nodeIds
+    .map(id => {
+      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const match = new RegExp(
+        `(^|[^A-Za-z0-9._-])${escaped}(?=$|[^A-Za-z0-9._-])`,
+        'u',
+      ).exec(reason)
+      return match
+        ? { id, index: match.index + match[1]!.length }
+        : undefined
+    })
+    .filter(
+      (match): match is { id: string; index: number } =>
+        match !== undefined,
+    )
+    .sort(
+      (left, right) =>
+        left.index - right.index || right.id.length - left.id.length,
+    )[0]?.id
+}
+
 function normalizePendingSlice(
   value: unknown,
   entries: readonly GameIrProjectionSliceJournalEntry[],
@@ -1413,6 +1438,59 @@ export class GameIrProjectionSliceJournal {
       ),
     )
   }
+
+  /**
+   * Removes the failed pending owner and its later suffix in one journal write.
+   *
+   * Record admission deliberately allows forward references so a producer can
+   * stream a sorted slice.  Closure is checked only when the slice is closed;
+   * when that check identifies a pending owner, the owner and everything after
+   * it must be removed before the retry is dispatched.  The persisted prefix is
+   * the retry authority, so a corrected record with the same id can be appended
+   * without replaying the rejected candidate.
+   */
+  async rollbackPendingRecordsForDiagnostic(
+    reason: string,
+  ): Promise<GameIrProjectionRetryDiagnostic | undefined> {
+    const pending = this.state.pendingSlice
+    if (!pending) return undefined
+
+    const ownerId = firstMentionedNodeId(
+      reason,
+      pending.records.map(record => record.node.id),
+    )
+    if (!ownerId) return undefined
+    const ownerIndex = pending.records.findIndex(
+      record => record.node.id === ownerId,
+    )
+    if (ownerIndex < 0) return undefined
+    const owner = pending.records[ownerIndex]
+    if (!owner) return undefined
+    const prefixRecords = Object.freeze(
+      [...pending.records.slice(0, ownerIndex)],
+    )
+    const nextPending = prefixRecords.length
+      ? {
+          sliceId: pending.sliceId,
+          predecessorDigest: pending.predecessorDigest,
+          records: prefixRecords,
+        }
+      : null
+    this.state = await persist(this.path, {
+      ...this.state,
+      pendingSlice: nextPending
+        ? { ...nextPending, pendingDigest: pendingDigest(nextPending) }
+        : null,
+    })
+    return {
+      scope: 'record',
+      sliceId: pending.sliceId,
+      recordId: owner.node.id,
+      fragmentId: owner.fragmentId,
+      reason,
+    }
+  }
+
   ownerSliceIdForDiagnostic(reason: string): string | undefined {
     const entries = this.state.entries
     const nodeOwners = new Map(
@@ -1420,25 +1498,7 @@ export class GameIrProjectionSliceJournal {
         entry.semantic.nodes.map(node => [node.id, entry.sliceId] as const),
       ),
     )
-    const exactNodeId = [...nodeOwners.keys()]
-      .map(id => {
-        const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        const match = new RegExp(
-          `(^|[^A-Za-z0-9._-])(${escaped})(?=$|[^A-Za-z0-9._-])`,
-          'u',
-        ).exec(reason)
-        return match
-          ? { id, index: match.index + match[1]!.length }
-          : undefined
-      })
-      .filter(
-        (match): match is { id: string; index: number } =>
-          match !== undefined,
-      )
-      .sort(
-        (left, right) =>
-          left.index - right.index || right.id.length - left.id.length,
-      )[0]?.id
+    const exactNodeId = firstMentionedNodeId(reason, [...nodeOwners.keys()])
     if (exactNodeId) return nodeOwners.get(exactNodeId)
 
     const indexed = /(?:^|\/)nodes?\/(\d+)(?:\/|$)|\bnodes?\[(\d+)\]/u.exec(

@@ -578,6 +578,137 @@ describe('Game IR projection slice journal', () => {
     }
   })
 
+  test('rolls back a pending failed owner and every later suffix record atomically', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const first = journal.slicePlan.slices[0]!
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
+      )
+      const sourceUnit =
+        realAuthority().phase5Authority.phase4Authority.balance.semantic.nodes[0]!
+      const { bindings: _bindings, producerMode: _producerMode, ...unit } =
+        sourceUnit as typeof sourceUnit & {
+          bindings?: unknown
+          producerMode?: unknown
+        }
+      const prefix = { ...unit, id: 'balance.a-unit' }
+      const failed = {
+        id: 'balance.parameter.b',
+        kind: 'balance.parameter',
+        value: { label: 'B', baseline: 1, unitReferenceIndex: 0 },
+        references: [
+          { targetId: 'balance.unit.future', targetType: 'balance.unit' },
+        ],
+        edges: [],
+      }
+      const suffix = {
+        id: 'balance.variable.c',
+        kind: 'balance.variable',
+        value: { label: 'C', baseline: 1, unitReferenceIndex: 0 },
+        references: [
+          { targetId: 'balance.unit.future', targetType: 'balance.unit' },
+        ],
+        edges: [],
+      }
+      await expect(
+        journal.appendRecords(
+          [
+            { fragmentId, node: prefix },
+            { fragmentId, node: failed },
+            { fragmentId, node: suffix },
+          ],
+          first.sliceId,
+        ),
+      ).resolves.toEqual({ acceptedCount: 3 })
+      const prefixBefore = journal.currentSliceRecordPrefix
+      const digestsBefore = journal.currentSliceRecordDigests
+      const pendingDigestBefore = journal.snapshot.pendingSlice?.pendingDigest
+      let reason = ''
+      try {
+        await journal.completeCurrentSlice()
+      } catch (error) {
+        reason = error instanceof Error ? error.message : String(error)
+      }
+      expect(reason).toMatch(/balance\.parameter\.b|unknown|dangling/i)
+      const rollback = await journal.rollbackPendingRecordsForDiagnostic(reason)
+      expect(rollback).toEqual({
+        scope: 'record',
+        sliceId: first.sliceId,
+        recordId: failed.id,
+        fragmentId,
+        reason,
+      })
+      expect(journal.currentSliceRecordPrefix).toEqual([prefixBefore[0]])
+      expect(journal.currentSliceRecordDigests).toEqual([digestsBefore[0]])
+      expect(journal.snapshot.pendingSlice?.pendingDigest).not.toBe(
+        pendingDigestBefore,
+      )
+      await expect(
+        journal.appendRecords(
+          [
+            {
+              fragmentId,
+              node: {
+                ...failed,
+                references: [{ targetId: prefix.id, targetType: 'balance.unit' }],
+              },
+            },
+            {
+              fragmentId,
+              node: {
+                ...suffix,
+                references: [{ targetId: prefix.id, targetType: 'balance.unit' }],
+              },
+            },
+          ],
+          first.sliceId,
+        ),
+      ).resolves.toEqual({ acceptedCount: 2 })
+      await expect(journal.completeCurrentSlice()).resolves.toBe(journal)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('does not mutate a pending slice when a failure has no pending owner', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const first = journal.slicePlan.slices[0]!
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
+      )
+      const sourceUnit =
+        realAuthority().phase5Authority.phase4Authority.balance.semantic.nodes[0]!
+      const { bindings: _bindings, producerMode: _producerMode, ...unit } =
+        sourceUnit as typeof sourceUnit & {
+          bindings?: unknown
+          producerMode?: unknown
+        }
+      await journal.appendRecords(
+        [{ fragmentId, node: { ...unit, id: 'balance.a-unit' } }],
+        first.sliceId,
+      )
+      const before = journal.snapshot
+      await expect(
+        journal.rollbackPendingRecordsForDiagnostic(
+          'unattributed closure failure',
+        ),
+      ).resolves.toBeUndefined()
+      expect(journal.snapshot).toEqual(before)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('exposes only a fully verified completed snapshot and never a raw merge completion path', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {

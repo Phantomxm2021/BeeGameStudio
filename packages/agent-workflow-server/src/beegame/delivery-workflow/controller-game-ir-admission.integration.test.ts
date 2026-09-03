@@ -348,6 +348,63 @@ describe('Game IR controller admission integration', () => {
     }
   })
 
+  test('rolls back a failed pending owner before retry and excludes its suffix from retry authority', async () => {
+    const fixture = await prepareFixture()
+    try {
+      const failedOwner = {
+        ...fixture.record,
+        node: {
+          ...(fixture.record.node as Record<string, unknown>),
+          id: 'state-middle',
+          references: [
+            { targetId: 'state-future', targetType: 'gameplay.state' },
+          ],
+        },
+      }
+      const suffix = {
+        ...fixture.record,
+        node: {
+          ...(fixture.record.node as Record<string, unknown>),
+          id: 'state-z',
+        },
+      }
+      await fixture.controller.dispatcher.completeDispatch(
+        fixture.request.dispatchId!,
+        terminal(fixture.request, {
+          records: [fixture.record, failedOwner, suffix],
+        }),
+      )
+
+      const journal = await loadGameIrProjectionSliceJournal(fixture.journalInput)
+      expect(journal.currentSliceRecordPrefix).toEqual([
+        { id: 'state-start', kind: 'gameplay.state' },
+      ])
+      const current = await fixture.controller.store.load()
+      const actual =
+        current?.gameIrState && 'diagnostic' in current.gameIrState
+          ? current.gameIrState.diagnostic?.actual ?? ''
+          : ''
+      expect(actual).toContain('game-ir-retry-diagnostic:')
+      expect(actual).toContain('"recordId":"state-middle"')
+      expect(fixture.started).toHaveLength(1)
+      expect(fixture.started[0]?.contract.retryDiagnostic).toEqual(
+        expect.objectContaining({
+          scope: 'record',
+          sliceId: 'gameplay.slice.0',
+          recordId: 'state-middle',
+        }),
+      )
+      const retrySliceContext = fixture.started[0]?.contract.sliceContext as
+        | { admittedCurrentNodes: unknown }
+        | undefined
+      expect(retrySliceContext?.admittedCurrentNodes).toEqual([
+        { id: 'state-start', kind: 'gameplay.state' },
+      ])
+    } finally {
+      await rm(fixture.workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('replays an exact completed terminal through controller admission without duplicating journal entries', async () => {
     const fixture = await prepareFixture()
     try {

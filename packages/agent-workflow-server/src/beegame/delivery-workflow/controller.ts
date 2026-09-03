@@ -1523,15 +1523,21 @@ export function createDeliveryWorkflowController(input: {
             ? error.message
             : 'Game IR operation admission failed'
         let unattributed = false
+        let retryDiagnostic: GameIrProjectionRetryDiagnostic | undefined
         if (
           operation.operation === 'projection' &&
-          projectionJournal &&
-          !projectionJournal.nextSlice
+          projectionJournal
         ) {
-          const ownerSliceId =
-            projectionJournal.ownerSliceIdForDiagnostic(actual)
-          if (ownerSliceId) await projectionJournal.invalidate(ownerSliceId)
-          else unattributed = true
+          retryDiagnostic =
+            await projectionJournal.rollbackPendingRecordsForDiagnostic(actual)
+          if (!retryDiagnostic && !projectionJournal.nextSlice) {
+            const ownerSliceId =
+              projectionJournal.ownerSliceIdForDiagnostic(actual)
+            if (ownerSliceId) await projectionJournal.invalidate(ownerSliceId)
+            else unattributed = true
+          } else if (!retryDiagnostic && projectionJournal.nextSlice) {
+            unattributed = true
+          }
         }
         const nativeCandidate =
           operation.operation === 'projection'
@@ -1554,7 +1560,7 @@ export function createDeliveryWorkflowController(input: {
         await persistCompilerDiagnostic(
           actual,
           admissionIdentity,
-          undefined,
+          retryDiagnostic,
           unattributed,
         )
         return
