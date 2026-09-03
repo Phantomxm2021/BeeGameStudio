@@ -2,11 +2,18 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { digestGameIrValue } from './model'
+import { digestGameIrSourceSectionIndex, digestGameIrValue } from './model'
 import { deriveProjectionSlicePlan } from './projection-slices'
 import { buildGameplayProjectionOperationPacket } from './gameplay-producer'
 import { buildBalanceProjectionOperationPacket } from './balance-producer'
 import { realAuthority } from './resource-realization-test-helpers'
+import {
+  buildGameIrDomainSourceEnvelope,
+  GAME_IR_MODULE_SOURCE_DOCUMENTS,
+  type GameIrDomainSourceEnvelope,
+} from './domain-source'
+import type { GameIrMechanicalProjectionReceipt } from './domain-projection'
+import type { GameIrDomainSemanticReceipt } from './domain-projection'
 import {
   createGameIrProjectionSliceJournal,
   loadGameIrProjectionSliceJournal,
@@ -17,7 +24,9 @@ import {
 } from './projection-slice-journal'
 import type { GameIrCompilationIdentity } from '../types'
 import { buildGameIrEvidenceFragmentCatalog } from './projection-slices'
-import { sourceSectionsForGameIrProjectionSlice } from './projection-slice-authority'
+import {
+  GAME_IR_SLICE_SOURCE_SECTIONS,
+} from './projection-slice-authority'
 import { buildGameIrSemanticObligationInventory } from './semantic-obligation-inventory'
 import {
   admitGameIrSemanticObligationValidationResult,
@@ -27,22 +36,124 @@ import type { GameIrSemanticObligationRecord } from './semantic-obligation-inven
 
 const digest = (letter: string): string => letter.repeat(64)
 
+function canonicalProjectionSource(
+  authoritySource: GameIrDomainSourceEnvelope,
+  moduleId: 'gameplay' | 'balance',
+) {
+  const baseByDocument = new Map(
+    authoritySource.authoritySectionIndex.map(section => [
+      section.documentPath,
+      section,
+    ]),
+  )
+  const selectors = Object.entries(GAME_IR_SLICE_SOURCE_SECTIONS)
+    .filter(
+      ([sliceId]) =>
+        sliceId.startsWith('gameplay.') || sliceId.startsWith('balance.'),
+    )
+    .flatMap(([, sliceSelectors]) => sliceSelectors)
+  const selectorByDocument = new Map<string, Set<string>>()
+  for (const selector of selectors) {
+    const ids = selectorByDocument.get(selector.documentPath) ?? new Set<string>()
+    ids.add(selector.sectionId)
+    selectorByDocument.set(selector.documentPath, ids)
+  }
+  for (const section of authoritySource.authoritySectionIndex) {
+    const ids = selectorByDocument.get(section.documentPath) ?? new Set<string>()
+    ids.add(section.sectionId)
+    selectorByDocument.set(section.documentPath, ids)
+  }
+  const authoritySections = [...new Set(
+    authoritySource.authoritySectionIndex.map(section => section.documentPath),
+  )].flatMap(documentPath => {
+    const template = authoritySource.authoritySectionIndex.find(
+      section => section.documentPath === documentPath,
+    )!
+    const ids = selectorByDocument.get(documentPath) ?? new Set([template.sectionId])
+    return [...ids].map(sectionId => ({
+      ...template,
+      sectionId,
+      startLine:
+        documentPath === 'docs/GDD.md' && sectionId === 'rules_systems'
+          ? 1
+          : documentPath === 'docs/BALANCE_DESIGN.md'
+            ? 100
+            : 2,
+      endLine:
+        documentPath === 'docs/BALANCE_DESIGN.md' ? 140 : 40,
+    }))
+  })
+  const sectionBytes: Record<string, string> = {}
+  for (const section of authoritySections) {
+    if (!GAME_IR_MODULE_SOURCE_DOCUMENTS[moduleId].includes(section.documentPath))
+      continue
+    const original = baseByDocument.get(section.documentPath)!
+    const originalKey = `${original.documentPath}#${original.sectionId}`
+    const key = `${section.documentPath}#${section.sectionId}`
+    sectionBytes[key] = authoritySource.sectionBytes[originalKey]!
+  }
+  const { receiptDigest: _receiptDigest, ...foundationBody } =
+    authoritySource.compileRequest.foundation
+  const foundation = {
+    ...foundationBody,
+    sectionIndexDigest: digestGameIrSourceSectionIndex(authoritySections),
+  }
+  const request = {
+    ...authoritySource.compileRequest,
+    foundation: { ...foundation, receiptDigest: digestGameIrValue(foundation) },
+  }
+  return buildGameIrDomainSourceEnvelope({
+    moduleId,
+    request,
+    sectionIndex: authoritySections,
+    sectionBytes,
+  })
+}
+
+function canonicalMechanical(
+  mechanical: GameIrMechanicalProjectionReceipt,
+  source: ReturnType<typeof canonicalProjectionSource>,
+): GameIrMechanicalProjectionReceipt {
+  const { receiptDigest: _ignored, ...body } = mechanical
+  const nextBody = { ...body, sourceDigest: source.sourceDigest }
+  return { ...nextBody, receiptDigest: digestGameIrValue(nextBody) }
+}
+
+function canonicalSemantic(
+  semantic: GameIrDomainSemanticReceipt & { moduleId: 'gameplay' },
+  source: ReturnType<typeof canonicalProjectionSource>,
+  mechanical: GameIrMechanicalProjectionReceipt,
+  packetDigest: string,
+): GameIrDomainSemanticReceipt & { moduleId: 'gameplay' } {
+  const { receiptDigest: _ignored, ...body } = semantic
+  const nextBody = {
+    ...body,
+    moduleId: 'gameplay' as const,
+    sourceDigest: source.sourceDigest,
+    mechanicalReceiptDigest: mechanical.receiptDigest,
+    packetDigest,
+  }
+  return { ...nextBody, receiptDigest: digestGameIrValue(nextBody) }
+}
+
 function fixture(journalPath: string): GameIrProjectionSliceJournalInput {
   const authority = realAuthority().phase5Authority.phase4Authority.gameplay
+  const source = canonicalProjectionSource(authority.source, 'gameplay')
+  const mechanical = canonicalMechanical(authority.mechanical, source)
   const packet = buildGameplayProjectionOperationPacket({
-    source: authority.source,
-    mechanical: authority.mechanical,
+    source,
+    mechanical,
   })
   const identity: GameIrCompilationIdentity = {
     runId: 'run-1',
-    taskId: authority.source.taskId,
-    publicationId: authority.source.compileRequest.publicationId,
+    taskId: source.taskId,
+    publicationId: source.compileRequest.publicationId,
     confirmedBriefDigest:
-      authority.source.compileRequest.foundation.confirmedBriefDigest,
+      source.compileRequest.foundation.confirmedBriefDigest,
     foundationRevision:
-      authority.source.compileRequest.foundation.foundationRevision,
+      source.compileRequest.foundation.foundationRevision,
     foundationReadyReceiptDigest:
-      authority.source.compileRequest.foundation.receiptDigest,
+      source.compileRequest.foundation.receiptDigest,
   }
   const base = {
     journalPath,
@@ -58,21 +169,38 @@ function balanceFixture(
   journalPath: string,
 ): GameIrProjectionSliceJournalInput {
   const authority = realAuthority().phase5Authority.phase4Authority.balance
+  const source = canonicalProjectionSource(authority.source, 'balance')
+  const gameplayAuthority = realAuthority().phase5Authority.phase4Authority.gameplay
+  const gameplaySource = canonicalProjectionSource(gameplayAuthority.source, 'gameplay')
+  const gameplayMechanical = canonicalMechanical(gameplayAuthority.mechanical, gameplaySource)
+  const gameplayPacket = buildGameplayProjectionOperationPacket({
+    source: gameplaySource,
+    mechanical: gameplayMechanical,
+  })
   const packet = buildBalanceProjectionOperationPacket({
-    source: authority.source,
-    mechanical: authority.mechanical,
-    gameplay: realAuthority().phase5Authority.phase4Authority.gameplay,
+    source,
+    mechanical: canonicalMechanical(authority.mechanical, source),
+    gameplay: {
+      source: gameplaySource,
+      mechanical: gameplayMechanical,
+      semantic: canonicalSemantic(
+        gameplayAuthority.semantic,
+        gameplaySource,
+        gameplayMechanical,
+        gameplayPacket.semanticPacket.packetDigest,
+      ),
+    },
   })
   const identity: GameIrCompilationIdentity = {
     runId: 'run-1',
-    taskId: authority.source.taskId,
-    publicationId: authority.source.compileRequest.publicationId,
+    taskId: source.taskId,
+    publicationId: source.compileRequest.publicationId,
     confirmedBriefDigest:
-      authority.source.compileRequest.foundation.confirmedBriefDigest,
+      source.compileRequest.foundation.confirmedBriefDigest,
     foundationRevision:
-      authority.source.compileRequest.foundation.foundationRevision,
+      source.compileRequest.foundation.foundationRevision,
     foundationReadyReceiptDigest:
-      authority.source.compileRequest.foundation.receiptDigest,
+      source.compileRequest.foundation.receiptDigest,
   }
   const base = {
     journalPath,
@@ -107,7 +235,6 @@ function emptyInventoryAndReceipt(input: GameIrProjectionSliceJournalInput) {
     result: {
       outcome: 'PASS',
       moduleId: authority.moduleId,
-      identities: authority.identities,
       coverage: authority.sourceFragments.map(fragment => fragment.fragmentId),
     },
   })
@@ -127,12 +254,10 @@ async function readyJournal(
 ) {
   const journal = await createGameIrProjectionSliceJournal(input)
   const defaultFragmentForKind = (targetKind: string): string => {
-    const slice = input.slicePlan.slices.find(candidate =>
-      candidate.nodeKinds.includes(targetKind),
-    )
-    if (!slice) throw new Error(`fixture kind is outside slice plan: ${targetKind}`)
-    const selector = sourceSectionsForGameIrProjectionSlice(slice.sliceId)[0]!
-    return firstEvidenceFragmentId(input, selector.documentPath, selector.sectionId)
+    const section = input.packet.source.sectionIndex[0]
+    if (!section)
+      throw new Error(`fixture has no compact source section for ${targetKind}`)
+    return firstEvidenceFragmentId(input, section.documentPath, section.sectionId)
   }
   const records = obligations
     .map(
@@ -160,7 +285,6 @@ async function readyJournal(
     result: {
       outcome: 'PASS',
       moduleId: authority.moduleId,
-      identities: authority.identities,
       coverage: authority.sourceFragments.map(fragment => fragment.fragmentId),
     },
   })
@@ -179,6 +303,12 @@ function firstEvidenceFragmentId(
     sectionIndex: input.packet.source.sectionIndex,
     sectionBytes: input.packet.source.sectionBytes,
   })
+  const common = catalog.fragments.find(
+    candidate =>
+      candidate.documentPath === 'docs/GDD.md' &&
+      candidate.sectionId === 'rules_systems',
+  )
+  if (common) return common.fragmentId
   const fragment = catalog.fragments.find(
     candidate =>
       candidate.documentPath === documentPath &&
@@ -749,7 +879,7 @@ describe('Game IR projection slice journal', () => {
         sliceId: first.sliceId,
         recordId: failed.id,
         fragmentId,
-        reason,
+        reason: 'structured projection diagnostic',
       })
       expect(journal.currentSliceRecordPrefix).toEqual([prefixBefore[0]])
       expect(journal.currentSliceRecordDigests).toEqual([digestsBefore[0]])
@@ -914,7 +1044,6 @@ describe('Game IR projection slice journal', () => {
           input.packet.source.sectionIndex[0]!.sectionId,
         ),
         recordId: 'balance.formula.bad',
-        diagnosticDigest: digestGameIrValue(diagnostic),
       })
       expect(rollback).toEqual({
         scope: 'record',
@@ -925,7 +1054,7 @@ describe('Game IR projection slice journal', () => {
           input.packet.source.sectionIndex[0]!.documentPath,
           input.packet.source.sectionIndex[0]!.sectionId,
         ),
-        reason: diagnostic,
+        reason: 'structured projection diagnostic',
       })
       expect(journal.entries.map(entry => entry.sliceId)).toEqual([
         first!.sliceId,
@@ -950,7 +1079,7 @@ describe('Game IR projection slice journal', () => {
     }
   })
 
-  test('rolls back a completed owner addressed by its canonical node index', async () => {
+  test('rolls back a completed owner by structured obligation identity', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
@@ -991,7 +1120,7 @@ describe('Game IR projection slice journal', () => {
         sliceId: slice.sliceId,
         recordId: 'entity.hero',
         fragmentId,
-        reason: 'invalid projection nodes[0] owner',
+        reason: 'structured projection diagnostic',
       })
       expect(journal.entries).toHaveLength(0)
     } finally {
@@ -1515,7 +1644,9 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await readyJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'condition.a', targetKind: 'gameplay.condition' },
+      ])
       const authoritySection = input.packet.source.sectionIndex[0]!
       const record = {
         fragmentId: firstEvidenceFragmentId(
@@ -1693,7 +1824,9 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await readyJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'condition.a', targetKind: 'gameplay.condition' },
+      ])
       const slice = journal.slicePlan.slices[0]!
       const fragmentId = firstEvidenceFragmentId(
         input,
