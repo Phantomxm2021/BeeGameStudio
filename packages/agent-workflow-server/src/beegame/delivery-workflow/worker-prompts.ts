@@ -384,12 +384,12 @@ function formatContract(request: WorkerDispatchRequest): string {
         mechanicalMarkdownProtocol.executiveSummary.heading,
         '',
         ...(Array.isArray(mechanicalMarkdownProtocol.sections)
-          ? mechanicalMarkdownProtocol.sections.flatMap(section => [section.heading, '', '...'])
+          ? mechanicalMarkdownProtocol.sections.flatMap(section => [section.heading, ''])
           : []),
         mechanicalMarkdownProtocol.productionMaterials.heading,
         '',
         ...(Array.isArray(mechanicalMarkdownProtocol.productionMaterials.entries)
-          ? mechanicalMarkdownProtocol.productionMaterials.entries.flatMap(entry => [entry.heading, '', '...'])
+          ? mechanicalMarkdownProtocol.productionMaterials.entries.flatMap(entry => [entry.heading, ''])
           : []),
       ].join('\n')
       contractWithoutDuplicatedBrief.completeDocumentContract = {

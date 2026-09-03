@@ -144,6 +144,7 @@ describe('worker prompts', () => {
       expect(typeof protocol.literalMarkdownSkeleton).toBe('string')
       expect(protocol.literalMarkdownSkeleton).toContain('# <document title>')
       expect(protocol.literalMarkdownSkeleton).toContain('## Production Materials')
+      expect(protocol.literalMarkdownSkeleton).not.toContain('...')
       let previous = -1
       for (const heading of expectedHeadings) {
         const position = protocol.literalMarkdownSkeleton.indexOf(heading)
@@ -182,6 +183,15 @@ describe('worker prompts', () => {
 
     const gddPrompt = buildPrompt('docs/GDD.md')
     for (const rule of assetRules) expect(gddPrompt).not.toContain(rule)
+  })
+
+  test('keeps Asset H2 guidance on policy and owner-material references only', () => {
+    const asset = getGameDocumentContract('docs/ASSET_PLAN.md')
+    for (const section of asset.sections) {
+      expect(section.purpose).toContain('policy, context, rationale, and owner-material references')
+      expect(section.purpose).not.toMatch(/per-inventory (rows|mappings|evidence|status|milestones)/i)
+      expect(section.purpose).not.toMatch(/define (creators|approvers|consumers|dependencies|licensing|milestones|status)/i)
+    }
   })
 
   test('aligns shared foundation authority instructions across all initial and parallel authors', () => {
