@@ -27,6 +27,7 @@ import {
 import { encryptSecret } from '../security/secret-crypto'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
+import { DELIVERY_PROGRESS_STAGES } from '../beegame/delivery-workflow/display-progress'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import {
   canonicalFoundationAuthorityProjectionBytes,
@@ -1485,7 +1486,7 @@ function frozenStageEvent(
     stageSnapshot: {
       stageId: phase,
       phaseIndex,
-      phaseCount: 10,
+      phaseCount: DELIVERY_PROGRESS_STAGES.length,
       status: 'completed',
       currentPhase: phase,
       message: 'frozen stage status',

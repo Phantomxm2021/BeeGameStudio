@@ -77,6 +77,20 @@ const EXPECTED_TEST_CORRECTIONS = [
     reason: "await the automatic onRetryable retry task to become durably running",
     failureEvidencePath: "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md",
   },
+  {
+    path: "packages/agent-workflow-server/src/__tests__/workflow-stage-snapshot-projection.test.ts",
+    baselineBlobId: "e7c0659f2b59eea75c2b8fe95a0b75be2380816d",
+    correctedBlobId: "a847be0ee6f4481a17d9c88a8fbb315e6abd4e97",
+    reason: "derive snapshot fixture phase count from DELIVERY_PROGRESS_STAGES",
+    failureEvidencePath: "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md",
+  },
+  {
+    path: "packages/agent-workflow-server/src/__tests__/session-routes.test.ts",
+    baselineBlobId: "8c9c7cb701071d06f222225b1b691cd6fd67b33d",
+    correctedBlobId: "57cdfa88f45d514a4e644c0470ee578d85fe5f23",
+    reason: "derive frozen stage fixture phase count from DELIVERY_PROGRESS_STAGES",
+    failureEvidencePath: "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md",
+  },
 ] as const;
 
 const EXPECTED_HISTORICAL_EVIDENCE = [
@@ -208,7 +222,7 @@ function validateManifest(root: string, value: unknown): BoundaryViolation[] {
         (entry as Record<string, unknown>).failureEvidencePath !== "",
     )
   ) {
-    return mismatch("admittedTestCorrections must contain exactly the three correction records");
+    return mismatch("admittedTestCorrections must contain exactly the five correction records");
   }
   for (const [index, expected] of EXPECTED_TEST_CORRECTIONS.entries()) {
     const entry = corrections[index] as Record<string, string>;

@@ -117,3 +117,11 @@ The failures were `claims document revision attempts durably beyond the former t
 Read-only flakiness diagnosis: each failing test passed in isolation three consecutive times; the complete `foundation-fact-runtime.integration.test.ts` file passed serially (68 pass, 0 fail, 556 assertions), and the full Stage 3 set passed with `--max-concurrency 1` (205/205). The failure occurs only in the default multi-file run because the retry callback schedules `void resume` asynchronously and the test reads durable state immediately. This is a pre-existing baseline timing race, not a Task 4 source change. No other worktree process was terminated.
 
 Per the brief, Stage 4, Checklist/shared-runtime, and broad regression were not run after the first substantive failure. No model or Chrome call occurred. This remains failure evidence, not an accepted local-gate receipt.
+
+## Broad baseline server RED evidence before Task 3A phase-count correction
+
+Command: `bun test packages/agent-workflow-server/src/__tests__`
+
+Result: exit 1; 352 pass, 3 fail, 1260 assertions; 355 tests across 42 files.
+
+The three failures were the `workflow stage snapshot display projection` tests in `packages/agent-workflow-server/src/__tests__/workflow-stage-snapshot-projection.test.ts`. They all used a stale literal `phaseCount: 10` after Checklist added a display stage; no production code was changed. The separate `packages/agent-workflow-server/src/__tests__/session-routes.test.ts` fixture contained the same stale literal and is corrected in the same bounded test-only change.

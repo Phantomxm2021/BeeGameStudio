@@ -106,9 +106,9 @@ describe("verifyGameIrIsolationBoundary", () => {
     const { root, manifest } = setupRepository();
     expect(verifyGameIrIsolationBoundary(root, manifest).violations).toEqual([]);
   });
-  test("allows exactly the three admitted test-only corrections", () => {
+  test("allows exactly the five admitted test-only corrections", () => {
     const { root, manifest } = setupRepository();
-    expect(manifest.admittedTestCorrections).toHaveLength(3);
+    expect(manifest.admittedTestCorrections).toHaveLength(5);
     expect(verifyGameIrIsolationBoundary(root, manifest).violations).toEqual([]);
   });
   test("rejects omitted, additional, reordered, or altered corrections", () => {
@@ -117,7 +117,7 @@ describe("verifyGameIrIsolationBoundary", () => {
     const variants = [
       corrections.slice(0, 1),
       [...corrections, corrections[0]],
-      [corrections[1], corrections[0], corrections[2]],
+      [corrections[1], corrections[0], corrections[2], corrections[3], corrections[4]],
       corrections.map((entry, index) => index === 0 ? { ...entry, reason: "altered" } : entry),
       corrections.map((entry, index) => index === 0 ? { ...entry, failureEvidencePath: "altered.md" } : entry),
     ];

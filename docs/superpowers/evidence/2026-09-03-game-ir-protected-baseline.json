@@ -27,6 +27,20 @@
       "correctedBlobId": "724597486bd5afdceada734bbdbb7ee1a168e232",
       "reason": "await the automatic onRetryable retry task to become durably running",
       "failureEvidencePath": "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/workflow-stage-snapshot-projection.test.ts",
+      "baselineBlobId": "e7c0659f2b59eea75c2b8fe95a0b75be2380816d",
+      "correctedBlobId": "a847be0ee6f4481a17d9c88a8fbb315e6abd4e97",
+      "reason": "derive snapshot fixture phase count from DELIVERY_PROGRESS_STAGES",
+      "failureEvidencePath": "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/session-routes.test.ts",
+      "baselineBlobId": "8c9c7cb701071d06f222225b1b691cd6fd67b33d",
+      "correctedBlobId": "57cdfa88f45d514a4e644c0470ee578d85fe5f23",
+      "reason": "derive frozen stage fixture phase count from DELIVERY_PROGRESS_STAGES",
+      "failureEvidencePath": "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md"
     }
   ],
   "protectedPaths": [

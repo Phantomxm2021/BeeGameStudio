@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { workflowStageSnapshotsForDisplay } from '../app'
+import { DELIVERY_PROGRESS_STAGES } from '../beegame/delivery-workflow/display-progress'
 
 const usage = {
   input_tokens: 10,
@@ -21,7 +22,7 @@ function stageSnapshot(stageId: 'DOCUMENT_DRAFTING' | 'DOCUMENT_REVIEW' | 'FOUND
   return {
     stageId,
     phaseIndex,
-    phaseCount: 10,
+    phaseCount: DELIVERY_PROGRESS_STAGES.length,
     status: 'running',
     currentPhase: stageId,
     tasks: [{ id: 'task', title: 'task', status: 'running', ...task }],
