@@ -106,7 +106,7 @@ The closed heading rules are:
 - section prose may reference a material but must not embed a second copy of it;
 - no additional H2 is allowed.
 
-Classification applies only to canonical H2 titles and canonical material H3 titles. Ordinary section-local H3/H4 headings remain legal. Headings inside fenced blocks remain ignored.
+Every non-empty candidate must also have exactly one authored H1 as its first non-blank line; a missing, displaced, or repeated H1 cannot be repaired by appending and is structurally invalid. Beyond that title rule, classification applies only to canonical H2 titles and canonical material H3 titles. Ordinary section-local H3/H4 headings remain legal. Headings inside fenced blocks remain ignored.
 
 This strengthens prompt clarity without changing the strict validator or introducing a structured JSON/YAML document output.
 
@@ -158,6 +158,7 @@ The author prompt derives its literal skeleton from the existing contract object
 - Prompt-contract tests prove that per-delivery-unit granularity, one inventory ID mapping to multiple files, explicit unresolved references, and evidence-safe observed state reach the author. These semantic qualities are audited on real output rather than falsely presented as mechanically validated prose.
 - A legal ordinary section H3 remains accepted even when canonical material-title H3 detection is strict.
 - A candidate with a canonical material H3 before Production Materials and another complete material set after it remains structurally invalid.
+- A non-empty candidate with a missing, displaced, or repeated authored H1 is structurally invalid; an empty candidate remains restartable.
 
 ### 8.2 Scope gates
 

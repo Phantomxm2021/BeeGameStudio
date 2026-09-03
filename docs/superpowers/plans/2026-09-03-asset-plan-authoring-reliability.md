@@ -113,6 +113,7 @@ Add focused cases for:
 - duplicate canonical H2 -> `structurally_invalid`;
 - reordered canonical H2 -> `structurally_invalid`;
 - unexpected H2 -> `structurally_invalid`;
+- missing, displaced, or repeated authored H1 in a non-empty candidate -> `structurally_invalid`, while an empty candidate remains `suffix_incomplete`;
 - canonical material H3 before Production Materials -> `structurally_invalid`;
 - a legal ordinary section H3 remains allowed, while a canonical material H3 before Production Materials plus a complete later material set remains `structurally_invalid`;
 - duplicate/reordered canonical material H3 -> `structurally_invalid`;
@@ -126,7 +127,7 @@ bun test packages/agent-workflow-server/src/beegame/complete-game-document.test.
 
 - [ ] **Step 3: Implement by reusing the existing heading scan**
 
-Compare authored canonical H2 headings against the expected sequence. A suffix is appendable only when every observed H2 is the exact prefix and no extra/duplicate heading exists. Treat only contract-listed canonical material-title H3 headings anywhere before Production Materials as invalid. After Production Materials, observed canonical material H3 headings must be an exact prefix with no duplicate or reordering. Arbitrary H3/H4 subsection headings remain allowed. An open trailing fence does not by itself make an otherwise valid prefix structurally invalid.
+For every non-empty candidate, require exactly one authored H1 on the first non-blank line; missing, displaced, or repeated H1 is non-tail structural invalidity. Compare authored canonical H2 headings against the expected sequence. A suffix is appendable only when every observed H2 is the exact prefix and no extra/duplicate heading exists. Treat only contract-listed canonical material-title H3 headings anywhere before Production Materials as invalid. After Production Materials, observed canonical material H3 headings must be an exact prefix with no duplicate or reordering. Arbitrary H3/H4 subsection headings remain allowed. An open trailing fence does not by itself make an otherwise valid prefix structurally invalid.
 
 Do not parse prose, table cells, Mermaid labels, or fenced headings.
 
