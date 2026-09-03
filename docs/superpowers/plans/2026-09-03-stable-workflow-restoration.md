@@ -252,6 +252,41 @@ git commit -m "test: correct restored workflow baseline fixtures"
 
 ---
 
+### Task 3B: Remove the reproduced asynchronous retry test race
+
+**Files:**
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts`
+- Modify: `scripts/game-ir-isolation-boundary.ts`
+- Modify: `scripts/game-ir-isolation-boundary.test.ts`
+- Modify: `docs/superpowers/evidence/2026-09-03-game-ir-protected-baseline.json`
+
+**Interfaces:**
+- Consumes: the committed Stage 3 concurrency failure evidence and the existing automatic `onRetryable` scheduling contract.
+- Produces: a deterministic test oracle that awaits the automatic retry's durable `running` state without invoking manual resume or changing production behavior.
+
+- [ ] **Step 1: Bind the nondeterministic RED evidence**
+
+Require evidence showing the same Stage 3 group pass once and later fail 2/205 under file concurrency, while each failing name, the full fact-runtime file, and the serial Stage 3 group pass unchanged.
+
+- [ ] **Step 2: Await the contract rather than the scheduler tick**
+
+Add one bounded polling helper in the integration test. Use it only at the two immediate post-failure reads that race the controller's intentional asynchronous `onRetryable` resume. The helper observes the store until the exact revision task becomes `running`; it must not call `resume`, alter timeouts globally, or weaken assertions.
+
+- [ ] **Step 3: Extend the exact correction authority**
+
+Add this single test path as the third ordered v2 correction with its exact baseline blob, corrected blob, reason, and failure-evidence path. Update checker tests so omission, addition, reorder, field tampering, and any fourth protected change remain rejected. Do not introduce another schema or compatibility branch.
+
+- [ ] **Step 4: Verify under concurrency and commit**
+
+Run the two names with `--rerun-each`, the full fact-runtime file, the original concurrent Stage 3 group, boundary tests/CLI, typecheck, and `git diff --check`. Expected: all pass and zero production diff from `d821e286`.
+
+```bash
+git add packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts scripts/game-ir-isolation-boundary.ts scripts/game-ir-isolation-boundary.test.ts docs/superpowers/evidence/2026-09-03-game-ir-protected-baseline.json
+git commit -m "test: await automatic foundation revision retry"
+```
+
+---
+
 ### Task 4: Run the complete local protected-workflow gate
 
 **Files:**
