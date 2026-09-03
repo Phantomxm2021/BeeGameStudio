@@ -23,7 +23,8 @@ recovery path.
 - Candidate stable code baseline:
   `d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6`.
 - The next commit, `109e7195d314bb716922ef2dd2de65567e428d64`,
-  is the first Game IR production-code commit.
+  is the first Game IR boundary-test commit. The first Game IR production
+  source commit is `f4a7d16f7bde3bb8a978f1a10350ad2cef84aa8f`.
 - Relative to the candidate baseline, the source commit changes 55 runtime or
   test files outside `delivery-workflow/game-ir/` and adds or changes 86 files
   inside it. It also changes 15 Game IR documents and mistakenly tracks 15 SDD
@@ -37,9 +38,14 @@ recovery path.
 - Large model **output** JSON is the known provider failure surface. JSON input
   is not prohibited merely because it is JSON.
 
-The candidate baseline is not authoritative until its branch ancestry and its
-historical Chrome acceptance evidence are verified. No restoration may begin
-from an inferred baseline.
+The candidate baseline is not final authority until its branch ancestry and a
+new complete Chrome acceptance are verified. Repository history contains
+Stage 2 and Reviewer Chrome evidence but no baseline-bound report covering
+Revision to zero open issues and Checklist. That absence is recorded rather
+than invented. Exact Git lineage plus the user-approved
+`codex/checklist-implementation` branch permits provisional mechanical
+restoration; Milestone 1 acceptance, not historical inference, grants final
+stable-baseline authority.
 
 ## Non-negotiable scope
 
@@ -87,16 +93,19 @@ The baseline-admission record must bind:
 
 - exact stable commit SHA;
 - source branch and commit SHA;
-- ancestry proof showing the stable commit precedes the first Game IR
-  production-code commit;
-- historical Chrome project/run evidence for Foundation drafting, Foundation
-  Review, Foundation Revision, and Checklist;
+- ancestry proof showing the stable commit directly precedes the first Game IR
+  boundary-test commit and precedes the first Game IR production-source
+  commit;
+- every available historical Chrome project/run record for Foundation
+  drafting and Foundation Review, plus an explicit negative finding that no
+  baseline-bound Revision-to-zero-and-Checklist receipt exists;
 - the exact protected file manifest and each baseline Git blob ID.
 
-If the preferred candidate `d821e286...` lacks the required acceptance
-evidence, the closest earlier commit with complete evidence becomes the
-baseline. Moving the baseline later requires a new written audit and user
-approval; implementation convenience is not sufficient.
+`d821e286...` may be used only as the provisional restoration source. It
+becomes the admitted stable baseline only after the new local and Chrome gates
+in this milestone pass. If they fail, the failure is captured and classified
+without patching protected code; selecting a different baseline requires a new
+written audit and user approval.
 
 ### Protected behavior
 
