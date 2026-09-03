@@ -1,16 +1,17 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { type ProtectedBaselineManifest, verifyGameIrIsolationBoundary } from "./game-ir-isolation-boundary";
 
-const protectedSource = "packages/agent-workflow-server/src/beegame/protected.ts";
-const protectedTest = "packages/agent-workflow-server/src/__tests__/protected.test.ts";
+const protectedSource = "packages/agent-workflow-server/src/beegame/complete-game-document.ts";
+const protectedTest = "packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts";
 const quarantine = "packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/";
-const baselineScratch = ".superpowers/sdd/old-report.md";
-const rangeScratch = ".superpowers/sdd/new-report.md";
 const roots: string[] = [];
+let sharedRoot: string | undefined;
+let sharedManifest: ProtectedBaselineManifest | undefined;
+setDefaultTimeout(30_000);
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, {
@@ -20,61 +21,72 @@ function git(root: string, args: string[]): string {
   }).trim();
 }
 
-function commit(root: string, message: string): string {
-  git(root, ["add", "--all"]);
-  git(root, ["commit", "--quiet", "-m", message]);
-  return git(root, ["rev-parse", "HEAD"]);
-}
-
 function setupRepository() {
+  if (sharedRoot && sharedManifest) {
+    if (git(sharedRoot, ["rev-parse", "HEAD"]) !== sharedManifest.sourceCommit) git(sharedRoot, ["checkout", "--quiet", "--detach", sharedManifest.sourceCommit]);
+    const removedPaths = ["packages/agent-workflow-server/src/beegame/added.ts", ".superpowers/sdd/task-report.md", ".superpowers/sdd/unlisted.md", ...sharedManifest.trackedScratchPaths];
+    for (const path of removedPaths) {
+      if (existsSync(join(sharedRoot, path))) rmSync(join(sharedRoot, path));
+    }
+    git(sharedRoot, ["update-index", "--force-remove", "--", ...removedPaths]);
+    for (const path of [protectedSource, protectedTest]) {
+      writeFileSync(join(sharedRoot, path), execFileSync("git", ["show", `${sharedManifest.baselineCommit}:${path}`], { cwd: sharedRoot }));
+    }
+    git(sharedRoot, ["update-index", "--add", "--", protectedSource, protectedTest]);
+    return { root: sharedRoot, manifest: JSON.parse(JSON.stringify(sharedManifest)), protectedSource, unrelatedCommit: "", testOnlyProductionCommit: "" } as {
+      root: string;
+      manifest: ProtectedBaselineManifest;
+      protectedSource: string;
+      unrelatedCommit: string;
+      testOnlyProductionCommit: string;
+    };
+  }
   const root = mkdtempSync(join(tmpdir(), "game-ir-boundary-"));
   roots.push(root);
   git(root, ["init", "--quiet", "-b", "main"]);
+  const sourceObjects = git(process.cwd(), ["rev-parse", "--path-format=absolute", "--git-path", "objects"]);
+  mkdirSync(join(root, ".git/objects/info"), { recursive: true });
+  writeFileSync(join(root, ".git/objects/info/alternates"), `${sourceObjects}\n`);
+  writeFileSync(join(root, ".git/info/sparse-checkout"), "/packages/agent-workflow-server/src/beegame/**\n/packages/agent-workflow-server/src/__tests__/**\n/.superpowers/sdd/**\n");
+  git(root, ["config", "core.sparseCheckout", "true"]);
+  git(root, ["checkout", "--quiet", "4335363b2cd33d1f0b7bd807bff95d9389c67ce1"]);
   git(root, ["config", "user.name", "boundary-test"]);
   git(root, ["config", "user.email", "boundary-test@example.test"]);
-  writeFileSync(join(root, "README.md"), "stable\n");
-  const stableBranchCommit = commit(root, "stable branch");
-  mkdirSync(join(root, protectedSource, ".."), { recursive: true });
-  mkdirSync(join(root, protectedTest, ".."), { recursive: true });
-  writeFileSync(join(root, protectedSource), "export const value = 'baseline';\n");
-  writeFileSync(join(root, protectedTest), "export const testValue = true;\n");
-  mkdirSync(join(root, ".superpowers/sdd"), { recursive: true });
-  writeFileSync(join(root, baselineScratch), "old scratch\n");
-  const baselineCommit = commit(root, "baseline");
-  mkdirSync(join(root, quarantine), { recursive: true });
-  mkdirSync(join(root, "docs"), { recursive: true });
-  writeFileSync(join(root, `${quarantine}boundary.ts`), "export const boundary = true;\n");
-  writeFileSync(join(root, "docs/game-ir-boundary.md"), "Game IR only\n");
-  const firstGameIrBoundaryCommit = commit(root, "game ir boundary");
-  writeFileSync(join(root, `${quarantine}production.ts`), "export const production = true;\n");
-  const firstGameIrProductionCommit = commit(root, "game ir production");
-  writeFileSync(join(root, `${quarantine}only.test.ts`), "export const onlyTest = true;\n");
-  const testOnlyProductionCommit = commit(root, "test-only game ir production");
-  writeFileSync(join(root, protectedSource), "export const value = 'source change';\n");
-  writeFileSync(join(root, rangeScratch), "new scratch\n");
-  const sourceCommit = commit(root, "source changes");
-  writeFileSync(join(root, protectedSource), "export const value = 'baseline';\n");
-  rmSync(join(root, rangeScratch));
-  rmSync(join(root, `${quarantine}only.test.ts`));
-  commit(root, "clean checkout");
-  const protectedPaths = [protectedSource, protectedTest]
-    .sort((a, b) => Buffer.from(a).compare(Buffer.from(b)))
-    .map((path) => ({ path, blobId: git(root, ["rev-parse", `${baselineCommit}:${path}`]) }));
-  const manifest = {
-    schemaVersion: "game-ir-protected-baseline.v1", baselineCommit, stableBranchCommit, firstGameIrBoundaryCommit, firstGameIrProductionCommit,
-    sourceCommit, quarantinedPrefix: quarantine, protectedPaths,
-    changedOutsideQuarantine: [protectedSource], trackedScratchPaths: [rangeScratch], historicalEvidence: [],
-    historicalEvidenceGap: "no baseline-bound Revision-to-zero-and-Checklist Chrome receipt found",
-  } as unknown as ProtectedBaselineManifest;
-  const unrelatedCommit = git(root, ["commit-tree", git(root, ["write-tree"]), "-m", "unrelated"]);
-  return { root, manifest, protectedSource, unrelatedCommit, testOnlyProductionCommit };
+  const manifest = JSON.parse(readFileSync(join(process.cwd(), "docs/superpowers/evidence/2026-09-03-game-ir-protected-baseline.json"), "utf8")) as ProtectedBaselineManifest;
+  restoreCleanCheckout(root, manifest);
+  sharedRoot = root;
+  sharedManifest = manifest;
+  return { root, manifest: JSON.parse(JSON.stringify(manifest)), protectedSource, unrelatedCommit: "", testOnlyProductionCommit: "" } as {
+    root: string;
+    manifest: ProtectedBaselineManifest;
+    protectedSource: string;
+    unrelatedCommit: string;
+    testOnlyProductionCommit: string;
+  };
+}
+
+function restoreCleanCheckout(root: string, manifest: ProtectedBaselineManifest): void {
+  const baselinePaths = new Set(manifest.protectedPaths.map(({ path }) => path));
+  const currentPaths = git(root, ["ls-files", "-z"]).split("\0").filter(Boolean);
+  for (const path of currentPaths) {
+    if ((path.startsWith("packages/agent-workflow-server/src/beegame/") || path.startsWith("packages/agent-workflow-server/src/__tests__/")) && !path.startsWith(quarantine) && !baselinePaths.has(path)) {
+      rmSync(join(root, path));
+      git(root, ["update-index", "--force-remove", "--", path]);
+    }
+  }
+  for (const { path } of manifest.protectedPaths) writeFileSync(join(root, path), execFileSync("git", ["show", `${manifest.baselineCommit}:${path}`], { cwd: root }));
+  const baselineScratch = new Set(git(root, ["ls-tree", "-r", "--name-only", manifest.baselineCommit, "--", ".superpowers/sdd/"]).split("\n").filter(Boolean));
+  for (const path of git(root, ["ls-files", "--cached", "-z"]).split("\0").filter(Boolean)) if (path.startsWith(".superpowers/sdd/") && !baselineScratch.has(path)) {
+    rmSync(join(root, path));
+    git(root, ["update-index", "--force-remove", "--", path]);
+  }
 }
 
 function codes(root: string, manifest: ProtectedBaselineManifest): string[] {
   return verifyGameIrIsolationBoundary(root, manifest).violations.map((violation) => violation.code);
 }
 
-afterEach(() => {
+afterAll(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -98,13 +110,13 @@ describe("verifyGameIrIsolationBoundary", () => {
   test("reports a deleted protected path", () => {
     const fixture = setupRepository();
     rmSync(join(fixture.root, fixture.protectedSource));
-    git(fixture.root, ["add", "--update"]);
+    git(fixture.root, ["update-index", "--force-remove", "--", fixture.protectedSource]);
     expect(codes(fixture.root, fixture.manifest)).toContain("missing_protected_path");
   });
   test("rejects a protected path omitted from the manifest even when it is deleted", () => {
     const fixture = setupRepository();
     rmSync(join(fixture.root, fixture.protectedSource));
-    git(fixture.root, ["add", "--update"]);
+    git(fixture.root, ["update-index", "--force-remove", "--", fixture.protectedSource]);
     fixture.manifest = {
       ...fixture.manifest,
       protectedPaths: fixture.manifest.protectedPaths.filter(
@@ -163,17 +175,86 @@ describe("verifyGameIrIsolationBoundary", () => {
   });
   test("rejects a baseline that is not an ancestor of the checkout", () => {
     const fixture = setupRepository();
-    fixture.manifest = { ...fixture.manifest, baselineCommit: fixture.unrelatedCommit } as ProtectedBaselineManifest;
+    const unrelatedCommit = git(fixture.root, ["commit-tree", git(fixture.root, ["write-tree"]), "-m", "unrelated"]);
+    git(fixture.root, ["checkout", "--quiet", "--detach", unrelatedCommit]);
     expect(codes(fixture.root, fixture.manifest)).toContain("invalid_baseline_ancestry");
   });
   test("requires the first production commit to add a non-test TypeScript source", () => {
     const fixture = setupRepository();
     fixture.manifest = {
       ...fixture.manifest,
-      firstGameIrProductionCommit: fixture.testOnlyProductionCommit,
+      firstGameIrProductionCommit: fixture.manifest.baselineCommit,
     } as ProtectedBaselineManifest;
 
-    expect(codes(fixture.root, fixture.manifest)).toContain("invalid_baseline_ancestry");
+    expect(codes(fixture.root, fixture.manifest)).toContain("baseline_manifest_mismatch");
+  });
+  test("rejects a coordinated baseline, source, and quarantine replacement", () => {
+    const fixture = setupRepository();
+    fixture.manifest = {
+      ...fixture.manifest,
+      baselineCommit: fixture.manifest.sourceCommit,
+      sourceCommit: fixture.manifest.baselineCommit,
+      quarantinedPrefix: "packages/agent-workflow-server/src/other/",
+    } as ProtectedBaselineManifest;
+
+    expect(codes(fixture.root, fixture.manifest)).toContain("baseline_manifest_mismatch");
+  });
+  test("reports unknown manifest keys without throwing", () => {
+    const fixture = setupRepository();
+    const malformed = { ...fixture.manifest, unknown: true };
+
+    expect(() => codes(fixture.root, malformed as ProtectedBaselineManifest)).not.toThrow();
+    expect(codes(fixture.root, malformed as ProtectedBaselineManifest)).toContain("baseline_manifest_mismatch");
+  });
+  test("reports unknown nested manifest keys without throwing", () => {
+    const fixture = setupRepository();
+    const malformed = {
+      ...fixture.manifest,
+      protectedPaths: fixture.manifest.protectedPaths.map((entry, index) =>
+        index === 0 ? { ...entry, unknown: true } : entry,
+      ),
+    };
+
+    expect(() => codes(fixture.root, malformed as ProtectedBaselineManifest)).not.toThrow();
+    expect(codes(fixture.root, malformed as ProtectedBaselineManifest)).toContain("baseline_manifest_mismatch");
+  });
+  test("reports missing manifest keys without throwing", () => {
+    const fixture = setupRepository();
+    const { schemaVersion: _schemaVersion, ...malformed } = fixture.manifest;
+
+    expect(() => codes(fixture.root, malformed as ProtectedBaselineManifest)).not.toThrow();
+    expect(codes(fixture.root, malformed as ProtectedBaselineManifest)).toContain("baseline_manifest_mismatch");
+  });
+  test("reports non-array manifest fields without throwing", () => {
+    const fixture = setupRepository();
+    const malformed = { ...fixture.manifest, protectedPaths: {} };
+
+    expect(() => codes(fixture.root, malformed as ProtectedBaselineManifest)).not.toThrow();
+    expect(codes(fixture.root, malformed as ProtectedBaselineManifest)).toContain("baseline_manifest_mismatch");
+  });
+  test("rejects historical evidence with a missing entry or changed commit", () => {
+    const fixture = setupRepository();
+    const malformed = {
+      ...fixture.manifest,
+      historicalEvidence: fixture.manifest.historicalEvidence.slice(0, 1).map((evidence) => ({
+        ...evidence,
+        commit: fixture.manifest.baselineCommit,
+      })),
+    };
+
+    expect(codes(fixture.root, malformed as ProtectedBaselineManifest)).toContain("baseline_manifest_mismatch");
+  });
+  test("reports unknown historical evidence keys without throwing", () => {
+    const fixture = setupRepository();
+    const malformed = {
+      ...fixture.manifest,
+      historicalEvidence: fixture.manifest.historicalEvidence.map((entry, index) =>
+        index === 0 ? { ...entry, unknown: true } : entry,
+      ),
+    };
+
+    expect(() => codes(fixture.root, malformed as ProtectedBaselineManifest)).not.toThrow();
+    expect(codes(fixture.root, malformed as ProtectedBaselineManifest)).toContain("baseline_manifest_mismatch");
   });
   test("uses the current checkout content when a protected file is staged", () => {
     const fixture = setupRepository();

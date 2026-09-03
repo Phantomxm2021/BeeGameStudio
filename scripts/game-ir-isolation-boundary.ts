@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type ProtectedBaselineManifest = Readonly<{
@@ -36,6 +36,43 @@ export type BoundaryReport = Readonly<{
   violations: readonly BoundaryViolation[];
 }>;
 
+const EXPECTED_AUTHORITY = {
+  schemaVersion: "game-ir-protected-baseline.v1",
+  baselineCommit: "d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6",
+  stableBranchCommit: "70df2e2c79bd214862af3959a257c5f5f42bd666",
+  firstGameIrBoundaryCommit: "109e7195d314bb716922ef2dd2de65567e428d64",
+  firstGameIrProductionCommit: "f4a7d16f7bde3bb8a978f1a10350ad2cef84aa8f",
+  sourceCommit: "4335363b2cd33d1f0b7bd807bff95d9389c67ce1",
+  quarantinedPrefix: "packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/",
+  historicalEvidenceGap: "no baseline-bound Revision-to-zero-and-Checklist Chrome receipt found",
+} as const;
+
+const EXPECTED_HISTORICAL_EVIDENCE = [
+  {
+    path: "docs/superpowers/reviews/2026-08-13-foundation-document-streaming-chrome-acceptance.md",
+    commit: "5254d695d5fc550dc02ed08199799dc35a7b0e6b",
+  },
+  {
+    path: "docs/superpowers/reviews/2026-08-17-reviewer-read-only-capability-chrome-acceptance.md",
+    commit: "26f05cf03574793b542d856d1eaacc759ccbeda4",
+  },
+] as const;
+
+const EXPECTED_MANIFEST_KEYS = [
+  "baselineCommit",
+  "changedOutsideQuarantine",
+  "firstGameIrBoundaryCommit",
+  "firstGameIrProductionCommit",
+  "historicalEvidence",
+  "historicalEvidenceGap",
+  "protectedPaths",
+  "quarantinedPrefix",
+  "schemaVersion",
+  "sourceCommit",
+  "stableBranchCommit",
+  "trackedScratchPaths",
+] as const;
+
 const runtimeRoot = "packages/agent-workflow-server/src/beegame/";
 const testsRoot = "packages/agent-workflow-server/src/__tests__/";
 const gameIrReference = /GAME_IR|GameIr|gameIr|game-ir/;
@@ -55,6 +92,87 @@ function gitSucceeds(root: string, args: string[]): boolean {
   } catch {
     return false;
   }
+}
+
+function validateManifest(root: string, value: unknown): BoundaryViolation[] {
+  const mismatch = (detail: string): BoundaryViolation[] => [
+    { code: "baseline_manifest_mismatch", detail },
+  ];
+  const hasExactKeys = (entry: object, expected: readonly string[]): boolean => {
+    const keys = Object.keys(entry).sort();
+    return keys.length === expected.length && expected.every((key, index) => keys[index] === key);
+  };
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return mismatch("manifest must be an object");
+  }
+  const manifest = value as Record<string, unknown>;
+  const keys = Object.keys(manifest).sort();
+  if (
+    keys.length !== EXPECTED_MANIFEST_KEYS.length ||
+    EXPECTED_MANIFEST_KEYS.some((key, index) => keys[index] !== key)
+  ) {
+    return mismatch("manifest top-level keys do not match the schema exactly");
+  }
+  for (const [key, expected] of Object.entries(EXPECTED_AUTHORITY)) {
+    if (manifest[key] !== expected) {
+      return mismatch(`manifest authority field ${key} does not match fixed authority`);
+    }
+  }
+  for (const key of [
+    "protectedPaths",
+    "changedOutsideQuarantine",
+    "trackedScratchPaths",
+    "historicalEvidence",
+  ]) {
+    if (!Array.isArray(manifest[key])) return mismatch(`${key} must be an array`);
+  }
+  if (
+    !(manifest.protectedPaths as unknown[]).every(
+      (entry) =>
+        entry !== null &&
+        typeof entry === "object" &&
+        hasExactKeys(entry, ["blobId", "path"]) &&
+        typeof (entry as Record<string, unknown>).path === "string" &&
+        typeof (entry as Record<string, unknown>).blobId === "string",
+    ) ||
+    !(manifest.changedOutsideQuarantine as unknown[]).every(
+      (entry) => typeof entry === "string",
+    ) ||
+    !(manifest.trackedScratchPaths as unknown[]).every(
+      (entry) => typeof entry === "string",
+    )
+  ) {
+    return mismatch("manifest path arrays have invalid entries");
+  }
+  const evidence = manifest.historicalEvidence as unknown[];
+  if (
+    evidence.length !== EXPECTED_HISTORICAL_EVIDENCE.length ||
+    !evidence.every(
+      (entry) =>
+        entry !== null &&
+        typeof entry === "object" &&
+        hasExactKeys(entry, ["claim", "commit", "path"]) &&
+        typeof (entry as Record<string, unknown>).path === "string" &&
+        typeof (entry as Record<string, unknown>).commit === "string" &&
+        typeof (entry as Record<string, unknown>).claim === "string" &&
+        (entry as Record<string, unknown>).claim !== "",
+    )
+  ) {
+    return mismatch("historicalEvidence must contain the two audited records");
+  }
+  for (const [index, expected] of EXPECTED_HISTORICAL_EVIDENCE.entries()) {
+    const entry = evidence[index] as Record<string, string>;
+    if (entry.path !== expected.path || entry.commit !== expected.commit) {
+      return mismatch("historicalEvidence path/commit tuple does not match fixed evidence");
+    }
+    if (!gitSucceeds(root, ["cat-file", "-e", `${EXPECTED_AUTHORITY.baselineCommit}:${entry.path}`])) {
+      return mismatch("historicalEvidence path is absent from the baseline tree");
+    }
+    if (!gitSucceeds(root, ["merge-base", "--is-ancestor", entry.commit, EXPECTED_AUTHORITY.baselineCommit])) {
+      return mismatch("historicalEvidence commit is not an ancestor of the baseline");
+    }
+  }
+  return [];
 }
 
 function trackedPaths(root: string): string[] {
@@ -90,28 +208,41 @@ function treeEntries(
   return entries;
 }
 
+function workingTreeBlobs(root: string, paths: readonly string[]): Map<string, string> {
+  const existingPaths = paths.filter((path) => existsSync(join(root, path)));
+  if (existingPaths.length === 0) return new Map();
+  try {
+    const hashes = git(root, ["hash-object", "--no-filters", "--", ...existingPaths])
+      .split("\n")
+      .filter(Boolean);
+    return new Map(existingPaths.map((path, index) => [path, hashes[index]]));
+  } catch {
+    return new Map();
+  }
+}
+
 function sortedDiffPaths(root: string, manifest: ProtectedBaselineManifest): string[] {
   return git(root, [
     "diff",
     "--name-only",
-    manifest.baselineCommit,
-    manifest.sourceCommit,
+    EXPECTED_AUTHORITY.baselineCommit,
+    EXPECTED_AUTHORITY.sourceCommit,
   ])
     .split("\n")
     .filter(Boolean)
-    .filter((path) => isProtectedPath(path, manifest.quarantinedPrefix))
+    .filter((path) => isProtectedPath(path, EXPECTED_AUTHORITY.quarantinedPrefix))
     .sort((a, b) => Buffer.from(a).compare(Buffer.from(b)));
 }
 
 function sortedScratchDiffPaths(
   root: string,
-  manifest: ProtectedBaselineManifest,
+  _manifest: ProtectedBaselineManifest,
 ): string[] {
   return git(root, [
     "diff",
     "--name-only",
-    manifest.baselineCommit,
-    manifest.sourceCommit,
+    EXPECTED_AUTHORITY.baselineCommit,
+    EXPECTED_AUTHORITY.sourceCommit,
     "--",
     ".superpowers/sdd/",
   ])
@@ -161,35 +292,35 @@ function addAncestryViolation(
 
 function verifyHistory(
   root: string,
-  manifest: ProtectedBaselineManifest,
+  _manifest: ProtectedBaselineManifest,
   violations: BoundaryViolation[],
 ): void {
   addAncestryViolation(
     violations,
     root,
-    manifest.baselineCommit,
+    EXPECTED_AUTHORITY.baselineCommit,
     "HEAD",
     "baseline commit is not an ancestor of the checkout",
   );
   addAncestryViolation(
     violations,
     root,
-    manifest.stableBranchCommit,
-    manifest.baselineCommit,
+    EXPECTED_AUTHORITY.stableBranchCommit,
+    EXPECTED_AUTHORITY.baselineCommit,
     "baseline commit is not descended from the stable branch commit",
   );
   addAncestryViolation(
     violations,
     root,
-    manifest.firstGameIrBoundaryCommit,
-    manifest.firstGameIrProductionCommit,
+    EXPECTED_AUTHORITY.firstGameIrBoundaryCommit,
+    EXPECTED_AUTHORITY.firstGameIrProductionCommit,
     "first Game IR production commit is not descended from the boundary commit",
   );
   addAncestryViolation(
     violations,
     root,
-    manifest.firstGameIrProductionCommit,
-    manifest.sourceCommit,
+    EXPECTED_AUTHORITY.firstGameIrProductionCommit,
+    EXPECTED_AUTHORITY.sourceCommit,
     "source commit is not descended from the first Game IR production commit",
   );
 
@@ -199,11 +330,11 @@ function verifyHistory(
       "--parents",
       "-n",
       "1",
-      manifest.firstGameIrBoundaryCommit,
+      EXPECTED_AUTHORITY.firstGameIrBoundaryCommit,
     ]).split(/\s+/);
     if (
       parents.length !== 2 ||
-      parents[1] !== manifest.baselineCommit
+      parents[1] !== EXPECTED_AUTHORITY.baselineCommit
     ) {
       violations.push({
         code: "invalid_baseline_ancestry",
@@ -224,14 +355,14 @@ function verifyHistory(
       "--name-only",
       "--diff-filter=A",
       "-r",
-      manifest.firstGameIrProductionCommit,
+      EXPECTED_AUTHORITY.firstGameIrProductionCommit,
     ])
       .split("\n")
       .filter(Boolean);
     if (
       !productionPaths.some(
         (path) =>
-          path.startsWith(manifest.quarantinedPrefix) &&
+          path.startsWith(EXPECTED_AUTHORITY.quarantinedPrefix) &&
           /\.tsx?$/.test(path) &&
           !/\.test\.tsx?$/.test(path),
       )
@@ -276,6 +407,7 @@ function verifyProtectedPaths(
     ...baselinePaths.keys(),
     ...manifestPaths.keys(),
   ]);
+  const currentBlobs = workingTreeBlobs(root, [...baselinePaths.keys()]);
   for (const path of [...allPaths].sort((a, b) =>
     Buffer.from(a).compare(Buffer.from(b)),
   )) {
@@ -294,7 +426,8 @@ function verifyProtectedPaths(
       continue;
     }
     try {
-      const currentBlob = git(root, ["hash-object", "--no-filters", "--", path]);
+      const currentBlob = currentBlobs.get(path);
+      if (currentBlob === undefined) throw new Error("protected path is unreadable");
       if (currentBlob !== baselineBlob) {
         violations.push({ code: "protected_blob_mismatch", path });
       }
@@ -316,7 +449,7 @@ function verifyProtectedPaths(
   }
 
   for (const path of currentPaths) {
-    if (isProtectedPath(path, manifest.quarantinedPrefix) && !baselinePaths.has(path)) {
+    if (isProtectedPath(path, EXPECTED_AUTHORITY.quarantinedPrefix) && !baselinePaths.has(path)) {
       violations.push({ code: "unexpected_protected_path", path });
     }
   }
@@ -327,11 +460,13 @@ export function verifyGameIrIsolationBoundary(
   manifest: ProtectedBaselineManifest,
 ): BoundaryReport {
   const violations: BoundaryViolation[] = [];
+  const manifestViolations = validateManifest(root, manifest);
+  if (manifestViolations.length > 0) return { violations: manifestViolations };
   verifyHistory(root, manifest, violations);
   const currentPaths = new Set(trackedPaths(root));
-  const baselinePaths = treeEntries(root, manifest.baselineCommit, [runtimeRoot, testsRoot]);
+  const baselinePaths = treeEntries(root, EXPECTED_AUTHORITY.baselineCommit, [runtimeRoot, testsRoot]);
   for (const path of [...baselinePaths.keys()]) {
-    if (path.startsWith(manifest.quarantinedPrefix)) baselinePaths.delete(path);
+    if (path.startsWith(EXPECTED_AUTHORITY.quarantinedPrefix)) baselinePaths.delete(path);
   }
   verifyProtectedPaths(root, manifest, baselinePaths, currentPaths, violations);
   compareManifestList(
@@ -348,7 +483,7 @@ export function verifyGameIrIsolationBoundary(
   );
 
   const baselineScratch = new Set(
-    treeEntries(root, manifest.baselineCommit, [".superpowers/sdd/"]).keys(),
+    treeEntries(root, EXPECTED_AUTHORITY.baselineCommit, [".superpowers/sdd/"]).keys(),
   );
   const currentTrackedPaths = new Set(stagedTrackedPaths(root));
   for (const path of currentTrackedPaths) {
