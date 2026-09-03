@@ -11,16 +11,16 @@ import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
 export type BeeGameModelContent =
   | string
   | Array<
-      | { type: 'text'; text: string }
-      | {
-          type: 'image'
-          source: {
-            type: 'base64'
-            media_type: 'image/png' | 'image/jpeg' | 'image/webp'
-            data: string
-          }
-        }
-    >
+    | { type: 'text'; text: string }
+    | {
+      type: 'image'
+      source: {
+        type: 'base64'
+        media_type: 'image/png' | 'image/jpeg' | 'image/webp'
+        data: string
+      }
+    }
+  >
 
 export type BeeGameModelMessage = {
   role: 'user' | 'assistant'
@@ -57,7 +57,9 @@ export type BeeGameModelGeneration = {
   usage?: BeeGameModelUsage
 }
 
-export type BeeGameModelRuntimeFailureStage = 'model_request' | 'model_response'
+export type BeeGameModelRuntimeFailureStage =
+  | 'model_request'
+  | 'model_response'
 
 export class BeeGameModelRuntimeError extends Error {
   constructor(
@@ -70,18 +72,13 @@ export class BeeGameModelRuntimeError extends Error {
   }
 }
 
-export function serializeStructuredModelToolResult(
-  value: unknown,
-  expectedName: string,
-): string {
+export function serializeStructuredModelToolResult(value: unknown, expectedName: string): string {
   if (!value || typeof value !== 'object' || !('content' in value)) {
     throw new Error('Structured model result is missing the required tool call')
   }
   const resultRecord = value as Record<string, unknown>
   if (resultRecord?.stop_reason === 'max_tokens') {
-    throw new Error(
-      'Structured model provider output was truncated before tool arguments completed',
-    )
+    throw new Error('Structured model provider output was truncated before tool arguments completed')
   }
   const content = (value as { content?: unknown }).content
   if (!Array.isArray(content)) {
@@ -93,9 +90,7 @@ export function serializeStructuredModelToolResult(
     return record.type === 'tool_use' && record.name === expectedName
   }) as Array<{ input?: unknown }>
   if (toolUses.length !== 1 || toolUses[0]?.input === undefined) {
-    throw new Error(
-      `Structured model result must contain exactly one ${expectedName} tool call`,
-    )
+    throw new Error(`Structured model result must contain exactly one ${expectedName} tool call`)
   }
   const toolInput = toolUses[0].input
   let canonicalInput = toolInput
@@ -103,7 +98,7 @@ export function serializeStructuredModelToolResult(
     toolInput &&
     typeof toolInput === 'object' &&
     !Array.isArray(toolInput) &&
-    Object.hasOwn(toolInput, 'raw_arguments')
+    Object.prototype.hasOwnProperty.call(toolInput, 'raw_arguments')
   ) {
     const inputRecord = toolInput as Record<string, unknown>
     const canonicalFields = Object.fromEntries(
@@ -122,9 +117,7 @@ export function serializeStructuredModelToolResult(
       try {
         canonicalInput = JSON.parse(rawArguments)
       } catch (error) {
-        throw new Error('Structured model tool arguments are not valid JSON', {
-          cause: error,
-        })
+        throw new Error('Structured model tool arguments are not valid JSON', { cause: error })
       }
     }
   }
@@ -292,12 +285,7 @@ async function runWorker(
     child.exited.then(code => {
       if (settled) return
       settled = true
-      reject(
-        new BeeGameModelRuntimeError(
-          `Model runtime process exited (${code})`,
-          'model_request',
-        ),
-      )
+      reject(new BeeGameModelRuntimeError(`Model runtime process exited (${code})`, 'model_request'))
     })
     child.send({
       type: 'model.generate',

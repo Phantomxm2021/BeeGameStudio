@@ -1,15 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import {
   createNativeCliProcessRunner,
   nativeRuntimeEnvironment,
   nativeRuntimeCommand,
 } from './native-cli-process-runner'
-import { createRuntimeObservability } from './runtime-observability'
 
 const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
@@ -18,9 +13,7 @@ const fixturePath = fileURLToPath(
 function startRuntime(
   options: {
     markdownStream?: boolean
-    recordStream?: boolean
     workflowJsonSchema?: Record<string, unknown>
-    observeMessage?: (message: Record<string, unknown>) => void
   } = {},
 ) {
   return createNativeCliProcessRunner({
@@ -29,7 +22,7 @@ function startRuntime(
       beginTurn: () => undefined,
       observeStdoutChunk: () => undefined,
       observeLine: () => undefined,
-      observeMessage: message => options.observeMessage?.(message),
+      observeMessage: () => undefined,
       finishTurn: () => undefined,
       flush: async () => undefined,
     }),
@@ -51,59 +44,7 @@ function startRuntime(
     ...(options.workflowJsonSchema
       ? { workflowJsonSchema: options.workflowJsonSchema }
       : {}),
-    ...(options.recordStream
-      ? {
-          workflowRecordStreamContract: {
-            version: 1 as const,
-            terminalRecord: { record: 'done', sliceId: 'slice-1' },
-          },
-        }
-      : {}),
   })
-}
-
-function recordStreamCommand(
-  mode:
-    | 'complete'
-    | 'cumulative'
-    | 'empty'
-    | 'invalid-nonterminal'
-    | 'incorrect-terminal'
-    | 'dsml'
-    | 'tool'
-    | 'unicode',
-) {
-  const script = `
-const decoder = new TextDecoder(); let buffer = ''; let count = 0;
-for await (const chunk of Bun.stdin.stream()) {
-  buffer += decoder.decode(chunk);
-  for (;;) {
-    const index = buffer.indexOf('\\n'); if (index < 0) break;
-    const line = buffer.slice(0, index); buffer = buffer.slice(index + 1);
-    const message = JSON.parse(line);
-    if (message.type !== 'user') continue; count += 1;
-    const emit = text => console.log(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text } } }));
-    if (count === 1) {
-      if (${JSON.stringify(mode)} === 'invalid-nonterminal') emit(${JSON.stringify('{not-json-record}\n')});
-      else if (${JSON.stringify(mode)} === 'dsml') emit(${JSON.stringify('<tool_use name="Write">\n')});
-      else if (${JSON.stringify(mode)} === 'tool') console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Write', input: {} }] } }));
-      else if (${JSON.stringify(mode)} === 'unicode') emit(${JSON.stringify('节点😀\n')});
-      else emit(${JSON.stringify('{"record":"node","id":"n1"}\n')});
-      if (${JSON.stringify(mode)} === 'cumulative') emit(${JSON.stringify('{"record":"node","id":"n1"}\n{"record":"node","id":"n1"}\n')});
-      else if (${JSON.stringify(mode)} === 'empty') console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
-      else console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'max_tokens' }));
-    } else if (${JSON.stringify(mode)} !== 'empty') {
-      emit(${JSON.stringify(mode)} === 'incorrect-terminal'
-        ? ${JSON.stringify('{"record":"done","sliceId":"wrong-slice"}\n')}
-        : ${JSON.stringify('{"record":"done","sliceId":"slice-1"}\n')});
-      console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
-    } else {
-      console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
-    }
-  }
-}
-`
-  return [process.execPath, '-e', script]
 }
 
 describe('native CLI process runner', () => {
@@ -179,24 +120,20 @@ describe('native CLI process runner', () => {
     expect(nativeRuntimeCommand(input)).not.toContain(
       '--resume=beegame_route_only',
     )
-    expect(() =>
-      nativeRuntimeCommand({
-        ...input,
-        resumeSessionId: 'beegame_route_only',
-      }),
-    ).toThrow('native resume session ID must be a UUID')
+    expect(() => nativeRuntimeCommand({
+      ...input,
+      resumeSessionId: 'beegame_route_only',
+    })).toThrow('native resume session ID must be a UUID')
   })
 
   test('resumes only an explicit native UUID', () => {
     const nativeSessionId = '550e8400-e29b-41d4-a716-446655440000'
-    expect(
-      nativeRuntimeCommand({
-        sessionId: 'beegame_route_only',
-        resumeSessionId: nativeSessionId,
-        cwd: process.cwd(),
-        env: {},
-      }),
-    ).toContain(`--resume=${nativeSessionId}`)
+    expect(nativeRuntimeCommand({
+      sessionId: 'beegame_route_only',
+      resumeSessionId: nativeSessionId,
+      cwd: process.cwd(),
+      env: {},
+    })).toContain(`--resume=${nativeSessionId}`)
   })
 
   test('does not replace the native document author tool inventory', () => {
@@ -209,9 +146,7 @@ describe('native CLI process runner', () => {
     })
 
     expect(command).not.toContain('--tools')
-    expect(command.some(argument => argument.startsWith('--tools='))).toBe(
-      false,
-    )
+    expect(command.some(argument => argument.startsWith('--tools='))).toBe(false)
     expect(
       command.some(argument => argument.startsWith('--allowedTools=')),
     ).toBe(false)
@@ -239,17 +174,10 @@ describe('native CLI process runner', () => {
 
   test('exposes only Read, Edit and the native terminal tool to a revision worker', () => {
     const command = nativeRuntimeCommand({
-      sessionId: 'beegame_revision_worker',
-      cwd: process.cwd(),
-      env: {},
-      workflowWorker: true,
-      workflowWorkerType: 'foundation-document-reviser',
+      sessionId: 'beegame_revision_worker', cwd: process.cwd(), env: {},
+      workflowWorker: true, workflowWorkerType: 'foundation-document-reviser',
     })
-    expect(command.slice(command.indexOf('--tools') + 1)).toEqual([
-      'Read',
-      'Edit',
-      'SubmitFoundationRevisionResult',
-    ])
+    expect(command.slice(command.indexOf('--tools') + 1)).toEqual(['Read', 'Edit', 'SubmitFoundationRevisionResult'])
   })
 
   test('disables built-in tools for a StructuredOutput workflow turn while retaining its JSON schema', () => {
@@ -269,386 +197,9 @@ describe('native CLI process runner', () => {
     })
 
     expect(command).toContain('--json-schema')
-    expect(command[command.indexOf('--json-schema') + 1]).toBe(
-      JSON.stringify(schema),
-    )
+    expect(command[command.indexOf('--json-schema') + 1]).toBe(JSON.stringify(schema))
     expect(command).toContain('--tools')
     expect(command[command.indexOf('--tools') + 1]).toBe('')
-  })
-
-  test('uses the single native record stream lane without schema or tools', () => {
-    const command = nativeRuntimeCommand({
-      sessionId: 'beegame_record_stream',
-      cwd: process.cwd(),
-      env: {},
-      workflowWorker: true,
-      workflowWorkerType: 'game-ir-compiler',
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    expect(command).not.toContain('--json-schema')
-    expect(command).toContain('--tools')
-    expect(command[command.indexOf('--tools') + 1]).toBe('')
-  })
-
-  test('continues one raw NDJSON stream and returns the complete record_stream', async () => {
-    const runtime = await createNativeCliProcessRunner({
-      command: recordStreamCommand('complete'),
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    const messages: Record<string, unknown>[] = []
-    await runtime.submit({
-      prompt: 'record stream',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-    expect(messages).toEqual([
-      expect.objectContaining({
-        type: 'result',
-        record_stream:
-          '{"record":"node","id":"n1"}\n{"record":"done","sliceId":"slice-1"}\n',
-      }),
-    ])
-    runtime.dispose?.()
-  })
-
-  test('passes a syntactically invalid non-terminal record to Stage 5 unchanged', async () => {
-    const runtime = await createNativeCliProcessRunner({
-      command: recordStreamCommand('invalid-nonterminal'),
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    const messages: Record<string, unknown>[] = []
-    await runtime.submit({
-      prompt: 'record stream',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      record_stream:
-        '{not-json-record}\n{"record":"done","sliceId":"slice-1"}\n',
-    })
-    runtime.dispose?.()
-  })
-
-  test('rejects DSML record-stream frames as provider protocol errors', async () => {
-    const runtime = await createNativeCliProcessRunner({
-      command: recordStreamCommand('dsml'),
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    await expect(
-      runtime.submit({
-        prompt: 'record stream',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(
-      'provider_stream_protocol_error: record_stream emitted a DSML frame',
-    )
-    runtime.dispose?.()
-  })
-
-  test('rejects record-stream tool frames as provider protocol errors', async () => {
-    const runtime = await createNativeCliProcessRunner({
-      command: recordStreamCommand('tool'),
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    await expect(
-      runtime.submit({
-        prompt: 'record stream',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(
-      'provider_stream_protocol_error: record_stream emitted a tool or DSML frame',
-    )
-    runtime.dispose?.()
-  })
-
-  test('rejects assistant text DSML after a valid record-stream prefix', async () => {
-    const script = `
-for await (const chunk of Bun.stdin.stream()) {
-  const text = new TextDecoder().decode(chunk);
-  if (!text.includes('"type":"user"')) continue;
-  console.log(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '{"record":"node","id":"n1"}\\n{"record":"done","sliceId":"slice-1"}\\n' } } }));
-  console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '<tool_use name="Write">' }] } }));
-  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, stop_reason: 'end_turn' }));
-}
-`
-    const runtime = await createNativeCliProcessRunner({
-      command: [process.execPath, '-e', script],
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    await expect(
-      runtime.submit({
-        prompt: 'record stream',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(
-      'provider_stream_protocol_error: record_stream emitted a DSML frame',
-    )
-    runtime.dispose?.()
-  })
-
-  test('rejects an incorrect record-stream terminal as a provider protocol error', async () => {
-    const runtime = await createNativeCliProcessRunner({
-      command: recordStreamCommand('incorrect-terminal'),
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    await expect(
-      runtime.submit({
-        prompt: 'record stream',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(
-      'provider_stream_protocol_error: record_stream terminal record did not match the expected slice',
-    )
-    runtime.dispose?.()
-  })
-
-  test('writes the exact UTF-8 digest and bytes for native record chunks', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'native-record-observe-'))
-    const chunk = Buffer.from('节点😀\n', 'utf8')
-    try {
-      const runtime = await createNativeCliProcessRunner({
-        command: recordStreamCommand('unicode'),
-        observabilityFactory: input => createRuntimeObservability(input),
-      }).start({
-        sessionId: 'record-stream-session',
-        cwd: workspacePath,
-        env: {},
-        workflowRecordStreamContract: {
-          version: 1,
-          terminalRecord: { record: 'done', sliceId: 'slice-1' },
-        },
-      })
-      await runtime.submit({
-        prompt: 'record stream',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      })
-      await runtime.dispose?.()
-      const raw = await readFile(
-        join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
-        'utf8',
-      )
-      expect(raw).toContain(
-        JSON.stringify({
-          bytes: chunk.byteLength,
-          digest: createHash('sha256').update(chunk).digest('hex'),
-        }).slice(1, -1),
-      )
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
-  test('rejects a blank physical record-stream line as a provider protocol error', async () => {
-    const script = `
-for await (const chunk of Bun.stdin.stream()) {
-  const text = new TextDecoder().decode(chunk);
-  if (!text.includes('"type":"user"')) continue;
-  console.log('');
-}
-`
-    const runtime = await createNativeCliProcessRunner({
-      command: [process.execPath, '-e', script],
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    await expect(
-      runtime.submit({
-        prompt: 'record stream',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(
-      'provider_stream_protocol_error: record_stream emitted an internal blank line',
-    )
-    runtime.dispose?.()
-  })
-
-  test('rejects cumulative record stream frames as provider protocol errors', async () => {
-    const runtime = await createNativeCliProcessRunner({
-      command: recordStreamCommand('cumulative'),
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    await expect(
-      runtime.submit({
-        prompt: 'record stream',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(
-      'provider_stream_protocol_error: record_stream emitted a cumulative frame',
-    )
-    runtime.dispose?.()
-  })
-
-  test('rejects a record stream continuation that makes no progress', async () => {
-    const runtime = await createNativeCliProcessRunner({
-      command: recordStreamCommand('empty'),
-      observabilityFactory: () => ({
-        beginTurn: () => undefined,
-        observeStdoutChunk: () => undefined,
-        observeLine: () => undefined,
-        observeMessage: () => undefined,
-        finishTurn: () => undefined,
-        flush: async () => undefined,
-      }),
-    }).start({
-      sessionId: 'record-stream-session',
-      cwd: process.cwd(),
-      env: {},
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done', sliceId: 'slice-1' },
-      },
-    })
-    await expect(
-      runtime.submit({
-        prompt: 'record stream',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(
-      'provider_stream_protocol_error: record_stream continuation made no progress',
-    )
-    runtime.dispose?.()
   })
 
   test('forwards native messages and resolves only on result', async () => {
@@ -702,121 +253,7 @@ for await (const chunk of Bun.stdin.stream()) {
       subtype: 'success',
       structured_output: { version: 3 },
     })
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(
-      1,
-    )
-    runtime.dispose?.()
-  })
-
-  test('continues an incomplete StructuredOutput turn in the same native session after max_tokens', async () => {
-    const runtime = await startRuntime({
-      workflowJsonSchema: {
-        type: 'object',
-        properties: { version: { const: 3 } },
-        required: ['version'],
-        additionalProperties: false,
-      },
-    })
-    const messages: Record<string, unknown>[] = []
-
-    await expect(
-      Promise.race([
-        runtime.submit({
-          prompt: 'structured-truncated',
-          signal: new AbortController().signal,
-          onMessage: message => messages.push(message),
-          requestPermission: async () => ({ behavior: 'deny' }),
-        }),
-        new Promise((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  'structured max-token continuation did not terminate',
-                ),
-              ),
-            500,
-          ),
-        ),
-      ]),
-    ).resolves.toBeUndefined()
-
-    expect(
-      messages.filter(message => message.type === 'assistant'),
-    ).toHaveLength(2)
-    expect(
-      messages
-        .filter(message => message.type === 'assistant')
-        .map(message => message.session_id),
-    ).toEqual([
-      '550e8400-e29b-41d4-a716-446655440000',
-      '550e8400-e29b-41d4-a716-446655440000',
-    ])
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      structured_output: { version: 3 },
-    })
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(
-      1,
-    )
-    runtime.dispose?.()
-  })
-
-  test('does not resolve a StructuredOutput turn when a failed tool is followed by a native success envelope', async () => {
-    const runtime = await startRuntime({
-      workflowJsonSchema: {
-        type: 'object',
-        properties: { version: { const: 3 } },
-        required: ['version'],
-        additionalProperties: false,
-      },
-    })
-    const messages: Record<string, unknown>[] = []
-
-    await expect(
-      runtime.submit({
-        prompt: 'structured-failure-success-result',
-        signal: new AbortController().signal,
-        onMessage: message => messages.push(message),
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow('StructuredOutput failed before producing a valid result')
-    expect(messages.some(message => message.type === 'user')).toBe(true)
-    runtime.dispose?.()
-  })
-
-  test('rejects repeated StructuredOutput max-token truncation when the output has made no progress', async () => {
-    const runtime = await startRuntime({
-      workflowJsonSchema: {
-        type: 'object',
-        properties: { version: { const: 3 } },
-        required: ['version'],
-        additionalProperties: false,
-      },
-    })
-
-    await expect(
-      Promise.race([
-        runtime.submit({
-          prompt: 'structured-truncated-forever',
-          signal: new AbortController().signal,
-          onMessage: () => undefined,
-          requestPermission: async () => ({ behavior: 'deny' }),
-        }),
-        new Promise((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error('structured no-progress failure did not terminate'),
-              ),
-            500,
-          ),
-        ),
-      ]),
-    ).rejects.toThrow(
-      'StructuredOutput provider truncation: continuation made no progress',
-    )
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
     runtime.dispose?.()
   })
 
@@ -872,7 +309,9 @@ for await (const chunk of Bun.stdin.stream()) {
       })
     }
 
-    expect(nativeSessionIds).toEqual(['550e8400-e29b-41d4-a716-446655440000'])
+    expect(nativeSessionIds).toEqual([
+      '550e8400-e29b-41d4-a716-446655440000',
+    ])
     expect(results.map(result => result.received_session_id)).toEqual([
       '',
       '550e8400-e29b-41d4-a716-446655440000',
@@ -916,9 +355,7 @@ for await (const chunk of Bun.stdin.stream()) {
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).resolves.toBeUndefined()
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(
-      1,
-    )
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
     expect(messages.at(-1)).toMatchObject({
       type: 'result',
       subtype: 'success',
@@ -961,9 +398,7 @@ for await (const chunk of Bun.stdin.stream()) {
       requestPermission: async () => ({ behavior: 'deny' }),
     })
 
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(
-      1,
-    )
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
     expect(messages.at(-1)).toMatchObject({
       type: 'result',
       subtype: 'success',
@@ -985,9 +420,7 @@ for await (const chunk of Bun.stdin.stream()) {
       requestPermission: async () => ({ behavior: 'deny' }),
     })
 
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(
-      1,
-    )
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
     expect(messages.at(-1)).toMatchObject({
       type: 'result',
       subtype: 'success',
@@ -1050,27 +483,6 @@ for await (const chunk of Bun.stdin.stream()) {
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).rejects.toThrow('Markdown continuation made no progress')
-    runtime.dispose?.()
-  })
-
-  test('rejects a complete body whose heading order cannot be repaired by appending', async () => {
-    const nativeResults: Record<string, unknown>[] = []
-    const runtime = await startRuntime({
-      markdownStream: true,
-      observeMessage: message => {
-        if (message.type === 'result') nativeResults.push(message)
-      },
-    })
-
-    await expect(
-      runtime.submit({
-        prompt: 'unreachable-markdown-order',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow(/cannot be completed by appending/i)
-    expect(nativeResults).toHaveLength(1)
     runtime.dispose?.()
   })
 

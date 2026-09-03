@@ -13,7 +13,7 @@ describe('foundation semantic reviewer terminal contract', () => {
   })
 
   test('targeted recheck worker schema excludes service-owned authority and requires diagnostic evidence on FAIL', () => {
-    const evidence = { documentPath: 'docs/GDD.md' as const, sectionId: 'core_loop' }
+    const evidence = { documentPath: 'docs/GDD.md' as const, sectionId: 'core_loop', digest: 'a'.repeat(64) }
     expect(foundationSemanticRecheckWorkerPayloadSchema.parse({ status: 'PASS' })).toEqual({ status: 'PASS' })
     expect(foundationSemanticRecheckWorkerPayloadSchema.parse({
       status: 'FAIL',
@@ -29,9 +29,6 @@ describe('foundation semantic reviewer terminal contract', () => {
     } })).toBe(true)
     expect(validate({ status: 'FAIL', diagnostic: {
       observedActual: 'actual persists', evidence: [evidence], failureReasonCode: 'actual_persists', scopeAssessment: 'repairable_in_scope',
-    } })).toBe(false)
-    expect(validate({ status: 'FAIL', diagnostic: {
-      observedActual: 'actual persists', evidence: [{ ...evidence, digest: 'a'.repeat(64) }], failureReasonCode: 'actual_persists',
     } })).toBe(false)
     expect(() => foundationSemanticRecheckWorkerPayloadSchema.parse({
       status: 'FAIL',

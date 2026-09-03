@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,99 +8,6 @@ import {
 } from './runtime-observability'
 
 describe('passive native runtime observability', () => {
-  test('records safe failure metadata without event timing or error text', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-failure-'))
-    const sentinel = 'PRIVATE_PROVIDER_FAILURE_BODY'
-    try {
-      const observer = createRuntimeObservability({
-        workspacePath,
-        sessionId: 'session-failure',
-        provider: 'anthropic',
-        model: 'model-1',
-        errorSink: () => undefined,
-      })
-      observer.beginTurn({ requestId: 'request-failure' })
-      observer.finishTurn({ outcome: 'error', error: new Error(sentinel) })
-      await observer.flush()
-
-      const raw = await readFile(
-        join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
-        'utf8',
-      )
-      const terminal = raw
-        .trim()
-        .split('\n')
-        .map(line => JSON.parse(line))
-        .at(-1)
-      expect(terminal).toMatchObject({
-        type: 'turn_terminal',
-        outcome: 'error',
-        eventCount: 0,
-        stdoutByteCount: 0,
-        errorType: 'Error',
-        errorBytes: Buffer.byteLength(sentinel),
-        errorDigest: createHash('sha256').update(sentinel).digest('hex'),
-      })
-      expect(terminal).not.toHaveProperty('error', sentinel)
-      expect(raw).not.toContain(sentinel)
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
-  test('records event timing and record chunk digests without record bodies', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-progress-'))
-    let nowMs = Date.parse('2026-09-02T10:00:00.000Z')
-    const chunk = Buffer.from('{"record":"node","secret":"PRIVATE"}\n')
-    try {
-      const observer = createRuntimeObservability({
-        workspacePath,
-        sessionId: 'session-progress',
-        provider: 'anthropic',
-        model: 'model-1',
-        clock: () => new Date(nowMs),
-      })
-      observer.beginTurn({ requestId: 'request-progress' })
-      nowMs += 100
-      observer.observeMessage({ type: 'stream_event' })
-      nowMs += 100
-      observer.observeRecordStreamChunk(chunk)
-      nowMs += 100
-      observer.finishTurn({ outcome: 'success' })
-      await observer.flush()
-
-      const raw = await readFile(
-        join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
-        'utf8',
-      )
-      const records = raw
-        .trim()
-        .split('\n')
-        .map(line => JSON.parse(line))
-      expect(records).toContainEqual(
-        expect.objectContaining({
-          type: 'record_stream_chunk',
-          bytes: chunk.byteLength,
-          digest: createHash('sha256').update(chunk).digest('hex'),
-        }),
-      )
-      expect(records.at(-1)).toEqual(
-        expect.objectContaining({
-          type: 'turn_terminal',
-          firstEventAt: '2026-09-02T10:00:00.100Z',
-          lastEventAt: '2026-09-02T10:00:00.100Z',
-          stdoutByteCount: 0,
-          eventCount: 1,
-          outcome: 'success',
-        }),
-      )
-      expect(raw).not.toContain('PRIVATE')
-      expect(raw).not.toContain('{"record":"node"')
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
   test('records stdout byte gaps without persisting streamed content', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-byte-gap-'))
     let nowMs = Date.parse('2026-08-12T10:00:00.000Z')
@@ -114,12 +20,10 @@ describe('passive native runtime observability', () => {
         clock: () => new Date(nowMs),
         streamGapObservationMs: 1_000,
       })
-      observer.beginTurn({
-        requestId: 'request-byte-gap',
-        promptByteCount: 12_345,
-        resumed: true,
-      })
-      observer.observeStdoutChunk(Buffer.from('PRIVATE PARTIAL TOOL JSON'))
+      observer.beginTurn({ requestId: 'request-byte-gap' })
+      observer.observeStdoutChunk(
+        Buffer.from('PRIVATE PARTIAL TOOL JSON'),
+      )
       nowMs += 3_500
       observer.observeStdoutChunk(Buffer.from('PRIVATE DOCUMENT BODY'))
       nowMs += 250
@@ -130,35 +34,21 @@ describe('passive native runtime observability', () => {
         join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
         'utf8',
       )
-      const records = raw
-        .trim()
-        .split('\n')
-        .map(line => JSON.parse(line))
-      expect(records[0]).toEqual(
-        expect.objectContaining({
-          type: 'turn_started',
-          promptByteCount: 12_345,
-          resumed: true,
-        }),
-      )
-      expect(records).toContainEqual(
-        expect.objectContaining({
-          type: 'stdout_resumed',
-          gapMs: 3_500,
-          chunkBytes: Buffer.byteLength('PRIVATE DOCUMENT BODY'),
-        }),
-      )
-      expect(records.at(-1)).toEqual(
-        expect.objectContaining({
-          type: 'turn_terminal',
-          stdoutChunkCount: 2,
-          stdoutByteCount:
-            Buffer.byteLength('PRIVATE PARTIAL TOOL JSON') +
-            Buffer.byteLength('PRIVATE DOCUMENT BODY'),
-          maxStdoutChunkGapMs: 3_500,
-          stdoutSilenceAtTerminalMs: 250,
-        }),
-      )
+      const records = raw.trim().split('\n').map(line => JSON.parse(line))
+      expect(records).toContainEqual(expect.objectContaining({
+        type: 'stdout_resumed',
+        gapMs: 3_500,
+        chunkBytes: Buffer.byteLength('PRIVATE DOCUMENT BODY'),
+      }))
+      expect(records.at(-1)).toEqual(expect.objectContaining({
+        type: 'turn_terminal',
+        stdoutChunkCount: 2,
+        stdoutByteCount:
+          Buffer.byteLength('PRIVATE PARTIAL TOOL JSON') +
+          Buffer.byteLength('PRIVATE DOCUMENT BODY'),
+        maxStdoutChunkGapMs: 3_500,
+        stdoutSilenceAtTerminalMs: 250,
+      }))
       expect(raw).not.toContain('PRIVATE PARTIAL TOOL JSON')
       expect(raw).not.toContain('PRIVATE DOCUMENT BODY')
     } finally {
@@ -198,14 +88,12 @@ describe('passive native runtime observability', () => {
       observer.observeMessage({
         type: 'assistant',
         message: {
-          content: [
-            {
-              type: 'tool_use',
-              id: 'tool-1',
-              name: 'Write',
-              input: { content: 'SECRET PROMPT BODY' },
-            },
-          ],
+          content: [{
+            type: 'tool_use',
+            id: 'tool-1',
+            name: 'Write',
+            input: { content: 'SECRET PROMPT BODY' },
+          }],
         },
       })
       observer.observeMessage({ type: 'result', subtype: 'error' })
@@ -226,10 +114,7 @@ describe('passive native runtime observability', () => {
         join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
         'utf8',
       )
-      const records = raw
-        .trim()
-        .split('\n')
-        .map(line => JSON.parse(line))
+      const records = raw.trim().split('\n').map(line => JSON.parse(line))
       expect(records).toEqual([
         expect.objectContaining({
           type: 'turn_started',
@@ -265,12 +150,7 @@ describe('passive native runtime observability', () => {
           eventCount: 2,
           byteCount: 20,
           lastEventType: 'result',
-          errorType: 'Error',
-          errorCode: 'runtime_error',
-          errorBytes: Buffer.byteLength('api exploded request=req-provider'),
-          errorDigest: createHash('sha256')
-            .update('api exploded request=req-provider')
-            .digest('hex'),
+          error: 'api exploded request=req-provider',
         }),
         expect.objectContaining({
           type: 'document_receipt',

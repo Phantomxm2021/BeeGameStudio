@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import { z } from 'zod/v4'
 import { commitFoundationRevisionDocumentMetadata } from './authored-document-receipt'
-import { buildFoundationSectionIndex } from './delivery-workflow/foundation-section-index'
 import {
   foundationRevisionStagePath,
   revisionTaskReceiptTerminalDigest,
@@ -17,7 +16,7 @@ const declarationSchema = foundationRevisionDeclarationSchema
 type BuildTool = (definition: Record<string, unknown>) => unknown
 type Declaration = z.infer<typeof declarationSchema>
 
-function sha256(value: string | Uint8Array): string {
+function sha256(value: Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
@@ -34,6 +33,13 @@ function resolveProjectPath(workspacePath: string, projectPath: string): string 
   )
     throw new Error('foundation revision path escaped the project workspace')
   return candidate
+}
+
+function sameArray(left: readonly string[], right: readonly string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  )
 }
 
 export function createNativeFoundationRevisionResultTool(options: {
@@ -65,7 +71,11 @@ export function createNativeFoundationRevisionResultTool(options: {
       return { behavior: 'allow', updatedInput: input }
     },
     async call(input: Declaration) {
-      declarationSchema.parse(input)
+      const parsed = declarationSchema.parse(input)
+      if (!sameArray(parsed.changedSectionIds, options.expectedSectionIds))
+        throw new Error(
+          'foundation revision receipt changedSectionIds mismatch',
+        )
 
       const stagedPath = foundationRevisionStagePath(options.expectedRevision, options.expectedDocumentPath)
       if (options.expectedStagedPath && options.expectedStagedPath !== stagedPath)
@@ -78,47 +88,41 @@ export function createNativeFoundationRevisionResultTool(options: {
         options.workspacePath,
         stagedPath,
       )
-      let documents: [string, string]
+      let bytes: [Uint8Array, Uint8Array]
       try {
-        documents = await Promise.all([
-          readFile(canonicalAbsolute, 'utf8'),
-          readFile(stagedAbsolute, 'utf8'),
+        bytes = await Promise.all([
+          readFile(canonicalAbsolute),
+          readFile(stagedAbsolute),
         ])
       } catch {
         throw new Error(
           'foundation revision canonical or staged document could not be read',
         )
       }
-      const [baseMarkdown, stagedMarkdown] = documents
-      if (options.expectedBaseDocumentDigest && sha256(baseMarkdown) !== options.expectedBaseDocumentDigest)
+      const [baseBytes, stagedBytes] = bytes
+      if (options.expectedBaseDocumentDigest && sha256(baseBytes) !== options.expectedBaseDocumentDigest)
         throw new Error('foundation revision canonical document has a stale base digest')
-      if (stagedMarkdown.length === 0)
+      if (stagedBytes.length === 0)
         throw new Error('foundation revision staged document is empty')
 
       await commitFoundationRevisionDocumentMetadata({
         workspacePath: options.workspacePath,
         canonicalPath: options.expectedDocumentPath,
         stagedPath,
-        expectedCanonicalDigest: sha256(baseMarkdown),
+        expectedCanonicalDigest: sha256(baseBytes),
       })
-      const finalStagedMarkdown = await readFile(stagedAbsolute, 'utf8')
-      if (finalStagedMarkdown.length === 0)
+      const finalStagedBytes = await readFile(stagedAbsolute)
+      if (finalStagedBytes.length === 0)
         throw new Error('foundation revision staged document is empty')
-      const changedSectionIds = deriveChangedSectionIds({
-        documentPath: options.expectedDocumentPath,
-        baseMarkdown,
-        stagedMarkdown: finalStagedMarkdown,
-        expectedSectionIds: options.expectedSectionIds,
-      })
 
       const receiptWithoutTerminal = {
         taskId: options.expectedTaskId,
         round: options.expectedRound,
         documentPath: options.expectedDocumentPath,
         issueIds: [...options.expectedIssueIds],
-        baseDocumentDigest: sha256(baseMarkdown),
-        stagedDocumentDigest: sha256(finalStagedMarkdown),
-        changedSectionIds,
+        baseDocumentDigest: sha256(baseBytes),
+        stagedDocumentDigest: sha256(finalStagedBytes),
+        changedSectionIds: [...parsed.changedSectionIds],
         stagedPath,
       } satisfies Omit<RevisionTaskReceipt, 'terminalDigest'>
       const receipt: RevisionTaskReceipt = {
@@ -145,38 +149,6 @@ export function createNativeFoundationRevisionResultTool(options: {
       }
     },
   })
-}
-
-function deriveChangedSectionIds(input: {
-  documentPath: FoundationDocumentPath
-  baseMarkdown: string
-  stagedMarkdown: string
-  expectedSectionIds: readonly string[]
-}): string[] {
-  const baseIndex = buildFoundationSectionIndex({
-    documents: new Map([[input.documentPath, input.baseMarkdown]]),
-  })
-  const stagedIndex = buildFoundationSectionIndex({
-    documents: new Map([[input.documentPath, input.stagedMarkdown]]),
-  })
-  if (
-    baseIndex.length !== stagedIndex.length ||
-    baseIndex.some(
-      (section, index) =>
-        section.documentPath !== stagedIndex[index]?.documentPath ||
-        section.sectionId !== stagedIndex[index]?.sectionId,
-    )
-  )
-    throw new Error('foundation revision section markers or order changed')
-  const changed = baseIndex.flatMap((section, index) =>
-    section.digest === stagedIndex[index]!.digest ? [] : [section.sectionId],
-  )
-  if (changed.length === 0)
-    throw new Error('foundation revision staged document has no changed sections')
-  const expected = new Set(input.expectedSectionIds)
-  if (changed.some(sectionId => !expected.has(sectionId)))
-    throw new Error('foundation revision changed section is outside packet authority')
-  return changed
 }
 
 export { declarationSchema as foundationRevisionDeclarationSchema }

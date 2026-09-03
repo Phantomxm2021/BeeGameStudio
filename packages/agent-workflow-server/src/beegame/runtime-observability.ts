@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { mkdir, appendFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
@@ -19,32 +18,17 @@ type RuntimeObservationInput = {
   streamGapObservationMs?: number
 }
 
-type RuntimeObservabilityImplementation = ReturnType<
-  typeof createRuntimeObservability
->
-
-// Keep custom/passive observers source-compatible while the native runner
-// adopts the optional record-stream digest hook.
-export type RuntimeObservability = Omit<
-  RuntimeObservabilityImplementation,
-  'observeRecordStreamChunk'
-> & {
-  observeRecordStreamChunk?: (chunk: Uint8Array) => void
-}
+export type RuntimeObservability = ReturnType<typeof createRuntimeObservability>
 
 export function createRuntimeObservability(input: RuntimeObservationInput) {
   const path = runtimeObservationPath(input.workspacePath)
-  const errorSink =
-    input.errorSink ??
-    (message => console.error(`[Bee Game Studio API error] ${message}`))
+  const errorSink = input.errorSink ?? (message => console.error(`[Bee Game Studio API error] ${message}`))
   const clock = input.clock ?? (() => new Date())
   const streamGapObservationMs = input.streamGapObservationMs ?? 30_000
   let requestId = ''
   let eventCount = 0
   let byteCount = 0
   let lastEventType = ''
-  let firstEventAt: string | undefined
-  let lastEventAt: string | undefined
   let turnActive = false
   let stdoutChunkCount = 0
   let stdoutByteCount = 0
@@ -68,17 +52,11 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
   }
 
   return {
-    beginTurn(turn: {
-      requestId: string
-      promptByteCount?: number
-      resumed?: boolean
-    }): void {
+    beginTurn(turn: { requestId: string }): void {
       requestId = turn.requestId
       eventCount = 0
       byteCount = 0
       lastEventType = ''
-      firstEventAt = undefined
-      lastEventAt = undefined
       turnActive = true
       stdoutChunkCount = 0
       stdoutByteCount = 0
@@ -91,10 +69,6 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         requestId,
         provider: input.provider,
         model: input.model,
-        ...(turn.promptByteCount !== undefined
-          ? { promptByteCount: turn.promptByteCount }
-          : {}),
-        ...(turn.resumed !== undefined ? { resumed: turn.resumed } : {}),
         ...(input.launchContract
           ? { launchContract: input.launchContract }
           : {}),
@@ -126,29 +100,14 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
     observeLine(line: string): void {
       byteCount += Buffer.byteLength(line)
     },
-    observeRecordStreamChunk(chunk: Uint8Array): void {
-      if (!turnActive) return
-      enqueue({
-        type: 'record_stream_chunk',
-        timestamp: clock().toISOString(),
-        sessionId: input.sessionId,
-        requestId,
-        bytes: chunk.byteLength,
-        digest: createHash('sha256').update(chunk).digest('hex'),
-      })
-    },
     observeMessage(message: Record<string, unknown>): void {
       eventCount += 1
-      const eventAt = clock().toISOString()
-      firstEventAt ??= eventAt
-      lastEventAt = eventAt
       lastEventType = stringField(message, 'type') || 'unknown'
       if (message.type !== 'assistant') return
       const envelope = objectField(message, 'message')
       const content = Array.isArray(envelope?.content) ? envelope.content : []
       for (const block of content) {
-        if (!block || typeof block !== 'object' || Array.isArray(block))
-          continue
+        if (!block || typeof block !== 'object' || Array.isArray(block)) continue
         const candidate = block as Record<string, unknown>
         if (candidate.type !== 'tool_use') continue
         enqueue({
@@ -161,18 +120,10 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         })
       }
     },
-    finishTurn(result: {
-      outcome: 'success' | 'error' | 'aborted'
-      error?: unknown
-    }): void {
+    finishTurn(result: { outcome: 'success' | 'error' | 'aborted'; error?: unknown }): void {
       const finishedAt = clock()
-      const errorText =
-        result.error === undefined ? undefined : errorMessage(result.error)
-      if (errorText) safeErrorSink(errorSink, errorText)
-      const errorMetadata =
-        result.error === undefined
-          ? undefined
-          : safeErrorMetadata(result.error, errorText ?? '')
+      const error = result.error === undefined ? undefined : errorMessage(result.error)
+      if (error) safeErrorSink(errorSink, error)
       enqueue({
         type: 'turn_terminal',
         timestamp: finishedAt.toISOString(),
@@ -184,8 +135,6 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         eventCount,
         byteCount,
         lastEventType,
-        ...(firstEventAt ? { firstEventAt } : {}),
-        ...(lastEventAt ? { lastEventAt } : {}),
         stdoutChunkCount,
         stdoutByteCount,
         maxStdoutChunkGapMs,
@@ -193,7 +142,7 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
           lastStdoutChunkAtMs === undefined
             ? 0
             : Math.max(0, finishedAt.getTime() - lastStdoutChunkAtMs),
-        ...(errorMetadata ?? {}),
+        ...(error ? { error } : {}),
       })
       turnActive = false
     },
@@ -251,28 +200,13 @@ function errorMessage(error: unknown): string {
   return message.slice(0, 4_096)
 }
 
-function safeErrorMetadata(
-  error: unknown,
-  message: string,
-): Record<string, unknown> {
-  const errorCode = message.startsWith('provider_stream_protocol_error:')
-    ? 'provider_stream_protocol_error'
-    : 'runtime_error'
-  return {
-    errorType: error instanceof Error ? error.name : typeof error,
-    errorCode,
-    errorDigest: createHash('sha256').update(message, 'utf8').digest('hex'),
-    errorBytes: Buffer.byteLength(message, 'utf8'),
-  }
-}
-
 function objectField(
   value: Record<string, unknown>,
   key: string,
 ): Record<string, unknown> | undefined {
   const field = value[key]
   return field && typeof field === 'object' && !Array.isArray(field)
-    ? (field as Record<string, unknown>)
+    ? field as Record<string, unknown>
     : undefined
 }
 

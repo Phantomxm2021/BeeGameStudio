@@ -266,8 +266,6 @@ export type BeeGameSessionRunnerStartInput = {
   workflowReadOnlyPaths?: string[]
   /** Native structured-output authority for workers that must return JSON. */
   workflowJsonSchema?: Record<string, unknown>
-  /** Native NDJSON semantic stream authority for workers that return records. */
-  workflowRecordStreamContract?: WorkflowRecordStreamContract
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
@@ -406,7 +404,6 @@ type SessionRecord = {
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
-  workflowRecordStreamContract?: WorkflowRecordStreamContract
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
   nativeRuntimeCwd?: string
@@ -429,8 +426,6 @@ type SessionRecord = {
   toolUses: Map<string, { toolName: string; input?: unknown }>
   /** Tool-use blocks observed before their streamed JSON input is complete. */
   streamingToolUses: Map<string, string>
-  workflowRecordStreamSequence: number
-  workflowRecordStreamPayloads: Map<number, DashboardSDKMessage>
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
   emittedAssistantMessageIds: Set<string>
@@ -570,21 +565,15 @@ export function selectFoundationFactFastRuntime(
   environment: Record<string, string>,
 ): Record<string, string> {
   const provider = foundationRuntimeProvider(runtime, environment)
-  if (!provider)
-    throw new Error('foundation fact extractor fast model is not configured')
+  if (!provider) throw new Error('foundation fact extractor fast model is not configured')
   const fastEnvKey = `${foundationRuntimeProviderPrefix(provider)}_DEFAULT_HAIKU_MODEL`
   const fastModel = environment[fastEnvKey]
-  if (!fastModel)
-    throw new Error('foundation fact extractor fast model is not configured')
+  if (!fastModel) throw new Error('foundation fact extractor fast model is not configured')
   // The native runtime selects its primary turn model through the provider's
   // sonnet/default alias. Route this worker's isolated process to the
   // configured fast model using a recognized provider key; arbitrary MODEL
   // environment variables are ignored by the runtime.
-  return {
-    ...environment,
-    [`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_SONNET_MODEL`]:
-      fastModel,
-  }
+  return { ...environment, [`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_SONNET_MODEL`]: fastModel }
 }
 
 export function selectFoundationSemanticRuntime(
@@ -592,19 +581,12 @@ export function selectFoundationSemanticRuntime(
   environment: Record<string, string>,
   tier: 'fast' | 'balanced' | 'strong',
 ): Record<string, string> {
-  const suffix =
-    tier === 'fast' ? 'HAIKU' : tier === 'balanced' ? 'SONNET' : 'OPUS'
+  const suffix = tier === 'fast' ? 'HAIKU' : tier === 'balanced' ? 'SONNET' : 'OPUS'
   const provider = foundationRuntimeProvider(runtime, environment)
-  if (!provider)
-    throw new Error(`foundation semantic ${tier} model is not configured`)
+  if (!provider) throw new Error(`foundation semantic ${tier} model is not configured`)
   const key = `${foundationRuntimeProviderPrefix(provider)}_DEFAULT_${suffix}_MODEL`
-  if (!key || !environment[key])
-    throw new Error(`foundation semantic ${tier} model is not configured`)
-  return {
-    ...environment,
-    [`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_SONNET_MODEL`]:
-      environment[key],
-  }
+  if (!key || !environment[key]) throw new Error(`foundation semantic ${tier} model is not configured`)
+  return { ...environment, [`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_SONNET_MODEL`]: environment[key] }
 }
 
 const FOUNDATION_RUNTIME_PROVIDERS: RuntimeModelConfig['modelType'][] = [
@@ -614,12 +596,6 @@ const FOUNDATION_RUNTIME_PROVIDERS: RuntimeModelConfig['modelType'][] = [
   'grok',
 ]
 
-/** The single native transport contract for semantic workflow record streams. */
-export type WorkflowRecordStreamContract = {
-  version: 1
-  terminalRecord: Record<string, unknown>
-}
-
 function foundationRuntimeProvider(
   runtime: RuntimeModelConfig | undefined,
   environment: Record<string, string>,
@@ -627,15 +603,10 @@ function foundationRuntimeProvider(
   if (runtime?.modelType) return runtime.modelType
   const providers = FOUNDATION_RUNTIME_PROVIDERS.filter(provider =>
     ['HAIKU', 'SONNET', 'OPUS'].some(tier =>
-      Boolean(
-        environment[
-          `${foundationRuntimeProviderPrefix(provider)}_DEFAULT_${tier}_MODEL`
-        ],
-      ),
+      Boolean(environment[`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_${tier}_MODEL`]),
     ),
   )
-  if (providers.length > 1)
-    throw new Error('Selected model environment contains multiple providers')
+  if (providers.length > 1) throw new Error('Selected model environment contains multiple providers')
   if (providers.length === 0) return undefined
   return providers[0]!
 }
@@ -670,7 +641,6 @@ export type StartBeeGameSessionInput = {
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
-  workflowRecordStreamContract?: WorkflowRecordStreamContract
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
 }
@@ -737,10 +707,6 @@ export class BeeGameSessionManager {
   }
 
   start(input: StartBeeGameSessionInput): BeeGameSession {
-    if (input.workflowJsonSchema && input.workflowRecordStreamContract)
-      throw new Error(
-        'A workflow session may use either StructuredOutput or record_stream, not both',
-      )
     if (!isAbsolute(input.workspacePath)) {
       throw new Error('Workspace path must be absolute')
     }
@@ -814,9 +780,7 @@ export class BeeGameSessionManager {
       ...(input.workflowWorkerType
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
-      ...(input.workflowModelTier
-        ? { workflowModelTier: input.workflowModelTier }
-        : {}),
+      ...(input.workflowModelTier ? { workflowModelTier: input.workflowModelTier } : {}),
       ...(input.workflowMarkdownStreamContract
         ? {
             workflowMarkdownStreamContract:
@@ -841,13 +805,6 @@ export class BeeGameSessionManager {
       ...(input.workflowJsonSchema
         ? { workflowJsonSchema: structuredClone(input.workflowJsonSchema) }
         : {}),
-      ...(input.workflowRecordStreamContract
-        ? {
-            workflowRecordStreamContract: structuredClone(
-              input.workflowRecordStreamContract,
-            ),
-          }
-        : {}),
       ...(input.workflowResourceContentCommitContract
         ? {
             workflowResourceContentCommitContract:
@@ -855,11 +812,7 @@ export class BeeGameSessionManager {
           }
         : {}),
       ...(input.workflowRevisionContract
-        ? {
-            workflowRevisionContract: structuredClone(
-              input.workflowRevisionContract,
-            ),
-          }
+        ? { workflowRevisionContract: structuredClone(input.workflowRevisionContract) }
         : {}),
       ...(nativeRuntimeCwd ? { nativeRuntimeCwd } : {}),
       runtime,
@@ -882,8 +835,6 @@ export class BeeGameSessionManager {
       pendingPermissions: new Map(),
       toolUses: new Map(),
       streamingToolUses: new Map(),
-      workflowRecordStreamSequence: 0,
-      workflowRecordStreamPayloads: new Map(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
@@ -1134,21 +1085,6 @@ export class BeeGameSessionManager {
       .map(event => formatBeeGameEventForDisplay(event, record.language))
   }
 
-  /** Returns complete record-stream results only to the in-process workflow port. */
-  workflowRecordStreamEvents(sessionId: string, after = 0): BeeGameEvent[] {
-    const record = this.sessions.get(sessionId)
-    if (!record) throw new Error('Session not found')
-    return record.events
-      .filter(
-        event => event.id > after && !isThinkingProtocolControlEvent(event),
-      )
-      .map(event => {
-        const payload = record.workflowRecordStreamPayloads.get(event.id)
-        return payload ? { ...event, payload } : event
-      })
-      .map(event => formatBeeGameEventForDisplay(event, record.language))
-  }
-
   hasInFlightToolSubmission(sessionId: string, toolName: string): boolean {
     const record = this.sessions.get(sessionId)
     if (!record) return false
@@ -1168,11 +1104,7 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     return record.events
-      .filter(
-        event =>
-          !isThinkingProtocolControlEvent(event) &&
-          !(record.workflowRecordStreamContract && event.type === 'result'),
-      )
+      .filter(event => !isThinkingProtocolControlEvent(event))
       .map(event => formatBeeGameEventForDisplay(event, record.language))
       .map(event => ({
         id: event.id,
@@ -1369,46 +1301,16 @@ export class BeeGameSessionManager {
   async disposeWorkflowWorker(sessionId: string): Promise<void> {
     const record = this.sessions.get(sessionId)
     if (!record?.workflowWorker) return
-    let firstError: unknown
-    const capture = (error: unknown): void => {
-      firstError ??= error
-    }
-    try {
-      if (record.session.status === 'running') {
-        try {
-          this.stop(sessionId)
-        } catch (error) {
-          capture(error)
-        }
-      }
-      try {
-        await this.waitForWorkflowWorkerIdle(sessionId)
-      } catch (error) {
-        capture(error)
-      }
-      try {
-        await rm(record.transcriptPath, { force: true })
-      } catch (error) {
-        capture(error)
-      }
-      try {
-        await rm(
-          getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
-          { force: true },
-        )
-      } catch (error) {
-        capture(error)
-      }
-      if (record.nativeRuntimeCwd)
-        try {
-          await rm(record.nativeRuntimeCwd, { recursive: true, force: true })
-        } catch (error) {
-          capture(error)
-        }
-    } finally {
-      this.sessions.delete(sessionId)
-    }
-    if (firstError) throw firstError
+    if (record.session.status === 'running') this.stop(sessionId)
+    await this.waitForWorkflowWorkerIdle(sessionId)
+    await rm(record.transcriptPath, { force: true })
+    await rm(
+      getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
+      { force: true },
+    )
+    if (record.nativeRuntimeCwd)
+      await rm(record.nativeRuntimeCwd, { recursive: true, force: true })
+    this.sessions.delete(sessionId)
   }
 
   async flushWorkflowUsage(sessionId: string): Promise<void> {
@@ -1418,6 +1320,20 @@ export class BeeGameSessionManager {
     if (record.workflowUsageWriteError) {
       throw record.workflowUsageWriteError
     }
+  }
+
+  async rebindWorkflowWorker(
+    sessionId: string,
+    binding: { runId: string; dispatchId: string; workerType: string },
+  ): Promise<void> {
+    const record = this.sessions.get(sessionId)
+    if (!record?.workflowWorker)
+      throw new Error('workflow worker session is unavailable')
+    await this.waitForWorkflowWorkerIdle(sessionId)
+    record.workflowRunId = binding.runId
+    record.workflowDispatchId = binding.dispatchId
+    record.workflowWorkerType = binding.workerType
+    this.persistRuntimeSnapshot(record)
   }
 
   async waitForWorkflowWorkerIdle(sessionId: string): Promise<void> {
@@ -1543,18 +1459,10 @@ export class BeeGameSessionManager {
         await this.loadAdditionalRuntimeEnv(record),
       )
       if (record.workflowWorkerType === 'foundation-fact-extractor') {
-        selectedEnvironment = selectFoundationFactFastRuntime(
-          record.runtime,
-          selectedEnvironment,
-        )
+        selectedEnvironment = selectFoundationFactFastRuntime(record.runtime, selectedEnvironment)
       } else if (record.workflowWorkerType === 'foundation-semantic-reviewer') {
-        if (!record.workflowModelTier)
-          throw new Error('foundation semantic model tier is missing')
-        selectedEnvironment = selectFoundationSemanticRuntime(
-          record.runtime,
-          selectedEnvironment,
-          record.workflowModelTier,
-        )
+        if (!record.workflowModelTier) throw new Error('foundation semantic model tier is missing')
+        selectedEnvironment = selectFoundationSemanticRuntime(record.runtime, selectedEnvironment, record.workflowModelTier)
       }
       let revisionStagedPath: string | undefined
       if (
@@ -1563,28 +1471,20 @@ export class BeeGameSessionManager {
       ) {
         const configuredPath = record.workflowRevisionContract.stagedPath
         if (typeof configuredPath !== 'string' || !configuredPath.trim())
-          throw new Error(
-            'foundation revision staged path authority is missing',
-          )
+          throw new Error('foundation revision staged path authority is missing')
         const candidate = resolve(record.session.cwd, configuredPath)
-        const workspaceRelative = relative(
-          resolve(record.session.cwd),
-          candidate,
-        )
+        const workspaceRelative = relative(resolve(record.session.cwd), candidate)
         if (
           workspaceRelative === '' ||
           workspaceRelative.startsWith('..') ||
           isAbsolute(workspaceRelative)
         )
-          throw new Error(
-            'foundation revision staged path escaped the project workspace',
-          )
+          throw new Error('foundation revision staged path escaped the project workspace')
         revisionStagedPath = candidate
       }
       const env = buildRuntimeEnv({
         ...selectedEnvironment,
-        ...(record.workflowWorkerType === 'foundation-document-reviser' &&
-        record.workflowRevisionContract
+        ...(record.workflowWorkerType === 'foundation-document-reviser' && record.workflowRevisionContract
           ? {
               BEEGAME_WORKFLOW_WORKER_TYPE: record.workflowWorkerType,
               // The native process deliberately runs in an empty sandbox cwd.
@@ -1602,8 +1502,7 @@ export class BeeGameSessionManager {
                 issueIds: record.workflowRevisionContract.issueIds,
                 sectionIds: record.workflowRevisionContract.sectionIds,
                 stagedPath: record.workflowRevisionContract.stagedPath,
-                baseDocumentDigest:
-                  record.workflowRevisionContract.baseDocumentDigest,
+                baseDocumentDigest: record.workflowRevisionContract.baseDocumentDigest,
               }),
             }
           : {}),
@@ -1668,13 +1567,6 @@ export class BeeGameSessionManager {
             : {}),
           ...(record.workflowJsonSchema
             ? { workflowJsonSchema: structuredClone(record.workflowJsonSchema) }
-            : {}),
-          ...(record.workflowRecordStreamContract
-            ? {
-                workflowRecordStreamContract: structuredClone(
-                  record.workflowRecordStreamContract,
-                ),
-              }
             : {}),
           ...(record.workflowResourceContentCommitContract
             ? {
@@ -1801,30 +1693,6 @@ export class BeeGameSessionManager {
       onMessage: message => {
         markdownStreamSink?.observe(message)
         appendProjectAgentRawLog(record, message)
-        if (record.workflowRecordStreamContract) {
-          if (isSDKExecutionError(message))
-            executionError = new Error(getSDKExecutionErrorDetail(message))
-          if (
-            message.type === 'stream_event' &&
-            getUsageFromEventPayload(message).total_tokens > 0
-          )
-            this.append(record, 'usage', '', message)
-          if (message.type === 'result' && 'record_stream' in message) {
-            const event = this.append(
-              record,
-              'result',
-              'Record stream accepted',
-              recordStreamEventMetadata(message),
-              {
-                persistTranscript: false,
-              },
-            )
-            record.workflowRecordStreamPayloads.set(event.id, message)
-          }
-          if (submittedTurnId)
-            this.queueUsageRecord(record, submittedTurnId, message)
-          return
-        }
         trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
@@ -2106,11 +1974,7 @@ export class BeeGameSessionManager {
         autoDenied: true,
         reason: 'workflow_tool_not_allowed',
       })
-      return Promise.resolve({
-        behavior: 'deny',
-        scope: 'once',
-        message: toolRestriction,
-      })
+      return Promise.resolve({ behavior: 'deny', scope: 'once', message: toolRestriction })
     }
     if (
       request.toolName === 'CommitResourceInventoryAuthority' ||
@@ -2247,7 +2111,6 @@ export class BeeGameSessionManager {
     type: BeeGameEventType,
     text: string,
     payload?: DashboardSDKMessage,
-    options?: { persistTranscript?: boolean },
   ): BeeGameEvent {
     const workflowUsageBefore =
       record.workflowWorker && record.workflowRunId
@@ -2263,8 +2126,7 @@ export class BeeGameSessionManager {
       createdAt: new Date(),
     }
     record.events.push(event)
-    if (options?.persistTranscript !== false)
-      appendTranscriptEvent(record.transcriptPath, event)
+    appendTranscriptEvent(record.transcriptPath, event)
     appendProjectRuntimeLog(record, event)
     if (record.workflowWorker && record.workflowRunId) {
       // Raw tool/system labels remain telemetry. Resource preparation exposes
@@ -2333,13 +2195,9 @@ export class BeeGameSessionManager {
             ...(record.workflowWorkerType
               ? { workerType: record.workflowWorkerType }
               : {}),
-            ...(record.workflowRevisionContract
-              ? {
-                  workflowRevisionContract: structuredClone(
-                    record.workflowRevisionContract,
-                  ),
-                }
-              : {}),
+          ...(record.workflowRevisionContract
+            ? { workflowRevisionContract: structuredClone(record.workflowRevisionContract) }
+            : {}),
             ...(record.workflowDispatchId
               ? { dispatchId: record.workflowDispatchId }
               : {}),
@@ -4027,8 +3885,7 @@ function projectWorkspaceFileAccessAuthority(
       return {
         behavior: 'deny',
         reason: 'project_workspace_read_scope_empty',
-        message:
-          'Scoped revision workers may use Read only on the assigned staged path.',
+        message: 'Scoped revision workers may use Read only on the assigned staged path.',
       }
     const inputPath = request.input.file_path
     if (typeof inputPath !== 'string' || !inputPath.trim())
@@ -4048,18 +3905,14 @@ function projectWorkspaceFileAccessAuthority(
       }
     const allowed = (record.workflowAllowedPaths ?? []).some(entry => {
       const configured = entry.trim()
-      return (
-        configured &&
-        targetPath === resolveProspectivePath(record.session.cwd, configured)
-      )
+      return configured && targetPath === resolveProspectivePath(record.session.cwd, configured)
     })
     return allowed
       ? { behavior: 'allow', reason: 'project_workspace_file_access' }
       : {
           behavior: 'deny',
           reason: 'project_workspace_read_scope_empty',
-          message:
-            'Scoped revision workers may read only their assigned staged path.',
+          message: 'Scoped revision workers may read only their assigned staged path.',
         }
   }
   const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'
@@ -4150,8 +4003,7 @@ function workflowFileMutationAuthority(
     : {
         behavior: 'deny',
         reason: 'workflow_path_not_allowed',
-        message:
-          'Workflow workers may mutate only their assigned project paths.',
+        message: 'Workflow workers may mutate only their assigned project paths.',
       }
 }
 
@@ -4352,131 +4204,22 @@ function appendProjectAgentRawLog(
   try {
     const path = getProjectAgentRawLogPath(record)
     mkdirSync(dirname(path), { recursive: true })
-    const serialized = JSON.stringify(message)
-    const semantic =
-      typeof message.record_stream === 'string'
-        ? message.record_stream
-        : message.type === 'stream_event'
-          ? extractStreamTextDelta(message)
-          : ''
-    const bytes = Buffer.byteLength(semantic || serialized, 'utf8')
-    const digest = createHash('sha256')
-      .update(semantic || serialized)
-      .digest('hex')
-    const usage = getUsageFromEventPayload(message)
-    const isUsageEvent = hasRecognizedUsagePayload(message)
-    const isResultEvent = message.type === 'result'
-    const hasErrorFields =
-      message.is_error === true ||
-      Array.isArray(message.errors) ||
-      typeof message.error === 'string'
-    const summary =
-      typeof message.record_stream === 'string'
-        ? {
-            sessionId: record.session.id,
-            ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
-            seq: ++record.workflowRecordStreamSequence,
-            bytes,
-            digest,
-            ...(hasErrorFields
-              ? safeProviderErrorMetadata(message)
-              : {}),
-          }
-        : isResultEvent || isUsageEvent || hasErrorFields
-          ? {
-              sessionId: record.session.id,
-              ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
-              createdAt: new Date().toISOString(),
-              type: isUsageEvent && !isResultEvent ? 'usage' : message.type,
-              ...(isResultEvent && typeof message.subtype === 'string'
-                ? { subtype: message.subtype }
-                : {}),
-              ...(isResultEvent && typeof message.is_error === 'boolean'
-                ? { is_error: message.is_error }
-                : {}),
-              ...(isUsageEvent ? { usage } : {}),
-              ...(hasErrorFields ? safeProviderErrorMetadata(message) : {}),
-            }
-        : {
-          sessionId: record.session.id,
-          ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
-          createdAt: new Date().toISOString(),
-          message,
-        }
-    appendBoundedDiagnosticRecord(path, `${JSON.stringify(summary)}\n`, {
-      maxBytes: MAX_PROJECT_AGENT_RAW_LOG_BYTES,
-      archiveCount: PROJECT_AGENT_RAW_LOG_ARCHIVES,
-    })
+    appendBoundedDiagnosticRecord(
+      path,
+      `${JSON.stringify({
+        sessionId: record.session.id,
+        ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
+        createdAt: new Date().toISOString(),
+        message,
+      })}\n`,
+      {
+        maxBytes: MAX_PROJECT_AGENT_RAW_LOG_BYTES,
+        archiveCount: PROJECT_AGENT_RAW_LOG_ARCHIVES,
+      },
+    )
   } catch {
     // Raw agent logs must never interrupt the active turn.
   }
-}
-
-function recordStreamEventMetadata(
-  message: DashboardSDKMessage,
-): DashboardSDKMessage {
-  const stream = message.record_stream
-  if (typeof stream !== 'string')
-    return { type: 'result', record_stream_type: 'ndjson' }
-  return {
-    type: 'result',
-    record_stream_type: 'ndjson',
-    record_stream_digest: createHash('sha256')
-      .update(stream, 'utf8')
-      .digest('hex'),
-    record_stream_bytes: Buffer.byteLength(stream, 'utf8'),
-    record_stream_lines: stream.split('\n').filter(line => line.length > 0).length,
-    ...(typeof message.subtype === 'string' ? { subtype: message.subtype } : {}),
-    ...(typeof message.is_error === 'boolean'
-      ? { is_error: message.is_error }
-      : {}),
-  }
-}
-
-function safeProviderErrorMetadata(
-  message: DashboardSDKMessage,
-): Record<string, unknown> {
-  const detail = providerErrorText(message)
-  return {
-    errorCode: providerErrorCode(message),
-    errorDigest: createHash('sha256').update(detail, 'utf8').digest('hex'),
-    errorBytes: Buffer.byteLength(detail, 'utf8'),
-  }
-}
-
-function hasRecognizedUsagePayload(message: DashboardSDKMessage): boolean {
-  const usage = getUsageRecord(message)
-  if (!usage) return false
-  return Object.keys(usage).some(key =>
-    [
-      'input_tokens',
-      'prompt_tokens',
-      'output_tokens',
-      'completion_tokens',
-      'cache_read_input_tokens',
-      'cache_read_tokens',
-      'cache_creation_input_tokens',
-      'cache_creation_tokens',
-      'total_tokens',
-    ].includes(key),
-  )
-}
-
-function providerErrorText(message: DashboardSDKMessage): string {
-  if (message.type === 'result') return getSDKExecutionErrorDetail(message)
-  const errors = Array.isArray(message.errors)
-    ? message.errors.filter(
-        (value): value is string => typeof value === 'string',
-      )
-    : []
-  return errors[0] ?? (typeof message.error === 'string' ? message.error : '')
-}
-
-function providerErrorCode(message: DashboardSDKMessage): string {
-  if (message.type === 'result' && message.is_error === true)
-    return 'provider_error'
-  if (message.type === 'result') return 'provider_result'
-  return 'provider_event_error'
 }
 
 function updateProjectLogIndex(record: SessionRecord): void {

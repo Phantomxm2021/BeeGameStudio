@@ -1,5 +1,4 @@
 import type { FoundationAuditState } from './foundation-audit-state'
-import type { GameIrReadyReceipt } from './game-ir/contracts'
 export type {
   FoundationAuditState,
   FoundationRevisionDocumentTask,
@@ -81,7 +80,6 @@ export type DeliveryPhase =
   | 'BRIEF_CONFIRMED'
   | 'DOCUMENT_DRAFTING'
   | 'DOCUMENT_REVIEW'
-  | 'GAME_IR_COMPILATION'
   | 'RESOURCE_PREPARATION'
   | 'ATOMIC_TASK_PLANNING'
   | 'IMPLEMENTATION'
@@ -93,7 +91,6 @@ export type DocumentWorkflowStep =
   | 'FOUNDATION_DRAFTING'
   | 'FOUNDATION_REVIEW'
   | 'CHECKLIST_DRAFTING'
-  | 'CHECKLIST_BRIDGE'
 
 /**
  * `blocked` is reserved for a durable validation gate result.  Operational
@@ -121,7 +118,6 @@ export type DispatchWorkerType =
   | 'foundation-fact-extractor'
   | 'foundation-semantic-reviewer'
   | 'foundation-document-reviser'
-  | 'game-ir-compiler'
   | 'resource-planner'
   | 'resource-curator'
   | 'resource-content-author'
@@ -147,78 +143,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 49 as const
-
-export type GameIrCompilationIdentity = Readonly<{
-  runId: string
-  taskId: string
-  publicationId: string
-  confirmedBriefDigest: string
-  foundationRevision: string
-  foundationReadyReceiptDigest: string
-}>
-
-export type GameIrCheckpointRef = Readonly<{
-  checkpointPath: string
-  checkpointDigest: string
-}>
-
-export type GameIrCompilationProgressIdentity = Readonly<{
-  inputDigest: string
-  diagnosticDigest: string
-  candidateDigest: string
-  checkpointJournalDigest: string
-  terminalDigest: string
-}>
-
-export type GameIrCompilationDiagnostic = Readonly<{
-  phase: 'GAME_IR_COMPILATION'
-  step: string
-  taskId: string
-  workerType: 'game-ir-compiler'
-  reasonCode: string
-  expected: string
-  actual: string
-  diagnosticRef: string
-  recoveryAction: string
-}>
-
-export type GameIrState =
-  | Readonly<{
-      status: 'compiling'
-      identity: GameIrCompilationIdentity
-      latestCheckpoint?: GameIrCheckpointRef
-      diagnosticRef?: string
-      diagnostic?: GameIrCompilationDiagnostic
-      progressIdentity?: GameIrCompilationProgressIdentity
-    }>
-  | Readonly<{
-      status: 'ready'
-      identity: GameIrCompilationIdentity
-      checkpoint: GameIrCheckpointRef
-      readyReceipt: GameIrReadyReceipt
-      readyReceiptDigest: string
-    }>
-
-export type ChecklistBridgeIdentity = Readonly<{
-  runId: string
-  taskId: string
-  checklistPublicationDigest: string
-  gameIrReadyReceiptDigest: string
-}>
-
-export type ChecklistBridgeState =
-  | Readonly<{
-      status: 'bridging'
-      identity: ChecklistBridgeIdentity
-      diagnosticRef?: string
-    }>
-  | Readonly<{
-      status: 'ready'
-      identity: ChecklistBridgeIdentity
-      receiptPath: string
-      receiptDigest: string
-    }>
+export const DELIVERY_RUN_SCHEMA_VERSION = 45 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -402,10 +327,6 @@ export type DeliveryRun = {
   foundationDraftState: FoundationDraftState
   /** Deterministic post-authoring Section Index + Fact Store binding. */
   foundationAuditState?: FoundationAuditState
-  /** Sole durable Game IR compilation/checkpoint state. */
-  gameIrState?: GameIrState
-  /** Sole durable Checklist-to-Game-IR semantic bridge state. */
-  checklistBridgeState?: ChecklistBridgeState
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
   usage?: WorkflowUsage
@@ -447,9 +368,7 @@ export type DeliveryWorkerPort = {
   /** Front-door validation for the fact worker's persisted fast model route. */
   assertFoundationFactFastReady?(request: WorkerDispatchRequest): Promise<void>
   /** Front-door validation for persisted semantic model tier routing. */
-  assertFoundationSemanticModelReady?(
-    request: WorkerDispatchRequest,
-  ): Promise<void>
+  assertFoundationSemanticModelReady?(request: WorkerDispatchRequest): Promise<void>
   start(
     request: WorkerDispatchRequest,
   ): Promise<{ sessionId: string; dispatchId: string }>

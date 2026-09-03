@@ -142,7 +142,7 @@ function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options
     round: 1 as const,
     batches: fixtureValue.stages.map(stage => stage.batch),
     receipts: fixtureValue.stages.map(stage => stage.receipt),
-    revisionDeclarations: fixtureValue.stages.map(() => ({ status: 'APPLIED' as const })),
+    revisionDeclarations: fixtureValue.stages.map(stage => ({ status: 'APPLIED' as const, changedSectionIds: [...stage.receipt.changedSectionIds] })),
     patchOperations: fixtureValue.stages.flatMap(stage => stage.operations),
     patchValidations: validations,
     semanticRecheckResults: options.semantic ?? [],
@@ -213,30 +213,12 @@ describe('foundation revision publication', () => {
         issueIds: receipt.issueIds,
       }],
       receipts: [receipt],
-      revisionDeclarations: [{ status: 'APPLIED' }],
+      revisionDeclarations: [{ status: 'APPLIED', changedSectionIds: receipt.changedSectionIds }],
       patchOperations: operations,
       patchValidations: [validation(documentPath, receipt, operations, receipt.issueIds[0]!)],
       semanticRecheckResults: [],
       resultingIssues: [],
     })).resolves.toMatchObject({ status: 'committed' })
-  })
-
-  test('replays a prepared publication when batch authority exceeds actual changed sections', async () => {
-    const value = await fixture()
-    const stage = value.stages[0]!
-    const contract = getGameDocumentContract(documentPath)
-    const authority = contract.sections.slice(0, 2).map(section => section.sectionId)
-    stage.batch = {
-      ...stage.batch,
-      sectionIds: authority,
-    }
-
-    const input = publishInput(value)
-    const first = await publishFoundationRevision(input)
-    expect(first.status).toBe('committed')
-    await expect(publishFoundationRevision(input)).resolves.toMatchObject({
-      status: 'committed',
-    })
   })
 
   test('publishes the final service-owned metadata bytes and digest', async () => {
@@ -276,7 +258,7 @@ describe('foundation revision publication', () => {
       validations: [validation(documentPath, receipt, operations, 'AUD-1')],
     })
     input.receipts = [receipt]
-    input.revisionDeclarations = [{ status: 'APPLIED' }]
+    input.revisionDeclarations = [{ status: 'APPLIED', changedSectionIds: [...receipt.changedSectionIds] }]
     input.patchOperations = operations
     await expect(publishFoundationRevision(input)).rejects.toThrow(/metadata/i)
   })
@@ -406,7 +388,7 @@ describe('foundation revision publication', () => {
     const stage = value.stages[0]!
     await expect(publishFoundationRevision({
       ...publishInput(value),
-      revisionDeclarations: [{ status: 'APPLIED', changedSectionIds: ['rules_systems'] } as never],
+      revisionDeclarations: [{ status: 'APPLIED', changedSectionIds: ['rules_systems'] }],
     })).rejects.toThrow(/declaration|receipt|batch|section/i)
     await expect(readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -451,8 +433,8 @@ describe('foundation revision publication', () => {
       batches: [first.stages[0]!.batch, { documentPath: secondPath, sectionIds: secondReceipt.changedSectionIds, issueIds: [secondIssue] }],
       receipts: [first.stages[0]!.receipt, secondReceipt],
       revisionDeclarations: [
-        { status: 'APPLIED' as const },
-        { status: 'APPLIED' as const },
+        { status: 'APPLIED' as const, changedSectionIds: [...first.stages[0]!.receipt.changedSectionIds] },
+        { status: 'APPLIED' as const, changedSectionIds: [...secondReceipt.changedSectionIds] },
       ],
       patchOperations: [...first.stages[0]!.operations, ...secondOperations],
       patchValidations: [validation(documentPath, first.stages[0]!.receipt, first.stages[0]!.operations, 'AUD-1'), validation(secondPath, secondReceipt, secondOperations, secondIssue)],

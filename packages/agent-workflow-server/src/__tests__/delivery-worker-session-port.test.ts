@@ -25,11 +25,7 @@ import {
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/delivery-workflow/types'
-import {
-  createFoundationRevisionStage,
-  foundationRevisionPacketPath,
-  revisionTaskReceiptTerminalDigest,
-} from '../beegame/delivery-workflow/foundation-revision-stage'
+import { createFoundationRevisionStage, foundationRevisionPacketPath, revisionTaskReceiptTerminalDigest } from '../beegame/delivery-workflow/foundation-revision-stage'
 import {
   buildFoundationFactStructuredOutputJsonSchema,
   foundationFactExtractorTerminalSchema,
@@ -50,48 +46,18 @@ describe('delivery worker session credentials', () => {
       revision: 'revision',
       keys: ['audio.event_ids', 'game.players.max'],
       sections: [
-        {
-          documentPath: 'docs/AUDIO_DESIGN.md',
-          sectionId: 'event_taxonomy',
-          heading: 'Events',
-          startLine: 65,
-          endLine: 80,
-          digest: 'a'.repeat(64),
-          text: 'events',
-        },
-        {
-          documentPath: 'docs/GDD.md',
-          sectionId: 'vision',
-          heading: 'Vision',
-          startLine: 10,
-          endLine: 20,
-          digest: 'b'.repeat(64),
-          text: 'vision',
-        },
+        { documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', heading: 'Events', startLine: 65, endLine: 80, digest: 'a'.repeat(64), text: 'events' },
+        { documentPath: 'docs/GDD.md', sectionId: 'vision', heading: 'Vision', startLine: 10, endLine: 20, digest: 'b'.repeat(64), text: 'vision' },
       ],
       bytesUtf8: 1,
       packetDigest: 'c'.repeat(64),
-    } satisfies FoundationFactPacket) as {
-      properties: {
-        results: { items: { oneOf: Array<Record<string, unknown>> } }
-      }
-    }
-    expect(schema.properties.results).toMatchObject({
-      minItems: 2,
-      maxItems: 2,
-    })
+    } satisfies FoundationFactPacket) as { properties: { results: { items: { oneOf: Array<Record<string, unknown>> } } } }
+    expect(schema.properties.results).toMatchObject({ minItems: 2, maxItems: 2 })
     const branches = schema.properties.results.items.oneOf
     expect(branches).toHaveLength(6)
-    const presentAudio = branches.find(
-      branch =>
-        (
-          branch.properties as {
-            key: { enum: string[] }
-            status: { enum: string[] }
-          }
-        ).key.enum[0] === 'audio.event_ids' &&
-        (branch.properties as { status: { enum: string[] } }).status.enum[0] ===
-          'present',
+    const presentAudio = branches.find(branch =>
+      (branch.properties as { key: { enum: string[] }; status: { enum: string[] } }).key.enum[0] === 'audio.event_ids' &&
+      (branch.properties as { status: { enum: string[] } }).status.enum[0] === 'present',
     )!
     expect(presentAudio.additionalProperties).toBe(false)
     expect(presentAudio.required).toEqual(['key', 'status', 'value'])
@@ -104,262 +70,105 @@ describe('delivery worker session credentials', () => {
         items: { type: 'string', pattern: '^\\S(?:.*\\S)?$' },
       },
     })
-    const absentAudio = branches.find(
-      branch =>
-        (
-          branch.properties as {
-            key: { enum: string[] }
-            status: { enum: string[] }
-          }
-        ).key.enum[0] === 'audio.event_ids' &&
-        (branch.properties as { status: { enum: string[] } }).status.enum[0] ===
-          'absent',
+    const absentAudio = branches.find(branch =>
+      (branch.properties as { key: { enum: string[] }; status: { enum: string[] } }).key.enum[0] === 'audio.event_ids' &&
+      (branch.properties as { status: { enum: string[] } }).status.enum[0] === 'absent',
     )!
     expect(absentAudio.required).toEqual(['key', 'status'])
     expect(absentAudio.properties).not.toHaveProperty('value')
     expect(absentAudio.properties).not.toHaveProperty('evidence')
     expect(absentAudio.properties).not.toHaveProperty('reason')
-    const uncertainAudio = branches.find(
-      branch =>
-        (
-          branch.properties as {
-            key: { enum: string[] }
-            status: { enum: string[] }
-          }
-        ).key.enum[0] === 'audio.event_ids' &&
-        (branch.properties as { status: { enum: string[] } }).status.enum[0] ===
-          'uncertain',
+    const uncertainAudio = branches.find(branch =>
+      (branch.properties as { key: { enum: string[] }; status: { enum: string[] } }).key.enum[0] === 'audio.event_ids' &&
+      (branch.properties as { status: { enum: string[] } }).status.enum[0] === 'uncertain',
     )!
     expect(uncertainAudio.required).toEqual(['key', 'status', 'reason'])
     expect(uncertainAudio.properties).not.toHaveProperty('evidence')
     const validate = new Ajv().compile(schema)
-    expect(
-      validate({
-        status: 'completed',
-        results: [
-          { key: 'audio.event_ids', status: 'absent' },
-          { key: 'game.players.max', status: 'absent' },
-        ],
-      }),
-    ).toBe(true)
-    expect(
-      validate({
-        status: 'completed',
-        results: [
-          {
-            key: 'audio.event_ids',
-            status: 'absent',
-            value: ['unexpected'],
-            evidence: {
-              documentPath: 'docs/AUDIO_DESIGN.md',
-              sectionId: 'event_taxonomy',
-              startLine: 65,
-              endLine: 80,
-              digest: 'a'.repeat(64),
-            },
-            reason: 'unexpected extra fields',
-          },
-          { key: 'game.players.max', status: 'absent' },
-        ],
-      }),
-    ).toBe(false)
-    expect(
-      validate({
-        status: 'completed',
-        results: [
-          {
-            key: 'audio.event_ids',
-            status: 'present',
-            value: ['player.jump'],
-            evidence: [],
-          },
-          { key: 'game.players.max', status: 'absent' },
-        ],
-      }),
-    ).toBe(false)
-    expect(
-      validate({
-        status: 'completed',
-        results: [
-          {
-            key: 'audio.event_ids',
-            status: 'present',
-            value: ['player.jump'],
-            evidence: {},
-          },
-          { key: 'game.players.max', status: 'absent' },
-        ],
-      }),
-    ).toBe(false)
-    expect(
-      validate({
-        status: 'completed',
-        results: [
-          {
-            key: 'audio.event_ids',
-            status: 'present',
-            value: ['player.jump'],
-            evidence: {
-              documentPath: 'docs/GDD.md',
-              sectionId: 'vision',
-              startLine: 10,
-              endLine: 20,
-              digest: 'a'.repeat(64),
-            },
-          },
-          { key: 'game.players.max', status: 'absent' },
-        ],
-      }),
-    ).toBe(false)
-    expect(
-      validate({
-        status: 'completed',
-        results: [
-          { key: 'audio.event_ids', status: 'uncertain', reason: 'ambiguous' },
-          { key: 'game.players.max', status: 'absent' },
-        ],
-      }),
-    ).toBe(true)
+    expect(validate({ status: 'completed', results: [{ key: 'audio.event_ids', status: 'absent' }, { key: 'game.players.max', status: 'absent' }] })).toBe(true)
+    expect(validate({
+      status: 'completed',
+      results: [{
+        key: 'audio.event_ids',
+        status: 'absent',
+        value: ['unexpected'],
+        evidence: { documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'a'.repeat(64) },
+        reason: 'unexpected extra fields',
+      }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(false)
+    expect(validate({
+      status: 'completed',
+      results: [{
+        key: 'audio.event_ids',
+        status: 'present',
+        value: ['player.jump'],
+        evidence: [],
+      }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(false)
+    expect(validate({
+      status: 'completed',
+      results: [{
+        key: 'audio.event_ids',
+        status: 'present',
+        value: ['player.jump'],
+        evidence: {},
+      }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(false)
+    expect(validate({
+      status: 'completed',
+      results: [{
+        key: 'audio.event_ids',
+        status: 'present',
+        value: ['player.jump'],
+        evidence: { documentPath: 'docs/GDD.md', sectionId: 'vision', startLine: 10, endLine: 20, digest: 'a'.repeat(64) },
+      }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(false)
+    expect(validate({
+      status: 'completed',
+      results: [{ key: 'audio.event_ids', status: 'uncertain', reason: 'ambiguous' }, { key: 'game.players.max', status: 'absent' }],
+    })).toBe(true)
   })
 
   test('exposes the foundation revision terminal and derives a terminal from its successful tool event', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'revision-session-port-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'revision-session-port-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       const contract = getGameDocumentContract('docs/GDD.md')
       const canonical = `# GDD\n\n${contract.sections.map(section => `<!-- beegame-section:${section.sectionId} -->\n## ${section.title}\n\noriginal ${section.sectionId}\n`).join('\n')}`
       await writeFile(join(workspacePath, 'docs/GDD.md'), canonical)
-      const stage = await createFoundationRevisionStage({
-        workspacePath,
-        revision: 'rev-1',
-        documentPath: 'docs/GDD.md',
-      })
+      const stage = await createFoundationRevisionStage({ workspacePath, revision: 'rev-1', documentPath: 'docs/GDD.md' })
       const staged = canonical.replace('original vision', 'revised vision')
       await writeFile(join(workspacePath, stage.stagedPath), staged)
       const receiptWithoutTerminal = {
-        taskId: 'revision-task-1',
-        round: 1 as const,
-        documentPath: 'docs/GDD.md' as const,
-        issueIds: ['AUD-1'],
+        taskId: 'revision-task-1', round: 1 as const, documentPath: 'docs/GDD.md' as const, issueIds: ['AUD-1'],
         baseDocumentDigest: stage.baseDocumentDigest,
         stagedDocumentDigest: createHash('sha256').update(staged).digest('hex'),
-        changedSectionIds: ['vision'],
-        stagedPath: stage.stagedPath,
+        changedSectionIds: ['vision'], stagedPath: stage.stagedPath,
       }
-      const receipt = {
-        ...receiptWithoutTerminal,
-        terminalDigest: revisionTaskReceiptTerminalDigest(
-          receiptWithoutTerminal,
-        ),
-      }
+      const receipt = { ...receiptWithoutTerminal, terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal) }
       const starts: Array<Record<string, unknown>> = []
       const prompts: string[] = []
       const sessions = {
-        start(input: Record<string, unknown>) {
-          starts.push(input)
-          return { id: 'session-revision' }
-        },
+        start(input: Record<string, unknown>) { starts.push(input); return { id: 'session-revision' } },
         updateAuthToken() {},
-        async sendWithDisplay(_sessionId: string, text: string) {
-          prompts.push(text)
-          return {}
-        },
-        events() {
-          return [
-            {
-              id: 'revision-tool-use',
-              type: 'tool.started' as const,
-              text: 'SubmitFoundationRevisionResult',
-              createdAt: new Date(),
-              payload: {
-                type: 'tool.started',
-                toolName: 'SubmitFoundationRevisionResult',
-                input: {
-                  status: 'APPLIED',
-                  changedSectionIds: ['vision'],
-                  receipt: { forged: true },
-                },
-              },
-            },
-            {
-              id: 'revision-tool-result',
-              type: 'tool.completed' as const,
-              text: 'SubmitFoundationRevisionResult completed',
-              createdAt: new Date(),
-              payload: {
-                type: 'tool.completed',
-                toolName: 'SubmitFoundationRevisionResult',
-                output: JSON.stringify({ status: 'APPLIED', receipt }),
-              },
-            },
-            {
-              id: 'revision-end-turn',
-              type: 'turn.completed' as const,
-              text: 'turn completed',
-              createdAt: new Date(),
-              payload: { type: 'turn.completed' },
-            },
-          ]
-        },
+        async sendWithDisplay(_sessionId: string, text: string) { prompts.push(text); return {} },
+        events() { return [
+          { id: 'revision-tool-use', type: 'tool.started' as const, text: 'SubmitFoundationRevisionResult', createdAt: new Date(), payload: { type: 'tool.started', toolName: 'SubmitFoundationRevisionResult', input: { status: 'APPLIED', changedSectionIds: ['vision'], receipt: { forged: true } } } },
+          { id: 'revision-tool-result', type: 'tool.completed' as const, text: 'SubmitFoundationRevisionResult completed', createdAt: new Date(), payload: { type: 'tool.completed', toolName: 'SubmitFoundationRevisionResult', output: JSON.stringify({ status: 'APPLIED', receipt }) } },
+          { id: 'revision-end-turn', type: 'turn.completed' as const, text: 'turn completed', createdAt: new Date(), payload: { type: 'turn.completed' } },
+        ] },
       } as unknown as BeeGameSessionManager
-      const port = createBeeGameDeliveryWorkerPort({
-        sessions,
-        userId: 'user-1',
-        confirmedBriefContext: 'CONFIRMED_SENTINEL',
-      })
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1', confirmedBriefContext: 'CONFIRMED_SENTINEL' })
       await port.start({
-        dispatchId: 'dispatch-revision',
-        runId: 'run-revision',
-        ownerId: 'user-1',
-        projectId: 'project-revision',
-        workspacePath,
-        workerType: 'foundation-document-reviser',
-        phase: 'DOCUMENT_REVIEW',
-        taskId: 'revision-task-1',
-        revision: 'rev-1',
-        allowedPaths: [stage.stagedPath],
-        protectedPaths: ['docs/GDD.md'],
-        projectReadScope: 'allowed',
-        contract: {
-          workerType: 'foundation-document-reviser',
-          taskId: 'revision-task-1',
-          round: 1,
-          documentPath: 'docs/GDD.md',
-          issueIds: ['AUD-1'],
-          sectionIds: ['vision'],
-          stagedPath: stage.stagedPath,
-          baseDocumentDigest: stage.baseDocumentDigest,
-          packetPath: foundationRevisionPacketPath(
-            'rev-1',
-            1,
-            'revision-task-1',
-          ),
-          packetDigest: 'a'.repeat(64),
-        },
+        dispatchId: 'dispatch-revision', runId: 'run-revision', ownerId: 'user-1', projectId: 'project-revision', workspacePath,
+        workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', taskId: 'revision-task-1', revision: 'rev-1',
+        allowedPaths: [stage.stagedPath], protectedPaths: ['docs/GDD.md'], projectReadScope: 'allowed',
+        contract: { workerType: 'foundation-document-reviser', taskId: 'revision-task-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['AUD-1'], sectionIds: ['vision'], stagedPath: stage.stagedPath, baseDocumentDigest: stage.baseDocumentDigest, packetPath: foundationRevisionPacketPath('rev-1', 1, 'revision-task-1'), packetDigest: 'a'.repeat(64) },
       })
-      await expect(
-        port.waitForTerminal?.('dispatch-revision'),
-      ).resolves.toMatchObject({
-        workerType: 'foundation-document-reviser',
-        status: 'completed',
-        declaration: { status: 'APPLIED', receipt },
-      })
-      expect(starts[0]).toMatchObject({
-        workflowAllowedPaths: [stage.stagedPath],
-        workflowProjectReadScope: 'allowed',
-        workflowProtectedPaths: ['docs/GDD.md'],
-        workflowRevisionContract: expect.objectContaining({
-          taskId: 'revision-task-1',
-          stagedPath: stage.stagedPath,
-        }),
-      })
+      await expect(port.waitForTerminal?.('dispatch-revision')).resolves.toMatchObject({ workerType: 'foundation-document-reviser', status: 'completed', declaration: { status: 'APPLIED', receipt } })
+      expect(starts[0]).toMatchObject({ workflowAllowedPaths: [stage.stagedPath], workflowProjectReadScope: 'allowed', workflowProtectedPaths: ['docs/GDD.md'], workflowRevisionContract: expect.objectContaining({ taskId: 'revision-task-1', stagedPath: stage.stagedPath }) })
       expect(starts[0]?.workflowRevisionContract).not.toHaveProperty('packet')
-      await port.submit(
-        'dispatch-revision',
-        `Immutable revision packet: {"sections":[]}\nAssigned staged path: ${join(workspacePath, stage.stagedPath)}\nRead and edit only the assigned staged path. After the revision, call SubmitFoundationRevisionResult exactly once with status APPLIED; do not return terminal JSON or prose completion text.`,
-      )
+      await port.submit('dispatch-revision', `Immutable revision packet: {"sections":[]}\nAssigned staged path: ${join(workspacePath, stage.stagedPath)}\nRead and edit only the assigned staged path. After the revision, call SubmitFoundationRevisionResult exactly once with status APPLIED and the exact changedSectionIds; do not return terminal JSON or prose completion text.`)
       expect(prompts[0]).toContain(join(workspacePath, stage.stagedPath))
       expect(prompts[0]).not.toContain('CONFIRMED_SENTINEL')
       expect(prompts[0]).not.toContain('Workspace root:')
@@ -388,41 +197,13 @@ describe('delivery worker session credentials', () => {
         userId: 'user-1',
       })
       await legacyPort.start({
-        dispatchId: 'dispatch-revision-legacy',
-        runId: 'run-revision',
-        ownerId: 'user-1',
-        projectId: 'project-revision',
-        workspacePath,
-        workerType: 'foundation-document-reviser',
-        phase: 'DOCUMENT_REVIEW',
-        taskId: 'revision-task-1',
-        revision: 'rev-1',
-        allowedPaths: [stage.stagedPath],
-        protectedPaths: ['docs/GDD.md'],
-        projectReadScope: 'allowed',
-        contract: {
-          workerType: 'foundation-document-reviser',
-          taskId: 'revision-task-1',
-          round: 1,
-          documentPath: 'docs/GDD.md',
-          issueIds: ['AUD-1'],
-          sectionIds: ['vision'],
-          stagedPath: stage.stagedPath,
-          baseDocumentDigest: stage.baseDocumentDigest,
-          packetPath: foundationRevisionPacketPath(
-            'rev-1',
-            1,
-            'revision-task-1',
-          ),
-          packetDigest: 'a'.repeat(64),
-        },
+        dispatchId: 'dispatch-revision-legacy', runId: 'run-revision', ownerId: 'user-1', projectId: 'project-revision', workspacePath,
+        workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', taskId: 'revision-task-1', revision: 'rev-1',
+        allowedPaths: [stage.stagedPath], protectedPaths: ['docs/GDD.md'], projectReadScope: 'allowed',
+        contract: { workerType: 'foundation-document-reviser', taskId: 'revision-task-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['AUD-1'], sectionIds: ['vision'], stagedPath: stage.stagedPath, baseDocumentDigest: stage.baseDocumentDigest, packetPath: foundationRevisionPacketPath('rev-1', 1, 'revision-task-1'), packetDigest: 'a'.repeat(64) },
       })
-      await expect(
-        legacyPort.waitForTerminal?.('dispatch-revision-legacy'),
-      ).rejects.toThrow()
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
+      await expect(legacyPort.waitForTerminal?.('dispatch-revision-legacy')).rejects.toThrow()
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
   test('uses the native StructuredOutput result for fact extraction and passes its strict schema to the runner', async () => {
@@ -437,19 +218,13 @@ describe('delivery worker session credentials', () => {
         return { id: 'session-facts' }
       },
       events() {
-        return [
-          {
-            id: 'fact-result',
-            type: 'result' as const,
-            text: 'Structured output accepted',
-            createdAt: new Date(),
-            payload: {
-              type: 'result',
-              subtype: 'success',
-              structured_output: structured,
-            },
-          },
-        ]
+        return [{
+          id: 'fact-result',
+          type: 'result' as const,
+          text: 'Structured output accepted',
+          createdAt: new Date(),
+          payload: { type: 'result', subtype: 'success', structured_output: structured },
+        }]
       },
     } as unknown as BeeGameSessionManager
     const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
@@ -464,24 +239,7 @@ describe('delivery worker session credentials', () => {
       revision: 'revision-facts',
       allowedPaths: [],
       projectReadScope: 'empty' as const,
-      contract: {
-        taskId: 'task-facts',
-        packetDigest: 'a'.repeat(64),
-        modelTier: 'fast',
-        workerType: 'foundation-fact-extractor',
-        packet: {
-          keys: ['audio.event_ids'],
-          sections: [
-            {
-              documentPath: 'docs/AUDIO_DESIGN.md',
-              sectionId: 'event_taxonomy',
-              startLine: 65,
-              endLine: 80,
-              digest: 'b'.repeat(64),
-            },
-          ],
-        },
-      },
+      contract: { taskId: 'task-facts', packetDigest: 'a'.repeat(64), modelTier: 'fast', workerType: 'foundation-fact-extractor', packet: { keys: ['audio.event_ids'], sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }] } },
     } as unknown as WorkerDispatchRequest
     await port.start(request)
     const terminal = await port.waitForTerminal?.('dispatch-facts')
@@ -495,12 +253,10 @@ describe('delivery worker session credentials', () => {
       packetDigest: 'a'.repeat(64),
       results: [],
     })
-    const schema = starts[0]?.workflowJsonSchema as
-      | {
-          required?: unknown[]
-          properties?: { results?: unknown }
-        }
-      | undefined
+    const schema = starts[0]?.workflowJsonSchema as {
+      required?: unknown[]
+      properties?: { results?: unknown }
+    } | undefined
     expect(schema).toMatchObject({
       additionalProperties: false,
       required: ['status', 'results'],
@@ -510,9 +266,7 @@ describe('delivery worker session credentials', () => {
     expect(schema?.required).not.toContain('taskId')
     expect(schema?.required).not.toContain('revision')
     expect(schema?.required).not.toContain('packetDigest')
-    const itemSchema = schema?.properties?.results as
-      | { items?: { oneOf?: Array<Record<string, unknown>> } }
-      | undefined
+    const itemSchema = schema?.properties?.results as { items?: { oneOf?: Array<Record<string, unknown>> } } | undefined
     expect(itemSchema?.items?.oneOf).toHaveLength(3)
   })
 
@@ -526,16 +280,8 @@ describe('delivery worker session credentials', () => {
     }
     const payloads = [
       { status: 'completed' as const, outcome: 'PASS' as const },
-      {
-        status: 'completed' as const,
-        outcome: 'ISSUES' as const,
-        issues: [issue],
-      },
-      {
-        status: 'completed' as const,
-        outcome: 'UNDECIDABLE' as const,
-        reason: 'The packet is ambiguous.',
-      },
+      { status: 'completed' as const, outcome: 'ISSUES' as const, issues: [issue] },
+      { status: 'completed' as const, outcome: 'UNDECIDABLE' as const, reason: 'The packet is ambiguous.' },
     ]
 
     for (const [index, payload] of payloads.entries()) {
@@ -559,33 +305,20 @@ describe('delivery worker session credentials', () => {
         },
       } as unknown as WorkerDispatchRequest
       const sessions = {
-        start() {
-          return { id: `session-semantic-${index}` }
-        },
+        start() { return { id: `session-semantic-${index}` } },
         events() {
-          return [
-            {
-              id: `semantic-result-${index}`,
-              type: 'result' as const,
-              text: 'Structured output accepted',
-              createdAt: new Date(),
-              payload: {
-                type: 'result',
-                subtype: 'success',
-                structured_output: payload,
-              },
-            },
-          ]
+          return [{
+            id: `semantic-result-${index}`,
+            type: 'result' as const,
+            text: 'Structured output accepted',
+            createdAt: new Date(),
+            payload: { type: 'result', subtype: 'success', structured_output: payload },
+          }]
         },
       } as unknown as BeeGameSessionManager
-      const port = createBeeGameDeliveryWorkerPort({
-        sessions,
-        userId: 'user-1',
-      })
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
       await port.start(request)
-      await expect(
-        port.waitForTerminal?.(request.dispatchId!),
-      ).resolves.toEqual({
+      await expect(port.waitForTerminal?.(request.dispatchId!)).resolves.toEqual({
         ...payload,
         workerType: 'foundation-semantic-reviewer',
         runId: request.runId,
@@ -596,94 +329,34 @@ describe('delivery worker session credentials', () => {
       })
     }
 
-    expect(() =>
-      foundationSemanticModelPayloadSchema.parse({
-        status: 'completed',
-        outcome: 'PASS',
-        issues: [issue],
-      }),
-    ).toThrow()
-    expect(() =>
-      foundationSemanticModelPayloadSchema.parse({
-        status: 'completed',
-        outcome: 'ISSUES',
-      }),
-    ).toThrow()
-    expect(() =>
-      foundationSemanticModelPayloadSchema.parse({
-        status: 'completed',
-        outcome: 'UNDECIDABLE',
-      }),
-    ).toThrow()
-    expect(() =>
-      foundationSemanticModelPayloadSchema.parse({
-        status: 'completed',
-        outcome: 'UNDECIDABLE',
-        issues: [issue],
-        reason: 'ambiguous',
-      }),
-    ).toThrow()
-    const validate = new Ajv().compile(
-      foundationSemanticReviewerStructuredOutputJsonSchema,
-    )
-    expect(
-      validate({
-        status: 'completed',
-        outcome: 'PASS',
-        reason: 'provider-added explanation',
-      }),
-    ).toBe(false)
-    expect(
-      validate({
-        status: 'completed',
-        outcome: 'ISSUES',
-        issues: [issue],
-        reason: 'provider-added explanation',
-      }),
-    ).toBe(false)
-    expect(
-      validate({ status: 'completed', outcome: 'ISSUES', issues: [issue] }),
-    ).toBe(true)
-    expect(
-      validate({
-        status: 'completed',
-        outcome: 'UNDECIDABLE',
-        reason: 'ambiguous packet',
-      }),
-    ).toBe(true)
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'PASS', issues: [issue] })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'ISSUES' })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'UNDECIDABLE' })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'UNDECIDABLE', issues: [issue], reason: 'ambiguous' })).toThrow()
+    const validate = new Ajv().compile(foundationSemanticReviewerStructuredOutputJsonSchema)
+    expect(validate({ status: 'completed', outcome: 'PASS', reason: 'provider-added explanation' })).toBe(false)
+    expect(validate({ status: 'completed', outcome: 'ISSUES', issues: [issue], reason: 'provider-added explanation' })).toBe(false)
+    expect(validate({ status: 'completed', outcome: 'ISSUES', issues: [issue] })).toBe(true)
+    expect(validate({ status: 'completed', outcome: 'UNDECIDABLE', reason: 'ambiguous packet' })).toBe(true)
   })
 
   test('binds a targeted semantic recheck FAIL payload to a completed FAIL terminal', async () => {
     const diagnostic = {
       observedActual: 'The Boot to MainMenu transition row remains absent.',
-      evidence: [
-        {
-          documentPath: 'docs/GDD.md' as const,
-          sectionId: 'flow',
-        },
-      ],
+      evidence: [{ documentPath: 'docs/GDD.md' as const, sectionId: 'flow', digest: 'b'.repeat(64) }],
       failureReasonCode: 'expected_not_met' as const,
     }
     const starts: Array<Record<string, unknown>> = []
     const sessions = {
-      start(input: Record<string, unknown>) {
-        starts.push(input)
-        return { id: 'session-semantic-recheck' }
-      },
+      start(input: Record<string, unknown>) { starts.push(input); return { id: 'session-semantic-recheck' } },
       events() {
-        return [
-          {
-            id: 'semantic-recheck-result',
-            type: 'result' as const,
-            text: 'Structured output accepted',
-            createdAt: new Date(),
-            payload: {
-              type: 'result',
-              subtype: 'success',
-              structured_output: { status: 'FAIL', diagnostic },
-            },
-          },
-        ]
+        return [{
+          id: 'semantic-recheck-result',
+          type: 'result' as const,
+          text: 'Structured output accepted',
+          createdAt: new Date(),
+      payload: { type: 'result', subtype: 'success', structured_output: { status: 'FAIL', diagnostic } },
+        }]
       },
     } as unknown as BeeGameSessionManager
     const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
@@ -699,29 +372,18 @@ describe('delivery worker session credentials', () => {
       revision: 'revision-semantic-recheck',
       allowedPaths: [],
       projectReadScope: 'empty',
-      workflowJsonSchema:
-        foundationSemanticRecheckStructuredOutputJsonSchema as unknown as Record<
-          string,
-          unknown
-        >,
+      workflowJsonSchema: foundationSemanticRecheckStructuredOutputJsonSchema as unknown as Record<string, unknown>,
       contract: {
         taskId: 'task-semantic-recheck',
         issueId: 'AUD-1',
         packetDigest: 'a'.repeat(64),
-        packet: {
-          issueId: 'AUD-1',
-          expected: 'transition exists',
-          actual: 'transition absent',
-          sections: [],
-        },
+        packet: { issueId: 'AUD-1', expected: 'transition exists', actual: 'transition absent', sections: [] },
         modelTier: 'strong',
         workerType: 'foundation-semantic-reviewer',
       },
     })
 
-    await expect(
-      port.waitForTerminal?.('dispatch-semantic-recheck'),
-    ).resolves.toEqual({
+    await expect(port.waitForTerminal?.('dispatch-semantic-recheck')).resolves.toEqual({
       workerType: 'foundation-semantic-reviewer',
       status: 'completed',
       runId: 'run-semantic-recheck',
@@ -732,9 +394,7 @@ describe('delivery worker session credentials', () => {
       outcome: 'FAIL',
       diagnostic: { ...diagnostic, scopeAssessment: 'repairable_in_scope' },
     })
-    expect(starts[0]?.workflowJsonSchema).toEqual(
-      foundationSemanticRecheckStructuredOutputJsonSchema,
-    )
+    expect(starts[0]?.workflowJsonSchema).toEqual(foundationSemanticRecheckStructuredOutputJsonSchema)
   })
 
   test('rejects oversized foundation structured output at the infrastructure boundary', async () => {
@@ -758,27 +418,23 @@ describe('delivery worker session credentials', () => {
       },
     } as unknown as WorkerDispatchRequest
     const sessions = {
-      start() {
-        return { id: 'session-semantic-oversized' }
-      },
+      start() { return { id: 'session-semantic-oversized' } },
       events() {
-        return [
-          {
-            id: 'semantic-result-oversized',
-            type: 'result' as const,
-            text: 'Structured output accepted',
-            createdAt: new Date(),
-            payload: {
-              type: 'result',
-              subtype: 'success',
-              structured_output: {
-                status: 'completed',
-                outcome: 'UNDECIDABLE',
-                reason: 'x'.repeat(FOUNDATION_WORKER_OUTPUT_MAX_BYTES),
-              },
+        return [{
+          id: 'semantic-result-oversized',
+          type: 'result' as const,
+          text: 'Structured output accepted',
+          createdAt: new Date(),
+          payload: {
+            type: 'result',
+            subtype: 'success',
+            structured_output: {
+              status: 'completed',
+              outcome: 'UNDECIDABLE',
+              reason: 'x'.repeat(FOUNDATION_WORKER_OUTPUT_MAX_BYTES),
             },
           },
-        ]
+        }]
       },
     } as unknown as BeeGameSessionManager
     const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
@@ -789,51 +445,16 @@ describe('delivery worker session credentials', () => {
   })
 
   test('rejects forged identity, extra fields and malformed model payloads', () => {
-    expect(() =>
-      foundationFactModelPayloadSchema.parse({
-        status: 'completed',
-        results: [],
-        taskId: 'spoofed',
-      }),
-    ).toThrow()
-    expect(() =>
-      foundationSemanticModelPayloadSchema.parse({
-        status: 'completed',
-        outcome: 'PASS',
-        runId: 'spoofed',
-      }),
-    ).toThrow()
-    expect(() =>
-      foundationFactModelPayloadSchema.parse({
-        status: 'completed',
-        results: [{ status: 'present' }],
-      }),
-    ).toThrow()
-    expect(() =>
-      foundationSemanticModelPayloadSchema.parse({
-        status: 'unknown',
-        outcome: 'PASS',
-      }),
-    ).toThrow()
-    expect(foundationFactStructuredOutputJsonSchema.additionalProperties).toBe(
-      false,
-    )
-    expect(
-      foundationSemanticReviewerStructuredOutputJsonSchema.additionalProperties,
-    ).toBe(false)
-    expect(
-      foundationFactStructuredOutputJsonSchema.properties,
-    ).not.toHaveProperty('taskId')
-    expect(
-      foundationSemanticReviewerStructuredOutputJsonSchema.properties,
-    ).not.toHaveProperty('packetDigest')
-    expect(foundationFactStructuredOutputJsonSchema.required).toEqual([
-      'status',
-      'results',
-    ])
-    expect(
-      foundationSemanticReviewerStructuredOutputJsonSchema.required,
-    ).toEqual(['status', 'outcome'])
+    expect(() => foundationFactModelPayloadSchema.parse({ status: 'completed', results: [], taskId: 'spoofed' })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'completed', outcome: 'PASS', runId: 'spoofed' })).toThrow()
+    expect(() => foundationFactModelPayloadSchema.parse({ status: 'completed', results: [{ status: 'present' }] })).toThrow()
+    expect(() => foundationSemanticModelPayloadSchema.parse({ status: 'unknown', outcome: 'PASS' })).toThrow()
+    expect(foundationFactStructuredOutputJsonSchema.additionalProperties).toBe(false)
+    expect(foundationSemanticReviewerStructuredOutputJsonSchema.additionalProperties).toBe(false)
+    expect(foundationFactStructuredOutputJsonSchema.properties).not.toHaveProperty('taskId')
+    expect(foundationSemanticReviewerStructuredOutputJsonSchema.properties).not.toHaveProperty('packetDigest')
+    expect(foundationFactStructuredOutputJsonSchema.required).toEqual(['status', 'results'])
+    expect(foundationSemanticReviewerStructuredOutputJsonSchema.required).toEqual(['status', 'outcome'])
   })
 
   test('enforces status-specific foundation fact fields in model and terminal Zod shapes', () => {
@@ -846,19 +467,14 @@ describe('delivery worker session credentials', () => {
     }
     const absent = { key: 'game.boss.count', status: 'absent' as const }
     expect(
-      foundationFactModelPayloadSchema.parse({
-        status: 'completed',
-        results: [absent],
-      }),
+      foundationFactModelPayloadSchema.parse({ status: 'completed', results: [absent] }),
     ).toEqual({ status: 'completed', results: [absent] })
     expect(
       foundationFactModelPayloadSchema.parse({
         status: 'completed',
         results: [{ key: absent.key, status: 'present', value: 1 }],
       }),
-    ).toMatchObject({
-      results: [{ key: absent.key, status: 'present', value: 1 }],
-    })
+    ).toMatchObject({ results: [{ key: absent.key, status: 'present', value: 1 }] })
     expect(
       foundationFactExtractorTerminalSchema.parse({
         workerType: 'foundation-fact-extractor',
@@ -898,14 +514,7 @@ describe('delivery worker session credentials', () => {
     expect(() =>
       foundationFactModelPayloadSchema.parse({
         status: 'completed',
-        results: [
-          {
-            key: absent.key,
-            status: 'uncertain',
-            reason: 'ambiguous',
-            evidence,
-          },
-        ],
+        results: [{ key: absent.key, status: 'uncertain', reason: 'ambiguous', evidence }],
       }),
     ).toThrow()
     expect(() =>
@@ -917,9 +526,7 @@ describe('delivery worker session credentials', () => {
     expect(() =>
       foundationFactModelPayloadSchema.parse({
         status: 'completed',
-        results: [
-          { key: absent.key, status: 'present', value: undefined, evidence },
-        ],
+        results: [{ key: absent.key, status: 'present', value: undefined, evidence }],
       }),
     ).toThrow()
   })
@@ -962,50 +569,26 @@ describe('delivery worker session credentials', () => {
       },
     } as unknown as WorkerDispatchRequest
     const payloads = [
-      {
-        key: 'audio.event_ids',
-        status: 'present' as const,
-        value: ['player.jump'],
-      },
-      {
-        key: 'audio.event_ids',
-        status: 'uncertain' as const,
-        reason: 'ambiguous packet text',
-      },
+      { key: 'audio.event_ids', status: 'present' as const, value: ['player.jump'] },
+      { key: 'audio.event_ids', status: 'uncertain' as const, reason: 'ambiguous packet text' },
       { key: 'audio.event_ids', status: 'absent' as const },
     ]
     for (const [index, result] of payloads.entries()) {
       const sessions = {
-        start() {
-          return { id: `session-facts-bound-${index}` }
-        },
+        start() { return { id: `session-facts-bound-${index}` } },
         events() {
-          return [
-            {
-              id: `fact-result-bound-${index}`,
-              type: 'result' as const,
-              text: 'Structured output accepted',
-              createdAt: new Date(),
-              payload: {
-                type: 'result',
-                subtype: 'success',
-                structured_output: { status: 'completed', results: [result] },
-              },
-            },
-          ]
+          return [{
+            id: `fact-result-bound-${index}`,
+            type: 'result' as const,
+            text: 'Structured output accepted',
+            createdAt: new Date(),
+            payload: { type: 'result', subtype: 'success', structured_output: { status: 'completed', results: [result] } },
+          }]
         },
       } as unknown as BeeGameSessionManager
-      const port = createBeeGameDeliveryWorkerPort({
-        sessions,
-        userId: 'user-1',
-      })
-      await port.start({
-        ...request,
-        dispatchId: `dispatch-facts-bound-${index}`,
-      })
-      await expect(
-        port.waitForTerminal?.(`dispatch-facts-bound-${index}`),
-      ).resolves.toMatchObject({
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+      await port.start({ ...request, dispatchId: `dispatch-facts-bound-${index}` })
+      await expect(port.waitForTerminal?.(`dispatch-facts-bound-${index}`)).resolves.toMatchObject({
         results: [
           result.status === 'present' || result.status === 'uncertain'
             ? { ...result, evidence: ownerEvidence }
@@ -1015,48 +598,17 @@ describe('delivery worker session credentials', () => {
     }
 
     const missingOwnerSessions = {
-      start() {
-        return { id: 'session-facts-missing-owner' }
-      },
+      start() { return { id: 'session-facts-missing-owner' } },
       events() {
-        return [
-          {
-            id: 'fact-result-missing-owner',
-            type: 'result' as const,
-            text: 'Structured output accepted',
-            createdAt: new Date(),
-            payload: {
-              type: 'result',
-              subtype: 'success',
-              structured_output: {
-                status: 'completed',
-                results: [
-                  {
-                    key: 'audio.event_ids',
-                    status: 'present',
-                    value: ['player.jump'],
-                  },
-                ],
-              },
-            },
-          },
-        ]
+        return [{ id: 'fact-result-missing-owner', type: 'result' as const, text: 'Structured output accepted', createdAt: new Date(), payload: { type: 'result', subtype: 'success', structured_output: { status: 'completed', results: [{ key: 'audio.event_ids', status: 'present', value: ['player.jump'] }] } } }]
       },
     } as unknown as BeeGameSessionManager
-    const missingOwnerPort = createBeeGameDeliveryWorkerPort({
-      sessions: missingOwnerSessions,
-      userId: 'user-1',
-    })
-    await expect(
-      missingOwnerPort.start({
-        ...request,
-        dispatchId: 'dispatch-facts-missing-owner',
-        contract: {
-          ...request.contract,
-          packet: { keys: ['audio.event_ids'], sections: [] },
-        },
-      }),
-    ).rejects.toThrow(/owner section|missing/i)
+    const missingOwnerPort = createBeeGameDeliveryWorkerPort({ sessions: missingOwnerSessions, userId: 'user-1' })
+    await expect(missingOwnerPort.start({
+      ...request,
+      dispatchId: 'dispatch-facts-missing-owner',
+      contract: { ...request.contract, packet: { keys: ['audio.event_ids'], sections: [] } },
+    })).rejects.toThrow(/owner section|missing/i)
   })
 
   test('binds identical model payloads to different request identities', async () => {
@@ -1080,59 +632,25 @@ describe('delivery worker session credentials', () => {
           workerType: 'foundation-fact-extractor' as const,
           packet: {
             keys: ['audio.event_ids'],
-            sections: [
-              {
-                documentPath: 'docs/AUDIO_DESIGN.md',
-                sectionId: 'event_taxonomy',
-                startLine: 65,
-                endLine: 80,
-                digest: 'b'.repeat(64),
-              },
-            ],
+            sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }],
           },
         },
       } as unknown as WorkerDispatchRequest
       const sessions = {
-        start() {
-          return { id: `session-${suffix}` }
-        },
+        start() { return { id: `session-${suffix}` } },
         events() {
-          return [
-            {
-              id: `result-${suffix}`,
-              type: 'result' as const,
-              text: '',
-              createdAt: new Date(),
-              payload: {
-                type: 'result',
-                structured_output: { status: 'completed', results: [] },
-              },
-            },
-          ]
+          return [{ id: `result-${suffix}`, type: 'result' as const, text: '', createdAt: new Date(), payload: { type: 'result', structured_output: { status: 'completed', results: [] } } }]
         },
       } as unknown as BeeGameSessionManager
-      const port = createBeeGameDeliveryWorkerPort({
-        sessions,
-        userId: 'user-1',
-      })
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
       await port.start(request)
       return port.waitForTerminal!(request.dispatchId!)
     }
 
     const first = await startFact('one')
     const second = await startFact('two')
-    expect(first).toMatchObject({
-      runId: 'run-one',
-      dispatchId: 'dispatch-one',
-      taskId: 'task-one',
-      revision: 'revision-one',
-    })
-    expect(second).toMatchObject({
-      runId: 'run-two',
-      dispatchId: 'dispatch-two',
-      taskId: 'task-two',
-      revision: 'revision-two',
-    })
+    expect(first).toMatchObject({ runId: 'run-one', dispatchId: 'dispatch-one', taskId: 'task-one', revision: 'revision-one' })
+    expect(second).toMatchObject({ runId: 'run-two', dispatchId: 'dispatch-two', taskId: 'task-two', revision: 'revision-two' })
     expect(first).not.toEqual(second)
   })
 
@@ -1142,9 +660,7 @@ describe('delivery worker session credentials', () => {
       userId: 'user-1',
       modelConfigId: 'remote-model-config',
     })
-    await port.assertFoundationFactFastReady!({
-      workerType: 'foundation-fact-extractor',
-    } as unknown as WorkerDispatchRequest)
+    await port.assertFoundationFactFastReady!({ workerType: 'foundation-fact-extractor' } as unknown as WorkerDispatchRequest)
     await port.assertFoundationSemanticModelReady!({
       workerType: 'foundation-semantic-reviewer',
       contract: { modelTier: 'balanced' },
@@ -1592,9 +1108,7 @@ describe('delivery worker session credentials', () => {
   })
 
   test('assembles the final initial author prompt without repeated assignment or authority text', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'document-prompt-dedup-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-prompt-dedup-'))
     let submittedPrompt = ''
     const sessions = {
       start() {
@@ -1632,31 +1146,13 @@ describe('delivery worker session credentials', () => {
       await port.start(request)
       await port.submit(request.dispatchId!, buildWorkerPrompt(request))
 
-      expect(
-        countOccurrences(
-          submittedPrompt,
-          'Return exactly one complete raw Markdown body',
-        ),
-      ).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'Return exactly one complete raw Markdown body')).toBe(1)
       expect(countOccurrences(submittedPrompt, 'Do not call tools')).toBe(1)
-      expect(
-        countOccurrences(submittedPrompt, 'completeDocumentContract'),
-      ).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'completeDocumentContract')).toBe(1)
       expect(countOccurrences(submittedPrompt, 'confirmed_build_brief')).toBe(1)
-      expect(
-        countOccurrences(
-          submittedPrompt,
-          'This document has no upstream document dependency.',
-        ),
-      ).toBe(0)
-      expect(
-        countOccurrences(
-          submittedPrompt,
-          'The assigned target is docs/GDD.md.',
-        ),
-      ).toBe(1)
-      for (const material of getGameDocumentContract('docs/GDD.md')
-        .productionMaterials)
+      expect(countOccurrences(submittedPrompt, 'This document has no upstream document dependency.')).toBe(0)
+      expect(countOccurrences(submittedPrompt, 'The assigned target is docs/GDD.md.')).toBe(1)
+      for (const material of getGameDocumentContract('docs/GDD.md').productionMaterials)
         expect(countOccurrences(submittedPrompt, material.materialId)).toBe(1)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
@@ -1664,9 +1160,7 @@ describe('delivery worker session credentials', () => {
   })
 
   test('does not synthesize retry failure evidence for any foundation author', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'document-prompt-retry-dedup-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'document-prompt-retry-dedup-'))
     let submittedPrompt = ''
     let sessionCount = 0
     const sessions = {
@@ -1719,11 +1213,7 @@ describe('delivery worker session credentials', () => {
               foundationDocumentPath: path,
               completeDocumentContract: contract,
               ...(authoringMode === 'initial'
-                ? {
-                    availableUpstreamPaths: contract.upstreamSections.map(
-                      source => source.path,
-                    ),
-                  }
+                ? { availableUpstreamPaths: contract.upstreamSections.map(source => source.path) }
                 : { availableUpstreamPaths: [] }),
             },
           }
@@ -1752,68 +1242,31 @@ describe('delivery worker session credentials', () => {
   })
 
   test('omits brief and authority display metadata for packet workers', async () => {
-    for (const workerType of [
-      'foundation-fact-extractor',
-      'foundation-semantic-reviewer',
-    ] as const) {
+    for (const workerType of ['foundation-fact-extractor', 'foundation-semantic-reviewer'] as const) {
       let submittedPrompt = ''
       let display: Record<string, unknown> | undefined
       const sessions = {
-        start() {
-          return { id: `session-${workerType}` }
-        },
+        start() { return { id: `session-${workerType}` } },
         updateAuthToken() {},
-        async sendWithDisplay(
-          _sessionId: string,
-          prompt: string,
-          metadata: Record<string, unknown>,
-        ) {
+        async sendWithDisplay(_sessionId: string, prompt: string, metadata: Record<string, unknown>) {
           submittedPrompt = prompt
           display = metadata
         },
       } as unknown as BeeGameSessionManager
       const request: WorkerDispatchRequest = {
         dispatchId: `dispatch-${workerType}`,
-        runId: 'run-packet',
-        ownerId: 'user-1',
-        projectId: 'project-packet',
-        workspacePath: '/workspace-secret',
-        workerType,
-        phase: 'DOCUMENT_REVIEW',
-        taskId: `task-${workerType}`,
-        revision: 'revision-packet',
-        allowedPaths: [],
-        projectReadScope: 'empty',
+        runId: 'run-packet', ownerId: 'user-1', projectId: 'project-packet', workspacePath: '/workspace-secret',
+        workerType, phase: 'DOCUMENT_REVIEW', taskId: `task-${workerType}`, revision: 'revision-packet', allowedPaths: [], projectReadScope: 'empty',
         contract: {
-          workerType,
-          taskId: `task-${workerType}`,
-          revision: 'revision-packet',
-          packetDigest: 'a'.repeat(64),
-          modelTier:
-            workerType === 'foundation-fact-extractor' ? 'fast' : 'balanced',
-          packet:
-            workerType === 'foundation-fact-extractor'
-              ? {
-                  revision: 'revision-packet',
-                  keys: ['audio.event_ids'],
-                  sections: [
-                    {
-                      documentPath: 'docs/AUDIO_DESIGN.md',
-                      sectionId: 'event_taxonomy',
-                      startLine: 65,
-                      endLine: 80,
-                      digest: 'b'.repeat(64),
-                      text: 'Audio event authority.',
-                    },
-                  ],
-                  packetDigest: 'a'.repeat(64),
-                }
-              : {
-                  revision: 'revision-packet',
-                  keys: ['GDD.player_loop'],
-                  sections: [],
-                  packetDigest: 'a'.repeat(64),
-                },
+          workerType, taskId: `task-${workerType}`, revision: 'revision-packet', packetDigest: 'a'.repeat(64), modelTier: workerType === 'foundation-fact-extractor' ? 'fast' : 'balanced',
+          packet: workerType === 'foundation-fact-extractor'
+            ? {
+                revision: 'revision-packet',
+                keys: ['audio.event_ids'],
+                sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64), text: 'Audio event authority.' }],
+                packetDigest: 'a'.repeat(64),
+              }
+            : { revision: 'revision-packet', keys: ['GDD.player_loop'], sections: [], packetDigest: 'a'.repeat(64) },
           confirmedBriefContext: 'CONFIRMED_BRIEF_SENTINEL',
         },
       }
@@ -1821,15 +1274,10 @@ describe('delivery worker session credentials', () => {
         sessions,
         userId: 'user-1',
         confirmedBriefContext: 'CONFIRMED_BRIEF_SENTINEL',
-        async getConfirmedBriefContext() {
-          throw new Error('packet workers must not load the confirmed brief')
-        },
+        async getConfirmedBriefContext() { throw new Error('packet workers must not load the confirmed brief') },
       })
       await port.start(request)
-      await port.submit(
-        request.dispatchId!,
-        'CONFIRMED_BRIEF_SENTINEL /workspace-secret',
-      )
+      await port.submit(request.dispatchId!, 'CONFIRMED_BRIEF_SENTINEL /workspace-secret')
       expect(submittedPrompt).not.toContain('CONFIRMED_BRIEF_SENTINEL')
       expect(submittedPrompt).not.toContain('/workspace-secret')
       expect(submittedPrompt).toContain('Model packet contract')
@@ -2193,35 +1641,24 @@ describe('delivery worker session credentials', () => {
   })
 
   test('fails closed with the original validation diagnostics when a post-idle turn fails', async () => {
-    const workspacePath = await mkdtemp(
-      join(tmpdir(), 'beegame-author-result-race-'),
-    )
+    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-author-result-race-'))
     const dispatchId = 'dispatch-author-result-race'
     const runId = 'run-author-result-race'
     const targetPath = 'docs/GDD.md' as const
     const prompts: string[] = []
     let starts = 0
-    const events: Array<Record<string, unknown>> = [
-      {
-        id: 1,
-        type: 'result',
-        text: 'native result arrived before the failure event',
-        createdAt: new Date(),
-      },
-    ]
+    const events: Array<Record<string, unknown>> = [{
+      id: 1,
+      type: 'result',
+      text: 'native result arrived before the failure event',
+      createdAt: new Date(),
+    }]
     let idleCalls = 0
     const sessions = {
-      start() {
-        starts += 1
-        return { id: 'session-author-result-race' }
-      },
+      start() { starts += 1; return { id: 'session-author-result-race' } },
       updateAuthToken() {},
-      events() {
-        return events
-      },
-      isWorkflowWorkerOpen() {
-        return true
-      },
+      events() { return events },
+      isWorkflowWorkerOpen() { return true },
       async waitForWorkflowWorkerIdle() {
         idleCalls += 1
         if (idleCalls === 1)
@@ -2232,15 +1669,10 @@ describe('delivery worker session credentials', () => {
             createdAt: new Date(),
           })
       },
-      async sendWithDisplay() {
-        prompts.push('unexpected second turn')
-      },
+      async sendWithDisplay() { prompts.push('unexpected second turn') },
     } as unknown as BeeGameSessionManager
     try {
-      const port = createBeeGameDeliveryWorkerPort({
-        sessions,
-        userId: 'user-1',
-      })
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
       await port.start({
         dispatchId,
         runId,
@@ -2262,16 +1694,12 @@ describe('delivery worker session credentials', () => {
 
       await expect(port.waitForTerminal?.(dispatchId)).rejects.toMatchObject({
         name: 'WorkerNeedsActionError',
-        message: expect.stringContaining(
-          'complete game document requires one document title',
-        ),
+        message: expect.stringContaining('complete game document requires one document title'),
       })
       expect(starts).toBe(1)
       expect(idleCalls).toBe(1)
       expect(prompts).toHaveLength(0)
-      expect(events.filter(event => event.type === 'turn.failed')).toHaveLength(
-        1,
-      )
+      expect(events.filter(event => event.type === 'turn.failed')).toHaveLength(1)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }
@@ -2321,8 +1749,7 @@ describe('delivery worker session credentials', () => {
     }
     expect(error).toMatchObject({
       name: 'WorkerNeedsActionError',
-      message:
-        'foundation_transport_needs_action: provider completion reason missing',
+      message: 'foundation_transport_needs_action: provider completion reason missing',
     })
   })
 
@@ -2642,6 +2069,7 @@ describe('delivery worker session credentials', () => {
       port.waitForTerminal?.('dispatch-resource-rejected-parallel'),
     ).rejects.toThrow('model turn ended after rejected calls')
   })
+
 })
 
 async function createResourceWorkspace(): Promise<string> {

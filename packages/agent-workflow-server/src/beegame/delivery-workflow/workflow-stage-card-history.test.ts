@@ -96,29 +96,27 @@ describe('workflow stage card history', () => {
       status: 'completed',
     })
     if (!frozen) return
-    expect(projectCurrentStageCard({ run: next, workspacePath })).toMatchObject(
-      {
-        stageId: 'FOUNDATION_REVISION',
-        phaseIndex: 4,
-        phaseCount: 10,
-        substage: 'REPAIRING',
-      },
-    )
+    expect(
+      projectCurrentStageCard({ run: next, workspacePath })
+    ).toMatchObject({
+      stageId: 'FOUNDATION_REVISION',
+      phaseIndex: 4,
+      phaseCount: 10,
+      substage: 'REPAIRING',
+    })
     const history = projectWorkflowStageCardHistory({
       run: next,
       workspacePath,
-      events: [
-        {
-          eventId: 'audit-stage-frozen',
-          runId: next.runId,
-          type: 'phase.entered',
-          phase: 'DOCUMENT_REVIEW',
-          status: 'running',
-          revision: next.revision,
-          createdAt: next.updatedAt,
-          stageSnapshot: frozen,
-        },
-      ],
+      events: [{
+        eventId: 'audit-stage-frozen',
+        runId: next.runId,
+        type: 'phase.entered',
+        phase: 'DOCUMENT_REVIEW',
+        status: 'running',
+        revision: next.revision,
+        createdAt: next.updatedAt,
+        stageSnapshot: frozen,
+      }],
       now: next.updatedAt,
     })
     expect(history.map(card => card.stageId)).toEqual([
@@ -250,38 +248,34 @@ describe('workflow stage card history', () => {
           status: 'revising',
           revision: base.revision,
           activeBundleId: 'bundle-revision-cursor',
-          revisionBundles: [
-            {
-              bundleId: 'bundle-revision-cursor',
-              status: 'active',
-              round: 1,
-              baseDocumentRevision: base.revision,
-              baseDocumentDigests: [],
-              remediationDigest: 'c'.repeat(64),
-              taskIds: ['revision:gdd'],
-              frozenTaskIds: [],
-            },
-          ],
-          tasks: [
-            {
-              taskId: 'revision:gdd',
-              kind: 'document-revision',
-              revision: base.revision,
-              round: 1,
-              bundleId: 'bundle-revision-cursor',
-              packetPath: '.beegame/packet.json',
-              packetDigest: 'a'.repeat(64),
-              attempt: 1,
-              status: 'running',
-              documentPath: 'docs/GDD.md',
-              issueIds: ['AUD-1'],
-              sectionIds: ['progression'],
-              stagedPath: '.beegame/staged/GDD.md',
-              baseDocumentDigest: 'b'.repeat(64),
-              dependencyDigests: {},
-              frozen: false,
-            },
-          ],
+          revisionBundles: [{
+            bundleId: 'bundle-revision-cursor',
+            status: 'active',
+            round: 1,
+            baseDocumentRevision: base.revision,
+            baseDocumentDigests: [],
+            remediationDigest: 'c'.repeat(64),
+            taskIds: ['revision:gdd'],
+            frozenTaskIds: [],
+          }],
+          tasks: [{
+            taskId: 'revision:gdd',
+            kind: 'document-revision',
+            revision: base.revision,
+            round: 1,
+            bundleId: 'bundle-revision-cursor',
+            packetPath: '.beegame/packet.json',
+            packetDigest: 'a'.repeat(64),
+            attempt: 1,
+            status: 'running',
+            documentPath: 'docs/GDD.md',
+            issueIds: ['AUD-1'],
+            sectionIds: ['progression'],
+            stagedPath: '.beegame/staged/GDD.md',
+            baseDocumentDigest: 'b'.repeat(64),
+            dependencyDigests: {},
+            frozen: false,
+          }],
         },
       } as never,
       workspacePath,
@@ -292,12 +286,7 @@ describe('workflow stage card history', () => {
       phaseIndex: 4,
       substage: 'REPAIRING',
       documentStep: 'FOUNDATION_REVIEW',
-      tasks: [
-        expect.objectContaining({
-          id: 'revision:docs/GDD.md',
-          operation: 'revise',
-        }),
-      ],
+      tasks: [expect.objectContaining({ id: 'revision:docs/GDD.md', operation: 'revise' })],
     })
     expect(card?.message).toBeUndefined()
   })

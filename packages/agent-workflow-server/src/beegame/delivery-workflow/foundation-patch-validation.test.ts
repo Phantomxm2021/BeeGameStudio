@@ -511,58 +511,6 @@ describe('targeted foundation patch validation', () => {
     expect(result.semanticRecheckIssueIds).toEqual([semantic.id])
   })
 
-  test('accepts one actual operation when a patch issue lists multiple canonical candidate sections', () => {
-    const fixture = productionFixture()
-    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
-    const candidate = issue('multi-candidate', rules)
-    candidate.remediation = {
-      kind: 'patch',
-      documentPath: 'docs/GDD.md',
-      sectionIds: ['rules_systems', 'player_actions'],
-    }
-
-    expect(() => validateFoundationPatch(validationInput(fixture, [candidate.id], [candidate]))).not.toThrow()
-  })
-
-  test('rejects a patch issue when none of its candidate sections changed', () => {
-    const fixture = productionFixture()
-    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
-    const candidate = issue('zero-candidate-hit', rules)
-    candidate.remediation = {
-      kind: 'patch',
-      documentPath: 'docs/GDD.md',
-      sectionIds: ['vision', 'player_actions'],
-    }
-
-    expect(() => validateFoundationPatch(validationInput(fixture, [candidate.id], [candidate]))).toThrow(/outside the patch/i)
-  })
-
-  test('rejects a patch issue with an unknown candidate even when another candidate changed', () => {
-    const fixture = productionFixture()
-    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
-    const candidate = issue('unknown-candidate', rules)
-    candidate.remediation = {
-      kind: 'patch',
-      documentPath: 'docs/GDD.md',
-      sectionIds: ['rules_systems', 'not_a_canonical_section'],
-    }
-
-    expect(() => validateFoundationPatch(validationInput(fixture, [candidate.id], [candidate]))).toThrow(/outside the patch|SectionIndex/i)
-  })
-
-  test('rejects a patch issue with duplicate candidate sections', () => {
-    const fixture = productionFixture()
-    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
-    const candidate = issue('duplicate-candidate', rules)
-    candidate.remediation = {
-      kind: 'patch',
-      documentPath: 'docs/GDD.md',
-      sectionIds: ['rules_systems', 'rules_systems'],
-    }
-
-    expect(() => validateFoundationPatch(validationInput(fixture, [candidate.id], [candidate]))).toThrow(/outside|unique|duplicate/i)
-  })
-
   test('rejects duplicate or out-of-scope issue and operation bindings', () => {
     const fixture = productionFixture()
     const rules = fixture.sectionIndex.find(section => section.sectionId === 'rules_systems')!
@@ -729,7 +677,7 @@ describe('semantic patch targeted recheck authority', () => {
       status: 'FAIL',
       diagnostic: {
         observedActual: 'the contradiction remains after the patch',
-        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId }],
+        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
         failureReasonCode: 'actual_persists',
       },
     }, { taskId: 'revision-task-1', issue: input.issue })
@@ -761,7 +709,7 @@ describe('semantic patch targeted recheck authority', () => {
     const section = packet.sections[0]!
     const diagnostic = {
       observedActual: 'the contradiction remains',
-      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId }],
+      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
       failureReasonCode: 'actual_persists' as const,
     }
     const admitted = admitFoundationSemanticRecheckResult(packet, { status: 'FAIL', diagnostic }, { taskId: 'revision-task-1', issue: input.issue })
@@ -778,7 +726,7 @@ describe('semantic patch targeted recheck authority', () => {
     const section = packet.sections[0]!
     const diagnostic = {
       observedActual: 'the contradiction remains',
-      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId }],
+      evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
       failureReasonCode: 'actual_persists',
     } as const
 
@@ -786,7 +734,7 @@ describe('semantic patch targeted recheck authority', () => {
       status: 'FAIL', diagnostic: { ...diagnostic, unmetExpected: 'worker authority' },
     }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/unknown|authority|expected/i)
     expect(() => admitFoundationSemanticRecheckResult(packet, {
-      status: 'FAIL', diagnostic: { ...diagnostic, evidence: [{ documentPath: 'docs/GDD.md', sectionId: 'not-assigned' }] },
+      status: 'FAIL', diagnostic: { ...diagnostic, evidence: [{ documentPath: 'docs/GDD.md', sectionId: 'not-assigned', digest: 'a'.repeat(64) }] },
     }, { taskId: 'revision-task-1', issue: input.issue })).toThrow(/evidence|section|assigned/i)
     expect(() => admitFoundationSemanticRecheckResult(packet, {
       status: 'FAIL', diagnostic: { ...diagnostic, evidence: [] },
@@ -796,7 +744,7 @@ describe('semantic patch targeted recheck authority', () => {
     }, { taskId: 'revision-task-1', issue: { ...input.issue, expected: 'tampered expected' } })).toThrow(/expected|authority|packet/i)
   })
 
-  test('rejects generic semantic_issue_persists and worker-supplied section digests', () => {
+  test('rejects generic semantic_issue_persists and diagnostics with tampered section digests', () => {
     const input = snapshot()
     const packet = buildFoundationSemanticRecheckPacket({ ...packetInput(input), factStore: [input.fact] })
     const section = packet.sections[0]!
@@ -804,7 +752,7 @@ describe('semantic patch targeted recheck authority', () => {
       status: 'FAIL' as const,
       diagnostic: {
         observedActual: 'the contradiction remains',
-        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId }],
+        evidence: [{ documentPath: section.ref.documentPath, sectionId: section.ref.sectionId, digest: section.ref.digest }],
         failureReasonCode: 'actual_persists',
       },
     }

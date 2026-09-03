@@ -29,7 +29,7 @@ import {
   foundationPatchOperationsDigest,
   type PatchOperation,
 } from './foundation-revision-stage'
-import { canonicalFoundationBlockIds, type SectionRef } from './foundation-section-index'
+import type { SectionRef } from './foundation-section-index'
 import type { FoundationDocumentPath, FoundationRevisionRound } from './types'
 
 type DocumentInput = ReadonlyMap<string, string> | Record<string, string>
@@ -42,10 +42,6 @@ const VALID_ISSUE_TYPES = new Set<AuditIssue['type']>([
   'contract',
   'semantic',
 ])
-
-export class FoundationSemanticAdmissionError extends Error {
-  override readonly name = 'FoundationSemanticAdmissionError'
-}
 
 /** One service-owned verdict for one original deterministic issue. */
 export type PatchValidation = {
@@ -436,8 +432,6 @@ function validateAdmittedIssue(
       : true).sort(compareStable)
   if (issueKeys.length !== expectedKeys.length || issueKeys.some((key, index) => key !== expectedKeys[index]))
     throw new Error('foundation admitted issue shape is invalid')
-  const indexed = new Map(sectionIndex.map(section => [sectionKey(section), section]))
-  const canonicalSections = new Set(canonicalFoundationBlockIds(documentPath))
   if (
     typeof issue.id !== 'string' || issue.id.trim().length === 0 ||
     !['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(issue.severity) ||
@@ -447,13 +441,10 @@ function validateAdmittedIssue(
     issue.remediation.kind !== 'patch' ||
     issue.remediation.documentPath !== documentPath ||
     issue.remediation.sectionIds.length === 0 ||
-    new Set(issue.remediation.sectionIds).size !== issue.remediation.sectionIds.length ||
-    issue.remediation.sectionIds.some(sectionId =>
-      !canonicalSections.has(sectionId) ||
-      !indexed.has(`${documentPath}\0${sectionId}`)) ||
-    !issue.remediation.sectionIds.some(sectionId => allowedSections.has(`${documentPath}\0${sectionId}`))
+    issue.remediation.sectionIds.some(sectionId => !allowedSections.has(`${documentPath}\0${sectionId}`))
   )
     throw new Error('foundation admitted issue fix target is outside the patch')
+  const indexed = new Map(sectionIndex.map(section => [sectionKey(section), section]))
   for (const candidate of [issue.source, issue.target].filter(Boolean)) {
     const exact = candidate && indexed.get(sectionKey(candidate))
     if (!candidate || !exact || exact.heading !== candidate.heading || exact.startLine !== candidate.startLine || exact.endLine !== candidate.endLine || exact.digest !== candidate.digest)
@@ -703,11 +694,12 @@ export function admitFoundationSemanticRecheckResult(
   for (const item of rawEvidence) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('targeted semantic diagnostic evidence is invalid')
     const candidate = item as Record<string, unknown>
-    assertExactKeys(candidate, ['documentPath', 'sectionId'], 'targeted semantic diagnostic evidence')
-    if (typeof candidate.documentPath !== 'string' || typeof candidate.sectionId !== 'string') throw new Error('targeted semantic diagnostic evidence reference is invalid')
+    assertExactKeys(candidate, ['digest', 'documentPath', 'sectionId'], 'targeted semantic diagnostic evidence')
+    if (typeof candidate.documentPath !== 'string' || typeof candidate.sectionId !== 'string' || typeof candidate.digest !== 'string' || !DIGEST.test(candidate.digest)) throw new Error('targeted semantic diagnostic evidence reference is invalid')
     const key = `${candidate.documentPath}\0${candidate.sectionId}`
     const ref = packetSections.get(key)
     if (!ref) throw new Error('targeted semantic diagnostic evidence references an unassigned Section')
+    if (ref.digest !== candidate.digest) throw new Error('targeted semantic diagnostic evidence digest is stale')
     if (evidenceKeys.has(key)) throw new Error('targeted semantic diagnostic evidence contains duplicate Sections')
     evidenceKeys.add(key)
     evidence.push({ ...ref })

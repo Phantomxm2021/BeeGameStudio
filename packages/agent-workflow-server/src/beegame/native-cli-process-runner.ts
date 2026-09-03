@@ -6,7 +6,6 @@ import type {
   BeeGameSessionRuntime,
   BeeGameSessionSubmitInput,
   DashboardPermissionDecision,
-  WorkflowRecordStreamContract,
 } from './session-manager'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { resolveNativeRuntimeCommand } from './native-runtime-process-path'
@@ -15,7 +14,7 @@ import {
   createRuntimeObservability,
   type RuntimeObservability,
 } from './runtime-observability'
-import { assessGameDocumentMarkdownStructure } from './complete-game-document'
+import { isCompleteGameDocumentMarkdownStructure } from './complete-game-document'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stdin: {
@@ -31,23 +30,17 @@ const MARKDOWN_PROTOCOL_CONTINUATION_PROMPT =
   'Continue the same raw Markdown response from the exact point where it stopped. Return only the remaining Markdown; do not restart, summarize, or repeat the document title.'
 const MARKDOWN_PROTOCOL_RESTART_PROMPT =
   'No visible Markdown was emitted. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
-const STRUCTURED_OUTPUT_PROTOCOL_CONTINUATION_PROMPT =
-  'Continue the same StructuredOutput submission from the current native context. Do not explain, summarize, or restart. Submit exactly one completed StructuredOutput value conforming to the supplied schema.'
-const RECORD_STREAM_PROTOCOL_CONTINUATION_PROMPT =
-  'Continue the same raw NDJSON record stream from the exact point where it stopped. Return only the remaining bytes; do not repeat completed records, wrap the stream, call tools, or explain.'
 
-export function createNativeCliProcessRunner(
-  options: {
-    command?: string[]
-    observabilityFactory?: (input: {
-      workspacePath: string
-      sessionId: string
-      provider: string
-      model: string
-      launchContract?: BeeGameSessionRunnerStartInput['runtimeLaunchContract']
-    }) => RuntimeObservability
-  } = {},
-): BeeGameSessionRunner {
+export function createNativeCliProcessRunner(options: {
+  command?: string[]
+  observabilityFactory?: (input: {
+    workspacePath: string
+    sessionId: string
+    provider: string
+    model: string
+    launchContract?: BeeGameSessionRunnerStartInput['runtimeLaunchContract']
+  }) => RuntimeObservability
+} = {}): BeeGameSessionRunner {
   return {
     async start(input) {
       return NativeCliProcessRuntime.start(
@@ -62,12 +55,6 @@ export function createNativeCliProcessRunner(
 export function nativeRuntimeCommand(
   input: BeeGameSessionRunnerStartInput,
 ): string[] {
-  if (input.workflowRecordStreamContract)
-    assertRecordStreamContract(input.workflowRecordStreamContract)
-  if (input.workflowJsonSchema && input.workflowRecordStreamContract)
-    throw new Error(
-      'A native turn may use either StructuredOutput or record_stream, not both',
-    )
   if (input.resumeSessionId && !isNativeSessionId(input.resumeSessionId)) {
     throw new Error('Bee Game Studio native resume session ID must be a UUID')
   }
@@ -88,9 +75,7 @@ export function nativeRuntimeCommand(
     // the one terminal lane. Markdown streams keep their existing boundary.
     ...(input.workflowWorkerType === 'foundation-document-reviser'
       ? ['--tools', 'Read', 'Edit', 'SubmitFoundationRevisionResult']
-      : input.workflowJsonSchema ||
-          input.workflowMarkdownStreamContract ||
-          input.workflowRecordStreamContract
+      : input.workflowJsonSchema || input.workflowMarkdownStreamContract
         ? ['--tools', '']
         : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
@@ -106,13 +91,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     markdownContinuationExpected: boolean
     markdownContinuationOutput: string
     markdownRestartExpected: boolean
-    recordStreamOutput: string
-    recordStreamResponseOutput: string
-    recordStreamContinuationPending: boolean
-    structuredOutputFailure?: Record<string, unknown>
-    structuredOutputProgressIdentity?: string
-    structuredOutputMaxTokensSeen: boolean
-    structuredOutputContinuationPending: boolean
     resolve(): void
     reject(error: Error): void
     abort(): void
@@ -141,8 +119,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       launchContract?: BeeGameSessionRunnerStartInput['runtimeLaunchContract']
     }) => RuntimeObservability,
   ): Promise<NativeCliProcessRuntime> {
-    if (input.workflowRecordStreamContract)
-      assertRecordStreamContract(input.workflowRecordStreamContract)
     if (command.length === 0)
       throw new Error('Bee Game Studio native runtime command is required')
     const child = Bun.spawn(command, {
@@ -171,12 +147,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   }
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
-    if (this.disposed)
-      throw new Error('Bee Game Studio native runtime is closed')
+    if (this.disposed) throw new Error('Bee Game Studio native runtime is closed')
     if (this.activeTurn)
-      throw new Error(
-        'Bee Game Studio native runtime already has an active turn',
-      )
+      throw new Error('Bee Game Studio native runtime already has an active turn')
     if (input.signal.aborted) return
     this.structuredOutputCalls.clear()
 
@@ -184,9 +157,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       const requestId = crypto.randomUUID()
       const abort = () => {
         this.child.kill('SIGTERM')
-        this.failActiveTurn(
-          new Error('Bee Game Studio native turn was aborted'),
-        )
+        this.failActiveTurn(new Error('Bee Game Studio native turn was aborted'))
       }
       input.signal.addEventListener('abort', abort, { once: true })
       this.activeTurn = {
@@ -197,11 +168,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         markdownContinuationExpected: false,
         markdownContinuationOutput: '',
         markdownRestartExpected: false,
-        recordStreamOutput: '',
-        recordStreamResponseOutput: '',
-        recordStreamContinuationPending: false,
-        structuredOutputMaxTokensSeen: false,
-        structuredOutputContinuationPending: false,
         resolve: () => {
           input.signal.removeEventListener('abort', abort)
           resolve()
@@ -212,15 +178,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         },
         abort,
       }
-      this.observability.beginTurn({
-        requestId,
-        promptByteCount: Buffer.byteLength(
-          typeof input.prompt === 'string'
-            ? input.prompt
-            : JSON.stringify(input.prompt),
-        ),
-        resumed: this.nativeSessionId !== undefined,
-      })
+      this.observability.beginTurn({ requestId })
       this.write({
         type: 'user',
         uuid: requestId,
@@ -252,20 +210,16 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
 
   private async consumeStdout(): Promise<void> {
     try {
-      for await (const line of ndjsonLines(
-        this.child.stdout,
-        chunk => {
-          this.observability.observeStdoutChunk(chunk)
-        },
-        Boolean(this.sessionInput.workflowRecordStreamContract),
-      )) {
+      for await (const line of ndjsonLines(this.child.stdout, chunk => {
+        this.observability.observeStdoutChunk(chunk)
+      })) {
         this.observability.observeLine(line)
         let message: Record<string, unknown>
         try {
           message = JSON.parse(line) as Record<string, unknown>
         } catch {
           throw new Error(
-            `${this.sessionInput.workflowRecordStreamContract ? 'provider_stream_protocol_error: ' : ''}Bee Game Studio native runtime emitted invalid JSON (${Buffer.byteLength(line)} bytes)`,
+            `Bee Game Studio native runtime emitted invalid JSON (${Buffer.byteLength(line)} bytes)`,
           )
         }
         await this.onMessage(message)
@@ -292,27 +246,13 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         this.sessionInput.onNativeSessionId?.(reportedSessionId)
       }
     }
-    const turn = this.activeTurn
     if (message.type === 'control_request') {
-      if (this.sessionInput.workflowRecordStreamContract) {
-        if (!turn) return
-        await this.rejectRecordStreamTurn(
-          turn,
-          new Error(
-            'provider_stream_protocol_error: record_stream cannot invoke tools',
-          ),
-        )
-        return
-      }
       await this.resolvePermissionRequest(message)
       return
     }
+    const turn = this.activeTurn
     if (!turn) return
     this.observability.observeMessage(message)
-    if (this.sessionInput.workflowRecordStreamContract) {
-      await this.onRecordStreamMessage(turn, message)
-      return
-    }
     if (this.sessionInput.workflowMarkdownStreamContract) {
       const streamedText = streamedMarkdownText(message)
       if (message.type === 'stream_event') {
@@ -379,75 +319,24 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           )
         return
       }
-      const structure = assessGameDocumentMarkdownStructure(
-        this.sessionInput.workflowMarkdownStreamContract.targetPath,
-        turn.markdownOutput,
-      )
-      if (structure.status === 'unreachable') {
-        await this.rejectMarkdownTurn(
-          turn,
-          new Error(`foundation_transport_needs_action: ${structure.reason}`),
+      if (
+        !isCompleteGameDocumentMarkdownStructure(
+          this.sessionInput.workflowMarkdownStreamContract.targetPath,
+          turn.markdownOutput,
         )
-        return
-      }
-      if (structure.status !== 'complete') {
+      ) {
         await this.recoverIncompleteMarkdownTurn(turn)
         return
       }
     }
-    if (
-      message.type === 'assistant' &&
-      turn.structuredOutputContinuationPending
-    ) {
-      // The result message for the truncated response can arrive after the
-      // continuation was written. The next assistant message marks the start
-      // of that continuation response and makes subsequent stop metadata
-      // authoritative again.
-      turn.structuredOutputContinuationPending = false
-    }
-    if (
-      this.sessionInput.workflowJsonSchema &&
-      message.type === 'result' &&
-      stringField(message, 'stop_reason') === 'max_tokens' &&
-      turn.structuredOutputContinuationPending
-    ) {
-      // Do not expose the stale result envelope for the response that already
-      // caused this continuation. It cannot become a workflow terminal.
-      return
-    }
+    turn.input.onMessage(message as DashboardSDKMessage)
     this.captureStructuredOutputCall(message)
     const structuredOutput = this.successfulStructuredOutput(message)
-    if (
-      this.sessionInput.workflowJsonSchema &&
-      this.failedStructuredOutput(message)
-    ) {
-      // A provider may first emit the failed tool_result and only then report
-      // message_delta.stop_reason=max_tokens. Keep this failure out of the
-      // delivery event stream until the native turn classifies the stop.
-      turn.structuredOutputFailure = message
-      return
-    }
-    const structuredStopReason = structuredOutputStopReason(message)
-    if (
-      this.sessionInput.workflowJsonSchema &&
-      structuredStopReason === 'max_tokens'
-    ) {
-      turn.structuredOutputMaxTokensSeen = true
-    }
-    turn.input.onMessage(message as DashboardSDKMessage)
     if (
       this.sessionInput.workflowJsonSchema &&
       structuredOutput !== undefined
     ) {
       await this.completeStructuredTurn(turn, structuredOutput)
-      return
-    }
-    if (
-      this.sessionInput.workflowJsonSchema &&
-      turn.structuredOutputMaxTokensSeen &&
-      isMessageStop(message)
-    ) {
-      await this.recoverIncompleteStructuredTurn(turn)
       return
     }
     if (
@@ -460,31 +349,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         nativeTaskNotification(message),
       )
     if (message.type !== 'result') return
-    if (
-      this.sessionInput.workflowJsonSchema &&
-      stringField(message, 'stop_reason') === 'max_tokens' &&
-      !turn.structuredOutputMaxTokensSeen &&
-      !turn.structuredOutputContinuationPending
-    ) {
-      turn.structuredOutputMaxTokensSeen = true
-      await this.recoverIncompleteStructuredTurn(turn)
-      return
-    }
-    if (
-      this.sessionInput.workflowJsonSchema &&
-      turn.structuredOutputFailure &&
-      !turn.structuredOutputContinuationPending
-    ) {
-      const error = new Error(
-        'StructuredOutput failed before producing a valid result',
-      )
-      this.forwardStructuredOutputFailure(turn, error.message)
-      await this.rejectStructuredTurn(turn, error)
-      return
-    }
     this.activeTurn = null
     if (isErrorResult(message)) {
-      this.forwardStructuredOutputFailure(turn)
       const error = new Error(nativeErrorDetail(message))
       this.observability.finishTurn({ outcome: 'error', error })
       await this.observability.flush()
@@ -494,254 +360,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     this.observability.finishTurn({ outcome: 'success' })
     await this.observability.flush()
     turn.resolve()
-  }
-
-  private async recoverIncompleteStructuredTurn(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-  ): Promise<void> {
-    const progressIdentity = structuredOutputProgressIdentity(
-      this.structuredOutputCalls,
-    )
-    if (
-      turn.structuredOutputProgressIdentity !== undefined &&
-      turn.structuredOutputProgressIdentity === progressIdentity
-    ) {
-      const error = new Error(
-        'StructuredOutput provider truncation: continuation made no progress',
-      )
-      this.forwardStructuredOutputFailure(turn, error.message)
-      await this.rejectStructuredTurn(turn, error)
-      return
-    }
-    turn.structuredOutputProgressIdentity = progressIdentity
-    turn.structuredOutputFailure = undefined
-    turn.structuredOutputMaxTokensSeen = false
-    turn.structuredOutputContinuationPending = true
-    this.write({
-      type: 'user',
-      uuid: crypto.randomUUID(),
-      session_id: this.nativeSessionId ?? '',
-      parent_tool_use_id: null,
-      message: {
-        role: 'user',
-        content: nativePromptContent(
-          STRUCTURED_OUTPUT_PROTOCOL_CONTINUATION_PROMPT,
-        ),
-      },
-    })
-  }
-
-  private async onRecordStreamMessage(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-    message: Record<string, unknown>,
-  ): Promise<void> {
-    if (recordStreamContainsTool(message)) {
-      await this.rejectRecordStreamTurn(
-        turn,
-        new Error(
-          recordStreamHasEmptyToolIdentity(message)
-            ? 'provider_stream_protocol_error: record_stream emitted an empty tool identity'
-            : 'provider_stream_protocol_error: record_stream emitted a tool or DSML frame',
-        ),
-      )
-      return
-    }
-    if (recordStreamAssistantContainsDsml(message)) {
-      await this.rejectRecordStreamTurn(
-        turn,
-        new Error(
-          'provider_stream_protocol_error: record_stream emitted a DSML frame',
-        ),
-      )
-      return
-    }
-    if (message.type === 'stream_event') {
-      const text = streamedRecordText(message)
-      if (text) {
-        this.observability.observeRecordStreamChunk?.(
-          Buffer.from(text, 'utf8'),
-        )
-        turn.recordStreamContinuationPending = false
-        if (
-          turn.recordStreamOutput &&
-          (text === turn.recordStreamOutput ||
-            text.startsWith(turn.recordStreamOutput))
-        ) {
-          await this.rejectRecordStreamTurn(
-            turn,
-            new Error(
-              'provider_stream_protocol_error: record_stream emitted a cumulative frame',
-            ),
-          )
-          return
-        }
-        if (
-          turn.recordStreamResponseOutput &&
-          (text === turn.recordStreamResponseOutput ||
-            text.startsWith(turn.recordStreamResponseOutput))
-        ) {
-          await this.rejectRecordStreamTurn(
-            turn,
-            new Error(
-              'provider_stream_protocol_error: record_stream emitted a cumulative frame',
-            ),
-          )
-          return
-        }
-        turn.recordStreamOutput += text
-        turn.recordStreamResponseOutput += text
-        assertRecordStreamLines(turn.recordStreamOutput)
-      }
-      if (recordStreamUsage(message))
-        turn.input.onMessage(message as DashboardSDKMessage)
-      return
-    }
-    if (message.type !== 'result') return
-    const terminal = recordStreamTerminal(turn.recordStreamOutput)
-    if (
-      terminal &&
-      terminal ===
-        stableJson(
-          this.sessionInput.workflowRecordStreamContract!.terminalRecord,
-        )
-    ) {
-      await this.completeRecordStreamTurn(turn)
-      return
-    }
-    if (terminal) {
-      await this.rejectRecordStreamTurn(
-        turn,
-        new Error(
-          'provider_stream_protocol_error: record_stream terminal record did not match the expected slice',
-        ),
-      )
-      return
-    }
-    const responseMadeProgress = turn.recordStreamResponseOutput.length > 0
-    const maxTokens = stringField(message, 'stop_reason') === 'max_tokens'
-    if (isErrorResult(message) && !maxTokens) {
-      await this.rejectRecordStreamTurn(
-        turn,
-        new Error(
-          `provider_stream_protocol_error: ${nativeErrorDetail(message)}`,
-        ),
-      )
-      return
-    }
-    if (!responseMadeProgress) {
-      await this.rejectRecordStreamTurn(
-        turn,
-        new Error(
-          'provider_stream_protocol_error: record_stream continuation made no progress',
-        ),
-      )
-      return
-    }
-    this.writeRecordStreamContinuation(turn)
-  }
-
-  private writeRecordStreamContinuation(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-  ): void {
-    turn.recordStreamResponseOutput = ''
-    turn.recordStreamContinuationPending = true
-    this.write({
-      type: 'user',
-      uuid: crypto.randomUUID(),
-      session_id: this.nativeSessionId ?? '',
-      parent_tool_use_id: null,
-      message: {
-        role: 'user',
-        content: nativePromptContent(
-          RECORD_STREAM_PROTOCOL_CONTINUATION_PROMPT,
-        ),
-      },
-    })
-  }
-
-  private async completeRecordStreamTurn(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-  ): Promise<void> {
-    this.activeTurn = null
-    const result = {
-      type: 'result',
-      subtype: 'success',
-      is_error: false,
-      result: 'Record stream accepted',
-      session_id: this.nativeSessionId ?? '',
-      record_stream: turn.recordStreamOutput,
-    }
-    this.observability.observeMessage(result)
-    turn.input.onMessage(result)
-    this.observability.finishTurn({ outcome: 'success' })
-    await this.observability.flush()
-    turn.resolve()
-    this.disposed = true
-    this.child.stdin.end()
-    if (this.child.exitCode === null) this.child.kill('SIGTERM')
-  }
-
-  private async rejectRecordStreamTurn(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-    error: Error,
-  ): Promise<void> {
-    this.activeTurn = null
-    this.observability.finishTurn({ outcome: 'error', error })
-    await this.observability.flush()
-    turn.reject(error)
-  }
-
-  private failedStructuredOutput(message: Record<string, unknown>): boolean {
-    if (message.type !== 'user') return false
-    const user = objectField(message, 'message')
-    const content = user?.content
-    if (!Array.isArray(content)) return false
-    return content.some(block => {
-      if (!block || typeof block !== 'object' || Array.isArray(block))
-        return false
-      const value = block as Record<string, unknown>
-      const toolUseID = stringField(value, 'tool_use_id')
-      return (
-        value.type === 'tool_result' &&
-        value.is_error === true &&
-        this.structuredOutputCalls.has(toolUseID)
-      )
-    })
-  }
-
-  private forwardStructuredOutputFailure(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-    override?: string,
-  ): void {
-    const failure = turn.structuredOutputFailure
-    if (!failure) return
-    turn.structuredOutputFailure = undefined
-    if (!override) {
-      turn.input.onMessage(failure as DashboardSDKMessage)
-      return
-    }
-    const copy = structuredClone(failure)
-    const user = objectField(copy, 'message')
-    if (Array.isArray(user?.content)) {
-      for (const block of user.content) {
-        if (!block || typeof block !== 'object' || Array.isArray(block))
-          continue
-        const value = block as Record<string, unknown>
-        if (value.type === 'tool_result' && value.is_error === true)
-          value.content = override
-      }
-    }
-    turn.input.onMessage(copy as DashboardSDKMessage)
-  }
-
-  private async rejectStructuredTurn(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-    error: Error,
-  ): Promise<void> {
-    this.activeTurn = null
-    this.observability.finishTurn({ outcome: 'error', error })
-    await this.observability.flush()
-    turn.reject(error)
   }
 
   private async recoverIncompleteMarkdownTurn(
@@ -863,10 +481,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           message: `${toolName} requires permission.`,
           input: toolInput,
         })
-      : ({
-          behavior: 'deny',
-          message: 'Permission authority is unavailable.',
-        } as const)
+      : ({ behavior: 'deny', message: 'Permission authority is unavailable.' } as const)
     this.write(permissionResponse(requestId, toolUseID, toolInput, decision))
   }
 
@@ -910,29 +525,11 @@ function isNativeSessionId(value: string): boolean {
   )
 }
 
-function assertRecordStreamContract(
-  contract: WorkflowRecordStreamContract,
-): void {
-  if (
-    contract.version !== 1 ||
-    !contract.terminalRecord ||
-    typeof contract.terminalRecord !== 'object' ||
-    Array.isArray(contract.terminalRecord)
-  )
-    throw new Error(
-      'provider_stream_protocol_error: record_stream contract must be v1 with one terminalRecord object',
-    )
-}
-
 function runtimeIdentity(env: Record<string, string>): {
   provider: string
   model: string
 } {
-  if (
-    env.ANTHROPIC_BASE_URL ||
-    env.ANTHROPIC_AUTH_TOKEN ||
-    env.ANTHROPIC_API_KEY
-  )
+  if (env.ANTHROPIC_BASE_URL || env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY)
     return {
       provider: 'anthropic',
       model: selectedRuntimeModel(env, 'ANTHROPIC'),
@@ -988,8 +585,7 @@ function permissionResponse(
             }
           : {
               behavior: 'deny',
-              message:
-                decision.message ?? 'Permission denied by user settings.',
+              message: decision.message ?? 'Permission denied by user settings.',
               toolUseID,
               decisionClassification: 'user_reject',
             },
@@ -1014,7 +610,6 @@ export function nativeRuntimeEnvironment(
 async function* ndjsonLines(
   stream: ReadableStream<Uint8Array>,
   observeChunk: (chunk: Uint8Array) => void = () => undefined,
-  strictBlankLines = false,
 ): AsyncGenerator<string> {
   const decoder = new TextDecoder()
   let buffer = ''
@@ -1024,31 +619,18 @@ async function* ndjsonLines(
     for (;;) {
       const newline = buffer.indexOf('\n')
       if (newline < 0) break
-      const line = buffer.slice(0, newline)
+      const line = buffer.slice(0, newline).trim()
       buffer = buffer.slice(newline + 1)
-      if (!line.trim()) {
-        if (strictBlankLines)
-          throw new Error(
-            'provider_stream_protocol_error: record_stream emitted an internal blank line',
-          )
-        continue
-      }
-      yield line.trim()
+      if (line) yield line
     }
   }
   buffer += decoder.decode()
   if (buffer.trim()) yield buffer.trim()
-  else if (strictBlankLines && buffer.length > 0)
-    throw new Error(
-      'provider_stream_protocol_error: record_stream emitted an internal blank line',
-    )
 }
 
 function isErrorResult(message: Record<string, unknown>): boolean {
-  return (
-    message.is_error === true ||
+  return message.is_error === true ||
     (typeof message.subtype === 'string' && message.subtype !== 'success')
-  )
 }
 
 function isMissingVisibleMarkdownResult(
@@ -1064,156 +646,6 @@ function streamedMarkdownText(message: Record<string, unknown>): string {
   return delta && stringField(delta, 'type') === 'text_delta'
     ? stringField(delta, 'text')
     : ''
-}
-
-function streamedRecordText(message: Record<string, unknown>): string {
-  if (message.type !== 'stream_event') return ''
-  const event = objectField(message, 'event')
-  const delta = event ? objectField(event, 'delta') : undefined
-  if (!delta || stringField(delta, 'type') !== 'text_delta') return ''
-  const text = stringField(delta, 'text')
-  if (!text)
-    throw new Error(
-      'provider_stream_protocol_error: record_stream emitted an empty text_delta',
-    )
-  if (recordStreamTextContainsDsml(text))
-    throw new Error(
-      'provider_stream_protocol_error: record_stream emitted a DSML frame',
-    )
-  return text
-}
-
-function recordStreamAssistantContainsDsml(
-  message: Record<string, unknown>,
-): boolean {
-  if (message.type !== 'assistant') return false
-  return extractNativeContentBlocks(message).some(
-    block =>
-      stringField(block, 'type') === 'text' &&
-      recordStreamTextContainsDsml(stringField(block, 'text')),
-  )
-}
-
-function recordStreamTextContainsDsml(text: string): boolean {
-  return /<(?:tool_use|tool_result|function_call|invoke|dsml)\b|<\|/iu.test(
-    text,
-  )
-}
-
-function recordStreamUsage(message: Record<string, unknown>): boolean {
-  if (message.type !== 'stream_event') return false
-  const event = objectField(message, 'event')
-  const delta = event ? objectField(event, 'delta') : undefined
-  const usage = delta ? objectField(delta, 'usage') : undefined
-  return Boolean(usage)
-}
-
-function assertRecordStreamLines(raw: string): void {
-  const lines = raw.split('\n')
-  const completeLines = raw.endsWith('\n')
-    ? lines.slice(0, -1)
-    : lines.slice(0, -1)
-  for (const line of completeLines) {
-    if (!line.trim())
-      throw new Error(
-        'provider_stream_protocol_error: record_stream emitted an internal blank line',
-      )
-  }
-}
-
-function recordStreamTerminal(raw: string): string | undefined {
-  const lines = raw.split('\n')
-  while (lines.length && !lines.at(-1)?.trim()) lines.pop()
-  const last = lines.at(-1)?.trim()
-  if (!last) return undefined
-  try {
-    const parsed = JSON.parse(last)
-    return parsed &&
-        typeof parsed === 'object' &&
-        !Array.isArray(parsed) &&
-        (parsed as Record<string, unknown>).record === 'done'
-      ? stableJson(parsed)
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function recordStreamContainsTool(message: Record<string, unknown>): boolean {
-  const blocks = extractNativeContentBlocks(message)
-  return blocks.some(block => {
-    const type = stringField(block, 'type')
-    return (
-      type === 'tool_use' ||
-      type === 'tool_result' ||
-      type === 'server_tool_use' ||
-      type === 'mcp_tool_use' ||
-      type === 'mcp_tool_result'
-    )
-  })
-}
-
-function recordStreamHasEmptyToolIdentity(
-  message: Record<string, unknown>,
-): boolean {
-  return extractNativeContentBlocks(message).some(block => {
-    const type = stringField(block, 'type')
-    if (!type.includes('tool')) return false
-    return !stringField(block, 'id') && !stringField(block, 'tool_use_id')
-  })
-}
-
-function extractNativeContentBlocks(
-  message: Record<string, unknown>,
-): Record<string, unknown>[] {
-  const nested = objectField(message, 'message')
-  const event = objectField(message, 'event')
-  const content =
-    nested?.content ??
-    message.content ??
-    (event ? event.content_block : undefined)
-  if (!Array.isArray(content)) return []
-  return content.filter(
-    (block): block is Record<string, unknown> =>
-      Boolean(block) && typeof block === 'object' && !Array.isArray(block),
-  )
-}
-
-function structuredOutputStopReason(message: Record<string, unknown>): string {
-  if (message.type === 'stream_event') {
-    const event = objectField(message, 'event')
-    const delta = event ? objectField(event, 'delta') : undefined
-    return delta ? stringField(delta, 'stop_reason') : ''
-  }
-  return message.type === 'message_delta'
-    ? stringField(message, 'stop_reason')
-    : ''
-}
-
-function isMessageStop(message: Record<string, unknown>): boolean {
-  return (
-    message.type === 'message_stop' ||
-    (message.type === 'stream_event' &&
-      objectField(message, 'event')?.type === 'message_stop')
-  )
-}
-
-function structuredOutputProgressIdentity(
-  calls: ReadonlyMap<string, unknown>,
-): string {
-  const latest = [...calls.values()].at(-1)
-  return latest === undefined ? 'none' : stableJson(latest)
-}
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`)
-      .join(',')}}`
-  }
-  return JSON.stringify(value) ?? 'null'
 }
 
 function assistantMarkdownText(message: Record<string, unknown>): string {
@@ -1267,6 +699,8 @@ function nativeTaskNotification(
         ? message.value
         : JSON.stringify(message),
     ...(typeof message.uuid === 'string' ? { uuid: message.uuid } : {}),
-    ...(typeof message.isMeta === 'boolean' ? { isMeta: message.isMeta } : {}),
+    ...(typeof message.isMeta === 'boolean'
+      ? { isMeta: message.isMeta }
+      : {}),
   }
 }

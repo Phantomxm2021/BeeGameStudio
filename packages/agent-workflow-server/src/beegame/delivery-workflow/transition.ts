@@ -1,25 +1,16 @@
 import { parseDeliveryRun } from './schema'
 import type {
   AtomicTask,
-  ChecklistBridgeIdentity,
   DeliveryRun,
   EvidenceRef,
   EvidenceStatus,
-  GameIrCheckpointRef,
-  GameIrCompilationIdentity,
-  GameIrState,
 } from './types'
-import { digestGameIrValue } from './game-ir/model'
-import { parseGameIrReadyReceipt } from './game-ir/contracts'
 import type {
   FoundationAuditState,
   FoundationAuditTask,
   FoundationRevisionTask,
 } from './foundation-audit-state'
-import {
-  activeFoundationRevisionTasks,
-  foundationRuntimeTasks,
-} from './foundation-audit-state'
+import { activeFoundationRevisionTasks, foundationRuntimeTasks } from './foundation-audit-state'
 import { isActiveFoundationRepairState } from './display-progress'
 
 export class WorkflowTransitionError extends Error {
@@ -34,28 +25,7 @@ export class WorkflowTransitionError extends Error {
 
 type EvidenceEvent = { evidence: EvidenceRef }
 
-type GameIrReadyEventState = Extract<GameIrState, { status: 'ready' }>
-
 export type DeliveryTransition =
-  | {
-      type: 'game_ir_compilation_started'
-      identity: GameIrCompilationIdentity
-    }
-  | {
-      type: 'game_ir_checkpoint_committed'
-      checkpoint: GameIrCheckpointRef
-      expectedPreviousCheckpoint?: GameIrCheckpointRef
-    }
-  | { type: 'game_ir_ready'; state: GameIrReadyEventState }
-  | {
-      type: 'checklist_bridge_started'
-      identity: ChecklistBridgeIdentity
-    }
-  | {
-      type: 'checklist_bridge_ready'
-      receiptPath: string
-      receiptDigest: string
-    }
   | { type: 'documents_ready' }
   | ({
       type: 'resource_preparation_ready'
@@ -145,15 +115,13 @@ function isUserStoppedFoundationRetryTask(
   )
 }
 
-function isActionableFoundationRevisionRetryTask(
+function isActionableDocumentRevisionRetryTask(
   task: FoundationRetryTask,
   taskId: string | undefined,
 ): boolean {
   return (
     (!taskId || task.taskId === taskId) &&
-    ['document-revision', 'impacted-facts', 'semantic-recheck'].includes(
-      task.kind,
-    ) &&
+    task.kind === 'document-revision' &&
     task.status === 'needs_action' &&
     (task.dispatch?.status === 'invalid' || task.dispatch?.status === 'failed')
   )
@@ -169,10 +137,7 @@ function isRetryableFoundationRevisionBoundary(
   if (state.status === 'planning') return true
   if (!['validating', 'round_closing'].includes(state.status)) return false
   const activeTasks = activeFoundationRevisionTasks(state)
-  return (
-    activeTasks.length > 0 &&
-    activeTasks.every(task => task.status === 'completed')
-  )
+  return activeTasks.length > 0 && activeTasks.every(task => task.status === 'completed')
 }
 
 function fail(message: string): never {
@@ -286,52 +251,6 @@ function requirePhase(run: DeliveryRun, phase: DeliveryRun['phase']): void {
     fail(`transition requires ${phase}, current phase is ${run.phase}`)
 }
 
-function requireSha256(value: string, label: string): void {
-  if (!/^[a-f0-9]{64}$/u.test(value)) fail(`${label} must be a SHA-256 digest`)
-}
-
-function sameGameIrIdentity(
-  left: GameIrCompilationIdentity,
-  right: GameIrCompilationIdentity,
-): boolean {
-  return (
-    left.runId === right.runId &&
-    left.taskId === right.taskId &&
-    left.publicationId === right.publicationId &&
-    left.confirmedBriefDigest === right.confirmedBriefDigest &&
-    left.foundationRevision === right.foundationRevision &&
-    left.foundationReadyReceiptDigest === right.foundationReadyReceiptDigest
-  )
-}
-
-function requireFoundationReadyIdentity(
-  run: DeliveryRun,
-  identity: GameIrCompilationIdentity,
-): void {
-  if (run.documentStep !== 'FOUNDATION_REVIEW')
-    fail('Game IR compilation requires the Foundation review step')
-  if (
-    !run.foundationAuditState ||
-    !['audit_ready', 'revision_ready'].includes(run.foundationAuditState.status)
-  )
-    fail('Game IR compilation requires a Foundation READY audit state')
-  if (identity.runId !== run.runId)
-    fail('Game IR compilation identity run does not match DeliveryRun')
-  if (!identity.taskId || !identity.publicationId)
-    fail('Game IR compilation identity must name one task and publication')
-  if (identity.confirmedBriefDigest !== run.confirmedBriefDigest)
-    fail('Game IR compilation identity brief does not match DeliveryRun')
-  if (identity.foundationRevision !== run.foundationAuditState.revision)
-    fail(
-      'Game IR compilation identity revision does not match Foundation READY',
-    )
-  requireSha256(identity.confirmedBriefDigest, 'confirmed brief digest')
-  requireSha256(
-    identity.foundationReadyReceiptDigest,
-    'Foundation READY receipt digest',
-  )
-}
-
 function requireEvidence(
   evidence: EvidenceRef,
   revision: string,
@@ -374,209 +293,6 @@ export function transitionDeliveryRun(
   const run = assertDeliveryRunInvariants(input)
   let next: DeliveryRun
   switch (event.type) {
-    case 'game_ir_compilation_started':
-      requirePhase(run, 'DOCUMENT_REVIEW')
-      requireFoundationReadyIdentity(run, event.identity)
-      if (run.gameIrState)
-        fail('Game IR compilation cannot start with an existing Game IR state')
-      next = {
-        ...run,
-        phase: 'GAME_IR_COMPILATION',
-        documentStep: undefined,
-        status: 'running',
-        blockedReason: undefined,
-        gameIrState: { status: 'compiling', identity: event.identity },
-        checklistBridgeState: undefined,
-        updatedAt: timestamp(),
-      }
-      break
-    case 'game_ir_checkpoint_committed': {
-      requirePhase(run, 'GAME_IR_COMPILATION')
-      if (!run.gameIrState || run.gameIrState.status !== 'compiling')
-        fail('Game IR checkpoint requires compiling state')
-      requireSha256(event.checkpoint.checkpointDigest, 'checkpoint digest')
-      if (
-        run.activeDispatch &&
-        (run.activeDispatch.workerType !== 'game-ir-compiler' ||
-          run.activeDispatch.status !== 'completed' ||
-          !run.activeDispatch.terminalResult)
-      )
-        fail(
-          'Game IR checkpoint cannot consume a non-terminal compiler dispatch',
-        )
-      const current = run.gameIrState.latestCheckpoint
-      const sameCheckpoint =
-        current?.checkpointPath === event.checkpoint.checkpointPath &&
-        current?.checkpointDigest === event.checkpoint.checkpointDigest
-      const checkpointedState = {
-        ...run.gameIrState,
-        latestCheckpoint: event.checkpoint,
-        diagnosticRef: undefined,
-        diagnostic: undefined,
-        progressIdentity: undefined,
-      }
-      if (sameCheckpoint)
-        return {
-          ...run,
-          activeDispatch: undefined,
-          status: 'running',
-          blockedReason: undefined,
-          thinking: 'working',
-          gameIrState: checkpointedState,
-          updatedAt: timestamp(),
-        }
-      if (current && current.checkpointPath === event.checkpoint.checkpointPath)
-        fail(
-          'Game IR checkpoint pointer conflicts with the existing checkpoint',
-        )
-      const expected = event.expectedPreviousCheckpoint
-      if (
-        (current === undefined && expected !== undefined) ||
-        (current !== undefined &&
-          (expected === undefined ||
-            current.checkpointPath !== expected.checkpointPath ||
-            current.checkpointDigest !== expected.checkpointDigest))
-      )
-        fail('Game IR checkpoint compare-and-swap predecessor is stale')
-      next = {
-        ...run,
-        activeDispatch: undefined,
-        status: 'running',
-        blockedReason: undefined,
-        thinking: 'working',
-        gameIrState: checkpointedState,
-        updatedAt: timestamp(),
-      }
-      break
-    }
-    case 'game_ir_ready': {
-      requirePhase(run, 'GAME_IR_COMPILATION')
-      if (!run.gameIrState || run.gameIrState.status !== 'compiling')
-        fail('Game IR ready requires compiling state')
-      const checkpoint = run.gameIrState.latestCheckpoint
-      if (!checkpoint) fail('Game IR ready requires a committed checkpoint')
-      if (
-        checkpoint.checkpointPath !== event.state.checkpoint.checkpointPath ||
-        checkpoint.checkpointDigest !== event.state.checkpoint.checkpointDigest
-      )
-        fail('Game IR ready checkpoint does not match the committed checkpoint')
-      if (!sameGameIrIdentity(run.gameIrState.identity, event.state.identity))
-        fail('Game IR ready identity does not match the compilation identity')
-      let readyReceipt
-      try {
-        readyReceipt = parseGameIrReadyReceipt(event.state.readyReceipt)
-      } catch (error) {
-        fail(
-          error instanceof Error
-            ? error.message
-            : 'Game IR ready receipt is invalid',
-        )
-      }
-      if (digestGameIrValue(readyReceipt) !== event.state.readyReceiptDigest)
-        fail('Game IR ready receipt digest mismatch')
-      if (
-        readyReceipt.taskId !== event.state.identity.taskId ||
-        readyReceipt.publicationId !== event.state.identity.publicationId ||
-        readyReceipt.foundationRevision !==
-          event.state.identity.foundationRevision ||
-        readyReceipt.foundationReceiptDigest !==
-          event.state.identity.foundationReadyReceiptDigest
-      )
-        fail(
-          'Game IR ready receipt identity does not match compilation identity',
-        )
-      next = {
-        ...run,
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'CHECKLIST_DRAFTING',
-        status: 'running',
-        blockedReason: undefined,
-        activeTaskId: undefined,
-        activeDispatch: undefined,
-        gameIrState: {
-          status: 'ready',
-          identity: run.gameIrState.identity,
-          checkpoint,
-          readyReceipt,
-          readyReceiptDigest: event.state.readyReceiptDigest,
-        },
-        checklistBridgeState: undefined,
-        updatedAt: timestamp(),
-      }
-      break
-    }
-    case 'checklist_bridge_started':
-      requirePhase(run, 'DOCUMENT_REVIEW')
-      if (run.documentStep !== 'CHECKLIST_DRAFTING')
-        fail('Checklist bridge requires the Checklist drafting step')
-      if (!run.gameIrState || run.gameIrState.status !== 'ready')
-        fail('Checklist bridge requires ready Game IR state')
-      if (run.checklistBridgeState)
-        fail('Checklist bridge cannot start with an existing bridge state')
-      if (event.identity.runId !== run.runId)
-        fail('Checklist bridge identity run does not match DeliveryRun')
-      requireSha256(
-        event.identity.checklistPublicationDigest,
-        'Checklist publication digest',
-      )
-      if (
-        event.identity.gameIrReadyReceiptDigest !==
-        run.gameIrState.readyReceiptDigest
-      )
-        fail('Checklist bridge identity does not match ready Game IR')
-      next = {
-        ...run,
-        documentStep: 'CHECKLIST_BRIDGE',
-        status: 'running',
-        checklistBridgeState: { status: 'bridging', identity: event.identity },
-        updatedAt: timestamp(),
-      }
-      break
-    case 'checklist_bridge_ready': {
-      requirePhase(run, 'DOCUMENT_REVIEW')
-      if (run.documentStep !== 'CHECKLIST_BRIDGE')
-        fail('Checklist bridge ready requires the bridge step')
-      if (
-        !run.checklistBridgeState ||
-        run.checklistBridgeState.status !== 'bridging'
-      )
-        fail('Checklist bridge ready requires bridging state')
-      if (!run.gameIrState || run.gameIrState.status !== 'ready')
-        fail('Checklist bridge ready requires ready Game IR state')
-      if (!event.receiptPath.trim())
-        fail('Checklist bridge receipt path is required')
-      requireSha256(event.receiptDigest, 'Checklist bridge receipt digest')
-      if (
-        run.checklistBridgeState.identity.gameIrReadyReceiptDigest !==
-        run.gameIrState.readyReceiptDigest
-      )
-        fail('Checklist bridge receipt is stale for the ready Game IR')
-      next = {
-        ...run,
-        phase: 'RESOURCE_PREPARATION',
-        documentStep: undefined,
-        status: 'running',
-        blockedReason: undefined,
-        activeTaskId: undefined,
-        activeDispatch: undefined,
-        checklistBridgeState: {
-          status: 'ready',
-          identity: run.checklistBridgeState.identity,
-          receiptPath: event.receiptPath,
-          receiptDigest: event.receiptDigest,
-        },
-        revision: {
-          ...run.revision,
-          resource: undefined,
-          implementation: undefined,
-        },
-        tasks: [],
-        evidence: {},
-        resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
-        updatedAt: timestamp(),
-      }
-      break
-    }
     case 'documents_ready':
       requirePhase(run, 'BRIEF_CONFIRMED')
       next = {
@@ -846,8 +562,7 @@ export function transitionDeliveryRun(
       {
         let draftRevived = false
         const nextDraftState =
-          run.phase === 'DOCUMENT_DRAFTING' &&
-          run.foundationDraftState.documents
+          run.phase === 'DOCUMENT_DRAFTING' && run.foundationDraftState.documents
             ? {
                 ...run.foundationDraftState,
                 documents: run.foundationDraftState.documents.map(document => {
@@ -897,54 +612,42 @@ export function transitionDeliveryRun(
               }),
             }
           : undefined
-        let revisionRevived = false
-        const nextRevisionState =
-          revisionState && revisionState.status !== 'planning'
-            ? {
-                ...revisionState,
-                ...(() => {
-                  const activeTaskIds = new Set(
-                    foundationRuntimeTasks(revisionState).map(
-                      task => task.taskId,
-                    ),
-                  )
-                  return {
-                    tasks: revisionState.tasks.map(task => {
-                      if (!activeTaskIds.has(task.taskId)) return task
-                      const actionableRevisionRetry =
-                        (task.kind !== 'document-revision' ||
-                          revisionState.status === 'revising') &&
-                        isActionableFoundationRevisionRetryTask(
-                          task,
-                          event.taskId,
-                        )
-                      const userStoppedRetry = isUserStoppedFoundationRetryTask(
-                        task,
-                        event.taskId,
-                      )
-                      const canReviveDocument =
-                        task.kind === 'document-revision' &&
-                        (actionableRevisionRetry || userStoppedRetry)
-                      const canReviveRevisionWorker =
-                        ['impacted-facts', 'semantic-recheck'].includes(
-                          task.kind,
-                        ) &&
-                        (actionableRevisionRetry ||
-                          isEligibleFoundationRetryTask(task, event.taskId) ||
-                          userStoppedRetry)
-                      if (!canReviveDocument && !canReviveRevisionWorker)
-                        return task
-                      revisionRevived = true
-                      return {
-                        ...task,
-                        status: 'pending' as const,
-                        failureReason: undefined,
-                      }
-                    }),
-                  }
-                })(),
-              }
-            : undefined
+    let revisionRevived = false
+    const nextRevisionState = revisionState && revisionState.status !== 'planning'
+          ? {
+              ...revisionState,
+              ...(() => {
+                const activeTaskIds = new Set(foundationRuntimeTasks(revisionState).map(task => task.taskId))
+                return {
+              tasks: revisionState.tasks.map(task => {
+                if (!activeTaskIds.has(task.taskId)) return task
+                const actionableDocumentRetry =
+                  revisionState.status === 'revising' &&
+                  isActionableDocumentRevisionRetryTask(task, event.taskId)
+                const userStoppedRetry = isUserStoppedFoundationRetryTask(
+                  task,
+                  event.taskId,
+                )
+                const canReviveDocument =
+                  task.kind === 'document-revision' &&
+                  (actionableDocumentRetry || userStoppedRetry)
+                const canReviveRevisionWorker =
+                  ['impacted-facts', 'semantic-recheck'].includes(task.kind) &&
+                  (isEligibleFoundationRetryTask(task, event.taskId) ||
+                    userStoppedRetry)
+                if (!canReviveDocument && !canReviveRevisionWorker)
+                  return task
+                revisionRevived = true
+                return {
+                  ...task,
+                  status: 'pending' as const,
+                  failureReason: undefined,
+                }
+              }),
+                }
+              })(),
+            }
+          : undefined
         const revisionBoundaryRevived = revisionState
           ? isRetryableFoundationRevisionBoundary(
               revisionState,
@@ -954,29 +657,20 @@ export function transitionDeliveryRun(
           : false
         const revisionBoundaryNeedsFactReplan = Boolean(
           revisionBoundaryRevived &&
-            revisionState?.status === 'validating' &&
-            activeFoundationRevisionTasks(revisionState).every(
-              task => task.kind === 'document-revision',
-            ),
+          revisionState?.status === 'validating' &&
+          activeFoundationRevisionTasks(revisionState).every(task => task.kind === 'document-revision'),
         )
         const foundationStateInCurrentPhase = !!(
-          (run.phase === 'DOCUMENT_DRAFTING' &&
-            run.foundationDraftState.documents?.some(
-              document => document.status === 'needs_action',
-            )) ||
+          run.phase === 'DOCUMENT_DRAFTING' &&
+          run.foundationDraftState.documents?.some(
+            document => document.status === 'needs_action',
+          ) ||
           auditState?.tasks.some(task => task.status === 'needs_action') ||
           (revisionState && run.status === 'needs_action') ||
-          (revisionState &&
-            revisionState.status !== 'planning' &&
-            activeFoundationRevisionTasks(revisionState).some(
-              task => task.status === 'needs_action',
-            ))
+          (revisionState && revisionState.status !== 'planning' && activeFoundationRevisionTasks(revisionState).some(task => task.status === 'needs_action'))
         )
         const foundationRevived =
-          draftRevived ||
-          auditRevived ||
-          revisionRevived ||
-          revisionBoundaryRevived
+          draftRevived || auditRevived || revisionRevived || revisionBoundaryRevived
         const preserveFoundationActionableState =
           foundationStateInCurrentPhase && !foundationRevived
         next = {
@@ -984,16 +678,9 @@ export function transitionDeliveryRun(
           status: preserveFoundationActionableState ? run.status : 'running',
           ...(draftRevived ? { foundationDraftState: nextDraftState } : {}),
           ...(auditRevived ? { foundationAuditState: nextAuditState } : {}),
-          ...(revisionRevived
-            ? { foundationAuditState: nextRevisionState }
-            : {}),
+          ...(revisionRevived ? { foundationAuditState: nextRevisionState } : {}),
           ...(revisionBoundaryNeedsFactReplan
-            ? {
-                foundationAuditState: {
-                  ...revisionState!,
-                  status: 'rebuilding_facts' as const,
-                },
-              }
+            ? { foundationAuditState: { ...revisionState!, status: 'rebuilding_facts' as const } }
             : {}),
           ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
             ? {

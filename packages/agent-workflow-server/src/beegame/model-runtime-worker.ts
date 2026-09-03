@@ -16,24 +16,20 @@ process.on('message', raw => {
   void handleMessage(raw as ModelRuntimeWorkerRequest)
 })
 
-async function handleMessage(
-  message: ModelRuntimeWorkerRequest,
-): Promise<void> {
+async function handleMessage(message: ModelRuntimeWorkerRequest): Promise<void> {
   if (message.type !== 'model.generate') return
   const previousCwd = process.cwd()
   const previousFetch = globalThis.fetch
   const previousEnv = new Map<string, string | undefined>()
   const targets = Object.fromEntries(
-    Object.entries(message.input.approvedOutboundTargets).map(
-      ([key, target]) => [
-        key,
-        createApprovedTarget(
-          target.url,
-          target.addresses,
-          target.trustedDevelopmentProxy,
-        ),
-      ],
-    ),
+    Object.entries(message.input.approvedOutboundTargets).map(([key, target]) => [
+      key,
+      createApprovedTarget(
+        target.url,
+        target.addresses,
+        target.trustedDevelopmentProxy,
+      ),
+    ]),
   )
   let pinnedFetch: ReturnType<typeof createPinnedRuntimeFetch> | undefined
   let failureStage: BeeGameModelRuntimeFailureStage = 'model_request'
@@ -78,13 +74,11 @@ async function handleMessage(
       querySource: message.input.querySource,
       ...(message.input.structuredOutput
         ? {
-            tools: [
-              {
-                name: message.input.structuredOutput.name,
-                description: message.input.structuredOutput.description,
-                input_schema: message.input.structuredOutput.inputSchema,
-              },
-            ],
+            tools: [{
+              name: message.input.structuredOutput.name,
+              description: message.input.structuredOutput.description,
+              input_schema: message.input.structuredOutput.inputSchema,
+            }],
             tool_choice: {
               type: 'tool' as const,
               name: message.input.structuredOutput.name,
@@ -94,10 +88,7 @@ async function handleMessage(
     })
     failureStage = 'model_response'
     const content = message.input.structuredOutput
-      ? serializeStructuredModelToolResult(
-          result,
-          message.input.structuredOutput.name,
-        )
+      ? serializeStructuredModelToolResult(result, message.input.structuredOutput.name)
       : extractText(result)
     const usage = extractUsage(result)
     send({

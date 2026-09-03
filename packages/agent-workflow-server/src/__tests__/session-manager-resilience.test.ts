@@ -1,14 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import {
@@ -41,10 +32,7 @@ import {
   foundationProjectionRelativePath,
   projectFoundationAuthority,
 } from '../beegame/foundation-authority-projection'
-import {
-  createModelConfig,
-  resetModelConfigs,
-} from '@bee-game-studio/agent-workflow'
+import { createModelConfig, resetModelConfigs } from '@bee-game-studio/agent-workflow'
 
 const waitForIdle = async (
   manager: BeeGameSessionManager,
@@ -107,46 +95,27 @@ describe('BeeGame session runtime resilience', () => {
       name: 'Fact fast route',
       provider: 'anthropic-compatible',
       apiKey: 'test-key',
-      models: {
-        fast: 'claude-fast',
-        balanced: 'claude-balanced',
-        strong: 'claude-strong',
-      },
+      models: { fast: 'claude-fast', balanced: 'claude-balanced', strong: 'claude-strong' },
     })
     let started: BeeGameSessionRunnerStartInput | undefined
     const runner: BeeGameSessionRunner = {
       start: async input => {
         started = input
         return {
-          submit: async ({ onMessage }) =>
-            onMessage({
-              type: 'result',
-              subtype: 'success',
-              is_error: false,
-              structured_output: {
-                workerType: 'foundation-fact-extractor',
-                status: 'completed',
-                runId: 'run-fast',
-                dispatchId: 'dispatch-fast',
-                taskId: 'task-fast',
-                revision: 'rev-fast',
-                packetDigest: 'a'.repeat(64),
-                results: [],
-              },
-            } as DashboardSDKMessage),
+          submit: async ({ onMessage }) => onMessage({
+            type: 'result', subtype: 'success', is_error: false,
+            structured_output: {
+              workerType: 'foundation-fact-extractor', status: 'completed', runId: 'run-fast', dispatchId: 'dispatch-fast', taskId: 'task-fast', revision: 'rev-fast', packetDigest: 'a'.repeat(64), results: [],
+            },
+          } as DashboardSDKMessage),
           stop: () => undefined,
         }
       },
     }
     const manager = new BeeGameSessionManager(runner, root)
     const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      modelConfigId: config.id,
-      workflowWorker: true,
-      workflowRunId: 'run-fast',
-      workflowDispatchId: 'dispatch-fast',
-      workflowWorkerType: 'foundation-fact-extractor',
+      workspacePath, userId: 'user-1', modelConfigId: config.id,
+      workflowWorker: true, workflowRunId: 'run-fast', workflowDispatchId: 'dispatch-fast', workflowWorkerType: 'foundation-fact-extractor',
       workflowJsonSchema: { type: 'object', additionalProperties: false },
     })
     await manager.send(session.id, 'extract the packet')
@@ -155,167 +124,38 @@ describe('BeeGame session runtime resilience', () => {
     expect(started?.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('claude-fast')
   })
 
-  test('keeps semantic record streams out of transcript and raw logs', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-record-stream-log-'))
-    const workspacePath = join(root, 'workspace')
-    await mkdir(workspacePath, { recursive: true })
-    const stream = '{"record":"node","id":"n1"}\n{"record":"done"}\n'
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async ({ onMessage }) => {
-          onMessage({
-            type: 'stream_event',
-            event: {
-              type: 'content_block_delta',
-              delta: { type: 'text_delta', text: stream },
-            },
-          } as DashboardSDKMessage)
-          onMessage({
-            type: 'result',
-            subtype: 'success',
-            is_error: false,
-            record_stream: stream,
-          } as DashboardSDKMessage)
-        },
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-record-stream',
-      workflowDispatchId: 'dispatch-record-stream',
-      workflowWorkerType: 'game-ir-compiler',
-      workflowRecordStreamContract: {
-        version: 1,
-        terminalRecord: { record: 'done' },
-      },
-    })
-    await manager.send(session.id, 'record stream')
-    await waitForIdle(manager, session.id)
-    const events = manager.events(session.id)
-    expect(events.some(event => event.type === 'assistant.partial')).toBe(false)
-    expect(events.find(event => event.type === 'result')?.payload).toMatchObject(
-      {
-        record_stream_type: 'ndjson',
-        record_stream_bytes: Buffer.byteLength(stream, 'utf8'),
-        record_stream_lines: 2,
-      },
-    )
-    expect(
-      events.find(event => event.type === 'result')?.payload,
-    ).not.toHaveProperty('record_stream')
-    expect(JSON.stringify(manager.transcript(session.id))).not.toContain(stream)
-    const rawLog = await readFile(
-      join(
-        workspacePath,
-        '.beegame/workflow/logs/run-record-stream/dispatch-record-stream/agent.raw.jsonl',
-      ),
-      'utf8',
-    )
-    expect(rawLog).not.toContain(stream)
-    expect(rawLog).toContain('"seq":')
-    expect(rawLog).toContain('"bytes":')
-    expect(rawLog).toContain('"digest":')
-  })
-
   test('limits allowed revision reads to the staged path and denies canonical/search reads', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-revision-read-scope-'))
     const workspacePath = join(root, 'workspace')
     const stagedPath = '.beegame/audit/foundation/rev-1/revision/docs/GDD.md'
-    await mkdir(
-      join(workspacePath, '.beegame/audit/foundation/rev-1/revision/docs'),
-      { recursive: true },
-    )
+    await mkdir(join(workspacePath, '.beegame/audit/foundation/rev-1/revision/docs'), { recursive: true })
     await writeFile(join(workspacePath, stagedPath), 'staged')
     const decisions: DashboardPermissionDecision[] = []
     let started: BeeGameSessionRunnerStartInput | undefined
     const runner: BeeGameSessionRunner = {
       start: async input => {
         started = input
-        return {
-          submit: async ({ requestPermission, onMessage }) => {
-            const common = { message: 'revision read', toolUseID: 'scope-test' }
-            decisions.push(
-              await requestPermission({
-                ...common,
-                toolName: 'Read',
-                input: { file_path: stagedPath },
-              }),
-            )
-            decisions.push(
-              await requestPermission({
-                ...common,
-                toolUseID: 'scope-canonical',
-                toolName: 'Read',
-                input: { file_path: 'docs/GDD.md' },
-              }),
-            )
-            decisions.push(
-              await requestPermission({
-                ...common,
-                toolUseID: 'scope-other',
-                toolName: 'Read',
-                input: { file_path: 'README.md' },
-              }),
-            )
-            decisions.push(
-              await requestPermission({
-                ...common,
-                toolUseID: 'scope-grep',
-                toolName: 'Grep',
-                input: { path: stagedPath },
-              }),
-            )
-            onMessage({
-              type: 'result',
-              subtype: 'success',
-              is_error: false,
-            } as DashboardSDKMessage)
-          },
-          stop: () => undefined,
-        } as BeeGameSessionRunner['start'] extends (...args: never[]) => infer T
-          ? Awaited<T>
-          : never
+        return ({
+        submit: async ({ requestPermission, onMessage }) => {
+          const common = { message: 'revision read', toolUseID: 'scope-test' }
+          decisions.push(await requestPermission({ ...common, toolName: 'Read', input: { file_path: stagedPath } }))
+          decisions.push(await requestPermission({ ...common, toolUseID: 'scope-canonical', toolName: 'Read', input: { file_path: 'docs/GDD.md' } }))
+          decisions.push(await requestPermission({ ...common, toolUseID: 'scope-other', toolName: 'Read', input: { file_path: 'README.md' } }))
+          decisions.push(await requestPermission({ ...common, toolUseID: 'scope-grep', toolName: 'Grep', input: { path: stagedPath } }))
+          onMessage({ type: 'result', subtype: 'success', is_error: false } as DashboardSDKMessage)
+        },
+        stop: () => undefined,
+        } as BeeGameSessionRunner['start'] extends (...args: never[]) => infer T ? Awaited<T> : never)
       },
     }
     const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      projectId: 'project-revision',
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-revision',
-      workflowDispatchId: 'dispatch-revision',
-      workflowWorkerType: 'foundation-document-reviser',
-      workflowAllowedPaths: [stagedPath],
-      workflowProjectReadScope: 'allowed',
-      workflowRevisionContract: {
-        taskId: 'task-revision',
-        revision: 'revision-1',
-        round: 1,
-        documentPath: 'docs/GDD.md',
-        issueIds: ['issue-1'],
-        sectionIds: ['section-1'],
-        stagedPath,
-        baseDocumentDigest: 'a'.repeat(64),
-      },
-    })
+    const session = manager.start({ workspacePath, projectId: 'project-revision', userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision', workflowWorkerType: 'foundation-document-reviser', workflowAllowedPaths: [stagedPath], workflowProjectReadScope: 'allowed', workflowRevisionContract: { taskId: 'task-revision', revision: 'revision-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['issue-1'], sectionIds: ['section-1'], stagedPath, baseDocumentDigest: 'a'.repeat(64) } })
     await manager.send(session.id, 'read stage')
     await waitForIdle(manager, session.id)
-    expect(decisions.map(decision => decision.behavior)).toEqual([
-      'allow',
-      'deny',
-      'deny',
-      'deny',
-    ])
+    expect(decisions.map(decision => decision.behavior)).toEqual(['allow', 'deny', 'deny', 'deny'])
     expect(started?.cwd).not.toBe(workspacePath)
     expect(started?.env.BEEGAME_WORKSPACE_PATH).toBe(workspacePath)
-    expect(started?.env.BEEGAME_REVISION_STAGED_PATH).toBe(
-      join(workspacePath, stagedPath),
-    )
+    expect(started?.env.BEEGAME_REVISION_STAGED_PATH).toBe(join(workspacePath, stagedPath))
     expect(started?.cwd).toContain('.beegame/workflow/native-sandbox/')
     const sandboxPath = started?.cwd
     expect(sandboxPath).not.toBe(join(workspacePath, stagedPath))
@@ -328,58 +168,26 @@ describe('BeeGame session runtime resilience', () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-revision-sandbox-'))
     const workspacePath = join(root, 'workspace')
     const stagedPath = '.beegame/audit/foundation/rev-1/revision/docs/GDD.md'
-    await mkdir(
-      join(workspacePath, '.beegame/audit/foundation/rev-1/revision/docs'),
-      { recursive: true },
-    )
+    await mkdir(join(workspacePath, '.beegame/audit/foundation/rev-1/revision/docs'), { recursive: true })
     await writeFile(join(workspacePath, stagedPath), 'staged')
     const started: Array<{ cwd: string; initialEntries: string[] }> = []
     const runner: BeeGameSessionRunner = {
       start: async input => {
-        started.push({
-          cwd: input.cwd,
-          initialEntries: await readdir(input.cwd),
-        })
+        started.push({ cwd: input.cwd, initialEntries: await readdir(input.cwd) })
         return {
-          submit: async ({ onMessage }) =>
-            onMessage({
-              type: 'result',
-              subtype: 'success',
-              is_error: false,
-            } as DashboardSDKMessage),
+          submit: async ({ onMessage }) => onMessage({ type: 'result', subtype: 'success', is_error: false } as DashboardSDKMessage),
           stop: () => undefined,
         }
       },
     }
     const manager = new BeeGameSessionManager(runner, root)
     const contract = {
-      taskId: 'task-revision',
-      revision: 'revision-1',
-      round: 4,
-      documentPath: 'docs/GDD.md' as const,
-      issueIds: ['issue-1'],
-      sectionIds: ['vision'],
-      stagedPath,
-      baseDocumentDigest: 'a'.repeat(64),
+      taskId: 'task-revision', revision: 'revision-1', round: 4,
+      documentPath: 'docs/GDD.md' as const, issueIds: ['issue-1'], sectionIds: ['vision'],
+      stagedPath, baseDocumentDigest: 'a'.repeat(64),
     }
-    const first = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-revision',
-      workflowDispatchId: 'dispatch-revision-1',
-      workflowWorkerType: 'foundation-document-reviser',
-      workflowRevisionContract: contract,
-    })
-    const second = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-revision',
-      workflowDispatchId: 'dispatch-revision-2',
-      workflowWorkerType: 'foundation-document-reviser',
-      workflowRevisionContract: { ...contract, taskId: 'task-revision-2' },
-    })
+    const first = manager.start({ workspacePath, userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision-1', workflowWorkerType: 'foundation-document-reviser', workflowRevisionContract: contract })
+    const second = manager.start({ workspacePath, userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision-2', workflowWorkerType: 'foundation-document-reviser', workflowRevisionContract: { ...contract, taskId: 'task-revision-2' } })
     await manager.send(first.id, 'revise stage')
     await manager.send(second.id, 'revise stage')
     await waitForIdle(manager, first.id)
@@ -388,11 +196,7 @@ describe('BeeGame session runtime resilience', () => {
     expect(started).toHaveLength(2)
     expect(started[0]!.cwd).not.toBe(started[1]!.cwd)
     expect(started.every(entry => entry.initialEntries.length === 0)).toBe(true)
-    expect(
-      started.every(entry =>
-        relative(entry.cwd, join(workspacePath, stagedPath)).startsWith('..'),
-      ),
-    ).toBe(true)
+    expect(started.every(entry => relative(entry.cwd, join(workspacePath, stagedPath)).startsWith('..'))).toBe(true)
     const sandboxes = started.map(entry => entry.cwd)
     await manager.disposeWorkflowWorker(first.id)
     await manager.disposeWorkflowWorker(second.id)
@@ -820,12 +624,12 @@ describe('BeeGame session runtime resilience', () => {
     const startedAt = new Date().toISOString()
     await store.save({
       ...initial,
-      phase: 'DOCUMENT_REVIEW',
+      phase: 'RESOURCE_PREPARATION',
       lastProgressAt: startedAt,
       activeDispatch: {
         dispatchId: 'dispatch-1',
         workerType: 'resource-curator',
-        phase: 'DOCUMENT_REVIEW',
+        phase: 'RESOURCE_PREPARATION',
         revision: initial.revision.document,
         status: 'running',
         startedAt,
@@ -1488,8 +1292,7 @@ describe('BeeGame session runtime resilience', () => {
     expect(await decisionPromise).toEqual({
       behavior: 'deny',
       scope: 'once',
-      message:
-        'Workflow workers may not mutate files outside the project workspace.',
+      message: 'Workflow workers may not mutate files outside the project workspace.',
     })
     expect(
       manager
@@ -1787,8 +1590,7 @@ describe('BeeGame session runtime resilience', () => {
         startedAt: new Date().toISOString(),
       },
     })
-    const markdown =
-      '# Private document body\n\nThis must not become card progress.'
+    const markdown = '# Private document body\n\nThis must not become card progress.'
     const runner: BeeGameSessionRunner = {
       start: async () => ({
         submit: async ({ onMessage }) => {
@@ -2267,72 +2069,6 @@ describe('BeeGame session runtime resilience', () => {
     expect(recorded).toHaveLength(2)
     expect(recorded[1]!.total_tokens).toBeGreaterThan(recorded[0]!.total_tokens)
     manager.dispose()
-  })
-
-  test('removes a workflow session after idle draining fails', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-dispose-idle-failure-'))
-    const manager = new BeeGameSessionManager(
-      {
-        start: async () => ({
-          submit: async () => undefined,
-          stop: () => undefined,
-        }),
-      },
-      root,
-    )
-    const session = manager.start({
-      workspacePath: join(root, 'workspace'),
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-dispose-idle-failure',
-      workflowDispatchId: 'dispatch-dispose-idle-failure',
-      workflowWorkerType: 'question-answerer',
-    })
-    manager.waitForWorkflowWorkerIdle = async () => {
-      throw new Error('idle drain failed')
-    }
-
-    await expect(manager.disposeWorkflowWorker(session.id)).rejects.toThrow(
-      'idle drain failed',
-    )
-    expect(manager.get(session.id)).toBeUndefined()
-  })
-
-  test('removes a workflow session after usage flushing fails', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-dispose-usage-failure-'))
-    let attempts = 0
-    const manager = new BeeGameSessionManager(
-      {
-        start: async () => ({
-          submit: async input => input.onMessage(usageMessage(10)),
-          stop: () => undefined,
-        }),
-      },
-      root,
-      () => ({}),
-      {
-        recordUsage: async () => {
-          attempts += 1
-          throw new Error('usage flush failed')
-        },
-      },
-    )
-    const session = manager.start({
-      workspacePath: join(root, 'workspace'),
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-dispose-usage-failure',
-      workflowDispatchId: 'dispatch-dispose-usage-failure',
-      workflowWorkerType: 'question-answerer',
-    })
-    await manager.send(session.id, 'continue')
-    for (let wait = 0; wait < 100 && attempts < 3; wait += 1)
-      await new Promise(resolve => setTimeout(resolve, 5))
-
-    await expect(manager.disposeWorkflowWorker(session.id)).rejects.toThrow(
-      /workflow run disappeared before usage was persisted|usage flush failed/,
-    )
-    expect(manager.get(session.id)).toBeUndefined()
   })
 
   test('bounds failed usage retries and does not append billing errors after stop', async () => {

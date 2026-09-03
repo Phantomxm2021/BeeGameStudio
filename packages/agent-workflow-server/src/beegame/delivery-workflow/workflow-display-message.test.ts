@@ -35,23 +35,11 @@ describe('sanitizeWorkflowDisplayMessage', () => {
 
 describe('projectWorkflowCurrentMessage', () => {
   test('hides raw reviewer and reviser prose from the foundation review card', () => {
-    expect(
-      projectWorkflowCurrentMessage({
-        value: 'I have what I need. Now I will rewrite it.',
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
-      }),
-    ).toBe('')
+    expect(projectWorkflowCurrentMessage({ value: 'I have what I need. Now I will rewrite it.', phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe('')
   })
 
   test('keeps sanitized progress outside the foundation review boundary', () => {
-    expect(
-      projectWorkflowCurrentMessage({
-        value: '正在编写验收清单。',
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'CHECKLIST_DRAFTING',
-      }),
-    ).toBe('正在编写验收清单。')
+    expect(projectWorkflowCurrentMessage({ value: '正在编写验收清单。', phase: 'DOCUMENT_REVIEW', documentStep: 'CHECKLIST_DRAFTING' })).toBe('正在编写验收清单。')
   })
 })
 
@@ -95,36 +83,5 @@ describe('projectWorkflowDisplayReason', () => {
 
     expect(projection).toMatchObject({ diagnosticId: 'trace-12345678' })
     expect(projection?.message).not.toContain('trace-12345678')
-  })
-
-  test('projects Game IR attention with its diagnostic id', () => {
-    const projection = projectWorkflowDisplayReason(
-      'game_ir_compilation_failed diagnostic game-ir-12345678',
-    )
-    expect(projection).toEqual({
-      code: 'game_ir_compilation',
-      message: 'Game IR compilation needs attention.',
-      diagnosticId: 'game-ir-12345678',
-    })
-  })
-
-  test('projects typed durable diagnostics without exposing expected or actual', () => {
-    const projection = projectWorkflowDisplayReason({
-      phase: 'GAME_IR_COMPILATION',
-      step: 'publication',
-      taskId: 'task-1',
-      workerType: 'game-ir-compiler',
-      reasonCode: 'publication',
-      expected: 'reader-valid committed Game IR',
-      actual: 'tampered checkpoint',
-      diagnosticRef: 'game-ir-typed-1234',
-      recoveryAction: 'retry',
-    })
-    expect(projection).toEqual({
-      code: 'game_ir_publication',
-      message: 'Game IR publication needs attention.',
-      diagnosticId: 'game-ir-typed-1234',
-    })
-    expect(projection?.message).not.toContain('tampered')
   })
 })

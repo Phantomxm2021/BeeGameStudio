@@ -2,16 +2,11 @@ import { z } from 'zod/v4'
 import type {
   AtomicTask,
   AcceptedWorkflowUnit,
-  ChecklistBridgeIdentity,
-  ChecklistBridgeState,
   DeliveryPhase,
   DeliveryRun,
   DispatchRecord,
   EvidenceRef,
   FoundationDraftState,
-  GameIrCheckpointRef,
-  GameIrCompilationIdentity,
-  GameIrState,
   Revision,
   TasksPlannedEvent,
   TaskVerification,
@@ -25,18 +20,11 @@ import {
   DELIVERY_RUN_SCHEMA_VERSION,
   RESOURCE_PRODUCTION_TASKS,
 } from './types'
-import {
-  gameIrReadyReceiptSchema,
-  parseGameIrReadyReceipt,
-} from './game-ir/contracts'
-import type { GameIrReadyReceipt } from './game-ir/contracts'
-import { digestGameIrValue } from './game-ir/model'
 
 export const DELIVERY_PHASES = [
   'BRIEF_CONFIRMED',
   'DOCUMENT_DRAFTING',
   'DOCUMENT_REVIEW',
-  'GAME_IR_COMPILATION',
   'RESOURCE_PREPARATION',
   'ATOMIC_TASK_PLANNING',
   'IMPLEMENTATION',
@@ -73,7 +61,6 @@ export const WORKER_TYPES = [
   'foundation-fact-extractor',
   'foundation-semantic-reviewer',
   'foundation-document-reviser',
-  'game-ir-compiler',
   'resource-planner',
   'resource-curator',
   'resource-content-author',
@@ -179,101 +166,6 @@ const resourceProductionStateSchema = z
   })
   .strict()
 
-const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/)
-const gameIrCompilationIdentitySchema: z.ZodType<GameIrCompilationIdentity> = z
-  .object({
-    runId: z.string().min(1),
-    taskId: z.string().min(1),
-    publicationId: z.string().min(1),
-    confirmedBriefDigest: sha256Schema,
-    foundationRevision: z.string().min(1),
-    foundationReadyReceiptDigest: sha256Schema,
-  })
-  .strict()
-
-const gameIrCheckpointRefSchema: z.ZodType<GameIrCheckpointRef> = z
-  .object({
-    checkpointPath: z.string().min(1),
-    checkpointDigest: sha256Schema,
-  })
-  .strict()
-
-const gameIrStateSchema: z.ZodType<GameIrState> = z.discriminatedUnion(
-  'status',
-  [
-    z
-      .object({
-        status: z.literal('compiling'),
-        identity: gameIrCompilationIdentitySchema,
-        latestCheckpoint: gameIrCheckpointRefSchema.optional(),
-        diagnosticRef: z.string().min(1).optional(),
-        diagnostic: z
-          .object({
-            phase: z.literal('GAME_IR_COMPILATION'),
-            step: z.string().min(1),
-            taskId: z.string().min(1),
-            workerType: z.literal('game-ir-compiler'),
-            reasonCode: z.string().min(1),
-            expected: z.string().min(1),
-            actual: z.string().min(1),
-            diagnosticRef: z.string().min(1),
-            recoveryAction: z.string().min(1),
-          })
-          .strict()
-          .optional(),
-        progressIdentity: z
-          .object({
-            inputDigest: sha256Schema,
-            diagnosticDigest: sha256Schema,
-            candidateDigest: sha256Schema,
-            checkpointJournalDigest: sha256Schema,
-            terminalDigest: sha256Schema,
-          })
-          .strict()
-          .optional(),
-      })
-      .strict(),
-    z
-      .object({
-        status: z.literal('ready'),
-        identity: gameIrCompilationIdentitySchema,
-        checkpoint: gameIrCheckpointRefSchema,
-        readyReceipt:
-          gameIrReadyReceiptSchema as unknown as z.ZodType<GameIrReadyReceipt>,
-        readyReceiptDigest: sha256Schema,
-      })
-      .strict(),
-  ],
-)
-
-const checklistBridgeIdentitySchema: z.ZodType<ChecklistBridgeIdentity> = z
-  .object({
-    runId: z.string().min(1),
-    taskId: z.string().min(1),
-    checklistPublicationDigest: sha256Schema,
-    gameIrReadyReceiptDigest: sha256Schema,
-  })
-  .strict()
-
-const checklistBridgeStateSchema: z.ZodType<ChecklistBridgeState> =
-  z.discriminatedUnion('status', [
-    z
-      .object({
-        status: z.literal('bridging'),
-        identity: checklistBridgeIdentitySchema,
-        diagnosticRef: z.string().min(1).optional(),
-      })
-      .strict(),
-    z
-      .object({
-        status: z.literal('ready'),
-        identity: checklistBridgeIdentitySchema,
-        receiptPath: z.string().min(1),
-        receiptDigest: sha256Schema,
-      })
-      .strict(),
-  ])
-
 export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
   .object({
     dispatchId: z.string().min(1),
@@ -375,7 +267,6 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
         'CHECKLIST_DRAFTING',
-        'CHECKLIST_BRIDGE',
       ])
       .optional(),
     status: z.enum(DELIVERY_RUN_STATUSES),
@@ -511,7 +402,6 @@ export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEven
           'FOUNDATION_DRAFTING',
           'FOUNDATION_REVIEW',
           'CHECKLIST_DRAFTING',
-          'CHECKLIST_BRIDGE',
         ])
         .optional(),
       status: z.enum(DELIVERY_RUN_STATUSES),
@@ -580,7 +470,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
         'CHECKLIST_DRAFTING',
-        'CHECKLIST_BRIDGE',
       ])
       .optional(),
     status: z.enum(DELIVERY_RUN_STATUSES),
@@ -598,8 +487,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       .strict(),
     foundationDraftState: foundationDraftStateSchema,
     foundationAuditState: foundationAuditStateSchema.optional(),
-    gameIrState: gameIrStateSchema.optional(),
-    checklistBridgeState: checklistBridgeStateSchema.optional(),
     resourceProductionState: resourceProductionStateSchema,
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),
@@ -616,7 +503,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
   .superRefine((run, context) => {
     const requiresCompletedFoundation =
       run.phase === 'DOCUMENT_REVIEW' ||
-      run.phase === 'GAME_IR_COMPILATION' ||
       run.phase === 'RESOURCE_PREPARATION' ||
       run.phase === 'ATOMIC_TASK_PLANNING' ||
       run.phase === 'IMPLEMENTATION' ||
@@ -635,185 +521,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
           'foundation review and downstream phases require all durable authoring checkpoints',
       })
 
-    const gameIr = run.gameIrState
-    const bridge = run.checklistBridgeState
-    const downstreamPhase = [
-      'RESOURCE_PREPARATION',
-      'ATOMIC_TASK_PLANNING',
-      'IMPLEMENTATION',
-      'IMPLEMENTATION_AUDIT',
-      'ACCEPTANCE',
-      'DELIVERY',
-    ].includes(run.phase)
-    const checklistStep =
-      run.phase === 'DOCUMENT_REVIEW' &&
-      (run.documentStep === 'CHECKLIST_DRAFTING' ||
-        run.documentStep === 'CHECKLIST_BRIDGE')
-    if (run.phase === 'GAME_IR_COMPILATION') {
-      if (run.documentStep !== undefined)
-        context.addIssue({
-          code: 'custom',
-          path: ['documentStep'],
-          message: 'Game IR compilation cannot carry a document workflow step',
-        })
-      if (!gameIr || gameIr.status !== 'compiling')
-        context.addIssue({
-          code: 'custom',
-          path: ['gameIrState'],
-          message: 'Game IR compilation requires compiling state',
-        })
-    }
-    if (checklistStep && (!gameIr || gameIr.status !== 'ready'))
-      context.addIssue({
-        code: 'custom',
-        path: ['gameIrState'],
-        message: 'Checklist workflow requires a committed ready Game IR state',
-      })
-    if (downstreamPhase) {
-      if (!gameIr || gameIr.status !== 'ready')
-        context.addIssue({
-          code: 'custom',
-          path: ['gameIrState'],
-          message: 'downstream phases require ready Game IR state',
-        })
-      if (!bridge || bridge.status !== 'ready')
-        context.addIssue({
-          code: 'custom',
-          path: ['checklistBridgeState'],
-          message: 'downstream phases require an admitted Checklist bridge',
-        })
-    }
-    if (
-      gameIr &&
-      (!run.foundationAuditState ||
-        !['audit_ready', 'revision_ready'].includes(
-          run.foundationAuditState.status,
-        ))
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['foundationAuditState'],
-        message:
-          'persisted Game IR state requires Foundation audit_ready or revision_ready authority',
-      })
-    const gameIrPlacementIsValid =
-      !gameIr ||
-      (gameIr.status === 'compiling' && run.phase === 'GAME_IR_COMPILATION') ||
-      (gameIr.status === 'ready' && (checklistStep || downstreamPhase))
-    if (!gameIrPlacementIsValid)
-      context.addIssue({
-        code: 'custom',
-        path: ['gameIrState'],
-        message: 'Game IR state is not valid in this phase and document step',
-      })
-    if (gameIr?.status === 'ready') {
-      try {
-        parseGameIrReadyReceipt(gameIr.readyReceipt)
-        const expectedReceiptDigest = digestGameIrValue(gameIr.readyReceipt)
-        if (expectedReceiptDigest !== gameIr.readyReceiptDigest)
-          context.addIssue({
-            code: 'custom',
-            path: ['gameIrState', 'readyReceiptDigest'],
-            message: 'Game IR ready receipt digest mismatch',
-          })
-      } catch {
-        context.addIssue({
-          code: 'custom',
-          path: ['gameIrState', 'readyReceipt'],
-          message: 'Game IR ready receipt is invalid',
-        })
-      }
-      if (
-        gameIr.readyReceipt.taskId !== gameIr.identity.taskId ||
-        gameIr.readyReceipt.publicationId !== gameIr.identity.publicationId ||
-        gameIr.readyReceipt.foundationRevision !==
-          gameIr.identity.foundationRevision ||
-        gameIr.readyReceipt.foundationReceiptDigest !==
-          gameIr.identity.foundationReadyReceiptDigest
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['gameIrState'],
-          message:
-            'Game IR ready receipt identity does not match compilation identity',
-        })
-    }
-    if (gameIr && gameIr.identity.runId !== run.runId)
-      context.addIssue({
-        code: 'custom',
-        path: ['gameIrState', 'identity', 'runId'],
-        message: 'Game IR identity is bound to a different run',
-      })
-    if (
-      gameIr &&
-      gameIr.identity.confirmedBriefDigest !== run.confirmedBriefDigest
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['gameIrState', 'identity', 'confirmedBriefDigest'],
-        message: 'Game IR identity is bound to a different confirmed brief',
-      })
-    if (
-      gameIr &&
-      run.foundationAuditState &&
-      gameIr.identity.foundationRevision !== run.foundationAuditState.revision
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['gameIrState', 'identity', 'foundationRevision'],
-        message: 'Game IR identity is bound to a different Foundation revision',
-      })
-    const bridgePlacementIsValid =
-      !bridge ||
-      (bridge.status === 'bridging' &&
-        run.phase === 'DOCUMENT_REVIEW' &&
-        run.documentStep === 'CHECKLIST_BRIDGE') ||
-      (bridge.status === 'ready' && downstreamPhase)
-    if (!bridgePlacementIsValid)
-      context.addIssue({
-        code: 'custom',
-        path: ['checklistBridgeState'],
-        message: 'Checklist bridge state is not valid in this phase and step',
-      })
-    if (bridge) {
-      if (!gameIr || gameIr.status !== 'ready')
-        context.addIssue({
-          code: 'custom',
-          path: ['checklistBridgeState'],
-          message: 'Checklist bridge state requires a ready Game IR state',
-        })
-      if (
-        bridge.identity.runId !== run.runId ||
-        (gameIr?.status === 'ready' &&
-          bridge.identity.gameIrReadyReceiptDigest !==
-            gameIr.readyReceiptDigest)
-      )
-        context.addIssue({
-          code: 'custom',
-          path: ['checklistBridgeState', 'identity'],
-          message:
-            'Checklist bridge identity is not bound to this run and ready Game IR',
-        })
-    }
-    if (run.documentStep === 'CHECKLIST_BRIDGE' && !bridge)
-      context.addIssue({
-        code: 'custom',
-        path: ['checklistBridgeState'],
-        message: 'Checklist bridge step requires bridge state',
-      })
-    if (run.documentStep === 'CHECKLIST_DRAFTING' && bridge !== undefined)
-      context.addIssue({
-        code: 'custom',
-        path: ['checklistBridgeState'],
-        message: 'Checklist bridge state cannot bypass Checklist drafting',
-      })
-    if (run.documentStep === 'CHECKLIST_BRIDGE' && bridge?.status === 'ready')
-      context.addIssue({
-        code: 'custom',
-        path: ['checklistBridgeState', 'status'],
-        message:
-          'Checklist bridge ready state must advance to resource preparation',
-      })
   })
 
 export const parseDeliveryRun = (value: unknown): DeliveryRun =>

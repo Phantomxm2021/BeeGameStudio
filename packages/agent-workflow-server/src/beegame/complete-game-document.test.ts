@@ -5,7 +5,6 @@ import {
 } from '../__tests__/complete-game-document-fixture'
 import {
   assertMaterialFormat,
-  assessGameDocumentMarkdownStructure,
   isCompleteGameDocumentMarkdownStructure,
   normalizeCompleteGameDocumentProtocol,
   validateCompleteGameDocumentMarkdown,
@@ -125,10 +124,7 @@ describe('native complete game document validation', () => {
     const second = '## Player Experience and Design Pillars'
 
     expect(() =>
-      normalizeCompleteGameDocumentProtocol(
-        path,
-        markerFree.replace(first, ''),
-      ),
+      normalizeCompleteGameDocumentProtocol(path, markerFree.replace(first, '')),
     ).toThrow(/heading|structure|section/i)
     expect(() =>
       normalizeCompleteGameDocumentProtocol(
@@ -139,10 +135,7 @@ describe('native complete game document validation', () => {
     expect(() =>
       normalizeCompleteGameDocumentProtocol(
         path,
-        markerFree
-          .replace(first, '__FIRST__')
-          .replace(second, first)
-          .replace('__FIRST__', second),
+        markerFree.replace(first, '__FIRST__').replace(second, first).replace('__FIRST__', second),
       ),
     ).toThrow(/order|structure|section/i)
     expect(() =>
@@ -159,78 +152,29 @@ describe('native complete game document validation', () => {
         path,
         completeTestSubmission(path),
       )
-      expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(
-        markdown,
-      )
+      expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(markdown)
     }
-  })
-
-  test('marks a Balance material emitted before Production Materials as unreachable by append-only continuation', () => {
-    const path = 'docs/BALANCE_DESIGN.md'
-    const canonical = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    ).replace(/<!-- beegame-audit-appendix -->[\s\S]*$/, '')
-    const invalidOrder = canonical
-      .replace('## Production Materials\n', '')
-      .replace(
-        '### Variable and Parameter Table\n',
-        '### Variable and Parameter Table\n\n## Production Materials\n',
-      )
-
-    expect(assessGameDocumentMarkdownStructure(path, invalidOrder)).toEqual({
-      status: 'unreachable',
-      reason: expect.stringContaining('Variable and Parameter Table'),
-    })
   })
 
   test('rejects non-canonical Foundation references in prose and code fences', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
-    expect(() =>
-      validateCompleteGameDocumentMarkdown(
-        path,
-        `${markdown}\nSee docs/UIUX_DESIGN.md.`,
-      ),
-    ).toThrow(/canonical|document reference/i)
-    expect(() =>
-      validateCompleteGameDocumentMarkdown(
-        path,
-        markdown.replace('```mermaid', '```mermaid\n%% docs/UIUX_DESIGN.md'),
-      ),
-    ).toThrow(/canonical|document reference/i)
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    expect(() => validateCompleteGameDocumentMarkdown(path, `${markdown}\nSee docs/UIUX_DESIGN.md.`)).toThrow(/canonical|document reference/i)
+    expect(() => validateCompleteGameDocumentMarkdown(path, markdown.replace('```mermaid', '```mermaid\n%% docs/UIUX_DESIGN.md'))).toThrow(/canonical|document reference/i)
   })
 
   test('rejects truncated Foundation path references without a Markdown extension', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
-    expect(() =>
-      validateCompleteGameDocumentMarkdown(path, `${markdown}\nSee docs/GGD.`),
-    ).toThrow(/canonical|document reference/i)
-    expect(() =>
-      validateCompleteGameDocumentMarkdown(path, `${markdown}\nSee docs/GDD.`),
-    ).toThrow(/canonical|document reference/i)
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    expect(() => validateCompleteGameDocumentMarkdown(path, `${markdown}\nSee docs/GGD.`)).toThrow(/canonical|document reference/i)
+    expect(() => validateCompleteGameDocumentMarkdown(path, `${markdown}\nSee docs/GDD.`)).toThrow(/canonical|document reference/i)
   })
 
   test('accepts canonical Foundation references and non-document asset paths', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
-    const referenced = markdown.replace(
-      'Concrete production authority',
-      'See docs/BALANCE_DESIGN.md and assets/example.png.\n\nConcrete production authority',
-    )
-    expect(validateCompleteGameDocumentMarkdown(path, referenced)).toBe(
-      referenced,
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+    const referenced = markdown.replace('Concrete production authority', 'See docs/BALANCE_DESIGN.md and assets/example.png.\n\nConcrete production authority')
+    expect(validateCompleteGameDocumentMarkdown(path, referenced)).toBe(referenced)
   })
 
   test('accepts a complete document above the compact authoring target', () => {
@@ -262,10 +206,7 @@ describe('native complete game document validation', () => {
     const markdown = renderTestCompleteGameDocument(
       path,
       completeTestSubmission(path),
-    ).replaceAll(
-      /(<!-- beegame-(?:executive-summary|section:[^>]+|production-materials|material:[^>]+|audit-appendix) -->)\n/g,
-      '$1\n\n',
-    )
+    ).replaceAll(/(<!-- beegame-(?:executive-summary|section:[^>]+|production-materials|material:[^>]+|audit-appendix) -->)\n/g, '$1\n\n')
 
     expect(validateCompleteGameDocumentMarkdown(path, markdown)).toBe(
       markdown.trimEnd() + '\n',
@@ -274,17 +215,11 @@ describe('native complete game document validation', () => {
 
   test('rejects missing, duplicate, and out-of-order canonical sections', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const firstMarker = markdown.match(/<!-- beegame-section:[^>]+ -->/)?.[0]
     expect(firstMarker).toBeTruthy()
     expect(() =>
-      validateCompleteGameDocumentMarkdown(
-        path,
-        markdown.replace(firstMarker!, ''),
-      ),
+      validateCompleteGameDocumentMarkdown(path, markdown.replace(firstMarker!, '')),
     ).toThrow(/sections|structure/i)
     expect(() =>
       validateCompleteGameDocumentMarkdown(
@@ -296,10 +231,7 @@ describe('native complete game document validation', () => {
 
   test('rejects missing or malformed production materials', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     expect(() =>
       validateCompleteGameDocumentMarkdown(
         path,
@@ -321,35 +253,27 @@ describe('native complete game document validation', () => {
 
   test('keeps evidence_register as a Markdown table and rejects key-value blocks', () => {
     const path = 'docs/ASSET_PLAN.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const keyValueBlock = replaceMaterialBody(
       markdown,
       'license-register',
       'evidenceId: asset.source.pending\nstate: source_not_selected\nevidenceRefs: []',
     )
-    expect(() =>
-      validateCompleteGameDocumentMarkdown(path, keyValueBlock),
-    ).toThrow(/format.*license-register/i)
+    expect(() => validateCompleteGameDocumentMarkdown(path, keyValueBlock)).toThrow(
+      /format.*license-register/i,
+    )
 
     const evidenceTable = replaceMaterialBody(
       markdown,
       'license-register',
       '| Inventory ID | Source | License Evidence |\n| --- | --- | --- |\n| asset.source.pending | not selected | pending |',
     )
-    expect(validateCompleteGameDocumentMarkdown(path, evidenceTable)).toBe(
-      evidenceTable,
-    )
+    expect(validateCompleteGameDocumentMarkdown(path, evidenceTable)).toBe(evidenceTable)
   })
 
   test('rejects unclosed fences and inline code with material and line diagnostics', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const malformed = replaceMaterialBody(
       markdown,
       'core-loop-diagram',
@@ -371,35 +295,22 @@ describe('native complete game document validation', () => {
 
   test('rejects concatenated material markers and deleted material markers deterministically', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const first = '<!-- beegame-material:core-loop-diagram -->'
     const second = '<!-- beegame-material:game-state-flow -->'
-    expect(() =>
-      validateCompleteGameDocumentMarkdown(
-        path,
-        markdown.replace(first, `${first}${second}`),
-      ),
-    ).toThrow(/material.*marker.*line/i)
-    expect(() =>
-      validateCompleteGameDocumentMarkdown(
-        path,
-        markdown.replace(
-          first,
-          '<!-- beegame-material:scene-transition-diagram -->',
-        ),
-      ),
-    ).toThrow(/scene-transition-diagram.*marker/i)
+    expect(() => validateCompleteGameDocumentMarkdown(
+      path,
+      markdown.replace(first, `${first}${second}`),
+    )).toThrow(/material.*marker.*line/i)
+    expect(() => validateCompleteGameDocumentMarkdown(
+      path,
+      markdown.replace(first, '<!-- beegame-material:scene-transition-diagram -->'),
+    )).toThrow(/scene-transition-diagram.*marker/i)
   })
 
   test('rejects uneven Markdown table pipes with the owning material line', () => {
     const path = 'docs/ART_DIRECTION.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const malformed = replaceMaterialBody(
       markdown,
       'visual-language-board',
@@ -412,10 +323,7 @@ describe('native complete game document validation', () => {
 
   test('rejects a malformed Mermaid fence with the owning material line', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const malformed = replaceMaterialBody(
       markdown,
       'core-loop-diagram',
@@ -428,10 +336,7 @@ describe('native complete game document validation', () => {
 
   test('pairs inline backtick runs exactly across lines and respects escaped delimiters', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const valid = replaceSectionBody(
       markdown,
       'vision',
@@ -468,33 +373,22 @@ describe('native complete game document validation', () => {
 
   test('rejects production tables whose rows do not match the header width', () => {
     const path = 'docs/ART_DIRECTION.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const malformed = replaceMaterialBody(
       markdown,
       'visual-language-board',
       '| Field | Value |\n| --- | --- |\n| authority | complete | stray |',
     )
-    expect(() => validateCompleteGameDocumentMarkdown(path, malformed)).toThrow(
-      /table|column|format/i,
-    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, malformed)).toThrow(/table|column|format/i)
   })
 
   test('requires actionable acceptance criteria', () => {
     const path = 'docs/GDD.md'
-    const markdown = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const markdown = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     expect(() =>
       validateCompleteGameDocumentMarkdown(
         path,
-        markdown.replace(
-          /### Acceptance Criteria[^]*$/,
-          '### Acceptance Criteria\n',
-        ),
+        markdown.replace(/### Acceptance Criteria[^]*$/, '### Acceptance Criteria\n'),
       ),
     ).toThrow(/acceptance criteria/i)
   })
@@ -550,9 +444,7 @@ describe('native complete game document validation', () => {
       ...submission,
       executiveSummary: 'No known section-specific risks.',
     })
-    expect(() => validateCompleteGameDocumentMarkdown(path, empty)).toThrow(
-      /template/i,
-    )
+    expect(() => validateCompleteGameDocumentMarkdown(path, empty)).toThrow(/template/i)
 
     const repeated = 'A concrete production paragraph '.repeat(9)
     const duplicated = renderTestCompleteGameDocument(path, {
@@ -563,25 +455,20 @@ describe('native complete game document validation', () => {
         body: index < 2 ? repeated : section.body,
       })),
     })
-    expect(() =>
-      validateCompleteGameDocumentMarkdown(path, duplicated),
-    ).toThrow(/repeats/i)
+    expect(() => validateCompleteGameDocumentMarkdown(path, duplicated)).toThrow(/repeats/i)
   })
 
   test('treats authored IDs and reference-column wording as document content', () => {
     const path = 'docs/GDD.md'
-    const base = renderTestCompleteGameDocument(
-      path,
-      completeTestSubmission(path),
-    )
+    const base = renderTestCompleteGameDocument(path, completeTestSubmission(path))
     const delegated = replaceSectionBody(
       base,
       'scope_risks',
       '| Subject | Owner Ref | Document Path | Authority Notes |\n| --- | --- | --- | --- |\n| numeric tuning | `material.variable-parameter-table` | docs/BALANCE_DESIGN.md | Balance owns the values. |',
     )
 
-    expect(validateCompleteGameDocumentMarkdown(path, delegated)).toBe(
-      delegated,
-    )
+    expect(validateCompleteGameDocumentMarkdown(path, delegated)).toBe(delegated)
   })
+
+
 })
