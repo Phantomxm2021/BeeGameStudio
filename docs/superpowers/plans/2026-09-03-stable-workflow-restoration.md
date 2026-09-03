@@ -230,6 +230,14 @@ git commit -m "refactor: remove coupled game ir source tree"
 
 Verify this worktree owns its ignored `node_modules` directory. A symlink to another worktree is forbidden because workspace-package links resolve duplicate physical TypeScript identities. If the directory is missing, run `bun install --frozen-lockfile`; verify `git status --short` remains clean.
 
+Build the ignored native CLI prerequisite before running tests:
+
+```bash
+bun run build:bun
+```
+
+Verify `dist/cli-bun.js` exists and remains ignored. The protected native-process tests execute this file; a clean checkout does not contain it because `dist/` is not tracked.
+
 - [ ] **Step 2: Run static gates**
 
 ```bash
