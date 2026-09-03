@@ -138,7 +138,7 @@ Infrastructure payload protection, a missing contract, or a replacement that mak
 
 ## 7. Minimal implementation shape
 
-Reuse the existing heading scanner and canonical contract. Add one exported structural classification function beside `isCompleteGameDocumentMarkdownStructure`; do not add a parser dependency, recovery framework, feature flag, compatibility reader, or durable schema.
+Reuse the existing heading scanner and canonical contract. Add one exported structural classification function beside `isCompleteGameDocumentMarkdownStructure`; do not add a parser dependency, recovery framework, feature flag, compatibility reader, or durable schema. The literal skeleton is rendered by one pure helper in `game-document-contracts.ts` and consumed by both the author prompt and replacement prompt; duplicate skeleton builders are forbidden.
 
 Extend the native turn state with only the transient distinction needed to capture a replacement response. Reuse the existing native session, observability, prompt writer, Markdown sink, pending path, and final result path. Normalize the successful terminal result to the complete accepted candidate, and let the sink's existing pre-commit overwrite publish that terminal body. The final committed body contains only the accepted replacement candidate.
 

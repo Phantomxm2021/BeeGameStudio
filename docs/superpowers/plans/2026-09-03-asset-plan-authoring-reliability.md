@@ -185,8 +185,11 @@ Run the boundary checker separately and require that every mismatch is an exact 
 - Modify: `packages/agent-workflow-server/src/beegame/fixtures/native-runtime-fixture.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/native-cli-process-runner.test.ts`
 - Modify: `packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts`
 
-**Interface:** The runner uses Task 2's classifier. `suffix_incomplete` uses the existing append prompt. `structurally_invalid` uses one complete-replacement prompt. The final forwarded result's `result` is the accepted complete candidate from the runner buffer.
+**Interface:** The runner uses Task 2's classifier. `suffix_incomplete` uses the existing append prompt. `structurally_invalid` uses one complete-replacement prompt. The final forwarded result's `result` is the accepted complete candidate from the runner buffer. The author and replacement prompts consume one shared pure skeleton renderer from `game-document-contracts.ts`.
 
 - [ ] **Step 1: Write RED native-runtime scenarios**
 
@@ -206,7 +209,7 @@ The successful replacement test must prove:
 - exactly one successful result reaches the caller;
 - its `result` equals the complete replacement and each canonical material heading appears exactly once.
 
-The failure tests must prove no third user message/replacement cycle occurs and the error identifies `Markdown structural replacement` rather than `continuation made no progress`. Add a terminal-only replacement scenario whose second response has no stream delta but a non-empty complete `result`, and a streamed non-empty candidate with an empty provider terminal result that the runner normalizes to the full candidate before forwarding. Only a replacement with neither replacement stream bytes nor replacement result bytes is empty.
+The failure tests must prove no third user message/replacement cycle occurs and the error identifies `Markdown structural replacement` rather than `continuation made no progress`. Add a terminal-only replacement scenario whose second response has no stream delta but a non-empty complete `result`, a streamed non-empty replacement with an empty provider terminal result, and a streamed append delta with an empty provider terminal result; each must preserve the streamed recovery buffer and normalize the full candidate before forwarding. Only a replacement with neither replacement stream bytes nor replacement result bytes is empty. Assert that the author prompt's literal skeleton equals the same shared helper output used by the replacement prompt.
 
 - [ ] **Step 2: Run RED**
 
@@ -216,7 +219,7 @@ bun test packages/agent-workflow-server/src/beegame/native-cli-process-runner.te
 
 - [ ] **Step 3: Implement one transient recovery mode**
 
-Replace the continuation booleans with the minimum explicit mode needed to distinguish `none`, `append`, `restart`, and `replace`. Define one replacement-prompt builder that receives the classifier `reason` and the contract-derived literal skeleton. During `replace`, collect new Markdown into the existing recovery buffer without appending it to the candidate; if no replacement stream text arrived, use the non-empty terminal `result` as that buffer. At its result:
+Replace the continuation booleans with the minimum explicit mode needed to distinguish `none`, `append`, `restart`, and `replace`. Define one replacement-prompt builder that receives the classifier `reason` and the skeleton from a single pure renderer exported by `game-document-contracts.ts`; remove the duplicate renderer from `worker-prompts.ts`. During `replace`, collect new Markdown into the existing recovery buffer without appending it to the candidate; only when that recovery buffer is trim-empty may a non-empty terminal `result` initialize it. Never overwrite streamed recovery bytes with an empty, delta-duplicating, or full-response terminal echo. At its result:
 
 - fail if empty or byte-identical to the rejected candidate;
 - classify the replacement and fail if it is not complete;
@@ -238,7 +241,7 @@ bun test packages/agent-workflow-server/src/beegame/native-cli-process-runner.te
 Inspect all callers of the classifier and all writes to the sink. Reject compatibility flags, recovery counters, fresh dispatches, duplicated candidate state, or changes outside Stage 2.
 
 ```bash
-git add packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts packages/agent-workflow-server/src/beegame/native-cli-process-runner.test.ts packages/agent-workflow-server/src/beegame/fixtures/native-runtime-fixture.ts
+git add packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts packages/agent-workflow-server/src/beegame/native-cli-process-runner.test.ts packages/agent-workflow-server/src/beegame/fixtures/native-runtime-fixture.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts
 git commit -m "fix: replace invalid markdown candidate in place"
 ```
 
