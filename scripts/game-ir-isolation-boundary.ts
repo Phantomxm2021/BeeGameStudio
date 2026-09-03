@@ -66,6 +66,80 @@ function trackedPaths(root: string): string[] {
   return output.split("\0").filter(Boolean);
 }
 
+function stagedTrackedPaths(root: string): string[] {
+  const output = execFileSync("git", ["ls-files", "--cached", "-z"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return output.split("\0").filter(Boolean);
+}
+
+function treeEntries(
+  root: string,
+  commit: string,
+  prefixes: string[],
+): Map<string, string> {
+  const output = git(root, ["ls-tree", "-r", commit, "--", ...prefixes]);
+  const entries = new Map<string, string>();
+  for (const line of output.split("\n").filter(Boolean)) {
+    const tab = line.indexOf("\t");
+    const fields = line.slice(0, tab).split(/\s+/);
+    entries.set(line.slice(tab + 1), fields[2]);
+  }
+  return entries;
+}
+
+function sortedDiffPaths(root: string, manifest: ProtectedBaselineManifest): string[] {
+  return git(root, [
+    "diff",
+    "--name-only",
+    manifest.baselineCommit,
+    manifest.sourceCommit,
+  ])
+    .split("\n")
+    .filter(Boolean)
+    .filter((path) => isProtectedPath(path, manifest.quarantinedPrefix))
+    .sort((a, b) => Buffer.from(a).compare(Buffer.from(b)));
+}
+
+function sortedScratchDiffPaths(
+  root: string,
+  manifest: ProtectedBaselineManifest,
+): string[] {
+  return git(root, [
+    "diff",
+    "--name-only",
+    manifest.baselineCommit,
+    manifest.sourceCommit,
+    "--",
+    ".superpowers/sdd/",
+  ])
+    .split("\n")
+    .filter(Boolean)
+    .sort((a, b) => Buffer.from(a).compare(Buffer.from(b)));
+}
+
+function compareManifestList(
+  expected: readonly string[],
+  actual: readonly string[],
+  violations: BoundaryViolation[],
+  detail: string,
+): void {
+  const sortedActual = [...actual].sort((a, b) =>
+    Buffer.from(a).compare(Buffer.from(b)),
+  );
+  const exact =
+    expected.length === actual.length &&
+    expected.every((path, index) => path === actual[index]);
+  if (!exact || sortedActual.some((path, index) => path !== actual[index])) {
+    violations.push({
+      code: "baseline_manifest_mismatch",
+      detail: `${detail}: manifest must equal the sorted Git range exactly`,
+    });
+  }
+}
+
 function isProtectedPath(path: string, quarantinedPrefix: string): boolean {
   return (
     (path.startsWith(runtimeRoot) && !path.startsWith(quarantinedPrefix)) ||
@@ -148,12 +222,20 @@ function verifyHistory(
       "diff-tree",
       "--no-commit-id",
       "--name-only",
+      "--diff-filter=A",
       "-r",
       manifest.firstGameIrProductionCommit,
     ])
       .split("\n")
       .filter(Boolean);
-    if (!productionPaths.some((path) => path.startsWith(manifest.quarantinedPrefix))) {
+    if (
+      !productionPaths.some(
+        (path) =>
+          path.startsWith(manifest.quarantinedPrefix) &&
+          /\.tsx?$/.test(path) &&
+          !/\.test\.tsx?$/.test(path),
+      )
+    ) {
       violations.push({
         code: "invalid_baseline_ancestry",
         detail: "first Game IR production commit does not add Game IR production source",
@@ -170,32 +252,50 @@ function verifyHistory(
 function verifyProtectedPaths(
   root: string,
   manifest: ProtectedBaselineManifest,
+  baselinePaths: Map<string, string>,
   currentPaths: Set<string>,
   violations: BoundaryViolation[],
 ): void {
-  const protectedPaths = new Set(manifest.protectedPaths.map(({ path }) => path));
-  for (const { path, blobId } of manifest.protectedPaths) {
-    let baselineBlob: string;
-    try {
-      baselineBlob = git(root, ["rev-parse", `${manifest.baselineCommit}:${path}`]);
-    } catch {
-      violations.push({ code: "missing_protected_path", path });
-      continue;
-    }
-    if (baselineBlob !== blobId) {
+  const manifestPaths = new Map(
+    manifest.protectedPaths.map(({ path, blobId }) => [path, blobId]),
+  );
+  const baselineOrder = [...baselinePaths.keys()].sort((a, b) =>
+    Buffer.from(a).compare(Buffer.from(b)),
+  );
+  const manifestOrder = manifest.protectedPaths.map(({ path }) => path);
+  if (
+    baselineOrder.length !== manifestOrder.length ||
+    baselineOrder.some((path, index) => path !== manifestOrder[index])
+  ) {
+    violations.push({
+      code: "baseline_manifest_mismatch",
+      detail: "manifest protected paths must equal the sorted baseline tree exactly",
+    });
+  }
+  const allPaths = new Set([
+    ...baselinePaths.keys(),
+    ...manifestPaths.keys(),
+  ]);
+  for (const path of [...allPaths].sort((a, b) =>
+    Buffer.from(a).compare(Buffer.from(b)),
+  )) {
+    const baselineBlob = baselinePaths.get(path);
+    const manifestBlob = manifestPaths.get(path);
+    if (baselineBlob === undefined || manifestBlob === undefined || baselineBlob !== manifestBlob) {
       violations.push({
         code: "baseline_manifest_mismatch",
         path,
-        detail: `manifest blob ${blobId} does not match baseline blob ${baselineBlob}`,
+        detail: "manifest protected path/blob set does not exactly match baseline tree",
       });
     }
+    if (baselineBlob === undefined) continue;
     if (!currentPaths.has(path)) {
       violations.push({ code: "missing_protected_path", path });
       continue;
     }
     try {
       const currentBlob = git(root, ["hash-object", "--no-filters", "--", path]);
-      if (currentBlob !== blobId) {
+      if (currentBlob !== baselineBlob) {
         violations.push({ code: "protected_blob_mismatch", path });
       }
     } catch {
@@ -216,7 +316,7 @@ function verifyProtectedPaths(
   }
 
   for (const path of currentPaths) {
-    if (isProtectedPath(path, manifest.quarantinedPrefix) && !protectedPaths.has(path)) {
+    if (isProtectedPath(path, manifest.quarantinedPrefix) && !baselinePaths.has(path)) {
       violations.push({ code: "unexpected_protected_path", path });
     }
   }
@@ -229,10 +329,30 @@ export function verifyGameIrIsolationBoundary(
   const violations: BoundaryViolation[] = [];
   verifyHistory(root, manifest, violations);
   const currentPaths = new Set(trackedPaths(root));
-  verifyProtectedPaths(root, manifest, currentPaths, violations);
+  const baselinePaths = treeEntries(root, manifest.baselineCommit, [runtimeRoot, testsRoot]);
+  for (const path of [...baselinePaths.keys()]) {
+    if (path.startsWith(manifest.quarantinedPrefix)) baselinePaths.delete(path);
+  }
+  verifyProtectedPaths(root, manifest, baselinePaths, currentPaths, violations);
+  compareManifestList(
+    sortedDiffPaths(root, manifest),
+    manifest.changedOutsideQuarantine,
+    violations,
+    "changedOutsideQuarantine",
+  );
+  compareManifestList(
+    sortedScratchDiffPaths(root, manifest),
+    manifest.trackedScratchPaths,
+    violations,
+    "trackedScratchPaths",
+  );
 
-  for (const path of manifest.trackedScratchPaths) {
-    if (currentPaths.has(path)) {
+  const baselineScratch = new Set(
+    treeEntries(root, manifest.baselineCommit, [".superpowers/sdd/"]).keys(),
+  );
+  const currentTrackedPaths = new Set(stagedTrackedPaths(root));
+  for (const path of currentTrackedPaths) {
+    if (path.startsWith(".superpowers/sdd/") && !baselineScratch.has(path)) {
       violations.push({ code: "tracked_sdd_scratch", path });
     }
   }
