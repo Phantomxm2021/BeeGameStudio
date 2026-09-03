@@ -92,3 +92,28 @@ Received: "atomic-task-planner"
 - The Stage 3/4 card-history failure is the independent `workflow-stage-card-history` assertion named above; no source file was edited or altered to investigate it.
 
 No production or existing test changes were made in response. Stage 2, Stage 3, and Stage 4 were run; Stage 3 and Stage 4 passed. Checklist/shared-runtime failed, so broad server regression was skipped. No successful evidence commit was created.
+
+## Final-gate rerun after admitted test-only corrections
+
+The preceding seven-failure RED evidence is intentionally preserved. The correction commits changed only the two admitted test files recorded by the boundary manifest; no production source, prompt, or contract was changed.
+
+Current rerun checkout: `2cc7f4c212c6d7e82019c850857a045d56cf2e69`.
+
+Precondition: `node_modules` is a real worktree-local directory, not a symlink; `git status --short` was empty before the rerun.
+
+Static gates (2026-09-03T09:08:00Z–2026-09-03T09:08:50Z): `bun scripts/game-ir-isolation-boundary.ts` exit 0 (`game-ir isolation boundary: PASS`); `bun run typecheck` exit 0 (`tsc --noEmit`); `git diff --check` exit 0.
+
+Stage 2 authoring rerun: the existing 13-file command from the prior report completed with exit 0, 123 pass, 0 fail, 782 assertions.
+
+Stage 3 Reviewer rerun was the first substantive failure:
+
+```text
+bun test [the same 19 protected foundation-audit/fact/semantic test files listed in the prior Task 4 report]
+exit 1; 203 pass, 2 fail, 1309 assertions; 205 tests across 19 files; 52.59s
+```
+
+The failures were `claims document revision attempts durably beyond the former third-attempt cap` and `keeps unauthorized-section revision failure in the automatic retry loop`; both expected task status `running` but received `retryable`.
+
+Read-only flakiness diagnosis: each failing test passed in isolation three consecutive times; the complete `foundation-fact-runtime.integration.test.ts` file passed serially (68 pass, 0 fail, 556 assertions), and the full Stage 3 set passed with `--max-concurrency 1` (205/205). The failure occurs only in the default multi-file run because the retry callback schedules `void resume` asynchronously and the test reads durable state immediately. This is a pre-existing baseline timing race, not a Task 4 source change. No other worktree process was terminated.
+
+Per the brief, Stage 4, Checklist/shared-runtime, and broad regression were not run after the first substantive failure. No model or Chrome call occurred. This remains failure evidence, not an accepted local-gate receipt.
