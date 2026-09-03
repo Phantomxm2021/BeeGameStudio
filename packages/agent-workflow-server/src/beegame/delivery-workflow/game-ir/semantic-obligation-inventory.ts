@@ -131,6 +131,27 @@ export type GameIrSemanticObligationRecordStreamResult = Readonly<{
   diagnostic?: string
 }>
 
+export type GameIrSemanticObligationPromptProviderMode = 'anthropic' | 'openai'
+
+export const GAME_IR_SEMANTIC_OBLIGATION_PROMPT_PROVIDER_MODES = Object.freeze([
+  'anthropic',
+  'openai',
+] as const)
+
+export type GameIrSemanticObligationInventoryPromptAuthority = Readonly<{
+  schemaVersion: 'game-ir-semantic-obligation-inventory-prompt.v1'
+  moduleId: GameIrProjectionModuleId
+  sourceFragments: readonly Readonly<{
+    fragmentId: string
+    text: string
+  }>[]
+  targetKinds: readonly Readonly<{
+    targetKind: string
+    obligationClass: string
+    semanticRole: string
+  }>[]
+}>
+
 export type GameIrSemanticObligationInventory = Readonly<{
   schemaVersion: typeof GAME_IR_SEMANTIC_OBLIGATION_INVENTORY_SCHEMA_VERSION
   moduleId: GameIrProjectionModuleId
@@ -442,4 +463,75 @@ export function buildGameIrSemanticObligationInventory(input: {
     ...body,
     digest: digestGameIrValue(body),
   })
+}
+
+/** Builds the compact, complete source authority shown to the inventory model. */
+export function buildGameIrSemanticObligationInventoryPromptAuthority(input: {
+  source: GameIrDomainSourceEnvelope
+}): GameIrSemanticObligationInventoryPromptAuthority {
+  const source = validateGameIrDomainSourceEnvelope(input.source)
+  const contract = buildGameIrProjectionContract(source.moduleId)
+  const catalog = buildGameIrEvidenceFragmentCatalog({
+    sectionIndex: source.sectionIndex,
+    sectionBytes: source.sectionBytes,
+  })
+  const sourceFragments = catalog.fragments.map(fragment => ({
+    fragmentId: fragment.fragmentId,
+    text: fragment.excerpt,
+  }))
+  const targetKinds = contract.nodes.map(node => {
+    const descriptor = GAME_IR_SEMANTIC_OBLIGATION_MANIFEST[source.moduleId][node.kind]
+    if (!descriptor) throw new Error(`missing obligation descriptor: ${source.moduleId}.${node.kind}`)
+    return {
+      targetKind: node.kind,
+      obligationClass: descriptor.obligationClass,
+      semanticRole: descriptor.semanticRole,
+    }
+  })
+  return deepFreeze({
+    schemaVersion: 'game-ir-semantic-obligation-inventory-prompt.v1',
+    moduleId: source.moduleId,
+    sourceFragments,
+    targetKinds,
+  })
+}
+
+function providerLabel(mode: GameIrSemanticObligationPromptProviderMode): string {
+  if (mode === 'anthropic') return 'Anthropic-compatible'
+  if (mode === 'openai') return 'OpenAI-compatible'
+  throw new Error(`unsupported semantic obligation provider mode: ${mode}`)
+}
+
+/** Renders only the inventory authority and its strict raw NDJSON contract. */
+export function renderGameIrSemanticObligationInventoryPrompt(
+  authority: GameIrSemanticObligationInventoryPromptAuthority,
+  providerMode: GameIrSemanticObligationPromptProviderMode = 'anthropic',
+): string {
+  const mode = providerLabel(providerMode)
+  const targetRows = authority.targetKinds.map(kind =>
+    `${kind.targetKind} | ${kind.obligationClass} | ${kind.semanticRole}`,
+  )
+  const fragmentRows = authority.sourceFragments.map(fragment =>
+    `- ${fragment.fragmentId}: ${JSON.stringify(fragment.text)}`,
+  )
+  return [
+    'Semantic obligation inventory authority',
+    `Provider mode: ${mode}`,
+    `Module: ${authority.moduleId}`,
+    '',
+    '## Allowed target kinds (service-owned class and role)',
+    'targetKind | class | role',
+    ...targetRows,
+    '',
+    '## Source fragments (complete canonical module scope)',
+    ...fragmentRows,
+    '',
+    '## Output contract',
+    'Return strict NDJSON only: one JSON object per line, no Markdown, prose, array/object wrapper, tool call, or extra fields.',
+    'Identify every obligation instance supported by the source fragments. Use only an allowed targetKind and one exact fragmentId. targetId values must be safe, unique, and code-unit sorted.',
+    'The service owns all authority not represented in this record shape; emit no extra properties.',
+    '{"record":"obligation","moduleId":"' + authority.moduleId + '","targetId":"<targetId>","targetKind":"<targetKind>","fragmentId":"<fragmentId>"}',
+    'After the final obligation, emit exactly: {"record":"done","moduleId":"' + authority.moduleId + '"}',
+    'The done record is last. An empty inventory is valid when no obligation is present.',
+  ].join('\n')
 }

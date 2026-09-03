@@ -23,8 +23,10 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import type { GameIrSourceSection } from './model'
 import {
   buildGameIrSemanticObligationInventory,
+  buildGameIrSemanticObligationInventoryPromptAuthority,
   GAME_IR_SEMANTIC_OBLIGATION_MANIFEST,
   parseGameIrSemanticObligationRecordStream,
+  renderGameIrSemanticObligationInventoryPrompt,
   validateGameIrSemanticObligationManifest,
 } from './semantic-obligation-inventory'
 
@@ -284,5 +286,34 @@ describe('Game IR semantic obligation inventory', () => {
     const fragmentId = fragmentFor(source, 'balance.slice.1')
     const parsed = parseGameIrSemanticObligationRecordStream({ expectedModuleId: 'balance', text: `${line('balance.formula.stale', 'balance.formula', fragmentId)}\n${done()}\n` })
     expect(() => buildGameIrSemanticObligationInventory({ moduleId: 'balance', source: stale as GameIrDomainSourceEnvelope, records: parsed.records })).toThrow(/stale|digest|source/i)
+  })
+
+  test('renders complete canonical source fragments and service-owned kind authority for both provider modes', () => {
+    const source = balanceSource()
+    const catalog = buildGameIrEvidenceFragmentCatalog({
+      sectionIndex: source.sectionIndex,
+      sectionBytes: source.sectionBytes,
+    })
+    const authority = buildGameIrSemanticObligationInventoryPromptAuthority({ source })
+    for (const providerMode of ['anthropic', 'openai'] as const) {
+      const rendered = renderGameIrSemanticObligationInventoryPrompt(authority, providerMode)
+      expect(rendered).toContain('## Source fragments')
+      for (const fragment of catalog.fragments) {
+        expect(rendered.match(new RegExp(`\\b${fragment.fragmentId}:`, 'g'))).toHaveLength(1)
+        expect(rendered).toContain(fragment.excerpt)
+      }
+      for (const [targetKind, descriptor] of Object.entries(GAME_IR_SEMANTIC_OBLIGATION_MANIFEST.balance)) {
+        expect(rendered).toContain(`${targetKind} | ${descriptor.obligationClass} | ${descriptor.semanticRole}`)
+      }
+      const output = rendered.slice(rendered.indexOf('## Output contract'))
+      expect(output).toContain('{"record":"obligation","moduleId":"balance","targetId":"<targetId>","targetKind":"<targetKind>","fragmentId":"<fragmentId>"}')
+      expect(output).toContain('{"record":"done","moduleId":"balance"}')
+      expect(output).not.toContain('ownerSliceId')
+      expect(output).not.toContain('semanticRole')
+      expect(output).not.toContain('digest')
+      expect(rendered).not.toContain('sectionBytes')
+      expect(rendered).not.toContain('authoritySectionIndex')
+      expect(rendered).not.toContain('operation-packet')
+    }
   })
 })

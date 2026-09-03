@@ -15,6 +15,7 @@ import {
 import { sourceSectionsForGameIrProjectionSlice } from './projection-slice-authority'
 import {
   GAME_IR_SEMANTIC_OBLIGATION_MANIFEST,
+  type GameIrSemanticObligationPromptProviderMode,
   type GameIrSemanticObligation,
   type GameIrSemanticObligationInventory,
 } from './semantic-obligation-inventory'
@@ -70,6 +71,26 @@ export type GameIrSemanticObligationValidationAuthority = Readonly<{
     sectionId: string
     sectionDigest: string
     text: string
+  }>[]
+  identities: GameIrSemanticObligationValidationIdentities
+}>
+
+export type GameIrSemanticObligationValidationPromptAuthority = Readonly<{
+  schemaVersion: 'game-ir-semantic-obligation-validation-prompt.v1'
+  moduleId: GameIrProjectionModuleId
+  sourceFragments: readonly Readonly<{
+    fragmentId: string
+    text: string
+  }>[]
+  manifest: readonly Readonly<{
+    targetKind: string
+    obligationClass: string
+    semanticRole: string
+  }>[]
+  admittedInventory: readonly Readonly<{
+    targetId: string
+    targetKind: string
+    fragmentId: string
   }>[]
   identities: GameIrSemanticObligationValidationIdentities
 }>
@@ -375,6 +396,112 @@ export function buildGameIrSemanticObligationValidationAuthority(input: {
     sourceFragments,
     identities,
   })
+}
+
+/**
+ * Projects validation authority without trusting its previously rendered
+ * fragment list; source fragments are rebuilt from the service source.
+ */
+export function buildGameIrSemanticObligationValidationPromptAuthority(
+  input:
+    | GameIrSemanticObligationValidationAuthority
+    | {
+        source: GameIrDomainSourceEnvelope
+        inventory: GameIrSemanticObligationInventory
+      },
+): GameIrSemanticObligationValidationPromptAuthority {
+  const authority = buildGameIrSemanticObligationValidationAuthority({
+    source: input.source,
+    inventory: input.inventory,
+  })
+  const sourceFragments = catalogFor(authority.source).fragments.map(fragment => ({
+    fragmentId: fragment.fragmentId,
+    text: fragment.excerpt,
+  }))
+  const manifest = authority.validatorManifest.obligations.map(obligation => ({
+    targetKind: obligation.targetKind,
+    obligationClass: obligation.obligationClass,
+    semanticRole: obligation.semanticRole,
+  }))
+  const admittedInventory = authority.inventory.obligations.map(obligation => ({
+    targetId: obligation.targetId,
+    targetKind: obligation.targetKind,
+    fragmentId: obligation.fragmentId,
+  }))
+  return deepFreeze({
+    schemaVersion: 'game-ir-semantic-obligation-validation-prompt.v1',
+    moduleId: authority.moduleId,
+    sourceFragments,
+    manifest,
+    admittedInventory,
+    identities: authority.identities,
+  })
+}
+
+function promptProviderLabel(mode: GameIrSemanticObligationPromptProviderMode): string {
+  if (mode === 'anthropic') return 'Anthropic-compatible'
+  if (mode === 'openai') return 'OpenAI-compatible'
+  throw new Error(`unsupported semantic obligation provider mode: ${mode}`)
+}
+
+function identityJson(
+  authority: GameIrSemanticObligationValidationPromptAuthority,
+): string {
+  return JSON.stringify({
+    record: 'pass',
+    moduleId: authority.moduleId,
+    ...authority.identities,
+  })
+}
+
+/** Renders independent source, fixed manifest and admitted inventory authority. */
+export function renderGameIrSemanticObligationValidationPrompt(
+  authority: GameIrSemanticObligationValidationPromptAuthority,
+  providerMode: GameIrSemanticObligationPromptProviderMode = 'anthropic',
+): string {
+  const mode = promptProviderLabel(providerMode)
+  const manifestRows = authority.manifest.map(item =>
+    `${item.targetKind} | ${item.obligationClass} | ${item.semanticRole}`,
+  )
+  const inventoryRows = authority.admittedInventory.length > 0
+    ? authority.admittedInventory.map(item =>
+        `${item.targetId} | ${item.targetKind} | ${item.fragmentId}`,
+      )
+    : ['(empty)']
+  const fragmentRows = authority.sourceFragments.map(fragment =>
+    `- ${fragment.fragmentId}: ${JSON.stringify(fragment.text)}`,
+  )
+  const identityFields = Object.entries(authority.identities)
+    .map(([key, value]) => `${key}=${value}`)
+  return [
+    'Semantic obligation validation authority',
+    `Provider mode: ${mode}`,
+    `Module: ${authority.moduleId}`,
+    '',
+    '## Fixed obligation manifest (service-owned)',
+    'targetKind | class | role',
+    ...manifestRows,
+    '',
+    '## Admitted inventory',
+    'targetId | targetKind | fragmentId',
+    ...inventoryRows,
+    '',
+    '## Source fragments (complete service-selected module scope)',
+    ...fragmentRows,
+    '',
+    '## Terminal identities',
+    ...identityFields,
+    '',
+    '## Output contract',
+    'Return strict NDJSON only: no Markdown, prose, array/object wrapper, tool call, or extra fields.',
+    'PASS must cover every source fragment exactly once, in the displayed order, then end with done. PASS is the only result that may emit coverage lines.',
+    `${identityJson(authority)}`,
+    '{"record":"coverage","moduleId":"' + authority.moduleId + '","fragmentId":"<fragmentId>"}',
+    '{"record":"fail","moduleId":"' + authority.moduleId + '","reasonCode":"missing-obligation","targetId":"<targetId>","expectedKind":"<targetKind>","semanticRole":"<service-owned role>","fragmentId":"<fragmentId>"}',
+    '{"record":"ambiguous","moduleId":"' + authority.moduleId + '","reasonCode":"ambiguous-obligation","detail":"<detail>"}',
+    '{"record":"done","moduleId":"' + authority.moduleId + '"}',
+    'Emit exactly one terminal result: PASS, FAIL missing-obligation, or AMBIGUOUS. The done record is always last.',
+  ].join('\n')
 }
 
 function lines(textValue: string): string[] {

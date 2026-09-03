@@ -24,8 +24,10 @@ import {
 import {
   admitGameIrSemanticObligationValidationResult,
   buildGameIrSemanticObligationValidationAuthority,
+  buildGameIrSemanticObligationValidationPromptAuthority,
   normalizeGameIrSemanticObligationValidationReceipt,
   parseGameIrSemanticObligationValidationResultStream,
+  renderGameIrSemanticObligationValidationPrompt,
 } from './semantic-obligation-validation'
 
 const sha256 = (value: string): string =>
@@ -330,5 +332,52 @@ describe('Game IR semantic obligation validation', () => {
         text: `${ambiguous}\n${fail}\n${done}\n`,
       }).diagnostic,
     ).toMatch(/duplicate|multiple|terminal|ambiguous/i)
+  })
+
+  test('renders independently selected full source and strict terminal protocol for both provider modes', () => {
+    const expected = authority()
+    const promptAuthority = buildGameIrSemanticObligationValidationPromptAuthority(expected)
+    const sourceCatalog = buildGameIrEvidenceFragmentCatalog({
+      sectionIndex: expected.source.sectionIndex,
+      sectionBytes: expected.source.sectionBytes,
+    })
+    for (const providerMode of ['anthropic', 'openai'] as const) {
+      const rendered = renderGameIrSemanticObligationValidationPrompt(promptAuthority, providerMode)
+      expect(rendered).toContain('## Fixed obligation manifest')
+      expect(rendered).toContain('## Admitted inventory')
+      expect(rendered).toContain('## Source fragments')
+      for (const fragment of sourceCatalog.fragments) {
+        expect(rendered.match(new RegExp(`\\b${fragment.fragmentId}:`, 'g'))).toHaveLength(1)
+        expect(rendered).toContain(fragment.excerpt)
+      }
+      expect(rendered).toContain('"record":"pass"')
+      expect(rendered).toContain('"record":"coverage"')
+      expect(rendered).toContain('"record":"fail"')
+      expect(rendered).toContain('"record":"ambiguous"')
+      expect(rendered).toContain('"record":"done"')
+      expect(rendered).not.toContain('sectionBytes')
+      expect(rendered).not.toContain('authoritySectionIndex')
+      expect(rendered).not.toContain('operation-packet')
+    }
+  })
+
+  test('does not derive validator source fragments from admitted inventory', () => {
+    const source = balanceSource()
+    const emptyInventory = buildGameIrSemanticObligationInventory({
+      moduleId: 'balance',
+      source,
+      records: [],
+    })
+    const expected = buildGameIrSemanticObligationValidationPromptAuthority({
+      source,
+      inventory: emptyInventory,
+    })
+    const complete = buildGameIrEvidenceFragmentCatalog({
+      sectionIndex: source.sectionIndex,
+      sectionBytes: source.sectionBytes,
+    })
+    expect(expected.sourceFragments.map(fragment => fragment.fragmentId)).toEqual(
+      complete.fragments.map(fragment => fragment.fragmentId),
+    )
   })
 })
