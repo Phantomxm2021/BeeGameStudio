@@ -1,0 +1,1006 @@
+{
+  "schemaVersion": "game-ir-protected-baseline.v1",
+  "baselineCommit": "d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6",
+  "stableBranchCommit": "70df2e2c79bd214862af3959a257c5f5f42bd666",
+  "firstGameIrBoundaryCommit": "109e7195d314bb716922ef2dd2de65567e428d64",
+  "firstGameIrProductionCommit": "f4a7d16f7bde3bb8a978f1a10350ad2cef84aa8f",
+  "sourceCommit": "4335363b2cd33d1f0b7bd807bff95d9389c67ce1",
+  "quarantinedPrefix": "packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/",
+  "protectedPaths": [
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/asset-contracts-resource-binding.test.ts",
+      "blobId": "d129ee96957dd60e6771ed2ad7db5a168a22058d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/atomic-task-planner.test.ts",
+      "blobId": "ccf70a067aeae36f903791dc58b025795e0fded6"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/authenticated-billing-proxy.test.ts",
+      "blobId": "a72a7fbcea33b8d0ccb3737e4c4cbca925cc3bdb"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/authenticated-resource-proxy.test.ts",
+      "blobId": "c5baf2d5e6a67c92b38b70fe1678d6381a5ab90e"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/authenticated-skills-proxy.test.ts",
+      "blobId": "08eca9bd892e885feeeae48b69cb369c2f746958"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/complete-game-document-fixture.ts",
+      "blobId": "d4fcf5d7692d4493e107134879b38f4027b0e4b7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/dashboard-repository.test.ts",
+      "blobId": "d30a5b581b6292d2c1f798987a2b42f947dc7962"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts",
+      "blobId": "76c4a153b9caf8510d13c5f6ee4b933d7e1cdeae"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/delivery-workflow-controller-resource-entry.test.ts",
+      "blobId": "131042fdfc9837a567a1d2c95546989b2dacb7ce"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts",
+      "blobId": "4c1d39384afdf7b3b8d07f914da998be21713c3b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/delivery-workflow-resource-integration.test.ts",
+      "blobId": "975efd3c26b39465167450a3fd9abffacbf0eb65"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/delivery-workflow-test-helpers.ts",
+      "blobId": "47903d622e6ecd28f3fdd37f0b556a9339b0f1ba"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/deployment-manager.test.ts",
+      "blobId": "30740a29b811e9b7a8d74761c0722e81168807ef"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/filesystem-routes.test.ts",
+      "blobId": "0735f9c2500dbf7b9346fcedc9d0280326651a80"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/idea-to-complete-documents.test.ts",
+      "blobId": "999e7fa4826aaf523705c57a842282e749877ab6"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/implementation-completion.test.ts",
+      "blobId": "63e21e2113555627622c163d1d3da549544c6cdf"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/intake-job-store.test.ts",
+      "blobId": "c373b5fdcb17fcb2c3762cfadc2140499663823d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/invitation-routes.test.ts",
+      "blobId": "f462a00c2a488614cb7578c755f1565b513f258c"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/invitation-service.test.ts",
+      "blobId": "5af9a0ab1a470f8ee1e3965fc01c143e3e7db6d0"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/local-data-migration.test.ts",
+      "blobId": "1077a9199983136880e5d3d1e564a6efe7f132ed"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/mcp-active-discovery.test.ts",
+      "blobId": "26874be09edb1591a1a6f9ec626e594bac57f606"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/outbound-target-policy.test.ts",
+      "blobId": "ce8e7507b111d4ad744400dba7914bf8fcb1b1f2"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/preview-capability.test.ts",
+      "blobId": "0f94dfd482961bc6d82f7a66d69f9387a43b41e4"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/preview-manager.test.ts",
+      "blobId": "b39cd1539769e6c61d3552a9e0aeb6e80957a7c4"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/project-stop-routes.test.ts",
+      "blobId": "d259cb6d44401b5ee980bdf14debdd3e727990dd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/provider-pinning.test.ts",
+      "blobId": "cbe81a3467f4a3795373f01609d5337c3de7a2d3"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/r2-deployment-publisher.test.ts",
+      "blobId": "30bea39fcd23a16b58bc662571e50682d7ef3cea"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/r2-project-asset-storage.test.ts",
+      "blobId": "cfd55d39a0af19484e286d6f115e6b7661ec3d39"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/resource-schema-migration.test.ts",
+      "blobId": "b4e69c5fd675ca7e5d4f15b46b4f52fc9216f9b7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/resource-selection-client.test.ts",
+      "blobId": "e1ce414f9e4304c91dbe1a6cfa91edd985883ab0"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/resource-selection-config.test.ts",
+      "blobId": "153d6977854209faa602aa4dac90aead9cbfdc05"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/resource-semantic-runtime.test.ts",
+      "blobId": "947c72de8a9eaa5c115e695cdcd3b5593f669bab"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/review-project-copy-route.test.ts",
+      "blobId": "2b3d7e0e3a9566979e7efc5c02f60eb95a2a49f7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/runtime-settings-store.test.ts",
+      "blobId": "d7b8018bc869eef2aebd921db5b8ee9e71743423"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/secret-crypto.test.ts",
+      "blobId": "e8829288b737f67485e8af3e8bf6973ebe8b5bad"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/secret-stores.test.ts",
+      "blobId": "ea9a8ac81ee142fe036921cc339448f21eaee099"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/session-manager-resilience.test.ts",
+      "blobId": "f4a9b9293748618aaf92489a0cd119cfe1eb07bd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/session-routes.test.ts",
+      "blobId": "8c9c7cb701071d06f222225b1b691cd6fd67b33d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/single-native-runtime-boundary.test.ts",
+      "blobId": "842f6c8cdd8441770e9e730db24104ca18641e9c"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/supabase-runtime-env-client.test.ts",
+      "blobId": "00381ec7aab0108835eb5e98487578c2fd21cbd0"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/upload-policy.test.ts",
+      "blobId": "f84af96c94165d2952b86784ec4bc7c7b21adf4c"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/user-context.test.ts",
+      "blobId": "346ce78fc6b3f68af05ae237f29148c58d364778"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/vite-preview-host.test.ts",
+      "blobId": "0c16ba91b3acd81ca12cd03bd4b01b2b3ba920b3"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/workflow-stage-snapshot-projection.test.ts",
+      "blobId": "e7c0659f2b59eea75c2b8fe95a0b75be2380816d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/acceptance-checklist.test.ts",
+      "blobId": "97624bc2db8b2ac1d5b99d46bb7303b4cecd638f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/acceptance-checklist.ts",
+      "blobId": "7e9d49255de1255375b85651d98f1c2459bf16c3"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/asset-contract-audit.test.ts",
+      "blobId": "e038626fab655ff9af23211237b43dc2bb97615a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/asset-contract-audit.ts",
+      "blobId": "b177062da9e5a3465172e08c3295b04332e08627"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/asset-contracts-resource-binding.test.ts",
+      "blobId": "a8319bfd9b413adad109fcf5bb7fa26f9b3f0774"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/asset-contracts.ts",
+      "blobId": "55d2648f47e74c391ac255ebed596817c73ad240"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/attachment-build.test.ts",
+      "blobId": "db101e7e47b4518c3f6d86f4b3fbec109466321d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/attachment-build.ts",
+      "blobId": "1baa9b2ca51ad711cf6ef8d3034fd927fa350f08"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/authored-document-receipt.test.ts",
+      "blobId": "02bc1e78bc2c3f4bbc2d6fe41e0767014a4d9539"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/authored-document-receipt.ts",
+      "blobId": "98f60ba15e1ef4ecb2fca0203e66670b9f1d653a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/bounded-diagnostic-log.test.ts",
+      "blobId": "7764b9b7fe73de0a78ad2141e40116f3a2d22f39"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/bounded-diagnostic-log.ts",
+      "blobId": "f1accdce8108507b7b995e8a7456eb6640efdd20"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/checklist-authority-projection.test.ts",
+      "blobId": "1deac233ccb3b3120d62adee32aa32af97ab8423"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/checklist-authority-projection.ts",
+      "blobId": "6cfb88a36ca4054a9794907ed42e9d066ed7344b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/checklist-candidate.test.ts",
+      "blobId": "c1411b2ff5b08389f8f95fe55a32025187fafc00"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/checklist-candidate.ts",
+      "blobId": "f2ffa60974c74ca9282d9b5f75327c6789978794"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/complete-game-document.test.ts",
+      "blobId": "7181bf85d156efec31cb7701b0e38fffd6da95a9"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/complete-game-document.ts",
+      "blobId": "be4c7a421e387cf6e77252bad70fbecbb54eb18d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/configured-provisional-resource-adapters.test.ts",
+      "blobId": "c43cf8c37fd3454b609ccbbaf3722f44bc0da9be"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/configured-provisional-resource-adapters.ts",
+      "blobId": "92b58b2fcbc90e2bf5fc5e7a8f378712f35b31e2"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/confirmed-brief-evidence.test.ts",
+      "blobId": "14a35f2e4ce62d1b8e222f6cfd01eaf0ceb4c540"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/confirmed-brief-evidence.ts",
+      "blobId": "cd233a6261cc774bfc2ee10a0ee13d662bf752ac"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/content-contracts.ts",
+      "blobId": "b7250af24e3fbdfcc6d0e5cbca477262cf1821fd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-worker-session-port.complete-documents.test.ts",
+      "blobId": "04abf5ffb00cd537bb49ec8d9a02fd5700d7ec1e"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-worker-session-port.ts",
+      "blobId": "4d0eecb60fc7cfcff498d6785f7e202753aed58a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/accepted-unit-journal.test.ts",
+      "blobId": "b777719c5aac7fb91de2877a2715aaff8c8c3d84"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/accepted-unit-journal.ts",
+      "blobId": "a130eca5691985f0f969078b39acfd344a428f9f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/atomic-task-planner.ts",
+      "blobId": "3d51b2fce0346b2f0b63bb368e7f0e8d131ef14a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/change-request.ts",
+      "blobId": "7d528cf1aa7683d7dededb862da999036c4c9cf5"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/controller.ts",
+      "blobId": "86dfa23f8212f0ad507b8b5818f6ec08b9fb6532"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/delivery-gate.ts",
+      "blobId": "4e1862bac4559c11909c0952c3e4cb1eee7066a3"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.ts",
+      "blobId": "d189217ad317885f15ec642e19503c74ffb05b45"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/display-progress.test.ts",
+      "blobId": "fdbba7e606a1ffbc83fde17d02c3ede94403fe05"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/display-progress.ts",
+      "blobId": "e33f792f119ddbe13a365edf3d1b0726b1247f8e"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/document-author-boundary.test.ts",
+      "blobId": "d4aafcaf3d2db9c4378d1446f250470daf75ff4a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/document-display-tasks.test.ts",
+      "blobId": "1dc79dd4f6d00c4a1e2293063bd57c2c12de5bf7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/document-display-tasks.ts",
+      "blobId": "8a494d98844e566007a931a2c509521e46d7e463"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/document-stage.ts",
+      "blobId": "8520c507f756ccd63ecd978bc7eb95c2de04c5b4"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/evidence.ts",
+      "blobId": "2bacdcefe1a9178f97f499b0f9785403dfdd92bf"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.test.ts",
+      "blobId": "36add0ef2a5e313a8739b21ba45a9c30172703a1"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.ts",
+      "blobId": "3000558bbb114b40f78730d64fbc46d1724636ef"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-authority.ts",
+      "blobId": "5245594a6c3f0b24cef4ee9adbe1926034942a22"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-boundary.ts",
+      "blobId": "45377ed8a151848b6fb783020b6098afffb140c0"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.test.ts",
+      "blobId": "170af5d6193fd68088166a71c3fa193ec35ebd30"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-check-definitions.ts",
+      "blobId": "7c0a5889213994cad88ce98a618d991758b5a46f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.test.ts",
+      "blobId": "8af85f6f8f95294ed45db1d0d1b68339451b555d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-contracts.ts",
+      "blobId": "9cc10065a7e262f974ff62e35d56630b49b5b88b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-cutover.test.ts",
+      "blobId": "e0f2e376348e8002b0bf2b34e8b9d1622f7691d1"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-integration.test.ts",
+      "blobId": "93cfdafb0cfd89ce5a703f0907fcf5cc52ada9e2"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.test.ts",
+      "blobId": "87d78bc8bdd86a3e29daf06cc70ac664d1705c4a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-production-manifest.ts",
+      "blobId": "c6f754cec9bcd8a913c72bad2d8b4d6be0a1045b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.test.ts",
+      "blobId": "19c301db8795673a589f0a4d18ba8ecce7b1cc56"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-rules.ts",
+      "blobId": "6a90153104f498da7173586cbbafb6663bb5bb47"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.test.ts",
+      "blobId": "0490efcc78176aea3c55957e74553e1968071fec"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-state.ts",
+      "blobId": "7fc1c071296c20b12fa8cd7f1b4959458a1c6890"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.test.ts",
+      "blobId": "73ee0676ce4951f472e01db0c52ecd03222299ff"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-authoring-batch.ts",
+      "blobId": "584c8ce6e4a673bcdaf32eb6252a8f0c500fd6cd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-document-topology.ts",
+      "blobId": "2f8c4dc07503dda44f1cbf07d7c1fcac769f8bb2"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.test.ts",
+      "blobId": "f928e496321992e7aa641724e85cd6826ef810fd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-definitions.ts",
+      "blobId": "a94cdfdfaa8a59f75674ef340bf6c460df64e80a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.test.ts",
+      "blobId": "b58249a62712b84f31855fc1f540aae2b9135ddd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-extraction.ts",
+      "blobId": "79f76a862320f93a5cffc93dfdf019e2688455d3"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts",
+      "blobId": "af2cd7c90d05b08b105bc907c3bd51c2bf1f2b51"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.test.ts",
+      "blobId": "9061ad4056090b8f58878127b131ab5d9df4dcda"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.ts",
+      "blobId": "8c77fb38c6e1c9b094a48e6b93dcc209b5dbd088"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.test.ts",
+      "blobId": "e4ff7b5fd71caa3cc4f42b7166e2a3c0ab41368d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-store.ts",
+      "blobId": "5c1631ab3a8d0dd6659dace1f51056703c69a260"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.test.ts",
+      "blobId": "a6dc47c99937485fea0f1541fff8e875a7eb8616"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-impact-analysis.ts",
+      "blobId": "bb06a6ad62fd2a320853e5a05418df558545d16f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-issue-registry.test.ts",
+      "blobId": "ed252cc54acc8d6a1c7c7fc3f80313e6525a7d65"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-issue-registry.ts",
+      "blobId": "443293b211422b6090b448497485639bb985157d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.test.ts",
+      "blobId": "244c8ce79ba752b394ecf550fe41c8e583967b11"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.ts",
+      "blobId": "131277ed8379a7a7250c85df1501ec698e39f599"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-project-deterministic-rules.test.ts",
+      "blobId": "ab2d7a08ec3f95c620e4ed6f49a7f7ced46d7977"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-project-deterministic-rules.ts",
+      "blobId": "441248ae5b101d4b7cce265308ffe71af8a9bb96"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.test.ts",
+      "blobId": "315ce0fd4b704b54b1cc074d90596d3d07d749e8"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-batches.ts",
+      "blobId": "bee76e4e69f20ea03f1d8f84b512d348cd26b11b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.test.ts",
+      "blobId": "2465d4da7156a2336a7a2d983d30971d92a99778"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.ts",
+      "blobId": "9768abb625347826335cc07727c3ce391bdf29d5"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-round-policy.test.ts",
+      "blobId": "590a00957508699709c8a799a2392ab1dd9dfacf"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-round-policy.ts",
+      "blobId": "666e628d707f464b15603b13237acc1586c759b7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.test.ts",
+      "blobId": "ba62aa18e8439c3f3eff8b32ebebdb9c0884c831"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.ts",
+      "blobId": "a7f5a2ab67cff6f712ae35abd278534ccb3524b8"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-section-index.test.ts",
+      "blobId": "e77050f3968deb02897c41a043d4f717f791bae7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-section-index.ts",
+      "blobId": "59757df58954f8bda124abc9be3786e2af253b56"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-audit.test.ts",
+      "blobId": "58bd3d5ce28867d5b594a79169a162aafee7370e"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-audit.ts",
+      "blobId": "c25bc5306604f69c195ca87504059f1cbef77276"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-runtime.test.ts",
+      "blobId": "bedb0c30826ac6bb1724448bfe4e6f5ad202c9f2"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-runtime.ts",
+      "blobId": "dad213100e44052172da70e43e252832a858761b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-worker-contract.test.ts",
+      "blobId": "ec2abaf90ea936c144aacdd6c74d41cc3221ec43"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.test.ts",
+      "blobId": "e02cb497c0b7d538ac6774c2227186740ea46a40"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.ts",
+      "blobId": "9345fddc48af9e12cdac6398d9d59a0025e8ec2f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/implementation-stage.ts",
+      "blobId": "8871d8dcedb0d1295f772153d7295490cb86c3c9"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.test.ts",
+      "blobId": "ea4a8a151f73135c03b8ca1bf11fff5451f5b3fe"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.ts",
+      "blobId": "6380852b7aca758b6925796a3a8a319f1dc4c1d7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/recovery.ts",
+      "blobId": "8311c1ee3c054988ca30874cb27efc957051d494"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/resource-stage.test.ts",
+      "blobId": "bbf9f7eaa203a1ab25ec4685fec49d85e6f5d254"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/resource-stage.ts",
+      "blobId": "c1b89a0bf3b6fcef945400b742c265a0cd29983d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/resource-task-resolver.test.ts",
+      "blobId": "37973718f44e614da4fa012a3f699ad12fb4cf3b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/resource-task-resolver.ts",
+      "blobId": "aa28d92c3c0871ff31f0270fd923f8c547a2f9dc"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/revision.ts",
+      "blobId": "a1855ae8695053fcc0fdfe9973904a64cba0e24d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/run-store.ts",
+      "blobId": "b59ba1811fc89a4ad9309363c82253b3276d8345"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts",
+      "blobId": "b6473c171bed91e69a4b643fa5230e49b5cbc507"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/schema.ts",
+      "blobId": "df0c3757e458e6cb54165cc1244e553626ee1960"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/system-delivery-contract.ts",
+      "blobId": "176c86a43c39f08e1c60d0b8952aa56cbbef1091"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/task-terminal-evidence.ts",
+      "blobId": "c6fd944cdff533ac2905cfec8ab86a58fdffefaa"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/transition.test.ts",
+      "blobId": "96d4885ed77b620247e69362d2abe5cf71a2953f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/transition.ts",
+      "blobId": "db34d6badabeab82f3738ddef670173d8bc6da10"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/types.ts",
+      "blobId": "3e9417d4cbd721a585a46be19d8554e5d125423e"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/validation-stage.ts",
+      "blobId": "540dd6f72a527edf24734398282f4c0aedfcb382"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.ts",
+      "blobId": "6518bec8d13ae64c82ab2625738f7ef55e7f8494"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts",
+      "blobId": "35a00e1aabafd60fa7d859e318f680cb3a528815"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts",
+      "blobId": "b14cb751231a6bc361b3aaf8203aba58770d2827"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.test.ts",
+      "blobId": "5db2ddca6d7702f67f294045bab2b81aa65b0628"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.ts",
+      "blobId": "d08b1b22838a469eb1a3fccf3649768c01cb79b1"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.test.ts",
+      "blobId": "c6af90e108c5c7b190bb3fd138af25f25ab4bfd8"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.ts",
+      "blobId": "ec5b68b727e8e6dd3a27a3ce964fa84c05d19769"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/deployment-manager.ts",
+      "blobId": "8e630f5c6a984b91ea78f4dc8ea0172250538d19"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/document-authoring-metrics.test.ts",
+      "blobId": "8bdfac60180bf2e2c9a2561b2b5e42e49237b936"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/document-authoring-metrics.ts",
+      "blobId": "254dbb2906d7a6ded736a41b46e56d81dcf60f88"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/document-readiness-audit.test.ts",
+      "blobId": "5a64bed740c0ab74f3ffefcf69ab4027b213d511"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/document-readiness-audit.ts",
+      "blobId": "3d2e8d49e3f44db60e3625aec10e8ddfddd3912f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/document-runtime-boundary.test.ts",
+      "blobId": "07d63b4084d6f685b2e31f704c133db4d6296207"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/fixed-service-ports.test.ts",
+      "blobId": "45da3841d3296ce7bfced633917d249fd1bd6287"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/fixed-service-ports.ts",
+      "blobId": "0b1eda7e93ce8e36ca9ce4a7e22e9b9c3c85925f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/fixtures/native-runtime-fixture.ts",
+      "blobId": "d4383e14ff5ba15c50ee3b7de44f45bbed1d7184"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/foundation-authority-projection.test.ts",
+      "blobId": "0b6b07b4fdbd86db04e54578cab626e985a257c1"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/foundation-authority-projection.ts",
+      "blobId": "4fc90a3a6a473e71b90ce3249fec6efe2f14d1f8"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/foundation-markdown-stream.test.ts",
+      "blobId": "e150d829571bd8bcf0c3c3bd9cc8b3a43a311a17"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/foundation-markdown-stream.ts",
+      "blobId": "0b30960745fd9253004635299ef7690c5a63d0c4"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/intake-job-store.ts",
+      "blobId": "5fe5e7072c5a82a44296fdb1122f82a234caca89"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/model-runtime-host.ts",
+      "blobId": "c933cbc33a2417cbc3a610d39b01b207d3e85c4b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/model-runtime-network.ts",
+      "blobId": "d4220541a85604b621db821e42efba8f6d274841"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/model-runtime-worker.ts",
+      "blobId": "a3d82773452ae34741f05bf15289d3f823ce7bb9"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-asset-manifest-tool.test.ts",
+      "blobId": "ac6629d7cee9783cabcfeab1f76be467d23b83fd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-asset-manifest-tool.ts",
+      "blobId": "bc05a33772ade0d3b9e27c150388e19fff957ac5"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-atomic-task-plan-tool.ts",
+      "blobId": "912423a9aadb516c9ce134b6d106748e293e2da7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-background-task-output.test.ts",
+      "blobId": "99df3d9d51f03c37f93ed003b1d30b6ca7726d21"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-background-task-output.ts",
+      "blobId": "7bf78cb1210fbf7a242d24ce7c54c3340732721f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-cli-process-runner.test.ts",
+      "blobId": "fef97177d28a6dcf19d4d9fc7fd3af3f261d0fd6"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts",
+      "blobId": "afa745dd5b375851fc5438e27b0f95479339ee43"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-foundation-revision-result-tool.test.ts",
+      "blobId": "47c287387d0a4a12407017d6b7cacb44d440f704"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-foundation-revision-result-tool.ts",
+      "blobId": "19c087584b0bbb52cb1db7183b5ca57e7197b240"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-implementation-result-tool.ts",
+      "blobId": "f24d535e0c20c4a32858bd8a93e0437ce313cbb6"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-resource-content-tool.test.ts",
+      "blobId": "b724c8d146d8627286d5d905ffd1be8dbebc1928"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-resource-content-tool.ts",
+      "blobId": "91ca91bb926a1984c02ef606f0e7fc2b3abe280d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-resource-inventory-commit-tool.test.ts",
+      "blobId": "c519bfcf98e2a097c85ca395525ae8f9361e8d4b"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-resource-inventory-commit-tool.ts",
+      "blobId": "73b6e4e151c7ffb966b471c798ac842d4aafe02a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-resource-library-call.ts",
+      "blobId": "fe3477aa1cdb106c10a6a542de14fbebc12d8b41"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-resource-library-tool.test.ts",
+      "blobId": "3bf26345b43be16fc031f19c9cf9fe55ba8334f5"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-resource-library-tool.ts",
+      "blobId": "b93e2bb650aab158c4e8edaad3200a67f07f5472"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-runtime-process-path.ts",
+      "blobId": "614149e20294bf406bdbe366e06353d1eff79049"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-task-notification.ts",
+      "blobId": "6d4c45a4435cd8bfdb6780b594cf4cf373e82c59"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-validation-result-tool.ts",
+      "blobId": "26df1f8b9a4d2dd330933f5029d0b23a979abace"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/native-workflow-result-tools.ts",
+      "blobId": "0a30debd6dffa192aab0563bd1d05b56768f2f3d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/preview-manager.ts",
+      "blobId": "2554643b0e3f165444a852cd75a3317bec9bc27f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/programmatic-audio-resource.test.ts",
+      "blobId": "f512113d2146d8ef01b0cd3a4839df77d4a0d7d7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/programmatic-audio-resource.ts",
+      "blobId": "58e46ce38efe73f1f88b9f6c5b90595938614a2c"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/project-resource-application.test.ts",
+      "blobId": "fe41fd170e8a9d35a604bbaf45b570e195abf322"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/project-resource-application.ts",
+      "blobId": "b22de0fc6dc4a201a818a1c243f55e2538090121"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/provisional-resource-adapters.ts",
+      "blobId": "ea8f5209de63d21dc256156afe1c380f491cfb27"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/r2-deployment-publisher.ts",
+      "blobId": "30296469a95804ad5d0f1848b544f7c76d86d467"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-delivery-adapters.ts",
+      "blobId": "54f3322938dd6f72fa86d5de6be62bc11641465c"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-delivery-readiness.test.ts",
+      "blobId": "d70b7a615aed9810fdf2ddff4afb8cd9727d0183"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-delivery-readiness.ts",
+      "blobId": "9c8c13263e1d563f8f61b294c1b669dde444feba"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-inventory-commit.test.ts",
+      "blobId": "6d80b06ac2304453917cff7f3519a44d0bd76713"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-inventory-commit.ts",
+      "blobId": "2bcd7428471952ec88c91fb652b0a64f63861f7a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-inventory-revision.ts",
+      "blobId": "700550751e867589cf988064294dd33d68ace667"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-match-observation.ts",
+      "blobId": "356ba2eca0475081a689f64c5e36e43df3b57b67"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-selection-client.ts",
+      "blobId": "a4ef58f9e37dbab5c5f00fa111df1bd0c93da137"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/resource-selection-config.ts",
+      "blobId": "50050ec798f12f75a891552b04d3432722d172a7"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/review-project-copy.test.ts",
+      "blobId": "fee034a45b82887d0d1de59f0bd9d49ab8f267ae"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/review-project-copy.ts",
+      "blobId": "f8224979ab92c882925f15374879da19bd98ca8d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/runtime-error-display.test.ts",
+      "blobId": "19dddc98bdcaac76331ab92fd4c753f7667c1c36"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/runtime-model-provider.test.ts",
+      "blobId": "9547bdf898de4f31ef870462be05e928a9ba4e28"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/runtime-observability.test.ts",
+      "blobId": "3d01c1090775697ab0a15997647a754a1b992120"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/runtime-observability.ts",
+      "blobId": "472d0fadf57bbcff3d9ed5f50d8957da41f5dfc4"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/runtime-process-environment.test.ts",
+      "blobId": "1920473dd1e27a42731ec4c63ebd076a36b1e3bc"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/runtime-process-environment.ts",
+      "blobId": "6548911ce8ab0b159a377671bcd891fc0e332d2e"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/runtime-worker-error.ts",
+      "blobId": "5be35c93091cbb0d8fe0b0ce333eab2b35d73911"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/session-manager-runtime-errors.test.ts",
+      "blobId": "1ce8f77ee424abfac260a63ae8a1ee89336ed180"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/session-manager.ts",
+      "blobId": "d97067a7f7e457fb640a8b9fa319021b8ab8d67a"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/vite-preview-host.ts",
+      "blobId": "1af632c9536795ac9b25091a3525a4567014fb5e"
+    }
+  ],
+  "changedOutsideQuarantine": [
+    "packages/agent-workflow-server/src/__tests__/delivery-worker-session-port.test.ts",
+    "packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts",
+    "packages/agent-workflow-server/src/__tests__/session-manager-resilience.test.ts",
+    "packages/agent-workflow-server/src/__tests__/single-native-runtime-boundary.test.ts",
+    "packages/agent-workflow-server/src/beegame/complete-game-document.test.ts",
+    "packages/agent-workflow-server/src/beegame/complete-game-document.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-worker-session-port.complete-documents.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-worker-session-port.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/controller-game-ir-admission.integration.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/controller-game-ir-preflight.integration.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/controller-game-ir-progress.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/controller.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch-recovery.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/dispatch.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-audit-artifacts.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-patch-validation.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-publication.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-revision-stage.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-semantic-worker-contract.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir-checkpoint-terminal-recovery.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/recovery-projector.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/recovery.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/run-store.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/schema-evolution.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/schema.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/secure-file.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/task-terminal-evidence.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/transition.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/transition.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/types.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/worker-contracts.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-display-message.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.test.ts",
+    "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.ts",
+    "packages/agent-workflow-server/src/beegame/fixed-service-ports.ts",
+    "packages/agent-workflow-server/src/beegame/fixtures/native-runtime-fixture.ts",
+    "packages/agent-workflow-server/src/beegame/model-runtime-host.ts",
+    "packages/agent-workflow-server/src/beegame/model-runtime-network.ts",
+    "packages/agent-workflow-server/src/beegame/model-runtime-worker.ts",
+    "packages/agent-workflow-server/src/beegame/native-cli-process-runner.test.ts",
+    "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts",
+    "packages/agent-workflow-server/src/beegame/native-foundation-revision-result-tool.test.ts",
+    "packages/agent-workflow-server/src/beegame/native-foundation-revision-result-tool.ts",
+    "packages/agent-workflow-server/src/beegame/runtime-observability.test.ts",
+    "packages/agent-workflow-server/src/beegame/runtime-observability.ts",
+    "packages/agent-workflow-server/src/beegame/session-manager-runtime-errors.test.ts",
+    "packages/agent-workflow-server/src/beegame/session-manager.ts"
+  ],
+  "trackedScratchPaths": [
+    ".superpowers/sdd/2026-08-30-game-ir-isolated-core/task-1-report.md",
+    ".superpowers/sdd/2026-08-30-game-ir-isolated-core/task-2-report.md",
+    ".superpowers/sdd/2026-08-30-game-ir-isolated-core/task-3-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-10-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-2-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-3-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-4-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-5-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-6-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-7-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-8-report.md",
+    ".superpowers/sdd/2026-08-31-game-ir-world-presentation/task-9-report.md",
+    ".superpowers/sdd/2026-09-01-game-ir-production-cutover/progress.md",
+    ".superpowers/sdd/2026-09-01-game-ir-production-cutover/task-3-report.md",
+    ".superpowers/sdd/2026-09-02-game-ir-stateless-semantic-slices/task-10-defect-2-report.md"
+  ],
+  "historicalEvidence": [
+    {
+      "path": "docs/superpowers/reviews/2026-08-13-foundation-document-streaming-chrome-acceptance.md",
+      "commit": "5254d695d5fc550dc02ed08199799dc35a7b0e6b",
+      "claim": "Stage 2 Foundation document authoring and bounded Markdown streaming Chrome acceptance."
+    },
+    {
+      "path": "docs/superpowers/reviews/2026-08-17-reviewer-read-only-capability-chrome-acceptance.md",
+      "commit": "26f05cf03574793b542d856d1eaacc759ccbeda4",
+      "claim": "Foundation Reviewer read-only Chrome acceptance with byte-identical source documents."
+    }
+  ],
+  "historicalEvidenceGap": "no baseline-bound Revision-to-zero-and-Checklist Chrome receipt found"
+}
