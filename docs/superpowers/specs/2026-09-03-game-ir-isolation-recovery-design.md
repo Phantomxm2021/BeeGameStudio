@@ -24,8 +24,10 @@ recovery path.
   `d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6`.
 - The next commit, `109e7195d314bb716922ef2dd2de65567e428d64`,
   is the first Game IR production-code commit.
-- Relative to the candidate baseline, the source commit changes 51 files
-  outside `delivery-workflow/game-ir/` and adds or changes 86 files inside it.
+- Relative to the candidate baseline, the source commit changes 55 runtime or
+  test files outside `delivery-workflow/game-ir/` and adds or changes 86 files
+  inside it. It also changes 15 Game IR documents and mistakenly tracks 15 SDD
+  scratch reports under `.superpowers/sdd/`.
 - The source range contains 293 commits and changes 171 files in total.
 - Real acceptance demonstrated that a Technical document with the misspelled
   required H2 `Online, Networking and Service Applibility` is now rejected by
@@ -116,10 +118,13 @@ The protected system includes:
 Every runtime or test file changed after the verified baseline and outside
 `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/` is
 restored to its baseline Git blob. Milestone 1 has no audit-based retention
-exception. The only post-baseline additions allowed outside that directory are
-this design, the versioned boundary checker, its immutable manifest, and the
-final restoration receipt; every such path is named explicitly in the
-manifest.
+exception. Game IR-only documents under `docs/` remain read-only salvage
+evidence and cannot justify a runtime retention. Tracked post-baseline files
+under `.superpowers/sdd/` are removed because they are disposable execution
+scratch, not product evidence. The only new Milestone 1 files allowed outside
+the Game IR source directory are this design, its implementation plan, the
+versioned boundary checker, its immutable manifest, and the final restoration
+receipt; every such path is named explicitly in the manifest.
 
 ### Game IR disconnection
 
