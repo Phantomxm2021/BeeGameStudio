@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { type ProtectedBaselineManifest, verifyGameIrIsolationBoundary } from "./game-ir-isolation-boundary";
+import { baselineBlobMatchesGitTree, type ProtectedBaselineManifest, verifyGameIrIsolationBoundary } from "./game-ir-isolation-boundary";
 
 const protectedSource = "packages/agent-workflow-server/src/beegame/complete-game-document.ts";
 const protectedTest = "packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts";
@@ -129,6 +129,22 @@ describe("verifyGameIrIsolationBoundary", () => {
     const fixture = setupRepository();
     writeFileSync(join(fixture.root, fixture.protectedTest), "test('unauthorized', () => {});\n");
     expect(codes(fixture.root, fixture.manifest)).toContain("protected_blob_mismatch");
+  });
+  test("requires each admitted baseline blob to match its Git tree entry", () => {
+    const fixture = setupRepository();
+    const correction = fixture.manifest.admittedTestCorrections[0];
+    expect(baselineBlobMatchesGitTree(
+      fixture.root,
+      fixture.manifest.baselineCommit,
+      correction.path,
+      correction.baselineBlobId,
+    )).toBe(true);
+    expect(baselineBlobMatchesGitTree(
+      fixture.root,
+      fixture.manifest.baselineCommit,
+      correction.path,
+      "0000000000000000000000000000000000000000",
+    )).toBe(false);
   });
   test("reports a tracked TypeScript file reintroduced under the old Game IR prefix", () => {
     const fixture = setupRepository();

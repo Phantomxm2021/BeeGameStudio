@@ -120,6 +120,19 @@ function gitSucceeds(root: string, args: string[]): boolean {
   }
 }
 
+export function baselineBlobMatchesGitTree(
+  root: string,
+  baselineCommit: string,
+  path: string,
+  blobId: string,
+): boolean {
+  try {
+    return git(root, ["rev-parse", `${baselineCommit}:${path}`]) === blobId;
+  } catch {
+    return false;
+  }
+}
+
 function validateManifest(root: string, value: unknown): BoundaryViolation[] {
   const mismatch = (detail: string): BoundaryViolation[] => [
     { code: "baseline_manifest_mismatch", detail },
@@ -203,6 +216,9 @@ function validateManifest(root: string, value: unknown): BoundaryViolation[] {
     }
     if (!gitSucceeds(root, ["cat-file", "-e", `${EXPECTED_AUTHORITY.baselineCommit}:${entry.path}`])) {
       return mismatch("admitted test correction path is absent from the baseline tree");
+    }
+    if (!baselineBlobMatchesGitTree(root, EXPECTED_AUTHORITY.baselineCommit, entry.path, entry.baselineBlobId)) {
+      return mismatch("admitted test correction baseline blob does not match the baseline tree");
     }
     if (!gitSucceeds(root, ["cat-file", "-e", entry.correctedBlobId])) {
       return mismatch("admitted test correction blob is unavailable");
