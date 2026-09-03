@@ -242,7 +242,6 @@ async function prepareFixture() {
     result: {
       outcome: 'PASS',
       moduleId: source.moduleId,
-      identities: validationAuthority.identities,
       coverage: validationAuthority.sourceFragments.map(fragment => fragment.fragmentId),
     },
   })

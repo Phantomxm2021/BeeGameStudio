@@ -1702,7 +1702,15 @@ export class GameIrProjectionSliceJournal {
     const validation = validationFor(this.authority.source, inventory)
     const admitted = admitGameIrSemanticObligationValidationResult({
       authority: validation,
-      result: { ...diagnostic, moduleId: validation.moduleId },
+      result: {
+        outcome: 'FAIL',
+        moduleId: validation.moduleId,
+        reasonCode: 'missing-obligation',
+        targetId: diagnostic.targetId,
+        expectedKind: diagnostic.expectedKind,
+        semanticRole: diagnostic.semanticRole,
+        fragmentId: diagnostic.fragmentId,
+      },
     })
     if (admitted.outcome !== 'FAIL')
       fail('obligation preflight diagnostic is not a validated missing obligation')

@@ -1274,7 +1274,6 @@ async function createProjectionRecoveryFixture() {
     result: {
       outcome: 'PASS',
       moduleId: packet.source.moduleId,
-      identities: validationAuthority.identities,
       coverage: validationAuthority.sourceFragments.map(item => item.fragmentId),
     },
   })
