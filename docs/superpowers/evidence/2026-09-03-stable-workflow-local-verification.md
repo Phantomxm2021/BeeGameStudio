@@ -125,3 +125,27 @@ Command: `bun test packages/agent-workflow-server/src/__tests__`
 Result: exit 1; 352 pass, 3 fail, 1260 assertions; 355 tests across 42 files.
 
 The three failures were the `workflow stage snapshot display projection` tests in `packages/agent-workflow-server/src/__tests__/workflow-stage-snapshot-projection.test.ts`. They all used a stale literal `phaseCount: 10` after Checklist added a display stage; no production code was changed. The separate `packages/agent-workflow-server/src/__tests__/session-routes.test.ts` fixture contained the same stale literal and is corrected in the same bounded test-only change.
+
+## Final accepted local gate
+
+The final gate ran after the five exact test-only corrections recorded in the
+v2 boundary manifest. Absolute timestamps were not retained by the distributed
+test runners; no timestamp is inferred or fabricated. Commands, exit status,
+test counts, assertion counts, and available durations are preserved below.
+
+| Gate | Result |
+| --- | --- |
+| `bun scripts/game-ir-isolation-boundary.ts` | PASS, exit 0 |
+| `bun run typecheck` | PASS, exit 0 |
+| `git diff --check` | PASS, exit 0 |
+| Stage 2 authoring command recorded above | 123 pass, 0 fail, 782 assertions |
+| Stage 3 default-concurrency foundation audit/fact/semantic command | 205 pass, 0 fail, 19 files, 1315 assertions |
+| Stage 4 revision command | 97 pass, 0 fail, 7 files, 278 assertions |
+| Checklist/shared-runtime command recorded above | 236 pass, 0 fail, 17 files, 957 assertions, 6.82s |
+| `bun test packages/agent-workflow-server/src/__tests__` | 355 pass, 0 fail, 42 files, 1265 assertions |
+| `bun test packages/agent-workflow-server/src/beegame` | 600 pass, 0 fail, 74 files, 4108 assertions, 60.24s |
+
+The protected production tree remains byte-identical to `d821e286`. The only
+protected differences are the five checker-frozen test corrections. The old
+in-package Game IR source tree is absent. No model or Chrome call occurred.
+The worktree was clean after the final static gate. This local gate is accepted.
