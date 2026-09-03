@@ -19,7 +19,10 @@ function streamEvent(event: Record<string, unknown>) {
   return { type: 'stream_event', event }
 }
 
-function successfulMessages(markdown: string): Record<string, unknown>[] {
+function successfulMessages(
+  markdown: string,
+  terminalResult = '',
+): Record<string, unknown>[] {
   const split = Math.floor(markdown.length / 2)
   return [
     streamEvent({
@@ -46,7 +49,7 @@ function successfulMessages(markdown: string): Record<string, unknown>[] {
       type: 'assistant',
       message: { id: 'message-1', content: [{ type: 'text', text: markdown }] },
     },
-    { type: 'result', subtype: 'success', is_error: false, result: '' },
+    { type: 'result', subtype: 'success', is_error: false, result: terminalResult },
   ]
 }
 
@@ -157,6 +160,39 @@ describe('foundation Markdown stream sink', () => {
       expect(await readFile(join(workspacePath, targetPath), 'utf8')).toContain(
         markdown,
       )
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('falls back to streamed body for a whitespace-only terminal result', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-terminal-whitespace-'))
+    try {
+      const markdown = renderTestCompleteGameDocument(
+        targetPath,
+        completeTestSubmission(targetPath),
+      )
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-terminal-whitespace',
+        dispatchId: 'dispatch-terminal-whitespace',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-terminal-whitespace')
+
+      for (const message of successfulMessages(markdown, ' \n\t')) sink.observe(message)
+
+      await sink.commit()
+
+      expect(await readFile(
+        foundationMarkdownPendingPath(
+          workspacePath,
+          'run-terminal-whitespace',
+          'dispatch-terminal-whitespace',
+        ),
+        'utf8',
+      )).toBe(markdown)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

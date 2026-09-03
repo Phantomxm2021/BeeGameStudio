@@ -84,7 +84,7 @@ export async function createFoundationMarkdownStreamSink(
         else {
           state.terminal = true
           const result = stringField(message, 'result')
-          if (result) {
+          if (result.trim()) {
             if (Buffer.byteLength(result) > contract.maxBytes)
               fail('foundation Markdown stream terminal body exceeds maximum bytes')
             else state.terminalBody = result
