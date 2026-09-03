@@ -322,6 +322,18 @@ V1 canonical domain modules 为 gameplay、balance、world-scene、presentation�
 
 Compiler 是唯一 candidate writer，Validator 是只读 admission，因此二者不是双写或双轨。
 
+#### 8.4.1 Projection preflight obligation inventory
+
+每个 domain 在 semantic projection 前必须完成一次 Stage 5 内部 preflight。服务端 domain contract 唯一声明 obligation class、允许的 semantic role、expected node kind、完整 owner source scope，以及由 kind 到 dependency-derived slice 的唯一映射。模型只能从该完整 source scope 中识别 obligation instance，并为其提交 canonical target ID、contract-declared kind/role 与精确 evidence fragment；模型不能定义 source scope、node kind、owner、slice、obligation digest 或业务事实规则。
+
+Inventory 使用逐条 strict NDJSON，不允许完整 domain object、array wrapper、兼容 shape 或 caller-supplied digest。服务端根据 READY identity、source bytes、projection contract 与 canonical inventory bytes 重算所有 obligation key 和 digest。随后由独立只读 inventory validator 同时读取服务端固定的完整 source scope、domain obligation contract 与 admitted inventory，判断 source 中的 obligation 是否被完整识别。Validator 不能从 inventory 反推 source scope，也不能用 inventory 自己的条目定义 PASS coverage。
+
+当 source 中存在 inventory 尚未声明的 obligation 时，validator 返回 `missing-obligation`，绑定 exact fragment、section digest、contract-declared role 和 expected kind；缺失 node 尚不存在，因此不得伪造成 candidate-owned `node:<id>#<pointer>`。服务端重新验证 evidence、kind、role，并自行推导唯一 owner slice。无法唯一归属属于 compiler contract defect，必须 fail closed。相同 authority、inventory bytes、diagnostic 与 durable cursor 再次出现属于 proven no progress，不得继续 dispatch；这不是固定 attempt、token 或 elapsed-time limit。
+
+只有完整、唯一、有序的 inventory PASS receipt 才能与 compile identity、Foundation READY receipt、source digest、projection contract digest、validator manifest digest、inventory digest 和 owner-slice map digest 一起原子写入现有 projection journal。没有该 receipt 时禁止 dispatch 第一个 projection slice。该 receipt 是 projection lifecycle 的前置覆盖证据，不是第二 checkpoint、第二 publication、第二 Fact Store 或下游可消费 authority。Projection 必须逐项覆盖 inventory 中属于当前 slice 的 required obligations；空 slice 只有在其 inventory obligation 集合确实为空时才合法。
+
+Inventory validator 只回答“source 中应该投影什么”；record admission、domain fidelity validator 与 final assembler 分别回答“节点是否合法”“投影是否忠实”“全域是否闭合”。这些责任不得合并，也不得双写同一结论。普通 record 错误不使已通过的 inventory 失效；只有 `missing-obligation` 或 stale source/contract/validator identity 才重新进入 preflight。
+
 ### 8.5 Admission
 
 服务端统一校验：
@@ -329,6 +341,7 @@ Compiler 是唯一 candidate writer，Validator 是只读 admission，因此二�
 - exact schema；
 - ID/reference closure；
 - Source Binding 完整性；
+- obligation inventory 完整性及其 READY/source/contract binding；
 - semantic projection fidelity；
 - derived input closure；
 - formula graph；

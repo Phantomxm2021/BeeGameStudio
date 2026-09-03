@@ -132,6 +132,15 @@ and empty identities are provider protocol errors with no fallback parser.
 
 Admission happens at the smallest independently owned record:
 
+- before the first projection slice, a compact source-bound obligation
+  inventory is independently validated against the complete service-owned
+  source scope and domain obligation contract;
+- the inventory may identify obligation instances but cannot define source
+  scope, semantic roles, node kinds, owner slices or authority digests;
+- an inventory PASS receipt is atomically bound into the existing projection
+  journal and is not a second checkpoint, publication or business authority;
+- every slice must cover its exact inventory-owned obligations; an empty slice
+  is legal only when that exact obligation set is empty;
 - a valid record is persisted once and is not regenerated;
 - an invalid record is retried with its exact contract, dependencies, source
   fragments and mechanical diagnostic;
@@ -150,7 +159,11 @@ checks pass. The existing canonical operation manifest is then written once.
 
 The operation-local journal remains staging state, not a second authority. It
 binds compilation identity, Foundation READY receipt digest, slice-plan digest,
-admitted records and predecessor digests.
+the independently admitted obligation-inventory receipt, admitted records and
+predecessor digests. The inventory receipt binds the exact source, projection
+contract, validator manifest, canonical inventory and owner-slice map. Ordinary
+record correction preserves it; a proven missing obligation or stale bound
+identity invalidates it before another inventory preflight.
 
 After restart, the service verifies the journal and starts a fresh independent
 request for the exact next slice. It does not attempt to resume or reconstruct a
@@ -167,9 +180,8 @@ This design changes Stage 5 projection compilation only.
   journal or publication state.
 - Checklist, Comprehensive Reviewer/Revision, UI and Task 9–15 consumer cutover
   remain outside this change.
-- Canonical Game IR DTOs, ten operation manifests, publication receipt and
-  committed reader remain unchanged unless a separately reviewed schema defect
-  is proven.
+- Canonical Game IR DTOs, operation manifests, publication receipt and committed
+  reader remain unchanged unless a separately reviewed schema defect is proven.
 
 Protected Stage 3/4 path and behavior parity is a required gate. A Game IR
 failure cannot silently re-enter Reviewer/Revision or mutate Foundation state.
