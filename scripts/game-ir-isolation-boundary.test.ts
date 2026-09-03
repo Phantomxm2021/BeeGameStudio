@@ -33,11 +33,16 @@ function setupRepository() {
     for (const path of [protectedSource, protectedTest]) {
       writeFileSync(join(sharedRoot, path), execFileSync("git", ["show", `${sharedManifest.baselineCommit}:${path}`], { cwd: sharedRoot }));
     }
+    for (const { path } of sharedManifest.admittedTestCorrections) {
+      writeFileSync(join(sharedRoot, path), readFileSync(join(process.cwd(), path)));
+      git(sharedRoot, ["hash-object", "-w", "--", path]);
+    }
     git(sharedRoot, ["update-index", "--add", "--", protectedSource, protectedTest]);
-    return { root: sharedRoot, manifest: JSON.parse(JSON.stringify(sharedManifest)), protectedSource, unrelatedCommit: "", testOnlyProductionCommit: "" } as {
+    return { root: sharedRoot, manifest: JSON.parse(JSON.stringify(sharedManifest)), protectedSource, protectedTest, unrelatedCommit: "", testOnlyProductionCommit: "" } as {
       root: string;
       manifest: ProtectedBaselineManifest;
       protectedSource: string;
+      protectedTest: string;
       unrelatedCommit: string;
       testOnlyProductionCommit: string;
     };
@@ -57,10 +62,11 @@ function setupRepository() {
   restoreCleanCheckout(root, manifest);
   sharedRoot = root;
   sharedManifest = manifest;
-  return { root, manifest: JSON.parse(JSON.stringify(manifest)), protectedSource, unrelatedCommit: "", testOnlyProductionCommit: "" } as {
+  return { root, manifest: JSON.parse(JSON.stringify(manifest)), protectedSource, protectedTest, unrelatedCommit: "", testOnlyProductionCommit: "" } as {
     root: string;
     manifest: ProtectedBaselineManifest;
     protectedSource: string;
+    protectedTest: string;
     unrelatedCommit: string;
     testOnlyProductionCommit: string;
   };
@@ -76,6 +82,10 @@ function restoreCleanCheckout(root: string, manifest: ProtectedBaselineManifest)
     }
   }
   for (const { path } of manifest.protectedPaths) writeFileSync(join(root, path), execFileSync("git", ["show", `${manifest.baselineCommit}:${path}`], { cwd: root }));
+  for (const { path } of manifest.admittedTestCorrections) {
+    writeFileSync(join(root, path), readFileSync(join(process.cwd(), path)));
+    git(root, ["hash-object", "-w", "--", path]);
+  }
   const baselineScratch = new Set(git(root, ["ls-tree", "-r", "--name-only", manifest.baselineCommit, "--", ".superpowers/sdd/"]).split("\n").filter(Boolean));
   for (const path of git(root, ["ls-files", "--cached", "-z"]).split("\0").filter(Boolean)) if (path.startsWith(".superpowers/sdd/") && !baselineScratch.has(path)) {
     rmSync(join(root, path));
@@ -95,6 +105,30 @@ describe("verifyGameIrIsolationBoundary", () => {
   test("allows unchanged protected files and Game IR-only changes", () => {
     const { root, manifest } = setupRepository();
     expect(verifyGameIrIsolationBoundary(root, manifest).violations).toEqual([]);
+  });
+  test("allows exactly the two admitted test-only corrections", () => {
+    const { root, manifest } = setupRepository();
+    expect(manifest.admittedTestCorrections).toHaveLength(2);
+    expect(verifyGameIrIsolationBoundary(root, manifest).violations).toEqual([]);
+  });
+  test("rejects omitted, additional, reordered, or altered corrections", () => {
+    const fixture = setupRepository();
+    const corrections = fixture.manifest.admittedTestCorrections;
+    const variants = [
+      corrections.slice(0, 1),
+      [...corrections, corrections[0]],
+      [corrections[1], corrections[0]],
+      corrections.map((entry, index) => index === 0 ? { ...entry, reason: "altered" } : entry),
+      corrections.map((entry, index) => index === 0 ? { ...entry, failureEvidencePath: "altered.md" } : entry),
+    ];
+    for (const admittedTestCorrections of variants) {
+      expect(codes(fixture.root, { ...fixture.manifest, admittedTestCorrections } as ProtectedBaselineManifest)).toContain("baseline_manifest_mismatch");
+    }
+  });
+  test("rejects an unauthorized protected test change", () => {
+    const fixture = setupRepository();
+    writeFileSync(join(fixture.root, fixture.protectedTest), "test('unauthorized', () => {});\n");
+    expect(codes(fixture.root, fixture.manifest)).toContain("protected_blob_mismatch");
   });
   test("reports a tracked TypeScript file reintroduced under the old Game IR prefix", () => {
     const fixture = setupRepository();

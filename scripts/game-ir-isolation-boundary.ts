@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type ProtectedBaselineManifest = Readonly<{
-  schemaVersion: "game-ir-protected-baseline.v1";
+  schemaVersion: "game-ir-protected-baseline.v2";
   baselineCommit: "d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6";
   stableBranchCommit: "70df2e2c79bd214862af3959a257c5f5f42bd666";
   firstGameIrBoundaryCommit: "109e7195d314bb716922ef2dd2de65567e428d64";
@@ -11,6 +11,13 @@ export type ProtectedBaselineManifest = Readonly<{
   sourceCommit: "4335363b2cd33d1f0b7bd807bff95d9389c67ce1";
   quarantinedPrefix: "packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/";
   protectedPaths: readonly Readonly<{ path: string; blobId: string }>[];
+  admittedTestCorrections: readonly Readonly<{
+    path: string;
+    baselineBlobId: string;
+    correctedBlobId: string;
+    reason: string;
+    failureEvidencePath: string;
+  }>[];
   changedOutsideQuarantine: readonly string[];
   trackedScratchPaths: readonly string[];
   historicalEvidence: readonly Readonly<{ path: string; commit: string; claim: string }>[];
@@ -38,7 +45,7 @@ export type BoundaryReport = Readonly<{
 }>;
 
 const EXPECTED_AUTHORITY = {
-  schemaVersion: "game-ir-protected-baseline.v1",
+  schemaVersion: "game-ir-protected-baseline.v2",
   baselineCommit: "d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6",
   stableBranchCommit: "70df2e2c79bd214862af3959a257c5f5f42bd666",
   firstGameIrBoundaryCommit: "109e7195d314bb716922ef2dd2de65567e428d64",
@@ -47,6 +54,23 @@ const EXPECTED_AUTHORITY = {
   quarantinedPrefix: "packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/",
   historicalEvidenceGap: "no baseline-bound Revision-to-zero-and-Checklist Chrome receipt found",
 } as const;
+
+const EXPECTED_TEST_CORRECTIONS = [
+  {
+    path: "packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts",
+    baselineBlobId: "4c1d39384afdf7b3b8d07f914da998be21713c3b",
+    correctedBlobId: "c2095a88a3d848821a1f991c0d09611bc5043d12",
+    reason: "replace obsolete Checklist fixture with the canonical section-reference form",
+    failureEvidencePath: "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md",
+  },
+  {
+    path: "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.test.ts",
+    baselineBlobId: "c6af90e108c5c7b190bb3fd138af25f25ab4bfd8",
+    correctedBlobId: "80aefe9c1b8ef2fa439af8b27bb2b25087b08400",
+    reason: "derive display phase count from DELIVERY_PROGRESS_STAGES",
+    failureEvidencePath: "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md",
+  },
+] as const;
 
 const EXPECTED_HISTORICAL_EVIDENCE = [
   {
@@ -60,6 +84,7 @@ const EXPECTED_HISTORICAL_EVIDENCE = [
 ] as const;
 
 const EXPECTED_MANIFEST_KEYS = [
+  "admittedTestCorrections",
   "baselineCommit",
   "changedOutsideQuarantine",
   "firstGameIrBoundaryCommit",
@@ -144,6 +169,44 @@ function validateManifest(root: string, value: unknown): BoundaryViolation[] {
     )
   ) {
     return mismatch("manifest path arrays have invalid entries");
+  }
+  const corrections = manifest.admittedTestCorrections;
+  if (
+    !Array.isArray(corrections) ||
+    corrections.length !== EXPECTED_TEST_CORRECTIONS.length ||
+    !corrections.every(
+      (entry) =>
+        entry !== null &&
+        typeof entry === "object" &&
+        hasExactKeys(entry, ["baselineBlobId", "correctedBlobId", "failureEvidencePath", "path", "reason"]) &&
+        typeof (entry as Record<string, unknown>).path === "string" &&
+        typeof (entry as Record<string, unknown>).baselineBlobId === "string" &&
+        typeof (entry as Record<string, unknown>).correctedBlobId === "string" &&
+        typeof (entry as Record<string, unknown>).reason === "string" &&
+        (entry as Record<string, unknown>).reason !== "" &&
+        typeof (entry as Record<string, unknown>).failureEvidencePath === "string" &&
+        (entry as Record<string, unknown>).failureEvidencePath !== "",
+    )
+  ) {
+    return mismatch("admittedTestCorrections must contain exactly the two correction records");
+  }
+  for (const [index, expected] of EXPECTED_TEST_CORRECTIONS.entries()) {
+    const entry = corrections[index] as Record<string, string>;
+    if (
+      entry.path !== expected.path ||
+      entry.baselineBlobId !== expected.baselineBlobId ||
+      entry.correctedBlobId !== expected.correctedBlobId ||
+      entry.reason !== expected.reason ||
+      entry.failureEvidencePath !== expected.failureEvidencePath
+    ) {
+      return mismatch("admittedTestCorrections must match the fixed ordered allowlist");
+    }
+    if (!gitSucceeds(root, ["cat-file", "-e", `${EXPECTED_AUTHORITY.baselineCommit}:${entry.path}`])) {
+      return mismatch("admitted test correction path is absent from the baseline tree");
+    }
+    if (!gitSucceeds(root, ["cat-file", "-e", entry.correctedBlobId])) {
+      return mismatch("admitted test correction blob is unavailable");
+    }
   }
   const evidence = manifest.historicalEvidence as unknown[];
   if (
@@ -429,7 +492,9 @@ function verifyProtectedPaths(
     try {
       const currentBlob = currentBlobs.get(path);
       if (currentBlob === undefined) throw new Error("protected path is unreadable");
-      if (currentBlob !== baselineBlob) {
+      const correction = EXPECTED_TEST_CORRECTIONS.find(({ path: correctionPath }) => correctionPath === path);
+      const expectedCurrentBlob = correction?.correctedBlobId ?? baselineBlob;
+      if (currentBlob !== expectedCurrentBlob) {
         violations.push({ code: "protected_blob_mismatch", path });
       }
     } catch {

@@ -1,11 +1,27 @@
 {
-  "schemaVersion": "game-ir-protected-baseline.v1",
+  "schemaVersion": "game-ir-protected-baseline.v2",
   "baselineCommit": "d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6",
   "stableBranchCommit": "70df2e2c79bd214862af3959a257c5f5f42bd666",
   "firstGameIrBoundaryCommit": "109e7195d314bb716922ef2dd2de65567e428d64",
   "firstGameIrProductionCommit": "f4a7d16f7bde3bb8a978f1a10350ad2cef84aa8f",
   "sourceCommit": "4335363b2cd33d1f0b7bd807bff95d9389c67ce1",
   "quarantinedPrefix": "packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/",
+  "admittedTestCorrections": [
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts",
+      "baselineBlobId": "4c1d39384afdf7b3b8d07f914da998be21713c3b",
+      "correctedBlobId": "c2095a88a3d848821a1f991c0d09611bc5043d12",
+      "reason": "replace obsolete Checklist fixture with the canonical section-reference form",
+      "failureEvidencePath": "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.test.ts",
+      "baselineBlobId": "c6af90e108c5c7b190bb3fd138af25f25ab4bfd8",
+      "correctedBlobId": "80aefe9c1b8ef2fa439af8b27bb2b25087b08400",
+      "reason": "derive display phase count from DELIVERY_PROGRESS_STAGES",
+      "failureEvidencePath": "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md"
+    }
+  ],
   "protectedPaths": [
     {
       "path": "packages/agent-workflow-server/src/__tests__/asset-contracts-resource-binding.test.ts",

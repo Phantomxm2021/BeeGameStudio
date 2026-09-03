@@ -91,7 +91,7 @@ describe('workflow stage card history', () => {
     expect(frozen).toMatchObject({
       stageId: 'DOCUMENT_REVIEW',
       phaseIndex: 3,
-      phaseCount: 10,
+      phaseCount: DELIVERY_PROGRESS_STAGES.length,
       substage: 'INITIAL_REVIEW',
       status: 'completed',
     })
@@ -101,7 +101,7 @@ describe('workflow stage card history', () => {
     ).toMatchObject({
       stageId: 'FOUNDATION_REVISION',
       phaseIndex: 4,
-      phaseCount: 10,
+      phaseCount: DELIVERY_PROGRESS_STAGES.length,
       substage: 'REPAIRING',
     })
     const history = projectWorkflowStageCardHistory({
