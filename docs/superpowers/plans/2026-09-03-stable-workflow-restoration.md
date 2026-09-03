@@ -216,6 +216,42 @@ git commit -m "refactor: remove coupled game ir source tree"
 
 ---
 
+### Task 3A: Admit the two reproduced baseline test corrections
+
+**Files:**
+- Modify: `packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts`
+- Modify: `packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.test.ts`
+- Modify: `scripts/game-ir-isolation-boundary.ts`
+- Modify: `scripts/game-ir-isolation-boundary.test.ts`
+- Modify: `docs/superpowers/evidence/2026-09-03-game-ir-protected-baseline.json`
+
+**Interfaces:**
+- Consumes: committed Task 4 failure evidence and the byte-identical provisional runtime baseline.
+- Produces: two exact test-only corrections plus a mechanically immutable correction allowlist; production behavior remains byte-identical.
+
+- [ ] **Step 1: Preserve the RED evidence**
+
+Re-run the two failing test files and require the same seven failures: six from the stale pre-single-track Checklist fixture and one from the stale hard-coded display phase count.
+
+- [ ] **Step 2: Correct only the stale test data**
+
+Replace the recovery fixture's obsolete Checklist line with the canonical section-reference form already proven by commit `983253161`. Replace the two literal `phaseCount: 10` expectations with `DELIVERY_PROGRESS_STAGES.length`. Do not modify production code.
+
+- [ ] **Step 3: Freeze the corrections mechanically**
+
+Upgrade the boundary manifest/checker contract to record exactly these two paths, their baseline blob IDs, corrected blob IDs, and fixed reasons. Reject an omitted, additional, reordered, or altered correction and reject any other protected change. Add RED/GREEN checker tests for tampering and unauthorized test changes.
+
+- [ ] **Step 4: Verify and commit**
+
+Run the two corrected tests, the boundary tests, boundary CLI, typecheck, and `git diff --check`. Expected: all pass and no production diff from `d821e286`.
+
+```bash
+git add packages/agent-workflow-server/src/__tests__/delivery-workflow-recovery.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/workflow-stage-card-history.test.ts scripts/game-ir-isolation-boundary.ts scripts/game-ir-isolation-boundary.test.ts docs/superpowers/evidence/2026-09-03-game-ir-protected-baseline.json
+git commit -m "test: correct restored workflow baseline fixtures"
+```
+
+---
+
 ### Task 4: Run the complete local protected-workflow gate
 
 **Files:**

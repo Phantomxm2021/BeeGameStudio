@@ -104,10 +104,14 @@ The baseline-admission record must bind:
 - the exact protected file manifest and each baseline Git blob ID.
 
 `d821e286...` may be used only as the provisional restoration source. It
-becomes the admitted stable baseline only after the new local and Chrome gates
-in this milestone pass. If they fail, the failure is captured and classified
-without patching protected code; selecting a different baseline requires a new
-written audit and user approval.
+becomes the admitted stable runtime baseline only after the new local and
+Chrome gates in this milestone pass. If a local failure reproduces with
+byte-identical baseline runtime and is proven to be a stale test fixture or
+oracle, a test-only correction is permitted only when its exact path, baseline
+blob, corrected blob, reason, and evidence are frozen in the boundary checker.
+It must not change production code or accommodate Game IR behavior. Any other
+failure is captured without patching protected code; selecting a different
+runtime baseline requires a new written audit and user approval.
 
 ### Protected behavior
 
@@ -128,8 +132,9 @@ The protected system includes:
 
 Every runtime or test file changed after the verified baseline and outside
 `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/` is
-restored to its baseline Git blob. Milestone 1 has no audit-based retention
-exception. Game IR-only documents under `docs/` remain read-only salvage
+restored to its baseline Git blob. The sole exception is an exact test-only
+correction admitted by the rule above; runtime files have no audit-based
+retention exception. Game IR-only documents under `docs/` remain read-only salvage
 evidence and cannot justify a runtime retention. Tracked post-baseline files
 under `.superpowers/sdd/` are removed because they are disposable execution
 scratch, not product evidence. The only new Milestone 1 files allowed outside
@@ -155,7 +160,9 @@ may cause Game IR code to load during the protected workflow.
 The repository must provide one versioned boundary checker. Given the admitted
 stable commit and protected manifest, it fails unless:
 
-- every protected path has the exact baseline blob ID;
+- every protected runtime path has the exact baseline blob ID;
+- every protected test path has either its baseline blob ID or an exact,
+  checker-frozen test-only correction blob ID;
 - no protected source imports a Game IR source path;
 - no runtime registry contains a Game IR worker, phase, state, or transition;
 - no non-Game-IR test changes a protected expected result to accommodate Game
