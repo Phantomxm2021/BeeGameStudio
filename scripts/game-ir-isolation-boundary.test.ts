@@ -24,6 +24,7 @@ function git(root: string, args: string[]): string {
 function setupRepository() {
   if (sharedRoot && sharedManifest) {
     if (git(sharedRoot, ["rev-parse", "HEAD"]) !== sharedManifest.sourceCommit) git(sharedRoot, ["checkout", "--quiet", "--detach", sharedManifest.sourceCommit]);
+    restoreCleanCheckout(sharedRoot, sharedManifest);
     const removedPaths = ["packages/agent-workflow-server/src/beegame/added.ts", ".superpowers/sdd/task-report.md", ".superpowers/sdd/unlisted.md", ...sharedManifest.trackedScratchPaths];
     for (const path of removedPaths) {
       if (existsSync(join(sharedRoot, path))) rmSync(join(sharedRoot, path));
@@ -69,7 +70,7 @@ function restoreCleanCheckout(root: string, manifest: ProtectedBaselineManifest)
   const baselinePaths = new Set(manifest.protectedPaths.map(({ path }) => path));
   const currentPaths = git(root, ["ls-files", "-z"]).split("\0").filter(Boolean);
   for (const path of currentPaths) {
-    if ((path.startsWith("packages/agent-workflow-server/src/beegame/") || path.startsWith("packages/agent-workflow-server/src/__tests__/")) && !path.startsWith(quarantine) && !baselinePaths.has(path)) {
+    if ((path.startsWith("packages/agent-workflow-server/src/beegame/") || path.startsWith("packages/agent-workflow-server/src/__tests__/")) && !baselinePaths.has(path)) {
       rmSync(join(root, path));
       git(root, ["update-index", "--force-remove", "--", path]);
     }
@@ -94,6 +95,28 @@ describe("verifyGameIrIsolationBoundary", () => {
   test("allows unchanged protected files and Game IR-only changes", () => {
     const { root, manifest } = setupRepository();
     expect(verifyGameIrIsolationBoundary(root, manifest).violations).toEqual([]);
+  });
+  test("reports a tracked TypeScript file reintroduced under the old Game IR prefix", () => {
+    const fixture = setupRepository();
+    const reintroducedPath = join(fixture.root, `${quarantine}reintroduced.ts`);
+    writeFileSync(reintroducedPath, "export const reintroduced = true;\n");
+    git(fixture.root, ["add", reintroducedPath]);
+
+    expect(codes(fixture.root, fixture.manifest)).toContain("game_ir_source_present");
+  });
+  test("reports an untracked test file reintroduced under the old Game IR prefix", () => {
+    const fixture = setupRepository();
+    const reintroducedPath = join(fixture.root, `${quarantine}reintroduced.test.ts`);
+    writeFileSync(reintroducedPath, "test('reintroduced', () => {});\n");
+
+    expect(codes(fixture.root, fixture.manifest)).toContain("game_ir_source_present");
+  });
+  test("reports an untracked arbitrary file reintroduced under the old Game IR prefix", () => {
+    const fixture = setupRepository();
+    const reintroducedPath = join(fixture.root, `${quarantine}reintroduced`);
+    writeFileSync(reintroducedPath, "reintroduced\n");
+
+    expect(codes(fixture.root, fixture.manifest)).toContain("game_ir_source_present");
   });
   test("reports a modified protected blob", () => {
     const fixture = setupRepository();

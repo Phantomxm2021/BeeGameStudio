@@ -23,6 +23,7 @@ export type BoundaryViolationCode =
   | "protected_blob_mismatch"
   | "missing_protected_path"
   | "unexpected_protected_path"
+  | "game_ir_source_present"
   | "game_ir_reference_in_protected_source"
   | "tracked_sdd_scratch";
 
@@ -464,6 +465,11 @@ export function verifyGameIrIsolationBoundary(
   if (manifestViolations.length > 0) return { violations: manifestViolations };
   verifyHistory(root, manifest, violations);
   const currentPaths = new Set(trackedPaths(root));
+  for (const path of currentPaths) {
+    if (path.startsWith(EXPECTED_AUTHORITY.quarantinedPrefix)) {
+      violations.push({ code: "game_ir_source_present", path });
+    }
+  }
   const baselinePaths = treeEntries(root, EXPECTED_AUTHORITY.baselineCommit, [runtimeRoot, testsRoot]);
   for (const path of [...baselinePaths.keys()]) {
     if (path.startsWith(EXPECTED_AUTHORITY.quarantinedPrefix)) baselinePaths.delete(path);
