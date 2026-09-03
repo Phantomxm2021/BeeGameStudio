@@ -67,16 +67,6 @@ export const gameIrObligationRecordSchema = z
     fragmentId: gameIrText,
   })
   .strict()
-export const gameIrObligationValidationIdentitySchema = z
-  .object({
-    compileRequestDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    sourceDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    inventoryDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    projectionContractDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    validatorManifestDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    ownerSliceMapDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  })
-  .strict()
 export const gameIrObligationValidationRawResultSchema = z.discriminatedUnion(
   'outcome',
   [
@@ -84,7 +74,6 @@ export const gameIrObligationValidationRawResultSchema = z.discriminatedUnion(
       .object({
         outcome: z.literal('PASS'),
         moduleId: gameIrText,
-        identities: gameIrObligationValidationIdentitySchema,
         coverage: z.array(gameIrText),
       })
       .strict(),

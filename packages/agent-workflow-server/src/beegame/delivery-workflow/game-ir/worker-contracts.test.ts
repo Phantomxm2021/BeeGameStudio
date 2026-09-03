@@ -445,10 +445,9 @@ describe('Game IR worker operation contracts', () => {
     ).toThrow()
 
     const validationResult = {
-      outcome: 'AMBIGUOUS' as const,
+      outcome: 'PASS' as const,
       moduleId: 'balance',
-      reasonCode: 'ambiguous-obligation' as const,
-      detail: 'ambiguous',
+      coverage: ['e0.0'],
     }
     const validation = gameIrObligationValidationTerminalSchema.parse({
       workerType: 'game-ir-compiler',
@@ -468,7 +467,12 @@ describe('Game IR worker operation contracts', () => {
     expect(() =>
       gameIrObligationValidationTerminalSchema.parse({
         ...validation,
-        result: { outcome: 'PASS', moduleId: 'balance' },
+        result: {
+          outcome: 'PASS',
+          moduleId: 'balance',
+          coverage: ['e0.0'],
+          identities: {},
+        },
       }),
     ).toThrow()
     expect(gameIrCompilerTerminalSchema.parse(inventory)).toEqual(inventory)
