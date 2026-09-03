@@ -5,6 +5,7 @@ import {
   nativeRuntimeEnvironment,
   nativeRuntimeCommand,
 } from './native-cli-process-runner'
+import type { FoundationDocumentPath } from './delivery-workflow/types'
 
 const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
@@ -14,6 +15,7 @@ function startRuntime(
   options: {
     markdownStream?: boolean
     workflowJsonSchema?: Record<string, unknown>
+    targetPath?: FoundationDocumentPath
   } = {},
 ) {
   return createNativeCliProcessRunner({
@@ -36,7 +38,7 @@ function startRuntime(
             workspacePath: process.cwd(),
             runId: 'run-1',
             dispatchId: 'dispatch-1',
-            targetPath: 'docs/GDD.md' as const,
+            targetPath: options.targetPath ?? ('docs/GDD.md' as const),
             maxBytes: 512_000,
           },
         }
@@ -458,6 +460,103 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
+  test('replaces a structurally invalid Asset Plan candidate in the same dispatch', async () => {
+    const runtime = await startRuntime({
+      markdownStream: true,
+      targetPath: 'docs/ASSET_PLAN.md',
+    })
+    const messages: Record<string, unknown>[] = []
+
+    await runtime.submit({
+      prompt: 'asset-structural-replacement',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    const result = messages.at(-1)!
+    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
+    expect(result).toMatchObject({
+      type: 'result',
+      subtype: 'success',
+      received_user_count: 2,
+      received_session_ids: ['', '550e8400-e29b-41d4-a716-446655440000'],
+    })
+    const receivedPrompts = result.received_prompts as string[]
+    expect(receivedPrompts).toHaveLength(2)
+    expect(receivedPrompts[1]).toContain('complete replacement')
+    expect(receivedPrompts[1]).toContain(
+      'canonical material headings must follow Production Materials',
+    )
+    expect(receivedPrompts[1]).toContain('# <document title>')
+    expect(receivedPrompts[1]).toContain('## Production Materials')
+    const accepted = String(result.result)
+    expect(accepted).toBe(fixtureCompleteAssetMarkdown())
+    for (const heading of assetMaterialHeadings())
+      expect(accepted.split(heading).length - 1).toBe(1)
+    runtime.dispose?.()
+  })
+
+  test.each([
+    ['asset-structural-replacement-empty', 'empty'],
+    ['asset-structural-replacement-identical', 'identical'],
+    ['asset-structural-replacement-still-invalid', 'still-invalid'],
+  ])('fails one structural replacement cycle for %s', async (prompt, _) => {
+    const runtime = await startRuntime({
+      markdownStream: true,
+      targetPath: 'docs/ASSET_PLAN.md',
+    })
+    let result: Record<string, unknown> | undefined
+
+    await expect(
+      runtime.submit({
+        prompt,
+        signal: new AbortController().signal,
+        onMessage: message => {
+          if (message.type === 'result') result = message
+        },
+        requestPermission: async () => ({ behavior: 'deny' }),
+      }),
+    ).rejects.toThrow('Markdown structural replacement')
+    expect(result).toBeUndefined()
+    runtime.dispose?.()
+  })
+
+  test('accepts a terminal-only replacement result in the same dispatch', async () => {
+    const runtime = await startRuntime({
+      markdownStream: true,
+      targetPath: 'docs/ASSET_PLAN.md',
+    })
+    const messages: Record<string, unknown>[] = []
+
+    await runtime.submit({
+      prompt: 'asset-structural-replacement-terminal-only',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(messages.at(-1)?.result).toBe(fixtureCompleteAssetMarkdown())
+    expect(messages.at(-1)?.received_user_count).toBe(2)
+    runtime.dispose?.()
+  })
+
+  test('normalizes a streamed complete candidate when terminal result is empty', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+    const messages: Record<string, unknown>[] = []
+
+    await runtime.submit({
+      prompt: 'streamed-complete-empty-terminal',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(messages.at(-1)?.result).toContain('# Visible Markdown')
+    expect(messages.at(-1)?.received_user_count).toBe(1)
+    runtime.dispose?.()
+  })
+
   test('rejects a continuation that restarts the document from its title', async () => {
     const runtime = await startRuntime({ markdownStream: true })
 
@@ -516,3 +615,43 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 })
+
+function assetMaterialHeadings(): string[] {
+  return [
+    '### Asset Inventory Table',
+    '### Responsibility Matrix',
+    '### Dependency and Integration Diagram',
+    '### License Register',
+    '### Milestone and Maturity Table',
+  ]
+}
+
+function fixtureCompleteAssetMarkdown(): string {
+  return [
+    '# Asset Plan',
+    '## Executive Summary',
+    'summary',
+    '## Asset and Content Inventory',
+    'inventory',
+    '## Ownership and Responsibility',
+    'ownership',
+    '## Dependencies and Integration Order',
+    'dependencies',
+    '## Source, Originality and Licensing',
+    'licensing',
+    '## Formats, Variants and Budgets',
+    'formats',
+    '## Production Pipeline and Naming',
+    'pipeline',
+    '## Milestones, Capacity and Schedule',
+    'milestones',
+    '## Validation and Quality Status',
+    'validation',
+    '## Placeholder and Replacement Strategy',
+    'replacement',
+    '## Delivery, Release and Risks',
+    'risks',
+    '## Production Materials',
+    ...assetMaterialHeadings().flatMap(heading => [heading, 'material']),
+  ].join('\n')
+}

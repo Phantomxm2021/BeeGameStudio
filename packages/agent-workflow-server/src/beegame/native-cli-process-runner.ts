@@ -14,7 +14,11 @@ import {
   createRuntimeObservability,
   type RuntimeObservability,
 } from './runtime-observability'
-import { isCompleteGameDocumentMarkdownStructure } from './complete-game-document'
+import {
+  classifyGameDocumentMarkdownStructure,
+} from './complete-game-document'
+import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import type { FoundationDocumentPath } from './delivery-workflow/types'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stdin: {
@@ -30,6 +34,8 @@ const MARKDOWN_PROTOCOL_CONTINUATION_PROMPT =
   'Continue the same raw Markdown response from the exact point where it stopped. Return only the remaining Markdown; do not restart, summarize, or repeat the document title.'
 const MARKDOWN_PROTOCOL_RESTART_PROMPT =
   'No visible Markdown was emitted. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
+
+type MarkdownRecoveryMode = 'none' | 'append' | 'restart' | 'replace'
 
 export function createNativeCliProcessRunner(options: {
   command?: string[]
@@ -88,9 +94,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     requestId: string
     markdownOutput: string
     markdownStreamDeltaSeen: boolean
-    markdownContinuationExpected: boolean
-    markdownContinuationOutput: string
-    markdownRestartExpected: boolean
+    markdownRecoveryMode: MarkdownRecoveryMode
+    markdownRecoveryOutput: string
     resolve(): void
     reject(error: Error): void
     abort(): void
@@ -165,9 +170,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         requestId,
         markdownOutput: '',
         markdownStreamDeltaSeen: false,
-        markdownContinuationExpected: false,
-        markdownContinuationOutput: '',
-        markdownRestartExpected: false,
+        markdownRecoveryMode: 'none',
+        markdownRecoveryOutput: '',
         resolve: () => {
           input.signal.removeEventListener('abort', abort)
           resolve()
@@ -257,11 +261,11 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       const streamedText = streamedMarkdownText(message)
       if (message.type === 'stream_event') {
         turn.markdownStreamDeltaSeen = true
-        if (turn.markdownContinuationExpected) {
-          turn.markdownContinuationOutput += streamedText
+        if (turn.markdownRecoveryMode !== 'none') {
+          turn.markdownRecoveryOutput += streamedText
           if (
-            !turn.markdownRestartExpected &&
-            turn.markdownContinuationOutput.trimStart().startsWith('# ')
+            turn.markdownRecoveryMode === 'append' &&
+            turn.markdownRecoveryOutput.trimStart().startsWith('# ')
           ) {
             await this.rejectMarkdownTurn(
               turn,
@@ -271,21 +275,25 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
             )
             return
           }
+        } else {
+          turn.markdownOutput += streamedText
         }
-        turn.markdownOutput += streamedText
       } else if (
         message.type === 'assistant' &&
         (!turn.markdownStreamDeltaSeen || !turn.markdownOutput)
       ) {
         const text = assistantMarkdownText(message)
-        if (turn.markdownContinuationExpected)
-          turn.markdownContinuationOutput += text
-        turn.markdownOutput += text
-      } else if (message.type === 'result' && !turn.markdownOutput) {
+        if (turn.markdownRecoveryMode !== 'none')
+          turn.markdownRecoveryOutput += text
+        else turn.markdownOutput += text
+      } else if (
+        message.type === 'result' &&
+        (turn.markdownRecoveryMode !== 'none' || !turn.markdownOutput)
+      ) {
         const text = stringField(message, 'result')
-        if (turn.markdownContinuationExpected)
-          turn.markdownContinuationOutput = text
-        turn.markdownOutput = text
+        if (turn.markdownRecoveryMode !== 'none')
+          turn.markdownRecoveryOutput = text
+        else turn.markdownOutput = text
       }
     }
     if (
@@ -293,41 +301,56 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       this.sessionInput.workflowMarkdownStreamContract &&
       !isErrorResult(message)
     ) {
-      if (
-        turn.markdownContinuationExpected &&
-        !turn.markdownContinuationOutput.trim()
-      ) {
-        await this.rejectMarkdownTurn(
-          turn,
-          new Error(
-            'foundation_transport_needs_action: Markdown continuation made no progress',
-          ),
-        )
-        return
-      }
-      turn.markdownContinuationExpected = false
-      turn.markdownRestartExpected = false
-      if (isMissingVisibleMarkdownResult(message)) {
-        if (!turn.markdownOutput.trim())
-          await this.recoverIncompleteMarkdownTurn(turn, true)
-        else
+      const recoveryMode = turn.markdownRecoveryMode
+      if (recoveryMode === 'append' || recoveryMode === 'restart') {
+        if (!turn.markdownRecoveryOutput.trim()) {
           await this.rejectMarkdownTurn(
             turn,
             new Error(
-              'Bee Game Studio native model response ended without visible Markdown',
+              'foundation_transport_needs_action: Markdown continuation made no progress',
             ),
           )
+          return
+        }
+        if (
+          recoveryMode === 'append' &&
+          turn.markdownRecoveryOutput.trimStart().startsWith('# ')
+        ) {
+          await this.rejectMarkdownTurn(
+            turn,
+            new Error(
+              'foundation_transport_needs_action: Markdown continuation restarted the document from its title',
+            ),
+          )
+          return
+        }
+        turn.markdownOutput =
+          recoveryMode === 'append'
+            ? turn.markdownOutput + turn.markdownRecoveryOutput
+            : turn.markdownRecoveryOutput
+        turn.markdownRecoveryOutput = ''
+        turn.markdownRecoveryMode = 'none'
+      } else if (recoveryMode === 'replace') {
+        if (!(await this.finishMarkdownReplacement(turn))) return
+        message = { ...message, result: turn.markdownOutput }
+      }
+      if (isMissingVisibleMarkdownResult(message) && !turn.markdownOutput.trim()) {
+        await this.recoverIncompleteMarkdownTurn(turn, true)
         return
       }
-      if (
-        !isCompleteGameDocumentMarkdownStructure(
-          this.sessionInput.workflowMarkdownStreamContract.targetPath,
-          turn.markdownOutput,
-        )
-      ) {
+      const classification = classifyGameDocumentMarkdownStructure(
+        this.sessionInput.workflowMarkdownStreamContract.targetPath,
+        turn.markdownOutput,
+      )
+      if (classification.kind === 'suffix_incomplete') {
         await this.recoverIncompleteMarkdownTurn(turn)
         return
       }
+      if (classification.kind === 'structurally_invalid') {
+        await this.requestMarkdownReplacement(turn, classification.reason)
+        return
+      }
+      message = { ...message, result: turn.markdownOutput }
     }
     turn.input.onMessage(message as DashboardSDKMessage)
     this.captureStructuredOutputCall(message)
@@ -366,9 +389,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
     fromBeginning = false,
   ): Promise<void> {
-    turn.markdownContinuationExpected = true
-    turn.markdownContinuationOutput = ''
-    turn.markdownRestartExpected = fromBeginning
+    turn.markdownRecoveryMode = fromBeginning ? 'restart' : 'append'
+    turn.markdownRecoveryOutput = ''
     this.write({
       type: 'user',
       uuid: crypto.randomUUID(),
@@ -386,6 +408,79 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         ],
       },
     })
+  }
+
+  private async requestMarkdownReplacement(
+    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
+    reason: string,
+  ): Promise<void> {
+    turn.markdownRecoveryMode = 'replace'
+    turn.markdownRecoveryOutput = ''
+    const targetPath = this.sessionInput.workflowMarkdownStreamContract!.targetPath
+    this.write({
+      type: 'user',
+      uuid: crypto.randomUUID(),
+      session_id: this.nativeSessionId ?? '',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: markdownReplacementPrompt(
+              reason,
+              literalMarkdownSkeleton(targetPath),
+            ),
+          },
+        ],
+      },
+    })
+  }
+
+  private async finishMarkdownReplacement(
+    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
+  ): Promise<boolean> {
+    const replacement = turn.markdownRecoveryOutput
+    if (!replacement) {
+      await this.rejectMarkdownTurn(
+        turn,
+        new Error(
+          'foundation_transport_needs_action: Markdown structural replacement was empty',
+        ),
+      )
+      return false
+    }
+    if (replacement === turn.markdownOutput) {
+      await this.rejectMarkdownTurn(
+        turn,
+        new Error(
+          'foundation_transport_needs_action: Markdown structural replacement made no progress',
+        ),
+      )
+      return false
+    }
+    const targetPath = this.sessionInput.workflowMarkdownStreamContract!.targetPath
+    const classification = classifyGameDocumentMarkdownStructure(
+      targetPath,
+      replacement,
+    )
+    if (classification.kind !== 'complete') {
+      const detail =
+        classification.kind === 'structurally_invalid'
+          ? classification.reason
+          : 'replacement remains suffix-incomplete'
+      await this.rejectMarkdownTurn(
+        turn,
+        new Error(
+          `foundation_transport_needs_action: Markdown structural replacement ${detail}`,
+        ),
+      )
+      return false
+    }
+    turn.markdownOutput = replacement
+    turn.markdownRecoveryOutput = ''
+    turn.markdownRecoveryMode = 'none'
+    return true
   }
 
   private async rejectMarkdownTurn(
@@ -637,6 +732,29 @@ function isMissingVisibleMarkdownResult(
   message: Record<string, unknown>,
 ): boolean {
   return stringField(message, 'result').trim().length === 0
+}
+
+function markdownReplacementPrompt(reason: string, skeleton: string): string {
+  return [
+    `The previous Markdown candidate was structurally invalid: ${reason}`,
+    'Return one complete replacement raw Markdown body from the title; do not continue, append, summarize, or add commentary.',
+    'Use this full literal contract-derived skeleton exactly once and in order:',
+    skeleton,
+  ].join('\n')
+}
+
+function literalMarkdownSkeleton(path: FoundationDocumentPath): string {
+  const contract = getGameDocumentContract(path)
+  return [
+    '# <document title>',
+    '',
+    '## Executive Summary',
+    '',
+    ...contract.sections.flatMap(section => [`## ${section.title}`, '']),
+    '## Production Materials',
+    '',
+    ...contract.productionMaterials.flatMap(material => [`### ${material.title}`, '']),
+  ].join('\n')
 }
 
 function streamedMarkdownText(message: Record<string, unknown>): string {
