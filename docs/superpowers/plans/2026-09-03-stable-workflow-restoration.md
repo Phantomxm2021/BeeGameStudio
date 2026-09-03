@@ -4,7 +4,7 @@
 
 **Goal:** Restore the eight-document, Stage 3 Reviewer, Stage 4 Revision, and Checklist workflow to the exact admitted pre-Game-IR implementation and prove it through local and real Chrome acceptance with Game IR unreachable.
 
-**Architecture:** This is Milestone 1 only. A Git-derived manifest freezes the admitted baseline, all 55 post-baseline runtime/test changes outside the quarantined Game IR directory are mechanically restored, and a permanent checker rejects any protected drift or Game IR reachability. Standalone Game IR salvage is a separate implementation plan created only after this milestone is accepted.
+**Architecture:** This is Milestone 1 only. A Git-derived manifest freezes the admitted baseline, all 55 post-baseline runtime/test changes outside the old Game IR directory are mechanically restored, the 86-file old in-package Game IR tree is deleted, and a permanent checker rejects protected drift or reintroduction. Standalone Game IR salvage reads immutable source commit `4335363b2...` under a separate implementation plan created only after this milestone is accepted.
 
 **Tech Stack:** TypeScript, Bun, Bun test, Node standard library, Git plumbing, Bee Game Studio fixed-port Web/React stack, Chrome.
 
@@ -17,7 +17,7 @@
 - Historical evidence proves Stage 2 and Reviewer behavior but not the complete Revision-to-zero-and-Checklist sequence; the new Chrome run is the admission proof rather than a repetition of an unproven historical claim.
 - Restore all runtime and test files changed after the baseline outside `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/`; do not preserve selected later hunks.
 - Remove all 15 post-baseline tracked `.superpowers/sdd/` scratch files.
-- Existing Game IR source stays quarantined and unreachable; protected source contains no `GAME_IR`, `GameIr`, `gameIr`, or `game-ir` token.
+- Existing Game IR source is preserved only in immutable source commit `4335363b2...` and deleted from the recovery branch; protected source contains no `GAME_IR`, `GameIr`, `gameIr`, or `game-ir` token.
 - Do not edit Stage 2, Stage 3, Stage 4, Checklist, controller, transport, schema, recovery, model runtime, session, or UI code after restoration.
 - No compatibility reader, fallback, alias, feature flag, dual parser, dual state, or dual execution route.
 - No fixed Token, byte, duration, attempt, issue, section, entity, or artifact business limit.
@@ -158,7 +158,65 @@ git commit -m "refactor: restore stable protected workflow"
 
 ---
 
-### Task 3: Run the complete local protected-workflow gate
+### Task 3: Remove the old in-package Game IR tree and make absence permanent
+
+**Files:**
+- Modify: `scripts/game-ir-isolation-boundary.ts`
+- Modify: `scripts/game-ir-isolation-boundary.test.ts`
+- Delete: all 86 tracked paths under `packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/`
+- Do not modify: protected runtime/tests, `docs/`, or the immutable manifest.
+
+**Interfaces:**
+- Consumes: immutable source commit `4335363b2...` as salvage authority and the Task 1 checker.
+- Produces: a recovery checkout with no old Game IR source tree and a boundary violation `game_ir_source_present` if any tracked or untracked non-ignored path reappears under the forbidden prefix.
+
+- [ ] **Step 1: Preserve the failing isolation evidence**
+
+Record the independent-install `bun run typecheck` failure. Every diagnostic must originate under the old Game IR prefix and must be caused by references to restored shared contracts such as `DeliveryRun`, `gameIrState`, `secure-file`, `durableWrite`, or Game IR worker schemas. If any diagnostic originates outside that prefix, stop and return `NEEDS_CONTEXT`.
+
+- [ ] **Step 2: Write the failing absence tests**
+
+Extend the boundary test to prove that a tracked or untracked non-ignored `.ts`, test, or arbitrary file beneath the exact old Game IR prefix produces `game_ir_source_present`. Keep ignored SDD files outside that prefix unaffected.
+
+- [ ] **Step 3: Run RED**
+
+```bash
+bun test ./scripts/game-ir-isolation-boundary.test.ts
+```
+
+Expected: the new reintroduction cases fail because the checker still permits the old prefix.
+
+- [ ] **Step 4: Implement the minimum absence gate and delete the old tree**
+
+Add only the new violation and a scan of current tracked plus untracked non-ignored paths under the fixed prefix. Delete the exact 86 paths returned by:
+
+```text
+git diff --name-only d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6..4335363b2cd33d1f0b7bd807bff95d9389c67ce1 -- packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir/
+```
+
+The command must return 86 before deletion. Do not copy or rewrite those files; Git history is the salvage source.
+
+- [ ] **Step 5: Run GREEN and static gates**
+
+```bash
+bun test ./scripts/game-ir-isolation-boundary.test.ts
+bun scripts/game-ir-isolation-boundary.ts
+bun run typecheck
+git diff --check
+```
+
+Expected: all exit `0`; no source path outside the deleted prefix changes.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/game-ir-isolation-boundary.ts scripts/game-ir-isolation-boundary.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-ir
+git commit -m "refactor: remove coupled game ir source tree"
+```
+
+---
+
+### Task 4: Run the complete local protected-workflow gate
 
 **Files:**
 - Create: `docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md`
@@ -168,9 +226,9 @@ git commit -m "refactor: restore stable protected workflow"
 - Consumes: restored baseline code, existing baseline tests, Task 1 checker.
 - Produces: exact commands, timestamps, exit codes, test counts, assertion counts, and failure text for the local gate.
 
-- [ ] **Step 1: Reuse the existing dependency installation without changing Git**
+- [ ] **Step 1: Use a worktree-local dependency installation without changing Git**
 
-If this worktree lacks `node_modules`, create an ignored local symlink to the already installed `../game-ir-packet-once-evaluation/node_modules`. Verify `git status --short` does not show the symlink. Do not run an install unless that dependency tree is missing or unusable.
+Verify this worktree owns its ignored `node_modules` directory. A symlink to another worktree is forbidden because workspace-package links resolve duplicate physical TypeScript identities. If the directory is missing, run `bun install --frozen-lockfile`; verify `git status --short` remains clean.
 
 - [ ] **Step 2: Run static gates**
 
@@ -225,7 +283,7 @@ git commit -m "test: verify restored stable workflow locally"
 
 ---
 
-### Task 4: Execute one real Chrome workflow from zero through Checklist
+### Task 5: Execute one real Chrome workflow from zero through Checklist
 
 **Files:**
 - Create: `docs/superpowers/reviews/2026-09-03-stable-workflow-chrome-acceptance.md`
@@ -270,7 +328,7 @@ git commit -m "docs: accept restored stable workflow"
 
 ---
 
-### Task 5: Seal the Milestone 1 restoration receipt
+### Task 6: Seal the Milestone 1 restoration receipt
 
 **Files:**
 - Create: `docs/superpowers/evidence/2026-09-03-stable-workflow-restoration-receipt.json`
@@ -305,7 +363,8 @@ type StableWorkflowRestorationReceipt = Readonly<{
 }>
 ```
 
-`protectedRestorationCommit` is the Task 2 commit, avoiding a self-referential
+`protectedRestorationCommit` is the Task 3 commit, which includes the Task 2
+baseline restoration and removal of the old Game IR tree while avoiding a self-referential
 commit identity. Canonicalize object keys, hash UTF-8 bytes with
 `receiptDigest` omitted, then insert the digest. Do not ask a model to emit
 this JSON.
@@ -319,7 +378,7 @@ bun test scripts/game-ir-isolation-boundary.test.ts
 git diff --check
 ```
 
-Re-run the exact Stage 2–4, Checklist, shared-runtime, and broad server commands recorded in Task 3. Expected: zero failures and zero protected diff.
+Re-run the exact Stage 2–4, Checklist, shared-runtime, and broad server commands recorded in Task 4. Expected: zero failures and zero protected diff.
 
 - [ ] **Step 3: Main-agent final audit and commit**
 

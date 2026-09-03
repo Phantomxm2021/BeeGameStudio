@@ -69,10 +69,12 @@ and explicit approval after standalone Game IR acceptance.
 The current Game IR branch is immutable source evidence. It is not an
 implementation workspace and cannot be merged as the recovery result.
 
-The recovery worktree starts at the current source commit so its history and
-Game IR files remain available. Stable workflow files are restored
-mechanically from the verified stable commit. Existing mixed commits are not
-cherry-picked, replayed, or hand-edited into shape.
+The recovery worktree starts at the current source commit so its history
+remains available. Stable workflow files are restored mechanically from the
+verified stable commit, then the old in-package Game IR tree is deleted from
+the recovery branch. Its exact bytes remain available from immutable source
+commit `4335363b2...`; existing mixed commits are not cherry-picked, replayed,
+or hand-edited into shape.
 
 Three authorities are distinct:
 
@@ -137,10 +139,13 @@ receipt; every such path is named explicitly in the manifest.
 
 ### Game IR disconnection
 
-During Milestone 1, Game IR source files may remain in the worktree only as
-unreachable salvage candidates. The protected runtime must contain no Game IR
-phase, state, dispatch, worker, prompt, retry, recovery, UI card, compatibility
-reader, feature flag, or fallback.
+During Milestone 1, no Game IR source file may remain under the protected
+server package. Leaving TypeScript in the old directory is not isolation: the
+repository compiler still loads it and reintroduces dependencies on restored
+shared types. Salvage reads exact files from immutable source commit
+`4335363b2...` only after stable acceptance. The protected runtime must contain
+no Game IR phase, state, dispatch, worker, prompt, retry, recovery, UI card,
+compatibility reader, feature flag, fallback, or source tree.
 
 The protected modules must not import Game IR. No registration or side effect
 may cause Game IR code to load during the protected workflow.
@@ -211,7 +216,8 @@ document digests, final workflow state, usage, and elapsed time.
 
 ### Salvage classification
 
-Every current Game IR production file and test is classified before migration:
+Every Game IR production file and test at immutable source commit
+`4335363b2...` is classified before migration:
 
 - `KEEP`: deterministic schema, identity, admission, assembly, publication, or
   test behavior that is independent of protected code;
