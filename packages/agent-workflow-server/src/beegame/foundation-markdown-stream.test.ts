@@ -46,7 +46,7 @@ function successfulMessages(markdown: string): Record<string, unknown>[] {
       type: 'assistant',
       message: { id: 'message-1', content: [{ type: 'text', text: markdown }] },
     },
-    { type: 'result', subtype: 'success', is_error: false },
+    { type: 'result', subtype: 'success', is_error: false, result: '' },
   ]
 }
 
@@ -62,6 +62,106 @@ async function writeEmptyGddProjection(workspacePath: string, dispatchId: string
 }
 
 describe('foundation Markdown stream sink', () => {
+  test('commits the non-empty terminal body instead of invalid streamed bytes', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-terminal-body-'))
+    try {
+      const validReplacement = renderTestCompleteGameDocument(
+        targetPath,
+        completeTestSubmission(targetPath),
+      )
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-terminal-body',
+        dispatchId: 'dispatch-terminal-body',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-terminal-body')
+
+      for (const message of [
+        streamEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: 'invalid-old\n' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: validReplacement },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: validReplacement,
+        },
+      ]) sink.observe(message)
+
+      await sink.commit()
+
+      expect(await readFile(
+        foundationMarkdownPendingPath(
+          workspacePath,
+          'run-terminal-body',
+          'dispatch-terminal-body',
+        ),
+        'utf8',
+      )).toBe(validReplacement)
+      expect(await readFile(join(workspacePath, targetPath), 'utf8')).not.toContain(
+        'invalid-old',
+      )
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('commits a complete terminal body without a streamed text block', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-terminal-only-'))
+    try {
+      const markdown = renderTestCompleteGameDocument(
+        targetPath,
+        completeTestSubmission(targetPath),
+      )
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-terminal-only',
+        dispatchId: 'dispatch-terminal-only',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-terminal-only')
+
+      sink.observe({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: markdown,
+      })
+
+      await sink.commit()
+
+      expect(await readFile(
+        foundationMarkdownPendingPath(
+          workspacePath,
+          'run-terminal-only',
+          'dispatch-terminal-only',
+        ),
+        'utf8',
+      )).toBe(markdown)
+      expect(await readFile(join(workspacePath, targetPath), 'utf8')).toContain(
+        markdown,
+      )
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('publishes ordered text blocks produced by a native max-token continuation', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-continuation-'))
     try {
@@ -308,6 +408,21 @@ describe('foundation Markdown stream sink', () => {
       }))
       oversized.observe({ type: 'result', subtype: 'success', is_error: false })
       await expect(oversized.commit()).rejects.toThrow(/maximum|bytes/i)
+
+      const terminalOversized = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-3',
+        dispatchId: 'dispatch-8',
+        targetPath,
+        maxBytes: 8,
+      })
+      terminalOversized.observe({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: '123456789',
+      })
+      await expect(terminalOversized.commit()).rejects.toThrow(/maximum|bytes/i)
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

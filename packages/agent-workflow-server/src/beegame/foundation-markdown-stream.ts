@@ -30,6 +30,7 @@ type StreamState = {
   textBlockStarted: boolean
   textBlockClosed: boolean
   textBlocks: string[]
+  terminalBody?: string
   terminal: boolean
   receivedBytes: number
   eventIds: Set<string>
@@ -80,7 +81,15 @@ export async function createFoundationMarkdownStreamSink(
       if (message.type === 'result') {
         if (message.is_error === true || message.subtype !== 'success')
           fail('foundation Markdown stream ended with an error result')
-        else state.terminal = true
+        else {
+          state.terminal = true
+          const result = stringField(message, 'result')
+          if (result) {
+            if (Buffer.byteLength(result) > contract.maxBytes)
+              fail('foundation Markdown stream terminal body exceeds maximum bytes')
+            else state.terminalBody = result
+          }
+        }
         return
       }
       if (message.type !== 'stream_event') return
@@ -138,11 +147,15 @@ export async function createFoundationMarkdownStreamSink(
     async commit() {
       await writeTail
       if (state.failure) throw state.failure
-      if (!state.terminal || !state.textBlockClosed)
+      if (!state.terminal)
         throw new Error('foundation Markdown stream has no complete terminal response')
-      if (state.receivedBytes === 0)
-        throw new Error('foundation Markdown stream is empty')
-      const authoredBody = mergeTextBlocks(state.textBlocks)
+      if (!state.terminalBody) {
+        if (!state.textBlockClosed)
+          throw new Error('foundation Markdown stream has no complete terminal response')
+        if (state.receivedBytes === 0)
+          throw new Error('foundation Markdown stream is empty')
+      }
+      const authoredBody = state.terminalBody ?? mergeTextBlocks(state.textBlocks)
       await writeFile(pendingPath, authoredBody, 'utf8')
       await syncFile(pendingPath)
       return commitAuthoredFoundationDocument({
