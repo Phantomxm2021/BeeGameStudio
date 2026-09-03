@@ -58,6 +58,57 @@ const projectionRecordSchema = z
     node: projectionNodeSchema,
   })
   .strict()
+export const gameIrObligationRecordSchema = z
+  .object({
+    record: z.literal('obligation'),
+    moduleId: gameIrText,
+    targetId: gameIrText.regex(safeIdPattern),
+    targetKind: gameIrText.regex(safeIdPattern),
+    fragmentId: gameIrText,
+  })
+  .strict()
+export const gameIrObligationValidationIdentitySchema = z
+  .object({
+    compileRequestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    sourceDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    inventoryDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    projectionContractDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    validatorManifestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    ownerSliceMapDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict()
+export const gameIrObligationValidationRawResultSchema = z.discriminatedUnion(
+  'outcome',
+  [
+    z
+      .object({
+        outcome: z.literal('PASS'),
+        moduleId: gameIrText,
+        identities: gameIrObligationValidationIdentitySchema,
+        coverage: z.array(gameIrText),
+      })
+      .strict(),
+    z
+      .object({
+        outcome: z.literal('FAIL'),
+        moduleId: gameIrText,
+        reasonCode: z.literal('missing-obligation'),
+        targetId: gameIrText.regex(safeIdPattern),
+        expectedKind: gameIrText.regex(safeIdPattern),
+        semanticRole: gameIrText,
+        fragmentId: gameIrText,
+      })
+      .strict(),
+    z
+      .object({
+        outcome: z.literal('AMBIGUOUS'),
+        moduleId: gameIrText,
+        reasonCode: z.literal('ambiguous-obligation'),
+        detail: gameIrText,
+      })
+      .strict(),
+  ],
+)
 const projectionCompletedSchema = z
   .object({
     status: z.literal('completed'),
@@ -72,6 +123,40 @@ const validationCompletedSchema = z
     validation: gameIrValidationModelSchema,
   })
   .strict()
+const obligationInventoryCompletedSchema = z
+  .object({
+    status: z.literal('completed'),
+    records: z.array(gameIrObligationRecordSchema),
+    done: z.literal(true),
+  })
+  .strict()
+const obligationInventoryModelPayloadSchema = z.discriminatedUnion('status', [
+  obligationInventoryCompletedSchema,
+  z
+    .object({
+      status: z.literal('failed'),
+      records: z.array(gameIrObligationRecordSchema),
+      done: z.literal(false),
+      reason: gameIrText,
+    })
+    .strict(),
+])
+const obligationValidationModelPayloadSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('completed'),
+      result: gameIrObligationValidationRawResultSchema,
+      done: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('failed'),
+      done: z.literal(false),
+      reason: gameIrText,
+    })
+    .strict(),
+])
 export const gameIrProjectionModelPayloadSchema = z.discriminatedUnion(
   'status',
   [
@@ -101,14 +186,36 @@ export type GameIrProjectionModelPayload = z.infer<
 export type GameIrValidationModelPayload = z.infer<
   typeof gameIrValidationModelPayloadSchema
 >
-export type GameIrCompilerOperation = 'projection' | 'validation'
+export type GameIrObligationInventoryModelPayload = z.infer<
+  typeof obligationInventoryModelPayloadSchema
+>
+export type GameIrObligationValidationModelPayload = z.infer<
+  typeof obligationValidationModelPayloadSchema
+>
+export const gameIrObligationInventoryModelPayloadSchema =
+  obligationInventoryModelPayloadSchema
+export const gameIrObligationValidationModelPayloadSchema =
+  obligationValidationModelPayloadSchema
+export type GameIrCompilerOperation =
+  | 'projection'
+  | 'validation'
+  | 'obligation-inventory'
+  | 'obligation-validation'
 export function parseGameIrCompilerModelPayload(
   value: unknown,
   operation: GameIrCompilerOperation,
-): GameIrProjectionModelPayload | GameIrValidationModelPayload {
-  return operation === 'projection'
-    ? gameIrProjectionModelPayloadSchema.parse(value)
-    : gameIrValidationModelPayloadSchema.parse(value)
+):
+  | GameIrProjectionModelPayload
+  | GameIrValidationModelPayload
+  | GameIrObligationInventoryModelPayload
+  | GameIrObligationValidationModelPayload {
+  if (operation === 'projection')
+    return gameIrProjectionModelPayloadSchema.parse(value)
+  if (operation === 'validation')
+    return gameIrValidationModelPayloadSchema.parse(value)
+  if (operation === 'obligation-inventory')
+    return obligationInventoryModelPayloadSchema.parse(value)
+  return obligationValidationModelPayloadSchema.parse(value)
 }
 const gameIrServiceIdentityFields = {
   runId: z.string().min(1),
@@ -172,9 +279,62 @@ export const gameIrValidationTerminalSchema = z.discriminatedUnion('status', [
     })
     .strict(),
 ])
+export const gameIrObligationInventoryTerminalSchema = z.discriminatedUnion(
+  'status',
+  [
+    z
+      .object({
+        workerType: z.literal('game-ir-compiler'),
+        operation: z.literal('obligation-inventory'),
+        status: z.literal('completed'),
+        records: z.array(gameIrObligationRecordSchema),
+        done: z.literal(true),
+        ...gameIrServiceIdentityFields,
+      })
+      .strict(),
+    z
+      .object({
+        workerType: z.literal('game-ir-compiler'),
+        operation: z.literal('obligation-inventory'),
+        status: z.literal('failed'),
+        records: z.array(gameIrObligationRecordSchema),
+        done: z.literal(false),
+        reason: gameIrText,
+        ...gameIrServiceIdentityFields,
+      })
+      .strict(),
+  ],
+)
+export const gameIrObligationValidationTerminalSchema = z.discriminatedUnion(
+  'status',
+  [
+    z
+      .object({
+        workerType: z.literal('game-ir-compiler'),
+        operation: z.literal('obligation-validation'),
+        status: z.literal('completed'),
+        result: gameIrObligationValidationRawResultSchema,
+        done: z.literal(true),
+        ...gameIrServiceIdentityFields,
+      })
+      .strict(),
+    z
+      .object({
+        workerType: z.literal('game-ir-compiler'),
+        operation: z.literal('obligation-validation'),
+        status: z.literal('failed'),
+        done: z.literal(false),
+        reason: gameIrText,
+        ...gameIrServiceIdentityFields,
+      })
+      .strict(),
+  ],
+)
 export const gameIrCompilerTerminalSchema = z.discriminatedUnion('operation', [
   gameIrProjectionTerminalSchema,
   gameIrValidationTerminalSchema,
+  gameIrObligationInventoryTerminalSchema,
+  gameIrObligationValidationTerminalSchema,
 ])
 const gameIrDiagnosticJsonSchema = {
   type: 'object',

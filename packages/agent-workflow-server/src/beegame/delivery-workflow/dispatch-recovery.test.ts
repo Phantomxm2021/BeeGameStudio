@@ -426,6 +426,29 @@ describe('Game IR dispatch crash windows', () => {
     expect((await store.load())?.activeDispatch?.status).toBe('invalid')
   })
 
+  test('rejects slice fields on an obligation preflight dispatch contract', async () => {
+    const { request, run: fixtureRun } = fixture()
+    const run = fixtureRun as DeliveryRun
+    request.contract = {
+      ...request.contract,
+      kind: 'obligation-inventory',
+    }
+    run.activeDispatch!.request = request
+    const dispatcher = createDeliveryDispatcher({
+      store: memoryStore(run),
+      workerPort: {
+        start: async () => ({ sessionId: 's', dispatchId: 'd' }),
+        submit: async () => undefined,
+        stop: async () => undefined,
+        status: async () => run.activeDispatch!,
+      },
+    })
+
+    await expect(dispatcher.dispatch(request)).rejects.toMatchObject({
+      code: 'blocked',
+    })
+  })
+
   test('rejects every terminal identity mismatch at admission and replay', async () => {
     const mismatches = [
       ['runId', 'other-run'],

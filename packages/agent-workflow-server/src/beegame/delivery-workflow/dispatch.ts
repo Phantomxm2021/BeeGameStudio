@@ -406,7 +406,12 @@ function assertGameIrOperationRequest(input: {
   const { request, run } = input
   if (request.workerType !== 'game-ir-compiler') return
   const contract = request.contract
-  const projection = contract.kind === 'projection'
+  const operation = contract.kind
+  const projection = operation === 'projection'
+  const protocolValidation = operation === 'validation'
+  const obligationPreflight =
+    operation === 'obligation-inventory' ||
+    operation === 'obligation-validation'
   const keys = Object.keys(contract).sort()
   const requiredKeys = [
     'kind',
@@ -417,7 +422,11 @@ function assertGameIrOperationRequest(input: {
   ].sort()
   const allowedKeys = [
     ...requiredKeys,
-    ...(projection ? ['retryDiagnostic'] : ['correctionDiagnostic']),
+    ...(projection
+      ? ['retryDiagnostic']
+      : protocolValidation
+        ? ['correctionDiagnostic']
+        : []),
   ].sort()
   if (
     (keys.length !== requiredKeys.length &&
@@ -467,7 +476,7 @@ function assertGameIrOperationRequest(input: {
         'Game IR correction diagnostic is invalid',
       )
   }
-  if (contract.kind !== 'projection' && contract.kind !== 'validation')
+  if (!projection && !protocolValidation && !obligationPreflight)
     throw new DispatchError(
       'blocked',
       'Game IR dispatch operation kind is invalid',
@@ -592,6 +601,51 @@ function assertGameIrOperationRequest(input: {
           ? error.message
           : 'Game IR projection slice context is invalid',
       )
+    }
+  } else if (obligationPreflight) {
+    if (!source || typeof source !== 'object' || Array.isArray(source))
+      throw new DispatchError(
+        'blocked',
+        'Game IR obligation preflight packet must be source-bound',
+      )
+    const sourceValue = source as Record<string, unknown>
+    const compileRequest = sourceValue.compileRequest
+    const foundation =
+      compileRequest &&
+      typeof compileRequest === 'object' &&
+      !Array.isArray(compileRequest)
+        ? (compileRequest as Record<string, unknown>).foundation
+        : undefined
+    const foundationRevision =
+      foundation && typeof foundation === 'object' && !Array.isArray(foundation)
+        ? (foundation as Record<string, unknown>).foundationRevision
+        : undefined
+    const receiptDigest =
+      foundation && typeof foundation === 'object' && !Array.isArray(foundation)
+        ? (foundation as Record<string, unknown>).receiptDigest
+        : undefined
+    if (
+      sourceValue.taskId !== request.taskId ||
+      !compileRequest ||
+      foundationRevision !== request.revision ||
+      digestGameIrValue(compileRequest) !== contract.compileRequestDigest ||
+      receiptDigest !== contract.foundationReadyReceiptDigest
+    )
+      throw new DispatchError(
+        'blocked',
+        'Game IR obligation preflight packet identity is stale',
+      )
+    if (operation === 'obligation-validation') {
+      const inventory = packet.inventory
+      if (
+        !inventory ||
+        typeof inventory !== 'object' ||
+        Array.isArray(inventory)
+      )
+        throw new DispatchError(
+          'blocked',
+          'Game IR obligation validation packet inventory is missing',
+        )
     }
   } else {
     if (
@@ -1151,12 +1205,8 @@ export function createDeliveryDispatcher(options: {
           ? foundationDispatch(run, parallelFoundationPath)
           : run.activeDispatch
 
-    const compilerRetry =
-      request.workerType === 'game-ir-compiler' &&
-      typeof request.contract.retryProgressIdentity === 'string'
     if (
       durableDispatch?.status === 'completed' &&
-      !compilerRetry &&
       (!auditRequest ||
         runtimeTasks.some(
           task => task.taskId === request.taskId && task.status === 'completed',

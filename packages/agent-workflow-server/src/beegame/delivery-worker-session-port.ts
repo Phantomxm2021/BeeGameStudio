@@ -88,6 +88,12 @@ import {
   type GameIrProjectionSlice,
 } from './delivery-workflow/game-ir/projection-slices'
 import { parseGameIrProjectionRecordStream } from './delivery-workflow/game-ir/projection-record-stream'
+import { parseGameIrSemanticObligationRecordStream } from './delivery-workflow/game-ir/semantic-obligation-inventory'
+import {
+  buildGameIrSemanticObligationValidationAuthority,
+  parseGameIrSemanticObligationValidationResultStream,
+} from './delivery-workflow/game-ir/semantic-obligation-validation'
+import { validateGameIrDomainSourceEnvelope } from './delivery-workflow/game-ir/domain-source'
 
 type FoundationFactPacketContract = {
   keys: FoundationFactKey[]
@@ -217,17 +223,48 @@ function taskTypeForWorker(
 
 function gameIrOperationForRequest(
   request: WorkerDispatchRequest,
-): 'projection' | 'validation' {
+):
+  | 'projection'
+  | 'validation'
+  | 'obligation-inventory'
+  | 'obligation-validation' {
   if (request.workerType !== 'game-ir-compiler')
     throw new Error('Game IR operation requested for a non-Game IR worker')
   if (
     request.contract.kind === 'projection' ||
-    request.contract.kind === 'validation'
+    request.contract.kind === 'validation' ||
+    request.contract.kind === 'obligation-inventory' ||
+    request.contract.kind === 'obligation-validation'
   )
     return request.contract.kind
   throw new Error(
-    'Game IR worker requires one operation kind: projection or validation',
+    'Game IR worker requires one operation kind: projection, validation, obligation-inventory, or obligation-validation',
   )
+}
+
+function gameIrSourceForRequest(request: WorkerDispatchRequest) {
+  const packet = request.contract.packet
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+    throw new Error('Game IR preflight requires one immutable operation packet')
+  const source = (packet as Record<string, unknown>).source
+  if (!source || typeof source !== 'object' || Array.isArray(source))
+    throw new Error('Game IR preflight packet is missing its source authority')
+  return validateGameIrDomainSourceEnvelope(source)
+}
+
+function gameIrObligationValidationAuthorityForRequest(
+  request: WorkerDispatchRequest,
+) {
+  const packet = request.contract.packet
+  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+    throw new Error('Game IR obligation validation packet is missing')
+  const inventory = (packet as Record<string, unknown>).inventory
+  if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory))
+    throw new Error('Game IR obligation validation packet is missing inventory')
+  return buildGameIrSemanticObligationValidationAuthority({
+    source: gameIrSourceForRequest(request),
+    inventory: inventory as never,
+  })
 }
 
 function gameIrProjectionModuleForRequest(
@@ -334,6 +371,14 @@ function gameIrProjectionRecordStreamContract(request: WorkerDispatchRequest) {
   }
 }
 
+function gameIrPreflightRecordStreamContract(request: WorkerDispatchRequest) {
+  const operation = gameIrOperationForRequest(request)
+  if (operation === 'projection')
+    return gameIrProjectionRecordStreamContract(request)
+  const moduleId = gameIrSourceForRequest(request).moduleId
+  return { version: 1 as const, terminalRecord: { record: 'done', moduleId } }
+}
+
 function assertGameIrOperationRequest(
   request: WorkerDispatchRequest,
   dispatchId: string,
@@ -351,6 +396,27 @@ function assertGameIrOperationRequest(
     throw new Error('Game IR compiler dispatch identity is incomplete')
   if (request.contract.kind === 'projection')
     gameIrProjectionSliceForRequest(request)
+  else if (
+    request.contract.kind === 'obligation-inventory' ||
+    request.contract.kind === 'obligation-validation'
+  ) {
+    gameIrSourceForRequest(request)
+    if (request.contract.kind === 'obligation-validation') {
+      const packet = request.contract.packet
+      const inventory =
+        packet && typeof packet === 'object' && !Array.isArray(packet)
+          ? (packet as Record<string, unknown>).inventory
+          : undefined
+      if (
+        !inventory ||
+        typeof inventory !== 'object' ||
+        Array.isArray(inventory)
+      )
+        throw new Error(
+          'Game IR obligation validation packet is missing inventory',
+        )
+    }
+  }
   for (const [label, value] of [
     ['compileRequestDigest', request.contract.compileRequestDigest],
     [
@@ -633,10 +699,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
                     >),
                 }
               : request.workerType === 'game-ir-compiler'
-                ? gameIrOperation === 'projection'
+                ? gameIrOperation === 'projection' ||
+                  gameIrOperation === 'obligation-inventory' ||
+                  gameIrOperation === 'obligation-validation'
                   ? {
                       workflowRecordStreamContract:
-                        gameIrProjectionRecordStreamContract(request),
+                        gameIrPreflightRecordStreamContract(request),
                     }
                   : {
                       workflowJsonSchema:
@@ -1383,17 +1451,59 @@ function createDeterministicGameIrCompilerTerminal(input: {
             ...(stream.diagnostic ? { reason: stream.diagnostic } : {}),
           }
         })()
-      : (() => {
-          const structured = resultPayload?.structured_output
-          if (structured === undefined)
-            throw new Error(
-              'Game IR validation result is missing native StructuredOutput',
-            )
-          assertFoundationStructuredOutputWithinInfrastructureBoundary(
-            structured,
-          )
-          return structured
-        })()
+      : operation === 'obligation-inventory'
+        ? (() => {
+            const recordStream = resultPayload?.record_stream
+            if (typeof recordStream !== 'string')
+              throw new Error(
+                'Game IR obligation inventory result is missing native record_stream',
+              )
+            const stream = parseGameIrSemanticObligationRecordStream({
+              expectedModuleId: gameIrSourceForRequest(input.request).moduleId,
+              text: recordStream,
+            })
+            return {
+              status: stream.done ? ('completed' as const) : ('failed' as const),
+              records: stream.records,
+              done: stream.done,
+              ...(stream.diagnostic ? { reason: stream.diagnostic } : {}),
+            }
+          })()
+          : operation === 'obligation-validation'
+            ? (() => {
+                const recordStream = resultPayload?.record_stream
+                if (typeof recordStream !== 'string')
+                  throw new Error(
+                    'Game IR obligation validation result is missing native record_stream',
+                  )
+                const stream =
+                  parseGameIrSemanticObligationValidationResultStream({
+                    authority: gameIrObligationValidationAuthorityForRequest(
+                      input.request,
+                    ),
+                    text: recordStream,
+                  })
+                return {
+                  status: stream.done
+                    ? ('completed' as const)
+                    : ('failed' as const),
+                  ...(stream.result
+                    ? { result: stream.result, done: true as const }
+                    : { done: false as const }),
+                  ...(stream.diagnostic ? { reason: stream.diagnostic } : {}),
+                }
+              })()
+          : (() => {
+              const structured = resultPayload?.structured_output
+              if (structured === undefined)
+                throw new Error(
+                  'Game IR validation result is missing native StructuredOutput',
+                )
+              assertFoundationStructuredOutputWithinInfrastructureBoundary(
+                structured,
+              )
+              return structured
+            })()
   const parsedPayload = parseGameIrCompilerModelPayload(modelPayload, operation)
   const payload =
     operation === 'projection'
@@ -1466,7 +1576,11 @@ function createGameIrCompilerFailureTerminal(input: {
     operation,
     status: 'failed',
     ...(sliceId ? { sliceId } : {}),
-    ...(operation === 'projection' ? { records: [], done: false } : {}),
+    ...(operation === 'projection' || operation === 'obligation-inventory'
+      ? { records: [], done: false }
+      : operation === 'obligation-validation'
+        ? { done: false }
+        : {}),
     reason: input.reason,
     runId: input.request.runId,
     dispatchId,

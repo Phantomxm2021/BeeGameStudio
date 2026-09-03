@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import Ajv from 'ajv'
 import {
   gameIrCompilerTerminalSchema,
+  gameIrObligationInventoryTerminalSchema,
+  gameIrObligationValidationTerminalSchema,
   gameIrProjectionModelPayloadSchema,
   gameIrValidationModelPayloadSchema,
   parseGameIrCompilerModelPayload,
@@ -406,6 +408,90 @@ describe('Game IR worker operation contracts', () => {
         status: 'completed',
         domainResults: [],
       }),
+    ).toThrow()
+  })
+
+  test('admits distinct strict preflight terminals without slice identity', () => {
+    const identity = {
+      runId: 'run',
+      dispatchId: 'dispatch',
+      taskId: 'task',
+      revision: 'revision',
+      compileRequestDigest: 'a'.repeat(64),
+      foundationReadyReceiptDigest: 'b'.repeat(64),
+    }
+    const inventory = gameIrObligationInventoryTerminalSchema.parse({
+      workerType: 'game-ir-compiler',
+      operation: 'obligation-inventory',
+      status: 'completed',
+      records: [
+        {
+          record: 'obligation',
+          moduleId: 'balance',
+          targetId: 'balance.formula.alpha',
+          targetKind: 'balance.formula',
+          fragmentId: 'e0.0',
+        },
+      ],
+      done: true,
+      ...identity,
+    })
+    expect(inventory).not.toHaveProperty('sliceId')
+    expect(() =>
+      gameIrObligationInventoryTerminalSchema.parse({
+        ...inventory,
+        sliceId: 'balance.slice.0',
+      }),
+    ).toThrow()
+
+    const validationResult = {
+      outcome: 'AMBIGUOUS' as const,
+      moduleId: 'balance',
+      reasonCode: 'ambiguous-obligation' as const,
+      detail: 'ambiguous',
+    }
+    const validation = gameIrObligationValidationTerminalSchema.parse({
+      workerType: 'game-ir-compiler',
+      operation: 'obligation-validation',
+      status: 'completed',
+      result: validationResult,
+      done: true,
+      ...identity,
+    })
+    expect(validation).not.toHaveProperty('sliceId')
+    expect(() =>
+      gameIrObligationValidationTerminalSchema.parse({
+        ...validation,
+        sliceId: 'balance.slice.0',
+      }),
+    ).toThrow()
+    expect(() =>
+      gameIrObligationValidationTerminalSchema.parse({
+        ...validation,
+        result: { outcome: 'PASS', moduleId: 'balance' },
+      }),
+    ).toThrow()
+    expect(gameIrCompilerTerminalSchema.parse(inventory)).toEqual(inventory)
+    expect(gameIrCompilerTerminalSchema.parse(validation)).toEqual(validation)
+    expect(() =>
+      parseGameIrCompilerModelPayload(
+        {
+          status: 'completed',
+          records: [],
+          done: true,
+        },
+        'obligation-validation',
+      ),
+    ).toThrow()
+    expect(() =>
+      parseGameIrCompilerModelPayload(
+        {
+          status: 'completed',
+          result: validationResult,
+          done: true,
+        },
+        'obligation-inventory',
+      ),
     ).toThrow()
   })
 })
