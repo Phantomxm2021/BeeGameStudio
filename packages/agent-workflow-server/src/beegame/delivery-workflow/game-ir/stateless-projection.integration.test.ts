@@ -459,7 +459,7 @@ type Harness = {
   journalClosed: boolean
 }
 
-async function harness(): Promise<Harness> {
+async function harness(obligationNodes: readonly Node[]): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), 'balance-matrix-'))
   const source = sourceFixture()
   const foundation = source.balance.compileRequest.foundation
@@ -562,10 +562,32 @@ async function harness(): Promise<Harness> {
     gameIrState: { ...initial.gameIrState!, latestCheckpoint: gameplayCheckpoint } as never,
   })
   const journal = await createGameIrProjectionSliceJournal(journalInput)
+  const balancePlan = deriveProjectionSlicePlan('balance')
   const balanceInventory = buildGameIrSemanticObligationInventory({
     moduleId: 'balance',
     source: source.balance,
-    records: [],
+    records: obligationNodes
+      .map(nodeValue => {
+        const owner = balancePlan.slices.find(slice =>
+          slice.nodeKinds.includes(nodeValue.kind),
+        )
+        if (!owner)
+          throw new Error(`no Balance slice owns ${nodeValue.kind}`)
+        return {
+          record: 'obligation' as const,
+          moduleId: 'balance' as const,
+          targetId: nodeValue.id,
+          targetKind: nodeValue.kind,
+          fragmentId: firstFragment(source.balance, owner.sliceId),
+        }
+      })
+      .sort((left, right) =>
+        left.targetId < right.targetId
+          ? -1
+          : left.targetId > right.targetId
+            ? 1
+            : 0,
+      ),
   })
   const balanceValidationAuthority = buildGameIrSemanticObligationValidationAuthority({ source: source.balance, inventory: balanceInventory })
   const balancePass = admitGameIrSemanticObligationValidationResult({
@@ -753,7 +775,7 @@ async function assertUniqueBalanceManifest(h: Harness) {
 
 describe('stateless Balance projection fault matrix', () => {
   test('corrects unsorted unit dimensions in a fresh session and changes only that record', async () => {
-    const h = await harness()
+    const h = await harness([unit()])
     try {
       const bad = unit([{ base: 'z', exponent: 1 }, { base: 'a', exponent: 1 }])
       const good = unit()
@@ -778,7 +800,10 @@ describe('stateless Balance projection fault matrix', () => {
   })
 
   test('corrects a formula AST/reference mismatch without rewriting the admitted unit record', async () => {
-    const h = await harness()
+    const h = await harness([
+      unit(),
+      formula({ kind: 'literal', value: 1, unitReferenceIndex: 0 }),
+    ])
     try {
       await complete(h, 'balance.slice.0', [unit()])
       const bad = formula({ kind: 'reference', referenceIndex: 1 })
@@ -797,7 +822,7 @@ describe('stateless Balance projection fault matrix', () => {
   })
 
   test('keeps two valid records after a malformed third record and admits one final manifest', async () => {
-    const h = await harness()
+    const h = await harness([unit(), variable()])
     try {
       const valid = recordsFor(h.source.balance, 'balance.slice.0', [unit(), variable()])
       const malformed = recordsFor(h.source.balance, 'balance.slice.0', [
@@ -821,7 +846,7 @@ describe('stateless Balance projection fault matrix', () => {
   })
 
   test('does not promote a provider process exit with no complete response, then succeeds in a fresh session', async () => {
-    const h = await harness()
+    const h = await harness([unit()])
     try {
       const attemptsBefore = h.log.attempts.length
       const failed = await providerTurn(h, 'balance.slice.0', { processExit: 'provider exited before complete response' })
@@ -836,7 +861,7 @@ describe('stateless Balance projection fault matrix', () => {
   })
 
   test('replays an admitted record prefix through a fresh session without changing its digest', async () => {
-    const h = await harness()
+    const h = await harness([unit()])
     try {
       const records = recordsFor(h.source.balance, 'balance.slice.0', [unit()])
       const attemptsBefore = h.log.attempts.length
@@ -854,7 +879,10 @@ describe('stateless Balance projection fault matrix', () => {
   })
 
   test('recovers a pending formula record after a crash with a new authority session', async () => {
-    const h = await harness()
+    const h = await harness([
+      unit(),
+      formula({ kind: 'literal', value: 1, unitReferenceIndex: 0 }),
+    ])
     try {
       await complete(h, 'balance.slice.0', [unit()])
       const records = recordsFor(h.source.balance, 'balance.slice.1', [formula({ kind: 'literal', value: 1, unitReferenceIndex: 0 })])
@@ -882,7 +910,7 @@ describe('stateless Balance projection fault matrix', () => {
   })
 
   test('rejects a stale Foundation revision during retry before a second provider session can write', async () => {
-    const h = await harness()
+    const h = await harness([unit()])
     try {
       const records = recordsFor(h.source.balance, 'balance.slice.0', [unit()])
       const first = await providerTurn(h, 'balance.slice.0', {
@@ -932,7 +960,11 @@ describe('stateless Balance projection fault matrix', () => {
   })
 
   test('assembles Balance from all four slices into one deterministic operation manifest', async () => {
-    const h = await harness()
+    const h = await harness([
+      unit(),
+      variable(),
+      formula({ kind: 'literal', value: 1, unitReferenceIndex: 0 }),
+    ])
     try {
       await complete(h, 'balance.slice.0', [unit(), variable()])
       await complete(h, 'balance.slice.1', [formula({ kind: 'literal', value: 1, unitReferenceIndex: 0 })])

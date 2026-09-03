@@ -940,6 +940,8 @@ function futureModuleLiteralViolations(
       ? 'GAME_IR_MODULE_SOURCE_DOCUMENTS'
       : filename === 'projection-contract.ts'
         ? 'manifests'
+        : filename === 'semantic-obligation-inventory.ts'
+          ? 'GAME_IR_SEMANTIC_OBLIGATION_MANIFEST'
         : undefined
   return collectAstFacts(source, filename)
     .strings.filter(
@@ -1024,6 +1026,8 @@ function gameIrProductionRole(filename: string): GameIrProductionRole {
   if (filename === 'publication.ts') return 'publication'
   if (filename === 'resource-realization-schema.ts') return 'semantic'
   if (filename === 'implementation-verification-schema.ts') return 'semantic'
+  if (filename === 'semantic-obligation-inventory.ts') return 'semantic'
+  if (filename === 'semantic-obligation-validation.ts') return 'semantic'
   if (filename === 'phase6-admission.ts') return 'phase6-producer'
   if (filename === 'resource-realization-assembler.ts') return 'phase6-producer'
   if (filename === 'resource-realization-producer.ts') return 'phase6-producer'
@@ -2154,6 +2158,8 @@ describe('Game IR stage boundary', () => {
       'resource-realization-producer.ts',
       'resource-realization-schema.ts',
       'semantic-fidelity.ts',
+      'semantic-obligation-inventory.ts',
+      'semantic-obligation-validation.ts',
       'stage-checkpoint.ts',
       'staged-compiler.ts',
       'world-presentation-assembler.ts',
@@ -2294,6 +2300,8 @@ describe('Game IR stage boundary', () => {
       './game-ir/publication',
       './game-ir/resource-realization-assembler',
       './game-ir/resource-realization-producer',
+      './game-ir/semantic-obligation-inventory',
+      './game-ir/semantic-obligation-validation',
       './game-ir/stage-checkpoint',
       './game-ir/staged-compiler',
       './game-ir/projection-slice-journal',
@@ -2305,6 +2313,7 @@ describe('Game IR stage boundary', () => {
       'GAME_IR_CHECKPOINT_RECORD_KINDS',
       'GAME_IR_DOMAIN_IDS',
       'GAME_IR_MODULE_SOURCE_DOCUMENTS',
+      'GAME_IR_STAGED_OPERATIONS',
       'GameIrCheckpointRecord',
       'GameIrCompileRequest',
       'GameIrCheckpointLoad',
@@ -2314,11 +2323,13 @@ describe('Game IR stage boundary', () => {
       'GameIrDomainId',
       'GameIrDomainSourceEnvelope',
       'GameIrReplayAuthority',
+      'GameIrSemanticObligationRecord',
       'GameIrProjectionRetryDiagnostic',
       'GameIrStageCheckpointLoader',
       'cleanupGameIrProjectionSliceJournalAfterCheckpoint',
       'createGameIrProjectionSliceJournal',
       'gameIrProjectionSliceJournalPath',
+      'gameIrPreflightPacket',
       'deriveProjectionSlicePlan',
       'gameIrSchemaVersion',
       'gameIrState',
@@ -2347,6 +2358,9 @@ describe('Game IR stage boundary', () => {
           'identifier: gameIrProjectionSliceForRequest',
           'identifier: gameIrProjectionRecordStreamContract',
           'identifier: gameIrValidationStructuredOutputJsonSchema',
+          'identifier: gameIrObligationValidationAuthorityForRequest',
+          'identifier: gameIrPreflightRecordStreamContract',
+          'identifier: gameIrSourceForRequest',
           'identifier: parseGameIrCompilerModelPayload',
           'identifier: parseGameIrProjectionRecordStream',
           'import: ./delivery-workflow/game-ir/model',
@@ -2354,6 +2368,9 @@ describe('Game IR stage boundary', () => {
           'import: ./delivery-workflow/game-ir/projection-slices',
           'import: ./delivery-workflow/game-ir/projection-record-stream',
           'import: ./delivery-workflow/game-ir/semantic-fidelity',
+          'import: ./delivery-workflow/game-ir/domain-source',
+          'import: ./delivery-workflow/game-ir/semantic-obligation-inventory',
+          'import: ./delivery-workflow/game-ir/semantic-obligation-validation',
         ]),
       ],
       [
@@ -2365,6 +2382,8 @@ describe('Game IR stage boundary', () => {
           'import: ./game-ir/model',
           'import: ./game-ir/projection-slice-authority',
           'import: ./game-ir/projection-slices',
+          'import: ./game-ir/semantic-obligation-inventory',
+          'import: ./game-ir/semantic-obligation-validation',
         ]),
       ],
       [
@@ -2385,6 +2404,8 @@ describe('Game IR stage boundary', () => {
           'identifier: loadGameIrProjectionSliceJournal',
           'import: ./game-ir/projection-slices',
           'identifier: deriveProjectionSlicePlan',
+          'identifier: GAME_IR_STAGED_OPERATIONS',
+          'import: ./game-ir/staged-compiler',
         ]),
       ],
       [
@@ -2437,12 +2458,20 @@ describe('Game IR stage boundary', () => {
         'beegame/delivery-workflow/worker-contracts.ts',
         new Set([
           'identifier: GameIrCompilerOperation',
+          'identifier: GameIrObligationInventoryModelPayload',
+          'identifier: GameIrObligationValidationModelPayload',
           'identifier: GameIrProjectionModelPayload',
           'identifier: GameIrValidationModelPayload',
           'identifier: gameIrCompilerTerminalSchema',
           'identifier: gameIrDiagnosticJsonSchema',
           'identifier: gameIrDiagnosticSchema',
           'identifier: gameIrJsonValue',
+          'identifier: gameIrObligationInventoryModelPayloadSchema',
+          'identifier: gameIrObligationInventoryTerminalSchema',
+          'identifier: gameIrObligationRecordSchema',
+          'identifier: gameIrObligationValidationModelPayloadSchema',
+          'identifier: gameIrObligationValidationRawResultSchema',
+          'identifier: gameIrObligationValidationTerminalSchema',
           'identifier: gameIrProjectionModelPayloadSchema',
           'identifier: gameIrProjectionTerminalSchema',
           'identifier: gameIrSemanticModelSchema',
