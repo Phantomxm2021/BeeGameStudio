@@ -1688,4 +1688,69 @@ describe('Game IR projection slice journal', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test('durably validates retry diagnostics and clears a corrected record atomically', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = fixture(join(root, 'journal.json'))
+      const journal = await readyJournal(input)
+      const slice = journal.slicePlan.slices[0]!
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
+      )
+      await journal.setRetryDiagnostic({
+        scope: 'slice',
+        sliceId: slice.sliceId,
+        reason: 'slice retry',
+      })
+      const reloaded = await loadGameIrProjectionSliceJournal(input)
+      expect(reloaded.retryDiagnostic).toEqual({
+        scope: 'slice',
+        sliceId: slice.sliceId,
+        reason: 'slice retry',
+      })
+      const raw = JSON.parse(await readFile(input.journalPath, 'utf8')) as Record<string, unknown>
+      raw.retryDiagnostic = {
+        scope: 'record',
+        sliceId: slice.sliceId,
+        recordId: 'condition.a',
+        fragmentId: 'outside-source',
+        reason: 'tampered',
+      }
+      const { journalDigest: _ignored, ...body } = raw
+      raw.journalDigest = digestGameIrValue(body)
+      await Bun.write(input.journalPath, `${JSON.stringify(raw)}\n`)
+      await expect(loadGameIrProjectionSliceJournal(input)).rejects.toThrow(
+        /retryDiagnostic|fragment|source/i,
+      )
+
+      const correctedInput = { ...input, journalPath: join(root, 'corrected.json') }
+      const restored = await readyJournal(correctedInput)
+      await restored.setRetryDiagnostic({
+        scope: 'record',
+        sliceId: slice.sliceId,
+        recordId: 'condition.a',
+        fragmentId,
+        reason: 'record retry',
+      })
+      await restored.appendRecords([
+        {
+          fragmentId,
+          node: {
+            id: 'condition.a',
+            kind: 'gameplay.condition',
+            value: { expression: { kind: 'boolean', value: true } },
+            references: [],
+            edges: [],
+          },
+        },
+      ])
+      expect(restored.retryDiagnostic).toBeUndefined()
+      expect((await loadGameIrProjectionSliceJournal(correctedInput)).retryDiagnostic).toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })

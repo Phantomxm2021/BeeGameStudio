@@ -182,6 +182,7 @@ export type GameIrProjectionSliceJournalSnapshot = Readonly<{
   slicePlan: GameIrProjectionSlicePlan
   slicePlanDigest: string
   preflight: GameIrProjectionSliceJournalPreflight
+  retryDiagnostic: GameIrProjectionRetryDiagnostic | null
   entries: readonly GameIrProjectionSliceJournalEntry[]
   pendingSlice: GameIrProjectionPendingSlice | null
   journalDigest: string
@@ -1108,6 +1109,71 @@ function pendingDigest(
   return digestGameIrValue(pendingBody(pending))
 }
 
+function normalizeRetryDiagnostic(
+  value: unknown,
+  entries: readonly GameIrProjectionSliceJournalEntry[],
+  slicePlan: GameIrProjectionSlicePlan,
+  authority: Authority,
+): GameIrProjectionRetryDiagnostic | null {
+  if (value === null) return null
+  if (!isRecord(value)) fail('journal retryDiagnostic must be an object or null')
+  if (value.scope === 'slice') {
+    exactKeys(value, ['scope', 'sliceId', 'reason'], 'journal retryDiagnostic')
+    const sliceId = text(value.sliceId, 'journal retryDiagnostic.sliceId')
+    if (!slicePlan.slices.some(slice => slice.sliceId === sliceId))
+      fail('journal retryDiagnostic slice is outside the slice plan')
+    const currentSlice = slicePlan.slices[entries.length]?.sliceId
+    const persistedEntry = entries.some(entry => entry.sliceId === sliceId)
+    if (sliceId !== currentSlice && !persistedEntry)
+      fail('journal retryDiagnostic slice is detached from the journal cursor')
+    return deepFreeze({
+      scope: 'slice',
+      sliceId,
+      reason: text(value.reason, 'journal retryDiagnostic.reason'),
+    })
+  }
+  if (value.scope === 'record') {
+    exactKeys(
+      value,
+      ['scope', 'sliceId', 'recordId', 'fragmentId', 'reason'],
+      'journal retryDiagnostic',
+    )
+    const sliceId = text(value.sliceId, 'journal retryDiagnostic.sliceId')
+    const recordId = text(value.recordId, 'journal retryDiagnostic.recordId')
+    const fragmentId = text(value.fragmentId, 'journal retryDiagnostic.fragmentId')
+    try {
+      resolveGameIrEvidenceFragment(
+        buildGameIrEvidenceFragmentCatalog({
+          sectionIndex: authority.source.sectionIndex,
+          sectionBytes: authority.source.sectionBytes,
+        }),
+        fragmentId,
+      )
+    } catch {
+      fail('journal retryDiagnostic fragment is outside source authority')
+    }
+    if (!slicePlan.slices.some(slice => slice.sliceId === sliceId))
+      fail('journal retryDiagnostic slice is outside the slice plan')
+    const currentSlice = slicePlan.slices[entries.length]?.sliceId
+    const persistedEntry = entries.find(entry => entry.sliceId === sliceId)
+    if (sliceId !== currentSlice && !persistedEntry)
+      fail('journal retryDiagnostic slice is detached from the journal cursor')
+    if (
+      persistedEntry &&
+      !persistedEntry.semantic.nodes.some(node => node.id === recordId)
+    )
+      fail('journal retryDiagnostic record is detached from its slice')
+    return deepFreeze({
+      scope: 'record',
+      sliceId,
+      recordId,
+      fragmentId,
+      reason: text(value.reason, 'journal retryDiagnostic.reason'),
+    })
+  }
+  fail('journal retryDiagnostic scope is invalid')
+}
+
 export type GameIrProjectionSliceRollbackInput = Readonly<{
   ownerSliceId: string
   obligationId: string
@@ -1281,6 +1347,7 @@ function normalizeSnapshot(
       'slicePlan',
       'slicePlanDigest',
       'preflight',
+      'retryDiagnostic',
       'entries',
       'pendingSlice',
       'journalDigest',
@@ -1407,6 +1474,12 @@ function normalizeSnapshot(
   )
   if (pendingSlice && !persisted.validation)
     fail('pending projection requires an admitted obligation validation PASS receipt')
+  const retryDiagnostic = normalizeRetryDiagnostic(
+    value.retryDiagnostic,
+    entries,
+    slicePlan,
+    authority,
+  )
   const body = {
     schemaVersion: GAME_IR_PROJECTION_SLICE_JOURNAL_SCHEMA_VERSION,
     identity,
@@ -1415,6 +1488,7 @@ function normalizeSnapshot(
     slicePlan,
     slicePlanDigest,
     preflight: persisted.preflight,
+    retryDiagnostic,
     entries: Object.freeze(entries),
     pendingSlice,
   }
@@ -1491,6 +1565,7 @@ export class GameIrProjectionSliceJournal {
       slicePlan,
       slicePlanDigest: planDigest(slicePlan),
       preflight: { inventory: null, validationReceipt: null, diagnostic: null },
+      retryDiagnostic: null,
       entries: [],
       pendingSlice: null,
     })
@@ -1552,6 +1627,11 @@ export class GameIrProjectionSliceJournal {
       ? clone(this.state.preflight.validationReceipt)
       : undefined
   }
+  get retryDiagnostic(): GameIrProjectionRetryDiagnostic | undefined {
+    return this.state.retryDiagnostic
+      ? clone(this.state.retryDiagnostic)
+      : undefined
+  }
   get entries(): readonly GameIrProjectionSliceJournalEntry[] {
     return clone(this.state.entries)
   }
@@ -1580,6 +1660,7 @@ export class GameIrProjectionSliceJournal {
     this.authority = { ...this.authority, validation: undefined }
     this.state = await persist(this.path, {
       ...this.state,
+      retryDiagnostic: null,
       preflight: {
         inventory: validation.inventory,
         validationReceipt: null,
@@ -1605,6 +1686,7 @@ export class GameIrProjectionSliceJournal {
     this.authority = { ...this.authority, validation }
     this.state = await persist(this.path, {
       ...this.state,
+      retryDiagnostic: null,
       preflight: { inventory, validationReceipt, diagnostic: null },
     })
     return this
@@ -1627,7 +1709,35 @@ export class GameIrProjectionSliceJournal {
     this.authority = { ...this.authority, validation: undefined }
     this.state = await persist(this.path, {
       ...this.state,
+      retryDiagnostic: null,
       preflight: { inventory: null, validationReceipt: null, diagnostic },
+    })
+    return this
+  }
+
+  async setRetryDiagnostic(
+    diagnostic: GameIrProjectionRetryDiagnostic,
+  ): Promise<GameIrProjectionSliceJournal> {
+    requireValidation(this.authority)
+    const normalized = normalizeRetryDiagnostic(
+      diagnostic,
+      this.state.entries,
+      this.state.slicePlan,
+      this.authority,
+    )
+    if (!normalized) fail('retry diagnostic cannot be null')
+    this.state = await persist(this.path, {
+      ...this.state,
+      retryDiagnostic: normalized,
+    })
+    return this
+  }
+
+  async clearRetryDiagnostic(): Promise<GameIrProjectionSliceJournal> {
+    if (!this.state.retryDiagnostic) return this
+    this.state = await persist(this.path, {
+      ...this.state,
+      retryDiagnostic: null,
     })
     return this
   }
@@ -1702,6 +1812,13 @@ export class GameIrProjectionSliceJournal {
         : null
       this.state = await persist(this.path, {
         ...this.state,
+        retryDiagnostic: {
+          scope: 'record',
+          sliceId: pending.sliceId,
+          recordId: obligation.targetId,
+          fragmentId: obligation.fragmentId,
+          reason,
+        },
         pendingSlice: nextPending
           ? { ...nextPending, pendingDigest: pendingDigest(nextPending) }
           : null,
@@ -1726,6 +1843,13 @@ export class GameIrProjectionSliceJournal {
     if (!ownerNode) return undefined
     this.state = await persist(this.path, {
       ...this.state,
+      retryDiagnostic: {
+        scope: 'record',
+        sliceId: ownerEntry.sliceId,
+        recordId: obligation.targetId,
+        fragmentId: obligation.fragmentId,
+        reason,
+      },
       entries: this.state.entries.slice(0, ownerEntryIndex),
       pendingSlice: null,
     })
@@ -1944,6 +2068,12 @@ export class GameIrProjectionSliceJournal {
           ...pending,
           pendingDigest: pendingDigest(pending),
         },
+        ...(this.state.retryDiagnostic?.scope === 'record' &&
+        this.state.retryDiagnostic.sliceId === slice.sliceId &&
+        this.state.retryDiagnostic.recordId === normalized.node.id &&
+        this.state.retryDiagnostic.fragmentId === normalized.fragmentId
+          ? { retryDiagnostic: null }
+          : {}),
       })
       acceptedCount += 1
     }
@@ -2045,6 +2175,7 @@ export class GameIrProjectionSliceJournal {
     const entry = { ...body, entryDigest: digestGameIrValue(entryBody(body)) }
     this.state = await persist(this.path, {
       ...this.state,
+      retryDiagnostic: null,
       entries: [...this.state.entries, entry],
       pendingSlice: null,
     })
@@ -2058,6 +2189,7 @@ export class GameIrProjectionSliceJournal {
     if (index < 0) fail(`cannot invalidate unknown slice ${sliceId}`)
     this.state = await persist(this.path, {
       ...this.state,
+      retryDiagnostic: null,
       entries: this.state.entries.slice(0, index),
       pendingSlice: null,
     })
