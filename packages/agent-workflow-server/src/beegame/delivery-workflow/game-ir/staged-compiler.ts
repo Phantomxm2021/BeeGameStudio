@@ -20,6 +20,7 @@ import {
 } from './domain-projection'
 import {
   GAME_IR_PROTOCOL_STEPS,
+  type GameIrCheckpointObligationPreflight,
   type GameIrCheckpointLoad,
   type GameIrCheckpointRecord,
   type GameIrProtocolStep,
@@ -747,6 +748,17 @@ export function stagedProjectionJournalCompletion(input: {
         `projection journal completion does not accept ${input.operation.step}`,
       )
   }
+}
+
+/** Copies the journal's verified PASS evidence into the existing checkpoint. */
+export function stagedProjectionObligationPreflight(
+  journal: GameIrProjectionSliceJournal,
+): GameIrCheckpointObligationPreflight {
+  const inventory = journal.obligationInventory
+  const validationReceipt = journal.validationReceipt
+  if (!inventory || !validationReceipt)
+    throw new Error('projection checkpoint requires an admitted obligation preflight')
+  return { inventory, validationReceipt }
 }
 
 /** Validation remains the existing small StructuredOutput/checkpoint route. */

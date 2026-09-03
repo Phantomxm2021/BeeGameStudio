@@ -24,6 +24,11 @@ import {
   type GameIrCheckpointStep,
   type GameIrProtocolStep,
 } from './stage-checkpoint'
+import { buildGameIrSemanticObligationInventory } from './semantic-obligation-inventory'
+import {
+  admitGameIrSemanticObligationValidationResult,
+  buildGameIrSemanticObligationValidationAuthority,
+} from './semantic-obligation-validation'
 import { commitGameIrPublication, validateCommittedGameIr } from './publication'
 import { createRunStore } from '../run-store'
 import {
@@ -309,6 +314,19 @@ function readerStep(
     ],
   }
   const [phase, domain, operation] = step.split('/')
+  const source = values[`${phase}/${domain}/source`] as Parameters<typeof buildGameIrSemanticObligationInventory>[0]['source'] | undefined
+  const obligationPreflight = operation === 'projection' && source
+    ? (() => {
+        const inventory = buildGameIrSemanticObligationInventory({ moduleId: source.moduleId, source, records: [] })
+        const authority = buildGameIrSemanticObligationValidationAuthority({ source, inventory })
+        const result = admitGameIrSemanticObligationValidationResult({
+          authority,
+          result: { outcome: 'PASS', moduleId: source.moduleId, coverage: authority.sourceFragments.map(fragment => fragment.fragmentId) },
+        })
+        if (result.outcome !== 'PASS') throw new Error('reader fixture preflight did not pass')
+        return { inventory, validationReceipt: result.receipt }
+      })()
+    : undefined
   return {
     phase: phase as GameIrCheckpointStep['phase'],
     domain: domain as GameIrCheckpointStep['domain'],
@@ -317,6 +335,7 @@ function readerStep(
       kind,
       record: values[kind],
     })) as GameIrCheckpointStep['records'],
+    ...(obligationPreflight ? { obligationPreflight } : {}),
   }
 }
 

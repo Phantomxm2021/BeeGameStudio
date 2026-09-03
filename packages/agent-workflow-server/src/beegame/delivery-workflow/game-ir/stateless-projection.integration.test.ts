@@ -46,6 +46,11 @@ import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun, type DeliveryWorkerPo
 import { createBeeGameDeliveryWorkerPort } from '../../delivery-worker-session-port'
 import { FOUNDATION_SEMANTIC_AUDIT_MANIFEST } from '../foundation-semantic-audit'
 import { writeGameIrStageCheckpoint, GameIrStageCheckpointLoader } from './stage-checkpoint'
+import { buildGameIrSemanticObligationInventory } from './semantic-obligation-inventory'
+import {
+  admitGameIrSemanticObligationValidationResult,
+  buildGameIrSemanticObligationValidationAuthority,
+} from './semantic-obligation-validation'
 
 type Node = {
   id: string
@@ -475,6 +480,24 @@ async function harness(): Promise<Harness> {
     })}\n`,
   )
   const gameplay = gameplayAuthority(source.gameplay)
+  const inventory = buildGameIrSemanticObligationInventory({
+    moduleId: gameplay.source.moduleId,
+    source: gameplay.source,
+    records: [],
+  })
+  const preflightAuthority = buildGameIrSemanticObligationValidationAuthority({
+    source: gameplay.source,
+    inventory,
+  })
+  const preflightResult = admitGameIrSemanticObligationValidationResult({
+    authority: preflightAuthority,
+    result: {
+      outcome: 'PASS',
+      moduleId: gameplay.source.moduleId,
+      coverage: preflightAuthority.sourceFragments.map(fragment => fragment.fragmentId),
+    },
+  })
+  if (preflightResult.outcome !== 'PASS') throw new Error('stateless fixture preflight did not pass')
   const balanceMechanical = mechanical(source.balance)
   const packet = buildBalanceProjectionOperationPacket({
     source: source.balance,
@@ -528,6 +551,10 @@ async function harness(): Promise<Harness> {
         { kind: 'phase4/gameplay/mechanical', record: gameplay.mechanical },
         { kind: 'phase4/gameplay/semantic', record: gameplay.semantic },
       ],
+      obligationPreflight: {
+        inventory,
+        validationReceipt: preflightResult.receipt,
+      },
     },
   })
   await controller.store.save({
@@ -535,6 +562,19 @@ async function harness(): Promise<Harness> {
     gameIrState: { ...initial.gameIrState!, latestCheckpoint: gameplayCheckpoint } as never,
   })
   const journal = await createGameIrProjectionSliceJournal(journalInput)
+  const balanceInventory = buildGameIrSemanticObligationInventory({
+    moduleId: 'balance',
+    source: source.balance,
+    records: [],
+  })
+  const balanceValidationAuthority = buildGameIrSemanticObligationValidationAuthority({ source: source.balance, inventory: balanceInventory })
+  const balancePass = admitGameIrSemanticObligationValidationResult({
+    authority: balanceValidationAuthority,
+    result: { outcome: 'PASS', moduleId: 'balance', coverage: balanceValidationAuthority.sourceFragments.map(fragment => fragment.fragmentId) },
+  })
+  if (balancePass.outcome !== 'PASS') throw new Error('balance fixture preflight did not pass')
+  await journal.admitObligationInventory(balanceInventory)
+  await journal.admitObligationValidationReceipt(balancePass.receipt)
   return { root, source, packet, journal, journalInput, controller, transportPort: transport.port, emit: transport.emit, log, dispatchCount: 0, journalClosed: false }
 }
 
@@ -564,6 +604,7 @@ function requestFor(
       currentSlice: sliceId,
       progress: h.journal.entries.map(entry => ({ sliceId: entry.sliceId, entryDigest: entry.entryDigest })),
       sliceContext: context,
+      obligationInventory: h.journal.obligationInventory,
     },
   } as unknown as WorkerDispatchRequest
 }

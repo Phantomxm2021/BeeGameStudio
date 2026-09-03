@@ -44,6 +44,13 @@ import {
   GAME_IR_CHECKPOINT_SCHEMA_VERSION,
   type GameIrCheckpointStep,
 } from './stage-checkpoint'
+import {
+  buildGameIrSemanticObligationInventory,
+} from './semantic-obligation-inventory'
+import {
+  admitGameIrSemanticObligationValidationResult,
+  buildGameIrSemanticObligationValidationAuthority,
+} from './semantic-obligation-validation'
 
 const workspaces: string[] = []
 const sha = (value: string) =>
@@ -270,6 +277,25 @@ function recordsFor(
     record,
   })) as GameIrCheckpointStep['records']
 }
+
+function obligationPreflightFor(source: ReturnType<typeof authorityFixture>['phase7Authority']['implementationVerification']['source']) {
+  const inventory = buildGameIrSemanticObligationInventory({
+    moduleId: source.moduleId,
+    source,
+    records: [],
+  })
+  const authority = buildGameIrSemanticObligationValidationAuthority({ source, inventory })
+  const admitted = admitGameIrSemanticObligationValidationResult({
+    authority,
+    result: {
+      outcome: 'PASS',
+      moduleId: source.moduleId,
+      coverage: authority.sourceFragments.map(fragment => fragment.fragmentId),
+    },
+  })
+  if (admitted.outcome !== 'PASS') throw new Error('fixture preflight did not pass')
+  return { inventory, validationReceipt: admitted.receipt }
+}
 function protocolStep(
   id: string,
   authority: ReturnType<typeof authorityFixture>['phase7Authority'],
@@ -286,11 +312,15 @@ function protocolStep(
         ? !record.kind.endsWith('/validation')
         : record.kind.endsWith('/validation')),
   )
+  const source = records.find(record => record.kind.endsWith('/source'))?.record
   return {
     phase,
     domain: domain as GameIrCheckpointStep['domain'],
     operation,
     records,
+    ...(operation === 'projection' && source
+      ? { obligationPreflight: obligationPreflightFor(source as never) }
+      : {}),
   }
 }
 const canonicalBytes = (value: unknown) => `${canonicalGameIrJson(value)}\n`
@@ -332,6 +362,125 @@ describe('v48 Game IR stage checkpoint boundary', () => {
     )
     expect(new GameIrStageCheckpointWriter()).toBeDefined()
     expect(new GameIrStageCheckpointLoader()).toBeDefined()
+  })
+
+  test('binds projection obligation preflight evidence into the immutable manifest', async () => {
+    const authority = authorityFixture()
+    const run = runFor(authority)
+    await persist(workspaces[0]!, run)
+    const step = protocolStep('phase4/gameplay/projection', authority.phase7Authority)
+    const ref = await new GameIrStageCheckpointWriter().write({
+      workspacePath: workspaces[0]!,
+      deliveryRun: run,
+      step,
+    })
+    const manifestPath = join(workspaces[0]!, ref.checkpointPath)
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
+    expect(manifest.obligationPreflight).toEqual({
+      inventoryDigest: step.obligationPreflight?.inventory.digest,
+      inventory: step.obligationPreflight?.inventory,
+      validationReceipt: step.obligationPreflight?.validationReceipt,
+    })
+
+    const tamperedDigest = await resealManifest(manifestPath, current => ({
+      ...current,
+      obligationPreflight: {
+        ...(current.obligationPreflight as Record<string, unknown>),
+        inventoryDigest: 'f'.repeat(64),
+      },
+    }))
+    await expect(new GameIrStageCheckpointLoader().load({
+      workspacePath: workspaces[0]!,
+      deliveryRun: {
+        ...run,
+        gameIrState: {
+          ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>),
+          latestCheckpoint: { ...ref, checkpointDigest: tamperedDigest },
+        },
+      },
+    })).rejects.toThrow(/preflight|inventory|identity/i)
+
+    const staleReceiptDigest = await resealManifest(manifestPath, current => {
+      const evidence = current.obligationPreflight as Record<string, unknown>
+      const receipt = evidence.validationReceipt as Record<string, unknown>
+      return {
+        ...current,
+        obligationPreflight: {
+          ...evidence,
+          validationReceipt: {
+            ...receipt,
+            identities: {
+              ...(receipt.identities as Record<string, unknown>),
+              sourceDigest: 'e'.repeat(64),
+            },
+          },
+        },
+      }
+    })
+    await expect(new GameIrStageCheckpointLoader().load({
+      workspacePath: workspaces[0]!,
+      deliveryRun: {
+        ...run,
+        gameIrState: {
+          ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>),
+          latestCheckpoint: { ...ref, checkpointDigest: staleReceiptDigest },
+        },
+      },
+    })).rejects.toThrow(/preflight|stale|identity/i)
+  })
+
+  test('requires preflight on projection and rejects it on validation', async () => {
+    const authority = authorityFixture()
+    const run = runFor(authority)
+    await persist(workspaces[0]!, run)
+    const writer = new GameIrStageCheckpointWriter()
+    const projection = protocolStep('phase4/gameplay/projection', authority.phase7Authority)
+    await expect(writer.write({
+      workspacePath: workspaces[0]!,
+      deliveryRun: run,
+      step: { ...projection, obligationPreflight: undefined },
+    })).rejects.toThrow(/preflight/i)
+    const first = await writer.write({ workspacePath: workspaces[0]!, deliveryRun: run, step: projection })
+    const withFirst = {
+      ...run,
+      gameIrState: {
+        ...(run.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>),
+        latestCheckpoint: first,
+      },
+    }
+    await persist(workspaces[0]!, withFirst)
+    const second = await writer.write({
+      workspacePath: workspaces[0]!,
+      deliveryRun: withFirst,
+      step: protocolStep('phase4/balance/projection', authority.phase7Authority),
+    })
+    const withSecond = {
+      ...withFirst,
+      gameIrState: {
+        ...(withFirst.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>),
+        latestCheckpoint: second,
+      },
+    }
+    await persist(workspaces[0]!, withSecond)
+    const third = await writer.write({
+      workspacePath: workspaces[0]!,
+      deliveryRun: withSecond,
+      step: protocolStep('phase5/world-scene/projection', authority.phase7Authority),
+    })
+    const withThird = {
+      ...withSecond,
+      gameIrState: {
+        ...(withSecond.gameIrState as Extract<DeliveryRun['gameIrState'], { status: 'compiling' }>),
+        latestCheckpoint: third,
+      },
+    }
+    await persist(workspaces[0]!, withThird)
+    const validation = protocolStep('phase5/world-scene/validation', authority.phase7Authority)
+    await expect(writer.write({
+      workspacePath: workspaces[0]!,
+      deliveryRun: withThird,
+      step: { ...validation, obligationPreflight: projection.obligationPreflight },
+    })).rejects.toThrow(/preflight/i)
   })
 
   test('commits each exact operation set across the canonical ten-step prefix', async () => {
@@ -459,6 +608,9 @@ describe('v48 Game IR stage checkpoint boundary', () => {
       packet,
       slicePlan: deriveProjectionSlicePlan('gameplay'),
     })
+    const preflight = obligationPreflightFor(gameplay.source as never)
+    await journal.admitObligationInventory(preflight.inventory)
+    await journal.admitObligationValidationReceipt(preflight.validationReceipt)
     for (const slice of journal.slicePlan.slices)
       await journal.append({
         status: 'completed',
@@ -502,6 +654,10 @@ describe('v48 Game IR stage checkpoint boundary', () => {
     await expect(readFile(journalPath, 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
     })
+    await expect(new GameIrStageCheckpointLoader().load({
+      workspacePath: workspaces[0]!,
+      deliveryRun: checkpointed,
+    })).resolves.toHaveProperty('step', 'phase4/gameplay/projection')
   })
 
   test('rejects skipped or duplicate protocol operations', async () => {

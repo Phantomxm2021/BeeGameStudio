@@ -193,6 +193,7 @@ import {
   nextGameIrOperation,
   stagedCompilerContract,
   stagedProjectionJournalCompletion,
+  stagedProjectionObligationPreflight,
   admitStagedValidationOperation,
   type GameIrStagedRecords,
 } from './game-ir/staged-compiler'
@@ -1850,6 +1851,9 @@ export function createDeliveryWorkflowController(input: {
           domain: operation.domain,
           operation: operation.operation,
           records: recordsToCommit,
+          ...(operation.operation === 'projection' && projectionJournal
+            ? { obligationPreflight: stagedProjectionObligationPreflight(projectionJournal) }
+            : {}),
         },
       })
       const checkpointed = transitionDeliveryRun(run, {
@@ -5519,6 +5523,7 @@ export function createDeliveryWorkflowController(input: {
             domain: operation.domain,
             operation: operation.operation,
             records: recordsToCommit,
+            obligationPreflight: stagedProjectionObligationPreflight(projectionJournal),
           },
         })
         const checkpointed = transitionDeliveryRun(compilationRun, {

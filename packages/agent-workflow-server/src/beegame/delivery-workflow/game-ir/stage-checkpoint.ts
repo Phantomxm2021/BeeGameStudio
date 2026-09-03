@@ -37,6 +37,12 @@ import {
   validateGameIrDomainSourceEnvelope,
   type GameIrDomainSourceEnvelope,
 } from './domain-source'
+import {
+  buildGameIrSemanticObligationValidationAuthority,
+  normalizeGameIrSemanticObligationValidationReceipt,
+  type GameIrSemanticObligationValidationReceipt,
+} from './semantic-obligation-validation'
+import type { GameIrSemanticObligationInventory } from './semantic-obligation-inventory'
 
 export const GAME_IR_CHECKPOINT_SCHEMA_VERSION =
   'game-ir-stage-checkpoint.v48' as const
@@ -78,6 +84,10 @@ export type GameIrCheckpointRecord = Readonly<{
   kind: GameIrCheckpointRecordKind
   record: unknown
 }>
+export type GameIrCheckpointObligationPreflight = Readonly<{
+  inventory: GameIrSemanticObligationInventory
+  validationReceipt: GameIrSemanticObligationValidationReceipt
+}>
 export const GAME_IR_PROTOCOL_STEPS = Object.freeze([
   'phase4/gameplay/projection',
   'phase4/balance/projection',
@@ -104,6 +114,8 @@ export type GameIrCheckpointStep = Readonly<{
   domain: GameIrCheckpointDomain
   operation: GameIrCheckpointOperation
   records: readonly GameIrCheckpointRecord[]
+  /** Private journal evidence copied into projection manifests before cleanup. */
+  obligationPreflight?: GameIrCheckpointObligationPreflight
 }>
 export type GameIrReplayAuthority = Readonly<{
   phase4Authority: GameplayBalanceAssemblyAuthority
@@ -158,6 +170,11 @@ type ClosureSeal = Readonly<{
   recordRefs: readonly RecordRef[]
   closureDigest: string
 }>
+type ManifestObligationPreflight = Readonly<{
+  inventoryDigest: string
+  inventory: GameIrSemanticObligationInventory
+  validationReceipt: GameIrSemanticObligationValidationReceipt
+}>
 type Manifest = Readonly<{
   schemaVersion: typeof GAME_IR_CHECKPOINT_SCHEMA_VERSION
   step: GameIrProtocolStep
@@ -172,6 +189,7 @@ type Manifest = Readonly<{
   }>
   authoritySectionIndex: readonly GameIrSourceSection[]
   records: readonly RecordRef[]
+  obligationPreflight?: ManifestObligationPreflight
   previousManifestPath?: string
   previousManifestDigest?: string
   closure?: ClosureSeal
@@ -326,6 +344,59 @@ function sourceOf(value: unknown): GameIrDomainSourceEnvelope | undefined {
     return undefined
   return validateGameIrDomainSourceEnvelope(value)
 }
+
+function normalizeManifestObligationPreflight(
+  value: unknown,
+  source: GameIrDomainSourceEnvelope,
+): ManifestObligationPreflight {
+  if (!isRecord(value)) fail('projection obligation preflight is missing')
+  exactKeys(
+    value,
+    ['inventoryDigest', 'inventory', 'validationReceipt'],
+    'obligation preflight',
+  )
+  if (typeof value.inventoryDigest !== 'string' || !SHA256.test(value.inventoryDigest))
+    fail('obligation preflight inventory digest is invalid')
+  const authority = buildGameIrSemanticObligationValidationAuthority({
+    source,
+    inventory: value.inventory as GameIrSemanticObligationInventory,
+  })
+  if (authority.inventory.digest !== value.inventoryDigest)
+    fail('obligation preflight inventory digest is stale')
+  const validationReceipt = normalizeGameIrSemanticObligationValidationReceipt(
+    authority,
+    value.validationReceipt,
+  )
+  return {
+    inventoryDigest: value.inventoryDigest,
+    inventory: authority.inventory,
+    validationReceipt,
+  }
+}
+
+function normalizeWriterObligationPreflight(
+  value: unknown,
+  source: GameIrDomainSourceEnvelope,
+): ManifestObligationPreflight {
+  if (!isRecord(value)) fail('projection obligation preflight is missing')
+  exactKeys(value, ['inventory', 'validationReceipt'], 'projection obligation preflight')
+  const authority = buildGameIrSemanticObligationValidationAuthority({
+    source,
+    inventory: value.inventory as GameIrSemanticObligationInventory,
+  })
+  const validationReceipt = normalizeGameIrSemanticObligationValidationReceipt(
+    authority,
+    value.validationReceipt,
+  )
+  return normalizeManifestObligationPreflight(
+    {
+      inventoryDigest: authority.inventory.digest,
+      inventory: authority.inventory,
+      validationReceipt,
+    },
+    source,
+  )
+}
 function moduleForKind(kind: GameIrCheckpointRecordKind): string {
   return kind.split('/')[1]!
 }
@@ -433,6 +504,7 @@ function normalizeManifest(value: unknown): Manifest {
     'foundationReadyBinding',
     'authoritySectionIndex',
     'records',
+    ...(descriptor.operation === 'projection' ? ['obligationPreflight'] : []),
     ...(hasPrevious ? ['previousManifestPath', 'previousManifestDigest'] : []),
     ...(descriptor.closes ? ['closure'] : []),
     'manifestDigest',
@@ -532,6 +604,19 @@ function normalizeManifest(value: unknown): Manifest {
   )
     fail('manifest records are not the exact operation record set')
   if (descriptor.closes) normalizeClosure(value.closure, descriptor)
+  if (descriptor.operation === 'projection') {
+    if (!('obligationPreflight' in value))
+      fail('projection obligation preflight is missing')
+    if (!isRecord(value.obligationPreflight))
+      fail('projection obligation preflight is invalid')
+    exactKeys(
+      value.obligationPreflight,
+      ['inventoryDigest', 'inventory', 'validationReceipt'],
+      'obligation preflight',
+    )
+  } else if ('obligationPreflight' in value) {
+    fail('validation manifest cannot contain obligation preflight')
+  }
   const body = { ...value }
   delete body.manifestDigest
   if (digest(body) !== value.manifestDigest) fail('manifest digest mismatch')
@@ -928,6 +1013,20 @@ async function readCheckpointChain(input: {
         value as RecordEnvelope,
       )
     }
+    if (current.manifest.operation === 'projection') {
+      const sourceRef = current.manifest.records.find(ref =>
+        ref.kind.endsWith('/source'),
+      )
+      const source = sourceRef
+        ? sourceOf(records.get(sourceRef.kind)?.record)
+        : undefined
+      if (!source)
+        fail('projection checkpoint source is missing or has invalid authority binding')
+      normalizeManifestObligationPreflight(
+        current.manifest.obligationPreflight,
+        source,
+      )
+    }
     manifests.unshift(current.manifest)
     if (current.manifest.step === GAME_IR_PROTOCOL_STEPS[0]) break
     const index = GAME_IR_PROTOCOL_STEPS.indexOf(current.manifest.step!)
@@ -1178,6 +1277,17 @@ export class GameIrStageCheckpointWriter {
         source,
         current?.compileRequestDigest ?? digest(source.compileRequest),
       )
+      const obligationPreflight =
+        descriptor.operation === 'projection'
+          ? normalizeWriterObligationPreflight(
+              input.step.obligationPreflight,
+              source,
+            )
+          : (() => {
+              if (input.step.obligationPreflight !== undefined)
+                fail('validation checkpoint cannot contain obligation preflight')
+              return undefined
+            })()
       if (
         current &&
         (digest(identity.sections) !== digest(current.sections) ||
@@ -1263,6 +1373,9 @@ export class GameIrStageCheckpointWriter {
           },
           authoritySectionIndex: identity.sections,
           records: refs,
+          ...(obligationPreflight
+            ? { obligationPreflight }
+            : {}),
           ...(state.latestCheckpoint
             ? {
                 previousManifestPath: state.latestCheckpoint.checkpointPath,
