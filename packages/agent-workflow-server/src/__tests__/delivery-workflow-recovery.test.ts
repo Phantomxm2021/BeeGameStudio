@@ -64,6 +64,17 @@ import {
   gameIrProjectionSliceJournalPath,
   loadGameIrProjectionSliceJournal,
 } from '../beegame/delivery-workflow/game-ir/projection-slice-journal'
+import {
+  buildGameIrSemanticObligationInventory,
+} from '../beegame/delivery-workflow/game-ir/semantic-obligation-inventory'
+import {
+  admitGameIrSemanticObligationValidationResult,
+  buildGameIrSemanticObligationValidationAuthority,
+} from '../beegame/delivery-workflow/game-ir/semantic-obligation-validation'
+import {
+  GAME_IR_STAGED_OPERATIONS,
+  buildStagedOperationPacket,
+} from '../beegame/delivery-workflow/game-ir/staged-compiler'
 import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
@@ -1228,12 +1239,11 @@ async function createProjectionRecoveryFixture() {
     source: {
       sectionIndex: readonly { documentPath: FoundationDocumentPath; sectionId: string }[]
       sectionBytes: Readonly<Record<string, string>>
+      moduleId: 'gameplay'
     }
   }
   const catalog = buildGameIrEvidenceFragmentCatalog(packet.source)
-  const selectors = sourceSectionsForGameIrProjectionSlice(
-    String(request.contract.currentSlice),
-  )
+  const selectors = sourceSectionsForGameIrProjectionSlice('gameplay.slice.0')
   const fragment = catalog.fragments.find(candidate =>
     selectors.some(
       selector =>
@@ -1242,6 +1252,72 @@ async function createProjectionRecoveryFixture() {
     ),
   )
   if (!fragment) throw new Error('projection fixture has no source fragment')
+  const inventory = buildGameIrSemanticObligationInventory({
+    moduleId: packet.source.moduleId,
+    source: packet.source as never,
+    records: [
+      {
+        record: 'obligation',
+        moduleId: packet.source.moduleId,
+        targetId: 'state-start',
+        targetKind: 'gameplay.state',
+        fragmentId: fragment.fragmentId,
+      },
+    ],
+  })
+  const validationAuthority = buildGameIrSemanticObligationValidationAuthority({
+    source: packet.source as never,
+    inventory,
+  })
+  const validation = admitGameIrSemanticObligationValidationResult({
+    authority: validationAuthority,
+    result: {
+      outcome: 'PASS',
+      moduleId: packet.source.moduleId,
+      identities: validationAuthority.identities,
+      coverage: validationAuthority.sourceFragments.map(item => item.fragmentId),
+    },
+  })
+  if (validation.outcome !== 'PASS') throw new Error('projection fixture validation did not pass')
+  const canonicalOperation = GAME_IR_STAGED_OPERATIONS.find(
+    operation => operation.domain === 'gameplay' && operation.operation === 'projection',
+  )!
+  const canonicalPacket = buildStagedOperationPacket({
+    operation: canonicalOperation,
+    source: packet.source as never,
+    records: new Map(),
+  })
+  const persistedBeforePreflight = await store.load()
+  if (!persistedBeforePreflight?.activeDispatch)
+    throw new Error('projection fixture lost preflight dispatch')
+  const identityState = persistedBeforePreflight.gameIrState
+  if (!identityState || identityState.status !== 'compiling')
+    throw new Error('projection fixture has no compiling identity')
+  const preflightJournalInput = {
+    journalPath: gameIrProjectionSliceJournalPath({
+      workspacePath,
+      identity: identityState.identity,
+      operationStep: canonicalOperation.step,
+    }),
+    identity: identityState.identity,
+    operationStep: canonicalOperation.step,
+    packet: canonicalPacket as never,
+    slicePlan: deriveProjectionSlicePlan('gameplay'),
+  }
+  const preflightJournal = await createGameIrProjectionSliceJournal(preflightJournalInput)
+  await preflightJournal.admitObligationInventory(inventory)
+  await preflightJournal.admitObligationValidationReceipt(validation.receipt)
+  const projectionRun = {
+    ...persistedBeforePreflight,
+    activeDispatch: undefined,
+    thinking: 'working' as const,
+  }
+  await store.save(projectionRun)
+  await controller.resume(projectionRun)
+  const projectionPersisted = await store.load()
+  const projectionRequest = projectionPersisted?.activeDispatch?.request
+  if (!projectionRequest || projectionRequest.contract.kind !== 'projection')
+    throw new Error('projection fixture did not resume into projection')
   const record = {
     fragmentId: fragment.fragmentId,
     node: {
@@ -1267,7 +1343,7 @@ async function createProjectionRecoveryFixture() {
     }),
     identity,
     operationStep,
-    packet: packet as never,
+    packet: canonicalPacket as never,
     slicePlan: deriveProjectionSlicePlan('gameplay'),
   }
   return {
@@ -1277,7 +1353,7 @@ async function createProjectionRecoveryFixture() {
     controller,
     workerPort,
     started,
-    request,
+    request: projectionRequest,
     record,
     identity,
     journalInput,

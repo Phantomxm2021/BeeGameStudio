@@ -16,6 +16,14 @@ import {
   buildGameIrProjectionSliceAuthority,
   renderGameIrProjectionSliceAuthority,
 } from './game-ir/projection-slice-authority'
+import {
+  buildGameIrSemanticObligationInventoryPromptAuthority,
+  renderGameIrSemanticObligationInventoryPrompt,
+} from './game-ir/semantic-obligation-inventory'
+import {
+  buildGameIrSemanticObligationValidationPromptAuthority,
+  renderGameIrSemanticObligationValidationPrompt,
+} from './game-ir/semantic-obligation-validation'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Judge quality by distinct implementable decisions and traceability, not document length. Use the minimum sufficient headings, tables, rows, diagrams and examples. Do not expand a contract purpose phrase by phrase into H3 headings. Represent each decision in one authoritative prose, table or diagram representation; elsewhere use a stable owner reference. Do not narrate tables or diagrams. Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate. Record a genuinely N/A item once with its reason and impact; never invent a system. Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets. Treat each section as the final decision record: Complete every required section and production material, omit only equivalent repetition, and keep rationale to the minimum needed for a production decision.'
@@ -153,6 +161,10 @@ function buildFoundationRevisionWorkerPrompt(
 
 function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
   const contract = formatPacketContract(request)
+  const preflight =
+    request.workerType === 'game-ir-compiler' &&
+    (request.contract.kind === 'obligation-inventory' ||
+      request.contract.kind === 'obligation-validation')
   return [
     `BeeGame delivery worker: ${request.workerType}`,
     'The model contract is the sole input for this task. The packet inside it is immutable service-owned authority.',
@@ -160,6 +172,8 @@ function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
     request.workerType === 'game-ir-compiler' &&
     request.contract.kind === 'projection'
       ? 'Return only the strict raw NDJSON record stream for the assigned packet; do not return Markdown, prose explanations, wrappers, tools, or additional fields.'
+      : preflight
+        ? 'Return only the strict raw NDJSON preflight record stream for the assigned packet; do not return Markdown, prose explanations, wrappers, tools, or additional fields.'
       : 'Return only the strict structured result for the assigned packet; do not return Markdown, prose explanations, or additional fields.',
     request.workerType === 'game-ir-compiler' &&
     request.contract.kind === 'projection'
@@ -172,6 +186,48 @@ function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
 }
 
 function formatPacketContract(request: WorkerDispatchRequest): string {
+  if (
+    request.workerType === 'game-ir-compiler' &&
+    request.contract.kind === 'obligation-inventory'
+  ) {
+    const packet = request.contract.packet
+    if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+      throw new Error('Game IR obligation inventory requires one operation packet')
+    const source = (packet as Record<string, unknown>).source
+    if (!source || typeof source !== 'object' || Array.isArray(source))
+      throw new Error('Game IR obligation inventory packet source is missing')
+    return renderGameIrSemanticObligationInventoryPrompt(
+      buildGameIrSemanticObligationInventoryPromptAuthority({
+        source: source as never,
+      }),
+    )
+  }
+  if (
+    request.workerType === 'game-ir-compiler' &&
+    request.contract.kind === 'obligation-validation'
+  ) {
+    const packet = request.contract.packet
+    if (!packet || typeof packet !== 'object' || Array.isArray(packet))
+      throw new Error('Game IR obligation validation requires one operation packet')
+    const value = packet as Record<string, unknown>
+    const source = value.source
+    const inventory = value.inventory
+    if (
+      !source ||
+      typeof source !== 'object' ||
+      Array.isArray(source) ||
+      !inventory ||
+      typeof inventory !== 'object' ||
+      Array.isArray(inventory)
+    )
+      throw new Error('Game IR obligation validation packet authority is missing')
+    return renderGameIrSemanticObligationValidationPrompt(
+      buildGameIrSemanticObligationValidationPromptAuthority({
+        source: source as never,
+        inventory: inventory as never,
+      }),
+    )
+  }
   const isGameIrProjection =
     request.workerType === 'game-ir-compiler' &&
     request.contract.kind === 'projection'
@@ -201,6 +257,7 @@ function formatPacketContract(request: WorkerDispatchRequest): string {
         typeof request.contract.foundationReadyReceiptDigest === 'string'
           ? request.contract.foundationReadyReceiptDigest
           : undefined,
+      obligationInventory: request.contract.obligationInventory as never,
       ...(retryDiagnostic ? { retryDiagnostic } : {}),
     })
     return renderGameIrProjectionSliceAuthority(authority)
@@ -819,6 +876,10 @@ function formatResourceContentContract(
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'game-ir-compiler':
+      if (request.contract.kind === 'obligation-inventory')
+        return 'Identify every source-bound semantic obligation from the compact authority. Emit one strict obligation record per instance, sorted by targetId, then the final done record. Do not project nodes, validate coverage, or emit service-owned identities.'
+      if (request.contract.kind === 'obligation-validation')
+        return 'Independently validate the admitted obligation inventory against the complete compact source authority and fixed service manifest. Emit exactly one PASS, missing-obligation FAIL, or AMBIGUOUS result, followed by done. Do not project nodes or redefine source scope, roles, kinds, owners or identities.'
       if (request.contract.kind === 'projection')
         return 'Project only the current dependency-frontier slice from the immutable operation packet; never project or assemble the complete domain. The `## Current slice` heading is the sole node-kind authority for this turn: use only its exact node kinds, value properties/types, and per-node `edgeRules` roles/targetKinds/cardinality and `referencePolicy`; do not invent fields or generic edge names. Apply every declared `referencePolicy` exactly. When `referencePolicy.kind` is `exact-edge-targets`, references must be the sorted targetId multiset of the node edges, with no unrelated references. When `referencePolicy.kind` is `exact-single-index-reference`, references must contain exactly one target whose targetType is one of targetKinds, and the value at indexField must equal requiredIndex. When `referencePolicy.kind` is `formula-indexed-references`, bind every declared indexedReferences path to the corresponding references entry, apply recursive rules at every matching expression node, and ensure every reference is consumed. If the `## Retry diagnostic` heading is present, correct that exact admitted failure in this slice; it is not product authority and does not authorize another slice. Every emitted node must satisfy every `edgeRules` cardinality: exactly-one and at-least-one roles cannot be omitted, and singleton roles cannot repeat. The `## Dependency context` heading is binding admitted graph state: emit every required current-node item with its exact id and kind; when an edge or reference targets an admitted kind, use the exact available prior-node id, kind, and value semantics, including terminal and outcome values. Emit nodes uniquely sorted by id; sort each references array by targetId then targetType and each edges array by type then targetId then targetType. The service rejects rather than repairs non-canonical order. Emit each node with exactly the declared node fields; references use {targetId,targetType}; every edge requires edges[].type, edges[].targetId, and edges[].targetType, mapping `edgeRules[].role` to type and the selected target identity to targetId/targetType. Bind every node to exactly one fragmentId selected from the rendered `## Source fragments` heading. The service derives source evidence groups and canonical semantic targets; never output either of them. Never copy or synthesize source text and never output subjects, documentPath, sectionId, excerpt, byte offsets, sourcePointer, literal, occurrence, or serialized edge/reference JSON in evidence. The rendered `## Output contract` heading is binding: emit strict JSONL node records and exactly one final done record. Do not validate or assemble other slices, write checkpoints, publish, or provide service identity.'
       if (request.contract.kind === 'validation')
@@ -966,6 +1027,11 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'game-ir-compiler':
       if (request.contract.kind === 'projection')
         return 'Return raw NDJSON only, with no Markdown fence, prose, array wrapper, object wrapper, tool call, or blank line. Emit one line per node exactly as {"record":"node","sliceId":"<current exact sliceId>","fragmentId":"<one exact evidence fragmentId>","node":{...}}. After the final node emit exactly one terminal line {"record":"done","sliceId":"<current exact sliceId>"}. The done line must be last. When continuation is requested, continue from the exact byte where the stream stopped without repeating prior records. Identity, evidence groups, checkpoints, publication markers, READY receipts, sourceClaims, outcome and authority paths are service-owned and forbidden in worker output.'
+      if (
+        request.contract.kind === 'obligation-inventory' ||
+        request.contract.kind === 'obligation-validation'
+      )
+        return 'Return the strict raw NDJSON preflight stream only. The final done record is last; emit no wrappers, prose, tools, service identities, checkpoints, publication markers or authority paths.'
       if (request.contract.kind === 'validation')
         return 'Return exactly one validation payload conforming to the supplied schema. A completed payload contains only validation; failed or blocked payloads contain only reason. Identity, checkpoints, publication markers, READY receipts, and authority paths are service-owned and forbidden in worker output.'
       throw new Error(

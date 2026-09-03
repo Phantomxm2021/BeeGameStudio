@@ -418,7 +418,9 @@ function assertGameIrOperationRequest(input: {
     'packet',
     'compileRequestDigest',
     'foundationReadyReceiptDigest',
-    ...(projection ? ['currentSlice', 'progress', 'sliceContext'] : []),
+    ...(projection
+      ? ['currentSlice', 'progress', 'sliceContext', 'obligationInventory']
+      : []),
   ].sort()
   const allowedKeys = [
     ...requiredKeys,
@@ -501,6 +503,15 @@ function assertGameIrOperationRequest(input: {
     )
   const source = packet.source
   if (projection) {
+    if (
+      !contract.obligationInventory ||
+      typeof contract.obligationInventory !== 'object' ||
+      Array.isArray(contract.obligationInventory)
+    )
+      throw new DispatchError(
+        'blocked',
+        'Game IR projection dispatch obligation inventory is missing',
+      )
     if (!source || typeof source !== 'object' || Array.isArray(source))
       throw new DispatchError(
         'blocked',

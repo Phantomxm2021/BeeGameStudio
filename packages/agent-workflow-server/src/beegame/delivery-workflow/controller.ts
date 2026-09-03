@@ -189,6 +189,7 @@ import {
 import {
   buildGameIrSourcePacket,
   buildStagedOperationPacket,
+  GAME_IR_STAGED_OPERATIONS,
   nextGameIrOperation,
   stagedCompilerContract,
   stagedProjectionJournalCompletion,
@@ -206,6 +207,14 @@ import {
 } from './game-ir/projection-slices'
 import { commitGameIrPublication } from './game-ir/publication'
 import { GameIrStageCheckpointLoader } from './game-ir/stage-checkpoint'
+import {
+  buildGameIrSemanticObligationInventory,
+  type GameIrSemanticObligationRecord,
+} from './game-ir/semantic-obligation-inventory'
+import {
+  buildGameIrSemanticObligationValidationAuthority,
+  admitGameIrSemanticObligationValidationResult,
+} from './game-ir/semantic-obligation-validation'
 
 function sameDocumentDigests(
   left: readonly { path: string; digest: string }[],
@@ -276,38 +285,6 @@ function retryDiagnosticActual(
   return `${reason}\n${RETRY_DIAGNOSTIC_PREFIX}${JSON.stringify(diagnostic)}`
 }
 
-function retryDiagnosticFromActual(
-  actual: string | undefined,
-): GameIrProjectionRetryDiagnostic | undefined {
-  if (!actual) return undefined
-  const encoded = actual
-    .split('\n')
-    .find(line => line.startsWith(RETRY_DIAGNOSTIC_PREFIX))
-  if (!encoded) return undefined
-  try {
-    const value = JSON.parse(encoded.slice(RETRY_DIAGNOSTIC_PREFIX.length))
-    if (!value || typeof value !== 'object' || Array.isArray(value))
-      return undefined
-    if (
-      value.scope === 'slice' &&
-      typeof value.sliceId === 'string' &&
-      typeof value.reason === 'string'
-    )
-      return value as GameIrProjectionRetryDiagnostic
-    if (
-      value.scope === 'record' &&
-      typeof value.sliceId === 'string' &&
-      typeof value.recordId === 'string' &&
-      typeof value.fragmentId === 'string' &&
-      typeof value.reason === 'string'
-    )
-      return value as GameIrProjectionRetryDiagnostic
-  } catch {
-    return undefined
-  }
-  return undefined
-}
-
 function markRevisionCommitTransient(error: unknown): never {
   if (error && typeof error === 'object')
     Object.assign(error, { foundationRevisionCommitTransient: true })
@@ -321,6 +298,59 @@ function isRevisionCommitTransient(error: unknown): boolean {
       (error as { foundationRevisionCommitTransient?: boolean })
         .foundationRevisionCommitTransient,
   )
+}
+
+function projectionOperationFor(
+  operation: (typeof GAME_IR_STAGED_OPERATIONS)[number],
+): (typeof GAME_IR_STAGED_OPERATIONS)[number] {
+  const projection = GAME_IR_STAGED_OPERATIONS.find(
+    candidate =>
+      candidate.domain === operation.domain && candidate.operation === 'projection',
+  )
+  if (!projection)
+    throw new Error(`Game IR projection operation is missing for ${operation.domain}`)
+  return projection
+}
+
+function gameIrPreflightPacket(input: {
+  source: unknown
+  operation: 'obligation-inventory' | 'obligation-validation'
+  inventory?: unknown
+}): Record<string, unknown> {
+  const body = {
+    schemaVersion:
+      input.operation === 'obligation-inventory'
+        ? 'game-ir-semantic-obligation-inventory-operation-packet.v1'
+        : 'game-ir-semantic-obligation-validation-operation-packet.v1',
+    source: input.source,
+    ...(input.operation === 'obligation-validation'
+      ? { inventory: input.inventory }
+      : {}),
+  }
+  return { ...body, packetDigest: digestGameIrValue(body) }
+}
+
+async function rollbackProjectionOwnerForDiagnostic(
+  journal: Awaited<ReturnType<typeof createGameIrProjectionSliceJournal>>,
+  diagnostic: GameIrProjectionRetryDiagnostic,
+): Promise<GameIrProjectionRetryDiagnostic | undefined> {
+  if (diagnostic.scope !== 'record') return undefined
+  const inventory = journal.obligationInventory
+  const obligation = inventory?.obligations.find(
+    candidate =>
+      candidate.targetId === diagnostic.recordId &&
+      candidate.ownerSliceId === diagnostic.sliceId &&
+      candidate.fragmentId === diagnostic.fragmentId,
+  )
+  if (!obligation) return undefined
+  return journal.rollbackOwnerForDiagnostic({
+    ownerSliceId: obligation.ownerSliceId,
+    obligationId: obligation.obligationId,
+    fragmentId: obligation.fragmentId,
+    recordId: obligation.targetId,
+    diagnosticDigest: digestGameIrValue(diagnostic),
+    expectedJournalDigest: journal.snapshot.journalDigest,
+  })
 }
 
 function revisionBundleDigest(value: unknown): string {
@@ -1294,15 +1324,13 @@ export function createDeliveryWorkflowController(input: {
           })
         : undefined
       const operation = nextGameIrOperation(replay)
-      if (
-        !operation ||
-        request.contract.kind !== operation.operation ||
-        result.operation !== operation.operation
-      )
+      if (!operation)
         throw new Error('Game IR compiler operation is stale or out of order')
       const records: GameIrStagedRecords = replay?.records ?? new Map()
       const source =
-        operation.operation === 'projection'
+        (operation.operation === 'projection' ||
+          request.contract.kind === 'obligation-inventory' ||
+          request.contract.kind === 'obligation-validation')
           ? await buildGameIrSourcePacket({
               workspacePath: input.workspacePath,
               request: compileRequest,
@@ -1310,29 +1338,281 @@ export function createDeliveryWorkflowController(input: {
               domain: operation.domain,
             })
           : undefined
-      const packet = buildStagedOperationPacket({
-        operation,
-        ...(source ? { source } : {}),
-        records,
-      })
+      const packet =
+        operation.operation === 'projection'
+          ? buildStagedOperationPacket({ operation, source, records })
+          : buildStagedOperationPacket({ operation, records })
+      const journalOperation = projectionOperationFor(operation)
       if (
+        request.contract.kind === operation.operation &&
         digestGameIrValue(request.contract.packet) !== digestGameIrValue(packet)
       )
         throw new Error('Game IR operation packet authority is stale')
       const projectionJournal =
-        operation.operation === 'projection'
+        source &&
+        (operation.operation === 'projection' ||
+          request.contract.kind === 'obligation-inventory' ||
+          request.contract.kind === 'obligation-validation')
           ? await createGameIrProjectionSliceJournal({
               journalPath: gameIrProjectionSliceJournalPath({
                 workspacePath: input.workspacePath,
                 identity: state.identity,
-                operationStep: operation.step,
+                operationStep: journalOperation.step,
               }),
               identity: state.identity,
-              operationStep: operation.step,
-              packet: packet as never,
+              operationStep: journalOperation.step,
+              packet: buildStagedOperationPacket({
+                operation: journalOperation,
+                source,
+                records,
+              }) as never,
               slicePlan: deriveProjectionSlicePlan(operation.domain),
             })
           : undefined
+      const preflightKind =
+        request.contract.kind === 'obligation-inventory' ||
+        request.contract.kind === 'obligation-validation'
+          ? request.contract.kind
+          : undefined
+      if (preflightKind) {
+        if (!source)
+          throw new Error('Game IR obligation preflight source is missing')
+        if (result.operation !== preflightKind || !projectionJournal)
+          throw new Error('Game IR obligation preflight operation is stale or out of order')
+        const preflightOrder = {
+          'obligation-inventory': 0,
+          'obligation-validation': 1,
+          projection: 2,
+        } as const
+        if (
+          preflightOrder[projectionJournal.preflightMode] >
+          preflightOrder[preflightKind]
+        ) {
+          const alreadyAdmitted = await persist(
+            {
+              ...run,
+              activeDispatch: undefined,
+              status: 'running',
+              blockedReason: undefined,
+              thinking: 'working',
+            },
+            'game_ir_obligation_preflight.replayed',
+          )
+          await resumeUnlocked(alreadyAdmitted)
+          return
+        }
+        if (projectionJournal.preflightMode !== preflightKind)
+          throw new Error('Game IR obligation preflight operation is stale or out of order')
+        const attendPreflightFailure = async (actual: string): Promise<void> => {
+          const normalized = normalizeGameIrDiagnosticReason(actual)
+          const progressIdentity = {
+            inputDigest: digestGameIrValue({
+              identity: state.identity,
+              operation: preflightKind,
+              packet: request.contract.packet,
+            }),
+            diagnosticDigest: digestGameIrValue({
+              operation: preflightKind,
+              reason: normalized,
+            }),
+            candidateDigest: digestGameIrValue({
+              operation: preflightKind,
+              reason: normalized,
+            }),
+            checkpointJournalDigest: digestGameIrValue(
+              state.latestCheckpoint ?? null,
+            ),
+            terminalDigest: digestGameIrValue({
+              operation: preflightKind,
+              reason: normalized,
+            }),
+          }
+          const unchanged =
+            state.progressIdentity !== undefined &&
+            digestGameIrValue(state.progressIdentity) ===
+              digestGameIrValue(progressIdentity)
+          const diagnosticRef = `game-ir-${digestGameIrValue(progressIdentity).slice(0, 12)}`
+          const attended = await persist(
+            {
+              ...run,
+              activeDispatch: undefined,
+              status: unchanged ? 'needs_action' : 'running',
+              blockedReason: unchanged
+                ? `game_ir_${preflightKind} diagnostic ${diagnosticRef}`
+                : undefined,
+              thinking: unchanged ? 'idle' : 'working',
+              gameIrState: {
+                ...state,
+                diagnosticRef,
+                diagnostic: {
+                  phase: 'GAME_IR_COMPILATION',
+                  step: preflightKind,
+                  taskId: state.identity.taskId,
+                  workerType: 'game-ir-compiler',
+                  reasonCode: 'preflight',
+                  expected: preflightKind,
+                  actual: normalized,
+                  diagnosticRef,
+                  recoveryAction: unchanged
+                    ? 'resolve the unchanged preflight diagnostic, then retry the same compilation identity'
+                    : 'retry the same compilation identity',
+                },
+                progressIdentity,
+              },
+            },
+            unchanged
+              ? `game_ir_${preflightKind}.needs_action`
+              : `game_ir_${preflightKind}.retryable`,
+            { diagnosticRef, reasonCode: 'preflight' },
+          )
+          if (attended.status === 'running') await resumeUnlocked(attended)
+        }
+        if (result.status !== 'completed') {
+          await attendPreflightFailure(result.reason)
+          return
+        }
+        if (preflightKind === 'obligation-inventory') {
+          if (!result.done || !('records' in result))
+            throw new Error(
+              'Game IR obligation inventory terminal is incomplete',
+            )
+          let inventory
+          try {
+            inventory = buildGameIrSemanticObligationInventory({
+              moduleId: source.moduleId,
+              source,
+              records: result.records as readonly GameIrSemanticObligationRecord[],
+            })
+          } catch (error) {
+            await attendPreflightFailure(
+              error instanceof Error ? error.message : 'obligation inventory admission failed',
+            )
+            return
+          }
+          await projectionJournal.admitObligationInventory(inventory)
+          const admitted = await persist(
+            {
+              ...run,
+              activeDispatch: undefined,
+              status: 'running',
+              blockedReason: undefined,
+              thinking: 'working',
+              gameIrState: {
+                ...state,
+                diagnosticRef: undefined,
+                diagnostic: undefined,
+                progressIdentity: undefined,
+              },
+            },
+            'game_ir_obligation_inventory_admitted',
+            { inventoryDigest: inventory.digest },
+          )
+          await resumeUnlocked(admitted)
+          return
+        }
+        if (result.status !== 'completed' || !('result' in result) || !result.result)
+          throw new Error(
+            'Game IR obligation validation terminal is incomplete',
+          )
+        const inventory = projectionJournal.obligationInventory
+        if (!inventory)
+          throw new Error('Game IR obligation validation inventory is missing')
+        let admitted: ReturnType<
+          typeof admitGameIrSemanticObligationValidationResult
+        >
+        try {
+          const authority = buildGameIrSemanticObligationValidationAuthority({
+            source,
+            inventory,
+          })
+          admitted = admitGameIrSemanticObligationValidationResult({
+            authority,
+            result: result.result as never,
+          })
+        } catch (error) {
+          await attendPreflightFailure(
+            error instanceof Error
+              ? error.message
+              : 'obligation validation admission failed',
+          )
+          return
+        }
+        if (admitted.outcome === 'AMBIGUOUS') {
+          await persist(
+            {
+              ...run,
+              activeDispatch: undefined,
+              status: 'needs_action',
+              blockedReason: `game_ir_obligation_validation ambiguous: ${admitted.detail}`,
+              thinking: 'idle',
+              gameIrState: {
+                ...state,
+                diagnosticRef: `game-ir-${digestGameIrValue(admitted).slice(0, 12)}`,
+                diagnostic: {
+                  phase: 'GAME_IR_COMPILATION',
+                  step: 'obligation-validation',
+                  taskId: state.identity.taskId,
+                  workerType: 'game-ir-compiler',
+                  reasonCode: admitted.reasonCode,
+                  expected: 'unambiguous obligation validation result',
+                  actual: admitted.detail,
+                  diagnosticRef: `game-ir-${digestGameIrValue(admitted).slice(0, 12)}`,
+                  recoveryAction: 'resolve the ambiguity, then retry the same compilation identity',
+                },
+              },
+            },
+            'game_ir_obligation_validation.needs_action',
+          )
+          return
+        }
+        if (admitted.outcome === 'FAIL') {
+          await projectionJournal.invalidateObligationPreflight(admitted)
+          const retried = await persist(
+            {
+              ...run,
+              activeDispatch: undefined,
+              status: 'running',
+              blockedReason: undefined,
+              thinking: 'working',
+              gameIrState: {
+                ...state,
+                diagnosticRef: undefined,
+                diagnostic: undefined,
+                progressIdentity: undefined,
+              },
+            },
+            'game_ir_obligation_validation.missing_obligation',
+            { obligationId: admitted.obligationId },
+          )
+          await resumeUnlocked(retried)
+          return
+        }
+        await projectionJournal.admitObligationValidationReceipt(admitted.receipt)
+        const passed = await persist(
+          {
+            ...run,
+            activeDispatch: undefined,
+            status: 'running',
+            blockedReason: undefined,
+            thinking: 'working',
+            gameIrState: {
+              ...state,
+              diagnosticRef: undefined,
+              diagnostic: undefined,
+              progressIdentity: undefined,
+            },
+          },
+          'game_ir_obligation_validation_passed',
+          { receiptDigest: admitted.receipt.receiptDigest },
+        )
+        await resumeUnlocked(passed)
+        return
+      }
+      if (
+        request.contract.kind !== operation.operation ||
+        result.operation !== operation.operation
+      )
+        throw new Error('Game IR compiler operation is stale or out of order')
       const currentSliceId = projectionJournal?.nextSlice?.sliceId
       const requestedSliceId =
         operation.operation === 'projection' &&
@@ -1455,20 +1735,28 @@ export function createDeliveryWorkflowController(input: {
           }
           if (admission.diagnostic && result.sliceId !== currentSliceId)
             throw new Error(admission.diagnostic.reason)
-          const retryDiagnostic =
-            admission.diagnostic ??
-            (!result.done
-              ? {
-                  scope: 'slice' as const,
-                  sliceId: result.sliceId,
-                  reason: result.reason,
-                }
-              : undefined)
+          const rolledBackDiagnostic = admission.diagnostic
+            ? await rollbackProjectionOwnerForDiagnostic(
+                projectionJournal,
+                admission.diagnostic,
+              )
+            : undefined
+          const retryDiagnostic = rolledBackDiagnostic ??
+            (admission.diagnostic
+              ? admission.diagnostic
+              : !result.done
+                ? {
+                    scope: 'slice' as const,
+                    sliceId: result.sliceId,
+                    reason: result.reason,
+                  }
+                : undefined)
           if (retryDiagnostic) {
             await persistCompilerDiagnostic(
               retryDiagnostic.reason,
               admissionProgressIdentity,
               retryDiagnostic,
+              Boolean(admission.diagnostic && !rolledBackDiagnostic),
             )
             return
           }
@@ -1524,20 +1812,8 @@ export function createDeliveryWorkflowController(input: {
             : 'Game IR operation admission failed'
         let unattributed = false
         let retryDiagnostic: GameIrProjectionRetryDiagnostic | undefined
-        if (
-          operation.operation === 'projection' &&
-          projectionJournal
-        ) {
-          retryDiagnostic =
-            await projectionJournal.rollbackPendingRecordsForDiagnostic(actual)
-          if (!retryDiagnostic && !projectionJournal.nextSlice) {
-            retryDiagnostic =
-              await projectionJournal.rollbackCompletedOwnerForDiagnostic(actual)
-            if (!retryDiagnostic) unattributed = true
-          } else if (!retryDiagnostic && projectionJournal.nextSlice) {
-            unattributed = true
-          }
-        }
+        if (operation.operation === 'projection' && projectionJournal)
+          unattributed = true
         const nativeCandidate =
           operation.operation === 'projection'
             ? 'records' in result
@@ -5166,11 +5442,17 @@ export function createDeliveryWorkflowController(input: {
               domain: operation.domain,
             })
           : undefined
-      const packet = buildStagedOperationPacket({
-        operation,
-        ...(source ? { source } : {}),
-        records: replayRecords,
-      })
+      const packet =
+        operation.operation === 'projection'
+          ? buildStagedOperationPacket({
+              operation,
+              source,
+              records: replayRecords,
+            })
+          : buildStagedOperationPacket({
+              operation,
+              records: replayRecords,
+            })
       const projectionJournal =
         operation.operation === 'projection'
           ? await createGameIrProjectionSliceJournal({
@@ -5185,6 +5467,36 @@ export function createDeliveryWorkflowController(input: {
               slicePlan: deriveProjectionSlicePlan(operation.domain),
             })
           : undefined
+      if (projectionJournal && projectionJournal.preflightMode !== 'projection') {
+        const preflightOperation = projectionJournal.preflightMode
+        const preflightPacket = gameIrPreflightPacket({
+          operation: preflightOperation,
+          source: (packet as { source?: unknown }).source,
+          ...(preflightOperation === 'obligation-validation'
+            ? { inventory: projectionJournal.obligationInventory }
+            : {}),
+        })
+        await dispatcher.dispatch({
+          dispatchId: randomUUID(),
+          runId: compilationRun.runId,
+          ownerId: compilationRun.ownerId,
+          projectId: compilationRun.projectId,
+          workspacePath: input.workspacePath,
+          workerType: 'game-ir-compiler',
+          phase: 'GAME_IR_COMPILATION',
+          taskId: state.identity.taskId,
+          revision: state.identity.foundationRevision,
+          allowedPaths: [],
+          projectReadScope: 'empty',
+          contract: {
+            kind: preflightOperation,
+            packet: preflightPacket,
+            compileRequestDigest: digestGameIrValue(compileRequest),
+            foundationReadyReceiptDigest: foundationReadyReceipt.receiptDigest,
+          },
+        })
+        return
+      }
       if (
         operation.operation === 'projection' &&
         !projectionJournal?.nextSlice
@@ -5238,11 +5550,7 @@ export function createDeliveryWorkflowController(input: {
         operation.operation === 'projection' &&
         projectionJournal?.nextSlice &&
         state.diagnostic?.step === operation.step
-          ? retryDiagnosticFromActual(state.diagnostic.actual) ?? {
-              scope: 'slice' as const,
-              sliceId: projectionJournal.nextSlice.sliceId,
-              reason: normalizeGameIrDiagnosticReason(state.diagnostic.actual),
-            }
+          ? undefined
           : undefined
       await dispatcher.dispatch({
         dispatchId: randomUUID(),
@@ -5272,6 +5580,9 @@ export function createDeliveryWorkflowController(input: {
                   entryDigest: entry.entryDigest,
                 })),
               }
+            : {}),
+          ...(projectionJournal?.obligationInventory
+            ? { obligationInventory: projectionJournal.obligationInventory }
             : {}),
           ...(retryDiagnostic ? { retryDiagnostic } : {}),
           ...stagedCompilerContract({

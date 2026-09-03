@@ -55,6 +55,17 @@ function syntheticProjectionPacket(sliceId = 'gameplay.slice.0') {
   }
 }
 
+function emptyObligationInventory(packet: ReturnType<typeof syntheticProjectionPacket>) {
+  const body = {
+    schemaVersion: 'game-ir-semantic-obligation-inventory.v1',
+    moduleId: packet.source.moduleId,
+    sourceDigest: packet.source.sourceDigest,
+    obligations: [],
+    index: {},
+  }
+  return { ...body, digest: digestGameIrValue(body) }
+}
+
 describe('worker prompts', () => {
   test('keeps the initial foundation author contract focused on the assigned document', () => {
     const prompt = buildWorkerPrompt({
@@ -1232,6 +1243,7 @@ describe('worker prompts', () => {
       allowedPaths: [],
       contract: {
         kind: 'projection',
+        obligationInventory: emptyObligationInventory(packet),
         currentSlice: 'gameplay.slice.0',
         sliceContext: {
           availablePriorNodes: [],
@@ -1265,6 +1277,7 @@ describe('worker prompts', () => {
       allowedPaths: [],
       contract: {
         kind: 'projection',
+        obligationInventory: emptyObligationInventory(packet),
         currentSlice: 'gameplay.slice.1',
         sliceContext: {
           availablePriorNodes: [],
@@ -1426,6 +1439,7 @@ describe('worker prompts', () => {
       allowedPaths: [],
       contract: {
         kind: 'projection',
+        obligationInventory: emptyObligationInventory(packet),
         currentSlice: 'gameplay.slice.0',
         sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] },
         compileRequestDigest: digestGameIrValue(packet.source.compileRequest),
@@ -1459,6 +1473,7 @@ describe('worker prompts', () => {
       allowedPaths: [],
       contract: {
         kind: 'projection',
+        obligationInventory: emptyObligationInventory(packet),
         currentSlice: 'gameplay.slice.0',
         sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] },
         packet,
@@ -1484,7 +1499,8 @@ describe('worker prompts', () => {
         revision: 'revision',
         allowedPaths: [],
         contract: {
-          kind: 'projection',
+        kind: 'projection',
+        obligationInventory: emptyObligationInventory(packet),
           currentSlice: 'gameplay.slice.0',
           sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] },
           retryDiagnostic: {
@@ -1513,7 +1529,8 @@ describe('worker prompts', () => {
         revision: 'revision',
         allowedPaths: [],
         contract: {
-          kind: 'projection',
+        kind: 'projection',
+        obligationInventory: emptyObligationInventory(packet),
           currentSlice: 'gameplay.slice.0',
           sliceContext: { availablePriorNodes: [], requiredCurrentNodes: [], admittedCurrentNodes: [] },
           retryDiagnostic,

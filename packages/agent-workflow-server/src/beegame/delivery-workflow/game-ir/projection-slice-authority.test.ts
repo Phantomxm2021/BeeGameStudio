@@ -16,6 +16,17 @@ import {
 import { digestGameIrValue } from './model'
 import { getGameDocumentContract } from '../game-document-contracts'
 
+function emptyInventory(packet: ReturnType<typeof projectionPacket>) {
+  const body = {
+    schemaVersion: 'game-ir-semantic-obligation-inventory.v1',
+    moduleId: packet.source.moduleId,
+    sourceDigest: packet.source.sourceDigest,
+    obligations: [],
+    index: {},
+  }
+  return { ...body, digest: digestGameIrValue(body) }
+}
+
 function projectionPacket(sliceId = 'gameplay.slice.0') {
   const compileRequest = {
     taskId: 'authority-task',
@@ -110,6 +121,7 @@ function authorityFor(
       slice => slice.sliceId === sliceId,
     )!,
     sliceContext: context,
+    obligationInventory: emptyInventory(packet) as never,
     ...(options.retryDiagnostic
       ? { retryDiagnostic: options.retryDiagnostic }
       : {}),
@@ -203,6 +215,7 @@ describe('Game IR projection slice authority source scope', () => {
         packet: packet as never,
         slice,
         sliceContext: context,
+        obligationInventory: emptyInventory(packet) as never,
         compileRequestDigest: 'c'.repeat(64),
       }),
     ).toThrow(/compile request digest is stale/)
@@ -211,6 +224,7 @@ describe('Game IR projection slice authority source scope', () => {
         packet: packet as never,
         slice,
         sliceContext: context,
+        obligationInventory: emptyInventory(packet) as never,
         foundationReadyReceiptDigest: 'f'.repeat(64),
       }),
     ).toThrow(/Foundation receipt digest is stale/)
@@ -223,6 +237,7 @@ describe('Game IR projection slice authority source scope', () => {
         packet: stale as never,
         slice,
         sliceContext: context,
+        obligationInventory: emptyInventory(stale) as never,
       }),
     ).toThrow(/source bytes are stale/)
   })
@@ -337,6 +352,7 @@ describe('Game IR projection slice authority source scope', () => {
           { id: 'context-prefix', kind: 'gameplay.action' },
         ],
       },
+      obligationInventory: emptyInventory(packet) as never,
       admittedCurrentNodes: [
         { id: 'forged-prefix', kind: 'gameplay.action' },
       ],

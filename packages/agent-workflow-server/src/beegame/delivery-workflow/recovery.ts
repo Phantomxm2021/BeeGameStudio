@@ -44,6 +44,10 @@ import {
   type GameIrProtocolStep,
 } from './game-ir/stage-checkpoint'
 import {
+  buildStagedOperationPacket,
+  GAME_IR_STAGED_OPERATIONS,
+} from './game-ir/staged-compiler'
+import {
   cleanupGameIrProjectionSliceJournalAfterCheckpoint,
   gameIrProjectionSliceJournalPath,
   loadGameIrProjectionSliceJournal,
@@ -200,7 +204,12 @@ function isStatelessGameIrProjectionDispatch(run: DeliveryRun): boolean {
   )
     return false
   const kind = dispatch.request?.contract.kind
-  return kind === undefined || kind === 'projection'
+  return (
+    kind === undefined ||
+    kind === 'projection' ||
+    kind === 'obligation-inventory' ||
+    kind === 'obligation-validation'
+  )
 }
 
 async function verifyGameIrProjectionJournal(input: {
@@ -242,12 +251,31 @@ async function verifyGameIrProjectionJournal(input: {
     identity: input.run.gameIrState!.identity,
     operationStep,
   })
+  const checkpoint = input.run.gameIrState?.status === 'compiling' &&
+    input.run.gameIrState.latestCheckpoint
+    ? await new GameIrStageCheckpointLoader().load({
+        workspacePath: input.workspacePath,
+        deliveryRun: input.run,
+      })
+    : undefined
+  const records = checkpoint?.records ?? new Map()
+  const projectionOperation = GAME_IR_STAGED_OPERATIONS.find(
+    candidate => candidate.domain === moduleId && candidate.operation === 'projection',
+  )
+  if (!projectionOperation)
+    recoveryConflict('Game IR projection operation is invalid')
+  const journalPacket = buildStagedOperationPacket({
+    operation: projectionOperation,
+    source: source as never,
+    records,
+  })
+  let journal
   try {
-    await loadGameIrProjectionSliceJournal({
+    journal = await loadGameIrProjectionSliceJournal({
       journalPath,
       identity: input.run.gameIrState!.identity,
       operationStep,
-      packet: packet as never,
+      packet: journalPacket as never,
       slicePlan,
     })
   } catch (error) {
@@ -258,6 +286,23 @@ async function verifyGameIrProjectionJournal(input: {
       )
     throw error
   }
+  const kind = input.run.activeDispatch?.request?.contract.kind
+  const expectedMode =
+    kind === 'projection' ||
+    kind === 'obligation-inventory' ||
+    kind === 'obligation-validation'
+      ? kind
+      : undefined
+  const modeOrder = {
+    'obligation-inventory': 0,
+    'obligation-validation': 1,
+    projection: 2,
+  } as const
+  if (
+    expectedMode &&
+    modeOrder[journal.preflightMode] < modeOrder[expectedMode]
+  )
+    recoveryConflict('Game IR recovery dispatch does not match durable preflight mode')
 }
 
 async function detachStatelessGameIrProjection(input: {

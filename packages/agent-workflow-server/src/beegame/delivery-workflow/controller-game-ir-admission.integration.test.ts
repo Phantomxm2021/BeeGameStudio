@@ -18,6 +18,11 @@ import { deriveProjectionSlicePlan, buildGameIrEvidenceFragmentCatalog } from '.
 import { sourceSectionsForGameIrProjectionSlice } from './game-ir/projection-slice-authority'
 import { digestGameIrValue } from './game-ir/model'
 import { createGameIrProjectionSliceJournal, gameIrProjectionSliceJournalPath, loadGameIrProjectionSliceJournal } from './game-ir/projection-slice-journal'
+import { buildGameIrSemanticObligationInventory } from './game-ir/semantic-obligation-inventory'
+import {
+  admitGameIrSemanticObligationValidationResult,
+  buildGameIrSemanticObligationValidationAuthority,
+} from './game-ir/semantic-obligation-validation'
 
 const DIGEST = 'a'.repeat(64)
 const ZERO_USAGE = { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }
@@ -200,6 +205,48 @@ async function prepareFixture() {
   })
   const operation = GAME_IR_STAGED_OPERATIONS[0]!
   const packet = buildStagedOperationPacket({ operation, source, records: new Map() }) as Record<string, unknown>
+  const obligationInventory = buildGameIrSemanticObligationInventory({
+    moduleId: source.moduleId,
+    source,
+    records: [
+      {
+        record: 'obligation',
+        moduleId: source.moduleId,
+        targetId: 'state-start',
+        targetKind: 'gameplay.state',
+        fragmentId: (() => {
+          const catalog = buildGameIrEvidenceFragmentCatalog({
+            sectionIndex: source.sectionIndex,
+            sectionBytes: source.sectionBytes,
+          })
+          const selectors = sourceSectionsForGameIrProjectionSlice(
+            'gameplay.slice.0',
+          )
+          return catalog.fragments.find(fragment =>
+            selectors.some(
+              selector =>
+                selector.documentPath === fragment.documentPath &&
+                selector.sectionId === fragment.sectionId,
+            ),
+          )!.fragmentId
+        })(),
+      },
+    ],
+  })
+  const validationAuthority = buildGameIrSemanticObligationValidationAuthority({
+    source,
+    inventory: obligationInventory,
+  })
+  const admittedValidation = admitGameIrSemanticObligationValidationResult({
+    authority: validationAuthority,
+    result: {
+      outcome: 'PASS',
+      moduleId: source.moduleId,
+      identities: validationAuthority.identities,
+      coverage: validationAuthority.sourceFragments.map(fragment => fragment.fragmentId),
+    },
+  })
+  if (admittedValidation.outcome !== 'PASS') throw new Error('fixture validation did not pass')
   const request: WorkerDispatchRequest = {
     dispatchId: 'game-ir-admission-dispatch',
     runId: run.runId,
@@ -217,6 +264,7 @@ async function prepareFixture() {
       foundationReadyReceiptDigest: receipt.receiptDigest,
       currentSlice: 'gameplay.slice.0',
       progress: [],
+      obligationInventory,
       sliceContext: {
         availablePriorNodes: [],
         requiredCurrentNodes: [],
@@ -281,6 +329,9 @@ async function prepareFixture() {
     packet: packet as never,
     slicePlan: deriveProjectionSlicePlan('gameplay'),
   }
+  const journal = await createGameIrProjectionSliceJournal(journalInput)
+  await journal.admitObligationInventory(obligationInventory)
+  await journal.admitObligationValidationReceipt(admittedValidation.receipt)
   return { workspacePath, controller, request, record, started, identity, foundationAuditState, packet, initial, journalInput }
 }
 

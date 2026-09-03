@@ -24,9 +24,10 @@ function fixture() {
   } as const
   const packetBody = {
     schemaVersion: 'game-ir-gameplay-projection-operation-packet.v1',
-    source: {
-      moduleId: 'gameplay',
-      taskId: identity.taskId,
+      source: {
+        moduleId: 'gameplay',
+        taskId: identity.taskId,
+        sourceDigest: 's'.repeat(64),
       compileRequest: {
         taskId: identity.taskId,
         foundation: {
@@ -57,6 +58,17 @@ function fixture() {
     ]),
   )
   const packet = { ...packetBody, packetDigest: digestGameIrValue(packetBody) }
+  const inventoryBody = {
+    schemaVersion: 'game-ir-semantic-obligation-inventory.v1',
+    moduleId: 'gameplay',
+    sourceDigest: 's'.repeat(64),
+    obligations: [],
+    index: {},
+  }
+  const obligationInventory = {
+    ...inventoryBody,
+    digest: digestGameIrValue(inventoryBody),
+  }
   const compileRequestDigest = digestGameIrValue(
     packetBody.source.compileRequest,
   )
@@ -77,6 +89,7 @@ function fixture() {
       foundationReadyReceiptDigest: identity.foundationReadyReceiptDigest,
       currentSlice: 'gameplay.slice.0',
       progress: [],
+      obligationInventory,
       sliceContext: {
         availablePriorNodes: [],
         requiredCurrentNodes: [],
