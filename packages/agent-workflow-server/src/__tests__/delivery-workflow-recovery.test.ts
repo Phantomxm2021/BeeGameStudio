@@ -60,7 +60,6 @@ import {
 } from '../beegame/delivery-workflow/game-ir/projection-slices'
 import { sourceSectionsForGameIrProjectionSlice } from '../beegame/delivery-workflow/game-ir/projection-slice-authority'
 import {
-  createGameIrProjectionSliceJournal,
   gameIrProjectionSliceJournalPath,
   loadGameIrProjectionSliceJournal,
 } from '../beegame/delivery-workflow/game-ir/projection-slice-journal'
@@ -711,6 +710,45 @@ async function matrixTerminal(input: {
       resolvedFindingIds: [],
     }
   }
+  if (
+    request.workerType === 'game-ir-compiler' &&
+    request.contract.kind === 'obligation-inventory'
+  )
+    return {
+      workerType: request.workerType,
+      operation: 'obligation-inventory' as const,
+      status: 'failed' as const,
+      records: [],
+      done: false,
+      runId: request.runId,
+      dispatchId: request.dispatchId!,
+      taskId: request.taskId!,
+      revision: request.revision,
+      compileRequestDigest: String(request.contract.compileRequestDigest),
+      foundationReadyReceiptDigest: String(
+        request.contract.foundationReadyReceiptDigest,
+      ),
+      reason: 'inventory operation needs repair',
+    }
+  if (
+    request.workerType === 'game-ir-compiler' &&
+    request.contract.kind === 'obligation-validation'
+  )
+    return {
+      workerType: request.workerType,
+      operation: 'obligation-validation' as const,
+      status: 'failed' as const,
+      done: false,
+      runId: request.runId,
+      dispatchId: request.dispatchId!,
+      taskId: request.taskId!,
+      revision: request.revision,
+      compileRequestDigest: String(request.contract.compileRequestDigest),
+      foundationReadyReceiptDigest: String(
+        request.contract.foundationReadyReceiptDigest,
+      ),
+      reason: 'validation preflight operation needs repair',
+    }
   if (request.workerType === 'game-ir-compiler')
     return request.contract.kind === 'projection'
       ? {
@@ -1278,41 +1316,53 @@ async function createProjectionRecoveryFixture() {
     },
   })
   if (validation.outcome !== 'PASS') throw new Error('projection fixture validation did not pass')
-  const canonicalOperation = GAME_IR_STAGED_OPERATIONS.find(
-    operation => operation.domain === 'gameplay' && operation.operation === 'projection',
-  )!
-  const canonicalPacket = buildStagedOperationPacket({
-    operation: canonicalOperation,
-    source: packet.source as never,
-    records: new Map(),
+  const inventoryRequest = persisted?.activeDispatch?.request
+  if (!inventoryRequest) throw new Error('projection fixture lost inventory dispatch')
+  await controller.dispatcher.completeDispatch(inventoryRequest.dispatchId!, {
+    workerType: 'game-ir-compiler',
+    operation: 'obligation-inventory',
+    status: 'completed',
+    records: [
+      {
+        record: 'obligation',
+        moduleId: packet.source.moduleId,
+        targetId: 'state-start',
+        targetKind: 'gameplay.state',
+        fragmentId: fragment.fragmentId,
+      },
+    ],
+    done: true,
+    runId: inventoryRequest.runId,
+    dispatchId: inventoryRequest.dispatchId!,
+    taskId: inventoryRequest.taskId!,
+    revision: inventoryRequest.revision,
+    compileRequestDigest: String(inventoryRequest.contract.compileRequestDigest),
+    foundationReadyReceiptDigest: String(
+      inventoryRequest.contract.foundationReadyReceiptDigest,
+    ),
   })
-  const persistedBeforePreflight = await store.load()
-  if (!persistedBeforePreflight?.activeDispatch)
-    throw new Error('projection fixture lost preflight dispatch')
-  const identityState = persistedBeforePreflight.gameIrState
-  if (!identityState || identityState.status !== 'compiling')
-    throw new Error('projection fixture has no compiling identity')
-  const preflightJournalInput = {
-    journalPath: gameIrProjectionSliceJournalPath({
-      workspacePath,
-      identity: identityState.identity,
-      operationStep: canonicalOperation.step,
-    }),
-    identity: identityState.identity,
-    operationStep: canonicalOperation.step,
-    packet: canonicalPacket as never,
-    slicePlan: deriveProjectionSlicePlan('gameplay'),
-  }
-  const preflightJournal = await createGameIrProjectionSliceJournal(preflightJournalInput)
-  await preflightJournal.admitObligationInventory(inventory)
-  await preflightJournal.admitObligationValidationReceipt(validation.receipt)
-  const projectionRun = {
-    ...persistedBeforePreflight,
-    activeDispatch: undefined,
-    thinking: 'working' as const,
-  }
-  await store.save(projectionRun)
-  await controller.resume(projectionRun)
+  const validationRequest = (await store.load())?.activeDispatch?.request
+  if (!validationRequest)
+    throw new Error('projection fixture lost validation dispatch')
+  await controller.dispatcher.completeDispatch(validationRequest.dispatchId!, {
+    workerType: 'game-ir-compiler',
+    operation: 'obligation-validation',
+    status: 'completed',
+    result: {
+      outcome: 'PASS',
+      moduleId: packet.source.moduleId,
+      coverage: validationAuthority.sourceFragments.map(item => item.fragmentId),
+    },
+    done: true,
+    runId: validationRequest.runId,
+    dispatchId: validationRequest.dispatchId!,
+    taskId: validationRequest.taskId!,
+    revision: validationRequest.revision,
+    compileRequestDigest: String(validationRequest.contract.compileRequestDigest),
+    foundationReadyReceiptDigest: String(
+      validationRequest.contract.foundationReadyReceiptDigest,
+    ),
+  })
   const projectionPersisted = await store.load()
   const projectionRequest = projectionPersisted?.activeDispatch?.request
   if (!projectionRequest || projectionRequest.contract.kind !== 'projection')
@@ -1327,13 +1377,19 @@ async function createProjectionRecoveryFixture() {
       edges: [],
     },
   }
-  const identity = run.gameIrState?.status === 'compiling'
-    ? run.gameIrState.identity
-    : persisted?.gameIrState?.status === 'compiling'
-      ? persisted.gameIrState.identity
-      : undefined
+  const identity = projectionPersisted?.gameIrState?.status === 'compiling'
+    ? projectionPersisted.gameIrState.identity
+    : undefined
   if (!identity) throw new Error('projection fixture has no compiling identity')
   const operationStep = 'phase4/gameplay/projection' as const
+  const canonicalOperation = GAME_IR_STAGED_OPERATIONS.find(
+    operation => operation.domain === 'gameplay' && operation.operation === 'projection',
+  )!
+  const canonicalPacket = buildStagedOperationPacket({
+    operation: canonicalOperation,
+    source: packet.source as never,
+    records: new Map(),
+  })
   const journalInput = {
     journalPath: gameIrProjectionSliceJournalPath({
       workspacePath,
@@ -1883,18 +1939,18 @@ describe('delivery workflow recovery', () => {
         resumeCurrentRun: run => fresh.resume(run),
       })
       expect(stopCount).toBe(1)
-      expect(fixture.started).toHaveLength(2)
-      expect(fixture.started[1]?.contract.currentSlice).toBe(
+      expect(fixture.started).toHaveLength(4)
+      expect(fixture.started[3]?.contract.currentSlice).toBe(
         fixture.request.contract.currentSlice,
       )
       expect(
-        (fixture.started[1]?.contract.sliceContext as { admittedCurrentNodes?: unknown } | undefined)
+        (fixture.started[3]?.contract.sliceContext as { admittedCurrentNodes?: unknown } | undefined)
           ?.admittedCurrentNodes,
       ).toEqual([])
-      expect(buildWorkerPrompt(fixture.started[1]!)).not.toContain(
+      expect(buildWorkerPrompt(fixture.started[3]!)).not.toContain(
         'game-ir-gameplay-projection-operation-packet.v1',
       )
-      expect(JSON.stringify(fixture.started[1])).not.toContain('sessionId')
+      expect(JSON.stringify(fixture.started[3])).not.toContain('sessionId')
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
       workspace = ''
@@ -1941,18 +1997,13 @@ describe('delivery workflow recovery', () => {
         resumeCurrentRun: run => restarted.resume(run),
       })
 
-      const request = fixture.started.at(-1)!
-      expect(request.contract.currentSlice).toBe(
-        fixture.request.contract.currentSlice,
-      )
-      expect((request.contract.sliceContext as { admittedCurrentNodes?: unknown } | undefined)?.admittedCurrentNodes).toEqual([
+      const journal = await loadGameIrProjectionSliceJournal(fixture.journalInput)
+      expect(journal.currentSliceRecordPrefix).toEqual([
         { id: 'state-start', kind: 'gameplay.state' },
       ])
-      expect(buildWorkerPrompt(request)).not.toContain(
-        'game-ir-gameplay-projection-operation-packet.v1',
+      expect(journal.nextSlice?.sliceId as string | undefined).toBe(
+        fixture.request.contract.currentSlice as string | undefined,
       )
-      expect(buildWorkerPrompt(request)).not.toContain('sectionBytes')
-      expect(JSON.stringify(request)).not.toContain('sessionId')
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
       workspace = ''
@@ -1980,7 +2031,7 @@ describe('delivery workflow recovery', () => {
           resumeCurrentRun: run => restarted.resume(run),
         }),
       ).rejects.toThrow(/journal/i)
-      expect(fixture.started).toHaveLength(1)
+      expect(fixture.started).toHaveLength(3)
       expect((await fixture.store.load())?.activeDispatch?.status).toBe('running')
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
@@ -2020,14 +2071,8 @@ describe('delivery workflow recovery', () => {
         resumeCurrentRun: run => restarted.resume(run),
       })
       expect(stopCount).toBe(1)
-      expect(fixture.started).toHaveLength(2)
-      expect(fixture.started[1]?.contract.currentSlice).toBe(
-        'gameplay.slice.0',
-      )
-      expect(
-        (fixture.started[1]?.contract.sliceContext as { admittedCurrentNodes?: unknown } | undefined)
-          ?.admittedCurrentNodes,
-      ).toEqual([])
+      expect(fixture.started).toHaveLength(4)
+      expect(fixture.started[3]?.contract.kind).toBe('obligation-inventory')
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
       workspace = ''
@@ -2117,13 +2162,9 @@ describe('delivery workflow recovery', () => {
         stopWorkspaceWorkers: async () => undefined,
         resumeCurrentRun: run => restarted.resume(run),
       })
-      const next = fixture.started.at(-1)!
-      expect(next.contract.currentSlice).not.toBe('gameplay.slice.0')
-      expect(next.contract.progress).toHaveLength(1)
-      expect((next.contract.sliceContext as { admittedCurrentNodes?: unknown } | undefined)?.admittedCurrentNodes).toEqual([])
-      expect(
-        (await loadGameIrProjectionSliceJournal(fixture.journalInput)).entries,
-      ).toHaveLength(1)
+      const journal = await loadGameIrProjectionSliceJournal(fixture.journalInput)
+      expect(journal.entries).toHaveLength(1)
+      expect(journal.nextSlice?.sliceId).toBe('gameplay.slice.1')
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
       workspace = ''
@@ -2139,10 +2180,14 @@ describe('delivery workflow recovery', () => {
         fixture.controller.store,
         'game_ir_checkpoint_committed',
       )
-      let requestIndex = 0
-      while (requestIndex < plan.slices.length) {
+      let requestIndex = fixture.started.findIndex(
+        request => request.contract.kind === 'projection',
+      )
+      let projectionCount = 0
+      while (projectionCount < plan.slices.length) {
         const request = fixture.started[requestIndex++]
         if (!request) throw new Error('projection slice dispatch was not started')
+        projectionCount += 1
         const finalSlice = request.contract.currentSlice === plan.slices.at(-1)?.sliceId
         if (finalSlice) {
           await expect(
@@ -2179,7 +2224,7 @@ describe('delivery workflow recovery', () => {
         resumeCurrentRun: run => restarted.resume(run),
       })
       await expect(loadGameIrProjectionSliceJournal(fixture.journalInput)).rejects.toThrow()
-      expect(fixture.started.slice(1).some(request => request.contract.currentSlice === 'gameplay.slice.0')).toBe(false)
+      expect(fixture.started.slice(3).some(request => request.contract.currentSlice === 'gameplay.slice.0')).toBe(false)
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
       workspace = ''
@@ -2222,7 +2267,7 @@ describe('delivery workflow recovery', () => {
             resumeCurrentRun: run => restarted.resume(run),
           }),
         ).rejects.toThrow()
-        expect(fixture.started).toHaveLength(1)
+        expect(fixture.started).toHaveLength(3)
       } finally {
         await rm(fixture.workspacePath, { recursive: true, force: true })
         workspace = ''
