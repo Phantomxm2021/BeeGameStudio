@@ -74,6 +74,21 @@ async function waitForStartedRequest(requests: WorkerDispatchRequest[], dispatch
   throw new Error(`worker request ${dispatchId} did not start`)
 }
 
+async function waitForRunningRevisionTask(
+  controller: ReturnType<typeof createDeliveryWorkflowController>,
+  expected: Pick<FoundationRevisionDocumentTask, 'taskId' | 'revision'>,
+): Promise<{ run: DeliveryRun; task: FoundationRevisionDocumentTask }> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const run = await controller.store.load()
+    const task = run?.foundationAuditState?.tasks.find(candidate => candidate.taskId === expected.taskId)
+    if (run && task?.kind === 'document-revision' && task.revision === expected.revision && task.status === 'running') {
+      return { run, task }
+    }
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+  throw new Error(`revision task ${expected.taskId} did not become durably running`)
+}
+
 function staleTopLevelTerminalDispatch(revision: string): NonNullable<DeliveryRun['activeDispatch']> {
   const startedAt = new Date(0).toISOString()
   return {
@@ -1574,19 +1589,13 @@ describe('foundation fact runtime controller integration', () => {
       const first = current!.foundationAuditState!.tasks.find(task => task.kind === 'document-revision')!
       const firstDispatch = first.dispatch!.dispatchId
       await expect(controller.dispatcher.completeDispatch(firstDispatch, {})).rejects.toThrow(/invalid|terminal/i)
-      current = await controller.store.load()
-      if (current!.foundationAuditState!.tasks.find(task => task.taskId === first.taskId)!.status === 'retryable') {
-        await controller.resume(current!)
-        current = await controller.store.load()
-      }
-      const firstRetry = current!.foundationAuditState!.tasks.find(task => task.taskId === first.taskId)!
+      const firstRetry = (await waitForRunningRevisionTask(controller, first)).task
       expect(firstRetry.status).toBe('running')
       expect(firstRetry.attempt).toBe(2)
       expect(firstRetry.failureReason).toBeUndefined()
       const firstRetryRequest = await waitForStartedRequest(requests, firstRetry.dispatch!.dispatchId)
       expect(firstRetryRequest.contract.priorFailureReason).toMatch(/invalid|terminal/i)
-      await controller.resume(current!)
-      current = await controller.store.load()
+      current = (await controller.store.load())!
       const second = current!.foundationAuditState!.tasks.find(task => task.taskId === first.taskId)!
       expect(second.dispatch).toBeDefined()
       expect(second.status).toBe('running')
@@ -1617,8 +1626,8 @@ describe('foundation fact runtime controller integration', () => {
       const { run: current } = await driveToFactOwnerRevisionIssue(controller)
       const task = current.foundationAuditState!.tasks.find(candidate => candidate.kind === 'document-revision')! as FoundationRevisionDocumentTask
       await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, await makeUnauthorizedRevisionTerminal(workspacePath, current, task))).rejects.toThrow(/invalid foundation revision terminal/i)
-      const retried = await controller.store.load()
-      const retry = retried!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId && candidate.kind === 'document-revision')!
+      const retried = (await waitForRunningRevisionTask(controller, task)).run
+      const retry = retried.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId && candidate.kind === 'document-revision')!
       expect(retried!.status).toBe('running')
       expect(retried!.foundationAuditState!.status).toBe('revising')
       expect(retry.status).toBe('running')

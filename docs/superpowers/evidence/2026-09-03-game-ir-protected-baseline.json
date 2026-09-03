@@ -20,6 +20,13 @@
       "correctedBlobId": "80aefe9c1b8ef2fa439af8b27bb2b25087b08400",
       "reason": "derive display phase count from DELIVERY_PROGRESS_STAGES",
       "failureEvidencePath": "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts",
+      "baselineBlobId": "af2cd7c90d05b08b105bc907c3bd51c2bf1f2b51",
+      "correctedBlobId": "724597486bd5afdceada734bbdbb7ee1a168e232",
+      "reason": "await the automatic onRetryable retry task to become durably running",
+      "failureEvidencePath": "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md"
     }
   ],
   "protectedPaths": [

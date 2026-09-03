@@ -70,6 +70,13 @@ const EXPECTED_TEST_CORRECTIONS = [
     reason: "derive display phase count from DELIVERY_PROGRESS_STAGES",
     failureEvidencePath: "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md",
   },
+  {
+    path: "packages/agent-workflow-server/src/beegame/delivery-workflow/foundation-fact-runtime.integration.test.ts",
+    baselineBlobId: "af2cd7c90d05b08b105bc907c3bd51c2bf1f2b51",
+    correctedBlobId: "724597486bd5afdceada734bbdbb7ee1a168e232",
+    reason: "await the automatic onRetryable retry task to become durably running",
+    failureEvidencePath: "docs/superpowers/evidence/2026-09-03-stable-workflow-local-verification.md",
+  },
 ] as const;
 
 const EXPECTED_HISTORICAL_EVIDENCE = [
@@ -201,7 +208,7 @@ function validateManifest(root: string, value: unknown): BoundaryViolation[] {
         (entry as Record<string, unknown>).failureEvidencePath !== "",
     )
   ) {
-    return mismatch("admittedTestCorrections must contain exactly the two correction records");
+    return mismatch("admittedTestCorrections must contain exactly the three correction records");
   }
   for (const [index, expected] of EXPECTED_TEST_CORRECTIONS.entries()) {
     const entry = corrections[index] as Record<string, string>;
