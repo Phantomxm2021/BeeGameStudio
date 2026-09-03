@@ -446,7 +446,7 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
-  test('rejects a structurally invalid Markdown response without replacing the candidate', async () => {
+  test('fails a structurally invalid Markdown response after one replacement attempt', async () => {
     const runtime = await startRuntime({ markdownStream: true })
 
     await expect(
@@ -456,7 +456,7 @@ describe('native CLI process runner', () => {
         onMessage: () => undefined,
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
-    ).rejects.toThrow('foundation_transport_needs_action')
+    ).rejects.toThrow('Markdown structural replacement')
     runtime.dispose?.()
   })
 

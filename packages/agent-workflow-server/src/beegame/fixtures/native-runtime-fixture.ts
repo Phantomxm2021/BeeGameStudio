@@ -6,7 +6,7 @@ let userMessageCount = 0
 const receivedPrompts: string[] = []
 const receivedSessionIds: string[] = []
 let assetScenario: string | undefined
-let markdownRecoveryMode: 'normal' | 'never' | 'twice' | 'empty_continuation' | 'empty_terminal_append' | 'malformed_once' | 'malformed_forever' = 'normal'
+let markdownRecoveryMode: 'normal' | 'never' | 'twice' | 'empty_continuation' | 'empty_terminal_append' | 'malformed_once' = 'normal'
 
 const completeGddMarkdown = [
   '# Visible Markdown',
@@ -218,9 +218,7 @@ for await (const chunk of Bun.stdin.stream()) {
       content.includes('complete raw Markdown document from the beginning')
     ) {
       emitMarkdownResponse(
-        markdownRecoveryMode === 'malformed_forever'
-          ? malformedGddMarkdown
-          : completeGddMarkdown,
+        completeGddMarkdown,
         'end_turn',
         userMessageCount,
       )
@@ -237,7 +235,6 @@ for await (const chunk of Bun.stdin.stream()) {
       content === 'truncated-markdown-empty-terminal-continuation' ||
       content === 'truncated-markdown-forever' ||
       content === 'malformed-markdown-end-turn' ||
-      content === 'malformed-markdown-end-turn-forever' ||
       (userMessageCount > 1 &&
         typeof content === 'string' &&
         content.includes('Continue the same raw Markdown response'))
@@ -252,11 +249,8 @@ for await (const chunk of Bun.stdin.stream()) {
         markdownRecoveryMode = 'empty_terminal_append'
       if (content === 'malformed-markdown-end-turn')
         markdownRecoveryMode = 'malformed_once'
-      if (content === 'malformed-markdown-end-turn-forever')
-        markdownRecoveryMode = 'malformed_forever'
       const recovered = userMessageCount > 1
-      const recoveredMarkdown = markdownRecoveryMode === 'malformed_once' ||
-          markdownRecoveryMode === 'malformed_forever'
+      const recoveredMarkdown = markdownRecoveryMode === 'malformed_once'
         ? malformedGddMarkdown
         : markdownRecoveryMode === 'twice' && userMessageCount === 2
           ? completeGddMarkdown.slice(
@@ -276,7 +270,7 @@ for await (const chunk of Bun.stdin.stream()) {
           : '# Partial document\n## Executive Summary\nHalf sentence'
       emitMarkdownResponse(
         recoveredMarkdown,
-        markdownRecoveryMode === 'malformed_once' || markdownRecoveryMode === 'malformed_forever'
+        markdownRecoveryMode === 'malformed_once'
           ? 'end_turn'
         : recovered && markdownRecoveryMode !== 'never' ? 'end_turn' : '',
         userMessageCount,
