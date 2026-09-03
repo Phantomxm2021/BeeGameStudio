@@ -1491,28 +1491,66 @@ export class GameIrProjectionSliceJournal {
     }
   }
 
-  ownerSliceIdForDiagnostic(reason: string): string | undefined {
+  /**
+   * Invalidates a completed owner slice and every later entry atomically.
+   * The returned diagnostic retains the persisted evidence fragment so the
+   * retry is scoped to the same source authority as the rejected owner.
+   */
+  async rollbackCompletedOwnerForDiagnostic(
+    reason: string,
+  ): Promise<GameIrProjectionRetryDiagnostic | undefined> {
     const entries = this.state.entries
-    const nodeOwners = new Map(
-      entries.flatMap(entry =>
-        entry.semantic.nodes.map(node => [node.id, entry.sliceId] as const),
-      ),
-    )
-    const exactNodeId = firstMentionedNodeId(reason, [...nodeOwners.keys()])
-    if (exactNodeId) return nodeOwners.get(exactNodeId)
-
-    const indexed = /(?:^|\/)nodes?\/(\d+)(?:\/|$)|\bnodes?\[(\d+)\]/u.exec(
+    let ownerId = firstMentionedNodeId(
       reason,
+      entries.flatMap(entry => entry.semantic.nodes.map(node => node.id)),
     )
-    const indexText = indexed?.[1] ?? indexed?.[2]
-    if (indexText !== undefined) {
-      const nodes = entries
-        .flatMap(entry => entry.semantic.nodes)
-        .sort((left, right) => compareCodeUnits(left.id, right.id))
-      const owner = nodeOwners.get(nodes[Number(indexText)]?.id ?? '')
-      if (owner) return owner
+    if (!ownerId) {
+      const indexed = /(?:^|\/)nodes?\/(\d+)(?:\/|$)|\bnodes?\[(\d+)\]/u.exec(
+        reason,
+      )
+      const indexText = indexed?.[1] ?? indexed?.[2]
+      if (indexText !== undefined) {
+        ownerId = entries
+          .flatMap(entry => entry.semantic.nodes)
+          .sort((left, right) => compareCodeUnits(left.id, right.id))[
+            Number(indexText)
+          ]?.id
+      }
     }
-    return undefined
+    if (!ownerId) return undefined
+    const ownerEntryIndex = entries.findIndex(entry =>
+      entry.semantic.nodes.some(node => node.id === ownerId),
+    )
+    if (ownerEntryIndex < 0) return undefined
+    const ownerEntry = entries[ownerEntryIndex]
+    if (!ownerEntry) return undefined
+    const group = ownerEntry.semantic.sourceEvidenceGroups.find(group =>
+      group.subjects.includes(`node:${ownerId}#/`),
+    )
+    if (!group) return undefined
+    const catalog = buildGameIrEvidenceFragmentCatalog({
+      sectionIndex: this.authority.source.sectionIndex,
+      sectionBytes: this.authority.source.sectionBytes,
+    })
+    const fragment = catalog.fragments.find(
+      candidate =>
+        candidate.documentPath === group.documentPath &&
+        candidate.sectionId === group.sectionId &&
+        candidate.excerpt === group.excerpt,
+    )
+    if (!fragment) return undefined
+    this.state = await persist(this.path, {
+      ...this.state,
+      entries: this.state.entries.slice(0, ownerEntryIndex),
+      pendingSlice: null,
+    })
+    return {
+      scope: 'record',
+      sliceId: ownerEntry.sliceId,
+      recordId: ownerId,
+      fragmentId: fragment.fragmentId,
+      reason,
+    }
   }
 
   async appendRecords(

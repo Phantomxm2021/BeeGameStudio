@@ -101,6 +101,38 @@ describe('Game IR worker operation contracts', () => {
     ).toBeUndefined()
   })
 
+  test('exposes the manifest-owned recursive formula index policy', () => {
+    const contract = buildGameIrProjectionContract('balance')
+    expect(
+      contract.nodes.find(node => node.kind === 'balance.formula')
+        ?.referencePolicy,
+    ).toEqual({
+      kind: 'formula-indexed-references',
+      indexedReferences: [
+        {
+          path: 'value.outputUnitReferenceIndex',
+          targetKinds: ['balance.unit'],
+          recursive: false,
+        },
+        {
+          path: 'value.expression.literal.unitReferenceIndex',
+          targetKinds: ['balance.unit'],
+          recursive: true,
+        },
+        {
+          path: 'value.expression.reference.referenceIndex',
+          targetKinds: [
+            'balance.variable',
+            'balance.parameter',
+            'balance.formula',
+          ],
+          recursive: true,
+        },
+      ],
+      consumesEveryReference: true,
+    })
+  })
+
   test('does not allow the known schema-valid producer-invalid gameplay projection', () => {
     const schema = buildGameIrProjectionSliceAdmissionJsonSchema(
       'gameplay',

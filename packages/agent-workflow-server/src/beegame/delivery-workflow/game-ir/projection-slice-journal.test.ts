@@ -796,9 +796,20 @@ describe('Game IR projection slice journal', () => {
       await journal.append(emptyCompletion(fourth!.sliceId))
       const diagnostic =
         'invalid Balance module: node balance.formula.bad formula expression.right.unit reference index is out of range'
-      const owner = journal.ownerSliceIdForDiagnostic(diagnostic)
-      expect(owner).toBe(second!.sliceId)
-      await journal.invalidate(owner!)
+      const rollback = await journal.rollbackCompletedOwnerForDiagnostic(
+        diagnostic,
+      )
+      expect(rollback).toEqual({
+        scope: 'record',
+        sliceId: second!.sliceId,
+        recordId: 'balance.formula.bad',
+        fragmentId: firstEvidenceFragmentId(
+          input,
+          input.packet.source.sectionIndex[0]!.documentPath,
+          input.packet.source.sectionIndex[0]!.sectionId,
+        ),
+        reason: diagnostic,
+      })
       expect(journal.entries.map(entry => entry.sliceId)).toEqual([
         first!.sliceId,
       ])
@@ -807,16 +818,62 @@ describe('Game IR projection slice journal', () => {
     }
   })
 
-  test('does not attribute an unknown module-level diagnostic to a slice', async () => {
+  test('does not rollback an unknown module-level diagnostic', async () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
       const journal = await createGameIrProjectionSliceJournal(input)
       for (const slice of journal.slicePlan.slices)
         await journal.append(emptyCompletion(slice.sliceId))
-      expect(journal.ownerSliceIdForDiagnostic('unknown closure failure')).toBe(
-        undefined,
+      const before = journal.snapshot
+      await expect(
+        journal.rollbackCompletedOwnerForDiagnostic('unknown closure failure'),
+      ).resolves.toBeUndefined()
+      expect(journal.snapshot).toEqual(before)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('rolls back a completed owner addressed by its canonical node index', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const input = fixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(input)
+      const slice = journal.nextSlice!
+      const fragmentId = firstEvidenceFragmentId(
+        input,
+        input.packet.source.sectionIndex[0]!.documentPath,
+        input.packet.source.sectionIndex[0]!.sectionId,
       )
+      await journal.append({
+        status: 'completed',
+        sliceId: slice.sliceId,
+        semantic: {
+          nodes: [
+            {
+              id: 'entity.hero',
+              kind: 'gameplay.entity',
+              value: { label: 'Hero' },
+              references: [],
+              edges: [],
+            },
+          ],
+          sourceEvidenceGroups: [{ nodeIds: ['entity.hero'], fragmentId }],
+        },
+      } as unknown as GameIrProjectionSliceCompletion)
+      await journal.append(emptyCompletion(journal.nextSlice!.sliceId))
+      const rollback = await journal.rollbackCompletedOwnerForDiagnostic(
+        'invalid projection nodes[0] owner',
+      )
+      expect(rollback).toEqual({
+        scope: 'record',
+        sliceId: slice.sliceId,
+        recordId: 'entity.hero',
+        fragmentId,
+        reason: 'invalid projection nodes[0] owner',
+      })
+      expect(journal.entries).toHaveLength(0)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1040,24 +1097,6 @@ describe('Game IR projection slice journal', () => {
       } as unknown as GameIrProjectionSliceCompletion)
       expect(journal.entries).toHaveLength(2)
       expect(journal.nextSlice).toBeUndefined()
-      expect(
-        journal.ownerSliceIdForDiagnostic(
-          'objective objective.escape must reach an explicit outcome',
-        ),
-      ).toBe('gameplay.slice.1')
-      expect(
-        journal.ownerSliceIdForDiagnostic(
-          'transition t leaves terminal state state.start',
-        ),
-      ).toBe('gameplay.slice.1')
-      expect(
-        journal.ownerSliceIdForDiagnostic(
-          'gameplay module must declare at least one state',
-        ),
-      ).toBeUndefined()
-      expect(journal.ownerSliceIdForDiagnostic('unknown closure failure')).toBe(
-        undefined,
-      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }

@@ -112,6 +112,14 @@ export type BalanceReferencePolicy = Readonly<{
   targetKinds: readonly ['balance.unit']
   indexField: 'unitReferenceIndex'
   requiredIndex: 0
+}> | Readonly<{
+  kind: 'formula-indexed-references'
+  indexedReferences: readonly Readonly<{
+    path: string
+    targetKinds: readonly string[]
+    recursive: boolean
+  }>[]
+  consumesEveryReference: true
 }>
 
 const role = (
@@ -132,6 +140,31 @@ const EXACT_SINGLE_INDEX_REFERENCE_POLICY: BalanceReferencePolicy = Object.freez
   targetKinds: Object.freeze(['balance.unit'] as const),
   indexField: 'unitReferenceIndex',
   requiredIndex: 0,
+})
+const FORMULA_INDEXED_REFERENCE_POLICY: BalanceReferencePolicy = Object.freeze({
+  kind: 'formula-indexed-references',
+  indexedReferences: Object.freeze([
+    Object.freeze({
+      path: 'value.outputUnitReferenceIndex',
+      targetKinds: Object.freeze(['balance.unit']),
+      recursive: false,
+    }),
+    Object.freeze({
+      path: 'value.expression.literal.unitReferenceIndex',
+      targetKinds: Object.freeze(['balance.unit']),
+      recursive: true,
+    }),
+    Object.freeze({
+      path: 'value.expression.reference.referenceIndex',
+      targetKinds: Object.freeze([
+        'balance.variable',
+        'balance.parameter',
+        'balance.formula',
+      ]),
+      recursive: true,
+    }),
+  ]),
+  consumesEveryReference: true,
 })
 
 /** The single schema-owned authority for Balance kinds, values, and roles. */
@@ -206,6 +239,7 @@ export const BALANCE_DOMAIN_MANIFEST = Object.freeze({
         'balance.formula',
       ]),
     }),
+    referencePolicy: FORMULA_INDEXED_REFERENCE_POLICY,
   }),
   'balance.economy-source': Object.freeze({
     valueJsonSchema: projectionValueSchema({
@@ -524,6 +558,72 @@ function parseExpression(
   fail(`${label} has an unknown kind`)
 }
 
+function formulaReferenceRule(
+  path: string,
+): Readonly<{
+  path: string
+  targetKinds: readonly string[]
+  recursive: boolean
+}> {
+  const policy = BALANCE_DOMAIN_MANIFEST['balance.formula'].referencePolicy
+  if (!policy || policy.kind !== 'formula-indexed-references')
+    fail('balance.formula has no formula indexed-reference policy')
+  const rule = policy.indexedReferences.find(candidate => candidate.path === path)
+  if (!rule) fail(`balance.formula policy is missing ${path}`)
+  return rule
+}
+
+function assertFormulaIndexedReference(
+  node: GameIrNode,
+  index: number,
+  path: string,
+): void {
+  const rule = formulaReferenceRule(path)
+  const reference = node.references[index]
+  const received = reference?.targetType ?? '<missing>'
+  if (!reference || !rule.targetKinds.includes(reference.targetType))
+    fail(
+      `node ${node.id} indexed reference at ${path} expects ${rule.targetKinds.join('/')}; received ${received}`,
+    )
+}
+
+function validateFormulaIndexedReferences(
+  node: GameIrNode,
+  expression: BalanceFormulaExpression,
+  outputUnitReferenceIndex: number,
+): void {
+  assertFormulaIndexedReference(
+    node,
+    outputUnitReferenceIndex,
+    'value.outputUnitReferenceIndex',
+  )
+  const visit = (entry: BalanceFormulaExpression): void => {
+    if (entry.kind === 'literal') {
+      assertFormulaIndexedReference(
+        node,
+        entry.unitReferenceIndex,
+        'value.expression.literal.unitReferenceIndex',
+      )
+      return
+    }
+    if (entry.kind === 'reference') {
+      assertFormulaIndexedReference(
+        node,
+        entry.referenceIndex,
+        'value.expression.reference.referenceIndex',
+      )
+      return
+    }
+    if ('operand' in entry) {
+      visit(entry.operand)
+      return
+    }
+    visit(entry.left)
+    visit(entry.right)
+  }
+  visit(expression)
+}
+
 function validateReferences(
   node: GameIrNode,
   targets: ReadonlyMap<string, KnownTarget>,
@@ -685,13 +785,18 @@ function parseVariableValue(
 function validateReferencePolicy(
   node: GameIrNode,
   policy: BalanceReferencePolicy | undefined,
+  consumedReferences: Set<number>,
 ): Set<number> {
-  const consumedReferences = new Set<number>()
   if (!policy) return consumedReferences
   if (policy.kind === 'exact-edge-targets') {
     exactRoleReferences(node)
     for (let index = 0; index < node.references.length; index += 1)
       consumedReferences.add(index)
+    return consumedReferences
+  }
+  if (policy.kind === 'formula-indexed-references') {
+    if (!policy.consumesEveryReference)
+      fail('formula indexed-reference policy must consume every reference')
     return consumedReferences
   }
   const indexValue = node.value[policy.indexField]
@@ -742,10 +847,11 @@ function parseFormulaValue(node: GameIrNode): {
     `node ${node.id} output unit`,
   )
   usedReferences.add(outputUnitReferenceIndex)
-  for (let index = 0; index < node.references.length; index += 1) {
-    if (!usedReferences.has(index))
-      fail(`node ${node.id} has an AST/reference mismatch`)
-  }
+  validateFormulaIndexedReferences(
+    node,
+    expression,
+    outputUnitReferenceIndex,
+  )
   return {
     value: {
       label: text(node.value.label, `node ${node.id} label`),
@@ -1129,11 +1235,7 @@ export function parseBalanceProjectionNode(
     BALANCE_DOMAIN_MANIFEST[node.kind as keyof typeof BALANCE_DOMAIN_MANIFEST]
   const policy =
     'referencePolicy' in manifest ? manifest.referencePolicy : undefined
-  for (const referenceIndex of validateReferencePolicy(
-    node,
-    policy,
-  ))
-    consumedReferences.add(referenceIndex)
+  validateReferencePolicy(node, policy, consumedReferences)
   assertReferenceConsumption(node, consumedReferences)
   return {
     ...node,

@@ -187,6 +187,16 @@ function nodeSchema(
       targetType:
         referencePolicy?.kind === 'exact-single-index-reference'
           ? { enum: referencePolicy.targetKinds }
+          : referencePolicy?.kind === 'formula-indexed-references'
+            ? {
+                enum: [
+                  ...new Set(
+                    referencePolicy.indexedReferences.flatMap(
+                      rule => rule.targetKinds,
+                    ),
+                  ),
+                ],
+              }
           : { type: 'string', minLength: 1 },
     },
     required: ['targetId', 'targetType'],

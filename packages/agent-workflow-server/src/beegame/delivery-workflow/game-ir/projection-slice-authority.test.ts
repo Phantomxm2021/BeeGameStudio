@@ -286,6 +286,18 @@ describe('Game IR projection slice authority source scope', () => {
     expect(rendered).toContain('requiredIndex')
   })
 
+  test('renders the recursive Balance formula index policy from the domain manifest', () => {
+    const authority = authorityFor(projectionPacket('balance.slice.1'), {
+      sliceId: 'balance.slice.1',
+    })
+    const rendered = renderGameIrProjectionSliceAuthority(authority)
+    expect(rendered).toContain('formula-indexed-references')
+    expect(rendered).toContain('value.outputUnitReferenceIndex')
+    expect(rendered).toContain('value.expression.literal.unitReferenceIndex')
+    expect(rendered).toContain('value.expression.reference.referenceIndex')
+    expect(rendered).toContain('consumesEveryReference')
+  })
+
   test('narrows record retries to the failed fragment while retaining direct context and admitted prefix', () => {
     const packet = projectionPacket('gameplay.slice.1')
     const authority = authorityFor(packet, {

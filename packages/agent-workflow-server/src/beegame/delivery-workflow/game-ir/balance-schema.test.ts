@@ -392,6 +392,31 @@ describe('Balance Game IR schema', () => {
       indexField: 'unitReferenceIndex',
       requiredIndex: 0,
     })
+    expect(BALANCE_DOMAIN_MANIFEST['balance.formula'].referencePolicy).toEqual({
+      kind: 'formula-indexed-references',
+      indexedReferences: [
+        {
+          path: 'value.outputUnitReferenceIndex',
+          targetKinds: ['balance.unit'],
+          recursive: false,
+        },
+        {
+          path: 'value.expression.literal.unitReferenceIndex',
+          targetKinds: ['balance.unit'],
+          recursive: true,
+        },
+        {
+          path: 'value.expression.reference.referenceIndex',
+          targetKinds: [
+            'balance.variable',
+            'balance.parameter',
+            'balance.formula',
+          ],
+          recursive: true,
+        },
+      ],
+      consumesEveryReference: true,
+    })
     expect('referencePolicy' in BALANCE_DOMAIN_MANIFEST['balance.unit']).toBe(
       false,
     )
@@ -403,6 +428,33 @@ describe('Balance Game IR schema', () => {
     target.value.unitReferenceIndex = 1
     expect(() => parseBalanceModule(invalid, gameplayTargets())).toThrow(
       'node balance.hp unit reference policy requires exactly-one balance.unit reference at index 0; received index 1 with 1 reference',
+    )
+  })
+
+  test('uses formula indexed-reference policy for output and recursive expression references', () => {
+    const module = cloneModule()
+    const formula = nodeById(module, 'balance.formula.math')
+    formula.references = [
+      ref('balance.rate', 'balance.parameter'),
+      ref('balance.unit.none', 'balance.unit'),
+    ]
+    formula.edges = [edge('depends-on', 'balance.rate', 'balance.parameter')]
+    formula.value.expression = { kind: 'reference', referenceIndex: 0 }
+    formula.value.outputUnitReferenceIndex = 1
+    expect(() => parseBalanceModule(module, gameplayTargets())).not.toThrow()
+
+    formula.value.outputUnitReferenceIndex = 0
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(
+      'node balance.formula.math indexed reference at value.outputUnitReferenceIndex expects balance.unit; received balance.parameter',
+    )
+  })
+
+  test('requires every formula reference to be consumed by its indexed expression', () => {
+    const module = cloneModule()
+    const formula = nodeById(module, 'balance.formula.math')
+    formula.references.push(ref('balance.unit.none', 'balance.unit'))
+    expect(() => parseBalanceModule(module, gameplayTargets())).toThrow(
+      'node balance.formula.math has an unused reference at index 3',
     )
   })
 
