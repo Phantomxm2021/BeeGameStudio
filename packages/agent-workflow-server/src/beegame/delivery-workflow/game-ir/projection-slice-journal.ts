@@ -38,6 +38,15 @@ import {
   type GameIrProjectionContract,
 } from './projection-contract'
 import {
+  admitGameIrSemanticObligationValidationResult,
+  buildGameIrSemanticObligationValidationAuthority,
+  normalizeGameIrSemanticObligationValidationReceipt,
+  type GameIrSemanticObligationValidationAuthority,
+  type GameIrSemanticObligationValidationReceipt,
+  type GameIrSemanticObligationValidationResult,
+} from './semantic-obligation-validation'
+import type { GameIrSemanticObligationInventory } from './semantic-obligation-inventory'
+import {
   buildGameIrProjectionSliceAdmissionJsonSchema,
   buildGameIrEvidenceFragmentCatalog,
   deriveProjectionSlicePlan,
@@ -50,7 +59,7 @@ import {
 import type { GameIrProjectionNodeRecord } from './projection-record-stream'
 
 export const GAME_IR_PROJECTION_SLICE_JOURNAL_SCHEMA_VERSION =
-  'game-ir-projection-slice-journal.v2' as const
+  'game-ir-projection-slice-journal.v3' as const
 
 const SHA256 = /^[a-f0-9]{64}$/
 const GENESIS_DIGEST = '0'.repeat(64)
@@ -111,6 +120,16 @@ export type GameIrProjectionSliceJournalInput = Readonly<{
   slicePlan: GameIrProjectionSlicePlan
 }>
 
+export type GameIrProjectionSlicePreflightDiagnostic = Readonly<
+  Extract<GameIrSemanticObligationValidationResult, { outcome: 'FAIL' }>
+>
+
+export type GameIrProjectionSliceJournalPreflight = Readonly<{
+  inventory: GameIrSemanticObligationInventory | null
+  validationReceipt: GameIrSemanticObligationValidationReceipt | null
+  diagnostic: GameIrProjectionSlicePreflightDiagnostic | null
+}>
+
 const PROJECTION_OPERATION_STEPS = new Set<GameIrProtocolStep>([
   'phase4/gameplay/projection',
   'phase4/balance/projection',
@@ -162,15 +181,20 @@ export type GameIrProjectionSliceJournalSnapshot = Readonly<{
   operationPacketDigest: string
   slicePlan: GameIrProjectionSlicePlan
   slicePlanDigest: string
+  preflight: GameIrProjectionSliceJournalPreflight
   entries: readonly GameIrProjectionSliceJournalEntry[]
   pendingSlice: GameIrProjectionPendingSlice | null
   journalDigest: string
 }>
 
-type Authority = Readonly<{
+type PacketAuthority = Readonly<{
   packet: GameIrProjectionOperationPacket
   source: GameIrDomainSourceEnvelope
   semanticPacket: unknown
+}>
+
+type Authority = Readonly<PacketAuthority & {
+  validation?: GameIrSemanticObligationValidationAuthority
 }>
 
 /**
@@ -405,7 +429,7 @@ function normalizePlan(value: unknown): GameIrProjectionSlicePlan {
   return clone(canonical)
 }
 
-function normalizePacket(value: unknown): Authority {
+function normalizePacket(value: unknown): PacketAuthority {
   if (!isRecord(value)) fail('operation packet must be a plain object')
   exactKeys(
     value,
@@ -519,6 +543,19 @@ function normalizePacket(value: unknown): Authority {
     fail('operation packet digest is stale or invalid')
   const packet = deepFreeze({ ...body, packetDigest })
   return { packet, source, semanticPacket }
+}
+
+function validationFor(
+  source: GameIrDomainSourceEnvelope,
+  inventory: GameIrSemanticObligationInventory,
+): GameIrSemanticObligationValidationAuthority {
+  return buildGameIrSemanticObligationValidationAuthority({ source, inventory })
+}
+
+function requireValidation(authority: Authority): GameIrSemanticObligationValidationAuthority {
+  if (!authority.validation)
+    fail('projection requires an admitted obligation validation PASS receipt')
+  return authority.validation
 }
 
 function normalizeGroups(
@@ -727,23 +764,11 @@ function sliceContext(
       admittedCurrentNodes: Object.freeze([]),
     })
   const currentKinds = new Set(slice.nodeKinds)
-  const serviceOwned = serviceOwnedTargetIds(authority)
   const priorNodes = entries.flatMap(entry => entry.semantic.nodes)
-  const required = new Map<string, { id: string; kind: string }>()
-  for (const node of priorNodes) {
-    for (const target of [...node.references, ...node.edges]) {
-      if (
-        !currentKinds.has(target.targetType) ||
-        serviceOwned.has(target.targetId)
-      )
-        continue
-      const candidate = { id: target.targetId, kind: target.targetType }
-      const existing = required.get(candidate.id)
-      if (existing && existing.kind !== candidate.kind)
-        fail(`required node ${candidate.id} has conflicting kinds`)
-      required.set(candidate.id, candidate)
-    }
-  }
+  const required = requireValidation(authority).inventory.obligations
+    .filter(obligation => obligation.ownerSliceId === slice.sliceId)
+    .map(obligation => ({ id: obligation.targetId, kind: obligation.targetKind }))
+    .filter(target => currentKinds.has(target.kind))
   const availablePriorNodes = priorNodes
     .map(node => ({ id: node.id, kind: node.kind, value: node.value }))
     .sort((left, right) =>
@@ -764,19 +789,60 @@ function sliceContext(
   })
 }
 
-function assertRequiredCurrentNodes(
+function assertObligationCoverage(
   entries: readonly GameIrProjectionSliceJournalEntry[],
   slice: GameIrProjectionSlice,
   nodes: readonly GameIrProjectionSliceNode[],
   authority: Authority,
+  sourceEvidenceGroups: readonly GameIrSourceEvidenceGroup[],
 ): void {
-  const required = sliceContext(entries, slice, authority).requiredCurrentNodes
-  const actual = new Map(nodes.map(node => [node.id, node.kind]))
-  for (const target of required)
-    if (actual.get(target.id) !== target.kind)
+  const obligations = requireValidation(authority).inventory.obligations.filter(
+    obligation => obligation.ownerSliceId === slice.sliceId,
+  )
+  const byId = new Map(obligations.map(obligation => [obligation.targetId, obligation]))
+  const actual = new Map<string, GameIrProjectionSliceNode>()
+  for (const node of nodes) {
+    const obligation = byId.get(node.id)
+    if (!obligation)
+      fail(`slice ${slice.sliceId} contains undeclared node ${node.id}`)
+    if (obligation.targetKind !== node.kind)
       fail(
-        `slice ${slice.sliceId} is missing required node ${target.id} (${target.kind})`,
+        `slice ${slice.sliceId} node ${node.id} has wrong kind ${node.kind}; expected ${obligation.targetKind}`,
       )
+    if (actual.has(node.id)) fail(`slice ${slice.sliceId} contains duplicate obligation ${node.id}`)
+    actual.set(node.id, node)
+  }
+  if (actual.size !== obligations.length)
+    fail(`slice ${slice.sliceId} does not cover every admitted obligation`)
+
+  const catalog = buildGameIrEvidenceFragmentCatalog({
+    sectionIndex: authority.source.sectionIndex,
+    sectionBytes: authority.source.sectionBytes,
+  })
+  const fragmentsByNode = new Map<string, string>()
+  for (const group of sourceEvidenceGroups) {
+    const fragment = catalog.fragments.find(
+      candidate =>
+        candidate.documentPath === group.documentPath &&
+        candidate.sectionId === group.sectionId &&
+        candidate.excerpt === group.excerpt,
+    )
+    if (!fragment) fail(`slice ${slice.sliceId} evidence fragment is outside authority`)
+    for (const subject of group.subjects) {
+      const match = /^node:(.+)#\/$/u.exec(subject)
+      if (match) {
+        if (fragmentsByNode.has(match[1]!))
+          fail(`slice ${slice.sliceId} has duplicate evidence for ${match[1]}`)
+        fragmentsByNode.set(match[1]!, fragment.fragmentId)
+      }
+    }
+  }
+  for (const obligation of obligations) {
+    if (fragmentsByNode.get(obligation.targetId) !== obligation.fragmentId)
+      fail(
+        `slice ${slice.sliceId} evidence for ${obligation.targetId} is not bound to ${obligation.fragmentId}`,
+      )
+  }
 }
 
 function assertRelationshipCardinality(
@@ -1042,30 +1108,14 @@ function pendingDigest(
   return digestGameIrValue(pendingBody(pending))
 }
 
-function firstMentionedNodeId(
-  reason: string,
-  nodeIds: readonly string[],
-): string | undefined {
-  return nodeIds
-    .map(id => {
-      const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const match = new RegExp(
-        `(^|[^A-Za-z0-9._-])${escaped}(?=$|[^A-Za-z0-9._-])`,
-        'u',
-      ).exec(reason)
-      return match
-        ? { id, index: match.index + match[1]!.length }
-        : undefined
-    })
-    .filter(
-      (match): match is { id: string; index: number } =>
-        match !== undefined,
-    )
-    .sort(
-      (left, right) =>
-        left.index - right.index || right.id.length - left.id.length,
-    )[0]?.id
-}
+export type GameIrProjectionSliceRollbackInput = Readonly<{
+  ownerSliceId: string
+  obligationId: string
+  fragmentId: string
+  recordId?: string
+  diagnosticDigest?: string
+  expectedJournalDigest?: string
+}>
 
 function normalizePendingSlice(
   value: unknown,
@@ -1145,6 +1195,76 @@ function normalizePendingSlice(
   return deepFreeze({ ...body, pendingDigest: digest })
 }
 
+function normalizePreflightDiagnostic(
+  value: unknown,
+): GameIrProjectionSlicePreflightDiagnostic | null {
+  if (value === null) return null
+  if (!isRecord(value)) fail('preflight diagnostic must be an object or null')
+  exactKeys(
+    value,
+    [
+      'outcome',
+      'reasonCode',
+      'targetId',
+      'expectedKind',
+      'semanticRole',
+      'fragmentId',
+      'obligationId',
+      'ownerSliceId',
+      'evidence',
+    ],
+    'preflight diagnostic',
+  )
+  if (value.outcome !== 'FAIL' || value.reasonCode !== 'missing-obligation')
+    fail('preflight diagnostic must be a missing-obligation failure')
+  return deepFreeze({
+    outcome: 'FAIL',
+    reasonCode: 'missing-obligation',
+    targetId: text(value.targetId, 'preflight diagnostic.targetId'),
+    expectedKind: text(value.expectedKind, 'preflight diagnostic.expectedKind'),
+    semanticRole: text(value.semanticRole, 'preflight diagnostic.semanticRole'),
+    fragmentId: text(value.fragmentId, 'preflight diagnostic.fragmentId'),
+    obligationId: text(value.obligationId, 'preflight diagnostic.obligationId'),
+    ownerSliceId: text(value.ownerSliceId, 'preflight diagnostic.ownerSliceId'),
+    evidence: clone(value.evidence) as GameIrProjectionSlicePreflightDiagnostic['evidence'],
+  })
+}
+
+function normalizePersistedPreflight(
+  value: unknown,
+  source: GameIrDomainSourceEnvelope,
+): {
+  preflight: GameIrProjectionSliceJournalPreflight
+  validation?: GameIrSemanticObligationValidationAuthority
+} {
+  if (!isRecord(value)) fail('journal preflight must be a plain object')
+  exactKeys(value, ['inventory', 'validationReceipt', 'diagnostic'], 'journal preflight')
+  const diagnostic = normalizePreflightDiagnostic(value.diagnostic)
+  if (value.inventory === null) {
+    if (value.validationReceipt !== null)
+      fail('journal validation receipt requires a persisted inventory')
+    return {
+      preflight: deepFreeze({ inventory: null, validationReceipt: null, diagnostic }),
+    }
+  }
+  const validation = validationFor(
+    source,
+    value.inventory as GameIrSemanticObligationInventory,
+  )
+  const inventory = validation.inventory
+  const validationReceipt =
+    value.validationReceipt === null
+      ? null
+      : normalizeGameIrSemanticObligationValidationReceipt(
+          validation,
+          value.validationReceipt,
+        )
+  return {
+    preflight: deepFreeze({ inventory, validationReceipt, diagnostic }),
+    ...(validationReceipt ? { validation } : {}),
+  }
+}
+
 function normalizeSnapshot(
   value: unknown,
   input: GameIrProjectionSliceJournalInput,
@@ -1160,6 +1280,7 @@ function normalizeSnapshot(
       'operationPacketDigest',
       'slicePlan',
       'slicePlanDigest',
+      'preflight',
       'entries',
       'pendingSlice',
       'journalDigest',
@@ -1184,6 +1305,12 @@ function normalizeSnapshot(
   sha256(value.operationPacketDigest, 'journal operationPacketDigest')
   const slicePlan = normalizePlan(value.slicePlan)
   if (!same(slicePlan, input.slicePlan)) fail('journal slice plan is stale')
+  const persisted = normalizePersistedPreflight(value.preflight, authority.source)
+  authority = persisted.validation
+    ? { ...authority, validation: persisted.validation }
+    : authority
+  if (value.entries && Array.isArray(value.entries) && value.entries.length > 0)
+    requireValidation(authority)
   const slicePlanDigest = sha256(
     value.slicePlanDigest,
     'journal slicePlanDigest',
@@ -1226,11 +1353,12 @@ function normalizeSnapshot(
       entries.flatMap(entry => entry.semantic.nodes),
     )
     assertRelationshipCardinality(slice, normalized.semantic.nodes)
-    assertRequiredCurrentNodes(
+    assertObligationCoverage(
       entries,
       slice,
       normalized.semantic.nodes,
       authority,
+      normalized.semantic.sourceEvidenceGroups,
     )
     assertLocalTargetClosure(
       entries,
@@ -1277,6 +1405,8 @@ function normalizeSnapshot(
     slicePlan,
     authority,
   )
+  if (pendingSlice && !persisted.validation)
+    fail('pending projection requires an admitted obligation validation PASS receipt')
   const body = {
     schemaVersion: GAME_IR_PROJECTION_SLICE_JOURNAL_SCHEMA_VERSION,
     identity,
@@ -1284,6 +1414,7 @@ function normalizeSnapshot(
     operationPacketDigest: authority.packet.packetDigest,
     slicePlan,
     slicePlanDigest,
+    preflight: persisted.preflight,
     entries: Object.freeze(entries),
     pendingSlice,
   }
@@ -1309,10 +1440,19 @@ async function persist(
   return clone(body)
 }
 
+function hydrateAuthority(
+  authority: Authority,
+  preflight: GameIrProjectionSliceJournalPreflight,
+): Authority {
+  return preflight.inventory && preflight.validationReceipt
+    ? { ...authority, validation: validationFor(authority.source, preflight.inventory) }
+    : authority
+}
+
 export class GameIrProjectionSliceJournal {
   private constructor(
     private readonly path: string,
-    private readonly authority: Authority,
+    private authority: Authority,
     private state: GameIrProjectionSliceJournalSnapshot,
   ) {}
 
@@ -1330,20 +1470,15 @@ export class GameIrProjectionSliceJournal {
     )
     try {
       const raw = await readFile(input.journalPath, 'utf8')
+      const snapshot = normalizeSnapshot(
+        JSON.parse(raw),
+        { ...input, identity, operationStep, slicePlan, packet: authority.packet },
+        authority,
+      )
       return new GameIrProjectionSliceJournal(
         input.journalPath,
-        authority,
-        normalizeSnapshot(
-          JSON.parse(raw),
-          {
-            ...input,
-            identity,
-            operationStep,
-            slicePlan,
-            packet: authority.packet,
-          },
-          authority,
-        ),
+        hydrateAuthority(authority, snapshot.preflight),
+        snapshot,
       )
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -1355,6 +1490,7 @@ export class GameIrProjectionSliceJournal {
       operationPacketDigest: authority.packet.packetDigest,
       slicePlan,
       slicePlanDigest: planDigest(slicePlan),
+      preflight: { inventory: null, validationReceipt: null, diagnostic: null },
       entries: [],
       pendingSlice: null,
     })
@@ -1381,7 +1517,7 @@ export class GameIrProjectionSliceJournal {
     const snapshot = normalizeSnapshot(parsed, input, authority)
     return new GameIrProjectionSliceJournal(
       input.journalPath,
-      authority,
+      hydrateAuthority(authority, snapshot.preflight),
       snapshot,
     )
   }
@@ -1401,6 +1537,21 @@ export class GameIrProjectionSliceJournal {
   get slicePlan(): GameIrProjectionSlicePlan {
     return clone(this.state.slicePlan)
   }
+  get preflightMode(): 'obligation-inventory' | 'obligation-validation' | 'projection' {
+    if (!this.state.preflight.inventory) return 'obligation-inventory'
+    if (!this.state.preflight.validationReceipt) return 'obligation-validation'
+    return 'projection'
+  }
+  get obligationInventory(): GameIrSemanticObligationInventory | undefined {
+    return this.state.preflight.inventory
+      ? clone(this.state.preflight.inventory)
+      : undefined
+  }
+  get validationReceipt(): GameIrSemanticObligationValidationReceipt | undefined {
+    return this.state.preflight.validationReceipt
+      ? clone(this.state.preflight.validationReceipt)
+      : undefined
+  }
   get entries(): readonly GameIrProjectionSliceJournalEntry[] {
     return clone(this.state.entries)
   }
@@ -1408,14 +1559,80 @@ export class GameIrProjectionSliceJournal {
     return clone(this.state)
   }
   get completedSnapshot(): GameIrProjectionSliceJournalSnapshot {
+    requireValidation(this.authority)
     if (this.state.entries.length !== this.state.slicePlan.slices.length)
       fail('cannot read a completed snapshot before every slice is admitted')
     return clone(this.state)
   }
   get nextSlice(): GameIrProjectionSlice | undefined {
+    requireValidation(this.authority)
     return clone(this.state.slicePlan.slices[this.state.entries.length])
   }
+
+  async admitObligationInventory(
+    inventory: GameIrSemanticObligationInventory,
+  ): Promise<GameIrProjectionSliceJournal> {
+    if (this.state.entries.length > 0)
+      fail('cannot admit obligation inventory after projection entries exist')
+    if (this.state.preflight.validationReceipt)
+      fail('cannot replace an admitted obligation validation PASS receipt')
+    const validation = validationFor(this.authority.source, inventory)
+    this.authority = { ...this.authority, validation: undefined }
+    this.state = await persist(this.path, {
+      ...this.state,
+      preflight: {
+        inventory: validation.inventory,
+        validationReceipt: null,
+        diagnostic: null,
+      },
+    })
+    return this
+  }
+
+  async admitObligationValidationReceipt(
+    receipt: GameIrSemanticObligationValidationReceipt,
+  ): Promise<GameIrProjectionSliceJournal> {
+    if (this.state.entries.length > 0)
+      fail('cannot admit obligation validation after projection entries exist')
+    const inventory = this.state.preflight.inventory
+    if (!inventory)
+      fail('cannot admit obligation validation without a persisted inventory')
+    const validation = validationFor(this.authority.source, inventory)
+    const validationReceipt = normalizeGameIrSemanticObligationValidationReceipt(
+      validation,
+      receipt,
+    )
+    this.authority = { ...this.authority, validation }
+    this.state = await persist(this.path, {
+      ...this.state,
+      preflight: { inventory, validationReceipt, diagnostic: null },
+    })
+    return this
+  }
+
+  async invalidateObligationPreflight(
+    diagnostic: GameIrProjectionSlicePreflightDiagnostic,
+  ): Promise<GameIrProjectionSliceJournal> {
+    if (this.state.entries.length > 0)
+      fail('cannot invalidate obligation preflight after projection entries exist')
+    const inventory = this.state.preflight.inventory
+    if (!inventory) fail('cannot invalidate absent obligation preflight')
+    const validation = validationFor(this.authority.source, inventory)
+    const admitted = admitGameIrSemanticObligationValidationResult({
+      authority: validation,
+      result: { ...diagnostic, moduleId: validation.moduleId },
+    })
+    if (admitted.outcome !== 'FAIL')
+      fail('obligation preflight diagnostic is not a validated missing obligation')
+    this.authority = { ...this.authority, validation: undefined }
+    this.state = await persist(this.path, {
+      ...this.state,
+      preflight: { inventory: null, validationReceipt: null, diagnostic },
+    })
+    return this
+  }
   get currentSliceRecordPrefix(): readonly Readonly<{ id: string; kind: string }>[] {
+    requireValidation(this.authority)
     return clone(
       (this.state.pendingSlice?.records ?? []).map(record => ({
         id: record.node.id,
@@ -1424,11 +1641,13 @@ export class GameIrProjectionSliceJournal {
     )
   }
   get currentSliceRecordDigests(): readonly string[] {
+    requireValidation(this.authority)
     return clone(
       (this.state.pendingSlice?.records ?? []).map(record => record.recordDigest),
     )
   }
   get nextSliceContext(): GameIrProjectionSliceContext {
+    requireValidation(this.authority)
     return clone(
       sliceContext(
         this.state.entries,
@@ -1439,106 +1658,72 @@ export class GameIrProjectionSliceJournal {
     )
   }
 
-  /**
-   * Removes the failed pending owner and its later suffix in one journal write.
-   *
-   * Record admission deliberately allows forward references so a producer can
-   * stream a sorted slice.  Closure is checked only when the slice is closed;
-   * when that check identifies a pending owner, the owner and everything after
-   * it must be removed before the retry is dispatched.  The persisted prefix is
-   * the retry authority, so a corrected record with the same id can be appended
-   * without replaying the rejected candidate.
-   */
-  async rollbackPendingRecordsForDiagnostic(
-    reason: string,
+  /** Truncates a validated obligation owner and all of its successors atomically. */
+  async rollbackOwnerForDiagnostic(
+    input: GameIrProjectionSliceRollbackInput,
   ): Promise<GameIrProjectionRetryDiagnostic | undefined> {
+    if (input.diagnosticDigest !== undefined)
+      sha256(input.diagnosticDigest, 'rollback diagnosticDigest')
+    if (input.expectedJournalDigest !== undefined)
+      sha256(input.expectedJournalDigest, 'rollback expectedJournalDigest')
+    const obligation = requireValidation(this.authority).inventory.index[input.obligationId]
+    if (!obligation) fail('rollback obligation is outside the admitted inventory')
+    if (obligation.ownerSliceId !== input.ownerSliceId)
+      fail('rollback owner slice is detached from the admitted obligation')
+    if (obligation.fragmentId !== input.fragmentId)
+      fail('rollback fragment is detached from the admitted obligation')
+    if (input.recordId !== undefined && input.recordId !== obligation.targetId)
+      fail('rollback record is detached from the admitted obligation')
+    if (
+      input.expectedJournalDigest !== undefined &&
+      input.expectedJournalDigest !== this.state.journalDigest
+    )
+      fail('rollback journal digest is stale')
+
+    const reason = input.diagnosticDigest
+      ? `structured projection diagnostic ${input.diagnosticDigest}`
+      : 'structured projection diagnostic'
     const pending = this.state.pendingSlice
-    if (!pending) return undefined
-
-    const ownerId = firstMentionedNodeId(
-      reason,
-      pending.records.map(record => record.node.id),
-    )
-    if (!ownerId) return undefined
-    const ownerIndex = pending.records.findIndex(
-      record => record.node.id === ownerId,
-    )
-    if (ownerIndex < 0) return undefined
-    const owner = pending.records[ownerIndex]
-    if (!owner) return undefined
-    const prefixRecords = Object.freeze(
-      [...pending.records.slice(0, ownerIndex)],
-    )
-    const nextPending = prefixRecords.length
-      ? {
-          sliceId: pending.sliceId,
-          predecessorDigest: pending.predecessorDigest,
-          records: prefixRecords,
-        }
-      : null
-    this.state = await persist(this.path, {
-      ...this.state,
-      pendingSlice: nextPending
-        ? { ...nextPending, pendingDigest: pendingDigest(nextPending) }
-        : null,
-    })
-    return {
-      scope: 'record',
-      sliceId: pending.sliceId,
-      recordId: owner.node.id,
-      fragmentId: owner.fragmentId,
-      reason,
-    }
-  }
-
-  /**
-   * Invalidates a completed owner slice and every later entry atomically.
-   * The returned diagnostic retains the persisted evidence fragment so the
-   * retry is scoped to the same source authority as the rejected owner.
-   */
-  async rollbackCompletedOwnerForDiagnostic(
-    reason: string,
-  ): Promise<GameIrProjectionRetryDiagnostic | undefined> {
-    const entries = this.state.entries
-    let ownerId = firstMentionedNodeId(
-      reason,
-      entries.flatMap(entry => entry.semantic.nodes.map(node => node.id)),
-    )
-    if (!ownerId) {
-      const indexed = /(?:^|\/)nodes?\/(\d+)(?:\/|$)|\bnodes?\[(\d+)\]/u.exec(
-        reason,
+    if (pending?.sliceId === input.ownerSliceId) {
+      const ownerIndex = pending.records.findIndex(
+        record => record.node.id === obligation.targetId,
       )
-      const indexText = indexed?.[1] ?? indexed?.[2]
-      if (indexText !== undefined) {
-        ownerId = entries
-          .flatMap(entry => entry.semantic.nodes)
-          .sort((left, right) => compareCodeUnits(left.id, right.id))[
-            Number(indexText)
-          ]?.id
+      if (ownerIndex < 0) return undefined
+      const owner = pending.records[ownerIndex]!
+      if (owner.fragmentId !== obligation.fragmentId)
+        fail('rollback pending record evidence is detached')
+      const prefixRecords = Object.freeze([...pending.records.slice(0, ownerIndex)])
+      const nextPending = prefixRecords.length
+        ? {
+            sliceId: pending.sliceId,
+            predecessorDigest: pending.predecessorDigest,
+            records: prefixRecords,
+          }
+        : null
+      this.state = await persist(this.path, {
+        ...this.state,
+        pendingSlice: nextPending
+          ? { ...nextPending, pendingDigest: pendingDigest(nextPending) }
+          : null,
+      })
+      return {
+        scope: 'record',
+        sliceId: pending.sliceId,
+        recordId: obligation.targetId,
+        fragmentId: obligation.fragmentId,
+        reason,
       }
     }
-    if (!ownerId) return undefined
-    const ownerEntryIndex = entries.findIndex(entry =>
-      entry.semantic.nodes.some(node => node.id === ownerId),
+
+    const ownerEntryIndex = this.state.entries.findIndex(
+      entry => entry.sliceId === input.ownerSliceId,
     )
     if (ownerEntryIndex < 0) return undefined
-    const ownerEntry = entries[ownerEntryIndex]
-    if (!ownerEntry) return undefined
-    const group = ownerEntry.semantic.sourceEvidenceGroups.find(group =>
-      group.subjects.includes(`node:${ownerId}#/`),
+    const ownerEntry = this.state.entries[ownerEntryIndex]!
+    const ownerNode = ownerEntry.semantic.nodes.find(
+      node => node.id === obligation.targetId,
     )
-    if (!group) return undefined
-    const catalog = buildGameIrEvidenceFragmentCatalog({
-      sectionIndex: this.authority.source.sectionIndex,
-      sectionBytes: this.authority.source.sectionBytes,
-    })
-    const fragment = catalog.fragments.find(
-      candidate =>
-        candidate.documentPath === group.documentPath &&
-        candidate.sectionId === group.sectionId &&
-        candidate.excerpt === group.excerpt,
-    )
-    if (!fragment) return undefined
+    if (!ownerNode) return undefined
     this.state = await persist(this.path, {
       ...this.state,
       entries: this.state.entries.slice(0, ownerEntryIndex),
@@ -1547,8 +1732,8 @@ export class GameIrProjectionSliceJournal {
     return {
       scope: 'record',
       sliceId: ownerEntry.sliceId,
-      recordId: ownerId,
-      fragmentId: fragment.fragmentId,
+      recordId: obligation.targetId,
+      fragmentId: obligation.fragmentId,
       reason,
     }
   }
@@ -1561,6 +1746,7 @@ export class GameIrProjectionSliceJournal {
     replayed?: boolean
     diagnostic?: GameIrProjectionRetryDiagnostic
   }> {
+    requireValidation(this.authority)
     const targetIndex = sliceId
       ? this.state.slicePlan.slices.findIndex(
           candidate => candidate.sliceId === sliceId,
@@ -1765,6 +1951,7 @@ export class GameIrProjectionSliceJournal {
   }
 
   async completeCurrentSlice(): Promise<GameIrProjectionSliceJournal> {
+    requireValidation(this.authority)
     const slice = this.state.slicePlan.slices[this.state.entries.length]
     if (!slice) fail('all slices are already completed')
     const pending = this.state.pendingSlice
@@ -1799,6 +1986,7 @@ export class GameIrProjectionSliceJournal {
   async append(
     completion: GameIrProjectionSliceCompletion,
   ): Promise<GameIrProjectionSliceJournal> {
+    requireValidation(this.authority)
     const authority = this.authority
     const slice = this.state.slicePlan.slices[this.state.entries.length]
     if (!slice) fail('all slices are already completed')
@@ -1815,11 +2003,12 @@ export class GameIrProjectionSliceJournal {
       this.state.entries.flatMap(entry => entry.semantic.nodes),
     )
     assertRelationshipCardinality(slice, normalized.semantic.nodes)
-    assertRequiredCurrentNodes(
+    assertObligationCoverage(
       this.state.entries,
       slice,
       normalized.semantic.nodes,
       authority,
+      normalized.semantic.sourceEvidenceGroups,
     )
     assertLocalTargetClosure(
       this.state.entries,

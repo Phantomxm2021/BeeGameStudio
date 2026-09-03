@@ -17,6 +17,7 @@ import {
 import {
   type GameIrProjectionOperationPacket,
 } from './projection-slice-journal'
+import type { GameIrSemanticObligationInventory } from './semantic-obligation-inventory'
 import { canonicalGameIrJson, compareCodeUnits, digestGameIrValue } from './model'
 
 export type GameIrProjectionSliceSourceSelector = Readonly<{
@@ -205,6 +206,8 @@ function selectedSourceFragments(
 function cloneContext(
   context: GameIrProjectionSliceContext,
   directDependencyKinds: ReadonlySet<string>,
+  requiredCurrentNodes: readonly Readonly<{ id: string; kind: string }>[] =
+    context.requiredCurrentNodes,
 ): GameIrProjectionSliceContext {
   return {
     availablePriorNodes: context.availablePriorNodes
@@ -217,7 +220,7 @@ function cloneContext(
           unknown
         >,
       })),
-    requiredCurrentNodes: context.requiredCurrentNodes.map(node => ({
+    requiredCurrentNodes: requiredCurrentNodes.map(node => ({
       id: node.id,
       kind: node.kind,
     })),
@@ -235,6 +238,7 @@ export function buildGameIrProjectionSliceAuthority(input: {
   compileRequestDigest?: string
   foundationReadyReceiptDigest?: string
   retryDiagnostic?: GameIrProjectionRetryDiagnostic
+  obligationInventory: GameIrSemanticObligationInventory
 }): GameIrProjectionSliceAuthority {
   const source = input.packet.source
   const moduleId = moduleForSlice(input.slice.sliceId)
@@ -275,7 +279,24 @@ export function buildGameIrProjectionSliceAuthority(input: {
       node.relationships.flatMap(relationship => relationship.targetKinds),
     ),
   )
-  const context = cloneContext(input.sliceContext, directDependencyKinds)
+  const inventory = input.obligationInventory
+  if (
+    inventory.moduleId !== source.moduleId ||
+    inventory.sourceDigest !== source.sourceDigest ||
+    inventory.digest !==
+      digestGameIrValue(
+        (({ digest: _digest, ...body }) => body)(inventory),
+      )
+  )
+    throw new Error('Game IR projection obligation inventory is stale')
+  const requiredCurrentNodes = inventory.obligations
+    .filter(obligation => obligation.ownerSliceId === input.slice.sliceId)
+    .map(obligation => ({ id: obligation.targetId, kind: obligation.targetKind }))
+  const context = cloneContext(
+    input.sliceContext,
+    directDependencyKinds,
+    requiredCurrentNodes,
+  )
   return freeze({
     schemaVersion: 'game-ir-projection-slice-authority.v1',
     identity: {

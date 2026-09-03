@@ -17,6 +17,13 @@ import {
 } from './projection-slice-journal'
 import type { GameIrCompilationIdentity } from '../types'
 import { buildGameIrEvidenceFragmentCatalog } from './projection-slices'
+import { sourceSectionsForGameIrProjectionSlice } from './projection-slice-authority'
+import { buildGameIrSemanticObligationInventory } from './semantic-obligation-inventory'
+import {
+  admitGameIrSemanticObligationValidationResult,
+  buildGameIrSemanticObligationValidationAuthority,
+} from './semantic-obligation-validation'
+import type { GameIrSemanticObligationRecord } from './semantic-obligation-inventory'
 
 const digest = (letter: string): string => letter.repeat(64)
 
@@ -37,13 +44,14 @@ function fixture(journalPath: string): GameIrProjectionSliceJournalInput {
     foundationReadyReceiptDigest:
       authority.source.compileRequest.foundation.receiptDigest,
   }
-  return {
+  const base = {
     journalPath,
     identity,
     operationStep: 'phase4/gameplay/projection',
     packet,
     slicePlan: deriveProjectionSlicePlan('gameplay'),
-  }
+  } as GameIrProjectionSliceJournalInput
+  return base
 }
 
 function balanceFixture(
@@ -66,13 +74,14 @@ function balanceFixture(
     foundationReadyReceiptDigest:
       authority.source.compileRequest.foundation.receiptDigest,
   }
-  return {
+  const base = {
     journalPath,
     identity,
     operationStep: 'phase4/balance/projection',
     packet,
     slicePlan: deriveProjectionSlicePlan('balance'),
-  }
+  } as GameIrProjectionSliceJournalInput
+  return base
 }
 
 function emptyCompletion(sliceId: string): GameIrProjectionSliceCompletion {
@@ -81,6 +90,84 @@ function emptyCompletion(sliceId: string): GameIrProjectionSliceCompletion {
     sliceId,
     semantic: { nodes: [], sourceEvidenceGroups: [] },
   }
+}
+
+function emptyInventoryAndReceipt(input: GameIrProjectionSliceJournalInput) {
+  const inventory = buildGameIrSemanticObligationInventory({
+    moduleId: input.packet.source.moduleId,
+    source: input.packet.source,
+    records: [],
+  })
+  const authority = buildGameIrSemanticObligationValidationAuthority({
+    source: input.packet.source,
+    inventory,
+  })
+  const admitted = admitGameIrSemanticObligationValidationResult({
+    authority,
+    result: {
+      outcome: 'PASS',
+      moduleId: authority.moduleId,
+      identities: authority.identities,
+      coverage: authority.sourceFragments.map(fragment => fragment.fragmentId),
+    },
+  })
+  if (admitted.outcome !== 'PASS') throw new Error('fixture preflight did not pass')
+  return { inventory, receipt: admitted.receipt }
+}
+
+type TestObligation = Readonly<{
+  targetId: string
+  targetKind: string
+  fragmentId?: string
+}>
+
+async function readyJournal(
+  input: GameIrProjectionSliceJournalInput,
+  obligations: readonly TestObligation[] = [],
+) {
+  const journal = await createGameIrProjectionSliceJournal(input)
+  const defaultFragmentForKind = (targetKind: string): string => {
+    const slice = input.slicePlan.slices.find(candidate =>
+      candidate.nodeKinds.includes(targetKind),
+    )
+    if (!slice) throw new Error(`fixture kind is outside slice plan: ${targetKind}`)
+    const selector = sourceSectionsForGameIrProjectionSlice(slice.sliceId)[0]!
+    return firstEvidenceFragmentId(input, selector.documentPath, selector.sectionId)
+  }
+  const records = obligations
+    .map(
+      ({ targetId, targetKind, fragmentId = defaultFragmentForKind(targetKind) }) =>
+        ({
+          record: 'obligation',
+          moduleId: input.packet.source.moduleId,
+          targetId,
+          targetKind,
+          fragmentId,
+        }) satisfies GameIrSemanticObligationRecord,
+    )
+    .sort((left, right) => left.targetId.localeCompare(right.targetId))
+  const inventory = buildGameIrSemanticObligationInventory({
+    moduleId: input.packet.source.moduleId,
+    source: input.packet.source,
+    records,
+  })
+  const authority = buildGameIrSemanticObligationValidationAuthority({
+    source: input.packet.source,
+    inventory,
+  })
+  const admitted = admitGameIrSemanticObligationValidationResult({
+    authority,
+    result: {
+      outcome: 'PASS',
+      moduleId: authority.moduleId,
+      identities: authority.identities,
+      coverage: authority.sourceFragments.map(fragment => fragment.fragmentId),
+    },
+  })
+  if (admitted.outcome !== 'PASS') throw new Error('fixture preflight did not pass')
+  await journal.admitObligationInventory(inventory)
+  await journal.admitObligationValidationReceipt(admitted.receipt)
+  return journal
 }
 
 function firstEvidenceFragmentId(
@@ -138,7 +225,7 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input)
       const first = journal.slicePlan.slices[0]!
       await journal.append(emptyCompletion(first.sliceId))
 
@@ -163,7 +250,7 @@ describe('Game IR projection slice journal', () => {
           operationStep: identityInput.operationStep,
         }),
       )
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input)
       const [first, second] = journal.slicePlan.slices
       await expect(
         journal.append(emptyCompletion(second!.sliceId)),
@@ -232,7 +319,7 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input)
       const slice = journal.nextSlice!
       await expect(
         journal.append({
@@ -262,7 +349,9 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'balance.unit.invalid', targetKind: 'balance.unit' },
+      ])
       const sourceUnit =
         realAuthority().phase5Authority.phase4Authority.balance.semantic
           .nodes[0]!
@@ -318,7 +407,10 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'balance.alpha-unit', targetKind: 'balance.unit' },
+        { targetId: 'balance.parameter.body-cold-base', targetKind: 'balance.parameter' },
+      ])
       const first = journal.slicePlan.slices[0]!
       const fragmentId = firstEvidenceFragmentId(
         input,
@@ -386,7 +478,10 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'balance.cost.admitted', targetKind: 'balance.cost' },
+        { targetId: 'balance.cost.invalid', targetKind: 'balance.cost' },
+      ])
       const [first, second, third] = journal.slicePlan.slices
       const fragmentId = firstEvidenceFragmentId(
         input,
@@ -502,7 +597,11 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'balance-unit', targetKind: 'balance.unit' },
+        { targetId: 'balance.formula.a', targetKind: 'balance.formula' },
+        { targetId: 'balance.formula.b', targetKind: 'balance.formula' },
+      ])
       const [first, second] = journal.slicePlan.slices
       const sourceUnit =
         realAuthority().phase5Authority.phase4Authority.balance.semantic.nodes[0]!
@@ -582,7 +681,11 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'balance.a-unit', targetKind: 'balance.unit' },
+        { targetId: 'balance.parameter.b', targetKind: 'balance.parameter' },
+        { targetId: 'balance.variable.c', targetKind: 'balance.variable' },
+      ])
       const first = journal.slicePlan.slices[0]!
       const fragmentId = firstEvidenceFragmentId(
         input,
@@ -635,7 +738,12 @@ describe('Game IR projection slice journal', () => {
         reason = error instanceof Error ? error.message : String(error)
       }
       expect(reason).toMatch(/balance\.parameter\.b|unknown|dangling/i)
-      const rollback = await journal.rollbackPendingRecordsForDiagnostic(reason)
+      const rollback = await journal.rollbackOwnerForDiagnostic({
+        ownerSliceId: first.sliceId,
+        obligationId: `balance:balance.parameter:${failed.id}`,
+        fragmentId,
+        recordId: failed.id,
+      })
       expect(rollback).toEqual({
         scope: 'record',
         sliceId: first.sliceId,
@@ -679,7 +787,9 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'balance.a-unit', targetKind: 'balance.unit' },
+      ])
       const first = journal.slicePlan.slices[0]!
       const fragmentId = firstEvidenceFragmentId(
         input,
@@ -698,11 +808,7 @@ describe('Game IR projection slice journal', () => {
         first.sliceId,
       )
       const before = journal.snapshot
-      await expect(
-        journal.rollbackPendingRecordsForDiagnostic(
-          'unattributed closure failure',
-        ),
-      ).resolves.toBeUndefined()
+      expect('rollbackPendingRecordsForDiagnostic' in journal).toBe(false)
       expect(journal.snapshot).toEqual(before)
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -713,7 +819,7 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input)
       expect(() => journal.completedSnapshot).toThrow(/complete|slice/i)
       for (const slice of journal.slicePlan.slices)
         await journal.append(emptyCompletion(slice.sliceId))
@@ -730,7 +836,10 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'balance-unit', targetKind: 'balance.unit' },
+        { targetId: 'balance.formula.bad', targetKind: 'balance.formula' },
+      ])
       const [first, second, third, fourth] = journal.slicePlan.slices
       const sourceUnit =
         realAuthority().phase5Authority.phase4Authority.balance.semantic
@@ -796,9 +905,17 @@ describe('Game IR projection slice journal', () => {
       await journal.append(emptyCompletion(fourth!.sliceId))
       const diagnostic =
         'invalid Balance module: node balance.formula.bad formula expression.right.unit reference index is out of range'
-      const rollback = await journal.rollbackCompletedOwnerForDiagnostic(
-        diagnostic,
-      )
+      const rollback = await journal.rollbackOwnerForDiagnostic({
+        ownerSliceId: second!.sliceId,
+        obligationId: `balance:balance.formula:${'balance.formula.bad'}`,
+        fragmentId: firstEvidenceFragmentId(
+          input,
+          input.packet.source.sectionIndex[0]!.documentPath,
+          input.packet.source.sectionIndex[0]!.sectionId,
+        ),
+        recordId: 'balance.formula.bad',
+        diagnosticDigest: digestGameIrValue(diagnostic),
+      })
       expect(rollback).toEqual({
         scope: 'record',
         sliceId: second!.sliceId,
@@ -822,13 +939,11 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = balanceFixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input)
       for (const slice of journal.slicePlan.slices)
         await journal.append(emptyCompletion(slice.sliceId))
       const before = journal.snapshot
-      await expect(
-        journal.rollbackCompletedOwnerForDiagnostic('unknown closure failure'),
-      ).resolves.toBeUndefined()
+      expect('rollbackCompletedOwnerForDiagnostic' in journal).toBe(false)
       expect(journal.snapshot).toEqual(before)
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -839,7 +954,9 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'entity.hero', targetKind: 'gameplay.entity' },
+      ])
       const slice = journal.nextSlice!
       const fragmentId = firstEvidenceFragmentId(
         input,
@@ -863,9 +980,12 @@ describe('Game IR projection slice journal', () => {
         },
       } as unknown as GameIrProjectionSliceCompletion)
       await journal.append(emptyCompletion(journal.nextSlice!.sliceId))
-      const rollback = await journal.rollbackCompletedOwnerForDiagnostic(
-        'invalid projection nodes[0] owner',
-      )
+      const rollback = await journal.rollbackOwnerForDiagnostic({
+        ownerSliceId: slice.sliceId,
+        obligationId: 'gameplay:gameplay.entity:entity.hero',
+        fragmentId,
+        recordId: 'entity.hero',
+      })
       expect(rollback).toEqual({
         scope: 'record',
         sliceId: slice.sliceId,
@@ -910,12 +1030,14 @@ describe('Game IR projection slice journal', () => {
     try {
       const input = fixture(join(root, 'journal.json'))
       const authority = realAuthority().phase5Authority.phase4Authority.gameplay
-      const journal = await createGameIrProjectionSliceJournal(input)
       const sourceNode = authority.semantic.nodes.find(node =>
-        journal.slicePlan.slices.some(slice =>
+        input.slicePlan.slices.some(slice =>
           slice.nodeKinds.includes(node.kind),
         ),
       )!
+      const journal = await readyJournal(input, [
+        { targetId: sourceNode.id, targetKind: sourceNode.kind },
+      ])
       const sliceIndex = journal.slicePlan.slices.findIndex(slice =>
         slice.nodeKinds.includes(sourceNode.kind),
       )
@@ -1007,7 +1129,12 @@ describe('Game IR projection slice journal', () => {
     try {
       const input = fixture(join(root, 'journal.json'))
       const authority = realAuthority().phase5Authority.phase4Authority.gameplay
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'outcome.win', targetKind: 'gameplay.outcome' },
+        { targetId: 'state.start', targetKind: 'gameplay.state' },
+        { targetId: 'objective.escape', targetKind: 'gameplay.objective' },
+        { targetId: 't', targetKind: 'gameplay.transition' },
+      ])
       const section = authority.source.sectionIndex[0]!
       const fragmentId = firstEvidenceFragmentId(
         input,
@@ -1107,7 +1234,12 @@ describe('Game IR projection slice journal', () => {
     try {
       const input = fixture(join(root, 'journal.json'))
       const authority = realAuthority().phase5Authority.phase4Authority.gameplay
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'condition.a', targetKind: 'gameplay.condition' },
+        { targetId: 'event.z', targetKind: 'gameplay.event' },
+        { targetId: 'state.a', targetKind: 'gameplay.state' },
+        { targetId: 'action.canonical', targetKind: 'gameplay.action' },
+      ])
       const fragmentId = firstEvidenceFragmentId(
         input,
         authority.source.sectionIndex[0]!.documentPath,
@@ -1226,7 +1358,13 @@ describe('Game IR projection slice journal', () => {
     try {
       const input = fixture(join(root, 'journal.json'))
       const authority = realAuthority().phase5Authority.phase4Authority.gameplay
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'state.a', targetKind: 'gameplay.state' },
+        { targetId: 'state.b', targetKind: 'gameplay.state' },
+        { targetId: 'state.c', targetKind: 'gameplay.state' },
+        { targetId: 'action.cardinality', targetKind: 'gameplay.action' },
+        { targetId: 'transition.cardinality', targetKind: 'gameplay.transition' },
+      ])
       const section = authority.source.sectionIndex[0]!
       const fragmentId = firstEvidenceFragmentId(
         input,
@@ -1331,7 +1469,7 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input)
       const first = journal.nextSlice!
       await journal.append(emptyCompletion(first.sliceId))
       await journal.invalidate(first.sliceId)
@@ -1377,7 +1515,7 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input)
       const authoritySection = input.packet.source.sectionIndex[0]!
       const record = {
         fragmentId: firstEvidenceFragmentId(
@@ -1424,7 +1562,10 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'condition.a', targetKind: 'gameplay.condition' },
+        { targetId: 'condition.b', targetKind: 'gameplay.condition' },
+      ])
       const fragmentId = firstEvidenceFragmentId(
         input,
         input.packet.source.sectionIndex[0]!.documentPath,
@@ -1476,7 +1617,9 @@ describe('Game IR projection slice journal', () => {
     const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
     try {
       const input = fixture(join(root, 'journal.json'))
-      const journal = await createGameIrProjectionSliceJournal(input)
+      const journal = await readyJournal(input, [
+        { targetId: 'condition.a', targetKind: 'gameplay.condition' },
+      ])
       const fragmentId = firstEvidenceFragmentId(
         input,
         input.packet.source.sectionIndex[0]!.documentPath,
@@ -1508,6 +1651,39 @@ describe('Game IR projection slice journal', () => {
         acceptedCount: 0,
         diagnostic: { scope: 'record', recordId: 'condition.0' },
       })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('stages inventory and validation in one journal before projection', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'game-ir-slice-journal-'))
+    try {
+      const base = balanceFixture(join(root, 'journal.json'))
+      const journal = await createGameIrProjectionSliceJournal(base)
+      expect(journal.preflightMode).toBe('obligation-inventory')
+      expect(() => journal.nextSlice).toThrow(/preflight|validation|receipt/i)
+      await expect(journal.append(emptyCompletion(journal.slicePlan.slices[0]!.sliceId)))
+        .rejects.toThrow(/preflight|validation|receipt/i)
+
+      const { inventory, receipt } = emptyInventoryAndReceipt(base)
+      await journal.admitObligationInventory(inventory)
+      expect(journal.preflightMode).toBe('obligation-validation')
+      expect(journal.obligationInventory?.digest).toBe(inventory.digest)
+      const reloadedWithInventory = await loadGameIrProjectionSliceJournal(base)
+      expect(reloadedWithInventory.preflightMode).toBe('obligation-validation')
+      expect(() => reloadedWithInventory.nextSlice).toThrow(/preflight|validation|receipt/i)
+
+      await journal.admitObligationValidationReceipt(receipt)
+      expect(journal.preflightMode).toBe('projection')
+      const reloadedWithPass = await loadGameIrProjectionSliceJournal(base)
+      expect(reloadedWithPass.preflightMode).toBe('projection')
+      expect(reloadedWithPass.validationReceipt?.receiptDigest).toBe(receipt.receiptDigest)
+      for (const slice of reloadedWithPass.slicePlan.slices)
+        await reloadedWithPass.append(emptyCompletion(slice.sliceId))
+      expect(reloadedWithPass.completedSnapshot.entries).toHaveLength(
+        reloadedWithPass.slicePlan.slices.length,
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
