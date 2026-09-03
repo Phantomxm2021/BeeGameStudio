@@ -137,7 +137,6 @@ export type GameIrSemanticObligationValidationRawResult = Readonly<
   | {
       outcome: 'PASS'
       moduleId: GameIrProjectionModuleId
-      identities: GameIrSemanticObligationValidationIdentities
       coverage: readonly string[]
     }
   | {
@@ -450,7 +449,6 @@ function identityJson(
   return JSON.stringify({
     record: 'pass',
     moduleId: authority.moduleId,
-    ...authority.identities,
   })
 }
 
@@ -471,8 +469,6 @@ export function renderGameIrSemanticObligationValidationPrompt(
   const fragmentRows = authority.sourceFragments.map(fragment =>
     `- ${fragment.fragmentId}: ${JSON.stringify(fragment.text)}`,
   )
-  const identityFields = Object.entries(authority.identities)
-    .map(([key, value]) => `${key}=${value}`)
   return [
     'Semantic obligation validation authority',
     `Provider mode: ${mode}`,
@@ -488,9 +484,6 @@ export function renderGameIrSemanticObligationValidationPrompt(
     '',
     '## Source fragments (complete service-selected module scope)',
     ...fragmentRows,
-    '',
-    '## Terminal identities',
-    ...identityFields,
     '',
     '## Output contract',
     'Return strict NDJSON only: no Markdown, prose, array/object wrapper, tool call, or extra fields.',
@@ -508,27 +501,6 @@ function lines(textValue: string): string[] {
   const result = textValue.split('\n')
   if (result.at(-1) === '') result.pop()
   return result.map(lineValue => (lineValue.endsWith('\r') ? lineValue.slice(0, -1) : lineValue))
-}
-
-function parseIdentity(value: RecordValue, label: string): GameIrSemanticObligationValidationIdentities {
-  exactKeys(value, [
-    'record',
-    'moduleId',
-    'compileRequestDigest',
-    'sourceDigest',
-    'inventoryDigest',
-    'projectionContractDigest',
-    'validatorManifestDigest',
-    'ownerSliceMapDigest',
-  ], label)
-  return {
-    compileRequestDigest: digest(value.compileRequestDigest, `${label}.compileRequestDigest`),
-    sourceDigest: digest(value.sourceDigest, `${label}.sourceDigest`),
-    inventoryDigest: digest(value.inventoryDigest, `${label}.inventoryDigest`),
-    projectionContractDigest: digest(value.projectionContractDigest, `${label}.projectionContractDigest`),
-    validatorManifestDigest: digest(value.validatorManifestDigest, `${label}.validatorManifestDigest`),
-    ownerSliceMapDigest: digest(value.ownerSliceMapDigest, `${label}.ownerSliceMapDigest`),
-  }
 }
 
 /** Parses the compact, strict validator NDJSON protocol. */
@@ -555,9 +527,9 @@ export function parseGameIrSemanticObligationValidationResultStream(input: {
     try {
       if (parsed.record === 'pass') {
         if (result) throw new Error(`${label} contains multiple terminal results`)
-        const identities = parseIdentity(parsed, `pass record at ${label}`)
+        exactKeys(parsed, ['record', 'moduleId'], `pass record at ${label}`)
         if (parsed.moduleId !== module) throw new Error(`${label} has the wrong module`)
-        result = { outcome: 'PASS', moduleId: module, identities, coverage: [] }
+        result = { outcome: 'PASS', moduleId: module, coverage: [] }
       } else if (parsed.record === 'coverage') {
         exactKeys(parsed, ['record', 'moduleId', 'fragmentId'], `coverage record at ${label}`)
         if (!result || result.outcome !== 'PASS') throw new Error(`${label} coverage is not attached to PASS`)
@@ -698,7 +670,7 @@ export function normalizeGameIrSemanticObligationValidationReceipt(
 }
 
 function validateResultKeys(value: RecordValue, outcome: RawValidationResult['outcome']): void {
-  if (outcome === 'PASS') exactKeys(value, ['outcome', 'moduleId', 'identities', 'coverage'], 'validation PASS result')
+  if (outcome === 'PASS') exactKeys(value, ['outcome', 'moduleId', 'coverage'], 'validation PASS result')
   else if (outcome === 'FAIL') exactKeys(value, ['outcome', 'moduleId', 'reasonCode', 'targetId', 'expectedKind', 'semanticRole', 'fragmentId'], 'validation FAIL result')
   else exactKeys(value, ['outcome', 'moduleId', 'reasonCode', 'detail'], 'validation AMBIGUOUS result')
 }
@@ -715,13 +687,8 @@ export function admitGameIrSemanticObligationValidationResult(input: {
   validateResultKeys(result, result.outcome)
   if (result.moduleId !== input.authority.moduleId) throw new Error('validation result module is detached')
   if (result.outcome === 'PASS') {
-    if (!isPlainRecord(result.identities) || !Array.isArray(result.coverage))
+    if (!Array.isArray(result.coverage))
       throw new Error('validation PASS result is invalid')
-    const expected = input.authority.identities
-    const identities = result.identities as GameIrSemanticObligationValidationIdentities
-    exactKeys(identities as unknown as RecordValue, Object.keys(expected), 'validation PASS identities')
-    for (const key of Object.keys(expected) as (keyof typeof expected)[])
-      if (identities[key] !== expected[key]) throw new Error('validation PASS identity is stale or relabeled')
     const receipt = buildReceipt(
       input.authority,
       coverageFor(input.authority, result.coverage),

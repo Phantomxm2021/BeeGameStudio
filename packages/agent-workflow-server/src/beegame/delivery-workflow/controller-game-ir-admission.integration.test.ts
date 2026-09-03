@@ -399,7 +399,7 @@ describe('Game IR controller admission integration', () => {
     }
   })
 
-  test('rolls back a failed pending owner before retry and excludes its suffix from retry authority', async () => {
+  test('retains the exact prefix and retries a rejected record without owner inference', async () => {
     const fixture = await prepareFixture()
     try {
       const failedOwner = {
@@ -431,13 +431,13 @@ describe('Game IR controller admission integration', () => {
         { id: 'state-start', kind: 'gameplay.state' },
       ])
       const current = await fixture.controller.store.load()
-      const actual =
+      expect(current?.status).toBe('running')
+      expect(fixture.started).toHaveLength(1)
+      expect(
         current?.gameIrState && 'diagnostic' in current.gameIrState
           ? current.gameIrState.diagnostic?.actual ?? ''
-          : ''
-      expect(actual).toContain('game-ir-retry-diagnostic:')
-      expect(actual).toContain('"recordId":"state-middle"')
-      expect(fixture.started).toHaveLength(1)
+          : '',
+      ).toContain('"recordId":"state-middle"')
       expect(fixture.started[0]?.contract.retryDiagnostic).toEqual(
         expect.objectContaining({
           scope: 'record',
@@ -445,12 +445,6 @@ describe('Game IR controller admission integration', () => {
           recordId: 'state-middle',
         }),
       )
-      const retrySliceContext = fixture.started[0]?.contract.sliceContext as
-        | { admittedCurrentNodes: unknown }
-        | undefined
-      expect(retrySliceContext?.admittedCurrentNodes).toEqual([
-        { id: 'state-start', kind: 'gameplay.state' },
-      ])
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
     }
@@ -476,46 +470,18 @@ describe('Game IR controller admission integration', () => {
   test('fails closed when a full-module admission failure has no unique owner', async () => {
     const fixture = await prepareFixture()
     try {
-      const journal = await createGameIrProjectionSliceJournal(fixture.journalInput)
-      for (const slice of journal.slicePlan.slices.slice(0, -1))
-        await journal.append({ status: 'completed', sliceId: slice.sliceId, semantic: { nodes: [], sourceEvidenceGroups: [] } })
-      const finalSlice = journal.slicePlan.slices.at(-1)!
-      const finalRequest = {
-        ...fixture.request,
-        contract: {
-          ...fixture.request.contract,
-          currentSlice: finalSlice.sliceId,
-          progress: journal.entries.map(entry => ({ sliceId: entry.sliceId, entryDigest: entry.entryDigest })),
-          sliceContext: {
-            availablePriorNodes: [],
-            requiredCurrentNodes: [],
-            admittedCurrentNodes: [],
-          },
-        },
-      }
-      const afterSetup = await fixture.controller.store.load()
-      await fixture.controller.store.save({
-        ...afterSetup!,
-        activeDispatch: {
-          ...afterSetup!.activeDispatch!,
-          request: finalRequest,
-        },
-      })
-      const setup = await fixture.controller.store.load()
-      expect(setup?.activeDispatch?.request?.contract.currentSlice).toBe(finalSlice.sliceId)
-      expect(journal.entries).toHaveLength(journal.slicePlan.slices.length - 1)
       await fixture.controller.dispatcher.completeDispatch(
-        finalRequest.dispatchId!,
-        terminal(finalRequest),
+        fixture.request.dispatchId!,
+        terminal(fixture.request),
       )
       const invalidated = await loadGameIrProjectionSliceJournal(fixture.journalInput)
-      expect(invalidated.entries).toHaveLength(2)
-      expect(invalidated.nextSlice).toBeUndefined()
+      expect(invalidated.entries).toHaveLength(0)
+      expect(invalidated.nextSlice?.sliceId).toBe('gameplay.slice.0')
       expect(fixture.started).toHaveLength(0)
       const afterAdmissionFailure = await fixture.controller.store.load()
       expect(afterAdmissionFailure?.activeDispatch).toBeUndefined()
       expect(afterAdmissionFailure?.status).toBe('needs_action')
-      expect(afterAdmissionFailure?.gameIrState && 'diagnostic' in afterAdmissionFailure.gameIrState ? afterAdmissionFailure.gameIrState.diagnostic?.actual : '').toContain('gameplay')
+      expect(afterAdmissionFailure?.gameIrState && 'diagnostic' in afterAdmissionFailure.gameIrState ? afterAdmissionFailure.gameIrState.diagnostic?.actual : '').toContain('does not cover every admitted obligation')
     } finally {
       await rm(fixture.workspacePath, { recursive: true, force: true })
     }

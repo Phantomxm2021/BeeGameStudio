@@ -1752,11 +1752,13 @@ export function createDeliveryWorkflowController(input: {
                   }
                 : undefined)
           if (retryDiagnostic) {
+            if (!rolledBackDiagnostic)
+              await projectionJournal.setRetryDiagnostic(retryDiagnostic)
             await persistCompilerDiagnostic(
               retryDiagnostic.reason,
               admissionProgressIdentity,
               retryDiagnostic,
-              Boolean(admission.diagnostic && !rolledBackDiagnostic),
+              false,
             )
             return
           }
@@ -5549,8 +5551,9 @@ export function createDeliveryWorkflowController(input: {
       const retryDiagnostic =
         operation.operation === 'projection' &&
         projectionJournal?.nextSlice &&
-        state.diagnostic?.step === operation.step
-          ? undefined
+        projectionJournal.retryDiagnostic?.sliceId ===
+          projectionJournal.nextSlice.sliceId
+          ? projectionJournal.retryDiagnostic
           : undefined
       await dispatcher.dispatch({
         dispatchId: randomUUID(),

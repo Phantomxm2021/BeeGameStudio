@@ -161,7 +161,6 @@ function passLine(value: ReturnType<typeof authority>) {
   return JSON.stringify({
     record: 'pass',
     moduleId: 'balance',
-    ...identities(value),
   })
 }
 
@@ -201,6 +200,21 @@ describe('Game IR semantic obligation validation', () => {
     expect(Object.isFrozen(admitted)).toBe(true)
     expect(Object.isFrozen(admitted.receipt)).toBe(true)
     expect(Object.isFrozen(admitted.receipt.coverage)).toBe(true)
+  })
+
+  test('rejects caller-supplied PASS identities', () => {
+    const expected = authority()
+    const passWithIdentity = JSON.stringify({
+      record: 'pass',
+      moduleId: 'balance',
+      ...identities(expected),
+    })
+    expect(
+      parseGameIrSemanticObligationValidationResultStream({
+        authority: expected,
+        text: `${passWithIdentity}\n${JSON.stringify({ record: 'done', moduleId: 'balance' })}\n`,
+      }).diagnostic,
+    ).toMatch(/field|unknown/i)
   })
 
   test('replays a valid frozen PASS receipt and rejects stale or non-canonical persistence', () => {
@@ -351,6 +365,10 @@ describe('Game IR semantic obligation validation', () => {
         expect(rendered).toContain(fragment.excerpt)
       }
       expect(rendered).toContain('"record":"pass"')
+      expect(rendered).toContain('{"record":"pass","moduleId":"balance"}')
+      expect(rendered).not.toContain('## Terminal identities')
+      for (const identity of Object.keys(expected.identities))
+        expect(rendered).not.toContain(identity)
       expect(rendered).toContain('"record":"coverage"')
       expect(rendered).toContain('"record":"fail"')
       expect(rendered).toContain('"record":"ambiguous"')
