@@ -171,8 +171,12 @@ The implementation diff may touch only:
 - `packages/agent-workflow-server/src/beegame/foundation-markdown-stream.ts` and its test;
 - `packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.ts` and prompt tests;
 - `packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.ts` and contract tests, only if the Asset quality rules cannot be expressed in existing fields.
+- `scripts/game-ir-isolation-boundary.ts`, its test, and `docs/superpowers/evidence/2026-09-03-game-ir-protected-baseline.json` only after implementation, to admit the exact reviewed Stage 2 blob set while continuing to reject every other protected change.
+- `docs/superpowers/evidence/2026-09-03-asset-plan-authoring-reliability.md` for final command and Chrome evidence.
 
 Reviewer, Revision, Checklist, Game IR, controller, durable schema, recovery, UI, and unrelated document contracts are forbidden.
+
+The isolation checker remains red during Tasks 1–4 only for the exact plan-allowed changed paths. Task 5 must extend its immutable manifest with a separate ordered `admittedStage2Corrections` list containing each approved path's baseline blob, final reviewed blob, reason, design commit, and evidence path. The checker must validate that list literally and then return green; it must not weaken the protected roots, reuse the existing test-only correction list, admit directories/globs, or accept working-tree-derived values dynamically.
 
 ### 8.3 Runtime acceptance order
 

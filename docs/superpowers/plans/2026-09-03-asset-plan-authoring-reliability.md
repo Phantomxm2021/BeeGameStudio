@@ -16,7 +16,7 @@
 - Reviewer, Revision, Checklist, Game IR, controller, recovery, durable schemas, UI, session routing, and the other seven document contracts are forbidden.
 - Foundation output stays raw Markdown. No JSON/YAML document output, compatibility reader, feature flag, fresh author dispatch, parallel candidate, or relaxed validator.
 - No fixed token, word, duration, row, resource, or business-attempt limit. One structural replacement is a native transport recovery boundary, not a quality budget.
-- The Game IR isolation boundary checker must pass after every task.
+- During Tasks 1–4, the Game IR isolation boundary checker may fail only with `protected_blob_mismatch` for the exact plan-allowed files changed so far; every other violation stops execution. Task 5 admits the final reviewed blobs through a fixed manifest list and must restore a fully green checker.
 
 ---
 
@@ -64,9 +64,10 @@ Put Asset-only quality language in the existing Asset authority/merge rule or As
 
 ```bash
 bun test packages/agent-workflow-server/src/beegame/delivery-workflow/worker-prompts.test.ts packages/agent-workflow-server/src/beegame/delivery-workflow/game-document-contracts.test.ts
-bun scripts/game-ir-isolation-boundary.ts
 git diff --check
 ```
+
+Run `bun scripts/game-ir-isolation-boundary.ts` separately and record that every reported path is an exact Task 1 allowlist path; any other violation fails the task.
 
 - [ ] **Step 5: Main-agent review and commit**
 
@@ -133,11 +134,12 @@ Do not parse prose, table cells, Mermaid labels, or fenced headings.
 
 ```bash
 bun test packages/agent-workflow-server/src/beegame/complete-game-document.test.ts
-bun scripts/game-ir-isolation-boundary.ts
 git diff --check
 git add packages/agent-workflow-server/src/beegame/complete-game-document.ts packages/agent-workflow-server/src/beegame/complete-game-document.test.ts
 git commit -m "fix: classify foundation markdown recovery"
 ```
+
+Run the boundary checker separately and require that every mismatch is an exact Task 1–2 allowlist path.
 
 ---
 
@@ -167,11 +169,12 @@ Add one optional transient `terminalBody` field. On the single successful result
 
 ```bash
 bun test packages/agent-workflow-server/src/beegame/foundation-markdown-stream.test.ts
-bun scripts/game-ir-isolation-boundary.ts
 git diff --check
 git add packages/agent-workflow-server/src/beegame/foundation-markdown-stream.ts packages/agent-workflow-server/src/beegame/foundation-markdown-stream.test.ts
 git commit -m "fix: commit accepted markdown candidate"
 ```
+
+Run the boundary checker separately and require that every mismatch is an exact Task 1–3 allowlist path.
 
 ---
 
@@ -240,9 +243,50 @@ git commit -m "fix: replace invalid markdown candidate in place"
 
 ---
 
-### Task 5: Prove local correctness and protected-boundary integrity
+### Task 5: Admit the exact Stage 2 corrections and prove local integrity
 
-**Files:** No production changes expected. Add an evidence report only if the repository already uses the existing `docs/superpowers/evidence/` convention for this branch.
+**Files:**
+- Modify: `scripts/game-ir-isolation-boundary.test.ts`
+- Modify: `scripts/game-ir-isolation-boundary.ts`
+- Modify: `docs/superpowers/evidence/2026-09-03-game-ir-protected-baseline.json`
+- Create: `docs/superpowers/evidence/2026-09-03-asset-plan-authoring-reliability.md`
+
+No production changes are allowed in this task.
+
+- [ ] **Step 1: Write RED boundary tests**
+
+Add a separate ordered `admittedStage2Corrections` manifest field. Each entry has exactly `path`, `baselineBlobId`, `correctedBlobId`, `reason`, `designCommit`, and `evidencePath`. Tests must reject an omitted, additional, reordered, altered, unavailable, baseline-mismatched, or current-blob-mismatched entry. The fixed list contains only final reviewed Task 1–4 production and test-support paths; it must not reuse or rename `admittedTestCorrections`.
+
+- [ ] **Step 2: Run RED**
+
+```bash
+bun test scripts/game-ir-isolation-boundary.test.ts
+```
+
+Expected: failure because the checker does not yet recognize the Stage 2 correction list.
+
+- [ ] **Step 3: Implement the fixed allowlist**
+
+Update the checker schema and literal expected list. Baseline blobs must resolve from `d821e286ebf7eb3ad1b4725ae60dac7a9fef95b6`; corrected blobs must be the committed Task 1–4 blobs; `designCommit` is `a773dc2f3`; `evidencePath` is `docs/superpowers/evidence/2026-09-03-asset-plan-authoring-reliability.md`. Keep exact-path comparison and all existing Game IR reference/absence checks. Do not admit a directory, glob, current HEAD, or values generated at verification time.
+
+- [ ] **Step 4: Run boundary GREEN**
+
+```bash
+bun test scripts/game-ir-isolation-boundary.test.ts
+bun scripts/game-ir-isolation-boundary.ts
+git diff --check
+```
+
+- [ ] **Step 5: Commit the boundary admission**
+
+```bash
+git add scripts/game-ir-isolation-boundary.ts scripts/game-ir-isolation-boundary.test.ts docs/superpowers/evidence/2026-09-03-game-ir-protected-baseline.json docs/superpowers/evidence/2026-09-03-asset-plan-authoring-reliability.md
+git commit -m "test: admit asset plan stage corrections"
+```
+
+### Task 5A: Prove local correctness
+
+**Files:** Update only the Task 5 evidence report with actual results.
 
 - [ ] **Step 1: Run focused tests**
 
@@ -269,7 +313,7 @@ git diff --check
 
 Require zero modified paths containing Reviewer, Revision, Checklist, Game IR, controller, recovery, durable schema, UI, or session-manager code. Search for forbidden additions: compatibility readers, alternate author/recovery lanes, JSON/YAML document output, and fixed business limits. The sink's local `terminalBody ?? mergedStream` input fallback is allowed and is not an alternate author lane.
 
-- [ ] **Step 4: Commit verification evidence if created**
+- [ ] **Step 4: Commit verification evidence**
 
 Record commands, pass/fail counts, duration, and changed paths. Do not claim Chrome acceptance from mocks.
 
