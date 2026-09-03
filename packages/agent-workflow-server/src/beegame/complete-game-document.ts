@@ -275,45 +275,87 @@ function assertMarkdownIntegrity(
   assertMarkdownTableIntegrity(body, blockId, startLine)
 }
 
-/** Structural-only admission used before a native Markdown result is forwarded. */
-export function isCompleteGameDocumentMarkdownStructure(
+export type GameDocumentMarkdownStructure =
+  | { kind: 'complete' }
+  | { kind: 'suffix_incomplete' }
+  | { kind: 'structurally_invalid'; reason: string }
+
+/** Classify the structural recovery operation available for a native Markdown result. */
+export function classifyGameDocumentMarkdownStructure(
   path: FoundationDocumentPath,
   value: string,
-): boolean {
+): GameDocumentMarkdownStructure {
   const body = value.trim()
-  if (!body) return false
+  if (!body) return { kind: 'suffix_incomplete' }
   const scan = authoredHeadingScan(body)
-  if (scan.fenceOpen) return false
   const contract = getGameDocumentContract(path)
-  if (!contract) return false
+  if (!contract)
+    return {
+      kind: 'structurally_invalid',
+      reason: `missing document contract for ${path}`,
+    }
   const expectedH2 = [
     'Executive Summary',
     ...contract.sections.map(section => section.title),
     'Production Materials',
   ]
-  const expectedH3 = contract.productionMaterials.map(material => material.title)
+  const expectedH3 = contract.productionMaterials.map(
+    material => material.title,
+  )
   const actualH2 = scan.headings
     .filter(heading => heading.level === 2)
     .map(heading => heading.text)
+  if (actualH2.some((heading, index) => expectedH2[index] !== heading))
+    return {
+      kind: 'structurally_invalid',
+      reason: `canonical H2 headings are not an exact prefix for ${path}`,
+    }
   const productionHeading = scan.headings.find(
     heading => heading.level === 2 && heading.text === 'Production Materials',
   )
-  if (!productionHeading || !exactSequence(actualH2, expectedH2))
-    return false
-  const materialHeadings = scan.headings.filter(
-    heading => heading.level === 3 && heading.lineIndex > productionHeading.lineIndex,
+  const canonicalMaterials = new Set(expectedH3)
+  if (
+    scan.headings.some(
+      heading =>
+        heading.level === 3 &&
+        canonicalMaterials.has(heading.text) &&
+        (!productionHeading || heading.lineIndex < productionHeading.lineIndex),
+    )
   )
-  const actualH3 = materialHeadings.map(heading => heading.text)
-  if (!exactSequence(actualH3, expectedH3))
-    return false
-  return true
+    return {
+      kind: 'structurally_invalid',
+      reason: `canonical material headings must follow Production Materials for ${path}`,
+    }
+  if (productionHeading) {
+    const actualH3 = scan.headings
+      .filter(
+        heading =>
+          heading.level === 3 &&
+          heading.lineIndex > productionHeading.lineIndex &&
+          canonicalMaterials.has(heading.text),
+      )
+      .map(heading => heading.text)
+    if (actualH3.some((heading, index) => expectedH3[index] !== heading))
+      return {
+        kind: 'structurally_invalid',
+        reason: `canonical material headings are not an exact prefix for ${path}`,
+      }
+    if (
+      actualH2.length === expectedH2.length &&
+      actualH3.length === expectedH3.length &&
+      !scan.fenceOpen
+    )
+      return { kind: 'complete' }
+  }
+  return { kind: 'suffix_incomplete' }
 }
 
-function exactSequence(actual: readonly string[], expected: readonly string[]): boolean {
-  return (
-    actual.length === expected.length &&
-    expected.every((heading, index) => actual[index] === heading)
-  )
+/** Structural-only admission used before a native Markdown result is forwarded. */
+export function isCompleteGameDocumentMarkdownStructure(
+  path: FoundationDocumentPath,
+  value: string,
+): boolean {
+  return classifyGameDocumentMarkdownStructure(path, value).kind === 'complete'
 }
 
 function substantiveContentBlocks(lines: readonly string[]): string[] {
