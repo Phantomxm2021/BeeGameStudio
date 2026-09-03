@@ -6,7 +6,7 @@ let userMessageCount = 0
 const receivedPrompts: string[] = []
 const receivedSessionIds: string[] = []
 let assetScenario: string | undefined
-let markdownRecoveryMode: 'normal' | 'never' | 'twice' | 'empty_continuation' | 'malformed_once' | 'malformed_forever' = 'normal'
+let markdownRecoveryMode: 'normal' | 'never' | 'twice' | 'empty_continuation' | 'empty_terminal_append' | 'malformed_once' | 'malformed_forever' = 'normal'
 
 const completeGddMarkdown = [
   '# Visible Markdown',
@@ -185,7 +185,7 @@ for await (const chunk of Bun.stdin.stream()) {
       }
     }
     if (assetScenario && userMessageCount > 1 && typeof content === 'string' && content.includes('complete replacement')) {
-        if (assetScenario.includes('empty'))
+        if (assetScenario.endsWith('-empty'))
           emitMarkdownResponse('', 'end_turn', userMessageCount, { stream: false })
         else if (assetScenario.includes('identical'))
           emitMarkdownResponse(capturedAssetMarkdown, 'end_turn', userMessageCount)
@@ -193,6 +193,8 @@ for await (const chunk of Bun.stdin.stream()) {
           emitMarkdownResponse(malformedAssetMarkdown, 'end_turn', userMessageCount)
         else if (assetScenario.includes('terminal-only'))
           emitMarkdownResponse(completeAssetMarkdown, 'end_turn', userMessageCount, { stream: false })
+        else if (assetScenario.includes('stream-empty-terminal'))
+          emitMarkdownResponse(completeAssetMarkdown, 'end_turn', userMessageCount, { terminalResult: '' })
         else
           emitMarkdownResponse(completeAssetMarkdown, 'end_turn', userMessageCount)
         continue
@@ -232,6 +234,7 @@ for await (const chunk of Bun.stdin.stream()) {
       content === 'truncated-markdown' ||
       content === 'truncated-markdown-twice' ||
       content === 'truncated-markdown-empty-continuation' ||
+      content === 'truncated-markdown-empty-terminal-continuation' ||
       content === 'truncated-markdown-forever' ||
       content === 'malformed-markdown-end-turn' ||
       content === 'malformed-markdown-end-turn-forever' ||
@@ -245,6 +248,8 @@ for await (const chunk of Bun.stdin.stream()) {
         markdownRecoveryMode = 'twice'
       if (content === 'truncated-markdown-empty-continuation')
         markdownRecoveryMode = 'empty_continuation'
+      if (content === 'truncated-markdown-empty-terminal-continuation')
+        markdownRecoveryMode = 'empty_terminal_append'
       if (content === 'malformed-markdown-end-turn')
         markdownRecoveryMode = 'malformed_once'
       if (content === 'malformed-markdown-end-turn-forever')
@@ -264,6 +269,8 @@ for await (const chunk of Bun.stdin.stream()) {
               )
           : markdownRecoveryMode === 'empty_continuation' && recovered
             ? ''
+        : markdownRecoveryMode === 'empty_terminal_append' && recovered
+          ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Vision and Product Promise'))
         : recovered && markdownRecoveryMode === 'normal'
           ? completeGddMarkdown.slice(completeGddMarkdown.indexOf('\n## Vision and Product Promise'))
           : '# Partial document\n## Executive Summary\nHalf sentence'
@@ -273,6 +280,9 @@ for await (const chunk of Bun.stdin.stream()) {
           ? 'end_turn'
         : recovered && markdownRecoveryMode !== 'never' ? 'end_turn' : '',
         userMessageCount,
+        markdownRecoveryMode === 'empty_terminal_append' && recovered
+          ? { terminalResult: '' }
+          : undefined,
       )
       continue
     }

@@ -3,9 +3,11 @@ import {
   CANONICAL_PROJECT_ARTIFACTS,
   CANONICAL_PROJECT_DOCUMENTS,
   CANONICAL_FOUNDATION_DOCUMENTS,
+  type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from './types'
 import { foundationFactDefinition } from './foundation-fact-definitions'
+import { renderLiteralMarkdownSkeleton } from './game-document-contracts'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
   'Judge quality by distinct implementable decisions and traceability, not document length. Use the minimum sufficient headings, tables, rows, diagrams and examples. Do not expand a contract purpose phrase by phrase into H3 headings. Represent each decision in one authoritative prose, table or diagram representation; elsewhere use a stable owner reference. Do not narrate tables or diagrams. Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate. Record a genuinely N/A item once with its reason and impact; never invent a system. Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets. Treat each section as the final decision record: Complete every required section and production material, omit only equivalent repetition, and keep rationale to the minimum needed for a production decision.'
@@ -378,20 +380,9 @@ function formatContract(request: WorkerDispatchRequest): string {
         additionalH2: 'forbidden',
         supportingContent: 'must be nested under one of the closed H2 headings',
       }
-      const literalMarkdownSkeleton = [
-        '# <document title>',
-        '',
-        mechanicalMarkdownProtocol.executiveSummary.heading,
-        '',
-        ...(Array.isArray(mechanicalMarkdownProtocol.sections)
-          ? mechanicalMarkdownProtocol.sections.flatMap(section => [section.heading, ''])
-          : []),
-        mechanicalMarkdownProtocol.productionMaterials.heading,
-        '',
-        ...(Array.isArray(mechanicalMarkdownProtocol.productionMaterials.entries)
-          ? mechanicalMarkdownProtocol.productionMaterials.entries.flatMap(entry => [entry.heading, ''])
-          : []),
-      ].join('\n')
+      const literalMarkdownSkeleton = renderLiteralMarkdownSkeleton(
+        request.contract.foundationDocumentPath as FoundationDocumentPath,
+      )
       contractWithoutDuplicatedBrief.completeDocumentContract = {
         ...authorDocumentContract,
         mechanicalMarkdownProtocol: {

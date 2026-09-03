@@ -541,6 +541,41 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
+  test('keeps streamed replacement bytes when its terminal result is empty', async () => {
+    const runtime = await startRuntime({
+      markdownStream: true,
+      targetPath: 'docs/ASSET_PLAN.md',
+    })
+    const messages: Record<string, unknown>[] = []
+
+    await runtime.submit({
+      prompt: 'asset-structural-replacement-stream-empty-terminal',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(messages.at(-1)?.result).toBe(fixtureCompleteAssetMarkdown())
+    expect(messages.at(-1)?.received_user_count).toBe(2)
+    runtime.dispose?.()
+  })
+
+  test('keeps streamed append bytes when its terminal result is empty', async () => {
+    const runtime = await startRuntime({ markdownStream: true })
+    const messages: Record<string, unknown>[] = []
+
+    await runtime.submit({
+      prompt: 'truncated-markdown-empty-terminal-continuation',
+      signal: new AbortController().signal,
+      onMessage: message => messages.push(message),
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+
+    expect(messages.at(-1)?.result).toContain('## Production Materials')
+    expect(messages.at(-1)?.received_user_count).toBe(2)
+    runtime.dispose?.()
+  })
+
   test('normalizes a streamed complete candidate when terminal result is empty', async () => {
     const runtime = await startRuntime({ markdownStream: true })
     const messages: Record<string, unknown>[] = []

@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { buildWorkerPrompt } from './worker-prompts'
-import { getGameDocumentContract } from './game-document-contracts'
+import {
+  getGameDocumentContract,
+  renderLiteralMarkdownSkeleton,
+} from './game-document-contracts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
@@ -142,6 +145,9 @@ describe('worker prompts', () => {
       ]
 
       expect(typeof protocol.literalMarkdownSkeleton).toBe('string')
+      expect(protocol.literalMarkdownSkeleton).toBe(
+        renderLiteralMarkdownSkeleton(path),
+      )
       expect(protocol.literalMarkdownSkeleton).toContain('# <document title>')
       expect(protocol.literalMarkdownSkeleton).toContain('## Production Materials')
       expect(protocol.literalMarkdownSkeleton).not.toContain('...')

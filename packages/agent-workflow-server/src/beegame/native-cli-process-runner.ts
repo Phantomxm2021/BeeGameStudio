@@ -17,8 +17,7 @@ import {
 import {
   classifyGameDocumentMarkdownStructure,
 } from './complete-game-document'
-import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import type { FoundationDocumentPath } from './delivery-workflow/types'
+import { renderLiteralMarkdownSkeleton } from './delivery-workflow/game-document-contracts'
 
 type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stdin: {
@@ -280,7 +279,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         }
       } else if (
         message.type === 'assistant' &&
-        (!turn.markdownStreamDeltaSeen || !turn.markdownOutput)
+        (!turn.markdownStreamDeltaSeen ||
+          (!turn.markdownOutput && !turn.markdownRecoveryOutput))
       ) {
         const text = assistantMarkdownText(message)
         if (turn.markdownRecoveryMode !== 'none')
@@ -291,9 +291,10 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         (turn.markdownRecoveryMode !== 'none' || !turn.markdownOutput)
       ) {
         const text = stringField(message, 'result')
-        if (turn.markdownRecoveryMode !== 'none')
-          turn.markdownRecoveryOutput = text
-        else turn.markdownOutput = text
+        if (turn.markdownRecoveryMode !== 'none') {
+          if (!turn.markdownRecoveryOutput.trim() && text.trim())
+            turn.markdownRecoveryOutput = text
+        } else turn.markdownOutput = text
       }
     }
     if (
@@ -429,7 +430,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
             type: 'text',
             text: markdownReplacementPrompt(
               reason,
-              literalMarkdownSkeleton(targetPath),
+              renderLiteralMarkdownSkeleton(targetPath),
             ),
           },
         ],
@@ -740,20 +741,6 @@ function markdownReplacementPrompt(reason: string, skeleton: string): string {
     'Return one complete replacement raw Markdown body from the title; do not continue, append, summarize, or add commentary.',
     'Use this full literal contract-derived skeleton exactly once and in order:',
     skeleton,
-  ].join('\n')
-}
-
-function literalMarkdownSkeleton(path: FoundationDocumentPath): string {
-  const contract = getGameDocumentContract(path)
-  return [
-    '# <document title>',
-    '',
-    '## Executive Summary',
-    '',
-    ...contract.sections.flatMap(section => [`## ${section.title}`, '']),
-    '## Production Materials',
-    '',
-    ...contract.productionMaterials.flatMap(material => [`### ${material.title}`, '']),
   ].join('\n')
 }
 

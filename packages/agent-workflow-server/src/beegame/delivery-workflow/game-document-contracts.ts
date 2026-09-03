@@ -478,3 +478,22 @@ export function getGameDocumentContract(
 ): GameDocumentContract {
   return GAME_DOCUMENT_CONTRACTS[path]
 }
+
+export function renderLiteralMarkdownSkeleton(
+  path: FoundationDocumentPath,
+): string {
+  const contract = getGameDocumentContract(path)
+  return [
+    '# <document title>',
+    '',
+    '## Executive Summary',
+    '',
+    ...contract.sections.flatMap(section => [`## ${section.title}`, '']),
+    '## Production Materials',
+    '',
+    ...contract.productionMaterials.flatMap(material => [
+      `### ${material.title}`,
+      '',
+    ]),
+  ].join('\n')
+}
