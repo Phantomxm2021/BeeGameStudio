@@ -168,4 +168,33 @@ describe('passive native runtime observability', () => {
       await rm(workspacePath, { recursive: true, force: true })
     }
   })
+
+  test('records a user cancellation without reporting a runtime error', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-cancelled-'))
+    try {
+      const errors: string[] = []
+      const observer = createRuntimeObservability({
+        workspacePath,
+        sessionId: 'session-cancelled',
+        provider: 'anthropic',
+        model: 'model-1',
+        errorSink: message => errors.push(message),
+      })
+      observer.beginTurn({ requestId: 'request-cancelled' })
+      observer.finishTurn({ outcome: 'cancelled_by_user' })
+      await observer.flush()
+
+      const raw = await readFile(
+        join(workspacePath, '.beegame/logs/native-runtime.jsonl'),
+        'utf8',
+      )
+      expect(JSON.parse(raw.trim().split('\n').at(-1)!)).toMatchObject({
+        type: 'turn_terminal',
+        outcome: 'cancelled_by_user',
+      })
+      expect(errors).toEqual([])
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
 })

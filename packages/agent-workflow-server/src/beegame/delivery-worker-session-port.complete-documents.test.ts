@@ -119,33 +119,25 @@ describe('delivery worker complete document boundary', () => {
       expect(projected.sources.length).toBeGreaterThan(0)
       expect(
         projected.sources.every((source: {
-          sections?: Array<{
-            sectionId?: unknown
-            startLine?: unknown
-            lineCount?: unknown
-            content?: unknown
-            digest?: unknown
-          }>
+          selectionScope?: unknown
+          sectionIds?: unknown[]
+          content?: unknown
+          contentDigest?: unknown
+          documentDigest?: unknown
         }) =>
-          source.sections?.every(
-            section =>
-              typeof section.sectionId === 'string' &&
-              Number.isInteger(section.startLine) &&
-              Number(section.startLine) > 0 &&
-              Number.isInteger(section.lineCount) &&
-              Number(section.lineCount) > 0 &&
-              typeof section.content === 'string' &&
-              section.content.includes(
-                `Authority content for ${String(section.sectionId)}.`,
-              ) &&
-              typeof section.digest === 'string' &&
-              /^[a-f0-9]{64}$/.test(section.digest),
-          ),
+          source.selectionScope === 'sections' &&
+          Array.isArray(source.sectionIds) &&
+          source.sectionIds.every(sectionId => typeof sectionId === 'string') &&
+          typeof source.content === 'string' &&
+          source.sectionIds.every(sectionId => String(source.content).includes(`Authority content for ${String(sectionId)}.`)) &&
+          typeof source.contentDigest === 'string' &&
+          /^[a-f0-9]{64}$/.test(source.contentDigest) &&
+          typeof source.documentDigest === 'string' &&
+          /^[a-f0-9]{64}$/.test(source.documentDigest),
         ),
       ).toBe(true)
-      expect(projected.sources[0]).not.toHaveProperty('sectionIds')
+      expect(projected.sources[0]).toHaveProperty('sectionIds')
       expect(projected).not.toHaveProperty('records')
-      expect(projected.sources[0].sections[0]).not.toHaveProperty('contentLines')
       expect(block).toContain('Authority content for')
       expect(block).not.toContain('"startLine"')
       expect(block).not.toContain('"lineCount"')

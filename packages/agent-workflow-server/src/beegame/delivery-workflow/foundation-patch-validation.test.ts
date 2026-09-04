@@ -148,8 +148,8 @@ function productionFixture(): {
   })
   // Leave one impacted contract and one unrelated contract broken. The post
   // audit must surface only the former as a new impacted issue.
-  factStore.find(item => item.key === 'asset.boss.count')!.value = 2
   factStore.find(item => item.key === 'level.required_assets')!.value = ['level-only']
+  factStore.splice(factStore.findIndex(item => item.key === 'asset.formats'), 1)
   factStore.find(item => item.key === 'technical.supported_actions')!.value = ['technical-only']
   factStore.find(item => item.key === 'game.mechanics')!.value = ['game-only']
   const postIssues = runProductionDeterministicFoundationAudit({
@@ -167,7 +167,7 @@ function issue(id: string, source: SectionRef, type: AuditIssue['type'] = 'schem
     source,
     expected: 'expected',
     actual: 'actual',
-    remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
+    remediation: { kind: 'patch', scope: 'section', documentPath: source.documentPath, sectionIds: [source.sectionId] },
   }
 }
 
@@ -177,8 +177,11 @@ function validationInput(
   admittedIssues: AuditIssue[],
   operationSectionId = 'rules_systems',
 ): FoundationPatchValidationInput {
-  const documentPath = operationSectionId === 'inventory' ? 'docs/ASSET_PLAN.md' : 'docs/GDD.md'
+  const documentPath = operationSectionId === 'inventory' || operationSectionId.startsWith('material.')
+    ? 'docs/ASSET_PLAN.md'
+    : 'docs/GDD.md'
   const operation: PatchOperation = {
+    scope: 'section',
     kind: 'REPLACE',
     documentPath,
     sectionId: operationSectionId,
@@ -204,8 +207,8 @@ describe('incremental foundation fact rebuilding', () => {
   test('replaces only impacted facts and preserves unrelated fact objects', () => {
     const rules: SectionRef = { ...vision, sectionId: 'rules_systems', heading: 'Rules', startLine: 4, endLine: 6 }
     const unrelated: FoundationFact = {
-      key: 'game.boss.count', value: 1, source: rules,
-      evidence: { documentPath: rules.documentPath, sectionId: rules.sectionId, startLine: 6, endLine: 6, digest: createHash('sha256').update('boss.count: 1').digest('hex') },
+      key: 'game.resources', value: ['health'], source: rules,
+      evidence: { documentPath: rules.documentPath, sectionId: rules.sectionId, startLine: 6, endLine: 6, digest: createHash('sha256').update('resources: [health]').digest('hex') },
     }
     const committed = createFoundationFactStore([
       fact('game.players.max', 2, vision, 'players.max: 2'),
@@ -213,7 +216,7 @@ describe('incremental foundation fact rebuilding', () => {
     ])
     const result = rebuildFoundationImpactedFacts({
       committedFactStore: committed,
-      documents: { 'docs/GDD.md': `${visionText}# Rules\n## Rules\nboss.count: 1\n` },
+      documents: { 'docs/GDD.md': `${visionText}# Rules\n## Rules\nresources: [health]\n` },
       sectionIndex: [vision, rules],
       impact: impact(['game.players.max']),
       revision: 'revision-2',
@@ -359,6 +362,7 @@ describe('targeted foundation patch validation', () => {
   test('runs only the selected deterministic contract and does not return unrelated issues', () => {
     const fixture = productionFixture()
     const operation: PatchOperation = {
+      scope: 'section',
       kind: 'REPLACE',
       documentPath: 'docs/UI_UX_SPEC.md',
       sectionId: 'hud',
@@ -396,6 +400,7 @@ describe('targeted foundation patch validation', () => {
   test('rejects unknown impact identities before evaluating deterministic checks', () => {
     const fixture = productionFixture()
     const impact = analyzeFoundationImpact([{
+      scope: 'section' as const,
       kind: 'REPLACE',
       documentPath: 'docs/UI_UX_SPEC.md',
       sectionId: 'hud',
@@ -424,6 +429,7 @@ describe('targeted foundation patch validation', () => {
   test('scopes schema and value checks to impacted fact keys', () => {
     const fixture = productionFixture()
     const impact = analyzeFoundationImpact([{
+      scope: 'section' as const,
       kind: 'REPLACE',
       documentPath: 'docs/GDD.md',
       sectionId: 'vision',
@@ -432,7 +438,7 @@ describe('targeted foundation patch validation', () => {
       afterDigest: 'd'.repeat(64),
     }])
     fixture.factStore.find(item => item.key === 'game.players.max')!.value = 65
-    fixture.factStore.find(item => item.key === 'game.boss.count')!.value = 65
+    fixture.factStore.find(item => item.key === 'game.resources')!.value = []
 
     const targeted = runProductionDeterministicFoundationImpactAudit({
       sectionIndex: fixture.sectionIndex,
@@ -442,20 +448,20 @@ describe('targeted foundation patch validation', () => {
     expect(targeted).toHaveLength(1)
     expect(targeted[0]?.type).toBe('schema')
     expect(targeted[0]?.actual).toContain('game.players.max')
-    expect(targeted[0]?.actual).not.toContain('game.boss.count')
+    expect(targeted[0]?.actual).not.toContain('game.resources')
   })
 
   test('returns exactly one deterministic PASS/FAIL per original issue and filters new issues by impact', () => {
     const fixture = productionFixture()
-    const impactedPostIssue = fixture.postIssues.find(issue => issue.type === 'contract' && issue.target?.sectionId === 'rules_systems')!
-    const newImpactedPostIssue = fixture.postIssues.find(issue => issue.type === 'contract' && issue.target?.sectionId === 'content_matrix')!
+    const impactedPostIssue = fixture.postIssues.find(issue => issue.type === 'contract' && issue.target?.sectionId === 'content_matrix')!
+    const newImpactedPostIssue = fixture.postIssues.find(issue => issue.type === 'schema' && issue.actual.includes('asset.formats'))!
     const unrelatedPostIssue = fixture.postIssues.find(issue => issue.type === 'contract' && issue.target?.sectionId === 'player_actions')!
-    const inventory = fixture.sectionIndex.find(section => section.sectionId === 'inventory')!
+    const inventory = fixture.sectionIndex.find(section => section.sectionId === 'material.asset-inventory-table')!
     const input = validationInput(
       fixture,
       ['original-resolved', impactedPostIssue.id],
       [issue('original-resolved', inventory), impactedPostIssue],
-      'inventory',
+      'material.asset-inventory-table',
     )
 
     const result = validateFoundationPatch(input)
@@ -488,11 +494,11 @@ describe('targeted foundation patch validation', () => {
     const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
     const semantic: AuditIssue = {
       ...issue('multi-section-semantic', rules, 'semantic'),
-      remediation: { kind: 'patch', documentPath: 'docs/GDD.md', sectionIds: ['rules_systems', 'player_actions'] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['rules_systems', 'player_actions'] },
     }
     const patchOperations: PatchOperation[] = [
-      { kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'rules_systems', issueIds: [semantic.id], beforeDigest: 'c'.repeat(64), afterDigest: 'd'.repeat(64) },
-      { kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'player_actions', issueIds: [semantic.id], beforeDigest: 'e'.repeat(64), afterDigest: 'f'.repeat(64) },
+      { scope: 'section', kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'rules_systems', issueIds: [semantic.id], beforeDigest: 'c'.repeat(64), afterDigest: 'd'.repeat(64) },
+      { scope: 'section', kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'player_actions', issueIds: [semantic.id], beforeDigest: 'e'.repeat(64), afterDigest: 'f'.repeat(64) },
     ]
 
     const result = validateFoundationPatch({
@@ -509,6 +515,96 @@ describe('targeted foundation patch validation', () => {
     })
 
     expect(result.semanticRecheckIssueIds).toEqual([semantic.id])
+  })
+
+  test('accepts a valid remediation subset when one authorized section is changed', () => {
+    const fixture = productionFixture()
+    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
+    const semantic: AuditIssue = {
+      ...issue('subset-semantic', rules, 'semantic'),
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['rules_systems', 'player_actions'] },
+    }
+    const operation: PatchOperation = {
+      scope: 'section', kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'rules_systems', issueIds: [semantic.id],
+      beforeDigest: 'c'.repeat(64), afterDigest: 'd'.repeat(64),
+    }
+
+    const result = validateFoundationPatch({
+      validatorTaskId: 'validator-task-subset',
+      round: 1,
+      documentPath: 'docs/GDD.md',
+      baseDocumentDigest: '1'.repeat(64),
+      postPatchDocumentDigest: '2'.repeat(64),
+      patchOperations: [operation],
+      impact: analyzeFoundationImpact([operation]),
+      admittedIssues: [semantic],
+      sectionIndex: fixture.sectionIndex,
+      factStore: fixture.factStore,
+    })
+
+    expect(result.semanticRecheckIssueIds).toEqual([semantic.id])
+  })
+
+  test('requires remediation sections to exist in the rebuilt SectionIndex', () => {
+    const fixture = productionFixture()
+    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
+    const semantic: AuditIssue = {
+      ...issue('missing-section', rules, 'semantic'),
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['not_in_index'] },
+    }
+    const input = validationInput(fixture, [semantic.id], [semantic], 'rules_systems')
+
+    expect(() => validateFoundationPatch(input)).toThrow(/rebuilt SectionIndex/i)
+  })
+
+  test('rejects remediation for a different document', () => {
+    const fixture = productionFixture()
+    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
+    const semantic: AuditIssue = {
+      ...issue('different-document', rules, 'semantic'),
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/ASSET_PLAN.md', sectionIds: ['inventory'] },
+    }
+    const input = validationInput(fixture, [semantic.id], [semantic], 'rules_systems')
+
+    expect(() => validateFoundationPatch(input)).toThrow(/outside the rebuilt SectionIndex/i)
+  })
+
+  test('requires each admitted issue to have a real operation bound to its remediation', () => {
+    const fixture = productionFixture()
+    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
+    const semantic: AuditIssue = {
+      ...issue('unbound-remediation', rules, 'semantic'),
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['rules_systems'] },
+    }
+    const input = validationInput(fixture, [semantic.id], [semantic], 'player_actions')
+
+    expect(() => validateFoundationPatch(input)).toThrow(/no PatchOperation bound/i)
+  })
+
+  test('rejects a PatchOperation that changes a section outside a bound issue remediation', () => {
+    const fixture = productionFixture()
+    const rules = fixture.sectionIndex.find(section => section.documentPath === 'docs/GDD.md' && section.sectionId === 'rules_systems')!
+    const semantic: AuditIssue = {
+      ...issue('unauthorized-operation', rules, 'semantic'),
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['rules_systems'] },
+    }
+    const input = validationInput(fixture, [semantic.id], [semantic], 'rules_systems')
+    const unauthorized: PatchOperation = {
+      scope: 'section',
+      kind: 'REPLACE',
+      documentPath: 'docs/GDD.md',
+      sectionId: 'player_actions',
+      issueIds: [semantic.id],
+      beforeDigest: 'e'.repeat(64),
+      afterDigest: 'f'.repeat(64),
+    }
+    const patchOperations = [...input.patchOperations, unauthorized]
+
+    expect(() => validateFoundationPatch({
+      ...input,
+      patchOperations,
+      impact: analyzeFoundationImpact(patchOperations),
+    })).toThrow(/outside admitted issue remediation/i)
   })
 
   test('rejects duplicate or out-of-scope issue and operation bindings', () => {
@@ -530,8 +626,8 @@ describe('targeted foundation patch validation', () => {
     const rules = fixture.sectionIndex.find(section => section.sectionId === 'rules_systems')!
     const vision = fixture.sectionIndex.find(section => section.sectionId === 'vision')!
     const operations: PatchOperation[] = [
-      { kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'vision', issueIds: ['b'], beforeDigest: '1'.repeat(64), afterDigest: '2'.repeat(64) },
-      { kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'rules_systems', issueIds: ['a'], beforeDigest: '3'.repeat(64), afterDigest: '4'.repeat(64) },
+      { scope: 'section', kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'vision', issueIds: ['b'], beforeDigest: '1'.repeat(64), afterDigest: '2'.repeat(64) },
+      { scope: 'section', kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'rules_systems', issueIds: ['a'], beforeDigest: '3'.repeat(64), afterDigest: '4'.repeat(64) },
     ]
     const impact = analyzeFoundationImpact(operations)
     const base = {
@@ -566,13 +662,14 @@ describe('semantic patch targeted recheck authority', () => {
       startLine: 3, endLine: 4, digest: createHash('sha256').update(targetText).digest('hex'),
     }
     const operation: PatchOperation = {
+      scope: 'section',
       kind: 'REPLACE', documentPath: 'docs/GDD.md', sectionId: 'vision', issueIds: ['semantic-1'],
       beforeDigest: 'b'.repeat(64), afterDigest: target.digest,
     }
     const issue: AuditIssue = {
       id: 'semantic-1', severity: 'HIGH', type: 'semantic', source,
       target, expected: 'coherent', actual: 'contradictory',
-      remediation: { kind: 'patch', documentPath: 'docs/GDD.md', sectionIds: ['vision'] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['vision'] },
     }
     const fact: FoundationFact = {
       key: 'game.players.max', value: 4, source: target,

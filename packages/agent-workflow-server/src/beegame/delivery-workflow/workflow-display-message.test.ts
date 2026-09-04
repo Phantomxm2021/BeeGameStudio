@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   projectWorkflowCurrentMessage,
   projectWorkflowDisplayReason,
+  sanitizeWorkflowDisplayDetail,
   sanitizeWorkflowDisplayMessage,
 } from './workflow-display-message'
 
@@ -52,12 +53,13 @@ describe('projectWorkflowDisplayReason', () => {
     ],
     ['dispatch failed: worker transport unavailable', 'dispatch_failed'],
     ['provider request failed: upstream unavailable', 'provider_failed'],
-  ] as const)('projects %s without exposing the internal reason', (reason, code) => {
+  ] as const)('projects %s with a safe technical detail', (reason, code) => {
     const projection = projectWorkflowDisplayReason(reason)
 
     expect(projection?.code).toBe(code)
     expect(projection?.message).toBeTruthy()
     expect(projection?.message).not.toContain(reason)
+    expect(projection?.detail).toBe(reason)
     expect(projection?.diagnosticId).toMatch(/^workflow-[0-9a-f]{12}$/)
   })
 
@@ -70,18 +72,71 @@ describe('projectWorkflowDisplayReason', () => {
   test('preserves an already projected reason instead of classifying its message again', () => {
     const projected = {
       message: 'Workflow stopped by user.',
+      detail: 'user stopped workflow',
       code: 'user_stopped' as const,
       diagnosticId: 'workflow-stop-1234',
     }
     expect(projectWorkflowDisplayReason(projected)).toEqual(projected)
   })
 
-  test('preserves an existing diagnostic id without exposing the detail', () => {
+  test('preserves structured diagnostic context through display reprojection', () => {
+    const projected = {
+      message: 'Foundation revision validation failed.',
+      detail: 'revision validation failed: stale receipt',
+      code: 'revision_validation_failed' as const,
+      diagnosticId: 'workflow-context-1234',
+      stage: 'DOCUMENT_REVIEW',
+      taskId: 'revision:docs/GDD.md',
+      documentPath: 'docs/GDD.md',
+      retryable: true,
+    }
+    expect(projectWorkflowDisplayReason(projected)).toEqual(projected)
+  })
+
+  test('preserves an existing diagnostic id outside the user-facing summary', () => {
     const projection = projectWorkflowDisplayReason(
       '当前项目的工作流状态无效。诊断编号：trace-12345678',
     )
 
     expect(projection).toMatchObject({ diagnosticId: 'trace-12345678' })
     expect(projection?.message).not.toContain('trace-12345678')
+  })
+
+  test('projects a revision scope failure with actionable structured context', () => {
+    const raw =
+      'foundation revision validation failed: admitted issue fix target is outside the authorized patch scope'
+    const projection = projectWorkflowDisplayReason(raw, {
+      stage: 'DOCUMENT_REVIEW',
+      taskId: 'revision:docs/ASSET_PLAN.md',
+      documentPath: 'docs/ASSET_PLAN.md',
+      retryable: true,
+    })
+
+    expect(projection).toMatchObject({
+      code: 'revision_validation_failed',
+      message:
+        'Foundation revision validation failed: the document changed outside the authorized scope.',
+      stage: 'DOCUMENT_REVIEW',
+      taskId: 'revision:docs/ASSET_PLAN.md',
+      documentPath: 'docs/ASSET_PLAN.md',
+      retryable: true,
+    })
+    expect(projection?.message).not.toContain(raw)
+  })
+})
+
+describe('sanitizeWorkflowDisplayDetail', () => {
+  test('redacts credentials and host paths while preserving the cause', () => {
+    expect(
+      sanitizeWorkflowDisplayDetail(
+        'receipt digest mismatch at /Users/example/project/run.json; api_key=secret-value',
+      ),
+    ).toBe('receipt digest mismatch at [host path redacted]; api_key: [redacted]')
+  })
+
+  test('bounds unexpected protocol payloads', () => {
+    const detail = sanitizeWorkflowDisplayDetail(`invalid terminal ${'x'.repeat(1_000)}`)
+    expect(detail.length).toBe(800)
+    expect(detail.endsWith('…')).toBe(true)
   })
 })

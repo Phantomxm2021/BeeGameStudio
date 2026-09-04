@@ -31,7 +31,7 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationRevisionToolResultSchema, foundationSemanticModelPayloadSchema, foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
+import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationSemanticModelPayloadSchema, foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
@@ -62,6 +62,7 @@ import {
   type FoundationAuthorityProjection,
 } from './foundation-authority-projection'
 import { buildChecklistAuthorityProjection } from './checklist-authority-projection'
+import { readFoundationRevisionCommitReceipt } from './foundation-revision-markdown-stream'
 
 type FoundationFactPacketContract = {
   keys: FoundationFactKey[]
@@ -342,6 +343,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
     string,
     FoundationAuthorityProjection
   >()
+  const documentPromptByteLengths = new Map<string, number>()
   const eventOffsets = new Map<string, number>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
@@ -408,7 +410,26 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? { workflowAllowedTools: ['Write', 'Edit'] }
           : {}),
         ...(request.contract.modelTier === 'fast' || request.contract.modelTier === 'balanced' || request.contract.modelTier === 'strong' ? { workflowModelTier: request.contract.modelTier } : {}),
-        ...(request.workerType === 'foundation-document-reviser' ? { workflowRevisionContract: request.contract } : {}),
+        ...(request.workerType === 'foundation-document-reviser'
+          ? {
+              workflowRevisionContract: request.contract,
+              workflowRevisionMarkdownStreamContract: {
+                workspacePath: request.workspacePath,
+                runId: request.runId,
+                dispatchId,
+                taskId: request.taskId!,
+                revision: request.revision,
+                round: request.contract.round as number,
+                scope: request.contract.scope as 'section' | 'document',
+                documentPath: request.contract.documentPath as FoundationDocumentPath,
+                issueIds: request.contract.issueIds as string[],
+                sectionIds: request.contract.sectionIds as string[],
+                stagedPath: request.contract.stagedPath as string,
+                baseDocumentDigest: request.contract.baseDocumentDigest as string,
+                maxBytes: FOUNDATION_WORKER_OUTPUT_MAX_BYTES,
+              },
+            }
+          : {}),
         workflowAllowedPaths: request.allowedPaths ?? [],
         ...(request.workerType === 'foundation-fact-extractor'
           ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactSchemaForRequest(request) }
@@ -534,10 +555,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
               : request?.workerType === 'question-answerer'
                 ? 'Submit the answer through SubmitQuestionAnswerResult exactly once. Do not author workflow evidence or return terminal JSON.'
                 : ''
-      const revisionResultInstruction =
-        request?.workerType === 'foundation-document-reviser'
-          ? 'After editing only the assigned stage, call SubmitFoundationRevisionResult exactly once with status APPLIED and the exact changedSectionIds; do not return terminal JSON.'
-          : ''
       const assetManifestInstruction =
         request?.workerType === 'resource-planner'
           ? 'Use AssetManifest submit_resource_plan as the only mutation and stop after it is accepted.'
@@ -558,12 +575,15 @@ export function createBeeGameDeliveryWorkerPort(input: {
               implementationResultInstruction,
               validationResultInstruction,
               workflowResultInstruction,
-              revisionResultInstruction,
               assetManifestInstruction,
             ]),
       ]
         .filter(Boolean)
         .join('\n\n')
+      documentPromptByteLengths.set(
+        dispatchId,
+        new TextEncoder().encode(workerPrompt).byteLength,
+      )
       await input.sessions.sendWithDisplay(sessionId, workerPrompt, {
         taskType: taskTypeForWorker(
           records.get(dispatchId)?.workerType ?? 'question-answerer',
@@ -616,6 +636,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         requests.delete(dispatchId)
         documentAuthorityBlocks.delete(dispatchId)
         documentAuthorityProjections.delete(dispatchId)
+        documentPromptByteLengths.delete(dispatchId)
         eventOffsets.delete(dispatchId)
       }
     },
@@ -711,6 +732,28 @@ export function createBeeGameDeliveryWorkerPort(input: {
             continue
           }
         }
+        if (request?.workerType === 'foundation-document-reviser') {
+          const receipt = await readFoundationRevisionCommitReceipt({
+            workspacePath: request.workspacePath,
+            dispatchId,
+          })
+          if (receipt) {
+            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+            return foundationDocumentReviserTerminalSchema.parse({
+              workerType: 'foundation-document-reviser',
+              status: 'completed',
+              runId: request.runId,
+              dispatchId: request.dispatchId,
+              taskId: request.taskId,
+              revision: request.revision,
+              packetDigest: request.contract.packetDigest,
+              round: request.contract.round,
+              documentPath: request.contract.documentPath,
+              declaration: { status: 'APPLIED', receipt },
+            })
+          }
+        }
         // The accepted structured submission is durable workflow evidence, but
         // Bee Game Studio still owns its normal turn completion. Drain the native
         // turn before the workflow controller is allowed to close the session.
@@ -755,6 +798,31 @@ export function createBeeGameDeliveryWorkerPort(input: {
             )
               error.name = 'WorkerNeedsActionError'
             throw error
+          }
+          if (
+            result.type === 'result' &&
+            request?.workerType === 'foundation-document-reviser'
+          ) {
+            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+            const receipt = await readFoundationRevisionCommitReceipt({
+              workspacePath: request.workspacePath,
+              dispatchId,
+            })
+            if (!receipt)
+              throw new Error('foundation revision completed without a committed Markdown receipt')
+            return foundationDocumentReviserTerminalSchema.parse({
+              workerType: 'foundation-document-reviser',
+              status: 'completed',
+              runId: request.runId,
+              dispatchId: request.dispatchId,
+              taskId: request.taskId,
+              revision: request.revision,
+              packetDigest: request.contract.packetDigest,
+              round: request.contract.round,
+              documentPath: request.contract.documentPath,
+              declaration: { status: 'APPLIED', receipt },
+            })
           }
           if (result.type === 'result' || result.type === 'turn.empty') {
             const missingTerminal = request
@@ -808,6 +876,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
                   sessionEvents(sessionId),
                   projectionMetrics(
                     documentAuthorityProjections.get(dispatchId),
+                    documentPromptByteLengths.get(dispatchId),
                   ),
                 ),
               )
@@ -836,7 +905,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
               [targetPath],
               documentAuthoringMetrics(
                 sessionEvents(sessionId),
-                projectionMetrics(documentAuthorityProjections.get(dispatchId)),
+                projectionMetrics(
+                  documentAuthorityProjections.get(dispatchId),
+                  documentPromptByteLengths.get(dispatchId),
+                ),
               ),
             )
           }
@@ -937,10 +1009,17 @@ async function persistFoundationAuthorityIndex(
   return projection
 }
 
-function projectionMetrics(projection?: FoundationAuthorityProjection) {
+function projectionMetrics(
+  projection?: FoundationAuthorityProjection,
+  promptByteLength?: number,
+) {
   return projection
     ? {
         byteLength: projection.byteLength,
+        modelByteLength: new TextEncoder().encode(
+          modelFoundationAuthorityProjectionBytes(projection),
+        ).byteLength,
+        ...(promptByteLength !== undefined ? { promptByteLength } : {}),
         rangeCount: projection.rangeCount,
         projectedLineCount: projection.projectedLineCount,
       }
@@ -974,7 +1053,7 @@ function structuredSubmissionToolName(
     case 'implementation-worker':
       return 'SubmitImplementationResult'
     case 'foundation-document-reviser':
-      return 'SubmitFoundationRevisionResult'
+      return undefined
     case 'implementation-auditor':
     case 'acceptance-validator':
       return 'SubmitValidationResult'
@@ -1041,7 +1120,7 @@ async function createDeterministicStructuredTerminal(input: {
         throw new Error('worker terminal result is missing a valid StructuredOutput semantic result')
       })()
     case 'foundation-document-reviser':
-      return createDeterministicFoundationRevisionTerminal(input)
+      throw new Error('foundation revision terminal requires a committed Markdown receipt')
     case 'atomic-task-planner':
       return createDeterministicAtomicTaskPlannerTerminal(input)
     case 'implementation-worker':
@@ -1139,34 +1218,6 @@ function createDeterministicFoundationSemanticTerminal(input: {
   })
 }
 
-function createDeterministicFoundationRevisionTerminal(input: {
-  request: WorkerDispatchRequest
-  events: ReturnType<BeeGameSessionManager['events']>
-}) {
-  const event = [...input.events].reverse().find(candidate => candidate.type === 'tool.completed' && candidate.payload?.toolName === 'SubmitFoundationRevisionResult')
-  const output = event?.payload?.output
-  if (typeof output !== 'string') throw new Error('foundation revision terminal output is missing')
-  let value: unknown
-  try { value = JSON.parse(output) } catch { throw new Error('foundation revision terminal output is malformed') }
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('foundation revision terminal output is not an object')
-  const candidate = value as Record<string, unknown>
-  if (Object.hasOwn(candidate, 'data')) throw new Error('foundation revision terminal output envelope is invalid')
-  const declaration = foundationRevisionToolResultSchema.parse(candidate)
-  return foundationDocumentReviserTerminalSchema.parse({
-    workerType: 'foundation-document-reviser',
-    status: 'completed',
-    runId: input.request.runId,
-    dispatchId: input.request.dispatchId,
-    taskId: input.request.taskId,
-    revision: input.request.revision,
-    packetDigest: input.request.contract.packetDigest,
-    round: input.request.contract.round,
-    documentPath: input.request.contract.documentPath,
-    declaration,
-  })
-}
-
 function completedToolInputs(
   events: ReturnType<BeeGameSessionManager['events']>,
   toolName: string,
@@ -1191,19 +1242,6 @@ function failedToolCount(
     event =>
       event.type === 'tool.failed' && event.payload?.toolName === toolName,
   ).length
-}
-
-function lastFailedToolOutput(
-  events: ReturnType<BeeGameSessionManager['events']>,
-  toolName: string,
-): string | undefined {
-  for (const event of [...events].reverse()) {
-    if (event.type !== 'tool.failed' || event.payload?.toolName !== toolName)
-      continue
-    const output = event.payload.output
-    if (typeof output === 'string' && output.trim()) return output.trim()
-  }
-  return undefined
 }
 
 async function writeCanonicalTerminalEvidence(input: {

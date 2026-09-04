@@ -14,6 +14,7 @@ function operation(
   kind: PatchOperation['kind'] = 'REPLACE',
 ): PatchOperation {
   return {
+    scope: 'section',
     kind,
     documentPath,
     sectionId,
@@ -31,11 +32,10 @@ describe('foundation revision impact analysis', () => {
 
     expect(result).toEqual({
       changedSections: [{ documentPath: 'docs/GDD.md', sectionId: 'rules_systems' }],
-      factKeys: ['game.boss.count', 'game.resources'],
-      contractIds: ['asset-boss-count-authority', 'ui-resources-authority'],
+      factKeys: ['game.resources'],
+      contractIds: ['ui-resources-authority'],
       checkIds: [
         'balance-resource-coverage',
-        'boss-count-consistency',
         'ui-resource-coverage',
       ],
       issueIds: ['AUD-RULES'],
@@ -45,29 +45,27 @@ describe('foundation revision impact analysis', () => {
   test('unions multiple sections and only includes contracts/checks touching their facts', () => {
     const result = analyzeFoundationImpact([
       operation('docs/GDD.md', 'rules_systems', ['AUD-RULES']),
-      operation('docs/ASSET_PLAN.md', 'inventory', ['AUD-ASSET']),
+      operation('docs/ASSET_PLAN.md', 'material.asset-inventory-table', ['AUD-ASSET']),
     ])
 
     expect(result.changedSections).toEqual([
-      { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' },
+      { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'material.asset-inventory-table' },
       { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' },
     ])
     expect(result.factKeys).toEqual([
-      'asset.boss.count',
       'asset.covered_level_requirements',
+      'asset.formats',
       'asset.inventory_ids',
-      'game.boss.count',
       'game.resources',
     ])
     expect(result.contractIds).toEqual([
-      'asset-boss-count-authority',
       'asset-level-requirement-coverage',
       'ui-resources-authority',
     ])
     expect(result.checkIds).toEqual([
       'asset-inventory-coverage',
+      'asset-platform-format',
       'balance-resource-coverage',
-      'boss-count-consistency',
       'level-asset-coverage',
       'ui-resource-coverage',
     ])

@@ -11,7 +11,6 @@ import {
 import { foundationRuntimeTasks } from './foundation-audit-state'
 import type { FoundationAuditState, FoundationIssueSummary, FoundationRevisionTask, FoundationRevisionRound } from './foundation-audit-state'
 import type { WorkflowUsage } from './types'
-import { isActiveFoundationRepairState } from './display-progress'
 
 export type DocumentDisplayTask = {
   id: string
@@ -212,10 +211,7 @@ function revisionTaskDisplayStatus(
 export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
-  if (
-    isActiveFoundationRepairState(input.foundationAuditState) &&
-    input.documentStep !== 'CHECKLIST_DRAFTING'
-  )
+  if (input.documentStep === 'FOUNDATION_REVISION')
     return projectFoundationRevisionTasks(input)
   if (input.documentStep === 'FOUNDATION_REVIEW')
     return projectFoundationAuditTasks(input)

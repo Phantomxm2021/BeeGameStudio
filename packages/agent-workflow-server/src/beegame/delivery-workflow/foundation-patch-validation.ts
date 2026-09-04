@@ -410,7 +410,7 @@ function validateAdmittedIssue(
   issue: AuditIssue,
   sectionIndex: readonly SectionRef[],
   documentPath: FoundationDocumentPath,
-  allowedSections: ReadonlySet<string>,
+  operations: readonly Extract<PatchOperation, { scope: 'section' }>[],
 ): void {
   if (!issue || typeof issue !== 'object' || Array.isArray(issue))
     throw new Error('foundation admitted issue is invalid')
@@ -432,6 +432,7 @@ function validateAdmittedIssue(
       : true).sort(compareStable)
   if (issueKeys.length !== expectedKeys.length || issueKeys.some((key, index) => key !== expectedKeys[index]))
     throw new Error('foundation admitted issue shape is invalid')
+  const indexed = new Map(sectionIndex.map(section => [sectionKey(section), section]))
   if (
     typeof issue.id !== 'string' || issue.id.trim().length === 0 ||
     !['BLOCKER', 'HIGH', 'MEDIUM', 'LOW'].includes(issue.severity) ||
@@ -441,10 +442,16 @@ function validateAdmittedIssue(
     issue.remediation.kind !== 'patch' ||
     issue.remediation.documentPath !== documentPath ||
     issue.remediation.sectionIds.length === 0 ||
-    issue.remediation.sectionIds.some(sectionId => !allowedSections.has(`${documentPath}\0${sectionId}`))
+    issue.remediation.sectionIds.some(sectionId => !indexed.has(`${documentPath}\0${sectionId}`))
   )
-    throw new Error('foundation admitted issue fix target is outside the patch')
-  const indexed = new Map(sectionIndex.map(section => [sectionKey(section), section]))
+    throw new Error('foundation admitted issue fix target is outside the rebuilt SectionIndex')
+  const bound = operations.some(operation =>
+    operation.issueIds.includes(issue.id) &&
+    operation.documentPath === issue.remediation.documentPath &&
+    issue.remediation.sectionIds.includes(operation.sectionId),
+  )
+  if (!bound)
+    throw new Error('foundation admitted issue has no PatchOperation bound to its remediation')
   for (const candidate of [issue.source, issue.target].filter(Boolean)) {
     const exact = candidate && indexed.get(sectionKey(candidate))
     if (!candidate || !exact || exact.heading !== candidate.heading || exact.startLine !== candidate.startLine || exact.endLine !== candidate.endLine || exact.digest !== candidate.digest)
@@ -583,6 +590,8 @@ export function buildFoundationSemanticRecheckPacket(input: {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('targeted semantic packet input is invalid')
   assertExactKeys(input as unknown as Record<string, unknown>, ['documents', 'factStore', 'impact', 'issue', 'patchOperation', 'sectionIndex'], 'targeted semantic packet input')
   validateTargetedIssue(input.issue)
+  if (input.patchOperation.scope !== 'section')
+    throw new Error('targeted semantic packet requires a section PatchOperation')
   const operationImpact = validateImpact(input.impact, [input.patchOperation])
   if (!input.patchOperation.issueIds.includes(input.issue.id)) throw new Error('targeted semantic packet issue is not bound to PatchOperation')
   if (input.issue.remediation.kind !== 'patch' || input.patchOperation.documentPath !== input.issue.remediation.documentPath || !input.issue.remediation.sectionIds.includes(input.patchOperation.sectionId))
@@ -768,6 +777,9 @@ export function validateFoundationPatch(
   assertDigest(input.postPatchDocumentDigest, 'foundation patch postPatchDocumentDigest')
   if (!Array.isArray(input.patchOperations) || input.patchOperations.length === 0)
     throw new Error('foundation patch validation requires PatchOperations')
+  if (input.patchOperations.some(operation => operation.scope !== 'section'))
+    throw new Error('foundation patch validation only accepts section PatchOperations')
+  const patchOperations = input.patchOperations as readonly Extract<PatchOperation, { scope: 'section' }>[]
   if (!Array.isArray(input.admittedIssues) || input.admittedIssues.length === 0)
     throw new Error('foundation patch validation requires admitted issues')
   if (!Array.isArray(input.sectionIndex) || input.sectionIndex.length === 0)
@@ -775,24 +787,31 @@ export function validateFoundationPatch(
   if (!Array.isArray(input.factStore))
     throw new Error('foundation patch validation requires a rebuilt FactStore')
 
-  const operationDocuments = new Set(input.patchOperations.map(operation => operation.documentPath))
+  const operationDocuments = new Set(patchOperations.map(operation => operation.documentPath))
   if (operationDocuments.size !== 1 || !operationDocuments.has(input.documentPath))
     throw new Error('foundation patch operations must belong to one requested document')
   const validatedDocumentPath = [...operationDocuments][0]!
-  const operationSections = new Set(input.patchOperations.map(operation => `${operation.documentPath}\0${operation.sectionId}`))
-  const impact = validateImpact(input.impact, input.patchOperations)
+  const impact = validateImpact(input.impact, patchOperations)
   const issueIds = new Set<string>()
   for (const issue of input.admittedIssues) {
     if (issueIds.has(issue.id)) throw new Error(`duplicate admitted issue ID: ${issue.id}`)
     issueIds.add(issue.id)
-    validateAdmittedIssue(issue, input.sectionIndex, input.documentPath, operationSections)
+    validateAdmittedIssue(issue, input.sectionIndex, input.documentPath, patchOperations)
   }
   if (
     issueIds.size !== impact.issueIds.length ||
     impact.issueIds.some(id => !issueIds.has(id))
   )
     throw new Error('foundation admitted issue coverage does not match impact.issueIds')
-  const operationIssueIds = new Set(input.patchOperations.flatMap(operation => operation.issueIds))
+  const admittedById = new Map(input.admittedIssues.map(issue => [issue.id, issue]))
+  for (const operation of patchOperations) {
+    for (const issueId of operation.issueIds) {
+      const admitted = admittedById.get(issueId)
+      if (!admitted || admitted.remediation.documentPath !== operation.documentPath || !admitted.remediation.sectionIds.includes(operation.sectionId))
+        throw new Error('foundation PatchOperation is outside admitted issue remediation')
+    }
+  }
+  const operationIssueIds = new Set(patchOperations.flatMap(operation => operation.issueIds))
   if (
     operationIssueIds.size !== impact.issueIds.length ||
     impact.issueIds.some(id => !operationIssueIds.has(id))
@@ -816,8 +835,8 @@ export function validateFoundationPatch(
     .filter(issue => issue.type === 'semantic')
     .map(issue => issue.id)
     .sort(compareStable)
-  const patchDigest = foundationPatchOperationsDigest(input.patchOperations)
-  const changedSectionIds = [...new Set(input.patchOperations.map(operation => operation.sectionId))].sort(compareStable)
+  const patchDigest = foundationPatchOperationsDigest(patchOperations)
+  const changedSectionIds = [...new Set(patchOperations.map(operation => operation.sectionId))].sort(compareStable)
   const patchValidations = deterministic
     .map(issue => ({
       validatorTaskId: input.validatorTaskId,

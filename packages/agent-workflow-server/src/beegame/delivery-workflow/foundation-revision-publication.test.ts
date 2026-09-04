@@ -4,6 +4,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getGameDocumentContract } from './game-document-contracts'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from '../../__tests__/complete-game-document-fixture'
 import { computeDocumentRevision } from './revision'
 import {
   createFoundationRevisionStage,
@@ -47,6 +51,81 @@ function canonicalDocument(path: FoundationDocumentPath = documentPath): string 
   return `---\ndocument_id: GDD\nversion: 1.0.0\nupdated_at: 2026-08-13T01:00:00.000+08:00\n---\n${body}`
 }
 
+function completeCanonicalDocument(
+  path: FoundationDocumentPath = documentPath,
+  version = '1.0.0',
+  updatedAt = '2026-08-13T01:00:00.000+08:00',
+): string {
+  const body = renderTestCompleteGameDocument(path, completeTestSubmission(path))
+  return `---\ndocument_id: GDD\nversion: ${version}\nupdated_at: ${updatedAt}\n---\n${body}`
+}
+
+async function documentScopeFixture() {
+  const workspace = await mkdtemp(join(tmpdir(), 'beegame-publication-document-'))
+  workspaces.push(workspace)
+  await mkdir(join(workspace, 'docs'), { recursive: true })
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+    await writeFile(join(workspace, path), canonicalDocument(path))
+
+  const complete = completeCanonicalDocument()
+  const malformed = complete.replace(
+    '<!-- beegame-section:vision -->',
+    '<!-- malformed-section-marker -->',
+  )
+  await writeFile(join(workspace, documentPath), malformed)
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  const staged = completeCanonicalDocument(
+    documentPath,
+    '1.0.1',
+    '2026-08-12T17:00:00.001Z',
+  )
+  await writeFile(join(workspace, stage.stagedPath), staged)
+
+  const issueId = 'AUD-DOCUMENT-FORMAT'
+  const receiptWithoutTerminal = {
+    scope: 'document' as const,
+    taskId: 'document-publication-task',
+    round: 1 as const,
+    documentPath,
+    issueIds: [issueId],
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: sha256(staged),
+    changedSectionIds: [] as [],
+    stagedPath: stage.stagedPath,
+  } satisfies Omit<RevisionTaskReceipt, 'terminalDigest'>
+  const receipt = {
+    ...receiptWithoutTerminal,
+    terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal),
+  }
+  const batch = {
+    scope: 'document' as const,
+    documentPath,
+    sectionIds: [] as [],
+    issueIds: [issueId],
+  }
+  const operations = await deriveFoundationPatchOperations({
+    workspacePath: workspace,
+    revision,
+    batch,
+    issues: [{
+      id: issueId,
+      severity: 'BLOCKER',
+      type: 'contract',
+      source: { scope: 'document', documentPath, digest: stage.baseDocumentDigest },
+      expected: 'canonical complete document',
+      actual: 'document format is invalid',
+      remediation: { kind: 'patch', scope: 'document', documentPath },
+      reasonCode: 'DOCUMENT_FORMAT_INVALID',
+    }],
+    receipt,
+  })
+  return { workspace, stage, malformed, staged, batch, receipt, operations }
+}
+
 async function fixture(paths: readonly FoundationDocumentPath[] = [documentPath]) {
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-publication-'))
   workspaces.push(workspace)
@@ -65,6 +144,7 @@ async function fixture(paths: readonly FoundationDocumentPath[] = [documentPath]
     const stagedDigest = sha256(staged)
     const issueId = `AUD-${paths.indexOf(path) + 1}`
     const receiptWithoutTerminal = {
+      scope: 'section' as const,
       taskId: `task-${paths.indexOf(path) + 1}`,
       round: 1 as const,
       documentPath: path,
@@ -78,11 +158,11 @@ async function fixture(paths: readonly FoundationDocumentPath[] = [documentPath]
     const operations = await deriveFoundationPatchOperations({
       workspacePath: workspace,
       revision,
-      batch: { documentPath: path, sectionIds: receipt.changedSectionIds, issueIds: receipt.issueIds },
+      batch: { scope: 'section', documentPath: path, sectionIds: receipt.changedSectionIds, issueIds: receipt.issueIds },
       issues: [revisionIssue(issueId, path, receipt.changedSectionIds[0]!)],
       receipt,
     })
-    stages.push({ receipt, operations, batch: { documentPath: path, sectionIds: receipt.changedSectionIds, issueIds: receipt.issueIds } })
+    stages.push({ receipt, operations, batch: { scope: 'section', documentPath: path, sectionIds: receipt.changedSectionIds, issueIds: receipt.issueIds } })
   }
   return { workspace, stages }
 }
@@ -117,7 +197,7 @@ function revisionIssue(id: string, path: FoundationDocumentPath, sectionId: stri
     source: { documentPath: path, sectionId, heading: sectionId, startLine: 1, endLine: 2, digest: sha256(`source:${id}`) },
     expected: 'expected',
     actual: 'actual',
-    remediation: { kind: 'patch', documentPath: path, sectionIds: [sectionId] },
+    remediation: { kind: 'patch', scope: 'section', documentPath: path, sectionIds: [sectionId] },
   }
 }
 
@@ -129,7 +209,7 @@ function resultingIssue(id: string, severity: AuditIssue['severity'] = 'HIGH'): 
     source: { documentPath, sectionId: 'core_loop', heading: 'Core Loop', startLine: 1, endLine: 2, digest: sha256(`source:${id}`) },
     expected: 'expected',
     actual: 'actual',
-    remediation: { kind: 'patch', documentPath, sectionIds: ['core_loop'] },
+    remediation: { kind: 'patch', scope: 'section', documentPath, sectionIds: ['core_loop'] },
   }
 }
 
@@ -142,7 +222,7 @@ function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options
     round: 1 as const,
     batches: fixtureValue.stages.map(stage => stage.batch),
     receipts: fixtureValue.stages.map(stage => stage.receipt),
-    revisionDeclarations: fixtureValue.stages.map(stage => ({ status: 'APPLIED' as const, changedSectionIds: [...stage.receipt.changedSectionIds] })),
+    revisionDeclarations: fixtureValue.stages.map(stage => ({ status: 'APPLIED' as const, scope: 'section' as const, changedSectionIds: [...stage.receipt.changedSectionIds] })),
     patchOperations: fixtureValue.stages.flatMap(stage => stage.operations),
     patchValidations: validations,
     semanticRecheckResults: options.semantic ?? [],
@@ -151,6 +231,96 @@ function publishInput(fixtureValue: Awaited<ReturnType<typeof fixture>>, options
 }
 
 describe('foundation revision publication', () => {
+  test('publishes a document-scope complete-document replacement and leaves other documents unchanged', async () => {
+    const value = await documentScopeFixture()
+    const untouchedPath = 'docs/LEVEL_SCENE_DESIGN.md' as const
+    const untouched = await readFile(join(value.workspace, untouchedPath), 'utf8')
+    const result = await publishFoundationRevision({
+      workspacePath: value.workspace,
+      revision,
+      confirmedBriefDigest,
+      round: 1,
+      batches: [value.batch],
+      receipts: [value.receipt],
+      revisionDeclarations: [{
+        status: 'APPLIED',
+        scope: 'document',
+        changedSectionIds: [],
+      }],
+      patchOperations: value.operations,
+      patchValidations: [],
+      semanticRecheckResults: [],
+      resultingIssues: [],
+    })
+
+    expect(result.status).toBe('committed')
+    expect(await readFile(join(value.workspace, documentPath), 'utf8')).toBe(value.staged)
+    expect(await readFile(join(value.workspace, untouchedPath), 'utf8')).toBe(untouched)
+    expect(result.patchOperations).toEqual(value.operations)
+    expect(result.patchOperations[0]).toEqual({
+      scope: 'document',
+      kind: 'REPLACE',
+      documentPath,
+      issueIds: ['AUD-DOCUMENT-FORMAT'],
+      beforeDigest: value.receipt.baseDocumentDigest,
+      afterDigest: value.receipt.stagedDocumentDigest,
+    })
+    const prepared = JSON.parse(
+      await readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8'),
+    ) as { documents: Array<Record<string, unknown>> }
+    expect(prepared.documents[0]).toMatchObject({
+      scope: 'document',
+      changedSectionIds: [],
+      patchOperations: value.operations,
+    })
+    expect(prepared.documents[0]?.patchOperations).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ sectionId: expect.anything() })]),
+    )
+  })
+
+  test('rejects a document-scope non-canonical whole-document stage before PREPARED', async () => {
+    const value = await documentScopeFixture()
+    const invalidStaged = value.staged.replace(
+      '<!-- beegame-section:vision -->',
+      '<!-- malformed-section-marker -->',
+    )
+    await writeFile(join(value.workspace, value.stage.stagedPath), invalidStaged)
+    const { terminalDigest: _terminalDigest, ...receiptCore } = value.receipt
+    const invalidReceiptCore = {
+      ...receiptCore,
+      stagedDocumentDigest: sha256(invalidStaged),
+    } satisfies Omit<RevisionTaskReceipt, 'terminalDigest'>
+    const invalidReceipt = {
+      ...invalidReceiptCore,
+      terminalDigest: revisionTaskReceiptTerminalDigest(invalidReceiptCore),
+    }
+    const invalidOperation = {
+      ...value.operations[0]!,
+      afterDigest: sha256(invalidStaged),
+    }
+    const canonicalBefore = await readFile(join(value.workspace, documentPath), 'utf8')
+
+    await expect(publishFoundationRevision({
+      workspacePath: value.workspace,
+      revision,
+      confirmedBriefDigest,
+      round: 1,
+      batches: [value.batch],
+      receipts: [invalidReceipt],
+      revisionDeclarations: [{
+        status: 'APPLIED',
+        scope: 'document',
+        changedSectionIds: [],
+      }],
+      patchOperations: [invalidOperation],
+      patchValidations: [],
+      semanticRecheckResults: [],
+      resultingIssues: [],
+    })).rejects.toThrow(/complete|marker|structure|format/i)
+    expect(await readFile(join(value.workspace, documentPath), 'utf8')).toBe(canonicalBefore)
+    await expect(readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   test('writes PREPARED before atomically rolling forward every staged document', async () => {
     const value = await fixture()
     const result = await publishFoundationRevision(publishInput(value))
@@ -174,6 +344,7 @@ describe('foundation revision publication', () => {
     const staged = (await readFile(stagedPath, 'utf8'))
       .replace(`original ${secondSectionId}`, `revised ${secondSectionId}`)
     await writeFile(stagedPath, staged)
+    if (stage.receipt.scope !== 'section') throw new Error('fixture requires a section receipt')
     const { terminalDigest: _oldTerminalDigest, ...baseReceipt } = stage.receipt
     const receiptWithoutTerminal = {
       ...baseReceipt,
@@ -187,6 +358,7 @@ describe('foundation revision publication', () => {
     const issue = revisionIssue(stage.receipt.issueIds[0]!, documentPath, firstSectionId)
     issue.remediation = {
       kind: 'patch',
+      scope: 'section',
       documentPath,
       sectionIds: [firstSectionId, secondSectionId],
     }
@@ -194,6 +366,7 @@ describe('foundation revision publication', () => {
       workspacePath: value.workspace,
       revision,
       batch: {
+        scope: 'section',
         documentPath,
         sectionIds: receipt.changedSectionIds,
         issueIds: receipt.issueIds,
@@ -208,12 +381,13 @@ describe('foundation revision publication', () => {
       confirmedBriefDigest,
       round: 1,
       batches: [{
+        scope: 'section',
         documentPath,
         sectionIds: receipt.changedSectionIds,
         issueIds: receipt.issueIds,
       }],
       receipts: [receipt],
-      revisionDeclarations: [{ status: 'APPLIED', changedSectionIds: receipt.changedSectionIds }],
+      revisionDeclarations: [{ status: 'APPLIED', scope: 'section', changedSectionIds: receipt.changedSectionIds }],
       patchOperations: operations,
       patchValidations: [validation(documentPath, receipt, operations, receipt.issueIds[0]!)],
       semanticRecheckResults: [],
@@ -238,6 +412,7 @@ describe('foundation revision publication', () => {
     const forged = (await readFile(join(value.workspace, stage.receipt.stagedPath), 'utf8'))
       .replace('updated_at: 2026-08-12T17:00:00.001Z', 'updated_at: 2099-01-01T00:00:00.000Z')
     await writeFile(join(value.workspace, stage.receipt.stagedPath), forged)
+    if (stage.receipt.scope !== 'section') throw new Error('fixture requires a section receipt')
     const { terminalDigest: _terminalDigest, ...receiptCore } = stage.receipt
     const receiptWithoutTerminal = {
       ...receiptCore,
@@ -258,7 +433,7 @@ describe('foundation revision publication', () => {
       validations: [validation(documentPath, receipt, operations, 'AUD-1')],
     })
     input.receipts = [receipt]
-    input.revisionDeclarations = [{ status: 'APPLIED', changedSectionIds: [...receipt.changedSectionIds] }]
+    input.revisionDeclarations = [{ status: 'APPLIED', scope: 'section', changedSectionIds: [...receipt.changedSectionIds] }]
     input.patchOperations = operations
     await expect(publishFoundationRevision(input)).rejects.toThrow(/metadata/i)
   })
@@ -388,7 +563,7 @@ describe('foundation revision publication', () => {
     const stage = value.stages[0]!
     await expect(publishFoundationRevision({
       ...publishInput(value),
-      revisionDeclarations: [{ status: 'APPLIED', changedSectionIds: ['rules_systems'] }],
+      revisionDeclarations: [{ status: 'APPLIED', scope: 'section', changedSectionIds: ['rules_systems'] }],
     })).rejects.toThrow(/declaration|receipt|batch|section/i)
     await expect(readFile(join(value.workspace, foundationRevisionPreparedPath(revision)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -420,21 +595,21 @@ describe('foundation revision publication', () => {
     await writeFile(join(value.workspace, secondStage.stagedPath), secondStaged)
     const secondIssue = 'AUD-2'
     const secondReceiptWithoutTerminal = {
-      taskId: 'task-2', round: 1 as const, documentPath: secondPath, issueIds: [secondIssue],
+      scope: 'section' as const, taskId: 'task-2', round: 1 as const, documentPath: secondPath, issueIds: [secondIssue],
       baseDocumentDigest: secondStage.baseDocumentDigest, stagedDocumentDigest: sha256(secondStaged),
       changedSectionIds: [getGameDocumentContract(secondPath).sections[0]!.sectionId], stagedPath: secondStage.stagedPath,
     }
     const secondReceipt = { ...secondReceiptWithoutTerminal, terminalDigest: revisionTaskReceiptTerminalDigest(secondReceiptWithoutTerminal) }
-    const secondOperations = await deriveFoundationPatchOperations({ workspacePath: value.workspace, revision, batch: { documentPath: secondPath, sectionIds: secondReceipt.changedSectionIds, issueIds: [secondIssue] }, issues: [revisionIssue(secondIssue, secondPath, secondReceipt.changedSectionIds[0]!)], receipt: secondReceipt })
+    const secondOperations = await deriveFoundationPatchOperations({ workspacePath: value.workspace, revision, batch: { scope: 'section', documentPath: secondPath, sectionIds: secondReceipt.changedSectionIds, issueIds: [secondIssue] }, issues: [revisionIssue(secondIssue, secondPath, secondReceipt.changedSectionIds[0]!)], receipt: secondReceipt })
     const first = value
     const input = {
       workspacePath: value.workspace, revision, round: 1 as const,
       confirmedBriefDigest,
-      batches: [first.stages[0]!.batch, { documentPath: secondPath, sectionIds: secondReceipt.changedSectionIds, issueIds: [secondIssue] }],
+      batches: [first.stages[0]!.batch, { scope: 'section' as const, documentPath: secondPath, sectionIds: secondReceipt.changedSectionIds, issueIds: [secondIssue] }],
       receipts: [first.stages[0]!.receipt, secondReceipt],
       revisionDeclarations: [
-        { status: 'APPLIED' as const, changedSectionIds: [...first.stages[0]!.receipt.changedSectionIds] },
-        { status: 'APPLIED' as const, changedSectionIds: [...secondReceipt.changedSectionIds] },
+        { status: 'APPLIED' as const, scope: 'section' as const, changedSectionIds: [...first.stages[0]!.receipt.changedSectionIds] },
+        { status: 'APPLIED' as const, scope: 'section' as const, changedSectionIds: [...secondReceipt.changedSectionIds] },
       ],
       patchOperations: [...first.stages[0]!.operations, ...secondOperations],
       patchValidations: [validation(documentPath, first.stages[0]!.receipt, first.stages[0]!.operations, 'AUD-1'), validation(secondPath, secondReceipt, secondOperations, secondIssue)],

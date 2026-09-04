@@ -11,6 +11,8 @@ import {
   assertExactlyEightCommittedFoundationDocuments,
   loadCommittedFoundationDerivedArtifacts,
   publishFoundationDerivedArtifacts,
+  publishDeterministicFoundationReview,
+  loadDeterministicFoundationReview,
   publishFoundationSemanticReview,
   loadFoundationSemanticReview,
 } from './foundation-audit-artifacts'
@@ -52,12 +54,108 @@ function validDocument(
 }
 
 describe('foundation audit artifacts', () => {
+  test('persists a document-scoped format issue in the deterministic registry', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-format-review-'))
+    try {
+      const digest = 'a'.repeat(64)
+      const issue = {
+        id: 'AUD-AAAAAAAAAAAAAAAAAAAAAAAA',
+        severity: 'BLOCKER' as const,
+        type: 'contract' as const,
+        source: {
+          scope: 'document' as const,
+          documentPath: 'docs/GDD.md' as const,
+          digest,
+        },
+        expected: 'canonical Foundation Markdown format',
+        actual: '[MARKDOWN_FORMAT_INVALID] document title is missing',
+        remediation: {
+          kind: 'patch' as const,
+          scope: 'document' as const,
+          documentPath: 'docs/GDD.md' as const,
+        },
+        reasonCode: 'DOCUMENT_FORMAT_INVALID' as const,
+      }
+      const published = await publishDeterministicFoundationReview({
+        workspacePath,
+        revision: 'format-review-revision',
+        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+          path,
+          digest,
+        })),
+        sectionIndex: [],
+        factStore: [],
+        issues: [issue],
+      })
+
+      expect(published.issues).toEqual([issue])
+      const loaded = await loadDeterministicFoundationReview({
+        workspacePath,
+        revision: 'format-review-revision',
+        reviewDigest: published.reviewDigest,
+      })
+      expect(loaded?.issues).toEqual([issue])
+      const registry = JSON.parse(
+        await readFile(published.paths.issueRegistry, 'utf8'),
+      ) as Record<string, unknown>
+      expect(registry).toMatchObject({
+        revision: 'format-review-revision',
+        status: 'deterministic_prefix',
+        documentDigests: published.documentDigests,
+        issues: [issue],
+      })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects a format issue that mixes document and SectionRef scopes', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-format-review-shape-'))
+    try {
+      const digest = 'a'.repeat(64)
+      const issue = {
+        id: 'AUD-BBBBBBBBBBBBBBBBBBBBBBBB',
+        severity: 'BLOCKER' as const,
+        type: 'contract' as const,
+        source: {
+          scope: 'document' as const,
+          documentPath: 'docs/GDD.md' as const,
+          digest,
+        },
+        expected: 'canonical Foundation Markdown format',
+        actual: '[MARKDOWN_FORMAT_INVALID] document title is missing',
+        remediation: {
+          kind: 'patch' as const,
+          scope: 'section' as const,
+          documentPath: 'docs/GDD.md' as const,
+          sectionIds: ['vision'],
+        },
+        reasonCode: 'DOCUMENT_FORMAT_INVALID' as const,
+      }
+      await expect(
+        publishDeterministicFoundationReview({
+          workspacePath,
+          revision: 'format-review-invalid-scope',
+          documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
+            path,
+            digest,
+          })),
+          sectionIndex: [],
+          factStore: [],
+          issues: [issue as never],
+        }),
+      ).rejects.toThrow(/document remediation|classification|scope/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('fails closed when a final registry issue has invalid classification or target shape', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-final-review-corrupt-'))
     try {
       const digest = 'a'.repeat(64)
       const ledger = FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => ({ checkId: check.checkId, packetIdentity: digest, admittedResultDigest: digest }))
-      const issue = { id: 'AUD-AAAAAAAAAAAAAAAAAAAAAAAA', severity: 'HIGH' as const, type: 'semantic' as const, source: { documentPath: 'docs/GDD.md' as const, sectionId: 'vision', heading: 'Vision', startLine: 1, endLine: 1, digest }, expected: 'expected', actual: 'actual', remediation: { kind: 'patch' as const, documentPath: 'docs/GDD.md' as const, sectionIds: ['vision'] } }
+      const issue = { id: 'AUD-AAAAAAAAAAAAAAAAAAAAAAAA', severity: 'HIGH' as const, type: 'semantic' as const, source: { documentPath: 'docs/GDD.md' as const, sectionId: 'vision', heading: 'Vision', startLine: 1, endLine: 1, digest }, expected: 'expected', actual: 'actual', remediation: { kind: 'patch' as const, scope: 'section' as const, documentPath: 'docs/GDD.md' as const, sectionIds: ['vision'] } }
       const published = await publishFoundationSemanticReview({ workspacePath, revision: 'rev', documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), sectionIndexDigest: digest, factStoreDigest: digest, deterministicReviewDigest: digest, semanticManifest: FOUNDATION_SEMANTIC_AUDIT_MANIFEST, semanticResultDigests: ledger, issues: [issue] })
       const issuePath = join(workspacePath, '.beegame/audit/foundation/rev/review', published.reviewDigest, 'issue-registry.json')
       const markerPath = join(workspacePath, '.beegame/audit/foundation/rev/review', published.reviewDigest, 'COMMITTED.json')

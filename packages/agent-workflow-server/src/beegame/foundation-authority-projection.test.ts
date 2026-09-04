@@ -50,15 +50,14 @@ describe('foundation authority projection', () => {
         source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
       )
       const projected = result.sources.flatMap(source =>
-        source.sections.map(section => `${source.path}#${section.sectionId}`),
+        source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
       )
 
       expect(projected).toEqual(declared)
       expect(result.rangeCount).toBe(declared.length)
       expect(result.projectedLineCount).toBe(
         result.sources.reduce(
-          (total, source) =>
-            total + source.sections.reduce((sum, section) => sum + section.lineCount, 0),
+          (total, source) => total + source.content.split('\n').length,
           0,
         ),
       )
@@ -91,40 +90,29 @@ describe('foundation authority projection', () => {
     expect(
       result.sources.map(source => ({
         path: source.path,
-        sections: source.sections.map(section => ({
-          sectionId: section.sectionId,
-          startLine: section.startLine,
-          lineCount: section.lineCount,
-        })),
+        selectionScope: source.selectionScope,
+        sectionIds: source.sectionIds,
       })),
     ).toEqual(
       getGameDocumentContract(targetPath).upstreamSections.map(source => ({
         path: source.path,
-        sections: source.sectionIds.map(sectionId => {
-          const sourceIndex = getGameDocumentContract(
-            source.path,
-          ).sections.findIndex(section => section.sectionId === sectionId)
-          return {
-            sectionId,
-            startLine: 3 + sourceIndex * 4,
-            lineCount: 4,
-          }
-        }),
+        selectionScope: 'sections',
+        sectionIds: source.sectionIds,
       })),
     )
-    expect(result.sources.every(source => /^[a-f0-9]{64}$/.test(source.digest)))
+    expect(result.sources.every(source => /^[a-f0-9]{64}$/.test(source.documentDigest)))
       .toBe(true)
     expect(
       result.sources.flatMap(source =>
-        source.sections.map(section => `${source.path}#${section.sectionId}`),
+        source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
       ),
     ).toEqual(
       [...selectedSections],
     )
     expect(
       result.sources.every(source =>
-        source.sections.every(section =>
-          selectedSections.has(`${source.path}#${section.sectionId}`),
+        source.sectionIds.every(sectionId =>
+          selectedSections.has(`${source.path}#${sectionId}`),
         ),
       ),
     ).toBe(true)
@@ -137,34 +125,18 @@ describe('foundation authority projection', () => {
     expect(serialized).toContain('Owned source content for')
     expect(serialized).not.toContain('Source materials are intentionally')
     for (const source of result.sources) {
-      const sourceMarkdown = input.documents.get(source.path)!
-      for (const selected of source.sections) {
-        const exactSourceRange = sourceMarkdown
-          .split('\n')
-          .slice(
-            selected.startLine - 1,
-            selected.startLine - 1 + selected.lineCount,
-          )
-          .join('\n')
-        expect(selected.content).toBe(exactSourceRange)
-        expect(selected.digest).toBe(
-          createHash('sha256').update(exactSourceRange).digest('hex'),
-        )
-        expect(selected.content).toContain(
-          `<!-- beegame-section:${selected.sectionId} -->`,
-        )
-      }
+      expect(source.selectionScope).toBe('sections')
+      expect(source.contentDigest).toBe(createHash('sha256').update(source.content).digest('hex'))
+      for (const sectionId of source.sectionIds)
+        expect(source.content).toContain(`<!-- beegame-section:${sectionId} -->`)
     }
     expect(serialized).toContain('"content":')
     expect(Object.isFrozen(result)).toBe(true)
     expect(result.sources.every(Object.isFrozen)).toBe(true)
-    expect(result.sources.every(source => Object.isFrozen(source.sections))).toBe(true)
-    expect(
-      result.sources.every(source => source.sections.every(Object.isFrozen)),
-    ).toBe(true)
+    expect(result.sources.every(source => Object.isFrozen(source.sectionIds))).toBe(true)
   })
 
-  test('rejects missing documents or missing contracted sections', () => {
+  test('rejects missing documents and uses one whole-document source when markers are incomplete', () => {
     const targetPath = 'docs/LEVEL_SCENE_DESIGN.md'
     const input = sources(['docs/GDD.md'])
     expect(() =>
@@ -185,13 +157,19 @@ describe('foundation authority projection', () => {
         '<!-- removed-section -->',
       ),
     )
-    expect(() =>
-      projectFoundationAuthority({
-        targetPath,
-        availableUpstreamPaths: ['docs/GDD.md'],
-        documents: incompleteDocuments,
-      }),
-    ).toThrow(/section.*missing/i)
+    const projected = projectFoundationAuthority({
+      targetPath,
+      availableUpstreamPaths: ['docs/GDD.md'],
+      documents: incompleteDocuments,
+    })
+    expect(projected.sources).toHaveLength(1)
+    expect(projected.sources[0]).toMatchObject({
+      path: 'docs/GDD.md',
+      selectionScope: 'document',
+      sectionIds: getGameDocumentContract(targetPath).upstreamSections[0]!.sectionIds,
+      content: incompleteDocuments.get('docs/GDD.md'),
+    })
+    expect(projected.rangeCount).toBe(1)
   })
 
   test('projects only currently available contracted authority for an early draft', () => {
@@ -231,7 +209,7 @@ describe('foundation authority projection', () => {
       ...input,
     })
     const projectedIds = result.sources.flatMap(source =>
-      source.sections.map(section => `${source.path}#${section.sectionId}`),
+      source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
     )
 
     expect(result.targetSectionIds).toEqual(['runtime_state'])
@@ -241,8 +219,8 @@ describe('foundation authority projection', () => {
     expect(projectedIds).toContain('docs/BALANCE_DESIGN.md#formulas')
     expect(
       result.sources.every(source =>
-        source.sections.every(section =>
-          section.content.includes(`Owned source content for ${section.sectionId}.`),
+        source.sectionIds.every(sectionId =>
+          source.content.includes(`Owned source content for ${sectionId}.`),
         ),
       ),
     ).toBe(true)
@@ -255,24 +233,35 @@ describe('foundation authority projection', () => {
       ...sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']),
     })
     const modelBytes = modelFoundationAuthorityProjectionBytes(result)
-    const model = JSON.parse(modelBytes) as Record<string, unknown>
 
-    expect(model.targetPath).toBe('docs/UI_UX_SPEC.md')
-    expect(model).not.toHaveProperty('byteLength')
-    expect(model).not.toHaveProperty('rangeCount')
-    expect(model).not.toHaveProperty('projectedLineCount')
-    expect(model).not.toHaveProperty('symbols')
-    for (const source of model.sources as Array<Record<string, unknown>>) {
-      expect(source).not.toHaveProperty('digest')
-      for (const section of source.sections as Array<Record<string, unknown>>) {
-        expect(section).toHaveProperty('sectionId')
-        expect(section).toHaveProperty('content')
-        expect(section).not.toHaveProperty('startLine')
-        expect(section).not.toHaveProperty('lineCount')
-        expect(section).not.toHaveProperty('digest')
-      }
-    }
+    expect(modelBytes).toContain(
+      '<!-- beegame-authority-source:docs/GDD.md scope=sections -->',
+    )
+    expect(modelBytes).toContain(
+      '<!-- beegame-authority-source-end:docs/GDD.md -->',
+    )
+    expect(modelBytes).not.toContain('"targetPath"')
+    expect(modelBytes).not.toContain('"targetSectionIds"')
+    expect(modelBytes).not.toContain('contentDigest')
+    expect(modelBytes).not.toContain('documentDigest')
+    expect(modelBytes).not.toContain('\\n')
     expect(modelBytes).toContain('Owned source content for')
+  })
+
+  test('uses fewer model bytes than the durable JSON projection', () => {
+    const result = projectFoundationAuthority({
+      targetPath: 'docs/UI_UX_SPEC.md',
+      availableUpstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'],
+      ...sources(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md']),
+    })
+
+    expect(
+      new TextEncoder().encode(modelFoundationAuthorityProjectionBytes(result))
+        .byteLength,
+    ).toBeLessThan(
+      new TextEncoder().encode(canonicalFoundationAuthorityProjectionBytes(result))
+        .byteLength,
+    )
   })
 
   test('treats a missing available upstream selection as no available authority', () => {

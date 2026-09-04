@@ -94,6 +94,9 @@ describe('foundation semantic runtime', () => {
     })
     const retry = claimFoundationSemanticTasks(failed.state, { now: new Date(3).toISOString(), dispatchIdFor: () => 'd2', configuredTiers: { fast: true, balanced: true } })
     expect(retry.tasks[0]?.dispatch?.dispatchId).toBe('d2')
+    expect(retry.tasks[0]?.attemptHistory).toEqual([
+      expect.objectContaining({ dispatchId: 'd1', status: 'failed' }),
+    ])
     const highProviderUsage = admitFoundationSemanticTerminal(retry, { taskId: task(0).taskId, dispatchId: 'd2', revision: 'rev', packetDigest: digest, terminal: { workerType: 'foundation-semantic-reviewer', status: 'completed', runId: 'run', dispatchId: 'd2', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'PASS' }, usage: { ...usage(1), completion_tokens: 4_897, total_tokens: 4_898 }, durationMs: 3, now: new Date(4).toISOString() })
     expect(highProviderUsage.state.tasks[0]?.status).toBe('completed')
     const nested = { workerType: 'foundation-semantic-reviewer' as const, status: 'completed' as const, runId: 'run', dispatchId: 'd2', taskId: task(0).taskId, revision: 'rev', packetDigest: digest, outcome: 'PASS' as const, metadata: { nested: { marker: 1 } } }

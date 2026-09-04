@@ -9,7 +9,7 @@ import {
 } from './display-progress'
 
 describe('delivery progress projection', () => {
-  test('uses the shared revision phase authority for every active repair phase', () => {
+  test('projects every active repair state only from the durable revision phase', () => {
     expect(FOUNDATION_REVISION_PHASES).toEqual([
       'planning',
       'revising',
@@ -24,8 +24,8 @@ describe('delivery progress projection', () => {
       expect(isFoundationRevisionPhase(status)).toBe(true)
       expect(
         projectDeliveryProgress({
-          phase: 'DOCUMENT_REVIEW',
-          documentStep: 'FOUNDATION_REVIEW',
+          phase: 'FOUNDATION_REVISION',
+          documentStep: 'FOUNDATION_REVISION',
           foundationAuditState: { status },
         }),
       ).toMatchObject({ stageId: 'FOUNDATION_REVISION', substage: 'REPAIRING' })
@@ -81,8 +81,8 @@ describe('delivery progress projection', () => {
   test('projects an active foundation revision as a repairing substage', () => {
     expect(
       projectDeliveryProgress({
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
+        phase: 'FOUNDATION_REVISION',
+        documentStep: 'FOUNDATION_REVISION',
         foundationAuditState: { status: 'planning' },
       }),
     ).toMatchObject({
@@ -94,8 +94,8 @@ describe('delivery progress projection', () => {
 
     expect(
       projectDeliveryProgress({
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
+        phase: 'FOUNDATION_REVISION',
+        documentStep: 'FOUNDATION_REVISION',
         foundationAuditState: { status: 'revising' },
       }),
     ).toMatchObject({

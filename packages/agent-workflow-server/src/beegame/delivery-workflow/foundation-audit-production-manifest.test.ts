@@ -86,18 +86,18 @@ function fixtureDocuments(overrides: Partial<Record<string, string>> = {}): Map<
 describe('service-owned deterministic production audit', () => {
   test('exposes exactly one closed, versioned manifest with catalog-grounded declarations', () => {
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.version).toBe('foundation-deterministic.v1')
-    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion).toBe('foundation-facts.v2')
-    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).toHaveLength(25)
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion).toBe('foundation-facts.v3')
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).toHaveLength(23)
     expect('rules' in FOUNDATION_AUDIT_PRODUCTION_MANIFEST).toBe(false)
-    expect(new Set(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).size).toBe(25)
-    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts.map(item => item.id)).toContain('asset-boss-count-authority')
+    expect(new Set(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.schemaKeys).size).toBe(23)
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts.map(item => item.id)).not.toContain('asset-boss-count-authority')
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts.map(item => item.id)).not.toContain('asset-art-constraints-authority')
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.deferredSemanticKeys).toEqual([
       'technical.target_fps',
       'level.complexity_budget',
       'asset.art_constraint_refs',
     ])
-    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest).toBe('2eb15f222f4c51784915041bb9b8483ae2ce49129d9a629291c15904e177f7bc')
+    expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest).toBe('df525223ae492c0dcec2b4e635236df8be2a729e90edb97fbeb37aeb1964b071')
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts).toBe(FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS)
     expect(FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts).toEqual(FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS)
     expect(Object.isFrozen(FOUNDATION_AUDIT_PRODUCTION_MANIFEST)).toBe(true)
@@ -107,9 +107,19 @@ describe('service-owned deterministic production audit', () => {
     const documents = fixtureDocuments()
     const sectionIndex = buildFoundationSectionIndex({ documents })
     const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: [] })
-    expect(issues).toHaveLength(22)
-    expect(issues.filter(issue => issue.type === 'schema')).toHaveLength(22)
+    expect(issues).toHaveLength(20)
+    expect(issues.filter(issue => issue.type === 'schema')).toHaveLength(20)
     expect(issues.filter(issue => issue.type === 'contract')).toHaveLength(0)
+  })
+
+  test('accepts an explicit empty loss-condition list as authored no-failure authority', () => {
+    const documents = fixtureDocuments({ 'game.loss_conditions': '[]' })
+    const sectionIndex = buildFoundationSectionIndex({ documents })
+    const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex })
+    expect(extraction.unresolvedKeys).not.toContain('game.loss_conditions')
+    expect(extraction.facts.find(fact => fact.key === 'game.loss_conditions')?.value).toEqual([])
+    expect(runProductionDeterministicFoundationAudit({ sectionIndex, factStore: extraction.facts }))
+      .toEqual([])
   })
 
   test('defers absent performance facts to semantic review while retaining non-deferred schema blockers', () => {
@@ -168,12 +178,7 @@ describe('service-owned deterministic production audit', () => {
       sectionIndex,
       factStore: extraction.facts,
     })
-    expect(issues).toHaveLength(1)
-    expect(issues[0]).toMatchObject({
-      id: expect.stringMatching(/^AUD-[A-F0-9]{24}$/),
-      type: 'contract',
-      remediation: { kind: 'patch', documentPath: 'docs/ASSET_PLAN.md', sectionIds: ['inventory'] },
-    })
+    expect(issues).toEqual([])
   })
 
   test('compares covered level requirements, not physical inventory IDs', () => {
@@ -211,7 +216,7 @@ describe('service-owned deterministic production audit', () => {
       id: expect.stringMatching(/^AUD-[A-F0-9]{24}$/),
       type: 'contract',
       severity: 'HIGH',
-      remediation: { kind: 'patch', documentPath: 'docs/ASSET_PLAN.md', sectionIds: ['inventory'] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/ASSET_PLAN.md', sectionIds: ['material.asset-inventory-table'] },
     })
   })
 
@@ -228,9 +233,8 @@ describe('service-owned deterministic production audit', () => {
       return fact
     })
     const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: tolerantFacts })
-    expect(issues).toHaveLength(1)
-    expect(issues[0]?.id).toBe(runProductionDeterministicFoundationAudit({ sectionIndex, factStore: extraction.facts })[0]?.id)
-    const passingFacts = extraction.facts.map(fact => fact.key === 'asset.boss.count' ? { ...fact, value: 3 } : fact)
+    expect(issues).toEqual([])
+    const passingFacts = extraction.facts
     for (const declaration of FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contracts) {
       const sourceKey = declaration.sourceFactKey
       const targetKey = declaration.targetFactKey
@@ -241,7 +245,7 @@ describe('service-owned deterministic production audit', () => {
       if (sourceKey === 'technical.target_fps') continue
       const mismatchIssues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: mismatch })
       expect(mismatchIssues.some(issue => issue.type === 'contract'), declaration.id).toBe(true)
-      expect(mismatchIssues.find(issue => issue.type === 'contract')?.remediation).toMatchObject({ kind: 'patch', documentPath: declaration.source.documentPath })
+      expect(mismatchIssues.find(issue => issue.type === 'contract')?.remediation).toMatchObject({ kind: 'patch', scope: 'section', documentPath: declaration.source.documentPath })
       expect(targetKey).toBeTruthy()
     }
   })
@@ -267,7 +271,9 @@ describe('service-owned deterministic production audit', () => {
   test('persists one revision-bound deterministic registry prefix and rejects stale or duplicate replay', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-deterministic-review-'))
     try {
-      const documents = fixtureDocuments()
+      const documents = fixtureDocuments({
+        'asset.covered_level_requirements': '[player_model]',
+      })
       const sectionIndex = buildFoundationSectionIndex({ documents })
       const extraction = extractNormalizedFoundationFacts({ documents, sectionIndex })
       const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore: extraction.facts })
@@ -336,6 +342,7 @@ describe('service-owned deterministic production audit', () => {
         actual: 'license evidence is missing',
         remediation: {
           kind: 'patch' as const,
+          scope: 'section' as const,
           documentPath: 'docs/ASSET_PLAN.md' as const,
           sectionIds: ['material.license-register'],
         },
@@ -370,6 +377,7 @@ describe('service-owned deterministic production audit', () => {
       section.sectionId === 'material.game-state-flow',
     )!
     const impact = analyzeFoundationImpact([{
+      scope: 'section' as const,
       kind: 'REPLACE',
       documentPath: 'docs/GDD.md',
       sectionId: material.sectionId,

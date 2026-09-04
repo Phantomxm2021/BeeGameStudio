@@ -20,6 +20,7 @@ export type FoundationFactTask = {
   status: FoundationFactTaskStatus
   attempt: number
   dispatch?: DispatchRecord
+  attemptHistory?: DispatchRecord[]
   terminalDigest?: string
   receiptPath?: string
   receiptDigest?: string
@@ -165,6 +166,9 @@ export function claimFoundationFactTasks(
     slots -= 1
     return {
       ...task,
+      ...(task.dispatch
+        ? { attemptHistory: [...(task.attemptHistory ?? []), task.dispatch] }
+        : {}),
       status: 'running' as const,
       attempt: task.attempt + 1,
       dispatch: {

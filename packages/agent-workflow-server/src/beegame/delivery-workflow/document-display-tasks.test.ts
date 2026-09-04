@@ -115,7 +115,7 @@ describe('workflow display tasks', () => {
   test('projects one ordinary revision task per affected document', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
-      documentStep: 'FOUNDATION_REVIEW',
+      documentStep: 'FOUNDATION_REVISION',
       workflowStatus: 'running',
       thinking: 'working',
       foundationAuditState: {
@@ -153,7 +153,7 @@ describe('workflow display tasks', () => {
   test('does not mix completed audit tasks into an active revision card', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
-      documentStep: 'FOUNDATION_REVIEW',
+      documentStep: 'FOUNDATION_REVISION',
       workflowStatus: 'needs_action',
       foundationAuditState: {
         status: 'revising',
@@ -190,7 +190,7 @@ describe('workflow display tasks', () => {
   test('projects an interrupted stopped review task as stopped even after retryable classification', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
-      documentStep: 'FOUNDATION_REVIEW',
+      documentStep: 'FOUNDATION_REVISION',
       workflowStatus: 'stopped',
       foundationAuditState: {
         status: 'revising',
@@ -229,7 +229,7 @@ describe('workflow display tasks', () => {
   test('does not display superseded revision evidence', async () => {
     const tasks = projectDocumentDisplayTasks({
       workspacePath: await workspace(),
-      documentStep: 'FOUNDATION_REVIEW',
+      documentStep: 'FOUNDATION_REVISION',
       foundationAuditState: {
         status: 'revising',
         activeBundleId: 'bundle-new',

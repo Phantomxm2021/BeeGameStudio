@@ -67,7 +67,7 @@ describe('deterministic foundation audit compiler', () => {
     expect(issues).toHaveLength(1)
     expect(issues[0]).toMatchObject({
       type: 'schema',
-      remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: source.documentPath, sectionIds: [source.sectionId] },
     })
   })
 

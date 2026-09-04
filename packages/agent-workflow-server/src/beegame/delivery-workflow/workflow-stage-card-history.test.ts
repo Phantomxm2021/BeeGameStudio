@@ -64,7 +64,7 @@ describe('workflow stage card history', () => {
     ).toBeUndefined()
   })
 
-  test('freezes audit stage 3 before entering virtual revision stage 4', () => {
+  test('freezes audit stage 3 before entering durable revision stage 4', () => {
     const base = createTestDeliveryRun({
       projectId: 'project-audit-revision-stages',
       ownerId: 'owner-audit-revision-stages',
@@ -76,6 +76,8 @@ describe('workflow stage card history', () => {
     }
     const next: DeliveryRun = {
       ...previous,
+      phase: 'FOUNDATION_REVISION',
+      documentStep: 'FOUNDATION_REVISION',
       foundationAuditState: { status: 'planning', tasks: [] } as never,
       updatedAt: '2026-08-06T00:00:02.000Z',
     }
@@ -240,8 +242,8 @@ describe('workflow stage card history', () => {
     const card = projectCurrentStageCard({
       run: {
         ...base,
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: undefined,
+        phase: 'FOUNDATION_REVISION',
+        documentStep: 'FOUNDATION_REVISION',
         currentMessage: 'The active reviser says this is worker prose.',
         status: 'running',
         foundationAuditState: {
@@ -285,7 +287,7 @@ describe('workflow stage card history', () => {
       stageId: 'FOUNDATION_REVISION',
       phaseIndex: 4,
       substage: 'REPAIRING',
-      documentStep: 'FOUNDATION_REVIEW',
+      documentStep: 'FOUNDATION_REVISION',
       tasks: [expect.objectContaining({ id: 'revision:docs/GDD.md', operation: 'revise' })],
     })
     expect(card?.message).toBeUndefined()

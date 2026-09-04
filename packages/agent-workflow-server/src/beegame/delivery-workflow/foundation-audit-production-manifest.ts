@@ -151,7 +151,7 @@ function valueType(value: unknown): FoundationFactValueType | undefined {
   if (typeof value === 'string') return 'string'
   if (typeof value === 'number') return 'number'
   if (typeof value === 'boolean') return 'boolean'
-  if (!Array.isArray(value) || value.length === 0) return undefined
+  if (!Array.isArray(value)) return undefined
   if (value.every(item => typeof item === 'string')) return 'string[]'
   if (value.every(item => typeof item === 'number' && Number.isFinite(item))) return 'number[]'
   return undefined
@@ -195,7 +195,7 @@ function catalogValueIssueDrafts(
       source: fact.source,
       expected: `fact ${fact.key} must satisfy its catalog value constraints`,
       actual: `fact ${fact.key} has invalid value ${JSON.stringify(fact.value)}`,
-      remediation: { kind: 'patch', documentPath: fact.source.documentPath, sectionIds: [fact.source.sectionId] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: fact.source.documentPath, sectionIds: [fact.source.sectionId] },
       conflictIdentity: {
         key: fact.key,
         expectedType: definition.valueType,

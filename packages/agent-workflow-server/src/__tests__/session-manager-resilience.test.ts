@@ -149,13 +149,18 @@ describe('BeeGame session runtime resilience', () => {
       },
     }
     const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({ workspacePath, projectId: 'project-revision', userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision', workflowWorkerType: 'foundation-document-reviser', workflowAllowedPaths: [stagedPath], workflowProjectReadScope: 'allowed', workflowRevisionContract: { taskId: 'task-revision', revision: 'revision-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['issue-1'], sectionIds: ['section-1'], stagedPath, baseDocumentDigest: 'a'.repeat(64) } })
+    const session = manager.start({ workspacePath, projectId: 'project-revision', userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision', workflowWorkerType: 'foundation-document-reviser', workflowAllowedPaths: [stagedPath], workflowProjectReadScope: 'allowed', workflowRevisionContract: { taskId: 'task-revision', revision: 'revision-1', round: 1, scope: 'document', documentPath: 'docs/GDD.md', issueIds: ['issue-1'], sectionIds: [], stagedPath, baseDocumentDigest: 'a'.repeat(64) } })
     await manager.send(session.id, 'read stage')
     await waitForIdle(manager, session.id)
     expect(decisions.map(decision => decision.behavior)).toEqual(['allow', 'deny', 'deny', 'deny'])
     expect(started?.cwd).not.toBe(workspacePath)
     expect(started?.env.BEEGAME_WORKSPACE_PATH).toBe(workspacePath)
     expect(started?.env.BEEGAME_REVISION_STAGED_PATH).toBe(join(workspacePath, stagedPath))
+    expect(JSON.parse(started!.env.BEEGAME_REVISION_CONTRACT!)).toMatchObject({ scope: 'document', sectionIds: [] })
+    expect(started?.workflowRevisionContract).toMatchObject({
+      scope: 'document',
+      documentPath: 'docs/GDD.md',
+    })
     expect(started?.cwd).toContain('.beegame/workflow/native-sandbox/')
     const sandboxPath = started?.cwd
     expect(sandboxPath).not.toBe(join(workspacePath, stagedPath))
@@ -183,7 +188,7 @@ describe('BeeGame session runtime resilience', () => {
     const manager = new BeeGameSessionManager(runner, root)
     const contract = {
       taskId: 'task-revision', revision: 'revision-1', round: 4,
-      documentPath: 'docs/GDD.md' as const, issueIds: ['issue-1'], sectionIds: ['vision'],
+      scope: 'section' as const, documentPath: 'docs/GDD.md' as const, issueIds: ['issue-1'], sectionIds: ['vision'],
       stagedPath, baseDocumentDigest: 'a'.repeat(64),
     }
     const first = manager.start({ workspacePath, userId: 'user-1', workflowWorker: true, workflowRunId: 'run-revision', workflowDispatchId: 'dispatch-revision-1', workflowWorkerType: 'foundation-document-reviser', workflowRevisionContract: contract })
@@ -1716,7 +1721,7 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('replaces stale document edit activity when native reasoning resumes', async () => {
+  test('keeps document author visibly working when prose streams without visible reasoning', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-document-reasoning-progress-'))
     const workspacePath = join(root, 'workspace')
     const store = createRunStore(workspacePath, 'user-1')
@@ -1772,9 +1777,16 @@ describe('BeeGame session runtime resilience', () => {
           input.onMessage({
             type: 'stream_event',
             event: {
-              type: 'content_block_delta',
+              type: 'content_block_stop',
               index: 1,
-              delta: { type: 'thinking_delta', thinking: 'continuing' },
+            },
+          } as DashboardSDKMessage)
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              index: 2,
+              delta: { type: 'text_delta', text: '# Document' },
             },
           } as DashboardSDKMessage)
           await hold
@@ -1797,7 +1809,7 @@ describe('BeeGame session runtime resilience', () => {
     let active = await store.load()
     for (
       let attempt = 0;
-      attempt < 400 && active?.currentMessage !== '正在推理当前文档…';
+      attempt < 400 && active?.currentMessage !== '正在撰写当前文档…';
       attempt += 1
     ) {
       await new Promise(resolve => setTimeout(resolve, 5))
@@ -1805,7 +1817,7 @@ describe('BeeGame session runtime resilience', () => {
     }
 
     expect(active?.thinking).toBe('working')
-    expect(active?.currentMessage).toBe('正在推理当前文档…')
+    expect(active?.currentMessage).toBe('正在撰写当前文档…')
     release()
     await turn
     manager.dispose()
@@ -2036,9 +2048,14 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('coalesces cumulative usage snapshots while a write is in flight', async () => {
+  test('records and debits cumulative usage exactly once at turn terminal', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-usage-coalesce-'))
-    const recorded: Usage[] = []
+    const recorded: Array<{
+      usage: Usage
+      idempotencyKey: string
+      metadata?: Record<string, unknown>
+    }> = []
+    const debited: string[] = []
     const runner: BeeGameSessionRunner = {
       start: async () => ({
         submit: async input => {
@@ -2051,10 +2068,15 @@ describe('BeeGame session runtime resilience', () => {
     }
     const manager = new BeeGameSessionManager(runner, root, () => ({}), {
       recordUsage: async (_userId, input) => {
-        recorded.push(input.usage)
-        if (recorded.length === 1) {
-          await new Promise(resolve => setTimeout(resolve, 25))
-        }
+        recorded.push({
+          usage: input.usage,
+          idempotencyKey: input.idempotencyKey,
+          metadata: input.metadata,
+        })
+        return usageResult(input.usage, input.idempotencyKey)
+      },
+      debitRealtimeUsage: async (_userId, input) => {
+        debited.push(input.idempotencyKey)
         return usageResult(input.usage, input.idempotencyKey)
       },
     })
@@ -2066,9 +2088,94 @@ describe('BeeGame session runtime resilience', () => {
     await manager.send(session.id, 'continue')
     await waitForIdle(manager, session.id)
 
-    expect(recorded).toHaveLength(2)
-    expect(recorded[1]!.total_tokens).toBeGreaterThan(recorded[0]!.total_tokens)
+    expect(recorded).toHaveLength(1)
+    expect(debited).toEqual([recorded[0]!.idempotencyKey])
+    expect(recorded[0]!.usage.total_tokens).toBe(30)
+    expect(recorded[0]!.metadata).toMatchObject({
+      providerCumulativeUsage: expect.objectContaining({ total_tokens: 30 }),
+      turnDeltaUsage: expect.objectContaining({ total_tokens: 30 }),
+      billableFinalUsage: expect.objectContaining({ total_tokens: 30 }),
+    })
+    expect(recorded[0]!.idempotencyKey).toMatch(/^usage-terminal:/)
     manager.dispose()
+  })
+
+  test('uses the terminal cumulative difference as the next turn delta', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-usage-turn-delta-'))
+    const recorded: Array<{
+      usage: Usage
+      metadata?: Record<string, unknown>
+    }> = []
+    let turn = 0
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          turn += 1
+          input.onMessage(usageMessage(turn === 1 ? 10 : 30))
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root, () => ({}), {
+      recordUsage: async (_userId, input) => {
+        recorded.push({ usage: input.usage, metadata: input.metadata })
+        return usageResult(input.usage, input.idempotencyKey)
+      },
+    })
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+    })
+
+    await manager.send(session.id, 'first')
+    await waitForIdle(manager, session.id)
+    await manager.send(session.id, 'second')
+    await waitForIdle(manager, session.id)
+
+    expect(recorded).toHaveLength(2)
+    expect(recorded.map(value => value.usage.total_tokens)).toEqual([10, 20])
+    expect(
+      recorded.map(
+        value => (value.metadata?.turnDeltaUsage as Usage).total_tokens,
+      ),
+    ).toEqual([10, 20])
+    manager.dispose()
+  })
+
+  test('keeps terminal billing identity stable when a workflow dispatch is replayed', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-usage-replay-'))
+    const keys: string[] = []
+    const backend = {
+      recordUsage: async (_userId: string, input: {
+        usage: Usage
+        idempotencyKey: string
+      }) => {
+        keys.push(input.idempotencyKey)
+        return usageResult(input.usage, input.idempotencyKey)
+      },
+    }
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => input.onMessage(usageMessage(12)),
+        stop: () => undefined,
+      }),
+    }
+    for (let replay = 0; replay < 2; replay += 1) {
+      const manager = new BeeGameSessionManager(runner, root, () => ({}), backend)
+      const session = manager.start({
+        workspacePath: join(root, `workspace-${replay}`),
+        userId: 'user-1',
+        workflowRunId: 'run-1',
+        workflowDispatchId: 'dispatch-1',
+      })
+      await manager.send(session.id, 'replay same terminal')
+      await waitForIdle(manager, session.id)
+      await manager.dispose()
+    }
+
+    expect(keys).toHaveLength(2)
+    expect(new Set(keys).size).toBe(1)
+    expect(keys[0]).toMatch(/^usage-terminal:run-1:dispatch-1:/)
   })
 
   test('bounds failed usage retries and does not append billing errors after stop', async () => {

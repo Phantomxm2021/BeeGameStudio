@@ -8,14 +8,11 @@ import {
 
 export type FoundationAuthoritySource = Readonly<{
   path: FoundationDocumentPath
-  sections: readonly Readonly<{
-    sectionId: string
-    startLine: number
-    lineCount: number
-    content: string
-    digest: string
-  }>[]
-  digest: string
+  selectionScope: 'sections' | 'document'
+  sectionIds: readonly string[]
+  content: string
+  contentDigest: string
+  documentDigest: string
 }>
 
 export type FoundationAuthorityProjection = Readonly<{
@@ -56,14 +53,11 @@ export function parseFoundationAuthorityProjectionBytes(
   const pathSchema = z.enum(CANONICAL_FOUNDATION_DOCUMENTS)
   const sourceSchema = z.object({
     path: pathSchema,
-    sections: z.array(z.object({
-      sectionId: z.string(),
-      startLine: z.number().int().positive(),
-      lineCount: z.number().int().positive(),
-      content: z.string(),
-      digest: z.string().regex(/^[a-f0-9]{64}$/),
-    }).strict()),
-    digest: z.string().regex(/^[a-f0-9]{64}$/),
+    selectionScope: z.enum(['sections', 'document']),
+    sectionIds: z.array(z.string()),
+    content: z.string(),
+    contentDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    documentDigest: z.string().regex(/^[a-f0-9]{64}$/),
   }).strict()
   const schema = z.object({
     targetPath: pathSchema,
@@ -79,8 +73,8 @@ export function parseFoundationAuthorityProjectionBytes(
   const value = {
     ...stored,
     byteLength: new TextEncoder().encode(raw).byteLength,
-    rangeCount: stored.sources.reduce((total, source) => total + source.sections.length, 0),
-    projectedLineCount: stored.sources.reduce((total, source) => total + source.sections.reduce((sum, section) => sum + section.lineCount, 0), 0),
+    rangeCount: stored.sources.reduce((total, source) => total + (source.selectionScope === 'sections' ? source.sectionIds.length : 1), 0),
+    projectedLineCount: stored.sources.reduce((total, source) => total + source.content.split('\n').length, 0),
   } as FoundationAuthorityProjection
   if (new Set(value.sources.map(source => source.path)).size !== value.sources.length)
     throw new Error('committed upstream projection contains duplicate sources')
@@ -88,14 +82,14 @@ export function parseFoundationAuthorityProjectionBytes(
     const upstream = targetContract.upstreamSections.find(candidate => candidate.path === source.path)
     if (!upstream)
       throw new Error(`committed upstream projection contains an undeclared source: ${source.path}`)
-    if (new Set(source.sections.map(section => section.sectionId)).size !== source.sections.length)
-      throw new Error(`committed upstream projection contains duplicate sections: ${source.path}`)
-    if (source.sections.some(section => !upstream.sectionIds.includes(section.sectionId)))
-      throw new Error(`committed upstream projection contains an undeclared section: ${source.path}`)
-    if (source.sections.some(section =>
-      createHash('sha256').update(section.content).digest('hex') !== section.digest,
-    ))
-      throw new Error(`committed upstream projection contains an invalid section digest: ${source.path}`)
+    if (
+      source.sectionIds.length !== upstream.sectionIds.length ||
+      source.sectionIds.some((sectionId, index) => sectionId !== upstream.sectionIds[index])
+    ) throw new Error(`committed upstream projection contains undeclared section authority: ${source.path}`)
+    if (createHash('sha256').update(source.content).digest('hex') !== source.contentDigest)
+      throw new Error(`committed upstream projection contains an invalid content digest: ${source.path}`)
+    if (source.selectionScope === 'sections' && source.sectionIds.some(sectionId => !source.content.includes(`<!-- beegame-section:${sectionId} -->`)))
+      throw new Error(`committed upstream projection section content is incomplete: ${source.path}`)
   }
   if (canonicalFoundationAuthorityProjectionBytes(value) !== raw)
     throw new Error('committed upstream projection bytes are not canonical')
@@ -109,17 +103,15 @@ export function parseFoundationAuthorityProjectionBytes(
 export function modelFoundationAuthorityProjectionBytes(
   projection: FoundationAuthorityProjection,
 ): string {
-  return `${JSON.stringify({
-    targetPath: projection.targetPath,
-    targetSectionIds: projection.targetSectionIds,
-    sources: projection.sources.map(source => ({
-      path: source.path,
-      sections: source.sections.map(section => ({
-        sectionId: section.sectionId,
-        content: section.content,
-      })),
-    })),
-  }, null, 2)}\n`
+  return projection.sources
+    .map(
+      source => [
+        `<!-- beegame-authority-source:${source.path} scope=${source.selectionScope} -->`,
+        source.content.trimEnd(),
+        `<!-- beegame-authority-source-end:${source.path} -->`,
+      ].join('\n'),
+    )
+    .join('\n\n') + (projection.sources.length ? '\n' : '')
 }
 
 export function projectFoundationAuthority(input: {
@@ -159,7 +151,6 @@ export function projectFoundationAuthority(input: {
     const markdown = input.documents.get(source.path)
     if (markdown === undefined)
       throw new Error(`canonical upstream document is missing: ${source.path}`)
-    const sourceContract = getGameDocumentContract(source.path)
     const lines = markdown.split('\n')
     const sectionMarkerLines = lines.flatMap((line, index) =>
       line.trim().startsWith('<!-- beegame-section:') ? [index] : [],
@@ -167,43 +158,32 @@ export function projectFoundationAuthority(input: {
     const productionMarkerLine = lines.findIndex(
       line => line.trim() === '<!-- beegame-production-materials -->',
     )
-    const sections: Array<{
-      sectionId: string
-      startLine: number
-      lineCount: number
-      content: string
-      digest: string
-    }> = []
+    const selectedSections: string[] = []
+    let completeSelection = true
     for (const sectionId of source.sectionIds) {
-      const section = sourceContract.sections.find(
-        candidate => candidate.sectionId === sectionId,
-      )
       const marker = `<!-- beegame-section:${sectionId} -->`
       const markerLine = lines.findIndex(line => line.trim() === marker)
-      if (!section || markerLine < 0)
-        throw new Error(
-          `canonical upstream section is missing: ${source.path}#${sectionId}`,
-        )
+      if (markerLine < 0) {
+        completeSelection = false
+        break
+      }
       const nextBoundary = [...sectionMarkerLines, productionMarkerLine]
         .filter(line => line > markerLine)
         .sort((left, right) => left - right)[0]
       const endLine = nextBoundary ?? lines.length
       const content = lines.slice(markerLine, endLine).join('\n')
-      sections.push(
-        Object.freeze({
-          sectionId,
-          startLine: markerLine + 1,
-          lineCount: endLine - markerLine,
-          content,
-          digest: createHash('sha256').update(content).digest('hex'),
-        }),
-      )
+      selectedSections.push(content)
     }
+    const selectionScope = completeSelection ? 'sections' as const : 'document' as const
+    const content = completeSelection ? selectedSections.join('\n\n') : markdown
     sources.push(
       Object.freeze({
         path: source.path,
-        sections: Object.freeze(sections),
-        digest: createHash('sha256').update(markdown).digest('hex'),
+        selectionScope,
+        sectionIds: Object.freeze([...source.sectionIds]),
+        content,
+        contentDigest: createHash('sha256').update(content).digest('hex'),
+        documentDigest: createHash('sha256').update(markdown).digest('hex'),
       }),
     )
   }
@@ -222,15 +202,7 @@ export function projectFoundationAuthority(input: {
     targetSectionIds,
     sources: frozenSources,
     byteLength,
-    rangeCount: frozenSources.reduce(
-      (total, source) => total + source.sections.length,
-      0,
-    ),
-    projectedLineCount: frozenSources.reduce(
-      (total, source) =>
-        total +
-        source.sections.reduce((sum, section) => sum + section.lineCount, 0),
-      0,
-    ),
+    rangeCount: frozenSources.reduce((total, source) => total + (source.selectionScope === 'sections' ? source.sectionIds.length : 1), 0),
+    projectedLineCount: frozenSources.reduce((total, source) => total + source.content.split('\n').length, 0),
   })
 }

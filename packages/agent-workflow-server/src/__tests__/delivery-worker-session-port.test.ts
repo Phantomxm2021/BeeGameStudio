@@ -46,7 +46,7 @@ describe('delivery worker session credentials', () => {
       revision: 'revision',
       keys: ['audio.event_ids', 'game.players.max'],
       sections: [
-        { documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', heading: 'Events', startLine: 65, endLine: 80, digest: 'a'.repeat(64), text: 'events' },
+        { documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'material.event-cue-matrix', heading: 'Events', startLine: 65, endLine: 80, digest: 'a'.repeat(64), text: 'events' },
         { documentPath: 'docs/GDD.md', sectionId: 'vision', heading: 'Vision', startLine: 10, endLine: 20, digest: 'b'.repeat(64), text: 'vision' },
       ],
       bytesUtf8: 1,
@@ -92,7 +92,7 @@ describe('delivery worker session credentials', () => {
         key: 'audio.event_ids',
         status: 'absent',
         value: ['unexpected'],
-        evidence: { documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'a'.repeat(64) },
+        evidence: { documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'material.event-cue-matrix', startLine: 65, endLine: 80, digest: 'a'.repeat(64) },
         reason: 'unexpected extra fields',
       }, { key: 'game.players.max', status: 'absent' }],
     })).toBe(false)
@@ -129,7 +129,7 @@ describe('delivery worker session credentials', () => {
     })).toBe(true)
   })
 
-  test('exposes the foundation revision terminal and derives a terminal from its successful tool event', async () => {
+  test('exposes the foundation revision terminal from its committed raw Markdown receipt', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'revision-session-port-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -140,12 +140,17 @@ describe('delivery worker session credentials', () => {
       const staged = canonical.replace('original vision', 'revised vision')
       await writeFile(join(workspacePath, stage.stagedPath), staged)
       const receiptWithoutTerminal = {
-        taskId: 'revision-task-1', round: 1 as const, documentPath: 'docs/GDD.md' as const, issueIds: ['AUD-1'],
+        scope: 'section' as const, taskId: 'revision-task-1', round: 1 as const, documentPath: 'docs/GDD.md' as const, issueIds: ['AUD-1'],
         baseDocumentDigest: stage.baseDocumentDigest,
         stagedDocumentDigest: createHash('sha256').update(staged).digest('hex'),
         changedSectionIds: ['vision'], stagedPath: stage.stagedPath,
       }
       const receipt = { ...receiptWithoutTerminal, terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal) }
+      await mkdir(join(workspacePath, '.beegame/workflow/revision-commits'), { recursive: true })
+      await writeFile(
+        join(workspacePath, '.beegame/workflow/revision-commits/dispatch-revision.json'),
+        `${JSON.stringify(receipt)}\n`,
+      )
       const starts: Array<Record<string, unknown>> = []
       const prompts: string[] = []
       const sessions = {
@@ -153,56 +158,37 @@ describe('delivery worker session credentials', () => {
         updateAuthToken() {},
         async sendWithDisplay(_sessionId: string, text: string) { prompts.push(text); return {} },
         events() { return [
-          { id: 'revision-tool-use', type: 'tool.started' as const, text: 'SubmitFoundationRevisionResult', createdAt: new Date(), payload: { type: 'tool.started', toolName: 'SubmitFoundationRevisionResult', input: { status: 'APPLIED', changedSectionIds: ['vision'], receipt: { forged: true } } } },
-          { id: 'revision-tool-result', type: 'tool.completed' as const, text: 'SubmitFoundationRevisionResult completed', createdAt: new Date(), payload: { type: 'tool.completed', toolName: 'SubmitFoundationRevisionResult', output: JSON.stringify({ status: 'APPLIED', receipt }) } },
+          { id: 'revision-result', type: 'result' as const, text: 'raw Markdown completed', createdAt: new Date(), payload: { type: 'result', subtype: 'success' } },
           { id: 'revision-end-turn', type: 'turn.completed' as const, text: 'turn completed', createdAt: new Date(), payload: { type: 'turn.completed' } },
         ] },
+        async waitForWorkflowWorkerIdle() {},
       } as unknown as BeeGameSessionManager
       const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1', confirmedBriefContext: 'CONFIRMED_SENTINEL' })
       await port.start({
         dispatchId: 'dispatch-revision', runId: 'run-revision', ownerId: 'user-1', projectId: 'project-revision', workspacePath,
-        workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', taskId: 'revision-task-1', revision: 'rev-1',
+        workerType: 'foundation-document-reviser', phase: 'FOUNDATION_REVISION', taskId: 'revision-task-1', revision: 'rev-1',
         allowedPaths: [stage.stagedPath], protectedPaths: ['docs/GDD.md'], projectReadScope: 'allowed',
-        contract: { workerType: 'foundation-document-reviser', taskId: 'revision-task-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['AUD-1'], sectionIds: ['vision'], stagedPath: stage.stagedPath, baseDocumentDigest: stage.baseDocumentDigest, packetPath: foundationRevisionPacketPath('rev-1', 1, 'revision-task-1'), packetDigest: 'a'.repeat(64) },
+        contract: { workerType: 'foundation-document-reviser', taskId: 'revision-task-1', round: 1, scope: 'section', documentPath: 'docs/GDD.md', issueIds: ['AUD-1'], sectionIds: ['vision'], stagedPath: stage.stagedPath, baseDocumentDigest: stage.baseDocumentDigest, packetPath: foundationRevisionPacketPath('rev-1', 1, 'revision-task-1'), packetDigest: 'a'.repeat(64) },
       })
       await expect(port.waitForTerminal?.('dispatch-revision')).resolves.toMatchObject({ workerType: 'foundation-document-reviser', status: 'completed', declaration: { status: 'APPLIED', receipt } })
-      expect(starts[0]).toMatchObject({ workflowAllowedPaths: [stage.stagedPath], workflowProjectReadScope: 'allowed', workflowProtectedPaths: ['docs/GDD.md'], workflowRevisionContract: expect.objectContaining({ taskId: 'revision-task-1', stagedPath: stage.stagedPath }) })
+      expect(starts[0]).toMatchObject({
+        workflowAllowedPaths: [stage.stagedPath],
+        workflowProjectReadScope: 'allowed',
+        workflowProtectedPaths: ['docs/GDD.md'],
+        workflowRevisionContract: expect.objectContaining({ taskId: 'revision-task-1', stagedPath: stage.stagedPath }),
+        workflowRevisionMarkdownStreamContract: expect.objectContaining({
+          taskId: 'revision-task-1',
+          scope: 'section',
+          sectionIds: ['vision'],
+        }),
+      })
       expect(starts[0]?.workflowRevisionContract).not.toHaveProperty('packet')
-      await port.submit('dispatch-revision', `Immutable revision packet: {"sections":[]}\nAssigned staged path: ${join(workspacePath, stage.stagedPath)}\nRead and edit only the assigned staged path. After the revision, call SubmitFoundationRevisionResult exactly once with status APPLIED and the exact changedSectionIds; do not return terminal JSON or prose completion text.`)
-      expect(prompts[0]).toContain(join(workspacePath, stage.stagedPath))
+      await port.submit('dispatch-revision', 'Return the revised section as visible raw Markdown.')
+      expect(prompts[0]).not.toContain(join(workspacePath, stage.stagedPath))
       expect(prompts[0]).not.toContain('CONFIRMED_SENTINEL')
       expect(prompts[0]).not.toContain('Workspace root:')
       expect(prompts[0]).not.toContain('README.md')
 
-      const legacySessions = {
-        ...sessions,
-        events() {
-          return [
-            {
-              id: 'legacy-revision-tool-result',
-              type: 'tool.completed' as const,
-              text: 'SubmitFoundationRevisionResult completed',
-              createdAt: new Date(),
-              payload: {
-                type: 'tool.completed',
-                toolName: 'SubmitFoundationRevisionResult',
-                output: JSON.stringify({ accepted: true, data: { receipt } }),
-              },
-            },
-          ]
-        },
-      } as unknown as BeeGameSessionManager
-      const legacyPort = createBeeGameDeliveryWorkerPort({
-        sessions: legacySessions,
-        userId: 'user-1',
-      })
-      await legacyPort.start({
-        dispatchId: 'dispatch-revision-legacy', runId: 'run-revision', ownerId: 'user-1', projectId: 'project-revision', workspacePath,
-        workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', taskId: 'revision-task-1', revision: 'rev-1',
-        allowedPaths: [stage.stagedPath], protectedPaths: ['docs/GDD.md'], projectReadScope: 'allowed',
-        contract: { workerType: 'foundation-document-reviser', taskId: 'revision-task-1', round: 1, documentPath: 'docs/GDD.md', issueIds: ['AUD-1'], sectionIds: ['vision'], stagedPath: stage.stagedPath, baseDocumentDigest: stage.baseDocumentDigest, packetPath: foundationRevisionPacketPath('rev-1', 1, 'revision-task-1'), packetDigest: 'a'.repeat(64) },
-      })
-      await expect(legacyPort.waitForTerminal?.('dispatch-revision-legacy')).rejects.toThrow()
     } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
@@ -239,7 +225,7 @@ describe('delivery worker session credentials', () => {
       revision: 'revision-facts',
       allowedPaths: [],
       projectReadScope: 'empty' as const,
-      contract: { taskId: 'task-facts', packetDigest: 'a'.repeat(64), modelTier: 'fast', workerType: 'foundation-fact-extractor', packet: { keys: ['audio.event_ids'], sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }] } },
+      contract: { taskId: 'task-facts', packetDigest: 'a'.repeat(64), modelTier: 'fast', workerType: 'foundation-fact-extractor', packet: { keys: ['audio.event_ids'], sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'material.event-cue-matrix', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }] } },
     } as unknown as WorkerDispatchRequest
     await port.start(request)
     const terminal = await port.waitForTerminal?.('dispatch-facts')
@@ -534,7 +520,7 @@ describe('delivery worker session credentials', () => {
   test('binds model facts to immutable packet owner evidence and rejects missing owners', async () => {
     const ownerSection = {
       documentPath: 'docs/AUDIO_DESIGN.md',
-      sectionId: 'event_taxonomy',
+      sectionId: 'material.event-cue-matrix',
       heading: 'Event Taxonomy',
       startLine: 65,
       endLine: 80,
@@ -632,7 +618,7 @@ describe('delivery worker session credentials', () => {
           workerType: 'foundation-fact-extractor' as const,
           packet: {
             keys: ['audio.event_ids'],
-            sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }],
+            sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'material.event-cue-matrix', startLine: 65, endLine: 80, digest: 'b'.repeat(64) }],
           },
         },
       } as unknown as WorkerDispatchRequest
@@ -1263,7 +1249,7 @@ describe('delivery worker session credentials', () => {
             ? {
                 revision: 'revision-packet',
                 keys: ['audio.event_ids'],
-                sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'event_taxonomy', startLine: 65, endLine: 80, digest: 'b'.repeat(64), text: 'Audio event authority.' }],
+                sections: [{ documentPath: 'docs/AUDIO_DESIGN.md', sectionId: 'material.event-cue-matrix', startLine: 65, endLine: 80, digest: 'b'.repeat(64), text: 'Audio event authority.' }],
                 packetDigest: 'a'.repeat(64),
               }
             : { revision: 'revision-packet', keys: ['GDD.player_loop'], sections: [], packetDigest: 'a'.repeat(64) },

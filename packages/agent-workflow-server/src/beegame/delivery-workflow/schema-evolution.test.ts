@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { z } from 'zod/v4'
 import {
   deliveryRunSchema,
+  dispatchRecordSchema,
   tasksPlannedEventSchema,
   workflowUnitAcceptedEventSchema,
 } from './schema'
@@ -42,6 +43,9 @@ const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
   43: '9ad82b75692fe292b11ed73a00cef9526e611e1b5f20f00b2f0d22c717991e39',
   44: '10c9b7d69cf294be7934368ca0fd0be02be62f570b5c456fb9c35192c1ea964c',
   45: 'e7965861cc072c45e510fca3ffb61201034c7639dcf9ec694cb19dcc51fd28b6',
+  46: '0943c244ec5e633b2f32d137717070b40f9e967275991a40e46044c55d1fdf9b',
+  47: '5fa13496659ae7b476c0120e44afde5fde2d3745b64bb71546ee2153e90b512d',
+  48: '5cec21bcb907435fc9c4b639cff430799668bd01fb2e366e94e33674d16b4516',
 }
 
 function canonicalize(value: unknown): unknown {
@@ -75,5 +79,18 @@ describe('persisted workflow schema evolution', () => {
       currentPersistedSchemaFingerprint(),
       `persisted workflow schema changed at DELIVERY_RUN_SCHEMA_VERSION ${DELIVERY_RUN_SCHEMA_VERSION}; increment DELIVERY_RUN_SCHEMA_VERSION`,
     ).toBe(expected)
+  })
+
+  test('rejects a revision worker recorded under the reviewer phase', () => {
+    expect(() =>
+      dispatchRecordSchema.parse({
+        dispatchId: 'dispatch-revision',
+        workerType: 'foundation-document-reviser',
+        phase: 'DOCUMENT_REVIEW',
+        revision: 'document-r1',
+        status: 'running',
+        startedAt: '2026-09-05T00:00:00.000Z',
+      }),
+    ).toThrow('foundation document reviser can only run in FOUNDATION_REVISION')
   })
 })

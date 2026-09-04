@@ -2,13 +2,18 @@ import { createHash } from 'node:crypto'
 import { link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { relative, resolve, sep } from 'node:path'
 import { normalizeServiceOwnedDocumentMetadata } from '../authored-document-receipt'
+import { validateCompleteGameDocumentMarkdown } from '../complete-game-document'
 import { getGameDocumentContract } from './game-document-contracts'
 import {
   buildFoundationSectionIndex,
   canonicalFoundationBlockIds,
 } from './foundation-section-index'
 import type { RevisionBatch } from './foundation-revision-batches'
-import type { AuditIssue } from './foundation-issue-registry'
+import type {
+  AuditIssue,
+  FoundationDocumentAuditIssue,
+  FoundationReviewIssue,
+} from './foundation-issue-registry'
 import { foundationFactPacketDigest, type FoundationFactPacket } from './foundation-fact-extraction'
 import { FOUNDATION_FACT_CATALOG } from './foundation-fact-definitions'
 import { digestFoundationSemanticRecheckResult, type FoundationSemanticRecheckResult } from './foundation-patch-validation'
@@ -19,19 +24,31 @@ import {
   type FoundationDocumentPath,
 } from './types'
 
-export type RevisionTaskReceipt = {
+export type FoundationRevisionScope = 'section' | 'document'
+
+type RevisionTaskReceiptBase = {
   taskId: string
   round: FoundationRevisionRound
   documentPath: FoundationDocumentPath
   issueIds: string[]
   baseDocumentDigest: string
   stagedDocumentDigest: string
-  changedSectionIds: string[]
   stagedPath: string
   terminalDigest: string
 }
 
-export type PatchOperation = {
+export type RevisionTaskReceipt =
+  | (RevisionTaskReceiptBase & {
+      scope: 'section'
+      changedSectionIds: string[]
+    })
+  | (RevisionTaskReceiptBase & {
+      scope: 'document'
+      changedSectionIds: []
+    })
+
+export type FoundationSectionPatchOperation = {
+  scope: 'section'
   kind: 'INSERT' | 'REPLACE' | 'DELETE'
   documentPath: FoundationDocumentPath
   sectionId: string
@@ -39,6 +56,22 @@ export type PatchOperation = {
   beforeDigest?: string
   afterDigest?: string
 }
+
+/**
+ * A document repair has no trustworthy section boundary.  Keep its operation
+ * in the same operation stream, but bind the complete before/after document
+ * digests instead of inventing a section identifier.
+ */
+export type FoundationDocumentPatchOperation = {
+  scope: 'document'
+  kind: 'REPLACE'
+  documentPath: FoundationDocumentPath
+  issueIds: string[]
+  beforeDigest: string
+  afterDigest: string
+}
+
+export type PatchOperation = FoundationSectionPatchOperation | FoundationDocumentPatchOperation
 
 export type FoundationRevisionStage = {
   revision: string
@@ -59,6 +92,7 @@ export type FoundationRevisionSectionSlice = {
 }
 
 export type FoundationRevisionAuthority = {
+  scope: 'section' | 'document'
   baseDocumentDigest: string
   stagedPath: string
   packetPath: string
@@ -66,9 +100,50 @@ export type FoundationRevisionAuthority = {
   packetDigest: string
 }
 
+function completeDocumentRepairContract(path: FoundationDocumentPath) {
+  const contract = getGameDocumentContract(path)
+  return {
+    documentTitle: {
+      position: 'first_non_blank_line',
+      headingPrefix: '# ',
+    },
+    executiveSummary: {
+      marker: '<!-- beegame-executive-summary -->',
+      heading: '## Executive Summary',
+    },
+    sections: contract.sections.map(section => ({
+      sectionId: section.sectionId,
+      marker: `<!-- beegame-section:${section.sectionId} -->`,
+      heading: `## ${section.title}`,
+    })),
+    productionMaterials: {
+      marker: '<!-- beegame-production-materials -->',
+      heading: '## Production Materials',
+      entries: contract.productionMaterials.map(material => ({
+        materialId: material.materialId,
+        marker: `<!-- beegame-material:${material.materialId} -->`,
+        heading: `### ${material.title}`,
+        format: material.format,
+      })),
+    },
+    auditAppendix: {
+      optional: true,
+      marker: '<!-- beegame-audit-appendix -->',
+      heading: '## Audit Appendix',
+      acceptanceHeading: '### Acceptance Criteria',
+    },
+    additionalH2: 'forbidden',
+    supportingContent: 'must be nested under one of the declared H2 headings',
+  }
+}
+
 export function foundationRevisionDocumentReceiptMatches(task: FoundationRevisionDocumentTask): boolean {
   const receipt = task.receipt
+  const taskScope = (task as FoundationRevisionDocumentTask & { scope?: unknown }).scope
+  const receiptScope = (receipt as unknown as { scope?: unknown } | undefined)?.scope
   return task.status === 'completed' && !!receipt && !!task.terminalDigest &&
+    (taskScope === 'section' || taskScope === 'document') &&
+    receiptScope === taskScope &&
     receipt.taskId === task.taskId &&
     receipt.round === task.round &&
     receipt.documentPath === task.documentPath &&
@@ -83,6 +158,7 @@ export function foundationRevisionTasksComplete(tasks: readonly import('./types'
 }
 
 type RevisionTaskReceiptCore = {
+  scope: FoundationRevisionScope
   taskId: string
   round: FoundationRevisionRound
   documentPath: FoundationDocumentPath
@@ -165,6 +241,101 @@ export function foundationRevisionPacketPath(
     throw new Error('foundation revision round must be a positive safe integer')
   assertTaskId(taskId)
   return `.beegame/audit/foundation/${revision}/round-${round}/tasks/${taskId}/packet.json`
+}
+
+export function foundationRevisionSnapshotPath(
+  revision: string,
+  round: FoundationRevisionRound,
+  taskId: string,
+  stagedDocumentDigest: string,
+): string {
+  assertRevision(revision)
+  if (!Number.isSafeInteger(round) || round < 1)
+    throw new Error('foundation revision round must be a positive safe integer')
+  assertTaskId(taskId)
+  if (!/^[a-f0-9]{64}$/.test(stagedDocumentDigest))
+    throw new Error('foundation revision snapshot digest is invalid')
+  return `.beegame/audit/foundation/${revision}/round-${round}/tasks/${taskId}/snapshots/${stagedDocumentDigest}.md`
+}
+
+/** Persist exact revision bytes under immutable task and content identities. */
+export async function writeFoundationRevisionSnapshot(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  bytes: Uint8Array
+  expectedDigest: string
+}): Promise<string> {
+  if (sha256(input.bytes) !== input.expectedDigest)
+    throw new Error('foundation revision snapshot digest does not match body')
+  const snapshotPath = foundationRevisionSnapshotPath(
+    input.revision,
+    input.round,
+    input.taskId,
+    input.expectedDigest,
+  )
+  const absolute = resolveProjectPath(input.workspacePath, snapshotPath)
+  await mkdir(resolve(absolute, '..'), { recursive: true })
+  try {
+    const existing = await readFile(absolute)
+    if (sha256(existing) !== input.expectedDigest)
+      throw new Error('foundation revision snapshot already exists with a different digest')
+    return snapshotPath
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const temporary = `${absolute}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(temporary, input.bytes, { flag: 'wx' })
+  try {
+    await link(temporary, absolute)
+    await unlink(temporary)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    await unlink(temporary).catch(() => undefined)
+    const existing = await readFile(absolute)
+    if (sha256(existing) !== input.expectedDigest)
+      throw new Error('foundation revision snapshot already exists with a different digest')
+  }
+  return snapshotPath
+}
+
+/** Restore mutable staging only from the immutable, receipt-bound task snapshot. */
+export async function restoreFoundationRevisionStageFromSnapshot(input: {
+  workspacePath: string
+  revision: string
+  round: FoundationRevisionRound
+  taskId: string
+  documentPath: FoundationDocumentPath
+  stagedPath: string
+  expectedDigest: string
+}): Promise<Uint8Array> {
+  const expectedStagePath = foundationRevisionStagePath(input.revision, input.documentPath)
+  if (input.stagedPath !== expectedStagePath)
+    throw new Error('foundation revision staged path authority mismatch')
+  const snapshotPath = foundationRevisionSnapshotPath(
+    input.revision,
+    input.round,
+    input.taskId,
+    input.expectedDigest,
+  )
+  const snapshotBytes = await readFile(resolveProjectPath(input.workspacePath, snapshotPath))
+  if (sha256(snapshotBytes) !== input.expectedDigest)
+    throw new Error('foundation revision snapshot digest mismatch')
+  const stagedAbsolute = resolveProjectPath(input.workspacePath, input.stagedPath)
+  try {
+    if (sha256(await readFile(stagedAbsolute)) === input.expectedDigest) return snapshotBytes
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  await mkdir(resolve(stagedAbsolute, '..'), { recursive: true })
+  const temporary = `${stagedAbsolute}.${process.pid}.${Date.now()}.tmp`
+  await writeFile(temporary, snapshotBytes, { flag: 'wx' })
+  await rename(temporary, stagedAbsolute).catch(error => {
+    void unlink(temporary).catch(() => undefined)
+    throw error
+  })
+  return snapshotBytes
 }
 
 export async function writeFoundationRevisionPacket(input: {
@@ -546,13 +717,39 @@ function sectionSlices(
   }))
 }
 
+/**
+ * Validate a staged document as the complete canonical document.  Revision
+ * workers receive the authored Markdown body, while the staged artifact may
+ * already contain service-owned YAML front matter.  Front matter is therefore
+ * removed only for this body validator; its metadata transition remains
+ * checked by publication.
+ */
+export function validateFoundationRevisionCompleteDocument(
+  documentPath: FoundationDocumentPath,
+  markdown: string,
+): string {
+  if (typeof markdown !== 'string' || !markdown.trim())
+    throw new Error('document revision staged document must be non-empty')
+  const lines = markdown.split('\n')
+  let body = markdown
+  if (lines[0]?.trim() === '---') {
+    const closing = lines.findIndex((line, index) => index > 0 && line.trim() === '---')
+    if (closing < 0)
+      throw new Error('document revision staged document front matter is not closed')
+    body = lines.slice(closing + 1).join('\n').trimStart()
+  }
+  if (!body.trim())
+    throw new Error('document revision staged document body must be non-empty')
+  return validateCompleteGameDocumentMarkdown(documentPath, body)
+}
+
 export async function buildFoundationRevisionAuthority(input: {
   workspacePath: string
   revision: string
   taskId: string
   round: FoundationRevisionRound
   batch: RevisionBatch
-  issues: readonly AuditIssue[]
+  issues: readonly FoundationReviewIssue[]
   sourceAuthorityDigest: string
   sourceIssueRegistryDigest: string
   sourceDerivedDigests: { sectionIndex: string; factStore: string; manifest: string }
@@ -562,14 +759,82 @@ export async function buildFoundationRevisionAuthority(input: {
   assertRevision(input.revision)
   assertBatch(input.batch)
   const canonicalPath = resolveProjectPath(input.workspacePath, input.batch.documentPath)
-  const markdown = (await readFile(canonicalPath)).toString('utf8')
-  const baseDocumentDigest = sha256(markdown)
+  const baseBytes = await readFile(canonicalPath)
+  const markdown = baseBytes.toString('utf8')
+  const baseDocumentDigest = sha256(baseBytes)
+  const packetBase = {
+    schema: 'beegame-foundation-revision-packet-v1' as const,
+    revision: input.revision,
+    round: input.round,
+    taskId: input.taskId,
+    documentPath: input.batch.documentPath,
+    issueIds: [...input.batch.issueIds],
+    sectionIds: [...input.batch.sectionIds],
+    // Keep the admitted registry issue as-is. `problem` duplicated `actual`,
+    // while `evidenceRefs` duplicated the immutable source/target/fix refs.
+    issues: input.issues,
+    immutableDigests: {
+      sourceAuthorityDigest: input.sourceAuthorityDigest,
+      sourceIssueRegistryDigest: input.sourceIssueRegistryDigest,
+      sourceDerivedDigests: input.sourceDerivedDigests,
+      sourceDocumentDigests: input.sourceDocumentDigests,
+      baseDocumentDigest,
+    },
+  }
+
+  if (input.batch.scope === 'document') {
+    if (input.issues.length !== input.batch.issueIds.length)
+      throw new Error('document revision requires the exact admitted issue authority')
+    const expectedIds = new Set(input.batch.issueIds)
+    const seenIds = new Set<string>()
+    for (const issue of input.issues) {
+      if (!issue || typeof issue.id !== 'string' || !expectedIds.has(issue.id) || seenIds.has(issue.id))
+        throw new Error('document revision admitted issue IDs disagree with the batch')
+      seenIds.add(issue.id)
+      if (!isDocumentFormatIssue(issue, input.batch.documentPath, baseDocumentDigest))
+        throw new Error(`document revision issue authority is invalid: ${issue.id}`)
+    }
+    if (seenIds.size !== expectedIds.size)
+      throw new Error('document revision admitted issue coverage is incomplete')
+    const packet: Record<string, unknown> = {
+      ...packetBase,
+      scope: 'document',
+      sections: [],
+      normalizedFacts: [],
+      factConstraints: [],
+      documentContract: completeDocumentRepairContract(input.batch.documentPath),
+      document: {
+        documentPath: input.batch.documentPath,
+        digest: baseDocumentDigest,
+        text: markdown,
+      },
+    }
+    return {
+      scope: 'document',
+      baseDocumentDigest,
+      stagedPath: foundationRevisionStagePath(input.revision, input.batch.documentPath),
+      packetPath: foundationRevisionPacketPath(input.revision, input.round, input.taskId),
+      packet,
+      packetDigest: foundationRevisionPacketDigest(packet),
+    }
+  }
+
+  const sectionIssues: AuditIssue[] = []
+  for (const issue of input.issues) {
+    if (!isSectionIssue(issue) || issue.remediation.documentPath !== input.batch.documentPath)
+      throw new Error(`section revision issue authority is invalid: ${String((issue as { id?: unknown })?.id ?? '')}`)
+    sectionIssues.push(issue)
+  }
+  if (sectionIssues.length !== input.batch.issueIds.length ||
+      new Set(sectionIssues.map(issue => issue.id)).size !== sectionIssues.length ||
+      sectionIssues.some(issue => !input.batch.issueIds.includes(issue.id)))
+    throw new Error('section revision admitted issue IDs disagree with the batch')
   const requiredSectionIds = new Set<string>(input.batch.sectionIds)
   const issueRefs = new Set<string>()
   const evidenceDocumentPaths = new Set<FoundationDocumentPath>([
     input.batch.documentPath,
   ])
-  for (const issue of input.issues) {
+  for (const issue of sectionIssues) {
     issueRefs.add(`${issue.source.documentPath}\0${issue.source.sectionId}`)
     evidenceDocumentPaths.add(issue.source.documentPath)
     if (issue.target) {
@@ -577,11 +842,9 @@ export async function buildFoundationRevisionAuthority(input: {
       evidenceDocumentPaths.add(issue.target.documentPath)
     }
     const remediation = issue.remediation
-    if (remediation.kind === 'patch') {
-      evidenceDocumentPaths.add(remediation.documentPath)
-      for (const sectionId of remediation.sectionIds)
-        issueRefs.add(`${remediation.documentPath}\0${sectionId}`)
-    }
+    evidenceDocumentPaths.add(remediation.documentPath)
+    for (const sectionId of remediation.sectionIds)
+      issueRefs.add(`${remediation.documentPath}\0${sectionId}`)
   }
   const evidenceDocuments = await Promise.all(
     [...evidenceDocumentPaths].map(async documentPath => [
@@ -620,28 +883,14 @@ export async function buildFoundationRevisionAuthority(input: {
     }))
     .sort((left, right) => left.key.localeCompare(right.key))
   const packet: Record<string, unknown> = {
-    schema: 'beegame-foundation-revision-packet-v1',
-    revision: input.revision,
-    round: input.round,
-    taskId: input.taskId,
-    documentPath: input.batch.documentPath,
-    issueIds: [...input.batch.issueIds],
-    sectionIds: [...input.batch.sectionIds],
-    // Keep the admitted registry issue as-is. `problem` duplicated `actual`,
-    // while `evidenceRefs` duplicated the immutable source/target/fix refs.
-    issues: input.issues,
+    ...packetBase,
+    scope: 'section',
     sections: selectedSections,
     normalizedFacts: selectedFacts,
     factConstraints,
-    immutableDigests: {
-      sourceAuthorityDigest: input.sourceAuthorityDigest,
-      sourceIssueRegistryDigest: input.sourceIssueRegistryDigest,
-      sourceDerivedDigests: input.sourceDerivedDigests,
-      sourceDocumentDigests: input.sourceDocumentDigests,
-      baseDocumentDigest,
-    },
   }
   return {
+    scope: 'section',
     baseDocumentDigest,
     stagedPath: foundationRevisionStagePath(input.revision, input.batch.documentPath),
     packetPath: foundationRevisionPacketPath(input.revision, input.round, input.taskId),
@@ -689,6 +938,72 @@ function sectionMap(
   return output
 }
 
+/** Derive section changes from canonical/staged bytes; worker declarations do not carry this evidence. */
+function deriveFoundationRevisionSectionDiff(input: {
+  documentPath: FoundationDocumentPath
+  baseMarkdown: string
+  stagedMarkdown: string
+  authorizedSectionIds: readonly string[]
+}): {
+  base: ParsedSection[]
+  staged: ParsedSection[]
+  changed: ParsedSection[]
+  changedSectionIds: string[]
+} {
+  const base = parseSections(input.documentPath, input.baseMarkdown)
+  const staged = parseSections(input.documentPath, input.stagedMarkdown)
+  sectionMap(base)
+  sectionMap(staged)
+  if (
+    base.length !== staged.length ||
+    base.some((section, index) => section.sectionId !== staged[index]?.sectionId)
+  )
+    throw new Error('revision changed section markers or section order')
+
+  const changed = base.filter(
+    (section, index) => section.text !== staged[index]!.text,
+  )
+  if (changed.some(section => !input.authorizedSectionIds.includes(section.sectionId)))
+    throw new Error('revision changed an unauthorized section')
+  const changedSectionIds = changed.map(section => section.sectionId)
+  if (changedSectionIds.length === 0)
+    throw new Error('revision contains no section progress')
+
+  const outside = (markdown: string, allowed: ReadonlySet<string>) => {
+    const lines = markdown.split('\n')
+    const index = buildFoundationSectionIndex({
+      documents: { [input.documentPath]: markdown },
+    })
+    const chunks: string[] = []
+    let cursor = 0
+    for (const section of index) {
+      const start = section.startLine - 1
+      const end = section.endLine
+      chunks.push(lines.slice(cursor, start).join('\n'))
+      if (allowed.has(section.sectionId))
+        chunks.push(`\0${section.sectionId}\0`)
+      else chunks.push(lines.slice(start, end).join('\n'))
+      cursor = end
+    }
+    chunks.push(lines.slice(cursor).join('\n'))
+    return normalizeServiceOwnedDocumentMetadata(chunks.join('\n'))
+  }
+  const allowed = new Set(input.authorizedSectionIds)
+  if (outside(input.baseMarkdown, allowed) !== outside(input.stagedMarkdown, allowed))
+    throw new Error('revision changed bytes outside authorized sections')
+
+  return { base, staged, changed, changedSectionIds }
+}
+
+export function deriveFoundationRevisionChangedSectionIds(input: {
+  documentPath: FoundationDocumentPath
+  baseMarkdown: string
+  stagedMarkdown: string
+  authorizedSectionIds: readonly string[]
+}): string[] {
+  return deriveFoundationRevisionSectionDiff(input).changedSectionIds
+}
+
 function assertExactKeys(
   value: Record<string, unknown>,
   keys: readonly string[],
@@ -701,6 +1016,40 @@ function assertExactKeys(
     actual.some((key, index) => key !== expected[index])
   )
     throw new Error(`${label} shape contains extra or missing keys`)
+}
+
+function isSectionIssue(value: FoundationReviewIssue): value is AuditIssue {
+  return !!value &&
+    typeof value === 'object' &&
+    !!value.remediation &&
+    value.remediation.kind === 'patch' &&
+    value.remediation.scope === 'section' &&
+    !!value.source &&
+    typeof value.source === 'object' &&
+    !Array.isArray(value.source) &&
+    !('scope' in value.source && value.source.scope === 'document')
+}
+
+function isDocumentFormatIssue(
+  value: FoundationReviewIssue,
+  documentPath: FoundationDocumentPath,
+  baseDocumentDigest: string,
+): value is FoundationDocumentAuditIssue {
+  if (!value || typeof value !== 'object' || !value.remediation || value.remediation.kind !== 'patch') return false
+  const source = value.source
+  return (
+    (value.type === 'schema' || value.type === 'contract') &&
+    value.reasonCode === 'DOCUMENT_FORMAT_INVALID' &&
+    value.remediation.scope === 'document' &&
+    value.remediation.documentPath === documentPath &&
+    !('target' in value) &&
+    !!source &&
+    typeof source === 'object' &&
+    !Array.isArray(source) &&
+    (source as { scope?: unknown }).scope === 'document' &&
+    source.documentPath === documentPath &&
+    source.digest === baseDocumentDigest
+  )
 }
 
 function assertUniqueStrings(
@@ -726,7 +1075,11 @@ export function revisionTaskReceiptTerminalDigest(
 function comparePatchOperations(left: PatchOperation, right: PatchOperation): number {
   const document = left.documentPath.localeCompare(right.documentPath)
   if (document !== 0) return document
-  const section = left.sectionId.localeCompare(right.sectionId)
+  const scope = left.scope.localeCompare(right.scope)
+  if (scope !== 0) return scope
+  const section = (left.scope === 'section' ? left.sectionId : '').localeCompare(
+    right.scope === 'section' ? right.sectionId : '',
+  )
   if (section !== 0) return section
   return stableJson(left).localeCompare(stableJson(right))
 }
@@ -745,6 +1098,7 @@ function validateReceipt(
   input: {
     revision: string
     documentPath: FoundationDocumentPath
+    scope: FoundationRevisionScope
     taskId?: string
     issueIds: readonly string[]
     sectionIds: readonly string[]
@@ -757,6 +1111,7 @@ function validateReceipt(
   assertExactKeys(
     value,
     [
+      'scope',
       'taskId',
       'round',
       'documentPath',
@@ -769,6 +1124,10 @@ function validateReceipt(
     ],
     'revision receipt',
   )
+  if (
+    value.scope !== input.scope
+  )
+    throw new Error('revision receipt scope mismatch')
   if (
     typeof value.taskId !== 'string' ||
     !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(value.taskId)
@@ -786,12 +1145,17 @@ function validateReceipt(
     value.issueIds.some((id, index) => id !== input.issueIds[index])
   )
     throw new Error('revision receipt issueIds mismatch')
-  assertUniqueStrings(
-    value.changedSectionIds,
-    'revision receipt changedSectionIds',
-  )
-  if (value.changedSectionIds.some(id => !input.sectionIds.includes(id)))
-    throw new Error('revision receipt changed section is unauthorized')
+  if (input.scope === 'document') {
+    if (!Array.isArray(value.changedSectionIds) || value.changedSectionIds.length !== 0)
+      throw new Error('document revision receipt changedSectionIds must be empty')
+  } else {
+    assertUniqueStrings(
+      value.changedSectionIds,
+      'revision receipt changedSectionIds',
+    )
+    if (value.changedSectionIds.some(id => !input.sectionIds.includes(id)))
+      throw new Error('revision receipt changed section is unauthorized')
+  }
   for (const key of [
     'baseDocumentDigest',
     'stagedDocumentDigest',
@@ -823,15 +1187,22 @@ function assertBatch(batch: RevisionBatch): void {
   if (!batch || typeof batch !== 'object')
     throw new Error('revision batch is invalid')
   assertCanonicalDocument(batch.documentPath)
-  assertUniqueStrings(batch.sectionIds, 'revision batch sectionIds')
   assertUniqueStrings(batch.issueIds, 'revision batch issueIds')
+  if (batch.scope === 'document') {
+    if (!Array.isArray(batch.sectionIds) || batch.sectionIds.length !== 0)
+      throw new Error('document revision batch sectionIds must be empty')
+    return
+  }
+  if (batch.scope !== 'section')
+    throw new Error('revision batch scope is invalid')
+  assertUniqueStrings(batch.sectionIds, 'revision batch sectionIds')
   const known = new Set(canonicalFoundationBlockIds(batch.documentPath))
   if (batch.sectionIds.some(sectionId => !known.has(sectionId)))
     throw new Error('revision batch section is not canonical')
 }
 
 function issueAuthority(
-  batch: RevisionBatch,
+  batch: Extract<RevisionBatch, { scope: 'section' }>,
   issues: readonly AuditIssue[],
 ): Map<string, string[]> {
   if (!Array.isArray(issues) || issues.length !== batch.issueIds.length)
@@ -868,6 +1239,26 @@ function issueAuthority(
   return grouped
 }
 
+function documentIssueAuthority(
+  batch: Extract<RevisionBatch, { scope: 'document' }>,
+  issues: readonly FoundationReviewIssue[],
+  baseDocumentDigest: string,
+): void {
+  if (!Array.isArray(issues) || issues.length !== batch.issueIds.length)
+    throw new Error('document revision requires the exact admitted issue authority')
+  const expected = new Set(batch.issueIds)
+  const seen = new Set<string>()
+  for (const issue of issues) {
+    if (!issue || typeof issue.id !== 'string' || !expected.has(issue.id) || seen.has(issue.id))
+      throw new Error('document revision admitted issue IDs disagree with the batch')
+    if (!isDocumentFormatIssue(issue, batch.documentPath, baseDocumentDigest))
+      throw new Error(`document revision issue authority is invalid: ${issue.id}`)
+    seen.add(issue.id)
+  }
+  if (seen.size !== expected.size)
+    throw new Error('document revision admitted issue coverage is incomplete')
+}
+
 function compareStable(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
@@ -878,7 +1269,7 @@ export async function deriveFoundationPatchOperations(input: {
   revision: string
   taskId?: string
   batch: RevisionBatch
-  issues: readonly AuditIssue[]
+  issues: readonly FoundationReviewIssue[]
   receipt: RevisionTaskReceipt
 }): Promise<PatchOperation[]> {
   assertRevision(input.revision)
@@ -886,12 +1277,12 @@ export async function deriveFoundationPatchOperations(input: {
   const receipt = validateReceipt(input.receipt, {
     revision: input.revision,
     documentPath: input.batch.documentPath,
+    scope: input.batch.scope,
     taskId: input.taskId,
     issueIds: input.batch.issueIds,
     sectionIds: input.batch.sectionIds,
     workspacePath: input.workspacePath,
   })
-  const issueIdsBySection = issueAuthority(input.batch, input.issues)
   const canonicalPath = resolveProjectPath(
     input.workspacePath,
     input.batch.documentPath,
@@ -903,69 +1294,50 @@ export async function deriveFoundationPatchOperations(input: {
     throw new Error('revision receipt has stale base document digest')
   if (sha256(stagedBytes) !== receipt.stagedDocumentDigest)
     throw new Error('revision receipt staged document digest mismatch')
-  const base = parseSections(
-    input.batch.documentPath,
-    baseBytes.toString('utf8'),
-  )
-  const staged = parseSections(
-    input.batch.documentPath,
-    stagedBytes.toString('utf8'),
-  )
-  sectionMap(base)
-  const stagedMap = sectionMap(staged)
-  if (
-    base.length !== staged.length ||
-    base.some(
-      (section, index) => section.sectionId !== staged[index]?.sectionId,
-    )
-  )
-    throw new Error('revision changed section markers or section order')
 
-  const changed = base.filter(
-    (section, index) => section.text !== staged[index]!.text,
-  )
-  if (
-    changed.some(section => !input.batch.sectionIds.includes(section.sectionId))
-  )
-    throw new Error('revision changed an unauthorized section')
-  const changedIds = changed.map(section => section.sectionId)
-  if (changedIds.length === 0)
-    throw new Error('revision contains no section progress')
+  if (input.batch.scope === 'document') {
+    documentIssueAuthority(input.batch, input.issues, receipt.baseDocumentDigest)
+    if (receipt.changedSectionIds.length !== 0)
+      throw new Error('document revision receipt cannot authorize sections')
+    if (receipt.baseDocumentDigest === receipt.stagedDocumentDigest)
+      throw new Error('document revision contains no document progress')
+    const stagedMarkdown = stagedBytes.toString('utf8')
+    if (!stagedMarkdown.trim())
+      throw new Error('document revision staged document must be non-empty')
+    validateFoundationRevisionCompleteDocument(input.batch.documentPath, stagedMarkdown)
+    const operation = {
+      scope: 'document' as const,
+      kind: 'REPLACE' as const,
+      documentPath: input.batch.documentPath,
+      issueIds: [...receipt.issueIds],
+      beforeDigest: receipt.baseDocumentDigest,
+      afterDigest: receipt.stagedDocumentDigest,
+    } satisfies FoundationDocumentPatchOperation
+    return [operation]
+  }
+
+  const sectionIssues = input.issues.filter(isSectionIssue)
+  if (sectionIssues.length !== input.issues.length)
+    throw new Error('section revision issue authority is invalid')
+  if (input.batch.scope !== 'section')
+    throw new Error('section revision batch scope is invalid')
+  const sectionBatch = input.batch
+  const issueIdsBySection = issueAuthority(sectionBatch, sectionIssues)
+  const { base, staged, changed, changedSectionIds: changedIds } = deriveFoundationRevisionSectionDiff({
+    documentPath: input.batch.documentPath,
+    baseMarkdown: baseBytes.toString('utf8'),
+    stagedMarkdown: stagedBytes.toString('utf8'),
+    authorizedSectionIds: sectionBatch.sectionIds,
+  })
+  const stagedMap = sectionMap(staged)
   if (
     changedIds.length !== receipt.changedSectionIds.length ||
     changedIds.some((id, index) => id !== receipt.changedSectionIds[index])
   )
     throw new Error('revision receipt changedSectionIds mismatch')
 
-  // Replace each authorized section with a sentinel and compare the rest byte-for-byte.
-  const outside = (markdown: string, allowed: ReadonlySet<string>) => {
-    const lines = markdown.split('\n')
-    const index = buildFoundationSectionIndex({
-      documents: { [input.batch.documentPath]: markdown },
-    })
-    const chunks: string[] = []
-    let cursor = 0
-    for (const section of index) {
-      const start = section.startLine - 1
-      const end = section.endLine
-      chunks.push(lines.slice(cursor, start).join('\n'))
-      if (allowed.has(section.sectionId))
-        chunks.push(`\0${section.sectionId}\0`)
-      else chunks.push(lines.slice(start, end).join('\n'))
-      cursor = end
-    }
-    chunks.push(lines.slice(cursor).join('\n'))
-    return normalizeServiceOwnedDocumentMetadata(chunks.join('\n'))
-  }
-  const allowed = new Set(input.batch.sectionIds)
-  if (
-    outside(baseBytes.toString('utf8'), allowed) !==
-    outside(stagedBytes.toString('utf8'), allowed)
-  )
-    throw new Error('revision changed bytes outside authorized sections')
-
   const contractOrder = new Map(
-    canonicalFoundationBlockIds(input.batch.documentPath).map(
+    canonicalFoundationBlockIds(sectionBatch.documentPath).map(
       (sectionId, index) => [sectionId, index],
     ),
   )
@@ -986,8 +1358,9 @@ export async function deriveFoundationPatchOperations(input: {
           ? 'DELETE'
           : 'REPLACE'
     return {
+      scope: 'section' as const,
       kind,
-      documentPath: input.batch.documentPath,
+      documentPath: sectionBatch.documentPath,
       sectionId: before.sectionId,
       issueIds,
       ...(kind === 'INSERT' || kind === 'REPLACE'
@@ -998,10 +1371,6 @@ export async function deriveFoundationPatchOperations(input: {
         : {}),
     } satisfies PatchOperation
   })
-  for (const issue of input.issues) {
-    if (issue.remediation.kind !== 'patch' || issue.remediation.sectionIds.some(sectionId => !changedIds.includes(sectionId)))
-      throw new Error('revision admitted issue target was not changed')
-  }
   const boundIssueIds = [...new Set(operations.flatMap(operation => operation.issueIds))]
   const expectedIssueIds = [...input.batch.issueIds].sort(compareStable)
   const actualIssueIds = [...boundIssueIds].sort(compareStable)

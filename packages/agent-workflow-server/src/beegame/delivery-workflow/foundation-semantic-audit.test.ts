@@ -17,14 +17,14 @@ import {
 const expected = [
   ['SEM.gameplay_level_viability', ['GDD#core_loop', 'LEVEL#pacing_beats'], ['game.mechanics', 'level.required_entities'], '核心循环、遭遇、节奏与反制是否可玩且不互相否定', 'HIGH', 'balanced'],
   ['SEM.progression_balance_coherence', ['GDD#progression', 'LEVEL#content_matrix', 'BALANCE#executive_summary', 'BALANCE#units_variables', 'BALANCE#entity_parameters', 'BALANCE#formulas', 'BALANCE#economy', 'BALANCE#progression_curves', 'BALANCE#challenge_model', 'BALANCE#rewards_value', 'BALANCE#bounds_exploits', 'BALANCE#tuning_validation', 'BALANCE#material.variable-parameter-table'], ['game.resources', 'balance.variable_ids'], '逐波数量、公式、经济、摘要与唯一参数表是否可重算并形成一致的进度与成长体验', 'HIGH', 'balanced'],
-  ['SEM.state_runtime_recovery', ['GDD#states_flow', 'TECHNICAL#runtime_state', 'TECHNICAL#save_load', 'GDD#material.game-state-flow', 'UI#screen_inventory', 'UI#feedback_errors'], ['game.states'], '状态、失败恢复、持久化与重开确认是否在运行时、界面和派生状态流中一致', 'HIGH', 'balanced'],
+  ['SEM.state_runtime_recovery', ['GDD#states_flow', 'TECHNICAL#runtime_state', 'TECHNICAL#save_load', 'GDD#material.game-state-flow', 'UI#screen_inventory', 'UI#feedback_errors'], ['game.states'], '只审计暂停、失焦、挂起、恢复、运行时快照与持久化降级是否一致；胜负、检查点、重试与重开由 completion_recovery 独占', 'HIGH', 'balanced'],
   ['SEM.platform_performance_feasibility', ['TECHNICAL#performance', 'TECHNICAL#risks', 'TECHNICAL#executive_summary', 'LEVEL#production_acceptance'], ['game.platform', 'technical.target_fps', 'level.complexity_budget'], '目标平台、关卡复杂度与性能预算是否现实，且不得把已有上游 authority 描述为 unavailable', 'HIGH', 'balanced'],
-  ['SEM.interaction_ui_coherence', ['GDD#player_actions', 'UI#input', 'UI#feedback_errors', 'UI#experience_architecture', 'UI#player_journeys', 'UI#prototype_acceptance'], ['game.mechanics', 'ui.supported_actions'], '玩家动作、滚动与交互路径、输入、反馈和错误恢复是否在架构、流程与验收中连贯', 'HIGH', 'balanced'],
+  ['SEM.interaction_ui_coherence', ['GDD#player_actions', 'UI#input', 'UI#experience_architecture', 'UI#prototype_acceptance'], ['game.mechanics', 'ui.supported_actions'], '只审计普通玩家动作、滚动、导航、输入映射与交互验收是否连贯；不得审计暂停/失焦恢复或胜负/重开语义', 'HIGH', 'balanced'],
   ['SEM.camera_visual_readability', ['LEVEL#camera_readability', 'LEVEL#world_structure', 'LEVEL#objectives_routes', 'ART#composition_readability', 'ART#camera_presentation', 'ART#color_lighting', 'UI#experience_architecture', 'UI#hud', 'UI#prototype_acceptance', 'UI#material.wireframe-board', 'ART#material.visual-language-board'], ['art.style_constraints'], '坐标、路径与格位可计算，viewport、安全区、断点、区域和 overlay 几何在 Level、UI 与 Art 布局之间一致且可读', 'MEDIUM', 'fast'],
   ['SEM.content_asset_feasibility', ['ART#animation', 'ART#vfx', 'ART#asset_specifications', 'ASSET#executive_summary', 'ASSET#inventory', 'ASSET#dependencies', 'ASSET#formats_budgets', 'ASSET#validation', 'ASSET#material.asset-inventory-table', 'ASSET#material.milestone-maturity-table'], ['level.required_assets', 'asset.inventory_ids', 'asset.art_constraint_refs', 'asset.formats'], '资产类型与实例、帧数/图元/物理文件和预算总计可重算且与上游一致，不得保留 stale unavailable 假设', 'HIGH', 'balanced'],
   ['SEM.audio_state_feedback', ['GDD#states_flow', 'AUDIO#event_taxonomy', 'AUDIO#music', 'AUDIO#production', 'AUDIO#executive_summary', 'AUDIO#material.event-cue-matrix', 'AUDIO#material.music-state-diagram', 'AUDIO#material.bus-ducking-diagram'], ['game.states', 'audio.event_ids'], 'PAUSED、失焦、静音及其他关键状态在音频正文、摘要、事件/音乐/总线派生视图中行为一致，并拒绝 stale unavailable 上游假设', 'MEDIUM', 'fast'],
-  ['SEM.multimodal_accessibility', ['GDD#accessibility_localization', 'UI#accessibility', 'ART#color_lighting', 'AUDIO#ui_feedback', 'UI#material.focus-accessibility-matrix', 'ART#material.visual-language-board'], [], '视觉、输入、焦点与非视觉替代在正文及派生可访问性视图中共同满足可访问性', 'HIGH', 'balanced'],
-  ['SEM.completion_recovery_coherence', ['GDD#states_flow', 'GDD#challenge_recovery', 'LEVEL#objectives_routes', 'LEVEL#spawn_checkpoint', 'GDD#material.game-state-flow', 'UI#player_journeys', 'UI#screen_inventory', 'UI#feedback_errors'], ['game.states', 'game.win_conditions', 'game.loss_conditions'], '胜负、目标、失败、检查点、重试与重开确认在状态流、玩家旅程、界面状态和反馈中形成闭环', 'HIGH', 'balanced'],
+  ['SEM.multimodal_accessibility', ['GDD#accessibility_localization', 'UI#accessibility', 'ART#color_lighting', 'AUDIO#ui_feedback', 'UI#material.focus-accessibility-matrix', 'ART#material.visual-language-board'], [], '只审计视觉、输入模态、焦点与非视觉替代的可访问性；不得新增或改写玩法生命周期动作', 'HIGH', 'balanced'],
+  ['SEM.completion_recovery_coherence', ['GDD#states_flow', 'GDD#challenge_recovery', 'LEVEL#objectives_routes', 'LEVEL#spawn_checkpoint', 'GDD#material.game-state-flow', 'UI#player_journeys', 'UI#screen_inventory'], ['game.states', 'game.win_conditions', 'game.loss_conditions'], '只审计胜负、目标、失败、关卡检查点、重试与重开是否闭环；暂停、失焦、挂起与恢复由 state_runtime_recovery 独占', 'HIGH', 'balanced'],
 ] as const
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -34,7 +34,7 @@ function ref(documentPath: SectionRef['documentPath'], sectionId: string, bytes 
 }
 
 function deterministicIssue(id: string, source: SectionRef, actual = 'mismatch', type: AuditIssue['type'] = 'rule'): AuditIssue {
-  return { id, severity: 'HIGH', type, source, expected: 'expected', actual, remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] } }
+  return { id, severity: 'HIGH', type, source, expected: 'expected', actual, remediation: { kind: 'patch', scope: 'section', documentPath: source.documentPath, sectionIds: [source.sectionId] } }
 }
 
 function fullSnapshot() {

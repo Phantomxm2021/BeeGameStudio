@@ -1,25 +1,22 @@
-import { resolve } from 'node:path'
 import {
   CANONICAL_PROJECT_ARTIFACTS,
   CANONICAL_PROJECT_DOCUMENTS,
   CANONICAL_FOUNDATION_DOCUMENTS,
-  type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from './types'
 import { foundationFactDefinition } from './foundation-fact-definitions'
-import { renderLiteralMarkdownSkeleton } from './game-document-contracts'
 
 const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
-  'Judge quality by distinct implementable decisions and traceability, not document length. Use the minimum sufficient headings, tables, rows, diagrams and examples. Do not expand a contract purpose phrase by phrase into H3 headings. Represent each decision in one authoritative prose, table or diagram representation; elsewhere use a stable owner reference. Do not narrate tables or diagrams. Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate. Record a genuinely N/A item once with its reason and impact; never invent a system. Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets. Treat each section as the final decision record: Complete every required section and production material, omit only equivalent repetition, and keep rationale to the minimum needed for a production decision.'
+  'Judge quality by distinct implementable decisions and traceability, not document length. Use the minimum sufficient headings, tables, rows, diagrams and examples. Do not expand a contract purpose phrase by phrase into H3 headings. Represent each decision in one authoritative prose, table or diagram representation; elsewhere use a stable owner reference. Do not narrate tables or diagrams. Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate. Record each genuinely N/A decision only in the contract block that owns that responsibility, once with its reason and impact; every other block omits it. Put acceptance tables and scenarios only in sections or materials whose declared purpose explicitly owns acceptance, validation, verification or testing; other blocks state decisions without a repeated test table. Each production-material row must own a distinct record or mapping, never a prose recap or an equivalent scenario variant. Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets. Treat each section as the final decision record: Complete every required section and production material, omit only equivalent repetition, and keep rationale to the minimum needed for a production decision.'
 
 const FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION =
-  'Use exactly one fact owner across the eight documents: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Every material is an owner representation for its declared facts and contains the single canonical representation. Define each fact once and use one representation per fact in its owner section or production material; elsewhere reference that owner instead of copying the fact. Use only this document and the contract-declared committed upstream section projection as content authority. Delegate responsibilities to a not-yet-generated downstream document by its canonical `Document Path` and discipline in ordinary Markdown; do not invent downstream facts, material IDs or inventory IDs. Keep stable IDs unambiguous and do not create aliases, placeholders or alternate spellings. The Executive Summary indexes authority, while each material owns the facts declared by its serialized authority rule. Do not restate the confirmed brief or upstream authority; downstream documents may specialize already-authorized behavior but must not redefine upstream rules.'
+  'Use exactly one fact owner across the eight documents: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Every material is an owner representation for its declared facts and contains the single canonical representation. Define each fact once and use one representation per fact in its owner section or production material; elsewhere reference that owner instead of copying the fact. Use only this document and the contract-declared committed upstream section projection as content authority. Delegate responsibilities to a not-yet-generated downstream document by its canonical `Document Path` and discipline in ordinary Markdown; do not invent downstream facts, material IDs or inventory IDs. Keep stable IDs unambiguous and do not create aliases, placeholders or alternate spellings. The Executive Summary is a concise authority index only: it contains no tables, diagrams, scenarios, acceptance criteria or duplicated owner facts. Each material owns the facts declared by its serialized authority rule. Do not restate the confirmed brief or upstream authority; downstream documents may specialize already-authorized behavior but must not redefine upstream rules.'
 
 const FOUNDATION_AUTHOR_CLOSURE_CHECK =
-  'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once; retain every required heading for N/A content and state its reason and impact. Use mechanicalMarkdownProtocol.literalMarkdownSkeleton as the one literal ordered skeleton. canonical material H3 headings are forbidden before Production Materials (the literal `## Production Materials` heading). Return only the complete raw Markdown body.'
+  'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once; retain every required heading for N/A content and state its reason and impact. Return only the complete raw Markdown body.'
 
 const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
-  'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority; each Issue sourceSectionKey, expected, and actual must match its single-document authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
+  'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. sourceSectionKey identifies the canonical owner evidence that makes expected authoritative; remediation.sectionKeys identify the incorrect block to change. For a cross-document conflict these are different sides: preserve the owner and patch the downstream conflict. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   const packetWorker =
@@ -125,16 +122,26 @@ function buildFoundationRevisionWorkerPrompt(
     throw new Error('foundation revision worker requires one immutable packet')
   if (typeof stagedPath !== 'string' || !stagedPath.trim())
     throw new Error('foundation revision worker requires one staged path')
-  const absoluteStagedPath = resolve(request.workspacePath, stagedPath)
+  const documentScoped = request.contract.scope === 'document'
+  if (
+    documentScoped &&
+    (!('documentContract' in packet) ||
+      !packet.documentContract ||
+      typeof packet.documentContract !== 'object' ||
+      Array.isArray(packet.documentContract))
+  ) {
+    throw new Error('document-scoped foundation revision worker requires one complete canonical documentContract')
+  }
   const priorFailureReason = typeof request.contract.priorFailureReason === 'string'
     ? request.contract.priorFailureReason
     : undefined
   return [
     `Revision evidence: ${JSON.stringify(projectRevisionPacketForModel(packet as Record<string, unknown>))}`,
-    `Assigned staged path: ${absoluteStagedPath}`,
-    'The packet sectionIds are the complete write authority: only those sections may change. Every other section—including related, risk, consistency, dependency, and production-material sections—must remain byte-identical; do not edit them to keep prose synchronized. Read and edit only the assigned staged path. Unmarked Production Materials and audit appendices are outside the packet authority; do not edit them even when they appear related to an admitted Issue. Make every admitted Issue expected true and remove its actual. For fact/schema repairs, packet.factConstraints is binding authority: satisfy its extractionInstruction and sourceOfTruthDirection. If an extractionInstruction requires an explicit mapping table or other semantic structure, do not substitute a standalone fact declaration, formatting-only change, alias, compatibility prose, risk registration, wording qualification, or downstream reinterpretation. Call SubmitFoundationRevisionResult exactly once with status APPLIED and only the exact changedSectionIds; the service injects task, round, document, Issue and base-authority identity. Do not return terminal JSON or prose completion text.',
+    documentScoped
+      ? 'The complete assigned staged document is the write authority because Stage 3 could not establish trustworthy section boundaries. Call ReadAssignedFoundationRevision exactly once with {}, prepare the repair in memory, then return the complete revised document as the visible raw Markdown response. Repair only packet.issues; do not discover or repair unrelated defects. packet.documentContract is preservation authority, not a second review checklist: retain every declared marker and heading in order and preserve substantive content outside the minimum structural collateral required by the admitted Issues. Do not call mutation or submission tools, use Read/Edit/Bash, wrap the Markdown in a code fence, or add terminal JSON or prose.'
+      : 'The packet sectionIds and packet.sections[].text are the complete current write authority: only sectionIds may change. Do not read the staged document; the service preserves every unassigned byte. Return only the complete replacement Markdown for every authorized section, in packet.sectionIds order. Each replacement must start with its exact canonical heading and include its complete body exactly like packet.sections[].text; omit protocol markers. Do not include read-only evidence sections, JSON, a wrapper code fence, preface, completion explanation, mutation tool call or submission tool call. Make every admitted Issue expected true and remove its actual. For fact/schema repairs, packet.factConstraints is binding authority: do not substitute a standalone fact declaration for its required semantic structure.',
     ...(priorFailureReason
-      ? [`Automatic retry after the previous strict validation failure: ${priorFailureReason}. Correct that failure in the authorized packet sections only; do not broaden scope.`]
+      ? [`Automatic retry after the previous strict validation failure: ${priorFailureReason}. Correct that failure only inside the assigned staged ${documentScoped ? 'document' : 'sections'}; do not broaden scope.`]
       : []),
   ].join('\n')
 }
@@ -215,18 +222,39 @@ function modelFact(value: unknown): Record<string, unknown> | undefined {
 function modelIssue(value: unknown, includeId: boolean): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const issue = value as Record<string, unknown>
-  const source = semanticRef(issue.source)
   const remediation = issue.remediation
   if (
     (includeId && typeof issue.id !== 'string') ||
     typeof issue.expected !== 'string' ||
     typeof issue.actual !== 'string' ||
-    source === undefined ||
     !remediation || typeof remediation !== 'object' || Array.isArray(remediation)
   ) return undefined
   const fix = remediation as Record<string, unknown>
+  const rawSource = issue.source
+  if (!rawSource || typeof rawSource !== 'object' || Array.isArray(rawSource)) return undefined
+  const sourceRecord = rawSource as Record<string, unknown>
+  if (sourceRecord.scope === 'document') {
+    if (
+      typeof sourceRecord.documentPath !== 'string' ||
+      fix.kind !== 'patch' ||
+      fix.scope !== 'document' ||
+      fix.documentPath !== sourceRecord.documentPath ||
+      issue.target !== undefined
+    ) return undefined
+    return {
+      ...(includeId ? { id: issue.id } : {}),
+      ...(typeof issue.severity === 'string' ? { severity: issue.severity } : {}),
+      ...(typeof issue.type === 'string' ? { type: issue.type } : {}),
+      source: { scope: 'document', documentPath: sourceRecord.documentPath },
+      expected: issue.expected,
+      actual: issue.actual,
+      remediation: { kind: 'patch', scope: 'document', documentPath: fix.documentPath },
+      ...(typeof issue.reasonCode === 'string' ? { reasonCode: issue.reasonCode } : {}),
+    }
+  }
+  const source = semanticRef(rawSource)
   const target = issue.target === undefined ? undefined : semanticRef(issue.target)
-  if (fix.kind !== 'patch' || typeof fix.documentPath !== 'string' || !Array.isArray(fix.sectionIds) || fix.sectionIds.some(sectionId => typeof sectionId !== 'string') || (issue.target !== undefined && target === undefined)) return undefined
+  if (source === undefined || fix.kind !== 'patch' || fix.scope !== 'section' || typeof fix.documentPath !== 'string' || !Array.isArray(fix.sectionIds) || fix.sectionIds.some(sectionId => typeof sectionId !== 'string') || (issue.target !== undefined && target === undefined)) return undefined
   return {
     ...(includeId ? { id: issue.id } : {}),
     ...(typeof issue.severity === 'string' ? { severity: issue.severity } : {}),
@@ -237,6 +265,7 @@ function modelIssue(value: unknown, includeId: boolean): Record<string, unknown>
     actual: issue.actual,
     remediation: {
       kind: 'patch',
+      scope: 'section',
       documentPath: fix.documentPath,
       sectionIds: fix.sectionIds,
     },
@@ -299,6 +328,9 @@ function projectRevisionPacketForModel(packet: Record<string, unknown>): Record<
       ? projectItems(packet.normalizedFacts, modelFact, 'revision fact')
       : [],
     ...(Array.isArray(packet.factConstraints) ? { factConstraints: packet.factConstraints } : {}),
+    ...(packet.scope === 'document' && packet.documentContract && typeof packet.documentContract === 'object' && !Array.isArray(packet.documentContract)
+      ? { documentContract: packet.documentContract }
+      : {}),
   }
 }
 
@@ -331,63 +363,56 @@ function formatContract(request: WorkerDispatchRequest): string {
         productionMaterials,
         ...authorDocumentContract
       } = completeDocumentContract as Record<string, unknown>
-      const mechanicalMarkdownProtocol = {
-        documentTitle: {
-          position: 'first_non_blank_line',
-          headingPrefix: '# ',
-        },
-        executiveSummary: {
-          heading: '## Executive Summary',
-        },
-        sections: Array.isArray(sections)
-          ? sections.map(value => {
-              const section = value as Record<string, unknown>
-              return {
-                ...section,
-                heading: `## ${section.title}`,
-              }
-            })
-          : sections,
-        productionMaterials: {
-          heading: '## Production Materials',
-          entries: Array.isArray(productionMaterials)
-            ? productionMaterials.map(value => {
-                const material = value as Record<string, unknown>
-                const serialization = material.serialization
-                const serializationRule =
-                  serialization === 'markdown_table'
-                    ? 'Markdown table only: include a header row, a separator row, and data rows; do not use a fenced code block, YAML, JSON, or a key-value list.'
-                    : serialization === 'mermaid'
-                      ? 'Mermaid only: use one fenced ```mermaid block; do not replace it with prose, JSON, YAML, or a key-value list.'
-                      : serialization === 'inline_svg'
-                        ? 'Inline SVG only: use one inline <svg>...</svg> block; do not replace it with a fenced code block, JSON, YAML, or a key-value list.'
-                        : undefined
-                return {
-                  ...material,
-                  heading: `### ${material.title}`,
-                  ...(serializationRule ? { serializationRule } : {}),
-                }
-              })
-            : productionMaterials,
-        },
-        closedHeadingSet: [
-          '## Executive Summary',
-          ...(Array.isArray(sections)
-            ? sections.map(value => `## ${(value as Record<string, unknown>).title}`)
-            : []),
-          '## Production Materials',
-        ],
-        additionalH2: 'forbidden',
-        supportingContent: 'must be nested under one of the closed H2 headings',
-      }
-      const literalMarkdownSkeleton = renderLiteralMarkdownSkeleton(
-        request.contract.foundationDocumentPath as FoundationDocumentPath,
-      )
       contractWithoutDuplicatedBrief.completeDocumentContract = {
         ...authorDocumentContract,
         mechanicalMarkdownProtocol: {
-          ...mechanicalMarkdownProtocol,
-          literalMarkdownSkeleton,
+          documentTitle: {
+            position: 'first_non_blank_line',
+            headingPrefix: '# ',
+          },
+          executiveSummary: {
+            heading: '## Executive Summary',
+          },
+          sections: Array.isArray(sections)
+            ? sections.map(value => {
+                const section = value as Record<string, unknown>
+                return {
+                  ...section,
+                  heading: `## ${section.title}`,
+                }
+              })
+            : sections,
+          productionMaterials: {
+            heading: '## Production Materials',
+            entries: Array.isArray(productionMaterials)
+              ? productionMaterials.map(value => {
+                  const material = value as Record<string, unknown>
+                  const serialization = material.serialization
+                  const serializationRule =
+                    serialization === 'markdown_table'
+                      ? 'Markdown table only: include a header row, a separator row, and data rows; do not use a fenced code block, YAML, JSON, or a key-value list.'
+                      : serialization === 'mermaid'
+                        ? 'Mermaid only: use one fenced ```mermaid block; do not replace it with prose, JSON, YAML, or a key-value list.'
+                        : serialization === 'inline_svg'
+                          ? 'Inline SVG only: use one inline <svg>...</svg> block; do not replace it with a fenced code block, JSON, YAML, or a key-value list.'
+                          : undefined
+                  return {
+                    ...material,
+                    heading: `### ${material.title}`,
+                    ...(serializationRule ? { serializationRule } : {}),
+                  }
+                })
+              : productionMaterials,
+          },
+          closedHeadingSet: [
+            '## Executive Summary',
+            ...(Array.isArray(sections)
+              ? sections.map(value => `## ${(value as Record<string, unknown>).title}`)
+              : []),
+            '## Production Materials',
+          ],
+          additionalH2: 'forbidden',
+          supportingContent: 'must be nested under one of the closed H2 headings',
         },
       }
     }
@@ -443,8 +468,8 @@ function workerInstruction(request: WorkerDispatchRequest): string {
       ].join(' ')
     case 'foundation-document-reviser':
       return [
-        'Revise only the assigned staged canonical Markdown document and exact target sections for the supplied Issue Registry issue IDs. Read and write only the staged path; never modify the canonical document or unrelated paths.',
-        'Preserve all section markers and document structure. Make every admitted expected true and remove each admitted actual; never use aliases, compatibility notes, risk registration, wording qualifications or downstream reinterpretation as a substitute. Submit APPLIED with only the exact changedSectionIds; the service owns task, round, document, Issue and base-authority identity.',
+        'Revise only the assigned staged canonical Markdown document and exact target sections for the supplied Issue Registry issue IDs. For document scope, read it once through the zero-argument ReadAssignedFoundationRevision tool. For section scope, packet.sections[].text is the complete current authority and no staged-document read is allowed. Return the revision as visible raw Markdown; never encode document content inside JSON or a tool argument.',
+        'Preserve all section markers and document structure. Make every admitted expected true and remove each admitted actual; never use aliases, compatibility notes, risk registration, wording qualifications or downstream reinterpretation as a substitute. The service applies the raw Markdown atomically and derives changed sections, receipt, task, round, document, Issue and base-authority identity.',
       ].join(' ')
     case 'document-author':
       return [
@@ -467,7 +492,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                 `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation.`,
                 FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
                 DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects all beegame protocol comments and performs mechanical contract validation after the turn.',
+                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects service-owned protocol comments when the exact canonical heading sequence is unambiguous; format and quality remain Stage 3 responsibilities.',
               ].join(' ')
             : request.contract.authoringMode === 'initial'
               ? [
@@ -476,7 +501,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
                   DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
                   'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. Do not author .beegame metadata. Do not claim verified license status without concrete evidence.',
-                  'BGS performs mechanical contract validation after the turn and the dedicated Review stage owns independent audit; do not launch or wait for an independent review or audit.',
+                  'The dedicated Review stage owns format, content and quality audit; do not launch or wait for an independent review or audit.',
                   ...(request.contract.foundationDocumentPath ===
                   'docs/ASSET_PLAN.md'
                     ? [
@@ -498,6 +523,10 @@ function workerInstruction(request: WorkerDispatchRequest): string {
                   'Do not create the checklist, asset manifest, resources or implementation.',
                 ].join(' ')
               : 'Unsupported Foundation document authoring mode.',
+        request.contract.documentSet === 'foundation' &&
+        request.contract.foundationDocumentPath === 'docs/BALANCE_DESIGN.md'
+          ? 'The Variable and Parameter Table is the sole numeric literal store for every var.* and param.* input, value, unit and range. Formula sections own symbolic formula IDs, evaluation order and boundary-case identities; their examples reference table IDs and source case IDs without copying numeric inputs or storing derived totals. Economy, progression, challenge, reward, exploit, tuning and risk sections reference those parameter, formula and case IDs instead of restating their literals or calculated results.'
+          : '',
       ].join(' ')
     case 'resource-planner':
       return [
@@ -569,7 +598,9 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
         return 'Return exactly one native StructuredOutput value conforming to the targeted semantic recheck schema. Use PASS without diagnostic, or FAIL with exactly one structured diagnostic containing observedActual, evidence, and failureReasonCode. Do not return ISSUES or UNDECIDABLE; the service determines scope assessment.'
       return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use exactly one outcome shape: PASS omits issues and reason; ISSUES includes a non-empty issues array and omits reason; UNDECIDABLE includes reason and omits issues.'
     case 'foundation-document-reviser':
-      return 'Complete the assigned staged Markdown revision so every admitted expected is true and every admitted actual is removed. Call SubmitFoundationRevisionResult exactly once with APPLIED plus the exact changedSectionIds; do not submit task, round, document or Issue identity, and do not end with prose completion text.'
+      return request.contract.scope === 'document'
+        ? 'After the single assigned read, return exactly one complete raw Markdown document as the visible response. Do not call mutation or submission tools and do not return JSON, a wrapper fence, or completion prose.'
+        : 'Return exactly the complete raw Markdown replacements for all packet.sectionIds in their declared order, each beginning with its exact canonical heading. Do not call tools and do not return JSON, protocol markers, a wrapper fence, or completion prose.'
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||

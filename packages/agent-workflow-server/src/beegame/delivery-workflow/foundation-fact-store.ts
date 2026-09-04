@@ -28,7 +28,7 @@ function isFactValue(value: unknown): value is FactValue {
     typeof value === 'boolean'
   )
     return true
-  if (!Array.isArray(value) || value.length === 0) return false
+  if (!Array.isArray(value)) return false
   return value.every(
     item =>
       typeof item === 'string' ||

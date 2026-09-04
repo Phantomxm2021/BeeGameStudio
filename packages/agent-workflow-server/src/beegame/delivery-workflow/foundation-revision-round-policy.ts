@@ -1,14 +1,14 @@
-import type { AuditIssue, AuditSeverity } from './foundation-issue-registry'
+import type { AuditSeverity, FoundationReviewIssue } from './foundation-issue-registry'
 import type { FoundationRevisionRound } from './types'
 
 export type FoundationRevisionRoundPolicySnapshot = {
-  issues: readonly AuditIssue[]
+  issues: readonly FoundationReviewIssue[]
   issueRegistryDigest: string
   documentRevision: string
 }
 
 export type FoundationRevisionRoundPolicyInput =
-  | { phase: 'plan'; round: FoundationRevisionRound; issues: readonly AuditIssue[] }
+  | { phase: 'plan'; round: FoundationRevisionRound; issues: readonly FoundationReviewIssue[] }
   | { phase: 'evaluate'; round: FoundationRevisionRound; before: FoundationRevisionRoundPolicySnapshot; after: FoundationRevisionRoundPolicySnapshot }
 
 export type FoundationRevisionRoundPolicyResult =
@@ -47,7 +47,7 @@ function assertSnapshot(value: FoundationRevisionRoundPolicySnapshot | undefined
   if (typeof value.documentRevision !== 'string' || value.documentRevision.length === 0) throw new Error(`foundation revision ${label} document revision is invalid`)
   return value
 }
-function assertIssueList(value: unknown, label: string): readonly AuditIssue[] {
+function assertIssueList(value: unknown, label: string): readonly FoundationReviewIssue[] {
   if (!Array.isArray(value)) throw new Error(`foundation revision ${label} issues must be an array`)
   const ids = new Set<string>()
   for (const issue of value) {
@@ -58,18 +58,18 @@ function assertIssueList(value: unknown, label: string): readonly AuditIssue[] {
   return value
 }
 function isSeverity(value: unknown): value is AuditSeverity { return typeof value === 'string' && SEVERITIES.includes(value as AuditSeverity) }
-function issueIdentity(issue: AuditIssue): string { return stableJson(issue) }
+function issueIdentity(issue: FoundationReviewIssue): string { return stableJson(issue) }
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
   if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`
   return JSON.stringify(value) ?? 'null'
 }
-function sameIssueIdentities(before: readonly AuditIssue[], after: readonly AuditIssue[]): boolean {
+function sameIssueIdentities(before: readonly FoundationReviewIssue[], after: readonly FoundationReviewIssue[]): boolean {
   const beforeById = new Map(before.map(issue => [issue.id, issueIdentity(issue)]))
   const afterById = new Map(after.map(issue => [issue.id, issueIdentity(issue)]))
   if (!sameIds([...beforeById.keys()], [...afterById.keys()])) return false
   return [...beforeById.keys()].every(id => beforeById.get(id) === afterById.get(id))
 }
-function sortedIssueIds(issues: readonly AuditIssue[]): string[] { return sortIds(issues.map(issue => issue.id)) }
+function sortedIssueIds(issues: readonly FoundationReviewIssue[]): string[] { return sortIds(issues.map(issue => issue.id)) }
 function sortIds(ids: readonly string[]): string[] { return [...ids].sort((left, right) => left.localeCompare(right)) }
 function sameIds(left: readonly string[], right: readonly string[]): boolean { const a = sortIds(left); const b = sortIds(right); return a.length === b.length && a.every((id, index) => id === b[index]) }

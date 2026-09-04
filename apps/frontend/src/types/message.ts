@@ -99,8 +99,13 @@ export interface WorkflowCardStageSnapshot {
   activeSince?: string
   block?: {
     message: string
+    detail?: string
     code?: string
     diagnosticId?: string
+    stage?: string
+    taskId?: string
+    documentPath?: string
+    retryable?: boolean
     nextAction?: string
   }
 }
@@ -158,6 +163,7 @@ export interface WorkflowCardPayload {
   lastProvenItemId?: string
   block?: {
     message: string
+    detail?: string
     code?: string
     diagnosticId?: string
     nextAction?: string

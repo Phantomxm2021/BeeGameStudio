@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { z } from 'zod/v4'
-import { normalizeCompleteGameDocumentProtocol } from './complete-game-document'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   foundationProjectionRelativePath,
@@ -15,6 +14,7 @@ import {
   type FoundationDocumentPath,
 } from './delivery-workflow/types'
 import { appendDocumentReceiptObservation } from './runtime-observability'
+import { injectFoundationProtocolMarkers } from './foundation-protocol-markers'
 
 const authoredDocumentReceiptSchema = z
   .object({
@@ -45,8 +45,9 @@ export type AuthoredDocumentReceipt = {
 /**
  * Record the result of a complete Markdown file written through Bee Game
  * Studio's native file tools. The authored body is the only human document
- * authority; this function validates it, injects deterministic service-owned
- * metadata, writes a machine audit sidecar, and commits the resulting bytes.
+ * authority; this function only enforces the authoring transport boundary,
+ * injects deterministic service-owned metadata, and commits the resulting
+ * bytes. Document format and quality belong to Review and Revision.
  */
 export async function commitAuthoredFoundationDocument(input: {
   workspacePath: string
@@ -93,27 +94,12 @@ export async function commitAuthoredFoundationDocument(input: {
     targetPath: input.targetPath,
   })
   await durableWrite(target, canonical)
-  const audit = {
-    schemaVersion: 1 as const,
-    dispatchId: input.dispatchId,
-    targetPath: input.targetPath,
-    documentId,
-    documentDigest: digest(canonical),
-    checks: {
-      canonicalStructure: 'passed' as const,
-      productionMaterials: 'passed' as const,
-      repeatedContent: 'passed' as const,
-    },
-  }
-  await durableWrite(
-    authoredDocumentAuditPath(input.workspacePath, input.dispatchId),
-    `${JSON.stringify(audit, null, 2)}\n`,
-  )
+  const documentDigest = digest(canonical)
   const prepared: AuthoredDocumentReceipt = {
     schemaVersion: 5,
     dispatchId: input.dispatchId,
     targetPath: input.targetPath,
-    finalDigest: audit.documentDigest,
+    finalDigest: documentDigest,
     byteLength: Buffer.byteLength(canonical),
     documentId,
     version: '1.0.0',
@@ -392,20 +378,6 @@ function authoredDocumentReceiptPath(
   )
 }
 
-function authoredDocumentAuditPath(
-  workspacePath: string,
-  dispatchId: string,
-): string {
-  validateDispatchId(dispatchId)
-  return join(
-    resolve(workspacePath),
-    '.beegame',
-    'workflow',
-    'document-audits',
-    `${dispatchId}.json`,
-  )
-}
-
 function validateDispatchId(dispatchId: string): void {
   const allowed = new Set(
     'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'.split(''),
@@ -544,17 +516,20 @@ function canonicalizeAuthoredDocument(
 ): string {
   const expectedDocumentId = CANONICAL_PROJECT_DOCUMENT_IDS[path]
   const lines = markdown.split('\n')
-  const body =
-    lines[0] === '---' && lines[4] === '---'
-      ? lines.slice(5).join('\n')
-      : markdown
-  const validatedBody = normalizeCompleteGameDocumentProtocol(path, body)
+  const closingIndex = lines[0]?.trim() === '---'
+    ? lines.findIndex((line, index) => index > 0 && line.trim() === '---')
+    : -1
+  const authoredBody = closingIndex > 0
+    ? lines.slice(closingIndex + 1).join('\n')
+    : markdown
+  const body = injectFoundationProtocolMarkers(path, authoredBody)
+  if (!body.trim()) throw new Error('authored document body is empty')
   return [
     '---',
     `document_id: ${expectedDocumentId}`,
     'version: 1.0.0',
     `updated_at: ${updatedAt}`,
     '---',
-    validatedBody,
+    body.trimStart(),
   ].join('\n')
 }

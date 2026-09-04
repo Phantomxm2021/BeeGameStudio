@@ -29,6 +29,7 @@ export type FoundationImpactAnalysis = Readonly<{
 const DIGEST = /^[a-f0-9]{64}$/
 const CANONICAL_DOCUMENTS = new Set<string>(CANONICAL_FOUNDATION_DOCUMENTS)
 const OPERATION_KEYS = new Set([
+  'scope',
   'kind',
   'documentPath',
   'sectionId',
@@ -102,16 +103,19 @@ function canonicalSection(
   })
 }
 
-function validateOperation(value: unknown): PatchOperation {
+function validateOperation(value: unknown): Extract<PatchOperation, { scope: 'section' }> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('foundation impact PatchOperation must be an object')
   const operation = value as Record<string, unknown>
+  if (operation.scope !== 'section')
+    throw new Error('foundation impact only accepts section PatchOperations')
   if (operation.kind === 'INSERT') {
     assertExactOperationKeys(operation, [
       'afterDigest',
       'documentPath',
       'issueIds',
       'kind',
+      'scope',
       'sectionId',
     ])
     assertDigest(operation.afterDigest, 'afterDigest')
@@ -121,6 +125,7 @@ function validateOperation(value: unknown): PatchOperation {
       'documentPath',
       'issueIds',
       'kind',
+      'scope',
       'sectionId',
     ])
     assertDigest(operation.beforeDigest, 'beforeDigest')
@@ -131,6 +136,7 @@ function validateOperation(value: unknown): PatchOperation {
       'documentPath',
       'issueIds',
       'kind',
+      'scope',
       'sectionId',
     ])
     assertDigest(operation.beforeDigest, 'beforeDigest')
@@ -140,7 +146,7 @@ function validateOperation(value: unknown): PatchOperation {
   }
   canonicalSection(operation.documentPath, operation.sectionId)
   assertIssueIds(operation.issueIds)
-  return operation as unknown as PatchOperation
+  return operation as unknown as Extract<PatchOperation, { scope: 'section' }>
 }
 
 function validateServiceAuthority(): Readonly<{

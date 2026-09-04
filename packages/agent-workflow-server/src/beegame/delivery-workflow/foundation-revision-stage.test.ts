@@ -5,6 +5,10 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildFoundationSectionIndex } from './foundation-section-index'
+import {
+  completeTestSubmission,
+  renderTestCompleteGameDocument,
+} from '../../__tests__/complete-game-document-fixture'
 import * as revisionStage from './foundation-revision-stage'
 import {
   createFoundationRevisionStage,
@@ -19,7 +23,10 @@ import {
   type RevisionTaskReceipt,
 } from './foundation-revision-stage'
 import { digestFoundationSemanticRecheckResult } from './foundation-patch-validation'
-import type { AuditIssue } from './foundation-issue-registry'
+import type {
+  AuditIssue,
+  FoundationDocumentAuditIssue,
+} from './foundation-issue-registry'
 import type { FoundationDocumentPath, FoundationRevisionRound } from './types'
 
 const workspaces: string[] = []
@@ -91,14 +98,14 @@ test('builds a revision packet without duplicate issue evidence', async () => {
     target,
     expected: 'expected',
     actual: 'actual',
-    remediation: { kind: 'patch', documentPath, sectionIds: ['rules_systems'] },
+    remediation: { kind: 'patch', scope: 'section', documentPath, sectionIds: ['rules_systems'] },
   }
   const authority = await buildFoundationRevisionAuthority({
     workspacePath: workspace,
     revision,
     taskId: 'revision-task-1',
     round: 1,
-    batch: { documentPath, sectionIds: ['rules_systems'], issueIds: ['AUD-1'] },
+    batch: { scope: 'section', documentPath, sectionIds: ['rules_systems'], issueIds: ['AUD-1'] },
     issues: [issue],
     sourceAuthorityDigest: 'c'.repeat(64),
     sourceIssueRegistryDigest: 'd'.repeat(64),
@@ -111,9 +118,9 @@ test('builds a revision packet without duplicate issue evidence', async () => {
   expect(authority.packet.normalizedFacts).toHaveLength(1)
   expect(authority.packet.factConstraints).toEqual(expect.arrayContaining([
     expect.objectContaining({
-      key: 'game.boss.count',
+      key: 'game.resources',
       owner: { documentPath, sectionId: 'rules_systems' },
-      valueType: 'number',
+      valueType: 'string[]',
       extractionInstruction: expect.any(String),
       sourceOfTruthDirection: expect.any(String),
     }),
@@ -151,7 +158,7 @@ test('includes complete cross-document source and target sections without wideni
     target,
     expected: 'expected cross-document consistency',
     actual: 'actual cross-document mismatch',
-    remediation: { kind: 'patch', documentPath, sectionIds: ['rules_systems'] },
+    remediation: { kind: 'patch', scope: 'section', documentPath, sectionIds: ['rules_systems'] },
   }
 
   const authority = await buildFoundationRevisionAuthority({
@@ -159,7 +166,7 @@ test('includes complete cross-document source and target sections without wideni
     revision,
     taskId: 'revision-task-cross-document',
     round: 1,
-    batch: { documentPath, sectionIds: ['rules_systems'], issueIds: [issue.id] },
+    batch: { scope: 'section', documentPath, sectionIds: ['rules_systems'], issueIds: [issue.id] },
     issues: [issue],
     sourceAuthorityDigest: 'c'.repeat(64),
     sourceIssueRegistryDigest: 'd'.repeat(64),
@@ -208,7 +215,7 @@ test('accepts a legal complex revision packet above the old 24KiB business cap',
     target,
     expected: 'expected',
     actual: 'detailed admitted issue context '.repeat(1500),
-    remediation: { kind: 'patch', documentPath, sectionIds: ['rules_systems'] },
+    remediation: { kind: 'patch', scope: 'section', documentPath, sectionIds: ['rules_systems'] },
   }
 
   const authority = await buildFoundationRevisionAuthority({
@@ -216,7 +223,7 @@ test('accepts a legal complex revision packet above the old 24KiB business cap',
     revision,
     taskId: 'revision-task-large-packet',
     round: 1,
-    batch: { documentPath, sectionIds: ['rules_systems'], issueIds: [issue.id] },
+    batch: { scope: 'section', documentPath, sectionIds: ['rules_systems'], issueIds: [issue.id] },
     issues: [issue],
     sourceAuthorityDigest: 'c'.repeat(64),
     sourceIssueRegistryDigest: 'd'.repeat(64),
@@ -333,6 +340,14 @@ async function workspaceWithCompleteCanonicalDocument() {
   return workspace
 }
 
+async function workspaceWithCompleteDocument() {
+  const workspace = await mkdtemp(join(tmpdir(), 'beegame-revision-stage-'))
+  workspaces.push(workspace)
+  await mkdirFor(join(workspace, 'docs'))
+  await writeFile(join(workspace, documentPath), completeDocument())
+  return workspace
+}
+
 function completeCanonicalDocument(): string {
   const contract = getGameDocumentContract(documentPath)
   const lines = [
@@ -368,6 +383,10 @@ function completeCanonicalDocument(): string {
   return lines.join('\n')
 }
 
+function completeDocument(path: FoundationDocumentPath = documentPath): string {
+  return renderTestCompleteGameDocument(path, completeTestSubmission(path))
+}
+
 async function workspaceWithCanonicalDocuments(paths: readonly FoundationDocumentPath[]) {
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-revision-stage-'))
   workspaces.push(workspace)
@@ -389,6 +408,7 @@ function receiptFor(
     >,
 ): RevisionTaskReceipt {
   const receiptWithoutTerminal = {
+    scope: 'section' as const,
     taskId: input.taskId ?? 'revision-task-1',
     round: input.round ?? 1,
     documentPath,
@@ -401,6 +421,22 @@ function receiptFor(
   return {
     ...receiptWithoutTerminal,
     terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal),
+  }
+}
+
+function documentFormatIssue(
+  id: string,
+  digest: string,
+): FoundationDocumentAuditIssue {
+  return {
+    id,
+    severity: 'BLOCKER',
+    type: 'contract',
+    source: { scope: 'document', documentPath, digest },
+    expected: 'canonical complete document',
+    actual: 'document format is invalid',
+    remediation: { kind: 'patch', scope: 'document', documentPath },
+    reasonCode: 'DOCUMENT_FORMAT_INVALID',
   }
 }
 
@@ -422,6 +458,159 @@ test('creates an isolated project-local staged copy and leaves canonical bytes u
   expect(await readFile(join(workspace, documentPath), 'utf8')).toBe(canonical)
   expect(stage.baseDocumentDigest).toMatch(/^[a-f0-9]{64}$/)
   expect(stage.stagedDocumentDigest).toBe(stage.baseDocumentDigest)
+})
+
+test('derives a document-scope replacement only for an admitted format issue', async () => {
+  const workspace = await workspaceWithCompleteDocument()
+  const complete = completeDocument()
+  const malformed = complete.replace(
+    '<!-- beegame-section:vision -->',
+    '<!-- malformed-section-marker -->',
+  )
+  await writeFile(join(workspace, documentPath), malformed)
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  await writeFile(join(workspace, stage.stagedPath), complete)
+  const issue = documentFormatIssue('AUD-DOCUMENT-FORMAT', stage.baseDocumentDigest)
+  const batch = {
+    scope: 'document' as const,
+    documentPath,
+    sectionIds: [] as [],
+    issueIds: [issue.id],
+  }
+  const receiptWithoutTerminal = {
+    scope: 'document' as const,
+    taskId: 'document-revision-task',
+    round: 1 as const,
+    documentPath,
+    issueIds: [issue.id],
+    baseDocumentDigest: stage.baseDocumentDigest,
+    stagedDocumentDigest: stageDigest(complete),
+    changedSectionIds: [] as [],
+    stagedPath: stage.stagedPath,
+  } satisfies Omit<RevisionTaskReceipt, 'terminalDigest'>
+  const receipt = {
+    ...receiptWithoutTerminal,
+    terminalDigest: revisionTaskReceiptTerminalDigest(receiptWithoutTerminal),
+  }
+
+  const authority = await buildFoundationRevisionAuthority({
+    workspacePath: workspace,
+    revision,
+    taskId: receipt.taskId,
+    round: receipt.round,
+    batch,
+    issues: [issue],
+    sourceAuthorityDigest: 'a'.repeat(64),
+    sourceIssueRegistryDigest: 'b'.repeat(64),
+    sourceDerivedDigests: {
+      sectionIndex: 'c'.repeat(64),
+      factStore: 'd'.repeat(64),
+      manifest: 'e'.repeat(64),
+    },
+    sourceDocumentDigests: [{ path: documentPath, digest: stage.baseDocumentDigest }],
+    normalizedFacts: [{ source: { documentPath, sectionId: 'vision' }, payload: 'ignored' }],
+  })
+  expect(authority.scope).toBe('document')
+  expect(authority.packet.scope).toBe('document')
+  expect(authority.packet.sections).toEqual([])
+  expect(authority.packet.normalizedFacts).toEqual([])
+  expect(authority.packet.factConstraints).toEqual([])
+  expect(authority.packet.documentContract).toBeDefined()
+  const serializedRepairContract = JSON.stringify(authority.packet.documentContract)
+  for (const section of getGameDocumentContract(documentPath).sections) {
+    expect(serializedRepairContract).toContain(`<!-- beegame-section:${section.sectionId} -->`)
+    expect(serializedRepairContract).toContain(`## ${section.title}`)
+  }
+  for (const material of getGameDocumentContract(documentPath).productionMaterials) {
+    expect(serializedRepairContract).toContain(`<!-- beegame-material:${material.materialId} -->`)
+    expect(serializedRepairContract).toContain(`### ${material.title}`)
+    expect(serializedRepairContract).toContain(material.format)
+  }
+  expect(authority.packet.document).toEqual({
+    documentPath,
+    digest: stage.baseDocumentDigest,
+    text: malformed,
+  })
+
+  const operations = await deriveFoundationPatchOperations({
+    workspacePath: workspace,
+    revision,
+    taskId: receipt.taskId,
+    batch,
+    issues: [issue],
+    receipt,
+  })
+  expect(operations).toEqual([{
+    scope: 'document',
+    kind: 'REPLACE',
+    documentPath,
+    issueIds: [issue.id],
+    beforeDigest: stage.baseDocumentDigest,
+    afterDigest: stageDigest(complete),
+  }])
+})
+
+test('rejects document-scope empty or non-canonical staged bytes', async () => {
+  const workspace = await workspaceWithCompleteDocument()
+  const complete = completeDocument()
+  const malformed = complete.replace(
+    '<!-- beegame-section:vision -->',
+    '<!-- malformed-section-marker -->',
+  )
+  await writeFile(join(workspace, documentPath), malformed)
+  const stage = await createFoundationRevisionStage({
+    workspacePath: workspace,
+    revision,
+    documentPath,
+  })
+  const issue = documentFormatIssue('AUD-DOCUMENT-FORMAT', stage.baseDocumentDigest)
+  const batch = {
+    scope: 'document' as const,
+    documentPath,
+    sectionIds: [] as [],
+    issueIds: [issue.id],
+  }
+
+  const makeReceipt = (staged: string): RevisionTaskReceipt => {
+    const core = {
+      scope: 'document' as const,
+      taskId: 'document-revision-invalid-task',
+      round: 1 as const,
+      documentPath,
+      issueIds: [issue.id],
+      baseDocumentDigest: stage.baseDocumentDigest,
+      stagedDocumentDigest: stageDigest(staged),
+      changedSectionIds: [] as [],
+      stagedPath: stage.stagedPath,
+    } satisfies Omit<RevisionTaskReceipt, 'terminalDigest'>
+    return {
+      ...core,
+      terminalDigest: revisionTaskReceiptTerminalDigest(core),
+    }
+  }
+
+  await writeFile(join(workspace, stage.stagedPath), '')
+  await expect(deriveFoundationPatchOperations({
+    workspacePath: workspace,
+    revision,
+    batch,
+    issues: [issue],
+    receipt: makeReceipt(''),
+  })).rejects.toThrow(/non-empty/i)
+
+  const malformedStaged = malformed.replace('## Executive Summary', '## Wrong Summary')
+  await writeFile(join(workspace, stage.stagedPath), malformedStaged)
+  await expect(deriveFoundationPatchOperations({
+    workspacePath: workspace,
+    revision,
+    batch,
+    issues: [issue],
+    receipt: makeReceipt(malformedStaged),
+  })).rejects.toThrow(/complete|marker|structure/i)
 })
 
 test('rejects a stale existing stage instead of reusing an orphaned copy', async () => {
@@ -459,6 +648,7 @@ test('derives INSERT, REPLACE and DELETE section operations without content fiel
     workspacePath: workspace,
     revision,
     batch: {
+      scope: 'section',
       documentPath,
       sectionIds: ['vision', 'core_loop', 'progression'],
       issueIds: ['AUD-1', 'AUD-DELETE', 'AUD-INSERT'],
@@ -499,7 +689,7 @@ test('derives admitted summary and material blocks while rejecting unlisted deri
   const makeInput = (document: string, receipt: RevisionTaskReceipt) => ({
     workspacePath: workspace,
     revision,
-    batch: { documentPath, sectionIds: admittedSectionIds, issueIds: admittedIssueIds },
+    batch: { scope: 'section' as const, documentPath, sectionIds: admittedSectionIds, issueIds: admittedIssueIds },
     issues: [
       admittedIssue('AUD-SUMMARY', 'executive_summary'),
       admittedIssue('AUD-MATERIAL', `material.${materialId}`),
@@ -513,7 +703,7 @@ test('derives admitted summary and material blocks while rejecting unlisted deri
     stagedPath: stage.stagedPath,
     changedSectionIds: admittedSectionIds,
   })))
-  expect(operations.map(operation => operation.sectionId)).toEqual(admittedSectionIds)
+  expect(operations.map(sectionOperationId)).toEqual(admittedSectionIds)
 
   const unlistedDerived = changed.replace(
     `material ${unlistedMaterialId}`,
@@ -558,7 +748,7 @@ test('rejects stale base, traversal paths, user-directory staging and unauthoriz
     deriveFoundationPatchOperations({
       workspacePath: workspace,
       revision,
-      batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      batch: { scope: 'section', documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
       issues: [admittedIssue('AUD-1', 'vision')],
       receipt: valid,
     }),
@@ -570,6 +760,7 @@ test('rejects stale base, traversal paths, user-directory staging and unauthoriz
       workspacePath: workspace,
       revision,
       batch: {
+        scope: 'section',
         documentPath,
         sectionIds: ['rules_systems'],
         issueIds: ['AUD-1'],
@@ -590,7 +781,7 @@ test('rejects stale base, traversal paths, user-directory staging and unauthoriz
     deriveFoundationPatchOperations({
       workspacePath: workspace,
       revision,
-      batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      batch: { scope: 'section', documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
       issues: [admittedIssue('AUD-1', 'vision')],
       receipt: traversal,
     }),
@@ -614,6 +805,7 @@ test('rejects extra keys, duplicate IDs, marker destruction and whole-document d
       workspacePath: workspace,
       revision,
       batch: {
+        scope: 'section',
         documentPath,
         sectionIds: ['vision'],
         issueIds: ['AUD-1', 'AUD-1'],
@@ -626,7 +818,7 @@ test('rejects extra keys, duplicate IDs, marker destruction and whole-document d
     deriveFoundationPatchOperations({
       workspacePath: workspace,
       revision,
-      batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      batch: { scope: 'section', documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
       issues: [admittedIssue('AUD-1', 'vision')],
       receipt: { ...valid, extra: true } as never,
     }),
@@ -649,7 +841,7 @@ test('rejects extra keys, duplicate IDs, marker destruction and whole-document d
     deriveFoundationPatchOperations({
       workspacePath: workspace,
       revision,
-      batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      batch: { scope: 'section', documentPath, sectionIds: ['vision'], issueIds: ['AUD-1'] },
       issues: [admittedIssue('AUD-1', 'vision')],
       receipt: broken,
     }),
@@ -671,7 +863,7 @@ function admittedIssue(id: string, remediationSectionId: string): AuditIssue {
     },
     expected: 'expected',
     actual: 'actual',
-    remediation: { kind: 'patch', documentPath, sectionIds: [remediationSectionId] },
+    remediation: { kind: 'patch', scope: 'section', documentPath, sectionIds: [remediationSectionId] },
   }
 }
 
@@ -701,6 +893,7 @@ test('binds distinct section operations to admitted fix targets regardless issue
     workspacePath: workspace,
     revision,
     batch: {
+      scope: 'section',
       documentPath,
       sectionIds: ['vision', 'core_loop'],
       issueIds: ['AUD-CORE', 'AUD-VISION'],
@@ -719,6 +912,7 @@ test('binds distinct section operations to admitted fix targets regardless issue
     workspacePath: workspace,
     revision,
     batch: {
+      scope: 'section',
       documentPath,
       sectionIds: ['vision', 'core_loop'],
       issueIds: ['AUD-VISION', 'AUD-CORE'],
@@ -737,18 +931,18 @@ test('binds distinct section operations to admitted fix targets regardless issue
   })
   expect(
     swapped.map(operation => ({
-      sectionId: operation.sectionId,
+      sectionId: sectionOperationId(operation),
       issueIds: operation.issueIds,
     })),
   ).toEqual(
     operations.map(operation => ({
-      sectionId: operation.sectionId,
+      sectionId: sectionOperationId(operation),
       issueIds: operation.issueIds,
     })),
   )
 })
 
-test('treats one admitted issue bound to multiple changed sections as exact issue coverage', async () => {
+test('treats remediation sectionIds as authority when only one authorized section changes', async () => {
   const workspace = await workspaceWithCanonicalDocument()
   const stage = await createFoundationRevisionStage({
     workspacePath: workspace,
@@ -757,11 +951,11 @@ test('treats one admitted issue bound to multiple changed sections as exact issu
   })
   const staged = (await readFile(join(workspace, stage.stagedPath), 'utf8'))
     .replace('original vision', 'revised vision')
-    .replace('original core_loop', 'revised core loop')
   await writeFile(join(workspace, stage.stagedPath), staged)
   const issue = admittedIssue('AUD-MULTI', 'vision')
   issue.remediation = {
     kind: 'patch',
+    scope: 'section',
     documentPath,
     sectionIds: ['vision', 'core_loop'],
   }
@@ -769,6 +963,7 @@ test('treats one admitted issue bound to multiple changed sections as exact issu
     workspacePath: workspace,
     revision,
     batch: {
+      scope: 'section',
       documentPath,
       sectionIds: ['vision', 'core_loop'],
       issueIds: [issue.id],
@@ -776,7 +971,7 @@ test('treats one admitted issue bound to multiple changed sections as exact issu
     issues: [issue],
     receipt: receiptFor({
       issueIds: [issue.id],
-      changedSectionIds: ['vision', 'core_loop'],
+      changedSectionIds: ['vision'],
       baseDocumentDigest: stage.baseDocumentDigest,
       stagedDocumentDigest: stageDigest(staged),
       stagedPath: stage.stagedPath,
@@ -784,8 +979,49 @@ test('treats one admitted issue bound to multiple changed sections as exact issu
   })
   expect(operations).toEqual([
     expect.objectContaining({ sectionId: 'vision', issueIds: [issue.id] }),
-    expect.objectContaining({ sectionId: 'core_loop', issueIds: [issue.id] }),
   ])
+})
+
+test('rejects section revisions with no progress or with changed sections lacking issue coverage', async () => {
+  const workspace = await workspaceWithCanonicalDocument()
+  const stage = await createFoundationRevisionStage({ workspacePath: workspace, revision, documentPath })
+  const original = await readFile(join(workspace, stage.stagedPath), 'utf8')
+  const issue = admittedIssue('AUD-VISION', 'vision')
+  const baseInput = {
+    workspacePath: workspace,
+    revision,
+    batch: {
+      scope: 'section' as const,
+      documentPath,
+      sectionIds: ['vision', 'core_loop'],
+      issueIds: [issue.id],
+    },
+    issues: [issue],
+  }
+
+  await expect(deriveFoundationPatchOperations({
+    ...baseInput,
+    receipt: receiptFor({
+      issueIds: [issue.id],
+      changedSectionIds: ['vision'],
+      baseDocumentDigest: stage.baseDocumentDigest,
+      stagedDocumentDigest: stage.baseDocumentDigest,
+      stagedPath: stage.stagedPath,
+    }),
+  })).rejects.toThrow(/no section progress/i)
+
+  const unrelatedChange = original.replace('original core_loop', 'revised core loop')
+  await writeFile(join(workspace, stage.stagedPath), unrelatedChange)
+  await expect(deriveFoundationPatchOperations({
+    ...baseInput,
+    receipt: receiptFor({
+      issueIds: [issue.id],
+      changedSectionIds: ['core_loop'],
+      baseDocumentDigest: stage.baseDocumentDigest,
+      stagedDocumentDigest: stageDigest(unrelatedChange),
+      stagedPath: stage.stagedPath,
+    }),
+  })).rejects.toThrow(/without an admitted issue|coverage/i)
 })
 
 test('keeps issues targeting one section together and rejects changed sections without authority', async () => {
@@ -810,6 +1046,7 @@ test('keeps issues targeting one section together and rejects changed sections w
       workspacePath: workspace,
       revision,
       batch: {
+        scope: 'section',
         documentPath,
         sectionIds: ['vision'],
         issueIds: ['AUD-2', 'AUD-1'],
@@ -838,14 +1075,14 @@ test('keeps issues targeting one section together and rejects changed sections w
     deriveWithIssues({
       workspacePath: workspace,
       revision,
-      batch: { documentPath, sectionIds: ['vision'], issueIds: ['AUD-OTHER'] },
+      batch: { scope: 'section', documentPath, sectionIds: ['vision'], issueIds: ['AUD-OTHER'] },
       issues: [admittedIssue('AUD-OTHER', 'core_loop')],
       receipt: unrelatedReceipt,
     }),
   ).rejects.toThrow(/target|changed|issue/i)
 })
 
-test('rejects an authorized issue target that was not changed and any changed section with no issue', async () => {
+test('rejects a changed authorized section outside the admitted issue remediation', async () => {
   const workspace = await workspaceWithCanonicalDocument()
   const stage = await createFoundationRevisionStage({
     workspacePath: workspace,
@@ -868,6 +1105,7 @@ test('rejects an authorized issue target that was not changed and any changed se
       workspacePath: workspace,
       revision,
       batch: {
+        scope: 'section',
         documentPath,
         sectionIds: ['vision', 'core_loop'],
         issueIds: ['AUD-CORE'],
@@ -880,4 +1118,9 @@ test('rejects an authorized issue target that was not changed and any changed se
 
 function stageDigest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function sectionOperationId(operation: import('./foundation-revision-stage').PatchOperation): string {
+  if (operation.scope !== 'section') throw new Error('expected a section operation')
+  return operation.sectionId
 }

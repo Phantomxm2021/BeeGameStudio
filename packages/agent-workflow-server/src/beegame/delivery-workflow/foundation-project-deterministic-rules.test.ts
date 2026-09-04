@@ -52,7 +52,7 @@ describe('project-local deterministic foundation rules', () => {
     expect(gapDrafts).toHaveLength(1)
     expect(gapDrafts[0]).toMatchObject({
       source: { documentPath: 'docs/GDD.md', sectionId: 'progression' },
-      remediation: { kind: 'patch', documentPath: 'docs/GDD.md', sectionIds: ['progression'] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['progression'] },
       conflictIdentity: { authority: 'FIXED_SETTLEMENT_DEW', scope: 'ambiguous' },
     })
     expect(gapDrafts[0]?.actual).toContain('without stating')
@@ -68,7 +68,7 @@ describe('project-local deterministic foundation rules', () => {
     expect(drafts).toHaveLength(1)
     expect(drafts[0]).toMatchObject({
       source: { documentPath: 'docs/BALANCE_DESIGN.md', sectionId: 'economy' },
-      remediation: { kind: 'patch', documentPath: 'docs/BALANCE_DESIGN.md', sectionIds: ['economy'] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/BALANCE_DESIGN.md', sectionIds: ['economy'] },
       conflictIdentity: { authority: 'FIXED_SETTLEMENT_DEW', scope: 'all' },
     })
   })

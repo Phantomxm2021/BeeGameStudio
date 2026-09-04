@@ -57,6 +57,7 @@ describe('document authoring metrics', () => {
         projectedLineCount: 196,
       }),
     ).toEqual({
+      usageStatus: 'measured',
       inputTokens: 50_957,
       cacheReadTokens: 169_721,
       cacheCreationTokens: 0,
@@ -80,5 +81,18 @@ describe('document authoring metrics', () => {
         event(1, 'tool.completed', { toolName: 'Write', toolUseID: 'tool' }),
       ]),
     ).toBeUndefined()
+  })
+
+  test('marks an all-zero provider terminal as unavailable instead of measured free usage', () => {
+    expect(documentAuthoringMetrics([
+      event(1, 'result', {
+        usage: {
+          input_tokens: 0,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          output_tokens: 0,
+        },
+      }),
+    ])?.usageStatus).toBe('unavailable')
   })
 })

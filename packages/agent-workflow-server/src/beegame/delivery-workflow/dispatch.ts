@@ -43,7 +43,7 @@ import {
   resetFoundationRevisionStage,
   type RevisionTaskReceipt,
 } from './foundation-revision-stage'
-import type { AuditIssue } from './foundation-issue-registry'
+import type { FoundationReviewIssue } from './foundation-issue-registry'
 
 export type DispatchCredits = {
   reserve?: (
@@ -125,12 +125,12 @@ function isFoundationRevisionSemanticRequest(run: DeliveryRun, request: WorkerDi
     (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState) : []).some(task => task.taskId === request.taskId && task.kind === 'semantic-recheck')
 }
 
-function reviewTask(run: DeliveryRun, taskId: string): FoundationAuditTask | undefined {
+function foundationStageTask(run: DeliveryRun, taskId: string): FoundationAuditTask | undefined {
   return run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(task => task.taskId === taskId) : undefined
 }
 
-function reviewTaskDispatch(run: DeliveryRun, taskId: string): DispatchRecord | undefined {
-  return reviewTask(run, taskId)?.dispatch
+function foundationStageTaskDispatch(run: DeliveryRun, taskId: string): DispatchRecord | undefined {
+  return foundationStageTask(run, taskId)?.dispatch
 }
 
 function hasRunningFoundationDispatch(run: DeliveryRun): boolean {
@@ -298,6 +298,11 @@ async function documentPerformance(input: {
       ? input.request.contract.foundationDocumentPath
       : receipt?.targetPath
   const projectionPath = `.beegame/workflow/document-projections/${input.dispatch.dispatchId}.json`
+  const projectionArtifactBytes = await fileBytes(projectionPath)
+  const projectionModelBytes =
+    input.result.authoringMetrics?.authorityProjection?.modelByteLength
+      ?? input.result.authoringMetrics?.authorityProjection?.byteLength
+      ?? 0
   const startedAt = Date.parse(input.dispatch.startedAt)
   const finishedAt = Date.parse(input.finishedAt)
   const authoringUsage = input.result.authoringMetrics
@@ -313,13 +318,18 @@ async function documentPerformance(input: {
   return {
     targetPath,
     documentAuthority: 'markdown_only',
+    usageStatus: input.result.authoringMetrics?.usageStatus ?? 'measured',
     usage: authoringUsage,
     durationMs:
       Number.isFinite(startedAt) && Number.isFinite(finishedAt)
         ? Math.max(0, finishedAt - startedAt)
         : 0,
     markdownBytes: await fileBytes(receipt?.targetPath ?? targetPath),
-    projectionBytes: await fileBytes(projectionPath),
+    // projectionBytes is the exact content sent to the model. The durable JSON
+    // envelope is tracked separately because escaping/metadata must not be
+    // reported as model context.
+    projectionBytes: projectionModelBytes,
+    projectionArtifactBytes,
     retryReason: null,
   }
 }
@@ -588,6 +598,9 @@ export function createDeliveryDispatcher(options: {
         revision: locked.revision,
         dispatchId,
         taskId: task.taskId,
+        ...(changed.record.failureReason
+          ? { reason: changed.record.failureReason }
+          : {}),
       }, undefined, lease)
       for (const sibling of siblingDispatches)
         releaseDispatch(sibling.dispatchId, { stopReason: needsActionReason })
@@ -625,14 +638,30 @@ export function createDeliveryDispatcher(options: {
     const revisionFactRequest = factRequest && Boolean(request.taskId && runtimeTasks.some(task => task.taskId === request.taskId && task.kind === 'impacted-facts'))
     const revisionTaskRequest = revisionRequest || revisionFactRequest || revisionSemanticRequest
     const auditRequest = semanticRequest || (factRequest && !revisionFactRequest)
-    const reviewRequest = auditRequest || revisionTaskRequest
+    const foundationStageRequest = auditRequest || revisionTaskRequest
+    if (
+      auditRequest &&
+      (run.phase !== 'DOCUMENT_REVIEW' || request.phase !== 'DOCUMENT_REVIEW')
+    )
+      throw new DispatchError(
+        'blocked',
+        'foundation reviewer workers can only run in DOCUMENT_REVIEW',
+      )
+    if (
+      revisionTaskRequest &&
+      (run.phase !== 'FOUNDATION_REVISION' || request.phase !== 'FOUNDATION_REVISION')
+    )
+      throw new DispatchError(
+        'blocked',
+        'foundation revision workers can only run in FOUNDATION_REVISION',
+      )
     if (revisionTaskRequest && request.taskId && run.foundationAuditState) {
       const requestedTask = runtimeTasks.find(task => task.taskId === request.taskId)
       if (!requestedTask)
         throw new DispatchError('blocked', 'foundation revision task is outside the active authority')
     }
-    const durableDispatch = reviewRequest && request.taskId
-      ? reviewTaskDispatch(run, request.taskId)
+    const durableDispatch = foundationStageRequest && request.taskId
+      ? foundationStageTaskDispatch(run, request.taskId)
       : parallelFoundationPath
         ? foundationDispatch(run, parallelFoundationPath)
         : run.activeDispatch
@@ -665,14 +694,14 @@ export function createDeliveryDispatcher(options: {
         'duplicate',
         'a regular delivery worker is already running',
       )
-    if (!parallelFoundationPath && !reviewRequest && hasRunningFoundationDispatch(run)) {
+    if (!parallelFoundationPath && !foundationStageRequest && hasRunningFoundationDispatch(run)) {
       throw new DispatchError(
         'duplicate',
         'foundation document authoring batch is active',
       )
     }
     const durableTask = request.taskId
-      ? reviewRequest
+      ? foundationStageRequest
         ? runtimeTasks.find(task => task.taskId === request.taskId)
           : run.tasks.find(task => task.id === request.taskId)
       : undefined
@@ -882,13 +911,13 @@ export function createDeliveryDispatcher(options: {
             'duplicate',
             'a regular delivery worker is already running',
           )
-        if (!currentFoundationPath && !reviewRequest && hasRunningFoundationDispatch(current))
+        if (!currentFoundationPath && !foundationStageRequest && hasRunningFoundationDispatch(current))
           throw new DispatchError(
             'duplicate',
             'foundation document authoring batch is active',
           )
         const next = revisionTaskRequest && request.taskId && currentRevisionTask
-          ? { ...current, foundationAuditState: { ...current.foundationAuditState!, tasks: current.foundationAuditState!.tasks.map(task => task.taskId === request.taskId ? { ...task, status: 'running' as const, attempt: task.attempt + 1, dispatch: record, failureReason: undefined } as FoundationAuditTask : task) } }
+          ? { ...current, foundationAuditState: { ...current.foundationAuditState!, tasks: current.foundationAuditState!.tasks.map(task => task.taskId === request.taskId ? { ...task, ...(task.dispatch ? { attemptHistory: [...(task.attemptHistory ?? []), task.dispatch] } : {}), status: 'running' as const, attempt: task.attempt + 1, dispatch: record, failureReason: undefined } as FoundationAuditTask : task) } }
           : factRequest && request.taskId && claimedFoundationState
           ? { ...current, foundationAuditState: { ...current.foundationAuditState!, status: 'extracting_facts' as const, tasks: claimedFoundationState.tasks.map(task => task.taskId === request.taskId ? { ...task, dispatch: record } : task) } }
           : semanticRequest && request.taskId && claimedSemanticState
@@ -1086,6 +1115,7 @@ export function createDeliveryDispatcher(options: {
     const message = error instanceof Error ? error.message : String(error)
     return (
       message.startsWith('missing_required_terminal_submission:') ||
+      message === 'foundation revision completed without a committed Markdown receipt' ||
       message === 'worker stopped before producing a durable terminal result'
     )
   }
@@ -1207,10 +1237,12 @@ export function createDeliveryDispatcher(options: {
         throw new Error('foundation revision terminal identity does not match dispatch contract')
       const packetValue = await loadFoundationRevisionPacket({ workspacePath: request.workspacePath, revision: task.revision, round: task.round, taskId: task.taskId, documentPath: task.documentPath, packetDigest: task.packetDigest })
       if (!Array.isArray(packetValue.issues) || !Array.isArray(packetValue.issueIds) || !Array.isArray(packetValue.sectionIds)) throw new Error('foundation revision packet authority is malformed')
-      const batch = { documentPath: request.contract.documentPath as FoundationDocumentPath, issueIds: packetValue.issueIds as string[], sectionIds: packetValue.sectionIds as string[] }
+      const batch = task.scope === 'document'
+        ? { scope: 'document' as const, documentPath: request.contract.documentPath as FoundationDocumentPath, issueIds: packetValue.issueIds as string[], sectionIds: [] as [] }
+        : { scope: 'section' as const, documentPath: request.contract.documentPath as FoundationDocumentPath, issueIds: packetValue.issueIds as string[], sectionIds: packetValue.sectionIds as string[] }
       if (result.declaration.status === 'APPLIED') {
         const receipt = result.declaration.receipt as RevisionTaskReceipt
-        await deriveFoundationPatchOperations({ workspacePath: request.workspacePath, revision: request.revision, taskId: request.taskId, batch, issues: packetValue.issues as AuditIssue[], receipt })
+        await deriveFoundationPatchOperations({ workspacePath: request.workspacePath, revision: request.revision, taskId: request.taskId, batch, issues: packetValue.issues as FoundationReviewIssue[], receipt })
         if (receipt.baseDocumentDigest !== task.baseDocumentDigest || receipt.stagedPath !== task.stagedPath)
           throw new Error('foundation revision receipt base or stage authority is stale')
       }
@@ -1238,7 +1270,12 @@ export function createDeliveryDispatcher(options: {
     const durationMs = Math.max(0, new Date(finishedAt).getTime() - new Date(location.record.startedAt).getTime())
     const durable = await mutateFoundationReviewTask(dispatchId, `dispatch.${status}`, ({ task: current, record }) => {
       const completed = parseDispatchRecord({ ...record, status, usage: measuredUsage, ...(terminalReasonForResult(result, status) ? { failureReason: terminalReasonForResult(result, status) } : {}), terminalResult: result as unknown as Record<string, unknown>, finishedAt })
-      return { task: { ...current, status: taskStatus, receipt: revisionResult.declaration.receipt, terminalDigest: revisionResult.declaration.receipt.terminalDigest, usage: measuredUsage, durationMs, dispatch: completed }, record: completed }
+      if (current.kind !== 'document-revision' || revisionResult.declaration.receipt.scope !== current.scope)
+        throw new Error('foundation revision receipt scope disagrees with durable task authority')
+      const completedTask = current.scope === 'document'
+        ? { ...current, status: taskStatus, receipt: revisionResult.declaration.receipt as Extract<typeof revisionResult.declaration.receipt, { scope: 'document' }>, terminalDigest: revisionResult.declaration.receipt.terminalDigest, usage: measuredUsage, durationMs, dispatch: completed }
+        : { ...current, status: taskStatus, receipt: revisionResult.declaration.receipt as Extract<typeof revisionResult.declaration.receipt, { scope: 'section' }>, terminalDigest: revisionResult.declaration.receipt.terminalDigest, usage: measuredUsage, durationMs, dispatch: completed }
+      return { task: completedTask, record: completed }
     })
     try {
       await options.credits?.settle?.(request ? idempotencyKey(request, task.attempt) : dispatchId, result)

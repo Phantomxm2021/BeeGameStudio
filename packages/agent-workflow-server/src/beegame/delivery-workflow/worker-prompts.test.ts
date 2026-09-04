@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { buildWorkerPrompt } from './worker-prompts'
-import {
-  getGameDocumentContract,
-  renderLiteralMarkdownSkeleton,
-} from './game-document-contracts'
+import { getGameDocumentContract } from './game-document-contracts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
@@ -117,89 +114,6 @@ describe('worker prompts', () => {
     }
   })
 
-  test('includes one literal contract-derived Markdown skeleton for each foundation author mode', () => {
-    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
-      const path = 'docs/ASSET_PLAN.md' as const
-      const prompt = buildWorkerPrompt({
-        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
-        allowedPaths: [path],
-        contract: {
-          documentSet: 'foundation', authoringMode, foundationDocumentPath: path,
-          completeDocumentContract: getGameDocumentContract(path),
-        },
-      })
-      const serialized = JSON.parse(prompt.split('\n').find(line => line.startsWith('{'))!) as {
-        completeDocumentContract: {
-          mechanicalMarkdownProtocol: {
-            literalMarkdownSkeleton: string
-            closedHeadingSet: string[]
-            productionMaterials: { entries: Array<{ heading: string }> }
-          }
-        }
-      }
-      const protocol = serialized.completeDocumentContract.mechanicalMarkdownProtocol
-      const expectedHeadings = [
-        ...protocol.closedHeadingSet,
-        ...protocol.productionMaterials.entries.map(entry => entry.heading),
-      ]
-
-      expect(typeof protocol.literalMarkdownSkeleton).toBe('string')
-      expect(protocol.literalMarkdownSkeleton).toBe(
-        renderLiteralMarkdownSkeleton(path),
-      )
-      expect(protocol.literalMarkdownSkeleton).toContain('# <document title>')
-      expect(protocol.literalMarkdownSkeleton).toContain('## Production Materials')
-      expect(protocol.literalMarkdownSkeleton).not.toContain('...')
-      let previous = -1
-      for (const heading of expectedHeadings) {
-        const position = protocol.literalMarkdownSkeleton.indexOf(heading)
-        expect(position).toBeGreaterThan(previous)
-        expect(protocol.literalMarkdownSkeleton.split(heading).length - 1).toBe(1)
-        previous = position
-      }
-      expect(prompt).toContain('canonical material H3 headings are forbidden before Production Materials')
-    }
-  })
-
-  test('gives Asset authors resource-production quality rules without leaking them to GDD authors', () => {
-    const buildPrompt = (foundationDocumentPath: 'docs/ASSET_PLAN.md' | 'docs/GDD.md') =>
-      buildWorkerPrompt({
-        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
-        allowedPaths: [foundationDocumentPath],
-        contract: {
-          documentSet: 'foundation', authoringMode: 'initial', foundationDocumentPath,
-          completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
-        },
-      })
-    const assetPrompt = buildPrompt('docs/ASSET_PLAN.md')
-    const assetRules = [
-      'one inventory ID per independently acquireable/authorable/licensable/replaceable/acceptable delivery unit',
-      'one inventory ID may map to multiple delivery files or encoding variants',
-      'per-unit mapping from upstream Art/Audio/UI requirements instead of category collapse',
-      'repeated metadata stays inside its one owner material without a second profile schema',
-      'planned fields separated from evidence-backed observed fields',
-      'no `verified`, `available`, current maturity, or delivery receipt claim without evidence',
-      'exact derivable mappings, otherwise an explicit `unresolvedRef`',
-      'Asset H2 sections to policy, context, rationale, and owner-material references',
-      'per-inventory rows, mappings, quantities, evidence, current status, and milestones remain only in the five owner materials',
-    ]
-    for (const rule of assetRules) expect(assetPrompt).toContain(rule)
-
-    const gddPrompt = buildPrompt('docs/GDD.md')
-    for (const rule of assetRules) expect(gddPrompt).not.toContain(rule)
-  })
-
-  test('keeps Asset H2 guidance on policy and owner-material references only', () => {
-    const asset = getGameDocumentContract('docs/ASSET_PLAN.md')
-    for (const section of asset.sections) {
-      expect(section.purpose).toContain('policy, context, rationale, and owner-material references')
-      expect(section.purpose).not.toMatch(/per-inventory (rows|mappings|evidence|status|milestones)/i)
-      expect(section.purpose).not.toMatch(/define (creators|approvers|consumers|dependencies|licensing|milestones|status)/i)
-    }
-  })
-
   test('aligns shared foundation authority instructions across all initial and parallel authors', () => {
     const expectedSharedInstructions = [
       'Use exactly one fact owner across the eight documents:',
@@ -256,7 +170,9 @@ describe('worker prompts', () => {
       'Represent each decision in one authoritative prose, table or diagram representation',
       'Do not narrate tables or diagrams',
       'Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate',
-      'Record a genuinely N/A item once with its reason and impact; never invent a system',
+      'Record each genuinely N/A decision only in the contract block that owns that responsibility',
+      'Put acceptance tables and scenarios only in sections or materials whose declared purpose explicitly owns acceptance, validation, verification or testing',
+      'Each production-material row must own a distinct record or mapping',
       'Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets',
       'Every material is an owner representation for its declared facts and contains the single canonical representation',
     ]
@@ -287,14 +203,15 @@ describe('worker prompts', () => {
         expect(countOccurrences(prompt, rules[foundationDocumentPath])).toBe(1)
         expect(prompt).toContain('complete raw Markdown body')
         expect(prompt).toContain('Do not call tools, return JSON')
-        expect(prompt).toContain('The Executive Summary indexes authority, while each material owns the facts declared by its serialized authority rule')
+        expect(prompt).toContain('The Executive Summary is a concise authority index only')
+        expect(prompt).toContain('it contains no tables, diagrams, scenarios, acceptance criteria or duplicated owner facts')
         expect(prompt).not.toContain('authorityMode')
         expect(prompt).not.toContain('reference-only')
         expect(prompt).not.toContain('reference_only')
         expect(prompt).not.toContain('derived view')
         expect(prompt).not.toContain('parallel-author')
         expect(prompt).not.toContain('All Production Materials are derived')
-        expect(countOccurrences(prompt, 'Record a genuinely N/A item once with its reason and impact')).toBe(1)
+        expect(countOccurrences(prompt, 'Record each genuinely N/A decision only in the contract block that owns that responsibility')).toBe(1)
         expect(prompt).toContain('Before returning, silently perform this internal closure check')
         expect(prompt).toContain('every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once')
         expect(prompt).toContain('every productionMaterials.entries H3 appears in order and exactly once')
@@ -327,7 +244,7 @@ describe('worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('The Executive Summary indexes authority')
+    expect(prompt).toContain('The Executive Summary is a concise authority index only')
     expect(prompt).toContain('Every material is an owner representation for its declared facts and contains the single canonical representation')
     expect(prompt).toContain('one complete raw Markdown body')
     expect(prompt).toContain('one representation per fact')
@@ -356,7 +273,7 @@ describe('worker prompts', () => {
         expect(prompt).toContain('complete raw Markdown body')
         expect(prompt).toContain('Every material is an owner representation for its declared facts and contains the single canonical representation')
         expect(prompt).toContain('use one representation per fact')
-        expect(prompt).toContain('Record a genuinely N/A item once with its reason and impact')
+        expect(prompt).toContain('Record each genuinely N/A decision only in the contract block that owns that responsibility')
         expect(prompt).not.toContain('authorityMode')
         expect(prompt).not.toContain('reference-only')
         expect(prompt).not.toContain('reference_only')
@@ -430,6 +347,25 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('classify freshness')
   })
 
+  test('keeps Balance numeric literals in its single owner table for both author modes', () => {
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      const prompt = buildWorkerPrompt({
+        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+        allowedPaths: ['docs/BALANCE_DESIGN.md'],
+        contract: {
+          documentSet: 'foundation', authoringMode,
+          foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
+          completeDocumentContract: getGameDocumentContract('docs/BALANCE_DESIGN.md'),
+        },
+      })
+
+      expect(prompt).toContain('sole numeric literal store')
+      expect(prompt).toContain('symbolic formula IDs')
+      expect(prompt).toContain('without copying numeric inputs or storing derived totals')
+    }
+  })
+
   test('keeps owner guidance concise without a Markdown semantic parser contract', () => {
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
       for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
@@ -498,6 +434,8 @@ describe('worker prompts', () => {
 
     expect(prompt).toContain('"outputPolicy":{"sectionStyle":"final_owned_decisions"')
     expect(prompt).toContain('Complete every required section and production material')
+    expect(prompt).toContain('acceptance, validation, verification or testing')
+    expect(prompt).toContain('Each production-material row must own a distinct record or mapping')
     expect(prompt).not.toContain('Production materials are canonical compact views of owned decisions and must not repeat section narrative.')
     expect(prompt).not.toContain('Use no more than one worked example per formula or system boundary')
     expect(prompt).not.toContain('Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.')
@@ -733,7 +671,7 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('Semantic Issue remediation')
   })
 
-  test('keeps revision workers on the packet and one absolute staged path', () => {
+  test('keeps revision workers on the packet without exposing a staged path', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',
       ownerId: 'owner',
@@ -757,7 +695,7 @@ describe('worker prompts', () => {
           documentPath: 'docs/GDD.md',
           issueIds: ['issue-1'],
           sectionIds: ['section-1'],
-          issues: [{ id: 'issue-1', severity: 'HIGH', type: 'semantic', source: { documentPath: 'docs/GDD.md', sectionId: 'section-1', heading: 'Section', startLine: 1, endLine: 2, digest: 'b'.repeat(64) }, expected: 'expected condition', actual: 'actual condition', remediation: { kind: 'patch', documentPath: 'docs/GDD.md', sectionIds: ['section-1'] } }],
+          issues: [{ id: 'issue-1', severity: 'HIGH', type: 'semantic', source: { documentPath: 'docs/GDD.md', sectionId: 'section-1', heading: 'Section', startLine: 1, endLine: 2, digest: 'b'.repeat(64) }, expected: 'expected condition', actual: 'actual condition', remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['section-1'] } }],
           sections: [{ documentPath: 'docs/GDD.md', sectionId: 'section-1', heading: 'Section', startLine: 1, endLine: 2, digest: 'b'.repeat(64), text: 'IMMUTABLE_PACKET_SENTINEL' }],
           factConstraints: [{
             key: 'asset.covered_level_requirements',
@@ -778,14 +716,17 @@ describe('worker prompts', () => {
     expect(prompt).toContain('expected condition')
     expect(prompt).toContain('actual condition')
     expect(prompt).toContain('"sectionIds":["section-1"]')
-    expect(prompt).toContain('packet sectionIds are the complete write authority')
-    expect(prompt).toContain('related, risk, consistency, dependency, and production-material sections')
+    expect(prompt).toContain('packet sectionIds and packet.sections[].text are the complete current write authority')
+    expect(prompt).toContain('Do not read the staged document')
+    expect(prompt).toContain('Return only the complete replacement Markdown for every authorized section')
+    expect(prompt).toContain('Do not include read-only evidence sections, JSON')
     expect(prompt).toContain('Automatic retry after the previous strict validation failure: revision changed an unauthorized section')
     expect(prompt).toContain('factConstraints')
     expect(prompt).toContain('left side of an explicit mapping table')
     expect(prompt).toContain('do not substitute a standalone fact declaration')
-    expect(prompt).toContain('Unmarked Production Materials and audit appendices are outside the packet authority')
-    expect(prompt).toContain('/workspace-secret/.beegame/audit/foundation/revision/revision/docs/GDD.md')
+    expect(prompt).toContain('complete replacement Markdown')
+    expect(prompt).not.toContain('sectionMarkdown')
+    expect(prompt).not.toContain('/workspace-secret/.beegame/audit/foundation/revision/revision/docs/GDD.md')
     expect(prompt).not.toContain('CONFIRMED_BRIEF_SENTINEL')
     expect(prompt).not.toContain('CANONICAL_ARTIFACT_SENTINEL')
     expect(prompt).not.toContain('Workspace root:')
@@ -795,6 +736,44 @@ describe('worker prompts', () => {
     expect(prompt).not.toContain('"startLine"')
     expect(prompt).not.toContain('"endLine"')
     expect(prompt).not.toContain('"digest"')
+  })
+
+  test('projects the complete canonical contract to a document-scope reviser', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'foundation-document-reviser', phase: 'FOUNDATION_REVISION', revision: 'revision', allowedPaths: ['stage.md'],
+      contract: {
+        scope: 'document', stagedPath: 'stage.md', sectionIds: [],
+        packet: {
+          scope: 'document', documentPath: 'docs/GDD.md', issueIds: ['issue-1'], sectionIds: [], sections: [], normalizedFacts: [], factConstraints: [],
+          issues: [{ id: 'issue-1', expected: 'canonical structure', actual: 'first failure', source: { scope: 'document', documentPath: 'docs/GDD.md' }, remediation: { kind: 'patch', scope: 'document', documentPath: 'docs/GDD.md' } }],
+          documentContract: { sections: [{ marker: '<!-- beegame-section:vision -->', heading: '## Vision' }], productionMaterials: { entries: [{ marker: '<!-- beegame-material:core-loop-diagram -->', heading: '### Core Loop Diagram', format: 'mermaid' }] } },
+          document: { text: 'DOCUMENT_BYTES_STAY_IN_STAGE' },
+        },
+      },
+    })
+    expect(prompt).toContain('packet.documentContract is preservation authority')
+    expect(prompt).toContain('Call ReadAssignedFoundationRevision exactly once with {}')
+    expect(prompt).toContain('<!-- beegame-section:vision -->')
+    expect(prompt).toContain('<!-- beegame-material:core-loop-diagram -->')
+    expect(prompt).toContain('Repair only packet.issues')
+    expect(prompt).toContain('preservation authority, not a second review checklist')
+    expect(prompt).toContain('do not discover or repair unrelated defects')
+    expect(prompt).not.toContain('DOCUMENT_BYTES_STAY_IN_STAGE')
+  })
+
+  test('rejects a legacy document-scope revision packet without the canonical contract', () => {
+    expect(() => buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'foundation-document-reviser', phase: 'FOUNDATION_REVISION', revision: 'revision', allowedPaths: ['stage.md'],
+      contract: {
+        scope: 'document', stagedPath: 'stage.md', sectionIds: [],
+        packet: {
+          scope: 'document', documentPath: 'docs/GDD.md', issueIds: ['issue-1'], sectionIds: [], sections: [], normalizedFacts: [], factConstraints: [],
+          issues: [{ id: 'issue-1', expected: 'canonical structure', actual: 'first failure', source: { scope: 'document', documentPath: 'docs/GDD.md' }, remediation: { kind: 'patch', scope: 'document', documentPath: 'docs/GDD.md' } }],
+        },
+      },
+    })).toThrow('document-scoped foundation revision worker requires one complete canonical documentContract')
   })
 
   test('projects packet workers to business evidence instead of service metadata', () => {
@@ -831,7 +810,7 @@ describe('worker prompts', () => {
 
     expect(() => buildWorkerPrompt({
       runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-      workerType: 'foundation-document-reviser', phase: 'DOCUMENT_REVIEW', revision: 'revision', allowedPaths: ['docs/GDD.md'],
+      workerType: 'foundation-document-reviser', phase: 'FOUNDATION_REVISION', revision: 'revision', allowedPaths: ['docs/GDD.md'],
       contract: {
         stagedPath: 'docs/GDD.md',
         packet: { documentPath: 'docs/GDD.md', sectionIds: ['loop'], issues: [{ id: 'issue', expected: 'e', actual: 'a' }], sections: [], normalizedFacts: [] },

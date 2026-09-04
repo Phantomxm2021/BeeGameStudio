@@ -1,16 +1,8 @@
 import { DELIVERY_PHASES } from './schema'
-import { isFoundationRevisionPhase } from './foundation-audit-state'
-
-/**
- * Display-only stages. `FOUNDATION_REVISION` is deliberately not a durable
- * delivery phase: audit and revision still share DOCUMENT_REVIEW authority,
- * but the dashboard must freeze audit at stage 3 and show repair at stage 4.
- */
 export const DELIVERY_PROGRESS_STAGES = [
-  ...DELIVERY_PHASES.slice(0, 3),
-  'FOUNDATION_REVISION',
+  ...DELIVERY_PHASES.slice(0, 4),
   'CHECKLIST_AUTHORING',
-  ...DELIVERY_PHASES.slice(3),
+  ...DELIVERY_PHASES.slice(4),
 ] as const
 
 export const DELIVERY_PROGRESS_SUBSTAGES = [
@@ -28,19 +20,6 @@ export type DeliveryProgressStage = (typeof DELIVERY_PROGRESS_STAGES)[number]
 export const FOUNDATION_REVISION_STAGE = 'FOUNDATION_REVISION' as const
 export const CHECKLIST_AUTHORING_STAGE = 'CHECKLIST_AUTHORING' as const
 
-/**
- * Revision remains inside DOCUMENT_REVIEW's top-level delivery phase, but it
- * shares the audit state's durable collection. A completed revision is
- * cleared when the workflow proceeds to checklist drafting.
- */
-export function isActiveFoundationRepairState(
-  value: unknown,
-): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const state = value as { status?: unknown }
-  return isFoundationRevisionPhase(state.status)
-}
-
 export type DeliveryProgress = {
   stageId: DeliveryProgressStage
   phaseIndex: number
@@ -52,28 +31,21 @@ export function projectDeliveryProgress(
   workflow: Record<string, unknown>,
 ): DeliveryProgress | undefined {
   if (!DELIVERY_PHASES.includes(workflow.phase as never)) return undefined
-  const activeFoundationRepair = isActiveFoundationRepairState(
-    workflow.foundationAuditState,
-  )
   const stageId =
     workflow.phase === 'DOCUMENT_REVIEW' &&
     workflow.documentStep === 'CHECKLIST_DRAFTING'
       ? CHECKLIST_AUTHORING_STAGE
-      : workflow.phase === 'DOCUMENT_REVIEW' && activeFoundationRepair
-        ? FOUNDATION_REVISION_STAGE
       : (workflow.phase as DeliveryProgressStage)
   const substage: DeliveryProgressSubstage | undefined =
     workflow.documentStep === 'FOUNDATION_DRAFTING'
       ? 'INITIAL_DRAFTING'
       : workflow.documentStep === 'FOUNDATION_REVIEW'
-        ? isActiveFoundationRepairState(workflow.foundationAuditState)
+        ? 'INITIAL_REVIEW'
+        : workflow.documentStep === 'FOUNDATION_REVISION'
           ? 'REPAIRING'
-          : 'INITIAL_REVIEW'
         : workflow.documentStep === 'CHECKLIST_DRAFTING'
           ? 'CHECKLIST_DRAFTING'
-          : activeFoundationRepair
-            ? 'REPAIRING'
-            : undefined
+          : undefined
   return {
     stageId,
     phaseIndex: DELIVERY_PROGRESS_STAGES.indexOf(stageId) + 1,

@@ -57,6 +57,11 @@ import {
   type FoundationMarkdownStreamContract,
   type FoundationMarkdownStreamSink,
 } from './foundation-markdown-stream'
+import {
+  createFoundationRevisionMarkdownStreamSink,
+  type FoundationRevisionMarkdownStreamContract,
+  type FoundationRevisionMarkdownStreamSink,
+} from './foundation-revision-markdown-stream'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -269,6 +274,7 @@ export type BeeGameSessionRunnerStartInput = {
   workflowResourceContentCommitContract?: ResourceContentCommitContract
   workflowRevisionContract?: Record<string, unknown>
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
+  workflowRevisionMarkdownStreamContract?: FoundationRevisionMarkdownStreamContract
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -398,6 +404,7 @@ type SessionRecord = {
   workflowWorkerType?: string
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
+  workflowRevisionMarkdownStreamContract?: FoundationRevisionMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
@@ -431,10 +438,14 @@ type SessionRecord = {
   emittedAssistantMessageIds: Set<string>
   thinkingBlockIndexes: Set<number>
   visibleThinkingBlockIndexes: Set<number>
+  /** Prevents one durable progress write for every streamed prose fragment. */
+  documentAuthorWritingReported: boolean
   events: BeeGameEvent[]
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
+  /** Provider-cumulative usage captured before the active turn starts. */
+  currentTurnStartingUsage?: BeeGameRuntimeSnapshot['usage']
   /** Usage already committed to the durable workflow run ledger. */
   workflowUsageCommitted: BeeGameRuntimeSnapshot['usage']
   /** Serializes workflow usage writes without blocking the SDK callback. */
@@ -444,14 +455,6 @@ type SessionRecord = {
   activeTurn?: Promise<void>
   /** Serializes usage billing events without blocking the SDK callback. */
   usageWriteTail: Promise<void>
-  usageWriteActive: boolean
-  usagePendingWrite?: {
-    turnId: string
-    sourceMessageType: string
-    usage: Usage
-    idempotencyKey: string
-  }
-  usageInFlightKey?: string
   usageLastCommittedKey?: string
   usageFailureReported: boolean
   resumeEventPending: boolean
@@ -532,6 +535,27 @@ function documentAuthorActivityMessage(
         ? '正在推理目前文件…'
         : '正在推理当前文档…'
       : 'Reasoning about the current document…'
+  if (
+    event.type === 'assistant.thinking' &&
+    event.payload?.status === 'ended'
+  )
+    return chinese
+      ? traditional
+        ? '正在撰寫目前文件…'
+        : '正在撰写当前文档…'
+      : 'Writing the current document…'
+  if (
+    event.type === 'assistant.partial' &&
+    event.text.trim() &&
+    !record.documentAuthorWritingReported
+  ) {
+    record.documentAuthorWritingReported = true
+    return chinese
+      ? traditional
+        ? '正在撰寫目前文件…'
+        : '正在撰写当前文档…'
+      : 'Writing the current document…'
+  }
   if (
     event.type !== 'tool.progress' ||
     event.payload?.phase !== 'input_streaming'
@@ -635,6 +659,7 @@ export type StartBeeGameSessionInput = {
   workflowWorkerType?: string
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
+  workflowRevisionMarkdownStreamContract?: FoundationRevisionMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
@@ -787,6 +812,12 @@ export class BeeGameSessionManager {
               input.workflowMarkdownStreamContract,
           }
         : {}),
+      ...(input.workflowRevisionMarkdownStreamContract
+        ? {
+            workflowRevisionMarkdownStreamContract:
+              input.workflowRevisionMarkdownStreamContract,
+          }
+        : {}),
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
         : {}),
@@ -840,6 +871,7 @@ export class BeeGameSessionManager {
       emittedAssistantMessageIds: new Set(),
       thinkingBlockIndexes: new Set(),
       visibleThinkingBlockIndexes: new Set(),
+      documentAuthorWritingReported: false,
       events: recoveredTranscript?.events ?? [],
       nextEventId: recoveredTranscript
         ? getNextTranscriptEventId(recoveredTranscript.events)
@@ -851,7 +883,6 @@ export class BeeGameSessionManager {
       workflowUsageCommitted: emptyRuntimeUsage(),
       workflowUsageWriteTail: Promise.resolve(),
       usageWriteTail: Promise.resolve(),
-      usageWriteActive: false,
       usageFailureReported: false,
       resumeEventPending: Boolean(recoveredTranscript),
     }
@@ -1200,6 +1231,8 @@ export class BeeGameSessionManager {
       record.emittedAssistantMessageIds.clear()
       record.thinkingBlockIndexes.clear()
       record.visibleThinkingBlockIndexes.clear()
+      record.documentAuthorWritingReported = false
+      record.currentTurnStartingUsage = this.deriveRuntimeSnapshot(record).usage
       record.currentTurnId = nextTurnId
       record.nextTurnIndex += 1
       display?.onTurnAccepted?.()
@@ -1451,6 +1484,7 @@ export class BeeGameSessionManager {
     attachmentDirectory?: string,
   ): Promise<void> {
     let markdownStreamSink: FoundationMarkdownStreamSink | undefined
+    let revisionMarkdownStreamSink: FoundationRevisionMarkdownStreamSink | undefined
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
@@ -1488,16 +1522,16 @@ export class BeeGameSessionManager {
           ? {
               BEEGAME_WORKFLOW_WORKER_TYPE: record.workflowWorkerType,
               // The native process deliberately runs in an empty sandbox cwd.
-              // These two values are the only trusted bridge back to the
-              // project: the result tool uses the workspace path for receipts
-              // and the built-in Read/Edit validators use the exact staged
-              // path for input-level enforcement.
+              // These values are the only trusted bridge back to the project.
+              // Document scope may read the exact staged artifact once; all
+              // mutation, metadata and receipt work remains service-owned.
               BEEGAME_WORKSPACE_PATH: record.session.cwd,
               BEEGAME_REVISION_STAGED_PATH: revisionStagedPath!,
               BEEGAME_REVISION_CONTRACT: JSON.stringify({
                 taskId: record.workflowRevisionContract.taskId,
                 revision: record.workflowRevisionContract.revision,
                 round: record.workflowRevisionContract.round,
+                scope: record.workflowRevisionContract.scope,
                 documentPath: record.workflowRevisionContract.documentPath,
                 issueIds: record.workflowRevisionContract.issueIds,
                 sectionIds: record.workflowRevisionContract.sectionIds,
@@ -1510,6 +1544,11 @@ export class BeeGameSessionManager {
       if (record.workflowMarkdownStreamContract) {
         markdownStreamSink = await createFoundationMarkdownStreamSink(
           record.workflowMarkdownStreamContract,
+        )
+      }
+      if (record.workflowRevisionMarkdownStreamContract) {
+        revisionMarkdownStreamSink = await createFoundationRevisionMarkdownStreamSink(
+          record.workflowRevisionMarkdownStreamContract,
         )
       }
       const runner =
@@ -1550,6 +1589,12 @@ export class BeeGameSessionManager {
                   record.workflowMarkdownStreamContract,
               }
             : {}),
+          ...(record.workflowRevisionMarkdownStreamContract
+            ? {
+                workflowRevisionMarkdownStreamContract:
+                  record.workflowRevisionMarkdownStreamContract,
+              }
+            : {}),
           ...(record.workflowAllowedPaths
             ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
             : {}),
@@ -1574,6 +1619,13 @@ export class BeeGameSessionManager {
                   record.workflowResourceContentCommitContract,
               }
             : {}),
+          ...(record.workflowRevisionContract
+            ? {
+                workflowRevisionContract: structuredClone(
+                  record.workflowRevisionContract,
+                ),
+              }
+            : {}),
           requestPermission: request => this.requestPermission(record, request),
         }))
       record.runner = runner
@@ -1582,9 +1634,10 @@ export class BeeGameSessionManager {
         runner,
         prompt,
         signal,
-        markdownStreamSink,
+        markdownStreamSink ?? revisionMarkdownStreamSink,
       )
       if (markdownStreamSink) await markdownStreamSink.commit()
+      if (revisionMarkdownStreamSink) await revisionMarkdownStreamSink.commit()
       try {
         if (!signal.aborted && record.session.status === 'running') {
           const turnId = record.currentTurnId
@@ -1617,6 +1670,9 @@ export class BeeGameSessionManager {
       if (markdownStreamSink) {
         await markdownStreamSink.abort(toErrorMessage(err))
       }
+      if (revisionMarkdownStreamSink) {
+        await revisionMarkdownStreamSink.abort(toErrorMessage(err))
+      }
       disposeRunner(record.runner)
       record.runner = null
       if (record.session.status === 'running') {
@@ -1628,6 +1684,10 @@ export class BeeGameSessionManager {
         )
       }
     } finally {
+      const terminalTurnId = record.currentTurnId
+      if (terminalTurnId) {
+        await this.recordTerminalUsage(record, terminalTurnId)
+      }
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
       }
@@ -1635,11 +1695,13 @@ export class BeeGameSessionManager {
         await rm(attachmentDirectory, { recursive: true, force: true })
       }
       record.currentTurnId = null
+      record.currentTurnStartingUsage = undefined
       record.assistantPartialTextByMessage.clear()
       record.activeAssistantMessageId = null
       record.emittedAssistantMessageIds.clear()
       record.thinkingBlockIndexes.clear()
       record.visibleThinkingBlockIndexes.clear()
+      record.documentAuthorWritingReported = false
       record.abortController = null
       record.session.updatedAt = new Date()
     }
@@ -1680,7 +1742,7 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
-    markdownStreamSink?: FoundationMarkdownStreamSink,
+    markdownStreamSink?: Pick<FoundationMarkdownStreamSink, 'observe'>,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
@@ -1755,53 +1817,62 @@ export class BeeGameSessionManager {
           }
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
-        this.queueUsageRecord(record, submittedTurnId, message)
       },
       requestPermission: request => this.requestPermission(record, request),
     })
-    await record.usageWriteTail
     if (executionError) throw executionError
   }
 
-  private queueUsageRecord(
+  private async recordTerminalUsage(
     record: SessionRecord,
     turnId: string,
-    message: DashboardSDKMessage,
-  ): void {
+  ): Promise<void> {
     if (!this.usageBillingBackend.recordUsage) return
-    const usage = this.deriveRuntimeSnapshot(record).usage
-    if (usage.total_tokens <= 0) return
-    const idempotencyKey = `usage:${record.session.id}:${turnId}:${createHash(
-      'sha256',
+    const providerCumulativeUsage = this.deriveRuntimeSnapshot(record).usage
+    const turnDeltaUsage = subtractRuntimeUsage(
+      providerCumulativeUsage,
+      record.currentTurnStartingUsage ?? emptyRuntimeUsage(),
     )
-      .update(JSON.stringify(usage))
-      .digest('hex')}`
-    if (
-      idempotencyKey === record.usagePendingWrite?.idempotencyKey ||
-      idempotencyKey === record.usageInFlightKey ||
-      idempotencyKey === record.usageLastCommittedKey
-    )
-      return
-    // A turn emits cumulative snapshots. Keep only the newest snapshot that
-    // has not started writing instead of serializing every intermediate delta.
-    record.usagePendingWrite = {
+    if (turnDeltaUsage.total_tokens <= 0) return
+    const terminalEvent = [...record.events]
+      .reverse()
+      .find(event =>
+        event.turnId === turnId &&
+        [
+          'result',
+          'turn.completed',
+          'turn.empty',
+          'turn.failed',
+          'session.stopped',
+          'session.failed',
+        ].includes(event.type),
+      )
+    const terminalDigest = createHash('sha256')
+      .update(JSON.stringify({
+        type: terminalEvent?.type ?? 'turn_terminal',
+        text: terminalEvent?.text ?? '',
+        turnDeltaUsage,
+      }))
+      .digest('hex')
+    const billingAuthority = record.workflowRunId && record.workflowDispatchId
+      ? `${record.workflowRunId}:${record.workflowDispatchId}`
+      : `${record.session.id}:${turnId}`
+    const idempotencyKey = `usage-terminal:${billingAuthority}:${terminalDigest}`
+    if (idempotencyKey === record.usageLastCommittedKey) return
+    const write = {
       turnId,
-      sourceMessageType: message.type,
-      usage,
+      sourceMessageType: terminalEvent?.type ?? 'turn_terminal',
+      usage: turnDeltaUsage,
       idempotencyKey,
+      metadata: {
+        providerCumulativeUsage,
+        turnDeltaUsage,
+        billableFinalUsage: turnDeltaUsage,
+        terminalDigest,
+      },
     }
-    if (record.usageWriteActive) return
-    record.usageWriteActive = true
-    record.usageWriteTail = this.drainUsageRecords(record).finally(() => {
-      record.usageWriteActive = false
-    })
-  }
-
-  private async drainUsageRecords(record: SessionRecord): Promise<void> {
-    while (record.usagePendingWrite) {
-      const write = record.usagePendingWrite
-      record.usagePendingWrite = undefined
-      record.usageInFlightKey = write.idempotencyKey
+    const previousWrite = record.usageWriteTail
+    record.usageWriteTail = previousWrite.catch(() => undefined).then(async () => {
       let failure: unknown
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
@@ -1817,7 +1888,6 @@ export class BeeGameSessionManager {
           }
         }
       }
-      record.usageInFlightKey = undefined
       if (!failure) {
         record.usageLastCommittedKey = write.idempotencyKey
         record.usageFailureReported = false
@@ -1832,12 +1902,19 @@ export class BeeGameSessionManager {
           idempotencyKey: write.idempotencyKey,
         })
       }
-    }
+    })
+    await record.usageWriteTail
   }
 
   private async writeUsageRecord(
     record: SessionRecord,
-    write: NonNullable<SessionRecord['usagePendingWrite']>,
+    write: {
+      turnId: string
+      sourceMessageType: string
+      usage: Usage
+      idempotencyKey: string
+      metadata: Record<string, unknown>
+    },
   ): Promise<void> {
     const options = {
       dataDir: record.userDataRoot ?? this.dashboardDataRoot,
@@ -1850,6 +1927,7 @@ export class BeeGameSessionManager {
         sourceMessageType: write.sourceMessageType,
         modelConfigId: record.session.modelConfigId,
         workflowWorker: Boolean(record.workflowWorker),
+        ...write.metadata,
       },
       ...(record.authToken ? { authToken: record.authToken } : {}),
     }
@@ -2166,14 +2244,13 @@ export class BeeGameSessionManager {
         : record.workflowWorkerType === 'document-author'
           ? isDocumentAuthorDurableProgress(event)
           : true
-      const thinkingEnded =
-        event.type === 'assistant.thinking' && event.payload?.status === 'ended'
-      const thinking = thinkingEnded
-        ? 'idle'
-        : event.type === 'assistant.thinking' ||
+      const thinking =
+        event.type === 'assistant.thinking' ||
             event.type === 'tool.started' ||
             (event.type === 'tool.progress' &&
-              event.payload?.phase === 'input_streaming')
+              event.payload?.phase === 'input_streaming') ||
+            (record.workflowWorkerType === 'document-author' &&
+              Boolean(documentActivityMessage))
           ? 'working'
           : event.type === 'turn.completed' ||
               event.type === 'turn.empty' ||
@@ -3150,7 +3227,7 @@ export function getLatestRuntimeUsage(
     // A turn can still be in flight after the previous result. Add only the
     // stream usage emitted after the latest modelUsage result; stream usage
     // before that result is already included in its cumulative counters.
-    const inFlight = sumUsageEvents(
+    const inFlight = latestCumulativeUsageEvent(
       events,
       findLastModelUsageEventIndex(events),
     )
@@ -3160,7 +3237,7 @@ export function getLatestRuntimeUsage(
 
   // Before a terminal result exists, message_delta is the only authoritative
   // usage source exposed by the streaming transport.
-  const streamedUsage = sumUsageEvents(events, -1)
+  const streamedUsage = latestCumulativeUsageEvent(events, -1)
   if (streamedUsage.total_tokens > 0) return streamedUsage
 
   return emptyRuntimeUsage()
@@ -3179,15 +3256,38 @@ function findLastModelUsageEventIndex(events: BeeGameEvent[]): number {
   return -1
 }
 
-function sumUsageEvents(
+function latestCumulativeUsageEvent(
   events: BeeGameEvent[],
   afterIndex: number,
 ): BeeGameRuntimeSnapshot['usage'] {
-  return events.slice(afterIndex + 1).reduce((total, event) => {
-    if (event.type !== 'usage') return total
-    addRuntimeUsage(total, getUsageFromEventPayload(event.payload))
-    return total
-  }, emptyRuntimeUsage())
+  // Native message_delta usage is a cumulative snapshot, not a delta. Keep
+  // the greatest observed value for each counter so partial snapshots (for
+  // example input tokens at message_start and output tokens at message_delta)
+  // compose without summing the same cumulative work repeatedly.
+  const latest = emptyRuntimeUsage()
+  for (const event of events.slice(afterIndex + 1)) {
+    if (event.type !== 'usage') continue
+    const usage = getUsageFromEventPayload(event.payload)
+    latest.prompt_tokens = Math.max(latest.prompt_tokens, usage.prompt_tokens)
+    latest.completion_tokens = Math.max(
+      latest.completion_tokens,
+      usage.completion_tokens,
+    )
+    latest.cache_read_tokens = Math.max(
+      latest.cache_read_tokens,
+      usage.cache_read_tokens,
+    )
+    latest.cache_creation_tokens = Math.max(
+      latest.cache_creation_tokens,
+      usage.cache_creation_tokens,
+    )
+  }
+  latest.total_tokens =
+    latest.prompt_tokens +
+    latest.completion_tokens +
+    latest.cache_read_tokens +
+    latest.cache_creation_tokens
+  return latest
 }
 
 function getRuntimeUsageForTurn(
@@ -3219,7 +3319,7 @@ function getRuntimeUsageForTurn(
         )
         addRuntimeUsage(
           turnUsage,
-          sumUsageEvents(
+          latestCumulativeUsageEvent(
             scopedEvents,
             findLastModelUsageEventIndex(scopedEvents),
           ),
@@ -3235,12 +3335,15 @@ function getRuntimeUsageForTurn(
   if (modelUsage) {
     addRuntimeUsage(
       modelUsage,
-      sumUsageEvents(scopedEvents, findLastModelUsageEventIndex(scopedEvents)),
+      latestCumulativeUsageEvent(
+        scopedEvents,
+        findLastModelUsageEventIndex(scopedEvents),
+      ),
     )
     return modelUsage
   }
 
-  const streamedUsage = sumUsageEvents(scopedEvents, -1)
+  const streamedUsage = latestCumulativeUsageEvent(scopedEvents, -1)
   if (streamedUsage.total_tokens > 0) return streamedUsage
   return emptyRuntimeUsage()
 }

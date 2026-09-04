@@ -38,8 +38,8 @@ describe('workflow stage snapshot display projection', () => {
   test('keeps live Round3 evidence metadata while rejecting invalid historical metadata', () => {
     const result = workflowStageSnapshotsForDisplay(
       {
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
+        phase: 'FOUNDATION_REVISION',
+        documentStep: 'FOUNDATION_REVISION',
         foundationAuditState: { status: 'planning', round: 3 },
         stageSnapshots: [
           stageSnapshot('DOCUMENT_DRAFTING', 2, {
@@ -86,8 +86,8 @@ describe('workflow stage snapshot display projection', () => {
   test('does not downgrade an already projected stopped reason to generic blocked', () => {
     const result = workflowStageSnapshotsForDisplay(
       {
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
+        phase: 'FOUNDATION_REVISION',
+        documentStep: 'FOUNDATION_REVISION',
         foundationAuditState: { status: 'planning' },
         stageSnapshots: [{
           ...stageSnapshot('FOUNDATION_REVISION', 4, {}),
@@ -112,8 +112,8 @@ describe('workflow stage snapshot display projection', () => {
   test('does not reclassify an already projected stopped task reason', () => {
     const result = workflowStageSnapshotsForDisplay(
       {
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
+        phase: 'FOUNDATION_REVISION',
+        documentStep: 'FOUNDATION_REVISION',
         foundationAuditState: { status: 'planning' },
         stageSnapshots: [stageSnapshot('FOUNDATION_REVISION', 4, {})],
       },

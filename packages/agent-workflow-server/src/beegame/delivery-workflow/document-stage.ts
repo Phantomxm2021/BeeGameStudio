@@ -6,7 +6,6 @@ import {
   commitAuthoredFoundationDocument,
   readAuthoredDocumentReceipt,
 } from '../authored-document-receipt'
-import { validateCompleteGameDocumentMarkdown } from '../complete-game-document'
 import { computeDocumentRevision, computeWorkspaceRevision } from './revision'
 import { getGameDocumentContract } from './game-document-contracts'
 import {
@@ -37,7 +36,6 @@ type ReadinessAudit = (
   options?: {
     includeChecklist?: boolean
     includeAssetManifest?: boolean
-    requireCompleteFoundation?: boolean
   },
 ) => { valid: boolean; issues: string[] }
 
@@ -50,7 +48,6 @@ async function defaultAudit(
   options?: {
     includeChecklist?: boolean
     includeAssetManifest?: boolean
-    requireCompleteFoundation?: boolean
   },
 ): Promise<ReturnType<ReadinessAudit>> {
   const { auditDocumentReadiness } = await import('../document-readiness-audit')
@@ -503,7 +500,6 @@ async function completeInitialFoundationDocumentDraft(input: {
       previous:
         input.run.activeDispatch?.request?.contract.previousDocumentMetadata,
     }),
-    ...completeFoundationDocumentIssues(input.workspacePath, expectedPath),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
       ? ['initial document author cannot resolve review findings']
       : []),
@@ -563,12 +559,10 @@ async function completeInitialFoundationDocumentDraft(input: {
     ? input.audit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
-        requireCompleteFoundation: true,
       })
     : await defaultAudit(input.workspacePath, {
         includeChecklist: false,
         includeAssetManifest: false,
-        requireCompleteFoundation: true,
       })
   if (!readiness.valid)
     return {
@@ -620,7 +614,6 @@ async function completeParallelFoundationDraft(input: {
     )
       ? ['parallel document author returned an unsafe document path']
       : []),
-    ...completeFoundationDocumentIssues(input.workspacePath, canonicalPath),
     ...((input.terminal.resolvedFindingIds?.length ?? 0) > 0
       ? ['parallel document author cannot resolve review findings']
       : []),
@@ -667,7 +660,6 @@ async function completeParallelFoundationDraft(input: {
   const readiness = await defaultAudit(input.workspacePath, {
     includeChecklist: false,
     includeAssetManifest: false,
-    requireCompleteFoundation: true,
   })
   if (!readiness.valid)
     return {
@@ -679,34 +671,5 @@ async function completeParallelFoundationDraft(input: {
     ...base,
     phase: 'DOCUMENT_REVIEW',
     documentStep: 'FOUNDATION_REVIEW',
-  }
-}
-
-function completeFoundationDocumentIssues(
-  workspacePath: string,
-  path: FoundationDocumentPath,
-): string[] {
-  try {
-    const content = readFileSync(join(workspacePath, path), 'utf8')
-    const lines = content.split('\n')
-    if (lines[0]?.trim() !== '---')
-      return [`${path}: canonical front matter is missing`]
-    const closingIndex = lines.findIndex(
-      (line, index) => index > 0 && line.trim() === '---',
-    )
-    if (closingIndex < 0)
-      return [`${path}: canonical front matter is incomplete`]
-    validateCompleteGameDocumentMarkdown(
-      path,
-      lines
-        .slice(closingIndex + 1)
-        .join('\n')
-        .trimStart(),
-    )
-    return []
-  } catch (error) {
-    return [
-      `${path}: ${error instanceof Error ? error.message : 'complete document validation failed'}`,
-    ]
   }
 }

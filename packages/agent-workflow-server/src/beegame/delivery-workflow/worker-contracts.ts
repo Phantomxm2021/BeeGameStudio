@@ -342,25 +342,27 @@ export const foundationSemanticRecheckStructuredOutputJsonSchema = {
 export const foundationRevisionDeclarationSchema = z.discriminatedUnion('status', [
   z.object({
     status: z.literal('APPLIED'),
-    changedSectionIds: z.array(z.string().min(1)).min(1),
-  }).strict().superRefine((value, context) => {
-    if (new Set(value.changedSectionIds).size !== value.changedSectionIds.length)
-      context.addIssue({ code: 'custom', path: ['changedSectionIds'], message: 'changedSectionIds must be unique' })
-  }),
+  }).strict(),
 ])
 
 
 const foundationRevisionReceiptSchema = z.object({
+  scope: z.enum(['section', 'document']),
   taskId: z.string().min(1),
   round: z.number().int().positive(),
   documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
   issueIds: z.array(z.string().min(1)).min(1),
   baseDocumentDigest: z.string().regex(/^[a-f0-9]{64}$/),
   stagedDocumentDigest: z.string().regex(/^[a-f0-9]{64}$/),
-  changedSectionIds: z.array(z.string().min(1)).min(1),
+  changedSectionIds: z.array(z.string().min(1)),
   stagedPath: z.string().min(1),
   terminalDigest: z.string().regex(/^[a-f0-9]{64}$/),
-}).strict()
+}).strict().superRefine((receipt, context) => {
+  if (receipt.scope === 'section' && receipt.changedSectionIds.length === 0)
+    context.addIssue({ code: 'custom', path: ['changedSectionIds'], message: 'section revision requires changed sections' })
+  if (receipt.scope === 'document' && receipt.changedSectionIds.length !== 0)
+    context.addIssue({ code: 'custom', path: ['changedSectionIds'], message: 'document revision forbids changed sections' })
+})
 
 export const foundationRevisionToolResultSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('APPLIED'), receipt: foundationRevisionReceiptSchema }).strict(),
@@ -387,6 +389,7 @@ export const documentAuthorTerminalSchema = z
     resolvedFindingIds: z.array(z.string().min(1)).optional(),
     authoringMetrics: z
       .object({
+        usageStatus: z.enum(['measured', 'unavailable']),
         inputTokens: z.number().int().nonnegative(),
         cacheReadTokens: z.number().int().nonnegative(),
         cacheCreationTokens: z.number().int().nonnegative(),
@@ -399,6 +402,8 @@ export const documentAuthorTerminalSchema = z
         authorityProjection: z
           .object({
             byteLength: z.number().int().nonnegative(),
+            modelByteLength: z.number().int().nonnegative().optional(),
+            promptByteLength: z.number().int().nonnegative().optional(),
             rangeCount: z.number().int().nonnegative(),
             projectedLineCount: z.number().int().nonnegative(),
           })

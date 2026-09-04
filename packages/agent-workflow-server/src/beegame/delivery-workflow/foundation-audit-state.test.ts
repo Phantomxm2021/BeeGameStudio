@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import {
   activeFoundationRevisionBundle,
   activeFoundationRevisionTasks,
+  FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT,
+  FOUNDATION_AUDIT_STATE_SCHEMA_VERSION,
   FOUNDATION_AUDIT_NON_REVISION_STATUSES,
   FOUNDATION_REVISION_PHASES,
   foundationAuditStateSchema,
@@ -13,8 +15,8 @@ import type { FoundationFactTask } from './foundation-fact-runtime'
 
 describe('foundationAuditState schema', () => {
   const valid = {
-    schemaVersion: 9 as const,
-    schemaFingerprint: 'foundation-audit-state-v9' as const,
+    schemaVersion: FOUNDATION_AUDIT_STATE_SCHEMA_VERSION,
+    schemaFingerprint: FOUNDATION_AUDIT_STATE_SCHEMA_FINGERPRINT,
     status: 'index_staged' as const,
     revision: 'revision-1',
     documentDigests: Object.fromEntries(
@@ -27,7 +29,7 @@ describe('foundationAuditState schema', () => {
     tasks: [] as FoundationFactTask[],
   } as const
 
-  test('keeps audit-only statuses separate from the shared revision phase authority', () => {
+  test('keeps audit-only statuses separate from revision statuses', () => {
     expect(FOUNDATION_AUDIT_NON_REVISION_STATUSES).toEqual([
       'index_staged',
       'extracting_facts',
@@ -76,8 +78,8 @@ describe('foundationAuditState schema', () => {
   test('rejects the prior audit-state schema without a compatibility reader', () => {
     expect(() => parseFoundationAuditState({
       ...valid,
-      schemaVersion: 8,
-      schemaFingerprint: 'foundation-audit-state-v8',
+      schemaVersion: 10,
+      schemaFingerprint: 'foundation-audit-state-v10',
     })).toThrow(/schemaVersion|schemaFingerprint/)
   })
 
@@ -148,7 +150,7 @@ describe('foundationAuditState schema', () => {
         modelTier: 'fast' as const, status: 'completed' as const, attempt: 1, terminalDigest: digest,
         receiptPath: '.beegame/audit/foundation/revision-1/round-1/tasks/revision-1.impacted-facts.1.0/receipt.json', receiptDigest: digest,
         usage: { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, durationMs: 0,
-        dispatch: { dispatchId: 'dispatch-1', workerType: 'foundation-fact-extractor' as const, phase: 'DOCUMENT_REVIEW' as const, taskId: 'revision-1.impacted-facts.1.0', revision: 'revision-1', status: 'completed' as const, terminalResult: { ok: true }, startedAt: '2026-08-24T00:00:00.000Z', finishedAt: '2026-08-24T00:00:00.000Z' },
+        dispatch: { dispatchId: 'dispatch-1', workerType: 'foundation-fact-extractor' as const, phase: 'FOUNDATION_REVISION' as const, taskId: 'revision-1.impacted-facts.1.0', revision: 'revision-1', status: 'completed' as const, terminalResult: { ok: true }, startedAt: '2026-08-24T00:00:00.000Z', finishedAt: '2026-08-24T00:00:00.000Z' },
       }],
       publication: { preparedPath: 'prepared', journalPath: 'journal', committedPath: 'committed', authorityDigest: digest, resultingRevision: 'revision-1', resultingIssueRegistryDigest: digest },
     }

@@ -25,7 +25,7 @@ const issue = (
   },
   expected: `expected-${id}`,
   actual,
-  remediation: { kind: 'patch', documentPath: 'docs/GDD.md', sectionIds: ['vision'] },
+  remediation: { kind: 'patch', scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['vision'] },
 })
 
 const snapshot = (

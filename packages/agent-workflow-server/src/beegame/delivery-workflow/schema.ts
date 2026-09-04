@@ -14,7 +14,10 @@ import type {
   WorkflowUnitAcceptedEvent,
   WorkerDispatchRequest,
 } from './types'
-import { foundationAuditStateSchema } from './foundation-audit-state'
+import {
+  foundationAuditStateSchema,
+  isFoundationRevisionPhase,
+} from './foundation-audit-state'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
@@ -25,6 +28,7 @@ export const DELIVERY_PHASES = [
   'BRIEF_CONFIRMED',
   'DOCUMENT_DRAFTING',
   'DOCUMENT_REVIEW',
+  'FOUNDATION_REVISION',
   'RESOURCE_PREPARATION',
   'ATOMIC_TASK_PLANNING',
   'IMPLEMENTATION',
@@ -107,6 +111,30 @@ const workerDispatchRequestSchema: z.ZodType<WorkerDispatchRequest> = z
     contract: z.record(z.string(), z.unknown()),
   })
   .strict()
+  .superRefine((request, context) => {
+    if (
+      request.workerType === 'foundation-document-reviser' &&
+      request.phase !== 'FOUNDATION_REVISION'
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['phase'],
+        message: 'foundation document reviser can only run in FOUNDATION_REVISION',
+      })
+    if (
+      request.phase === 'FOUNDATION_REVISION' &&
+      ![
+        'foundation-document-reviser',
+        'foundation-fact-extractor',
+        'foundation-semantic-reviewer',
+      ].includes(request.workerType)
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['workerType'],
+        message: 'FOUNDATION_REVISION rejects non-revision workers',
+      })
+  })
 
 export const atomicTaskSchema: z.ZodType<AtomicTask> = z
   .object({
@@ -184,6 +212,17 @@ export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
     finishedAt: z.string().datetime().optional(),
   })
   .strict()
+  .superRefine((record, context) => {
+    if (
+      record.workerType === 'foundation-document-reviser' &&
+      record.phase !== 'FOUNDATION_REVISION'
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['phase'],
+        message: 'foundation document reviser can only run in FOUNDATION_REVISION',
+      })
+  })
 
 export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
   .object({
@@ -266,6 +305,7 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
       .enum([
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
+        'FOUNDATION_REVISION',
         'CHECKLIST_DRAFTING',
       ])
       .optional(),
@@ -401,6 +441,7 @@ export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEven
         .enum([
           'FOUNDATION_DRAFTING',
           'FOUNDATION_REVIEW',
+          'FOUNDATION_REVISION',
           'CHECKLIST_DRAFTING',
         ])
         .optional(),
@@ -469,6 +510,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       .enum([
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
+        'FOUNDATION_REVISION',
         'CHECKLIST_DRAFTING',
       ])
       .optional(),
@@ -503,6 +545,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
   .superRefine((run, context) => {
     const requiresCompletedFoundation =
       run.phase === 'DOCUMENT_REVIEW' ||
+      run.phase === 'FOUNDATION_REVISION' ||
       run.phase === 'RESOURCE_PREPARATION' ||
       run.phase === 'ATOMIC_TASK_PLANNING' ||
       run.phase === 'IMPLEMENTATION' ||
@@ -519,6 +562,28 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         path: ['foundationDraftState', 'completedPaths'],
         message:
           'foundation review and downstream phases require all durable authoring checkpoints',
+      })
+
+    const revisionStatus = isFoundationRevisionPhase(
+      run.foundationAuditState?.status,
+    )
+    if (revisionStatus && (run.phase !== 'FOUNDATION_REVISION' || run.documentStep !== 'FOUNDATION_REVISION'))
+      context.addIssue({
+        code: 'custom',
+        path: ['phase'],
+        message: 'foundation revision state requires the exclusive FOUNDATION_REVISION phase and document step',
+      })
+    if (run.phase === 'FOUNDATION_REVISION' && (!revisionStatus || run.documentStep !== 'FOUNDATION_REVISION'))
+      context.addIssue({
+        code: 'custom',
+        path: ['foundationAuditState'],
+        message: 'FOUNDATION_REVISION requires an active revision state',
+      })
+    if (run.documentStep === 'FOUNDATION_REVISION' && run.phase !== 'FOUNDATION_REVISION')
+      context.addIssue({
+        code: 'custom',
+        path: ['documentStep'],
+        message: 'foundation revision document step cannot run outside FOUNDATION_REVISION',
       })
 
   })

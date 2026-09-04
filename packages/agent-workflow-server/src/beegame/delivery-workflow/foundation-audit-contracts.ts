@@ -128,7 +128,7 @@ function bindingDrafts(
         target,
         expected: 'both contract facts must exist',
         actual: `missing ${!sourceFact ? binding.sourceFactKey : binding.targetFactKey}`,
-        remediation: { kind: 'patch', documentPath: fix.documentPath, sectionIds: [fix.sectionId] },
+        remediation: { kind: 'patch', scope: 'section', documentPath: fix.documentPath, sectionIds: [fix.sectionId] },
         conflictIdentity: conflict,
       })
       continue
@@ -145,7 +145,7 @@ function bindingDrafts(
         target,
         expected: `${binding.sourceFactKey} and ${binding.targetFactKey} must match`,
         actual: `${text(sourceFact.value)} != ${text(targetFact.value)}`,
-        remediation: { kind: 'patch', documentPath: target.documentPath, sectionIds: [target.sectionId] },
+        remediation: { kind: 'patch', scope: 'section', documentPath: target.documentPath, sectionIds: [target.sectionId] },
         conflictIdentity: conflict,
       })
     }

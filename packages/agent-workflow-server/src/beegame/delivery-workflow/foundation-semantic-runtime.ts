@@ -20,6 +20,7 @@ export type FoundationSemanticTask = {
   status: FoundationSemanticTaskStatus
   attempt: number
   dispatch?: DispatchRecord
+  attemptHistory?: DispatchRecord[]
   terminalDigest?: string
   receiptPath?: string
   receiptDigest?: string
@@ -39,6 +40,7 @@ export type FoundationConfirmationTask = {
   status: FoundationSemanticTaskStatus
   attempt: 0 | 1
   dispatch?: DispatchRecord
+  attemptHistory?: DispatchRecord[]
   terminalDigest?: string
   receiptPath?: string
   receiptDigest?: string
@@ -212,7 +214,7 @@ export function claimFoundationSemanticTasks(
     if (task.attempt >= maxAttempts) return { ...task, status: 'needs_action' as const, failureReason: 'semantic task attempt cap exceeded' }
     const dispatchId = input.dispatchIdFor(task); if (!dispatchId.trim()) throw new Error('semantic dispatch ID is required')
     slots -= 1
-    return { ...task, status: 'running' as const, attempt: (task.attempt + 1) as never, dispatch: { dispatchId, workerType: 'foundation-semantic-reviewer' as const, phase: 'DOCUMENT_REVIEW' as const, taskId: task.taskId, revision: task.revision, status: 'running' as const, startedAt: input.now }, failureReason: undefined }
+    return { ...task, ...(task.dispatch ? { attemptHistory: [...(task.attemptHistory ?? []), task.dispatch] } : {}), status: 'running' as const, attempt: (task.attempt + 1) as never, dispatch: { dispatchId, workerType: 'foundation-semantic-reviewer' as const, phase: 'DOCUMENT_REVIEW' as const, taskId: task.taskId, revision: task.revision, status: 'running' as const, startedAt: input.now }, failureReason: undefined }
   }) }
 }
 

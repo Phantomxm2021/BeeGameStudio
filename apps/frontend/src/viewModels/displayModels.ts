@@ -267,11 +267,22 @@ const normalizeWorkflowBlock = (
       : undefined
   return {
     message,
+    ...(trimString(block.detail) ? { detail: trimString(block.detail) } : {}),
     ...(trimString(block.code) ? { code: trimString(block.code) } : {}),
     ...(trimString(block.diagnosticId ?? block.diagnostic_id)
       ? {
           diagnosticId: trimString(block.diagnosticId ?? block.diagnostic_id),
         }
+      : {}),
+    ...(trimString(block.stage) ? { stage: trimString(block.stage) } : {}),
+    ...(trimString(block.taskId ?? block.task_id)
+      ? { taskId: trimString(block.taskId ?? block.task_id) }
+      : {}),
+    ...(trimString(block.documentPath ?? block.document_path)
+      ? { documentPath: trimString(block.documentPath ?? block.document_path) }
+      : {}),
+    ...(typeof block.retryable === 'boolean'
+      ? { retryable: block.retryable }
       : {}),
     nextAction,
   }

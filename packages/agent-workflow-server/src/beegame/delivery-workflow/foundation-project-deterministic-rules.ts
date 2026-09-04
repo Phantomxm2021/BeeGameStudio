@@ -101,7 +101,7 @@ function gapBudgetIssueDraft(
     source,
     expected: GAP_BUDGET_EXPECTED,
     actual,
-    remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
+    remediation: { kind: 'patch', scope: 'section', documentPath: source.documentPath, sectionIds: [source.sectionId] },
     conflictIdentity: {
       authority: FIXED_SETTLEMENT_DEW_AUTHORITY,
       documentPath: source.documentPath,

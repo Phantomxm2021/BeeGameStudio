@@ -15,7 +15,7 @@ import {
   FOUNDATION_SEMANTIC_AUDIT_MANIFEST,
   FOUNDATION_SEMANTIC_CHECKS,
 } from './foundation-semantic-audit'
-import { transitionDeliveryRun } from './transition'
+import { assertDeliveryRunInvariants, transitionDeliveryRun } from './transition'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type DeliveryRun,
@@ -45,6 +45,7 @@ function auditState(
     manifest: {
       revision: REVISION,
       status: 'index_staged',
+      derivationMode: 'complete',
       catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
       sectionIndexDigest: DIGEST,
     },
@@ -143,6 +144,7 @@ function semanticAuditState(
     manifest: {
       revision: REVISION,
       status: 'index_staged',
+      derivationMode: 'complete',
       catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
       sectionIndexDigest: DIGEST,
     },
@@ -261,12 +263,13 @@ function revisionState(): FoundationAuditState {
       source: { documentPath: 'docs/GDD.md' as const, sectionId: 'vision', heading: 'Vision', startLine: 1, endLine: 1, digest: DIGEST },
       expected: 'expected',
       actual: 'actual',
-      remediation: { kind: 'patch' as const, documentPath: 'docs/GDD.md' as const, sectionIds: ['vision'] },
+      remediation: { kind: 'patch' as const, scope: 'section' as const, documentPath: 'docs/GDD.md' as const, sectionIds: ['vision'] },
     } satisfies AuditIssue,
   }
   const documentTask = {
     taskId: 'document-revision-0',
     kind: 'document-revision' as const,
+    scope: 'section' as const,
     revision: REVISION,
     round: 2 as const,
     packetPath: foundationRevisionPacketPath(REVISION, 2, 'document-revision-0'),
@@ -289,6 +292,7 @@ function revisionState(): FoundationAuditState {
     manifest: {
       revision: REVISION,
       status: 'index_staged',
+      derivationMode: 'complete',
       catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
       sectionIndexDigest: DIGEST,
     },
@@ -332,8 +336,8 @@ function validationBoundaryState(): FoundationAuditState {
 function revisionRun(state: FoundationAuditState): DeliveryRun {
   return {
     ...createTestDeliveryRun({ projectId: 'transition-retry-revision', ownerId: 'transition-owner' }),
-    phase: 'DOCUMENT_REVIEW',
-    documentStep: 'FOUNDATION_REVIEW',
+    phase: 'FOUNDATION_REVISION',
+    documentStep: 'FOUNDATION_REVISION',
     status: 'needs_action',
     blockedReason: 'revision worker needs attention',
     foundationAuditState: state,
@@ -351,7 +355,7 @@ function completedRevisionState(): FoundationAuditState {
         dispatch: {
           dispatchId: `dispatch-${task.taskId}`,
           workerType: task.kind === 'document-revision' ? 'foundation-document-reviser' as const : 'foundation-semantic-reviewer' as const,
-          phase: 'DOCUMENT_REVIEW' as const,
+          phase: 'FOUNDATION_REVISION' as const,
           taskId: task.taskId,
           revision: task.revision,
           status: 'completed' as const,
@@ -372,6 +376,7 @@ function completedRevisionState(): FoundationAuditState {
         }
       }
       if (task.kind !== 'document-revision') throw new Error('completed fixture requires document revisions')
+      if (task.scope !== 'section') throw new Error('completed fixture requires section revisions')
       return {
         ...task,
         ...terminalEvidence,
@@ -379,6 +384,7 @@ function completedRevisionState(): FoundationAuditState {
         attempt: 1,
         terminalDigest: DIGEST,
         receipt: {
+          scope: 'section' as const,
           taskId: task.taskId,
           round: task.round,
           documentPath: task.documentPath,
@@ -395,6 +401,22 @@ function completedRevisionState(): FoundationAuditState {
 }
 
 describe('foundation retry transitions', () => {
+  test('rejects Reviewer and Revision state crossing their durable phase boundary', () => {
+    const revision = revisionRun(revisionState())
+    expect(() => assertDeliveryRunInvariants({
+      ...revision,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+    })).toThrow(/exclusive FOUNDATION_REVISION phase/i)
+
+    const review = auditRun(auditState())
+    expect(() => assertDeliveryRunInvariants({
+      ...review,
+      phase: 'FOUNDATION_REVISION',
+      documentStep: 'FOUNDATION_REVISION',
+    })).toThrow(/active revision state/i)
+  })
+
   test('retries all eligible document-facts tasks and preserves aggregate usage', () => {
     const run = auditRun(auditState())
     const retried = transitionDeliveryRun(run, { type: 'retry' })
@@ -438,7 +460,7 @@ describe('foundation retry transitions', () => {
       dispatch: {
         dispatchId: 'dispatch-document-revision-0',
         workerType: 'foundation-document-reviser' as const,
-        phase: 'DOCUMENT_REVIEW' as const,
+        phase: 'FOUNDATION_REVISION' as const,
         taskId: documentTask.taskId,
         revision: documentTask.revision,
         status: 'invalid' as const,
@@ -485,24 +507,6 @@ describe('foundation retry transitions', () => {
     })
     expect(taskRetry.status).toBe('needs_action')
     expect(taskRetry.foundationAuditState).toEqual(before)
-  })
-
-  test('replans a legacy validating boundary that never materialized impacted-fact tasks', () => {
-    const before = validationBoundaryState()
-    const documentOnly = {
-      ...before,
-      tasks: before.tasks.filter(task => task.kind === 'document-revision'),
-      revisionBundles: before.revisionBundles?.map(bundle => ({
-        ...bundle,
-        taskIds: bundle.taskIds.filter(taskId => before.tasks.some(task => task.taskId === taskId && task.kind === 'document-revision')),
-      })),
-    }
-    const retried = transitionDeliveryRun(revisionRun(documentOnly), { type: 'retry' })
-
-    expect(retried.status).toBe('running')
-    expect(retried.blockedReason).toBeUndefined()
-    expect(retried.foundationAuditState?.status).toBe('rebuilding_facts')
-    expect(retried.foundationAuditState?.tasks).toEqual(documentOnly.tasks)
   })
 
   test('re-enters a failed planning boundary', () => {

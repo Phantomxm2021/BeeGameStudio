@@ -131,7 +131,7 @@ function valueFromText(
     const values = splitList(value).map(item =>
       Number(item.replace(/[, ]/g, '')),
     )
-    return values.length && values.every(Number.isFinite) ? values : undefined
+    return (values.length > 0 || definition.valueSpec.minItems === 0) && values.every(Number.isFinite) ? values : undefined
   }
   const values = splitList(value)
   if (definition.key === 'level.required_assets') {
@@ -147,7 +147,7 @@ function valueFromText(
       .filter(Boolean)
     return normalized.length ? normalized : undefined
   }
-  return values.length ? values : undefined
+  return values.length > 0 || definition.valueSpec.minItems === 0 ? values : undefined
 }
 
 function normalizeSharedResourceLabel(value: string): string {

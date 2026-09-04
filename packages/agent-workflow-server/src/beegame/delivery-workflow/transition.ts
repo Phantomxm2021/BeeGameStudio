@@ -10,8 +10,7 @@ import type {
   FoundationAuditTask,
   FoundationRevisionTask,
 } from './foundation-audit-state'
-import { activeFoundationRevisionTasks, foundationRuntimeTasks } from './foundation-audit-state'
-import { isActiveFoundationRepairState } from './display-progress'
+import { activeFoundationRevisionTasks, foundationRuntimeTasks, isFoundationRevisionPhase } from './foundation-audit-state'
 
 export class WorkflowTransitionError extends Error {
   constructor(
@@ -582,8 +581,8 @@ export function transitionDeliveryRun(
               }
             : undefined
         const revisionState =
-          run.phase === 'DOCUMENT_REVIEW' &&
-          isActiveFoundationRepairState(run.foundationAuditState)
+          run.phase === 'FOUNDATION_REVISION' &&
+          isFoundationRevisionPhase(run.foundationAuditState?.status)
             ? run.foundationAuditState
             : undefined
         const auditState =
@@ -655,11 +654,6 @@ export function transitionDeliveryRun(
               event.taskId,
             )
           : false
-        const revisionBoundaryNeedsFactReplan = Boolean(
-          revisionBoundaryRevived &&
-          revisionState?.status === 'validating' &&
-          activeFoundationRevisionTasks(revisionState).every(task => task.kind === 'document-revision'),
-        )
         const foundationStateInCurrentPhase = !!(
           run.phase === 'DOCUMENT_DRAFTING' &&
           run.foundationDraftState.documents?.some(
@@ -679,9 +673,6 @@ export function transitionDeliveryRun(
           ...(draftRevived ? { foundationDraftState: nextDraftState } : {}),
           ...(auditRevived ? { foundationAuditState: nextAuditState } : {}),
           ...(revisionRevived ? { foundationAuditState: nextRevisionState } : {}),
-          ...(revisionBoundaryNeedsFactReplan
-            ? { foundationAuditState: { ...revisionState!, status: 'rebuilding_facts' as const } }
-            : {}),
           ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
             ? {
                 activeTaskId: undefined,

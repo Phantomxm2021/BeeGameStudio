@@ -5,7 +5,6 @@ import {
   nativeRuntimeEnvironment,
   nativeRuntimeCommand,
 } from './native-cli-process-runner'
-import type { FoundationDocumentPath } from './delivery-workflow/types'
 
 const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
@@ -15,7 +14,7 @@ function startRuntime(
   options: {
     markdownStream?: boolean
     workflowJsonSchema?: Record<string, unknown>
-    targetPath?: FoundationDocumentPath
+    workflowWorkerType?: 'foundation-document-reviser'
   } = {},
 ) {
   return createNativeCliProcessRunner({
@@ -38,13 +37,16 @@ function startRuntime(
             workspacePath: process.cwd(),
             runId: 'run-1',
             dispatchId: 'dispatch-1',
-            targetPath: options.targetPath ?? ('docs/GDD.md' as const),
+            targetPath: 'docs/GDD.md' as const,
             maxBytes: 512_000,
           },
         }
       : {}),
     ...(options.workflowJsonSchema
       ? { workflowJsonSchema: options.workflowJsonSchema }
+      : {}),
+    ...(options.workflowWorkerType
+      ? { workflowWorker: true, workflowWorkerType: options.workflowWorkerType }
       : {}),
   })
 }
@@ -174,12 +176,24 @@ describe('native CLI process runner', () => {
     expect(command[command.indexOf('--tools') + 1]).toBe('')
   })
 
-  test('exposes only Read, Edit and the native terminal tool to a revision worker', () => {
+  test('disables tools for a section revision raw Markdown worker', () => {
     const command = nativeRuntimeCommand({
       sessionId: 'beegame_revision_worker', cwd: process.cwd(), env: {},
       workflowWorker: true, workflowWorkerType: 'foundation-document-reviser',
+      workflowRevisionContract: { scope: 'section' },
     })
-    expect(command.slice(command.indexOf('--tools') + 1)).toEqual(['Read', 'Edit', 'SubmitFoundationRevisionResult'])
+    expect(command.slice(command.indexOf('--tools') + 1)).toEqual([''])
+  })
+
+  test('adds the bound reader only for a document revision worker', () => {
+    const command = nativeRuntimeCommand({
+      sessionId: 'beegame_document_revision_worker', cwd: process.cwd(), env: {},
+      workflowWorker: true, workflowWorkerType: 'foundation-document-reviser',
+      workflowRevisionContract: { scope: 'document' },
+    })
+    expect(command.slice(command.indexOf('--tools') + 1)).toEqual([
+      'ReadAssignedFoundationRevision',
+    ])
   })
 
   test('disables built-in tools for a StructuredOutput workflow turn while retaining its JSON schema', () => {
@@ -368,7 +382,7 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
-  test('accepts a mechanically closed Markdown body when provider stop metadata is missing', async () => {
+  test('accepts visible Markdown when provider stop metadata is missing', async () => {
     const runtime = await startRuntime({ markdownStream: true })
     const messages: Record<string, unknown>[] = []
     await expect(
@@ -389,7 +403,7 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
-  test('recovers a truncated Markdown result in the same native turn and session', async () => {
+  test('accepts a nonempty Markdown result without structural continuation', async () => {
     const runtime = await startRuntime({ markdownStream: true })
     const messages: Record<string, unknown>[] = []
 
@@ -404,14 +418,14 @@ describe('native CLI process runner', () => {
     expect(messages.at(-1)).toMatchObject({
       type: 'result',
       subtype: 'success',
-      stop_reason: 'end_turn',
-      received_user_count: 2,
+      stop_reason: '',
+      received_user_count: 1,
     })
-    expect(messages.at(-1)?.result).toContain('## Vision and Product Promise')
+    expect(messages.at(-1)?.result).toContain('## Executive Summary')
     runtime.dispose?.()
   })
 
-  test('continues a long Markdown document until its structure closes', async () => {
+  test('does not continue a long Markdown document based on structure', async () => {
     const runtime = await startRuntime({ markdownStream: true })
     const messages: Record<string, unknown>[] = []
 
@@ -426,197 +440,33 @@ describe('native CLI process runner', () => {
     expect(messages.at(-1)).toMatchObject({
       type: 'result',
       subtype: 'success',
-      received_user_count: 3,
+      received_user_count: 1,
     })
-    expect(messages.at(-1)?.result).toContain('## Production Materials')
+    expect(messages.at(-1)?.result).not.toContain('## Production Materials')
     runtime.dispose?.()
   })
 
-  test('classifies an unrecovered Markdown truncation as non-retryable transport failure', async () => {
+  test('accepts structurally incomplete Markdown for downstream Review', async () => {
     const runtime = await startRuntime({ markdownStream: true })
 
-    await expect(
-      runtime.submit({
+    await expect(runtime.submit({
         prompt: 'truncated-markdown-forever',
         signal: new AbortController().signal,
         onMessage: () => undefined,
         requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow('foundation_transport_needs_action')
+      })).resolves.toBeUndefined()
     runtime.dispose?.()
   })
 
-  test('fails a structurally invalid Markdown response after one replacement attempt', async () => {
+  test('accepts structurally invalid Markdown for downstream Review', async () => {
     const runtime = await startRuntime({ markdownStream: true })
 
-    await expect(
-      runtime.submit({
+    await expect(runtime.submit({
         prompt: 'malformed-markdown-end-turn',
         signal: new AbortController().signal,
         onMessage: () => undefined,
         requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow('Markdown structural replacement')
-    runtime.dispose?.()
-  })
-
-  test('replaces a structurally invalid Asset Plan candidate in the same dispatch', async () => {
-    const runtime = await startRuntime({
-      markdownStream: true,
-      targetPath: 'docs/ASSET_PLAN.md',
-    })
-    const messages: Record<string, unknown>[] = []
-
-    await runtime.submit({
-      prompt: 'asset-structural-replacement',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    const result = messages.at(-1)!
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
-    expect(result).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      received_user_count: 2,
-      received_session_ids: ['', '550e8400-e29b-41d4-a716-446655440000'],
-    })
-    const receivedPrompts = result.received_prompts as string[]
-    expect(receivedPrompts).toHaveLength(2)
-    expect(receivedPrompts[1]).toContain('complete replacement')
-    expect(receivedPrompts[1]).toContain(
-      'canonical material headings must follow Production Materials',
-    )
-    expect(receivedPrompts[1]).toContain('# <document title>')
-    expect(receivedPrompts[1]).toContain('## Production Materials')
-    const accepted = String(result.result)
-    expect(accepted).toBe(fixtureCompleteAssetMarkdown())
-    for (const heading of assetMaterialHeadings())
-      expect(accepted.split(heading).length - 1).toBe(1)
-    runtime.dispose?.()
-  })
-
-  test.each([
-    ['asset-structural-replacement-empty', 'empty'],
-    ['asset-structural-replacement-identical', 'identical'],
-    ['asset-structural-replacement-still-invalid', 'still-invalid'],
-  ])('fails one structural replacement cycle for %s', async (prompt, _) => {
-    const runtime = await startRuntime({
-      markdownStream: true,
-      targetPath: 'docs/ASSET_PLAN.md',
-    })
-    let result: Record<string, unknown> | undefined
-
-    await expect(
-      runtime.submit({
-        prompt,
-        signal: new AbortController().signal,
-        onMessage: message => {
-          if (message.type === 'result') result = message
-        },
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow('Markdown structural replacement')
-    expect(result).toBeUndefined()
-    runtime.dispose?.()
-  })
-
-  test('accepts a terminal-only replacement result in the same dispatch', async () => {
-    const runtime = await startRuntime({
-      markdownStream: true,
-      targetPath: 'docs/ASSET_PLAN.md',
-    })
-    const messages: Record<string, unknown>[] = []
-
-    await runtime.submit({
-      prompt: 'asset-structural-replacement-terminal-only',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    expect(messages.at(-1)?.result).toBe(fixtureCompleteAssetMarkdown())
-    expect(messages.at(-1)?.received_user_count).toBe(2)
-    runtime.dispose?.()
-  })
-
-  test('keeps streamed replacement bytes when its terminal result is empty', async () => {
-    const runtime = await startRuntime({
-      markdownStream: true,
-      targetPath: 'docs/ASSET_PLAN.md',
-    })
-    const messages: Record<string, unknown>[] = []
-
-    await runtime.submit({
-      prompt: 'asset-structural-replacement-stream-empty-terminal',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    expect(messages.at(-1)?.result).toBe(fixtureCompleteAssetMarkdown())
-    expect(messages.at(-1)?.received_user_count).toBe(2)
-    runtime.dispose?.()
-  })
-
-  test('keeps streamed append bytes when its terminal result is empty', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    const messages: Record<string, unknown>[] = []
-
-    await runtime.submit({
-      prompt: 'truncated-markdown-empty-terminal-continuation',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    expect(messages.at(-1)?.result).toContain('## Production Materials')
-    expect(messages.at(-1)?.received_user_count).toBe(2)
-    runtime.dispose?.()
-  })
-
-  test('normalizes a streamed complete candidate when terminal result is empty', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    const messages: Record<string, unknown>[] = []
-
-    await runtime.submit({
-      prompt: 'streamed-complete-empty-terminal',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    expect(messages.at(-1)?.result).toContain('# Visible Markdown')
-    expect(messages.at(-1)?.received_user_count).toBe(1)
-    runtime.dispose?.()
-  })
-
-  test('rejects a continuation that restarts the document from its title', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-
-    await expect(
-      runtime.submit({
-        prompt: 'truncated-markdown-forever',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow('restarted the document from its title')
-    runtime.dispose?.()
-  })
-
-  test('rejects a continuation that makes no progress', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-
-    await expect(
-      runtime.submit({
-        prompt: 'truncated-markdown-empty-continuation',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).rejects.toThrow('Markdown continuation made no progress')
+      })).resolves.toBeUndefined()
     runtime.dispose?.()
   })
 
@@ -650,43 +500,3 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 })
-
-function assetMaterialHeadings(): string[] {
-  return [
-    '### Asset Inventory Table',
-    '### Responsibility Matrix',
-    '### Dependency and Integration Diagram',
-    '### License Register',
-    '### Milestone and Maturity Table',
-  ]
-}
-
-function fixtureCompleteAssetMarkdown(): string {
-  return [
-    '# Asset Plan',
-    '## Executive Summary',
-    'summary',
-    '## Asset and Content Inventory',
-    'inventory',
-    '## Ownership and Responsibility',
-    'ownership',
-    '## Dependencies and Integration Order',
-    'dependencies',
-    '## Source, Originality and Licensing',
-    'licensing',
-    '## Formats, Variants and Budgets',
-    'formats',
-    '## Production Pipeline and Naming',
-    'pipeline',
-    '## Milestones, Capacity and Schedule',
-    'milestones',
-    '## Validation and Quality Status',
-    'validation',
-    '## Placeholder and Replacement Strategy',
-    'replacement',
-    '## Delivery, Release and Risks',
-    'risks',
-    '## Production Materials',
-    ...assetMaterialHeadings().flatMap(heading => [heading, 'material']),
-  ].join('\n')
-}

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
+  type FoundationDocumentPath,
 } from './types'
 import {
   GAME_DOCUMENT_CONTRACTS,
@@ -114,6 +115,57 @@ describe('complete game document contracts', () => {
         item => item.materialId === 'license-register',
       )?.serialization,
     ).toBe('markdown_table')
+  })
+
+  test('projects only the upstream owner sections each downstream discipline consumes', () => {
+    const expected: Record<
+      FoundationDocumentPath,
+      Array<[FoundationDocumentPath, string[]]>
+    > = {
+      'docs/GDD.md': [],
+      'docs/LEVEL_SCENE_DESIGN.md': [
+        ['docs/GDD.md', ['experience_pillars', 'core_loop', 'player_actions', 'rules_systems', 'states_flow', 'progression', 'content_narrative', 'challenge_recovery', 'accessibility_localization', 'scope_risks']],
+      ],
+      'docs/BALANCE_DESIGN.md': [
+        ['docs/GDD.md', ['core_loop', 'rules_systems', 'states_flow', 'progression', 'challenge_recovery', 'metrics']],
+        ['docs/LEVEL_SCENE_DESIGN.md', ['world_structure', 'level_sequence', 'objectives_routes', 'pacing_beats', 'encounters', 'spawn_checkpoint', 'content_matrix']],
+      ],
+      'docs/TECHNICAL_DESIGN.md': [
+        ['docs/GDD.md', ['player_actions', 'rules_systems', 'states_flow', 'accessibility_localization', 'metrics', 'scope_risks']],
+        ['docs/LEVEL_SCENE_DESIGN.md', ['world_structure', 'spawn_checkpoint', 'camera_readability', 'scene_states', 'content_matrix']],
+        ['docs/BALANCE_DESIGN.md', ['units_variables', 'formulas', 'bounds_exploits']],
+      ],
+      'docs/ART_DIRECTION.md': [
+        ['docs/GDD.md', ['experience_pillars', 'rules_systems', 'content_narrative', 'accessibility_localization']],
+        ['docs/LEVEL_SCENE_DESIGN.md', ['world_structure', 'camera_readability', 'content_matrix']],
+      ],
+      'docs/UI_UX_SPEC.md': [
+        ['docs/GDD.md', ['core_loop', 'player_actions', 'rules_systems', 'states_flow', 'challenge_recovery', 'accessibility_localization', 'content_narrative']],
+        ['docs/LEVEL_SCENE_DESIGN.md', ['objectives_routes', 'pacing_beats', 'spawn_checkpoint', 'camera_readability', 'scene_states']],
+      ],
+      'docs/AUDIO_DESIGN.md': [
+        ['docs/GDD.md', ['experience_pillars', 'core_loop', 'rules_systems', 'states_flow', 'content_narrative', 'accessibility_localization']],
+        ['docs/LEVEL_SCENE_DESIGN.md', ['world_structure', 'pacing_beats', 'encounters', 'scene_states']],
+        ['docs/UI_UX_SPEC.md', ['feedback_errors', 'accessibility']],
+      ],
+      'docs/ASSET_PLAN.md': [
+        ['docs/GDD.md', ['scope_risks']],
+        ['docs/LEVEL_SCENE_DESIGN.md', ['content_matrix']],
+        ['docs/TECHNICAL_DESIGN.md', ['data_content', 'performance', 'build_release']],
+        ['docs/ART_DIRECTION.md', ['asset_specifications']],
+        ['docs/UI_UX_SPEC.md', ['screen_inventory', 'localization']],
+        ['docs/AUDIO_DESIGN.md', ['implementation']],
+      ],
+    }
+
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      expect(
+        getGameDocumentContract(path).upstreamSections.map(source => [
+          source.path,
+          [...source.sectionIds],
+        ]),
+      ).toEqual(expected[path])
+    }
   })
 
   test('exposes the closed owner-only material catalog in canonical order', () => {
@@ -285,6 +337,9 @@ describe('complete game document contracts', () => {
         mutableFactPolicy: 'single_owner_no_copied_totals',
         workedExamples: 'one_per_distinct_boundary',
         acceptanceScenarios: 'materially_distinct_only',
+        nonApplicableDecisions: 'owner_block_once',
+        acceptanceEvidence: 'declared_acceptance_owners_only',
+        productionMaterialRows: 'distinct_owner_records_only',
       })
     }
   })
@@ -298,8 +353,10 @@ describe('complete game document contracts', () => {
     expect(balancePurpose('formulas')).toContain('formulas')
     expect(balancePurpose('formulas')).toContain('rounding')
     expect(balancePurpose('formulas')).toContain('boundaries')
+    expect(balancePurpose('formulas')).toContain('without copying owner-table numeric inputs')
     for (const sectionId of ['economy', 'progression_curves', 'challenge_model']) {
-      expect(balancePurpose(sectionId)).toContain('recomputable results and totals')
+      expect(balancePurpose(sectionId)).toContain('referencing parameter and formula IDs')
+      expect(balancePurpose(sectionId)).toContain('do not copy owner inputs or persist derived totals')
     }
     expect(balancePurpose('tuning_validation')).toContain('validation chain')
 

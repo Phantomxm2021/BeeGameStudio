@@ -1,6 +1,6 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：阶段边界与六域 canonical schema/assembly/publication 设计已确认；Phase 3–7 的领域合同和确定性服务端实现已经独立审计。后续真实 Chrome 验收否定了 projection transport 的 live-session packet-once 假设，因此 Stage 5 provider transport 重新开放，必须切换为无状态 semantic-slice compilation 后才能重新获得完整验收。Task 9–15 consumer migration 仍不得开始。
+状态：设计待确认
 
 日期：2026-08-30
 
@@ -73,9 +73,9 @@ Stage 10 Implementation / Acceptance
 
 ### 4.1 Stage 2
 
-Stage 2 负责生成八份完整 raw Markdown 文档并完成文档自身的结构 admission。
+Stage 2 负责生成并提交八份非空 raw Markdown 文档，只处理 provider、唯一写入路径、权限、持久化 receipt/digest 与 upstream projection 稳定性；不承担正文结构、格式、内容或质量 admission。
 
-Stage 2 可以校验文档合同已经明确要求的表格、ID、字段和引用语法，但不得为了当前 Game IR 实现强迫文档增加机器专用、重复或对读者无价值的结构。现有 typed blocks 必须逐项审计：人类文档本身需要的 canonical owner table 可以保留；只为浅层 IR 服务的重复表必须删除或由 Stage 5 semantic compilation 替代。
+文档合同要求的标题、章节、表格、ID、字段、引用语法、重复与质量全部由 Stage 3 Reviewer 审计，并由 Stage 4 Revision 修复；Stage 2 不因这些正文特征拒绝或重试。现有 typed blocks 必须逐项审计：人类文档本身需要的 canonical owner table 可以保留；只为浅层 IR 服务的重复表必须删除或由 Stage 5 semantic compilation 替代。
 
 ### 4.2 Stage 3
 
@@ -101,16 +101,14 @@ Game IR 是下游执行 authority，但不是新的产品决策 authority。任�
 
 ### 5.1 FoundationReadyReceipt
 
-Foundation READY 的唯一交接边界必须绑定：
+Stage 4 的唯一输出边界必须绑定：
 
 - Foundation revision；
 - 八份 canonical document path/digest；
 - Section Index path/digest；
+- Reviewer READY digest；
 - 空 Issue Registry digest；
-- 唯一 READY authority variant：初审直接 READY 使用 `review` 与 review digest；修订后 READY 使用 `revision_publication` 与 committed publication authority digest/base revision；
-- 对完整 receipt canonical bytes 计算的 Foundation ready receipt digest。
-
-两种 authority variant 是同一 READY 接口的互斥来源类型，不是两条运行轨道。一个 receipt 只能携带其中一种，不能同时携带、fallback 或相互转换。
+- publication authority digest。
 
 ### 5.2 GameIrCompileRequest
 
@@ -121,14 +119,6 @@ Stage 5 的唯一输入包含：
 - Game IR schema version；
 - compile task ID；
 - publication ID。
-
-Phase 4 的 domain source envelope 同时携带 READY-bound canonical full
-`authoritySectionIndex` 与 fixed-manifest selected `sectionIndex`。Foundation
-Section Index digest authenticates the complete section set and content; the
-shared `canonicalizeGameIrSourceSections` helper is the sole Game IR source-order
-authority. Each selected section is accompanied by exact UTF-8 bytes whose digest
-matches the authority entry. Gameplay uses GDD sections; Balance uses GDD and
-Balance sections, while both retain the same complete authority index.
 
 Stage 5 不接受旧 IR、Checklist、Manifest、实现代码、worker prose 或失败 candidate 作为业务输入。
 
@@ -312,27 +302,9 @@ Game IR schema 为每个字段声明唯一 producerMode：mechanical、semantic 
 
 Semantic Producer 只有 candidate 写权限。独立的只读 Semantic Projection Validator 按 module 检查 candidate 是否忠实、完整且没有超出 source evidence；它只能返回 PASS 或结构化 compiler diagnostic，不能修改 candidate、文档或业务 Issue。
 
-Validator 不接受可重新贴 task/revision 身份的 detached module。服务端 packet 必须绑定完整 admitted candidate、compile request、Foundation READY receipt、完整 Section Index 及所选 module 使用的精确 Markdown section bytes；section bytes 必须机械匹配 Section Index digest。固定 validator manifest 定义 V1 canonical modules、每个 module 的必检项和 service-owned `sourceDocumentPaths`。必读 source scope 是 manifest 指定文档的全部 Section Index entries 与 candidate 额外 owner bindings 的并集，不能由 candidate 单独反推；caller 必须提供该并集的精确 Markdown bytes，不能多也不能少。PASS 必须返回完整、唯一、有序的 coverage receipt。仅有 packet digest 回显的布尔 PASS 不构成 admission evidence。
-
-V1 canonical domain modules 为 gameplay、balance、world-scene、presentation、resource-realization 与 implementation-verification；candidate/publication 按 code-unit 排序为 balance、gameplay、implementation-verification、presentation、resource-realization、world-scene。Core 是 compile request、binding、graph admission 与 publication 基础设施，不是第七个业务 module；没有独立 schema、producer 或职责的旧 `core` placeholder requirement 必须删除，不得用空 module、alias 或 derived index 恢复。六个 domain module 均不得缺失或为空。诊断 evidence pointer 优先精确到 owner Source Binding 的 document、section 与 sourcePointer；当诊断的正是 missing/ambiguous projection、尚不存在 binding 时，允许使用带 section digest 的 immutable `section:<document>#<section>@<digest>` pointer。裸 document/section identity 不可入场。
-
-本节与已落地的 Phase 7 Implementation/Verification 设计，在 complete-candidate/publication completion boundary 上窄范围 supersede Phase 3–6 历史设计中的 seven-module、业务 `core` module、caller-supplied candidate/admissions 与 generic semantic-admission publication route。旧 route 已物理删除；Phase 3–6 已验收的领域行为、commit 与证据不被重写，仍使用的 shared fidelity primitives 与 domain adapters 继续保留。
-
 同一 input 支持两个不同且无法机械区分的合法映射时，Validator 必须返回 ambiguity diagnostic，并由 Stage 5 输出 FoundationDefectReport。不得用模型偏好、默认值或首次成功输出选择业务含义。
 
 Compiler 是唯一 candidate writer，Validator 是只读 admission，因此二者不是双写或双轨。
-
-#### 8.4.1 Projection preflight obligation inventory
-
-每个 domain 在 semantic projection 前必须完成一次 Stage 5 内部 preflight。服务端 domain contract 唯一声明 obligation class、允许的 semantic role、expected node kind、完整 owner source scope，以及由 kind 到 dependency-derived slice 的唯一映射。模型只能从该完整 source scope 中识别 obligation instance，并为其提交 canonical target ID、contract-declared kind/role 与精确 evidence fragment；模型不能定义 source scope、node kind、owner、slice、obligation digest 或业务事实规则。
-
-Inventory 使用逐条 strict NDJSON，不允许完整 domain object、array wrapper、兼容 shape 或 caller-supplied digest。服务端根据 READY identity、source bytes、projection contract 与 canonical inventory bytes 重算所有 obligation key 和 digest。随后由独立只读 inventory validator 同时读取服务端固定的完整 source scope、domain obligation contract 与 admitted inventory，判断 source 中的 obligation 是否被完整识别。Validator 不能从 inventory 反推 source scope，也不能用 inventory 自己的条目定义 PASS coverage。
-
-当 source 中存在 inventory 尚未声明的 obligation 时，validator 返回 `missing-obligation`，绑定 exact fragment、section digest、contract-declared role 和 expected kind；缺失 node 尚不存在，因此不得伪造成 candidate-owned `node:<id>#<pointer>`。服务端重新验证 evidence、kind、role，并自行推导唯一 owner slice。无法唯一归属属于 compiler contract defect，必须 fail closed。相同 authority、inventory bytes、diagnostic 与 durable cursor 再次出现属于 proven no progress，不得继续 dispatch；这不是固定 attempt、token 或 elapsed-time limit。
-
-只有完整、唯一、有序的 inventory PASS receipt 才能与 compile identity、Foundation READY receipt、source digest、projection contract digest、validator manifest digest、inventory digest 和 owner-slice map digest 一起原子写入现有 projection journal。没有该 receipt 时禁止 dispatch 第一个 projection slice。该 receipt 是 projection lifecycle 的前置覆盖证据，不是第二 checkpoint、第二 publication、第二 Fact Store 或下游可消费 authority。Projection 必须逐项覆盖 inventory 中属于当前 slice 的 required obligations；空 slice 只有在其 inventory obligation 集合确实为空时才合法。
-
-Inventory validator 只回答“source 中应该投影什么”；record admission、domain fidelity validator 与 final assembler 分别回答“节点是否合法”“投影是否忠实”“全域是否闭合”。这些责任不得合并，也不得双写同一结论。普通 record 错误不使已通过的 inventory 失效；只有 `missing-obligation` 或 stale source/contract/validator identity 才重新进入 preflight。
 
 ### 8.5 Admission
 
@@ -341,7 +313,6 @@ Inventory validator 只回答“source 中应该投影什么”；record admissi
 - exact schema；
 - ID/reference closure；
 - Source Binding 完整性；
-- obligation inventory 完整性及其 READY/source/contract binding；
 - semantic projection fidelity；
 - derived input closure；
 - formula graph；
@@ -351,18 +322,6 @@ Inventory validator 只回答“source 中应该投影什么”；record admissi
 - cross-module invariants；
 - canonical ordering；
 - revision/digest binding。
-
-### 8.6 Publication / Recovery
-
-Publication 的唯一输入是外部可重建的 `GameIrPublicationAuthority`：workspace、publication ID 与 replayable Phase 7 authority。Publisher 必须从该 authority 逐层重放 Phase 4–7 assembler/fidelity，自行重建 compile request、完整六-domain candidate、receipt-bound Section Index 与 validation evidence；不得接受 caller-supplied candidate、detached generic admissions、digest-only PASS、字段 alias 或 caller 自报的 task/revision。旧 generic semantic-admission publication route 在 Phase 7 删除，不保留 forwarding wrapper。
-
-服务端从该 authority 纯函数重建 module、source map、dependency graph、manifest、semantic evidence 与 COMMITTED marker 的全部 canonical bytes。Journal 只记录预期 authority/digest，不构成新的 authority；recovery 与 committed validation 必须重新接收外部 authority 并逐字节比较重建结果，不能让 journal、staging 或 final artifacts 循环自证。Publication ID 不得复用，PREPARED journal 在 READY 后作为 immutable audit evidence 保留，不执行存在 check/unlink 竞态的事后删除。
-
-最终 revision 目录使用完整目录原子切换：先写 PREPARED journal，在私有 staging 中补齐并验证全部文件，最后写 staging/COMMITTED.json，再把整个非空 staging 目录原子 rename 到此前不存在的 final revision 路径。不得逐文件写入或覆盖可见 final 目录。并发赢家只有在 exact external authority 校验一致时才可作为幂等成功；否则 fail closed。
-
-所有 workspace 下的既有路径组件必须拒绝已存 symlink 与非目录，revision/publication segment 必须在任何写入前通过安全校验。Journal 与 staging artifact 使用临时文件写入、同步和原子 rename，partial temp 只能被同一 external authority 的 recovery 丢弃重建。恢复可以补齐缺失的 expected staging bytes，但必须拒绝 unexpected 或 conflicting bytes；final READY 只由完整、外部 authority 一致的 COMMITTED publication 表示。
-
-该边界协调所有遵守同一协议的 Bee Game 进程，并在每次 validation 检测 workspace divergence；不宣称 Node/Bun path API 能阻止同权限恶意进程在两个 syscall 之间替换父目录。运行时没有可移植的 directory-fd/openat 能力，而同权限进程本来也能直接改写应用代码和 committed output。若未来威胁模型要求抵御此类本机攻击，应由宿主 sandbox 或单独审计的 native filesystem broker 提供，不在 Game IR 业务代码中伪造保证。
 
 ## 9. 现有实现回收规则
 
@@ -423,137 +382,38 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 - 加入 Game IR enabled/disabled parity test；
 - 加入 import boundary test。
 
-### Phase 3：Stage 5 独立 Core（历史基础层已完成；部分 completion boundary 已由 Phase 7 supersede）
+### Phase 3：Stage 5 独立 Core
 
-- 已定义四个阶段接口；
-- 已落地并验收 strict contracts、Foundation READY adapter、Core model、shared semantic-fidelity primitives、publication/recovery 基础设施和 parity；
-- 历史的 caller-built complete-candidate、generic semantic-admission publication route 与七模块/业务 `core` 约定，已由 Phase 7 的六域 authority-bound assembly 取代并删除；不把旧 route 作为当前未实现项或兼容入口。
-- Consumer migration 与 production routing 不属于本阶段，仍由 Phase 8 执行。
+- 定义四个阶段接口；
+- 落地 Core schema、state、admission、publication 和 recovery；
+- 不实现 consumer migration。
 
-### Phase 4：Gameplay + Balance（领域合同已 accepted；provider transport 重新开放）
+### Phase 4：Gameplay + Balance
 
-The final-review findings have been corrected, independently reviewed, and
-root-verified for schema, admission and deterministic assembly. Later real-provider
-acceptance invalidated the packet-once transport assumption; that transport is
-not accepted and must be replaced without changing the accepted domain contract.
+- 落地行为、状态、规则、事件、公式和数值依赖；
+- 验证 source coverage 和 graph closure。
 
-- Gameplay 与 Balance 领域 schema、semantic admission、精确 source envelope
-  和 immutable module projections 已落地；同一 pair assembler 每次重验两侧
-  receipts、Core modules、task/revision/READY identity 与完整 typed maps 后才同时签发。
-- Gameplay 可读取 typed Balance variable/formula target；Balance reward/cost
-  binding 可指向 typed Gameplay action/event。双向引用、wrong kind、stale
-  task/revision、deterministic bytes/digests 与 not-yet-implemented module
-  rejection 均由 gate tests 覆盖。
-- Phase 4 的 Gameplay 与 Balance mechanical nodes、verified claims 均必须为空；
-  variable records、formula AST、economy/progression/reward/cost semantics 由
-  semantic producer 拥有，Balance source claims 使用精确
-  `/bytes/<start>/<end>` ranges 并按 UTF-8 bytes 复核。空 mechanical output
-  是唯一 policy，不是 fallback。
-- Missing/ambiguous semantic projection 使用 packet/source-bound、node-qualified
-  discriminated diagnostic；不写入 Foundation state。
-- Domain projection 的模型输出使用唯一 service-owned semantic slice stream：
-  slice 由 projection contract 的 node-kind dependency graph 机械派生，逐片
-  strict-admit 到 operation-local digest journal；全部 slice 通过后才由既有
-  full-domain gate 写入唯一 canonical operation manifest。journal 不是第二
-  authority，manifest commit 后必须删除。禁止 complete-domain StructuredOutput、
-  token/byte/time/count 分片、compatibility reader 或第二 checkpoint/publication。
-- 每个 slice dispatch 必须是无状态、自包含的独立 provider request，只携带
-  当前 slice 所需的 READY-bound source fragments、直接依赖投影与 strict JSONL
-  record contract。禁止依赖 live session reuse、packet-once、prompt cache 或
-  provider resume；禁止 fresh-session fallback 重发完整 operation/domain packet。
-  Canonical JSON 仅由服务端 journal、assembler 与 publisher 持有，模型不得接收
-  或返回完整 domain JSON。该规则适用于全部六个 projection module，不是
-  Balance 特例。
-- AST/static detector 对新增 production files 禁止 partial candidate、
-  publication、controller/store/DeliveryRun/Foundation Issue、provider
-  dispatch 和五个 placeholder module；protected 21-file parity 与 full
-  server unreachable scan 保持通过。
-- Phase 7 的 complete six-domain candidate assembly/publication 已完成并
-  accepted；production routing/persistence、consumer migration 与 Chrome
-  acceptance 尚未执行，分别属于 Phase 8–9。Phase 5 的 World/Presentation
-  实现、双 profile、Foundation parity、AST isolation、Task 11、whole-branch
-  independent review 与 root verification 已全部完成并 accepted；Phase 6
-  Resource Realization 也已完成并 accepted。
+### Phase 5：World + Presentation
 
-### Phase 5：World + Presentation（已 accepted）
+- 落地 scene graph、instances、routes、encounters、UI、Audio、Animation 和 VFX binding。
 
-- 已落地 scene graph、instances、routes、encounters、UI、Audio、Animation
-  和 VFX binding；World/Presentation 通过唯一 closure assembler 只读重放
-  Phase 4 authority，并完成 traversal 与 puzzle 两个完整 profile。
-- Task 11 integration audit 补充了同一 assembler 内的两个只读 staged
-  validation-packet preparation API；它们不暴露 module、projection、digest
-  或 draft，最终 projection/closure writer 仍唯一且私有。
-- 已实现并通过 Foundation planning parity、21-file protected baseline、
-  分层 AST isolation、Task 11 independent review、whole-branch review 与
-  root verification；本阶段仍未接入 production routing、publication、
-  consumer 或 Chrome。
+### Phase 6：Resource Realization
 
-### Phase 6：Resource Realization（已 implemented and accepted）
+- 落地 logical requirement、variant、delivery artifacts 与 runtime binding；
+- 支持一资源多文件；
+- 验证技术约束和 budget。
 
-- Resource Realization manifest/schema 是 logical requirement、variant、delivery
-  artifact、runtime binding、resource-plan projection、共享资源词汇、技术约束
-  与 budget 的唯一 authority；不引入第二套 schema 或兼容 admission。
-- 唯一 replaying assembler 重建并绑定完整 Phase 5 closure，派生 exact
-  Presentation requirements 与 resource-plan/Curator-policy projection，再由
-  Phase 6 fidelity admission 重放 receipt、source bytes、profiles、delivery
-  target 与所有 closure invariants。
-- prior schema closure 要求 Phase 5 priors
-  `gameplay → balance → world-scene → presentation` exactly once、exact order、无
-  missing/extra；每个 prior 重新通过既有 domain parser，并使用排除自身的只读
-  cross-domain target map，同时保留 Core 的全局 binding、cycle 与 disjointness
-  admission。
-- 已覆盖 semantic 与 Presentation profiles、conditional predicate、multi-file
-  delivery、expanded graph、重复 assembly byte/digest determinism 与 frozen
-  closure；Phase 6 production routing、publication、consumer migration 与
-  Chrome 仍不可达。
-- 验证证据：Game IR `435/435`，Foundation `263/263`；root 与 server
-  `typecheck`、Biome、`git diff --check` 均通过；Sol final audit 为
-  `0 Critical / 0 Important / 0 Minor`。关键 commits：
-  `8407707bf`、`fba39debb`、`d78c33147`、`57ed546ab`、`42d9f8fdc`、
-  `a440659d5`、`818051606`。
+### Phase 7：Implementation + Verification
 
-### Phase 7：Implementation + Verification（已 implemented；independent final audit 与 root verification accepted）
+- 落地 implementation target、dependency、acceptance scenario、invariant 和 evidence trace。
 
-- 已落地唯一 Implementation/Verification domain producer、strict five-kind
-  schema/manifest、source-bound semantic projection 与独立 validation admission；
-  implementation target、dependency、acceptance scenario、invariant 和 evidence
-  trace 均进入同一六域 Game IR closure。
-- 已落地 complete six-domain assembly：assembler 从 replayable Phase 7
-  authority 重放 Phase 4–7 的 source、mechanical、semantic 与 validation
-  evidence，生成 canonical candidate、source map、dependency graph 和 closure
-  digest；不接受 caller-supplied candidate、detached admission 或 digest-only
-  PASS。
-- 已落地 Phase 7 authority-bound atomic publication/recovery：唯一
-  `GameIrPublicationAuthority` 驱动 PREPARED journal、私有 staging、完整目录
-  原子 rename、COMMITTED marker、recovery 与 committed validation；旧 generic
-  semantic-admission publication route 已删除，不保留 forwarding wrapper。
-- 已完成真实 READY parity、profile（最小、expanded、multi-artifact）、stage
-  boundary、身份/摘要重算、hidden/accessor/symbol、防篡改、持久化耐久性与并发
-  证据验证。最终证据：Game IR `465 pass / 0 fail / 4701 assertions`；root 与
-  server `typecheck` 通过；Biome 与 `git diff --check` 通过。
-- accepted commit chain（含纠正提交）：
-  `30625c71b` → `5c4b64896` → `c7694551a` → `2863744bd` →
-  `c06dce7b7` → `b541ecc8e` → `f7882793e` → `60639aa82` →
-  `70b2b6e5e` → `63a1539bc` → `3c3872dbc` → `f22e3dd20`。
-  其中 `c06dce7b7`、`60639aa82` 分别纠正 schema invariants 与 producer
-  authority；`f22e3dd20` 清除 Phase 7 audit residue 并完成最终边界测试。
+### Phase 8：Consumer 单轨迁移
 
-### Phase 8：Production cutover 与 Consumer 单轨迁移（设计已审计，实施未开始）
-
-Phase 8 先把唯一 `GAME_IR_COMPILATION` durable phase、checkpoint/committed
-reader 和 Checklist bridge 接入现有 DeliveryRun，再按 Resource Planner、
-Resource Curator、Content、Atomic Task Planner、Implementation Worker、
-Implementation Auditor、Acceptance 顺序逐个迁移。每个 consumer 在同一提交中
-切换唯一 reader 并删除旧 reader，不保留 fallback 或双写。完整约束见
-`docs/superpowers/specs/2026-09-01-game-ir-production-cutover-design.md`。
+按 Resource Planner、Resource Curator、Content、Implementation、Comprehensive Reviewer、Acceptance 顺序逐个迁移。每个 consumer 在同一提交中切换唯一 reader 并删除旧 reader，不保留 fallback 或双写。
 
 Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority；Game IR 只提供稳定 ID traceability，不重写 Checklist 业务内容。
 
-产品阶段图中的 Comprehensive Reviewer/Revision 是未来独立阶段；当前仓库没有
-该实现，Phase 8 不新增、恢复、改名或预埋其 route，也不修改 Foundation
-Reviewer/Revision。
-
-### Phase 9：真实验收（未开始）
+### Phase 9：真实验收
 
 - 自动测试全部通过后再启动 Chrome；
 - 不恢复经过热 schema 修改的旧 run；
@@ -565,8 +425,6 @@ Reviewer/Revision。
 ### 11.1 Reviewer 非回归
 
 相同文档在 Game IR enabled/disabled 下必须产生完全相同的 Stage 3 tasks、Issue Registry、Stage 4 Patch packets、Targeted Recheck 和 Foundation READY receipt。
-
-Core Phase 已实现并验收 strict contracts、Foundation READY adapter、Core model、shared semantic-fidelity primitives、publication/recovery 基础设施和 parity；历史 generic semantic-admission completion/publication route 已在 Phase 7 cutover 中 superseded 并删除。Phase 4 的 Gameplay 与 Balance isolated projections、domain producer/assembler gates 已实现并通过 automated verification。Phase 5 的 World/Scene 与 Presentation producer、fidelity、closure、双 profile、Foundation planning parity、Task 11 independent review、AST isolation/status gate 与最终 whole-branch/root verification 已完成并 accepted。Phase 6 Resource Realization 的唯一 schema/manifest、replaying assembler、resource-plan/profile projection、fidelity admission 与 prior schema closure 已完成并 accepted，且通过上述 Game IR、Foundation、typecheck、Biome/diff 与 Sol final evidence。Phase 7 Implementation/Verification producer、独立 admission、六域 complete-candidate assembly、authority-bound publication/recovery 与最终证据已完成并 accepted。因此此处 enabled 表示在 READY 后调用真实、只读且 authority-bound 的 Game IR closure；不得为了 parity 伪造同构 placeholder candidate。Task 11 parity 测试调用真实 Phase 5 closure assembler，并在调用前后重新序列化同一 Foundation documents/state；不得只比较 receipt/compile-request，也不得使用 Task 9/10 测试 helper。Phase 8 仍负责 consumer migration/production routing 与 persistence，Phase 9 负责 fresh workflow 和 Chrome 真实验收。
 
 ### 11.2 架构边界
 

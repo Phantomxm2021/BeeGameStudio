@@ -1,6 +1,7 @@
 import type { BeeGameEvent } from './session-manager'
 
 export type DocumentAuthoringMetrics = {
+  usageStatus: 'measured' | 'unavailable'
   inputTokens: number
   cacheReadTokens: number
   cacheCreationTokens: number
@@ -12,6 +13,8 @@ export type DocumentAuthoringMetrics = {
   permissionDenials: number
   authorityProjection?: {
     byteLength: number
+    modelByteLength?: number
+    promptByteLength?: number
     rangeCount: number
     projectedLineCount: number
   }
@@ -47,6 +50,10 @@ export function documentAuthoringMetrics(
             event.payload?.decision === 'denied'),
       ).length
   return {
+    usageStatus:
+      inputTokens + cacheReadTokens + cacheCreationTokens + outputTokens > 0
+        ? 'measured'
+        : 'unavailable',
     inputTokens,
     cacheReadTokens,
     cacheCreationTokens,

@@ -433,6 +433,49 @@ describe('WorkflowCard', () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('retry'));
   });
 
+  it('copies the structured diagnostic context for a blocked workflow', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_diagnostic',
+          status: 'blocked',
+          currentPhase: 'DOCUMENT_REVIEW',
+          block: {
+            message: 'Foundation revision validation failed.',
+            detail: 'revision receipt staged document digest mismatch',
+            code: 'revision_validation_failed',
+            diagnosticId: 'workflow-abc123def456',
+            stage: 'DOCUMENT_REVIEW',
+            taskId: 'revision:docs/ASSET_PLAN.md',
+            documentPath: 'docs/ASSET_PLAN.md',
+            retryable: true,
+          },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '复制错误信息' }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        [
+          'Foundation revision validation failed.',
+          'Technical reason: revision receipt staged document digest mismatch',
+          'Diagnostic ID: workflow-abc123def456',
+          'Reason code: revision_validation_failed',
+          'Stage: DOCUMENT_REVIEW',
+          'Task: revision:docs/ASSET_PLAN.md',
+          'Document: docs/ASSET_PLAN.md',
+          'Retryable: yes',
+        ].join('\n'),
+      ),
+    );
+  });
+
   it('shows a recoverable workflow at its proven unit and continues once without internal diagnostics', async () => {
     const onAction = vi.fn().mockResolvedValue(undefined);
     render(

@@ -105,7 +105,7 @@ describe('document readiness audit', () => {
     ).toEqual({ valid: true, issues: [] })
   })
 
-  test('rejects skeleton foundation documents when complete contracts are required', async () => {
+  test('leaves foundation body review to Stage 3', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-document-complete-'))
     for (const path of REQUIRED_PROJECT_DOCUMENTS.slice(0, -1)) {
       await mkdir(join(workspace, path, '..'), { recursive: true })
@@ -115,13 +115,11 @@ describe('document readiness audit', () => {
     const audit = auditDocumentReadiness(workspace, {
       includeChecklist: false,
       includeAssetManifest: false,
-      requireCompleteFoundation: true,
     })
-    expect(audit.valid).toBe(false)
-    expect(audit.issues.some(issue => issue.startsWith('docs/GDD.md:'))).toBe(true)
+    expect(audit).toEqual({ valid: true, issues: [] })
   })
 
-  test('requires every compact production material at the durable readiness gate', async () => {
+  test('does not duplicate production-material review in readiness', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-document-materials-'))
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
       await mkdir(join(workspace, path, '..'), { recursive: true })
@@ -136,10 +134,8 @@ describe('document readiness audit', () => {
     const audit = auditDocumentReadiness(workspace, {
       includeChecklist: false,
       includeAssetManifest: false,
-      requireCompleteFoundation: true,
     })
-    expect(audit.valid).toBe(false)
-    expect(audit.issues.some(issue => issue.includes('production materials'))).toBe(true)
+    expect(audit).toEqual({ valid: true, issues: [] })
   })
 
   test('rejects a seven-document foundation missing either new fact owner', async () => {

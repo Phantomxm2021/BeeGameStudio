@@ -1199,7 +1199,7 @@ describe('delivery workflow recovery', () => {
     const seed = createFoundationAuditState({
       revision,
       documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+      manifest: { revision, status: 'index_staged', derivationMode: 'complete', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
     })
     const foundationAuditState = parseFoundationAuditState({
       ...seed,
@@ -1262,6 +1262,7 @@ describe('delivery workflow recovery', () => {
         manifest: {
           revision,
           status: 'index_staged',
+          derivationMode: 'complete',
           catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
           sectionIndexDigest: digest,
         },
@@ -1279,13 +1280,13 @@ describe('delivery workflow recovery', () => {
       phaseStartedAt: new Date().toISOString(),
       issueSummary: { total: 2, blocker: 0, high: 2, medium: 0, low: 0 },
       tasks: [
-        ...documents.map(document => ({ taskId: document.taskId, kind: 'document-revision' as const, revision, round: 1 as const, bundleId, packetPath: packetPaths.get(document.taskId)!, packetDigest: packetDigests.get(document.taskId)!, status: 'pending' as const, attempt: 0, documentPath: document.documentPath, issueIds: ['AUD-1'], sectionIds: [document.sectionId], stagedPath: foundationRevisionStagePath(revision, document.documentPath), baseDocumentDigest: baseDocumentDigest.get(document.taskId)!, dependencyDigests: {}, frozen: false })),
+        ...documents.map(document => ({ taskId: document.taskId, kind: 'document-revision' as const, scope: 'section' as const, revision, round: 1 as const, bundleId, packetPath: packetPaths.get(document.taskId)!, packetDigest: packetDigests.get(document.taskId)!, status: 'pending' as const, attempt: 0, documentPath: document.documentPath, issueIds: ['AUD-1'], sectionIds: [document.sectionId], stagedPath: foundationRevisionStagePath(revision, document.documentPath), baseDocumentDigest: baseDocumentDigest.get(document.taskId)!, dependencyDigests: {}, frozen: false })),
       ],
     })
     const run = {
       ...createTestDeliveryRun({ runId: 'terminal-retry', projectId: 'project', ownerId: RECOVERY_OWNER_ID }),
-      phase: 'DOCUMENT_REVIEW' as const,
-      documentStep: 'FOUNDATION_REVIEW' as const,
+      phase: 'FOUNDATION_REVISION' as const,
+      documentStep: 'FOUNDATION_REVISION' as const,
       foundationAuditState,
     }
     const store = createRunStore(workspace, RECOVERY_OWNER_ID)
@@ -1294,7 +1295,7 @@ describe('delivery workflow recovery', () => {
     let releaseSibling!: () => void
     const siblingGate = new Promise<void>(resolve => { releaseSibling = resolve })
     const missingTerminal = () => {
-      const error = new Error('missing_required_terminal_submission: SubmitFoundationRevisionResult')
+      const error = new Error('foundation revision completed without a committed Markdown receipt')
       error.name = 'WorkerNeedsActionError'
       return error
     }
@@ -1321,7 +1322,7 @@ describe('delivery workflow recovery', () => {
       projectId: run.projectId,
       workspacePath: workspace,
       workerType: 'foundation-document-reviser',
-      phase: 'DOCUMENT_REVIEW',
+      phase: 'FOUNDATION_REVISION',
       taskId,
       revision,
       contract: { workerType: 'foundation-document-reviser', taskId, round: 1, documentPath: documents.find(document => document.taskId === taskId)!.documentPath, issueIds: ['AUD-1'], sectionIds: [documents.find(document => document.taskId === taskId)!.sectionId], stagedPath: foundationRevisionStagePath(revision, documents.find(document => document.taskId === taskId)!.documentPath), baseDocumentDigest: baseDocumentDigest.get(taskId)!, packetPath: packetPaths.get(taskId)!, packetDigest: packetDigests.get(taskId)! },
@@ -1352,7 +1353,7 @@ describe('delivery workflow recovery', () => {
     expect(final?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-b')).toMatchObject({
       status: 'retryable',
       attempt: 1,
-      dispatch: { status: 'failed', failureReason: 'missing_required_terminal_submission: SubmitFoundationRevisionResult' },
+      dispatch: { status: 'failed', failureReason: 'foundation revision completed without a committed Markdown receipt' },
     })
 
     const stale = {
@@ -1381,6 +1382,7 @@ describe('delivery workflow recovery', () => {
         manifest: {
           revision,
           status: 'index_staged',
+          derivationMode: 'complete',
           catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
           sectionIndexDigest: digest,
         },
@@ -1399,8 +1401,8 @@ describe('delivery workflow recovery', () => {
     })
     const run = {
       ...createTestDeliveryRun({ runId: 'revision-planning-retry', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }),
-      phase: 'DOCUMENT_REVIEW' as const,
-      documentStep: 'FOUNDATION_REVIEW' as const,
+      phase: 'FOUNDATION_REVISION' as const,
+      documentStep: 'FOUNDATION_REVISION' as const,
       status: 'needs_action' as const,
       blockedReason: 'foundation revision planning materialization failed: transient store error',
       foundationAuditState: revisionState,
@@ -1424,6 +1426,7 @@ describe('delivery workflow recovery', () => {
     const task = (taskId: string, bundleId: string, dispatchId: string) => ({
       taskId,
       kind: 'document-revision' as const,
+      scope: 'section' as const,
       revision,
       round: 1 as const,
       bundleId,
@@ -1441,7 +1444,7 @@ describe('delivery workflow recovery', () => {
       dispatch: {
         dispatchId,
         workerType: 'foundation-document-reviser' as const,
-        phase: 'DOCUMENT_REVIEW' as const,
+        phase: 'FOUNDATION_REVISION' as const,
         taskId,
         revision,
         status: 'running' as const,
@@ -1455,6 +1458,7 @@ describe('delivery workflow recovery', () => {
         manifest: {
           revision,
           status: 'index_staged',
+          derivationMode: 'complete',
           catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
           sectionIndexDigest: digest,
         },
@@ -1508,8 +1512,8 @@ describe('delivery workflow recovery', () => {
         ownerId: RECOVERY_OWNER_ID,
         confirmedBriefContext: RECOVERY_BRIEF,
       }),
-      phase: 'DOCUMENT_REVIEW' as const,
-      documentStep: 'FOUNDATION_REVIEW' as const,
+      phase: 'FOUNDATION_REVISION' as const,
+      documentStep: 'FOUNDATION_REVISION' as const,
       status: 'needs_action' as const,
       blockedReason: 'foundation revision requires action',
       foundationAuditState,
@@ -1602,7 +1606,7 @@ describe('delivery workflow recovery', () => {
     const seed = createFoundationAuditState({
       revision,
       documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+      manifest: { revision, status: 'index_staged', derivationMode: 'complete', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
     })
     const foundationAuditState = parseFoundationAuditState({
       ...seed,
@@ -1642,7 +1646,7 @@ describe('delivery workflow recovery', () => {
       ...createFoundationAuditState({
         revision,
         documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-        manifest: { revision, status: 'index_staged', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+        manifest: { revision, status: 'index_staged', derivationMode: 'complete', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
       }),
       status: 'revising' as const,
       authority: {
@@ -1659,6 +1663,7 @@ describe('delivery workflow recovery', () => {
       tasks: [{
         taskId,
         kind: 'document-revision' as const,
+        scope: 'section' as const,
         revision,
         round,
         bundleId,
@@ -1676,7 +1681,7 @@ describe('delivery workflow recovery', () => {
         dispatch: {
           dispatchId: 'revision-dispatch',
           workerType: 'foundation-document-reviser' as const,
-          phase: 'DOCUMENT_REVIEW' as const,
+          phase: 'FOUNDATION_REVISION' as const,
           taskId,
           revision,
           status: 'running' as const,
@@ -1686,7 +1691,7 @@ describe('delivery workflow recovery', () => {
         },
       }],
     })
-    const run = { ...createTestDeliveryRun({ runId: 'orphaned-foundation-revision', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'DOCUMENT_REVIEW' as const, documentStep: 'FOUNDATION_REVIEW' as const, status: 'running' as const, foundationAuditState }
+    const run = { ...createTestDeliveryRun({ runId: 'orphaned-foundation-revision', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'FOUNDATION_REVISION' as const, documentStep: 'FOUNDATION_REVISION' as const, status: 'running' as const, foundationAuditState }
     const store = createRunStore(workspace, RECOVERY_OWNER_ID)
     await store.save(run)
 
@@ -2446,7 +2451,7 @@ describe('delivery workflow recovery', () => {
       foundationAuditState: undefined,
       activeDispatch: {
         dispatchId: 'usage-terminal-dispatch',
-        workerType: 'foundation-document-reviser' as const,
+        workerType: 'foundation-semantic-reviewer' as const,
         phase: 'DOCUMENT_REVIEW' as const,
         revision: initial.revision.document,
         status: 'running' as const,
@@ -2747,6 +2752,7 @@ describe('delivery workflow recovery', () => {
         manifest: {
           revision,
           status: 'index_staged',
+          derivationMode: 'complete',
           catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
           sectionIndexDigest: digest,
         },
@@ -2773,6 +2779,7 @@ describe('delivery workflow recovery', () => {
         return {
           taskId,
           kind: 'document-revision' as const,
+          scope: 'section' as const,
           revision,
           round: 1,
           bundleId,
@@ -2790,7 +2797,7 @@ describe('delivery workflow recovery', () => {
           dispatch: {
             dispatchId,
             workerType: 'foundation-document-reviser' as const,
-            phase: 'DOCUMENT_REVIEW' as const,
+            phase: 'FOUNDATION_REVISION' as const,
             taskId,
             revision,
             status: 'running' as const,
@@ -2805,8 +2812,8 @@ describe('delivery workflow recovery', () => {
         projectId: 'project',
         ownerId: RECOVERY_OWNER_ID,
       }),
-      phase: 'DOCUMENT_REVIEW' as const,
-      documentStep: 'FOUNDATION_REVIEW' as const,
+      phase: 'FOUNDATION_REVISION' as const,
+      documentStep: 'FOUNDATION_REVISION' as const,
       foundationAuditState,
     }
     await store.save(run)
@@ -2890,6 +2897,7 @@ describe('delivery workflow recovery', () => {
         manifest: {
           revision,
           status: 'index_staged',
+          derivationMode: 'complete',
           catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
           sectionIndexDigest: digest,
         },

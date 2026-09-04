@@ -29,7 +29,7 @@ describe('parseToolPreset', () => {
 })
 
 describe('foundation revision native tool registration', () => {
-  test('builds a complete tool for the CLI bootstrap inventory', () => {
+  test('exposes only the bound reader for document-scoped raw Markdown revision', () => {
     const previousWorkerType = process.env.BEEGAME_WORKFLOW_WORKER_TYPE
     const previousContract = process.env.BEEGAME_REVISION_CONTRACT
     const previousWorkspace = process.env.BEEGAME_WORKSPACE_PATH
@@ -39,20 +39,33 @@ describe('foundation revision native tool registration', () => {
       taskId: 'task-1',
       revision: 'revision-1',
       round: 1,
+      scope: 'document',
       documentPath: 'docs/GDD.md',
       issueIds: ['issue-1'],
-      sectionIds: ['section-1'],
+      sectionIds: [],
       stagedPath: '.beegame/audit/foundation/revision/docs/GDD.md',
       baseDocumentDigest: 'a'.repeat(64),
     })
 
     try {
-      const tool = getTools(getEmptyToolPermissionContext()).find(
-        candidate => candidate.name === 'SubmitFoundationRevisionResult',
+      const tools = getTools(getEmptyToolPermissionContext())
+      const readTool = getTools(getEmptyToolPermissionContext()).find(
+        candidate => candidate.name === 'ReadAssignedFoundationRevision',
       )
-      expect(tool).toBeDefined()
-      expect(tool?.isEnabled()).toBe(true)
-      expect(tool?.isConcurrencySafe({} as never)).toBe(false)
+      expect(readTool).toBeDefined()
+      expect(readTool?.isEnabled()).toBe(true)
+      expect(tools.some(candidate => candidate.name === 'ApplyFoundationRevision')).toBe(false)
+      expect(tools.some(candidate => candidate.name === 'SubmitFoundationRevisionResult')).toBe(false)
+      expect(
+        getTools(getEmptyToolPermissionContext()).some(
+          candidate => candidate.name === 'Edit',
+        ),
+      ).toBe(false)
+      expect(
+        getTools(getEmptyToolPermissionContext()).some(
+          candidate => candidate.name === 'Read',
+        ),
+      ).toBe(false)
     } finally {
       if (previousWorkerType === undefined)
         delete process.env.BEEGAME_WORKFLOW_WORKER_TYPE
@@ -66,7 +79,7 @@ describe('foundation revision native tool registration', () => {
     }
   })
 
-  test('registers a dynamic round and rejects invalid rounds', () => {
+  test('registers no tools for section scope and rejects invalid document contracts', () => {
     const previousWorkerType = process.env.BEEGAME_WORKFLOW_WORKER_TYPE
     const previousContract = process.env.BEEGAME_REVISION_CONTRACT
     const previousWorkspace = process.env.BEEGAME_WORKSPACE_PATH
@@ -75,6 +88,7 @@ describe('foundation revision native tool registration', () => {
     const base = {
       taskId: 'task-4',
       revision: 'revision-4',
+      scope: 'section',
       documentPath: 'docs/GDD.md',
       issueIds: ['issue-1'],
       sectionIds: ['section-1'],
@@ -84,38 +98,38 @@ describe('foundation revision native tool registration', () => {
     try {
       process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, round: 4 })
       expect(
-        getTools(getEmptyToolPermissionContext()).find(
-          candidate => candidate.name === 'SubmitFoundationRevisionResult',
+        getTools(getEmptyToolPermissionContext()).some(
+          candidate => ['ReadAssignedFoundationRevision', 'ApplyFoundationRevision', 'SubmitFoundationRevisionResult'].includes(candidate.name),
         ),
-      ).toBeDefined()
+      ).toBe(false)
 
-      process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, round: 0 })
+      process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, scope: 'document', sectionIds: [], round: 0 })
       expect(
         getTools(getEmptyToolPermissionContext()).find(
-          candidate => candidate.name === 'SubmitFoundationRevisionResult',
+          candidate => candidate.name === 'ReadAssignedFoundationRevision',
         ),
       ).toBeUndefined()
 
       for (const round of [Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
-        process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, round })
+        process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, scope: 'document', sectionIds: [], round })
         expect(
           getTools(getEmptyToolPermissionContext()).find(
-            candidate => candidate.name === 'SubmitFoundationRevisionResult',
+            candidate => candidate.name === 'ReadAssignedFoundationRevision',
           ),
         ).toBeUndefined()
       }
 
-      process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, round: 4 })
+      process.env.BEEGAME_REVISION_CONTRACT = JSON.stringify({ ...base, scope: 'document', sectionIds: [], round: 4 })
       delete process.env.BEEGAME_WORKSPACE_PATH
       expect(
         getTools(getEmptyToolPermissionContext()).find(
-          candidate => candidate.name === 'SubmitFoundationRevisionResult',
+          candidate => candidate.name === 'ReadAssignedFoundationRevision',
         ),
       ).toBeUndefined()
       process.env.BEEGAME_WORKSPACE_PATH = 'relative/workspace'
       expect(
         getTools(getEmptyToolPermissionContext()).find(
-          candidate => candidate.name === 'SubmitFoundationRevisionResult',
+          candidate => candidate.name === 'ReadAssignedFoundationRevision',
         ),
       ).toBeUndefined()
     } finally {

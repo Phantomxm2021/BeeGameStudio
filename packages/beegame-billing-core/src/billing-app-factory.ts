@@ -21,17 +21,49 @@ export function createBeeGameBillingRouteApp(
   options: BeeGameBillingAppFactoryOptions,
 ): Hono {
   const app = new Hono()
+  const failureOccurrences = new Map<
+    string,
+    { diagnosticId: string; repeatCount: number }
+  >()
 
   app.onError((error, c) => {
-    const traceId = randomUUID()
-    console.error(
-      `[BeeGame billing] ${c.req.method} ${c.req.path} failed:`,
-      { traceId, error },
-    )
+    const reasonCode = c.req.path.startsWith('/api/internal/usage/')
+      ? 'usage_billing'
+      : 'billing_request'
+    const failureKey = JSON.stringify({
+      method: c.req.method,
+      path: c.req.path,
+      reasonCode,
+      message: toErrorMessage(error),
+    })
+    const previous = failureOccurrences.get(failureKey)
+    if (!previous && failureOccurrences.size >= 256) {
+      const oldest = failureOccurrences.keys().next().value
+      if (oldest !== undefined) failureOccurrences.delete(oldest)
+    }
+    const occurrence = previous
+      ? { ...previous, repeatCount: previous.repeatCount + 1 }
+      : { diagnosticId: randomUUID(), repeatCount: 1 }
+    failureOccurrences.set(failureKey, occurrence)
+    const traceId = occurrence.diagnosticId
+    if (occurrence.repeatCount === 1) {
+      console.error(
+        `[BeeGame billing] ${c.req.method} ${c.req.path} failed:`,
+        { traceId, reasonCode, error },
+      )
+    } else if ((occurrence.repeatCount & (occurrence.repeatCount - 1)) === 0) {
+      // Log only exponentially spaced counters after the first full stack.
+      // A persistent outage therefore remains visible without flooding logs.
+      console.warn('[BeeGame billing] repeated failure', {
+        traceId,
+        reasonCode,
+        repeatCount: occurrence.repeatCount,
+      })
+    }
     return c.json(
       {
         error: 'Billing request failed',
-        ...(c.req.path.startsWith('/api/internal/usage/')
+        ...(reasonCode === 'usage_billing'
           ? { stage: 'usage_billing' as const }
           : {}),
         message: toErrorMessage(error),

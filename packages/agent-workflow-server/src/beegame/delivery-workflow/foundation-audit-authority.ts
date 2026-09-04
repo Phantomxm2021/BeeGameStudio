@@ -32,9 +32,8 @@ const declaration = (
 /** The sole service-owned deterministic contract declaration source. */
 export const FOUNDATION_DETERMINISTIC_CONTRACT_DECLARATIONS = Object.freeze([
   declaration('technical-actions-authority', 'technical.supported_actions', 'game.mechanics', 'contains-all', { documentPath: 'docs/TECHNICAL_DESIGN.md', sectionId: 'input_interaction' }, { documentPath: 'docs/GDD.md', sectionId: 'player_actions' }),
-  declaration('asset-boss-count-authority', 'asset.boss.count', 'game.boss.count', 'numeric-equal', { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }, { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' }),
   declaration('ui-resources-authority', 'ui.displayed_resources', 'game.resources', 'contains-all', { documentPath: 'docs/UI_UX_SPEC.md', sectionId: 'hud' }, { documentPath: 'docs/GDD.md', sectionId: 'rules_systems' }),
-  declaration('asset-level-requirement-coverage', 'asset.covered_level_requirements', 'level.required_assets', 'contains-all', { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'inventory' }, { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'content_matrix' }),
+  declaration('asset-level-requirement-coverage', 'asset.covered_level_requirements', 'level.required_assets', 'contains-all', { documentPath: 'docs/ASSET_PLAN.md', sectionId: 'material.asset-inventory-table' }, { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'content_matrix' }),
 ] as const)
 
 export const TECHNICAL_IMPOSSIBILITY_REASON_CODE =
@@ -114,6 +113,7 @@ export function applyFoundationFixAuthority(
       ...issue,
       remediation: {
         kind: 'patch' as const,
+        scope: 'section' as const,
         documentPath: target.documentPath,
         sectionIds: [target.sectionId],
       },

@@ -7,13 +7,12 @@ import {
 import { GAME_DOCUMENT_CONTRACTS } from './game-document-contracts'
 
 describe('normalized foundation fact catalog', () => {
-  test('is a versioned closed catalog of exactly the 25 service-owned keys', () => {
-    expect(FOUNDATION_FACT_CATALOG_VERSION).toBe('foundation-facts.v2')
-    expect(FOUNDATION_FACT_CATALOG).toHaveLength(25)
-    expect(new Set(FOUNDATION_FACT_CATALOG.map(item => item.key)).size).toBe(25)
+  test('is a versioned closed catalog without genre-specific boss facts', () => {
+    expect(FOUNDATION_FACT_CATALOG_VERSION).toBe('foundation-facts.v3')
+    expect(FOUNDATION_FACT_CATALOG).toHaveLength(23)
+    expect(new Set(FOUNDATION_FACT_CATALOG.map(item => item.key)).size).toBe(23)
     expect(FOUNDATION_FACT_CATALOG.map(item => item.key)).toEqual([
       'game.players.max',
-      'game.boss.count',
       'game.mechanics',
       'game.resources',
       'game.states',
@@ -34,7 +33,6 @@ describe('normalized foundation fact catalog', () => {
       'audio.event_ids',
       'asset.inventory_ids',
       'asset.covered_level_requirements',
-      'asset.boss.count',
       'asset.art_constraint_refs',
       'asset.formats',
     ])
@@ -72,7 +70,7 @@ describe('normalized foundation fact catalog', () => {
     })
     expect(foundationFactDefinition('asset.art_constraint_refs')?.owner).toEqual({
       documentPath: 'docs/ASSET_PLAN.md',
-      sectionId: 'dependencies',
+      sectionId: 'material.dependency-integration-diagram',
     })
     expect(foundationFactDefinition('balance.entity_ids')?.owner).toEqual({
       documentPath: 'docs/BALANCE_DESIGN.md',
@@ -82,6 +80,14 @@ describe('normalized foundation fact catalog', () => {
       documentPath: 'docs/BALANCE_DESIGN.md',
       sectionId: 'material.variable-parameter-table',
     })
+  })
+
+  test('binds material-owned facts to canonical materials and permits an explicit no-loss game', () => {
+    expect(foundationFactDefinition('audio.event_ids')?.owner.sectionId).toBe('material.event-cue-matrix')
+    expect(foundationFactDefinition('asset.inventory_ids')?.owner.sectionId).toBe('material.asset-inventory-table')
+    expect(foundationFactDefinition('asset.covered_level_requirements')?.owner.sectionId).toBe('material.asset-inventory-table')
+    expect(foundationFactDefinition('asset.formats')?.owner.sectionId).toBe('material.asset-inventory-table')
+    expect(foundationFactDefinition('game.loss_conditions')?.valueSpec.minItems).toBe(0)
   })
 
   test('defines semantic labels for level assets and shared resource facts', () => {

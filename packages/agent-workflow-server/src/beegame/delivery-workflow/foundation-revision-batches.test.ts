@@ -30,7 +30,7 @@ const issue = (
     source,
     expected: 'expected',
     actual: 'actual',
-    remediation: { kind: 'patch', documentPath: remediationDocument as FoundationDocumentPath, sectionIds: [remediationSectionId] },
+    remediation: { kind: 'patch', scope: 'section', documentPath: remediationDocument as FoundationDocumentPath, sectionIds: [remediationSectionId] },
   }
 }
 
@@ -67,6 +67,7 @@ describe('foundation revision batch planning', () => {
 
     expect(batches).toEqual([
       {
+        scope: 'section',
         documentPath: 'docs/GDD.md',
         sectionIds: ['vision', 'rules_systems'],
         issueIds: ['AUD-A', 'AUD-B'],
@@ -105,7 +106,7 @@ describe('foundation revision batch planning', () => {
     })
 
     expect(batches).toEqual([
-      { documentPath: 'docs/GDD.md', sectionIds: ['vision'], issueIds: ['AUD-1'] },
+      { scope: 'section', documentPath: 'docs/GDD.md', sectionIds: ['vision'], issueIds: ['AUD-1'] },
     ])
   })
 

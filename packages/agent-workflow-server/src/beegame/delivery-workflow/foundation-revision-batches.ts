@@ -1,5 +1,5 @@
 import type {
-  AuditIssue,
+  FoundationReviewIssue,
   IssueRegistryContext,
 } from './foundation-issue-registry'
 import {
@@ -8,11 +8,11 @@ import {
 } from './types'
 import { canonicalFoundationBlockIds } from './foundation-section-index'
 
-export type RevisionBatch = {
-  documentPath: FoundationDocumentPath
-  sectionIds: string[]
-  issueIds: string[]
-}
+const DIGEST = /^[a-f0-9]{64}$/
+
+export type RevisionBatch =
+  | { scope: 'section'; documentPath: FoundationDocumentPath; sectionIds: string[]; issueIds: string[] }
+  | { scope: 'document'; documentPath: FoundationDocumentPath; sectionIds: []; issueIds: string[] }
 
 /**
  * Groups the already-admitted Issue Registry into one revision scope per
@@ -20,7 +20,7 @@ export type RevisionBatch = {
  * issue source/target sections never widen a revision batch.
  */
 export function buildFoundationRevisionBatches(input: {
-  issues: readonly AuditIssue[]
+  issues: readonly FoundationReviewIssue[]
   registry: IssueRegistryContext
 }): RevisionBatch[] {
   if (!input || !Array.isArray(input.issues))
@@ -30,6 +30,7 @@ export function buildFoundationRevisionBatches(input: {
 
   const seenIssueIds = new Set<string>()
   const grouped = new Map<FoundationDocumentPath, {
+    scope: 'section' | 'document'
     sectionIds: Set<string>
     issueIds: string[]
   }>()
@@ -42,8 +43,40 @@ export function buildFoundationRevisionBatches(input: {
     seenIssueIds.add(issue.id)
 
     const documentPath = issue.remediation.documentPath
+    if (!isCanonicalDocument(documentPath))
+      throw new Error(`revision issue patch target is outside canonical authority: ${issue.id}`)
+
+    if (issue.remediation.scope === 'document') {
+      // A document-scoped remediation is deliberately a narrow format-repair
+      // contract.  It cannot be used to smuggle an ordinary section issue into
+      // a whole-document rewrite, and its source must remain an exact digest
+      // reference rather than an invented SectionRef.
+      if (
+        issue.type !== 'schema' &&
+        issue.type !== 'contract'
+      )
+        throw new Error(`revision document scope is reserved for format issues: ${issue.id}`)
+      if (
+        issue.reasonCode !== 'DOCUMENT_FORMAT_INVALID' ||
+        !issue.source ||
+        typeof issue.source !== 'object' ||
+        Array.isArray(issue.source) ||
+        issue.source.scope !== 'document' ||
+        issue.source.documentPath !== documentPath ||
+        typeof issue.source.digest !== 'string' ||
+        !DIGEST.test(issue.source.digest) ||
+        'target' in issue
+      )
+        throw new Error(`revision document scope issue authority is invalid: ${issue.id}`)
+      const current = grouped.get(documentPath)
+      if (current && current.scope !== 'document')
+        throw new Error(`revision document and section scopes cannot be mixed: ${documentPath}`)
+      if (current) current.issueIds.push(issue.id)
+      else grouped.set(documentPath, { scope: 'document', sectionIds: new Set(), issueIds: [issue.id] })
+      continue
+    }
     const sectionIds = issue.remediation.sectionIds
-    if (!isCanonicalDocument(documentPath) || !sectionIds.length || new Set(sectionIds).size !== sectionIds.length)
+    if (!sectionIds.length || new Set(sectionIds).size !== sectionIds.length)
       throw new Error(`revision issue patch target is outside canonical authority: ${issue.id}`)
 
     const knownBlockIds = new Set(canonicalFoundationBlockIds(documentPath))
@@ -59,10 +92,13 @@ export function buildFoundationRevisionBatches(input: {
 
     const current = grouped.get(documentPath)
     if (current) {
+      if (current.scope !== 'section')
+        throw new Error(`revision document and section scopes cannot be mixed: ${documentPath}`)
       for (const sectionId of sectionIds) current.sectionIds.add(sectionId)
       current.issueIds.push(issue.id)
     } else {
       grouped.set(documentPath, {
+        scope: 'section',
         sectionIds: new Set(sectionIds),
         issueIds: [issue.id],
       })
@@ -75,7 +111,13 @@ export function buildFoundationRevisionBatches(input: {
       const blockOrder = new Map(
         canonicalFoundationBlockIds(documentPath).map((blockId, index) => [blockId, index]),
       )
-      return {
+      return value.scope === 'document' ? {
+        scope: 'document' as const,
+        documentPath,
+        sectionIds: [],
+        issueIds: [...value.issueIds].sort(compareStable),
+      } : {
+        scope: 'section' as const,
         documentPath,
         sectionIds: [...value.sectionIds].sort(
           (left, right) =>

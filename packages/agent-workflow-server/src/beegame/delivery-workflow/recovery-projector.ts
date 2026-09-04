@@ -7,7 +7,7 @@ import {
   readResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
 import { validateFoundationAuditStateArtifacts } from './foundation-audit-artifacts'
-import { parseFoundationAuditState } from './foundation-audit-state'
+import { isFoundationRevisionPhase, parseFoundationAuditState } from './foundation-audit-state'
 import { getGameDocumentContract } from './game-document-contracts'
 import {
   computeDocumentRevision,
@@ -1716,7 +1716,14 @@ export async function projectExactResumeRun(input: {
     }
   }
   const projectedRun = foundationAuditState
-    ? { ...run, foundationAuditState }
+    ? isFoundationRevisionPhase(foundationAuditState.status)
+      ? {
+          ...run,
+          phase: 'FOUNDATION_REVISION' as const,
+          documentStep: 'FOUNDATION_REVISION' as const,
+          foundationAuditState,
+        }
+      : { ...run, foundationAuditState }
     : run
   return {
     run: projectedRun,

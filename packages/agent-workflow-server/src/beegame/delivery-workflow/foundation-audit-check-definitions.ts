@@ -137,7 +137,7 @@ function validateSection(value: unknown, label: string): SectionRef {
 function validValue(value: unknown): value is FactValue {
   if (typeof value === 'string' || typeof value === 'boolean') return true
   if (typeof value === 'number') return Number.isFinite(value)
-  if (!Array.isArray(value) || value.length === 0) return false
+  if (!Array.isArray(value)) return false
   return (
     value.every(item => typeof item === 'string') ||
     value.every(item => typeof item === 'number' && Number.isFinite(item))
@@ -492,7 +492,7 @@ function schemaDrafts(
         source,
         expected: `required fact ${definition.key} must exist with type ${definition.expectedType}`,
         actual: `missing fact ${definition.key}`,
-        remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
+        remediation: { kind: 'patch', scope: 'section', documentPath: source.documentPath, sectionIds: [source.sectionId] },
         conflictIdentity: {
           key: definition.key,
           expectedType: definition.expectedType,
@@ -519,7 +519,7 @@ function schemaDrafts(
       source: declaredSource,
       expected: `fact ${definition.key} must have type ${definition.expectedType}`,
       actual: `fact ${definition.key} has type ${actualType}`,
-      remediation: { kind: 'patch', documentPath: declaredSource.documentPath, sectionIds: [declaredSource.sectionId] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: declaredSource.documentPath, sectionIds: [declaredSource.sectionId] },
       conflictIdentity: {
         key: definition.key,
         expectedType: definition.expectedType,
@@ -602,7 +602,9 @@ function validateRemediation(
     throw new Error('audit issue remediation must be an object')
   const candidate = value as Record<string, unknown>
   if (candidate.kind === 'patch') {
-    exactKeys(candidate, ['documentPath', 'kind', 'sectionIds'], 'patch remediation')
+    exactKeys(candidate, ['documentPath', 'kind', 'scope', 'sectionIds'], 'patch remediation')
+    if (candidate.scope !== 'section')
+      throw new Error('compiled audit issue remediation must be section-scoped')
     if (
       typeof candidate.documentPath !== 'string' ||
       !CANONICAL_FOUNDATION_DOCUMENTS.includes(candidate.documentPath as FoundationDocumentPath)
@@ -618,6 +620,7 @@ function validateRemediation(
     }
     return {
       kind: 'patch',
+      scope: 'section',
       documentPath: candidate.documentPath as FoundationDocumentPath,
       sectionIds: [...candidate.sectionIds] as string[],
     }

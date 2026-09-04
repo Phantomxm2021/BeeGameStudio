@@ -246,13 +246,12 @@ describe('idea to complete game documents', () => {
     }
   })
 
-  test('does not advance past an invalid complete foundation document', async () => {
+  test('commits non-empty malformed Markdown and defers format review beyond authoring', async () => {
     const workspacePath = await mkdtemp(
       join(tmpdir(), 'invalid-idea-document-'),
     )
     workspaces.push(workspacePath)
     const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
-    const contract = getGameDocumentContract(path)
     const submission = completeSubmission(path)
     const renderedLines = renderTestCompleteGameDocument(
       path,
@@ -273,8 +272,7 @@ describe('idea to complete game documents', () => {
       ].join('\n'),
     )
 
-    const run = await completeDocumentDraft({
-      run: {
+    const baseRun: DeliveryRun = {
         ...createTestDeliveryRun({
           projectId: 'project-invalid-document',
           ownerId: 'owner-invalid-document',
@@ -283,6 +281,34 @@ describe('idea to complete game documents', () => {
         }),
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
+      }
+    const requests: WorkerDispatchRequest[] = []
+    await startDocumentStage({
+      run: baseRun,
+      workspacePath,
+      dispatcher: { async dispatch(request) { requests.push(request); return request } },
+    })
+    const request = requests.find(candidate => candidate.taskId === path)!
+    const dispatch = {
+      dispatchId: 'malformed-markdown-author',
+      workerType: 'document-author' as const,
+      phase: baseRun.phase,
+      taskId: path,
+      revision: baseRun.revision.document,
+      status: 'completed' as const,
+      request,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+    }
+    await writeCommittedProjection(workspacePath, dispatch.dispatchId, path)
+    await commitAuthoredFoundationDocument({ workspacePath, dispatchId: dispatch.dispatchId, targetPath: path })
+    const run = await completeDocumentDraft({
+      run: {
+        ...baseRun,
+        activeDispatch: dispatch,
+        foundationDraftState: baseRun.foundationDraftState.documents
+          ? recordFoundationDispatch(baseRun.foundationDraftState, path, 'drafting', dispatch)
+          : baseRun.foundationDraftState,
       },
       workspacePath,
       terminal: {
@@ -294,9 +320,7 @@ describe('idea to complete game documents', () => {
       documentSet: 'foundation',
     })
 
-    expect(run.blockedReason).toContain(
-      'complete game document requires one document title',
-    )
-    expect(run.foundationDraftState.completedPaths).toEqual([])
+    expect(run.blockedReason).toBeUndefined()
+    expect(run.foundationDraftState.completedPaths).toContain(path)
   })
 })

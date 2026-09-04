@@ -2,11 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import { parseAcceptanceChecklist } from './acceptance-checklist'
-import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
-import {
-  CANONICAL_FOUNDATION_DOCUMENTS,
-  CANONICAL_PROJECT_DOCUMENTS,
-} from './delivery-workflow/types'
+import { CANONICAL_PROJECT_DOCUMENTS } from './delivery-workflow/types'
 
 export const REQUIRED_PROJECT_DOCUMENTS = CANONICAL_PROJECT_DOCUMENTS
 
@@ -18,7 +14,6 @@ export type DocumentReadinessAudit = {
 export type DocumentReadinessAuditOptions = {
   includeChecklist?: boolean
   includeAssetManifest?: boolean
-  requireCompleteFoundation?: boolean
 }
 
 /** Returns stable checklist ids without interpreting any project-specific semantics. */
@@ -64,19 +59,6 @@ export function auditDocumentReadiness(
       if (!content.trim()) {
         issues.push(`Required project document is empty: ${projectPath}`)
       }
-      if (
-        options.requireCompleteFoundation === true &&
-        CANONICAL_FOUNDATION_DOCUMENTS.includes(
-          projectPath as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-        )
-      )
-        issues.push(
-          ...auditCompleteFoundationDocument(
-            workspace,
-            projectPath as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-            content,
-          ),
-        )
     } catch {
       issues.push(`Required project document is unreadable: ${projectPath}`)
     }
@@ -103,34 +85,6 @@ export function auditDocumentReadiness(
   }
 
   return { valid: issues.length === 0, issues }
-}
-
-function auditCompleteFoundationDocument(
-  workspacePath: string,
-  path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-  content: string,
-): string[] {
-  try {
-    const lines = content.split('\n')
-    let bodyStart = 0
-    if (lines[0]?.trim() === '---') {
-      const metadataEnd = lines.findIndex(
-        (line, index) => index > 0 && line.trim() === '---',
-      )
-      if (metadataEnd < 0)
-        throw new Error('complete game document front matter is incomplete')
-      bodyStart = metadataEnd + 1
-    }
-    validateCompleteGameDocumentMarkdown(
-      path,
-      lines.slice(bodyStart).join('\n').trimStart(),
-    )
-    return []
-  } catch (error) {
-    return [
-      `${path}: ${error instanceof Error ? error.message : 'complete document contract is invalid'}`,
-    ]
-  }
 }
 
 function auditChecklistStructure(content: string, path: string): string[] {

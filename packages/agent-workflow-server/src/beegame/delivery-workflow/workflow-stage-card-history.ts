@@ -1,6 +1,5 @@
 import {
   DELIVERY_PROGRESS_STAGES,
-  isActiveFoundationRepairState,
   projectDeliveryProgress,
   type DeliveryProgressStage,
   type DeliveryProgressSubstage,
@@ -68,8 +67,13 @@ export type WorkflowStageCardSnapshot = {
   activeSince?: string
   block?: {
     message: string
+    detail?: string
     code?: string
     diagnosticId?: string
+    stage?: string
+    taskId?: string
+    documentPath?: string
+    retryable?: boolean
     nextAction?: string
   }
 }
@@ -220,6 +224,17 @@ export function isWorkflowStageCardSnapshot(
   if (value.block !== undefined) {
     if (!isRecord(value.block) || typeof value.block.message !== 'string')
       return false
+    for (const field of ['detail', 'code', 'diagnosticId', 'stage', 'taskId', 'documentPath'])
+      if (
+        value.block[field] !== undefined &&
+        typeof value.block[field] !== 'string'
+      )
+        return false
+    if (
+      value.block.retryable !== undefined &&
+      typeof value.block.retryable !== 'boolean'
+    )
+      return false
     if (
       value.block.nextAction !== undefined &&
       typeof value.block.nextAction !== 'string'
@@ -342,13 +357,7 @@ function documentTasks(
   run: DeliveryRun,
   workspacePath: string,
 ): DocumentDisplayTask[] {
-  const documentStep =
-    run.documentStep ??
-    (run.phase === 'DOCUMENT_REVIEW' &&
-    (isActiveFoundationRepairState(run.foundationAuditState) ||
-      run.foundationAuditState?.status === 'audit_ready')
-      ? 'FOUNDATION_REVIEW'
-      : undefined)
+  const documentStep = run.documentStep
   const input: Parameters<typeof projectDocumentDisplayTasks>[0] = {
     workspacePath,
     currentItemId: run.currentItemId,
@@ -499,32 +508,41 @@ export function projectCurrentStageCard(input: {
   if (!progress) return undefined
   const run = input.run
   const documentPhase =
-    run.phase === 'DOCUMENT_DRAFTING' || run.phase === 'DOCUMENT_REVIEW'
+    run.phase === 'DOCUMENT_DRAFTING' ||
+    run.phase === 'DOCUMENT_REVIEW' ||
+    run.phase === 'FOUNDATION_REVISION'
   const tasks = documentPhase
     ? normalizeDisplayTasks(documentTasks(run, input.workspacePath))
     : run.phase === 'RESOURCE_PREPARATION'
       ? normalizeDisplayTasks(resourceTasks(run, input.workspacePath))
       : atomicTasks(run)
   const elapsed = elapsedTiming(run, input.timing)
-  const documentStep =
-    run.documentStep ??
-    (run.phase === 'DOCUMENT_REVIEW' &&
-    (isActiveFoundationRepairState(run.foundationAuditState) ||
-      run.foundationAuditState?.status === 'audit_ready')
-      ? 'FOUNDATION_REVIEW'
-      : undefined)
+  const documentStep = run.documentStep
   const message = run.status === 'running'
     ? projectWorkflowCurrentMessage({ value: run.currentMessage, phase: run.phase, documentStep })
     : ''
   const blockedReason = stringValue(
     run.blockedReason ?? run.activeDispatch?.failureReason,
   )
-  const blockReason = projectWorkflowDisplayReason(blockedReason)
+  const failedTask = tasks.find(task =>
+    ['failed', 'blocked'].includes(task.status),
+  )
+  const failedDocumentPath = failedTask?.title.startsWith('docs/')
+    ? failedTask.title
+    : run.currentItemId?.startsWith('docs/')
+      ? run.currentItemId
+      : undefined
   const nextAction = blockedReason
     ? run.status === 'stopped'
       ? 'resume'
       : 'retry'
     : undefined
+  const blockReason = projectWorkflowDisplayReason(blockedReason, {
+    stage: run.phase,
+    taskId: failedTask?.id ?? run.activeDispatch?.taskId,
+    documentPath: failedDocumentPath,
+    retryable: nextAction === 'retry',
+  })
   return {
     stageId: progress.stageId,
     phaseIndex: progress.phaseIndex,

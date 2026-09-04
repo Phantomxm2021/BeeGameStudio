@@ -111,7 +111,7 @@ describe('deterministic foundation rules', () => {
     expect(issues[0]).toMatchObject({
       type: 'schema',
       source: later,
-      remediation: { kind: 'patch', documentPath: later.documentPath, sectionIds: [later.sectionId] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: later.documentPath, sectionIds: [later.sectionId] },
     })
   })
 
@@ -139,7 +139,7 @@ describe('deterministic foundation rules', () => {
     expect(issues[0]).toMatchObject({
       type: 'schema',
       source: later,
-      remediation: { kind: 'patch', documentPath: later.documentPath, sectionIds: [later.sectionId] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: later.documentPath, sectionIds: [later.sectionId] },
     })
   })
 
@@ -245,7 +245,7 @@ describe('deterministic foundation rules', () => {
     expect(issues[0]).toMatchObject({
       type: 'schema',
       source,
-      remediation: { kind: 'patch', documentPath: source.documentPath, sectionIds: [source.sectionId] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: source.documentPath, sectionIds: [source.sectionId] },
     })
   })
 
@@ -266,7 +266,7 @@ describe('deterministic foundation rules', () => {
     expect(issues).toHaveLength(1)
     expect(issues[0]).toMatchObject({
       source: level,
-      remediation: { kind: 'patch', documentPath: level.documentPath, sectionIds: [level.sectionId] },
+      remediation: { kind: 'patch', scope: 'section', documentPath: level.documentPath, sectionIds: [level.sectionId] },
     })
   })
 })

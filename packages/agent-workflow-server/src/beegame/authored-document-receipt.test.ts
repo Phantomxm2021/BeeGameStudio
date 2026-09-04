@@ -16,6 +16,7 @@ import {
   projectFoundationAuthority,
   foundationProjectionRelativePath,
 } from './foundation-authority-projection'
+import { validateCompleteGameDocumentMarkdown } from './complete-game-document'
 
 function completeDocument(path: 'docs/GDD.md'): string {
   const contract = getGameDocumentContract(path)
@@ -141,27 +142,9 @@ describe('native authored document receipts', () => {
       expect(first.finalDigest).toBe(
         createHash('sha256').update(committedMarkdown).digest('hex'),
       )
-      const audit = JSON.parse(
-        await readFile(
-          join(
-            workspacePath,
-            '.beegame/workflow/document-audits/native-gdd.json',
-          ),
-          'utf8',
-        ),
-      )
-      expect(audit).toEqual({
-        schemaVersion: 1,
-        dispatchId: 'native-gdd',
-        targetPath: 'docs/GDD.md',
-        documentId: 'GDD',
-        documentDigest: first.finalDigest,
-        checks: {
-          canonicalStructure: 'passed',
-          productionMaterials: 'passed',
-          repeatedContent: 'passed',
-        },
-      })
+      await expect(
+        access(join(workspacePath, '.beegame/workflow/document-audits/native-gdd.json')),
+      ).rejects.toMatchObject({ code: 'ENOENT' })
       await expect(
         access(join(workspacePath, 'docs/GDD.authority.json')),
       ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -309,7 +292,7 @@ describe('native authored document receipts', () => {
     }
   })
 
-  test('commits semantic-looking Markdown through the structural Stage 2 gate', async () => {
+  test('commits semantic-looking Markdown without a Stage 2 content gate', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'authored-markdown-content-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -332,6 +315,55 @@ describe('native authored document receipts', () => {
         targetPath,
         updatedAt: '2026-08-13T01:00:00.000+08:00',
       })).resolves.toMatchObject({ status: 'committed' })
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('commits nonempty raw Markdown without performing Review work in Stage 2', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'authored-raw-markdown-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const targetPath = 'docs/GDD.md' as const
+      await writeProjectionForTarget(workspacePath, 'raw-markdown', targetPath, new Map())
+      const receipt = await commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId: 'raw-markdown',
+        targetPath,
+        authoredBody: '# draft title\n\nAn incomplete but valid authoring result.\n',
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
+      })
+      expect(receipt.status).toBe('committed')
+      expect(await readFile(join(workspacePath, targetPath), 'utf8')).toContain('# draft title')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('commits exact canonical raw Markdown with service-owned block markers', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'authored-service-markers-'))
+    try {
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      const targetPath = 'docs/GDD.md' as const
+      await writeProjectionForTarget(workspacePath, 'service-markers', targetPath, new Map())
+      const marked = completeFoundationDocument(targetPath)
+      const authoredBody = marked
+        .split('<!-- beegame-audit-appendix -->')[0]!
+        .split('\n')
+        .filter(line => !line.trim().startsWith('<!-- beegame-'))
+        .join('\n')
+      await commitAuthoredFoundationDocument({
+        workspacePath,
+        dispatchId: 'service-markers',
+        targetPath,
+        authoredBody,
+        updatedAt: '2026-08-13T01:00:00.000+08:00',
+      })
+      const committed = await readFile(join(workspacePath, targetPath), 'utf8')
+      const body = committed.split('---\n').slice(2).join('---\n')
+      expect(body).toContain('<!-- beegame-section:vision -->')
+      expect(body).toContain('<!-- beegame-material:core-loop-diagram -->')
+      expect(() => validateCompleteGameDocumentMarkdown(targetPath, body)).not.toThrow()
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

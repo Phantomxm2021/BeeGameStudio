@@ -1,10 +1,9 @@
 import type { FoundationDocumentPath } from './types'
 
-export const FOUNDATION_FACT_CATALOG_VERSION = 'foundation-facts.v2' as const
+export const FOUNDATION_FACT_CATALOG_VERSION = 'foundation-facts.v3' as const
 
 export type FoundationFactKey =
   | 'game.players.max'
-  | 'game.boss.count'
   | 'game.mechanics'
   | 'game.resources'
   | 'game.states'
@@ -25,7 +24,6 @@ export type FoundationFactKey =
   | 'audio.event_ids'
   | 'asset.inventory_ids'
   | 'asset.covered_level_requirements'
-  | 'asset.boss.count'
   | 'asset.art_constraint_refs'
   | 'asset.formats'
 
@@ -147,14 +145,6 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
       64,
       ['player-capacity-check'],
     ),
-    integer(
-      'game.boss.count',
-      GDDRules,
-      'Read the authored boss entity count as one finite integer.',
-      0,
-      64,
-      ['boss-count-consistency'],
-    ),
     list(
       'game.mechanics',
       GDDActions,
@@ -185,13 +175,16 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
       ['win-condition-coverage'],
       { resolution: 'model_if_unresolved' },
     ),
-    list(
-      'game.loss_conditions',
-      GDDStates,
-      'Read the canonical loss condition identifiers or short labels as a list.',
-      ['loss-condition-coverage'],
-      { resolution: 'model_if_unresolved' },
-    ),
+    {
+      ...list(
+        'game.loss_conditions',
+        GDDStates,
+        'Read the canonical loss condition identifiers or short labels as a list. An explicit empty list is authoritative when the game intentionally has no failure state.',
+        ['loss-condition-coverage'],
+        { resolution: 'model_if_unresolved' },
+      ),
+      valueSpec: { minItems: 0, maxItems: 256, itemPattern: '^\\S(?:.*\\S)?$' },
+    },
     {
       key: 'game.platform',
       owner: GDDVision,
@@ -285,19 +278,19 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     ),
     list(
       'audio.event_ids',
-      owner('docs/AUDIO_DESIGN.md', 'event_taxonomy'),
-      'Read stable audio event identifiers.',
+      owner('docs/AUDIO_DESIGN.md', 'material.event-cue-matrix'),
+      'Read stable audio event identifiers from the canonical Event to Cue Matrix owner material.',
       ['audio-event-coverage'],
     ),
     list(
       'asset.inventory_ids',
-      owner('docs/ASSET_PLAN.md', 'inventory'),
-      'Read stable asset inventory identifiers.',
+      owner('docs/ASSET_PLAN.md', 'material.asset-inventory-table'),
+      'Read stable asset inventory identifiers from the canonical Asset Inventory Table owner material.',
       ['asset-inventory-coverage'],
     ),
     list(
       'asset.covered_level_requirements',
-      owner('docs/ASSET_PLAN.md', 'inventory'),
+      owner('docs/ASSET_PLAN.md', 'material.asset-inventory-table'),
       'Read only the Level requirement entries or labels on the left side of an explicit AssetPlan inventory mapping table. If that mapping table or its covered rows is absent or unclear, leave this fact absent or uncertain; never copy, transform, or infer values from asset.inventory_ids, filenames, or other physical asset IDs.',
       ['level-asset-coverage'],
       {
@@ -305,22 +298,10 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
           'LEVEL content matrix owns required asset requirements; ASSET_PLAN inventory maps those requirements to physical inventory IDs.',
       },
     ),
-    integer(
-      'asset.boss.count',
-      owner('docs/ASSET_PLAN.md', 'inventory'),
-      'Read the authored boss asset count as one finite integer.',
-      0,
-      64,
-      ['boss-count-consistency'],
-      {
-        sourceOfTruthDirection:
-          'GDD rules owns boss count; ASSET_PLAN inventory is a downstream projection.',
-      },
-    ),
     list(
       'asset.art_constraint_refs',
-      owner('docs/ASSET_PLAN.md', 'dependencies'),
-      'Read references to ART_DIRECTION visual constraints used by assets.',
+      owner('docs/ASSET_PLAN.md', 'material.dependency-integration-diagram'),
+      'Read references to ART_DIRECTION visual constraints from the canonical dependency and integration owner material.',
       ['asset-style-constraint-coverage'],
       {
         sourceOfTruthDirection:
@@ -329,8 +310,8 @@ export const FOUNDATION_FACT_CATALOG: readonly FoundationFactDefinition[] =
     ),
     list(
       'asset.formats',
-      owner('docs/ASSET_PLAN.md', 'formats_budgets'),
-      'Read canonical asset delivery format identifiers.',
+      owner('docs/ASSET_PLAN.md', 'material.asset-inventory-table'),
+      'Read canonical delivered file format identifiers from the Asset Inventory Table file column.',
       ['asset-platform-format'],
     ),
   ])

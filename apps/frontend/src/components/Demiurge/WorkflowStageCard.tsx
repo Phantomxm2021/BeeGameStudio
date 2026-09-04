@@ -415,6 +415,20 @@ export function WorkflowStageCard({
     : undefined;
   const recoveryMessage = '已验证的工作流检查点可继续恢复。';
   const failureMessage = isRecoverable ? '工作流需要恢复。请点击继续以从已验证的检查点恢复。' : snapshot.block?.message;
+  const failureDetails = snapshot.block
+      ? [
+        failureMessage,
+        snapshot.block.detail && snapshot.block.detail !== failureMessage ? `Technical reason: ${snapshot.block.detail}` : '',
+        snapshot.block.diagnosticId ? `Diagnostic ID: ${snapshot.block.diagnosticId}` : '',
+        snapshot.block.code ? `Reason code: ${snapshot.block.code}` : '',
+        snapshot.block.stage ? `Stage: ${snapshot.block.stage}` : '',
+        snapshot.block.taskId ? `Task: ${snapshot.block.taskId}` : '',
+        snapshot.block.documentPath ? `Document: ${snapshot.block.documentPath}` : '',
+        typeof snapshot.block.retryable === 'boolean' ? `Retryable: ${snapshot.block.retryable ? 'yes' : 'no'}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : undefined;
   const message = isRecoverable
     ? recoveryMessage
     : snapshot.thinking || (isBlocked ? snapshot.block?.message : undefined) || '正在准备当前阶段…';
@@ -512,7 +526,7 @@ export function WorkflowStageCard({
   };
 
   const handleCopyFailure = async () => {
-    const message = failureMessage;
+    const message = failureDetails;
     if (!message) return;
     const copied = await copyText(message);
     if (copied) showSuccess('错误信息已复制');
@@ -565,7 +579,7 @@ export function WorkflowStageCard({
                       role="tooltip"
                       className="pointer-events-none invisible absolute right-0 top-6 z-30 w-72 rounded-xl border border-rose-400/20 bg-zinc-950/95 p-3 text-xs leading-5 text-rose-100 opacity-0 shadow-2xl backdrop-blur-xl transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
                     >
-                      <p>{failureMessage}</p>
+                      <p className="whitespace-pre-wrap">{failureDetails}</p>
                       {snapshot.block.nextAction ? (
                         <p className="mt-1 text-rose-200/70">下一步：{snapshot.block.nextAction}</p>
                       ) : null}

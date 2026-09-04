@@ -74,6 +74,9 @@ export type GameDocumentOutputPolicy = Readonly<{
   mutableFactPolicy: 'single_owner_no_copied_totals'
   workedExamples: 'one_per_distinct_boundary'
   acceptanceScenarios: 'materially_distinct_only'
+  nonApplicableDecisions: 'owner_block_once'
+  acceptanceEvidence: 'declared_acceptance_owners_only'
+  productionMaterialRows: 'distinct_owner_records_only'
 }>
 
 export type GameDocumentContract = {
@@ -96,6 +99,9 @@ export const GAME_DOCUMENT_OUTPUT_POLICY: GameDocumentOutputPolicy =
     mutableFactPolicy: 'single_owner_no_copied_totals',
     workedExamples: 'one_per_distinct_boundary',
     acceptanceScenarios: 'materially_distinct_only',
+    nonApplicableDecisions: 'owner_block_once',
+    acceptanceEvidence: 'declared_acceptance_owners_only',
+    productionMaterialRows: 'distinct_owner_records_only',
   })
 
 const section = (
@@ -160,7 +166,7 @@ const PRODUCTION_MATERIALS = {
     material('information-architecture-diagram', 'Information Architecture Diagram', 'mermaid', 'Canonical navigation evidence owning experience_architecture hierarchy and entry-point mappings.', 'Own canonical UI navigation, hierarchy and entry-point mappings; corresponding prose and other materials reference this diagram.'),
     material('player-flow-diagram', 'Player Flow Diagram', 'mermaid', 'Canonical journey evidence owning player_journeys and feedback_errors task-flow mappings.', 'Own canonical UI onboarding, play, progression, configuration and recovery journey mappings; corresponding prose and other materials reference this diagram.'),
     material('screen-state-table', 'Screen and State Table', 'markdown_table', 'Canonical screen/state evidence owned by screen_inventory.', 'Own the canonical UI screen and interface state inventory; all other UI materials reference these screen and state IDs.'),
-    material('wireframe-board', 'Wireframe Board', 'inline_svg', 'Canonical layout evidence owning responsive geometry, minimum regions and screen presentation.', 'Own canonical UI responsive layout, region and screen geometry literals; corresponding prose and other materials reference this board.'),
+    material('wireframe-board', 'Wireframe Board', 'inline_svg', 'One compact semantic wireframe owning responsive geometry, minimum regions and screen presentation; include only labeled layout regions and constraints, never decorative vectors or a duplicate screen-state catalog.', 'Own canonical UI responsive layout, region and screen geometry literals; corresponding prose and other materials reference this board.'),
     material('focus-accessibility-matrix', 'Focus and Accessibility Matrix', 'markdown_table', 'Canonical focus and accessibility evidence owning input, remapping and inclusive-use mappings.', 'Own canonical UI focus, input, remapping and accessibility mappings; corresponding prose and other materials reference this matrix.'),
   ],
   'docs/AUDIO_DESIGN.md': [
@@ -197,7 +203,7 @@ const FOUNDATION_DOCUMENT_MERGE_REFERENCE_RULES = Object.freeze({
   'docs/ART_DIRECTION.md': 'Merge visual language and visual acceptance conditions into Art owners; omit repeated prose and geometry, and delegate resource responsibility, source, license and schedule facts to Asset Plan.',
   'docs/UI_UX_SPEC.md': 'Merge responsive geometry/layout and screen-state ownership into their canonical sections and materials; omit equivalent repetition while keeping material evidence aligned to stable owners.',
   'docs/AUDIO_DESIGN.md': 'Merge event-to-cue behavior and technical audio constraints into Audio owners and materials; omit repeated mappings and resource facts, and delegate resource IDs, source, license and schedule facts to Asset Plan.',
-  'docs/ASSET_PLAN.md': 'Merge Asset materials by their shared inventory ID: inventory owns resource identity, semantic requirement mappings, type, instance, file, quantity and unique detail; sibling materials separately own responsibility, dependency/integration, source/licensing, and milestone/maturity facts. Keep the shared key stable without transferring sibling facts into inventory. Use one inventory ID per independently acquireable/authorable/licensable/replaceable/acceptable delivery unit; one inventory ID may map to multiple delivery files or encoding variants. Use per-unit mapping from upstream Art/Audio/UI requirements instead of category collapse. repeated metadata stays inside its one owner material without a second profile schema. Keep planned fields separated from evidence-backed observed fields; make no `verified`, `available`, current maturity, or delivery receipt claim without evidence. Use exact derivable mappings, otherwise an explicit `unresolvedRef`. Constrain Asset H2 sections to policy, context, rationale, and owner-material references; per-inventory rows, mappings, quantities, evidence, current status, and milestones remain only in the five owner materials.',
+  'docs/ASSET_PLAN.md': 'Merge Asset materials by their shared inventory ID: inventory owns resource identity, semantic requirement mappings, type, instance, file, quantity and unique detail; sibling materials separately own responsibility, dependency/integration, source/licensing, and milestone/maturity facts. Keep the shared key stable without transferring sibling facts into inventory.',
 } satisfies Record<FoundationDocumentPath, string>)
 
 const UPSTREAM_SECTIONS = {
@@ -206,17 +212,17 @@ const UPSTREAM_SECTIONS = {
     upstream('docs/GDD.md', 'experience_pillars', 'core_loop', 'player_actions', 'rules_systems', 'states_flow', 'progression', 'content_narrative', 'challenge_recovery', 'accessibility_localization', 'scope_risks'),
   ],
   'docs/BALANCE_DESIGN.md': [
-    upstream('docs/GDD.md', 'core_loop', 'rules_systems', 'states_flow', 'progression', 'challenge_recovery', 'metrics', 'scope_risks'),
-    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'level_sequence', 'objectives_routes', 'pacing_beats', 'encounters', 'spawn_checkpoint', 'content_matrix', 'production_acceptance'),
+    upstream('docs/GDD.md', 'core_loop', 'rules_systems', 'states_flow', 'progression', 'challenge_recovery', 'metrics'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'level_sequence', 'objectives_routes', 'pacing_beats', 'encounters', 'spawn_checkpoint', 'content_matrix'),
   ],
   'docs/TECHNICAL_DESIGN.md': [
     upstream('docs/GDD.md', 'player_actions', 'rules_systems', 'states_flow', 'accessibility_localization', 'metrics', 'scope_risks'),
-    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'spawn_checkpoint', 'camera_readability', 'scene_states', 'content_matrix', 'production_acceptance'),
-    upstream('docs/BALANCE_DESIGN.md', 'units_variables', 'formulas', 'bounds_exploits', 'tuning_validation', 'risks_dependencies'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'spawn_checkpoint', 'camera_readability', 'scene_states', 'content_matrix'),
+    upstream('docs/BALANCE_DESIGN.md', 'units_variables', 'formulas', 'bounds_exploits'),
   ],
   'docs/ART_DIRECTION.md': [
-    upstream('docs/GDD.md', 'experience_pillars', 'rules_systems', 'content_narrative', 'accessibility_localization', 'scope_risks'),
-    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'camera_readability', 'content_matrix', 'production_acceptance'),
+    upstream('docs/GDD.md', 'experience_pillars', 'rules_systems', 'content_narrative', 'accessibility_localization'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'camera_readability', 'content_matrix'),
   ],
   'docs/UI_UX_SPEC.md': [
     upstream('docs/GDD.md', 'core_loop', 'player_actions', 'rules_systems', 'states_flow', 'challenge_recovery', 'accessibility_localization', 'content_narrative'),
@@ -225,15 +231,15 @@ const UPSTREAM_SECTIONS = {
   'docs/AUDIO_DESIGN.md': [
     upstream('docs/GDD.md', 'experience_pillars', 'core_loop', 'rules_systems', 'states_flow', 'content_narrative', 'accessibility_localization'),
     upstream('docs/LEVEL_SCENE_DESIGN.md', 'world_structure', 'pacing_beats', 'encounters', 'scene_states'),
-    upstream('docs/UI_UX_SPEC.md', 'hud', 'input', 'feedback_errors', 'onboarding', 'accessibility'),
+    upstream('docs/UI_UX_SPEC.md', 'feedback_errors', 'accessibility'),
   ],
   'docs/ASSET_PLAN.md': [
     upstream('docs/GDD.md', 'scope_risks'),
-    upstream('docs/LEVEL_SCENE_DESIGN.md', 'content_matrix', 'production_acceptance'),
-    upstream('docs/TECHNICAL_DESIGN.md', 'data_content', 'performance', 'build_release', 'risks'),
-    upstream('docs/ART_DIRECTION.md', 'asset_specifications', 'pipeline_risks'),
-    upstream('docs/UI_UX_SPEC.md', 'screen_inventory', 'localization', 'prototype_acceptance'),
-    upstream('docs/AUDIO_DESIGN.md', 'implementation', 'production'),
+    upstream('docs/LEVEL_SCENE_DESIGN.md', 'content_matrix'),
+    upstream('docs/TECHNICAL_DESIGN.md', 'data_content', 'performance', 'build_release'),
+    upstream('docs/ART_DIRECTION.md', 'asset_specifications'),
+    upstream('docs/UI_UX_SPEC.md', 'screen_inventory', 'localization'),
+    upstream('docs/AUDIO_DESIGN.md', 'implementation'),
   ],
 } satisfies Record<FoundationDocumentPath, readonly GameDocumentUpstreamProjection[]>
 
@@ -374,10 +380,10 @@ export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
     [
       section('units_variables', 'Units, Variables and Conventions', 'Define units, unit semantics, variable semantics, precision rules and comparison conventions from explicit owner inputs; numeric `var.*` and `param.*` entries are stored only in the variable-parameter-table, which is their sole owner.', 'balance_and_math'),
       section('entity_parameters', 'Entity and Ability Parameters', 'Define entity and action parameter identities (`param.*`), parameter semantics, semantic roles and relationships only; numeric parameter entries are stored only in the variable-parameter-table, which is their sole owner, while Fact Store identity remains this section.', 'balance_and_math', 'gameplay_systems'),
-      section('formulas', 'Authoritative Formulas', 'Define authoritative formulas, ordering, clamping, rounding and boundaries with recomputable worked results and totals; other sections and materials reference formula IDs and do not store independent results or totals.', 'balance_and_math'),
-      section('economy', 'Economy Sources, Sinks and Constraints', 'Define resource flows, costs, rewards, affordability and deadlock prevention, making recomputable results and totals derive from owner inputs without independent derived totals.', 'progression_and_economy', 'balance_and_math'),
-      section('progression_curves', 'Progression and Capability Curves', 'Define growth, unlock, power and content progression, making recomputable results and totals derive from owner inputs rather than independent derived totals.', 'progression_and_economy', 'balance_and_math'),
-      section('challenge_model', 'Challenge and Pressure Model', 'Define difficulty inputs, opposition scaling, pacing pressure and recovery capacity, making recomputable results and totals derive from owner inputs rather than independent derived totals.', 'balance_and_math', 'player_experience'),
+      section('formulas', 'Authoritative Formulas', 'Define authoritative formula IDs, symbolic formulas, ordering, clamping, rounding and boundaries. Boundary cases reference parameter/variable IDs and source case IDs without copying owner-table numeric inputs or storing independent derived totals.', 'balance_and_math'),
+      section('economy', 'Economy Sources, Sinks and Constraints', 'Define resource-flow relationships, affordability and deadlock prevention by referencing parameter and formula IDs; do not copy owner inputs or persist derived totals.', 'progression_and_economy', 'balance_and_math'),
+      section('progression_curves', 'Progression and Capability Curves', 'Define growth, unlock, power and content progression relationships by referencing parameter and formula IDs; do not copy owner inputs or persist derived totals.', 'progression_and_economy', 'balance_and_math'),
+      section('challenge_model', 'Challenge and Pressure Model', 'Define difficulty inputs, opposition scaling, pacing pressure and recovery relationships by referencing parameter and formula IDs; do not copy owner inputs or persist derived totals.', 'balance_and_math', 'player_experience'),
       section('rewards_value', 'Rewards and Relative Value', 'Define reward valuation, exchange relationships and choice tradeoffs.', 'progression_and_economy', 'balance_and_math'),
       section('bounds_exploits', 'Bounds, Degenerate Strategies and Exploit Controls', 'Define hard limits, invariants, abuse cases and corrective constraints.', 'balance_and_math', 'quality_and_acceptance'),
       section('tuning_validation', 'Tuning and Validation Method', 'Define scenarios, sensitivity checks, telemetry inputs and acceptance intervals with an auditable validation chain from inputs through results to acceptance.', 'analytics_and_success_metrics', 'quality_and_acceptance'),
@@ -459,16 +465,16 @@ export const GAME_DOCUMENT_CONTRACTS = Object.freeze({
     'Producer, Asset Lead and Content Pipeline Lead',
     'Own the complete production inventory and delivery plan for game content and media.',
     [
-      section('inventory', 'Asset and Content Inventory', 'Define inventory policy, context, rationale, and owner-material references for the complete bill of materials; reference asset-inventory-table for canonical type, instance and file facts.', 'asset_and_content_production'),
-      section('ownership', 'Ownership and Responsibility', 'Define ownership policy, context, rationale, and owner-material references; reference responsibility-matrix for canonical responsibility facts.', 'production_planning', 'asset_and_content_production'),
-      section('dependencies', 'Dependencies and Integration Order', 'Define dependency and integration policy, context, rationale, and owner-material references; reference dependency-integration-diagram for canonical dependency facts.', 'risks_and_dependencies', 'production_planning'),
-      section('source_license', 'Source, Originality and Licensing', 'Define source and licensing policy, context, rationale, and owner-material references; reference license-register for canonical licensing facts.', 'asset_and_content_production', 'network_security_and_privacy'),
-      section('formats_budgets', 'Formats, Variants and Budgets', 'Define format and variant policy, context, rationale, and owner-material references; reference asset-inventory-table for canonical file facts.', 'asset_and_content_production', 'performance_and_reliability'),
-      section('pipeline', 'Production Pipeline and Naming', 'Define pipeline and naming policy, context, rationale, and owner-material references; reference the five owner materials for canonical delivery facts.', 'asset_and_content_production', 'production_planning'),
-      section('milestones', 'Milestones, Capacity and Schedule', 'Define milestone and capacity policy, context, rationale, and owner-material references; reference milestone-maturity-table for canonical schedule and maturity facts.', 'production_planning'),
-      section('validation', 'Validation and Quality Status', 'Define validation and quality policy, context, rationale, and owner-material references; validation totals are recomputed from unique detail, with current lifecycle facts referenced from the owner material.', 'quality_and_acceptance'),
-      section('placeholder_replacement', 'Placeholder and Replacement Strategy', 'Define placeholder and replacement policy, context, rationale, and owner-material references; reference inventory and responsibility materials for canonical replacement facts.', 'asset_and_content_production', 'technical_architecture'),
-      section('delivery_risks', 'Delivery, Release and Risks', 'Define delivery and release policy, context, rationale, and owner-material references; reference the five owner materials for canonical acceptance facts.', 'release_and_operations', 'risks_and_dependencies', 'quality_and_acceptance'),
+      section('inventory', 'Asset and Content Inventory', 'Define the complete bill of materials with stable semantic IDs, categories and intended uses, distinguishing type, instance and file; asset-inventory-table is the owner material for resource facts and adjacent materials reference its IDs.', 'asset_and_content_production'),
+      section('ownership', 'Ownership and Responsibility', 'Define creators, approvers, consumers, handoff responsibilities and status authority.', 'production_planning', 'asset_and_content_production'),
+      section('dependencies', 'Dependencies and Integration Order', 'Define upstream/downstream relationships, blocking dependencies and integration sequence.', 'risks_and_dependencies', 'production_planning'),
+      section('source_license', 'Source, Originality and Licensing', 'Define creation/source strategy, licensing evidence, attribution, restrictions and replacement rights.', 'asset_and_content_production', 'network_security_and_privacy'),
+      section('formats_budgets', 'Formats, Variants and Budgets', 'Define engine-neutral format capabilities, variants, dimensions, compression and technical file budgets without conflating type, instance and file.', 'asset_and_content_production', 'performance_and_reliability'),
+      section('pipeline', 'Production Pipeline and Naming', 'Define stable naming, versioning, review, conversion, storage and delivery workflow.', 'asset_and_content_production', 'production_planning'),
+      section('milestones', 'Milestones, Capacity and Schedule', 'Define production batches, estimates, staffing/capacity assumptions and milestone acceptance.', 'production_planning'),
+      section('validation', 'Validation and Quality Status', 'Define validation checks, status lifecycle, evidence, defect handling and readiness criteria with totals recomputed from unique detail.', 'quality_and_acceptance'),
+      section('placeholder_replacement', 'Placeholder and Replacement Strategy', 'Define replaceable placeholder responsibilities and the same-path transition to final content.', 'asset_and_content_production', 'technical_architecture'),
+      section('delivery_risks', 'Delivery, Release and Risks', 'Define packaging handoff, release readiness, outstanding risks, contingencies and final acceptance.', 'release_and_operations', 'risks_and_dependencies', 'quality_and_acceptance'),
     ],
   ),
 } satisfies Record<FoundationDocumentPath, GameDocumentContract>)
@@ -477,23 +483,4 @@ export function getGameDocumentContract(
   path: FoundationDocumentPath,
 ): GameDocumentContract {
   return GAME_DOCUMENT_CONTRACTS[path]
-}
-
-export function renderLiteralMarkdownSkeleton(
-  path: FoundationDocumentPath,
-): string {
-  const contract = getGameDocumentContract(path)
-  return [
-    '# <document title>',
-    '',
-    '## Executive Summary',
-    '',
-    ...contract.sections.flatMap(section => [`## ${section.title}`, '']),
-    '## Production Materials',
-    '',
-    ...contract.productionMaterials.flatMap(material => [
-      `### ${material.title}`,
-      '',
-    ]),
-  ].join('\n')
 }

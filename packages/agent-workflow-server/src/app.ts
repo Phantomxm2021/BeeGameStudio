@@ -202,7 +202,6 @@ import { loadCommittedFoundationDerivedArtifacts, loadFoundationSemanticReview }
 import { loadCommittedFoundationRevisionAuthority } from './beegame/delivery-workflow/foundation-revision-publication'
 import {
   FOUNDATION_REVISION_STAGE,
-  isActiveFoundationRepairState,
   projectDeliveryProgress,
 } from './beegame/delivery-workflow/display-progress'
 import {
@@ -4441,7 +4440,7 @@ async function generateBeeGameModelWithUsage(
   return result.content
 }
 
-function createUsageRecorder(input: {
+export function createUsageRecorder(input: {
   sessionId: string
   projectId?: string
   record: (input: {
@@ -4473,7 +4472,16 @@ function createUsageRecorder(input: {
     usageSource?: 'runtime_snapshot' | 'model_runtime_host'
   }) => Promise<{ creditsMicro: number }>
   onSettled?: (result: { creditsMicro: number }) => void | Promise<void>
+  onDebitFailed?: (failure: {
+    diagnosticId: string
+    sessionId: string
+    querySource: string
+    idempotencyKey: string
+    retryable: boolean
+    message: string
+  }) => void | Promise<void>
 }): (usage: BeeGameModelUsage, querySource: string) => Promise<void> {
+  const settledKeys = new Set<string>()
   return async (usage, querySource) => {
     const normalizedUsage = {
       prompt_tokens: usage.input_tokens,
@@ -4485,6 +4493,7 @@ function createUsageRecorder(input: {
     const idempotencyKey = `usage:${input.sessionId}:${createHash('sha256')
       .update(JSON.stringify({ querySource, usage: normalizedUsage }))
       .digest('hex')}`
+    if (settledKeys.has(idempotencyKey)) return
     const recordInput = {
       sessionId: input.sessionId,
       ...(input.projectId ? { projectId: input.projectId } : {}),
@@ -4496,9 +4505,37 @@ function createUsageRecorder(input: {
       },
       usageSource: 'model_runtime_host' as const,
     }
-    await input.record(recordInput)
-    const debitResult = await input.debit(recordInput)
-    await input.onSettled?.(debitResult)
+    const recordResult = await input.record(recordInput)
+    try {
+      const debitResult = await input.debit(recordInput)
+      settledKeys.add(idempotencyKey)
+      await input.onSettled?.(debitResult)
+    } catch (error) {
+      settledKeys.add(idempotencyKey)
+      await input.onSettled?.(recordResult)
+      const message = error instanceof Error ? error.message : String(error)
+      const diagnosticId = `billing_${createHash('sha256')
+        .update(`${idempotencyKey}:${message}`)
+        .digest('hex')
+        .slice(0, 16)}`
+      const failure = {
+        diagnosticId,
+        sessionId: input.sessionId,
+        querySource,
+        idempotencyKey,
+        retryable:
+          typeof error === 'object' &&
+          error !== null &&
+          'retryable' in error &&
+          error.retryable === true,
+        message,
+      }
+      if (input.onDebitFailed) {
+        await input.onDebitFailed(failure)
+      } else {
+        console.error('[BeeGame] realtime usage debit failed', failure)
+      }
+    }
   }
 }
 
@@ -5658,7 +5695,23 @@ function workflowBlockedReason(workflow: JsonObject | null): string | null {
 }
 
 function workflowDisplayReason(workflow: JsonObject | null) {
-  return projectWorkflowDisplayReason(workflowBlockedReason(workflow))
+  if (!workflow) return undefined
+  const dispatch = isObject(workflow.activeDispatch)
+    ? workflow.activeDispatch
+    : undefined
+  const documentPath =
+    typeof workflow.currentItemId === 'string' &&
+    workflow.currentItemId.startsWith('docs/')
+      ? workflow.currentItemId
+      : undefined
+  return projectWorkflowDisplayReason(workflowBlockedReason(workflow), {
+    ...(typeof workflow.phase === 'string' ? { stage: workflow.phase } : {}),
+    ...(typeof dispatch?.taskId === 'string'
+      ? { taskId: dispatch.taskId }
+      : {}),
+    ...(documentPath ? { documentPath } : {}),
+    retryable: workflow.status !== 'stopped',
+  })
 }
 
 function projectRuntimeBlockedReasonFields(
@@ -5677,6 +5730,10 @@ function projectWorkflowDisplayTasks(
   tasks: readonly JsonObject[],
 ): JsonObject[] {
   return tasks.map(task => {
+    const documentPath =
+      typeof task.title === 'string' && task.title.startsWith('docs/')
+        ? task.title
+        : undefined
     const reason = projectWorkflowDisplayReason(
       typeof task.failureReason === 'string' &&
       typeof task.failureCode === 'string' &&
@@ -5687,6 +5744,11 @@ function projectWorkflowDisplayTasks(
             diagnosticId: task.diagnosticId,
           }
         : task.failureReason,
+      {
+        ...(typeof task.id === 'string' ? { taskId: task.id } : {}),
+        ...(documentPath ? { documentPath } : {}),
+        retryable: task.status !== 'stopped',
+      },
     )
     const { failureReason: _rawFailureReason, ...safeTask } = task
     return {
@@ -6134,8 +6196,7 @@ function workflowViewForDisplay(
   const nextAction = workflowNextAction(workflow)
   const tasks = Array.isArray(workflow.tasks) ? workflow.tasks : []
   const activeFoundationRepair =
-    workflow.phase === 'DOCUMENT_REVIEW' &&
-    isActiveFoundationRepairState(workflow.foundationAuditState)
+    workflow.phase === 'FOUNDATION_REVISION'
   const foundationAuditReady =
     workflow.phase === 'DOCUMENT_REVIEW' &&
     isObject(workflow.foundationAuditState) &&
@@ -6424,8 +6485,7 @@ export function workflowStageSnapshotsForDisplay(
   )
   if (reached.length === 0) return undefined
   const activeFoundationRepair =
-    workflow.phase === 'DOCUMENT_REVIEW' &&
-    isActiveFoundationRepairState(workflow.foundationAuditState)
+    workflow.phase === 'FOUNDATION_REVISION'
   if (
     activeFoundationRepair &&
     currentProgress?.stageId === FOUNDATION_REVISION_STAGE
