@@ -1,4 +1,5 @@
 import { retryAuthorState } from './foundation-authoring-state'
+import { retryFoundationReviewStateTasks } from './foundation-review-boundary'
 import { parseDeliveryRun } from './schema'
 import type {
   AtomicTask,
@@ -574,27 +575,10 @@ export function transitionDeliveryRun(
           run.phase === 'DOCUMENT_REVIEW' && !revisionState
             ? run.foundationAuditState
             : undefined
-        let auditRevived = false
-        const nextAuditState = auditState
-          ? {
-              ...auditState,
-              tasks: auditState.tasks.map(task => {
-                if (
-                  (!isEligibleFoundationRetryTask(task, event.taskId) &&
-                    !isUserStoppedFoundationRetryTask(task, event.taskId)) ||
-                  !['document-facts', 'semantic', 'confirmation'].includes(
-                    task.kind,
-                  )
-                )
-                  return task
-                auditRevived = true
-                return {
-                  ...task,
-                  status: 'pending' as const,
-                  failureReason: undefined,
-                }
-              }),
-            }
+        const auditRetry = auditState ? retryFoundationReviewStateTasks(auditState, event.taskId) : undefined
+        const auditRevived = auditRetry?.revived ?? false
+        const nextAuditState = auditState && auditRetry
+          ? { ...auditState, tasks: auditRetry.tasks }
           : undefined
     let revisionRevived = false
     const nextRevisionState = revisionState && revisionState.status !== 'planning'

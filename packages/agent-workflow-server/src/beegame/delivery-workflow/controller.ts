@@ -2,6 +2,8 @@ import { prepareFoundationReviewFacts, prepareFoundationDeterministicReview, pre
 import { projectFoundationReviewFacts, projectFoundationDeterministicReview } from './foundation-review-boundary'
 import { prepareFoundationReviewSummary, admitFoundationSemanticReviewTerminal, isFoundationSemanticReviewComplete, prepareFoundationFactTerminal } from './stages/foundation-review/public'
 import { projectFoundationReviewSummary, projectFoundationSemanticTerminal, projectFoundationFactTerminal } from './foundation-review-boundary'
+import { replayFoundationReviewTerminals, foundationReviewContinuationFailure } from './stages/foundation-review/public'
+import { projectFoundationReviewReplay } from './foundation-review-boundary'
 import { enterFoundationReview, buildSemanticPacketFor, requireSectionAuditIssues, resumeFoundationReview, mayIgnoreDuplicateFoundationReviewDispatch } from './stages/foundation-review/public'
 import { projectFoundationReviewScheduling } from './foundation-review-boundary'
 import {
@@ -313,14 +315,15 @@ export function createDeliveryWorkflowController(input: {
     run: DeliveryRun,
     error: unknown,
   ): Promise<void> {
-    const reason = `foundation audit continuation failed: ${error instanceof Error ? error.message : String(error)}`
+    const failure = foundationReviewContinuationFailure(error)
+    const reason = failure.reason
     const lease = await store.mutationLock(run.runId)
     try {
       const locked = await store.load(lease)
       if (!locked || locked.runId !== run.runId) return
       await store.commit(
-        { ...locked, status: 'needs_action', blockedReason: reason, thinking: 'idle' },
-        { runId: locked.runId, type: 'foundation.audit.continuation_failed', phase: locked.phase, status: 'needs_action', revision: locked.revision, reason },
+        { ...locked, status: failure.status, blockedReason: reason, thinking: failure.thinking },
+        { runId: locked.runId, type: failure.eventType, phase: locked.phase, status: failure.status, revision: locked.revision, reason },
         undefined,
         lease,
       )
@@ -1953,12 +1956,18 @@ export function createDeliveryWorkflowController(input: {
       run.foundationAuditState &&
       !isFoundationRevisionPhase(run.foundationAuditState.status)
     ) {
-      const replayableFactDispatches = foundationRuntimeTasks(run.foundationAuditState)
-        .filter(task => task.status !== 'completed' && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId))
-        .map(task => task.dispatch!)
-      if (replayableFactDispatches.length) {
-        for (const dispatch of replayableFactDispatches)
+      const dispatches = new Map(foundationRuntimeTasks(run.foundationAuditState)
+        .filter(task => task.dispatch).map(task => [task.dispatch!.dispatchId, task.dispatch!]))
+      const replay = replayFoundationReviewTerminals(projectFoundationReviewReplay(run), {
+        isTerminalAdmissionInFlight: dispatchId => terminalAdmissionInFlight.has(dispatchId),
+        replayTerminal: async dispatchId => {
+          const dispatch = dispatches.get(dispatchId)
+          if (!dispatch) throw new Error('review replay dispatch is unavailable')
           await dispatcher.replayTerminal(dispatch, handleTerminalUnlocked)
+        },
+      })
+      if (replay) {
+        await replay
         return
       }
     }

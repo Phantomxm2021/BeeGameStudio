@@ -1,6 +1,6 @@
 # 工作流独立阶段模块设计
 
-状态：设计已确认；Reviewer 入口、调度、事实归并、确定性准备、语义汇总及终态接纳四批迁移已实施，其余业务迁移及真实审计修订验收未完成。
+状态：设计已确认；Reviewer 已完成五批业务迁移（含终态重放、停止／继续及派发认领准备），剩余恢复协调、其他阶段迁移及真实审计修订验收未完成。
 
 ## 目标与约束
 
@@ -146,4 +146,17 @@ context 是可读状态投影，boundary 是受限回写适配器；两者必须
 - 最终离线验证：delivery-workflow 全目录 561 pass / 0 fail（58 个文件，4798 次断言）；agent-workflow-server TypeScript 检查及 git diff --check 通过。
 - 未启动真实模型、重启服务或恢复暂停项目。本批是业务提取与离线验证，不代表整个 Reviewer／Revision 隔离或真实闭环验收完成。
 
-下一批继续迁移 Reviewer 的剩余恢复协调，再推进 Revision 和 Reviewer 复核交接。真实运行仍须等待 Checklist 前可靠停点。
+第五批实施（恢复策略、停止／继续与认领准备）：
+
+- `recovery.ts` 接管 Reviewer 未完成终态的重放选择和顺序、延续失败结果，以及事实／语义／确认任务的派发失败升级判定。公共层仍持有原始 dispatch、锁、事件及传输调用。
+- `lifecycle.ts` 接管 Reviewer 的显式继续资格和用户停止投影；整轮停止与单个 dispatch 停止复用同一规则。保留 interrupted 证据、已有计量、历史尝试，以及用户停止不消耗当前尝试次数的既有语义。
+- 重试投影保留回执／结果字段的“是否缺失”信息；不得因丢掉空字符串、旧结果或其他残留证据，把任务误判为干净的模型配置失败。全局 retry 适配器只回写任务状态和失败原因，其余字段原样保留。
+- `claim.ts` 接管事实／语义任务的认领准备、模型就绪及容量判断和精确 blocked 原因。保留全局探测模型配置的时序、事实 schema 必要性、语义 modelTier 属性键行为及原始任务身份。
+- 两个 Luna high 执行子任务分别实现生命周期与认领模块；另一个 Luna high 子任务只读清点残余恢复职责。主 agent 完成接线、修正分支类型与空值语义、编写共享层整体轨迹对照，并保留重放前已捕获的 dispatch，避免异步期间重新查找导致身份改变。
+- 新增逐字恢复检查：仅还原本批明确的适配片段后，controller、dispatch、transition、recovery 四个文件必须完整等于 `2d2cb26f1`。原作者及前四批冻结检查继续保留；Revision 逻辑不随本批迁移改变。
+- 新增 22 项测试，覆盖停止后的事件／解锁／传输顺序、提交与传输失败、指定任务继续、残留证据拒绝、两条停止路径、认领阻塞与最终 dispatch 状态、重放失败及异步输入变化；无可重放终态时保持同步直通，不新增微任务等待。未启动服务、真实工作流模型或暂停项目。
+- 最终联合回归：delivery-workflow 全目录及跨模块 delivery-workflow-recovery 测试合计 687 pass / 0 fail（63 个文件，5443 次断言）；agent-workflow-server TypeScript 检查及 git diff --check 通过。
+
+本批后尚未迁移：dispatcher 中终态失败的持久化协调与兄弟任务升级、部分 replay 完整性判断、recovery-projector 的 Reviewer 状态恢复校验；全局无审计状态的作者交接恢复仍为公共适配。不能把本批称为 Reviewer 恢复职责全部隔离。
+
+下一批继续迁移上述 Reviewer 残余恢复职责，再推进 Revision 和 Reviewer 复核交接。真实运行仍须等待 Checklist 前可靠停点。

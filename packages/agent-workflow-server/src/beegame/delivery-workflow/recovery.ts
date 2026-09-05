@@ -1,4 +1,5 @@
 import { runningAuthorDispatches, stopAuthorState } from './foundation-authoring-state'
+import { stopFoundationReviewTask, projectFoundationReviewLifecycleTask } from './stages/foundation-review/public'
 import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { transitionDeliveryRun } from './transition'
@@ -974,7 +975,9 @@ export async function stopRun(input: {
               ...stopped.foundationAuditState,
               tasks: stopped.foundationAuditState.tasks.map(task =>
                 activeTaskIds.has(task.taskId) && task.dispatch?.status === 'running'
-                  ? (() => {
+                  ? task.kind === 'document-facts' || task.kind === 'semantic' || task.kind === 'confirmation'
+                    ? stopFoundationReviewTask({ task: projectFoundationReviewLifecycleTask(task), reason: input.reason, interruptDispatch: interruptedDispatch }) as FoundationAuditTask
+                    : (() => {
                       const terminal = interruptedDispatch(task.dispatch!)
                       return projectTaskTerminalEvidence(
                         {

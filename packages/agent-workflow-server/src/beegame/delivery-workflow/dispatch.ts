@@ -1,4 +1,8 @@
 import { isInitialAuthorRequest, parallelFoundationPathFor, authorDispatch, locateAuthorDispatch, runningAuthorDispatches, replaceAuthorDispatch, claimAuthorBatchDispatch, failAuthorBatchDispatch, preserveAuthorSession } from './foundation-authoring-state'
+import { foundationReviewFailureNeedsAction } from './stages/foundation-review/public'
+import { stopFoundationReviewTask, projectFoundationReviewLifecycleTask } from './stages/foundation-review/public'
+import { prepareFoundationFactClaim, prepareFoundationSemanticClaim } from './stages/foundation-review/public'
+import { projectFoundationFactClaim, projectFoundationSemanticClaim } from './foundation-review-boundary'
 import { createHash, randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -799,34 +803,22 @@ export function createDeliveryDispatcher(options: {
         }
         let claimedFoundationState: FoundationFactTaskCollection | undefined
         if (factRequest && !revisionFactRequest && current.foundationAuditState && request.taskId) {
-          const claimed = claimFoundationFactTasks({
-            revision: current.foundationAuditState.revision,
-            phaseStartedAt: current.foundationAuditState.phaseStartedAt!,
-            status: current.foundationAuditState.status === 'facts_staged' ? 'facts_staged' : 'extracting_facts',
-            tasks: foundationRuntimeTasks(current.foundationAuditState).filter(task => task.kind === 'document-facts'),
-            aggregateUsage: current.foundationAuditState.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-          }, {
-            onlyTaskId: fastModelError ? undefined : request.taskId,
-            dispatchIdFor: () => record.dispatchId,
-            now: record.startedAt,
-            modelReady: !fastModelError && Boolean(request.workflowJsonSchema),
-          })
+          const prepared = prepareFoundationFactClaim(projectFoundationFactClaim(current, request, record, fastModelError))
+          const claimed = prepared.state
           claimedFoundationState = claimed
-          const claimedTask = claimed.tasks.find(task => task.taskId === request.taskId)
-          if (!claimedTask || claimedTask.status !== 'running') {
-            const blocked = claimedTask?.failureReason ?? fastModelError ?? 'foundation fact task is not claimable'
+          if (prepared.kind === 'blocked') {
+            const blocked = prepared.reason
             await options.store.commit({ ...current, foundationAuditState: { ...current.foundationAuditState, tasks: claimed.tasks }, status: 'needs_action', blockedReason: blocked, thinking: 'idle' }, { runId: current.runId, type: 'foundation.fact.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, dispatchId: record.dispatchId, taskId: request.taskId, reason: blocked }, undefined, lease)
             throw new DispatchError('blocked', blocked)
           }
         }
         let claimedSemanticState: FoundationSemanticTaskCollection | undefined
         if (semanticRequest && current.foundationAuditState && request.taskId) {
-          const semanticTasks = foundationRuntimeTasks(current.foundationAuditState).filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticRuntimeTask[]
-          const claimed = claimFoundationSemanticTasks({ revision: current.foundationAuditState.revision, phaseStartedAt: current.foundationAuditState.phaseStartedAt!, status: 'semantic_review', tasks: semanticTasks, aggregateUsage: current.foundationAuditState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 }, ...(current.foundationAuditState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: current.foundationAuditState.semantic.deepPhaseStartedAt } : {}), ...(current.foundationAuditState.semantic?.deepAggregateUsage ? { deepAggregateUsage: current.foundationAuditState.semantic.deepAggregateUsage } : {}) }, { onlyTaskId: fastModelError ? undefined : request.taskId, dispatchIdFor: () => record.dispatchId, now: record.startedAt, configuredTiers: { [request.contract.modelTier as string]: !fastModelError } })
+          const prepared = prepareFoundationSemanticClaim(projectFoundationSemanticClaim(current, request, record, fastModelError))
+          const claimed = prepared.state
           claimedSemanticState = claimed
-          const claimedTask = claimed.tasks.find(task => task.taskId === request.taskId)
-          if (!claimedTask || claimedTask.status !== 'running') {
-            const blocked = claimedTask?.failureReason ?? fastModelError ?? 'foundation semantic task is not claimable'
+          if (prepared.kind === 'blocked') {
+            const blocked = prepared.reason
             await options.store.commit({ ...current, foundationAuditState: { ...current.foundationAuditState, tasks: current.foundationAuditState.tasks.map(task => claimed.tasks.find(candidate => candidate.taskId === task.taskId) ?? task), semantic: { aggregateUsage: claimed.aggregateUsage, ...(claimed.deepPhaseStartedAt ? { deepPhaseStartedAt: claimed.deepPhaseStartedAt } : {}), ...(claimed.deepAggregateUsage ? { deepAggregateUsage: claimed.deepAggregateUsage } : {}) } }, status: 'needs_action', blockedReason: blocked, thinking: 'idle' }, { runId: current.runId, type: 'foundation.semantic.claim_blocked', phase: current.phase, status: 'needs_action', revision: current.revision, dispatchId: record.dispatchId, taskId: request.taskId, reason: blocked }, undefined, lease)
             throw new DispatchError('blocked', blocked)
           }
@@ -1067,10 +1059,6 @@ export function createDeliveryDispatcher(options: {
       message === 'foundation revision completed without a committed Markdown receipt' ||
       message === 'worker stopped before producing a durable terminal result'
     )
-  }
-
-  function isTerminalFoundationFactFailure(reason: string): boolean {
-    return /(?:fast model|model config|attempt cap|not configured)/i.test(reason)
   }
 
   async function completeFoundationFactDispatch(
@@ -1746,7 +1734,7 @@ export function createDeliveryDispatcher(options: {
       const failed = await mutateFoundationReviewTask(dispatchId, 'dispatch.failed', ({ task, record }) => {
         const terminal = parseDispatchRecord({ ...record, status: 'failed', finishedAt: now(), failureReason: reason })
         const stage3Task = task.kind === 'document-facts' || task.kind === 'semantic' || task.kind === 'confirmation'
-        const needsAction = stage3Task && (isTerminalFoundationFactFailure(reason) || task.attempt >= (task.kind === 'confirmation' ? 1 : 2))
+        const needsAction = stage3Task && foundationReviewFailureNeedsAction({ kind: task.kind, attempt: task.attempt, reason })
         return {
           task: { ...task, status: needsAction ? 'needs_action' : 'retryable', failureReason: reason, dispatch: terminal },
           record: terminal,
@@ -1880,7 +1868,9 @@ export function createDeliveryDispatcher(options: {
         return {
           // A user stop interrupts the current attempt; only a worker
           // failure is allowed to consume the retry budget.
-          task: { ...task, status: 'retryable', attempt: Math.max(0, task.attempt - 1), failureReason: reason, dispatch: terminal } as FoundationAuditTask,
+          task: task.kind === 'document-facts' || task.kind === 'semantic' || task.kind === 'confirmation'
+            ? stopFoundationReviewTask({ task: projectFoundationReviewLifecycleTask(task), reason, interruptDispatch: () => terminal }) as FoundationAuditTask
+            : { ...task, status: 'retryable', attempt: Math.max(0, task.attempt - 1), failureReason: reason, dispatch: terminal } as FoundationAuditTask,
           record: terminal,
           runStatus: 'stopped',
           blockedReason: reason,

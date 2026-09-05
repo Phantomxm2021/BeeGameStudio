@@ -1,6 +1,6 @@
-import type { DeliveryRun, DispatchRecord } from './types'
+import type { DeliveryRun, DispatchRecord, WorkerDispatchRequest } from './types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
-import { foundationRuntimeTasks } from './foundation-audit-state'
+import { foundationRuntimeTasks, isFoundationRevisionPhase } from './foundation-audit-state'
 import {
   projectReviewSchedulingTask,
   projectReviewSchedulingUsage,
@@ -12,7 +12,73 @@ import {
   type FoundationReviewFactTerminalInput,
   projectFoundationSemanticTerminalTask,
   projectFoundationFactTerminalTask,
+  type FoundationReviewReplayContext,
+  type FoundationReviewFactClaimInput,
+  type FoundationReviewSemanticClaimInput,
+  retryFoundationReviewTasks,
+  projectFoundationReviewLifecycleTask,
 } from './stages/foundation-review/public'
+
+export function retryFoundationReviewStateTasks(
+  state: NonNullable<DeliveryRun['foundationAuditState']>,
+  taskId?: string,
+): { tasks: typeof state.tasks; revived: boolean } {
+  const result = retryFoundationReviewTasks({
+    tasks: state.tasks.filter(task => task.kind === 'document-facts' || task.kind === 'semantic' || task.kind === 'confirmation').map(projectFoundationReviewLifecycleTask),
+    taskId,
+  })
+  return {
+    revived: result.revived,
+    tasks: state.tasks.map(task => {
+      const update = result.tasks.find(candidate => candidate.taskId === task.taskId)
+      return update ? { ...task, status: update.status, failureReason: update.failureReason } : task
+    }),
+  }
+}
+
+export function projectFoundationFactClaim(
+  run: DeliveryRun, request: WorkerDispatchRequest, record: DispatchRecord, fastModelError?: string,
+): FoundationReviewFactClaimInput {
+  const state = run.foundationAuditState!
+  return {
+    snapshot: {
+      revision: state.revision, status: state.status, phaseStartedAt: state.phaseStartedAt!,
+      tasks: foundationRuntimeTasks(state).filter(task => task.kind === 'document-facts').map(projectFoundationFactTerminalTask),
+      aggregateUsage: projectReviewSchedulingUsage(state.aggregateUsage),
+    },
+    request: { taskId: request.taskId, schemaPresent: Boolean(request.workflowJsonSchema), fastModelError },
+    record: { dispatchId: record.dispatchId, startedAt: record.startedAt },
+  }
+}
+
+export function projectFoundationSemanticClaim(
+  run: DeliveryRun, request: WorkerDispatchRequest, record: DispatchRecord, fastModelError?: string,
+): FoundationReviewSemanticClaimInput {
+  const state = run.foundationAuditState!
+  return {
+    snapshot: {
+      revision: state.revision, status: 'semantic_review', phaseStartedAt: state.phaseStartedAt!,
+      tasks: foundationRuntimeTasks(state).filter(task => task.kind === 'semantic' || task.kind === 'confirmation').map(projectFoundationSemanticTerminalTask),
+      aggregateUsage: projectReviewSchedulingUsage(state.semantic?.aggregateUsage),
+      ...(state.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: state.semantic.deepPhaseStartedAt } : {}),
+      ...(state.semantic?.deepAggregateUsage ? { deepAggregateUsage: projectReviewSchedulingUsage(state.semantic.deepAggregateUsage) } : {}),
+    },
+    request: { taskId: request.taskId, modelTier: request.contract.modelTier, fastModelError },
+    record: { dispatchId: record.dispatchId, startedAt: record.startedAt },
+  }
+}
+
+export function projectFoundationReviewReplay(run: DeliveryRun): FoundationReviewReplayContext | undefined {
+  const state = run.foundationAuditState
+  if (run.phase !== 'DOCUMENT_REVIEW' || !state || isFoundationRevisionPhase(state.status)) return undefined
+  return {
+    tasks: foundationRuntimeTasks(state).map(task => ({
+      status: task.status,
+      dispatchId: task.dispatch?.dispatchId,
+      hasTerminalResult: Boolean(task.dispatch?.terminalResult),
+    })),
+  }
+}
 
 export function projectFoundationFactTerminal(
   run: DeliveryRun,

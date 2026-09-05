@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { restoreReviewerLifecycleSource } from './foundation-review-lifecycle-oracle'
 
 const root = resolve(import.meta.dir, '../../../../..')
 const directory = 'packages/agent-workflow-server/src/beegame/delivery-workflow/'
@@ -11,7 +12,7 @@ const adapter = "async function deriveFoundationAudit(\n  run: DeliveryRun,\n  w
 // Restore only the explicitly approved delegation; unrelated controller code
 // continues to be checked against the previous source oracle.
 export function restoreReviewEntry(source: string): string {
-  source = restoreReviewScheduling(restoreReviewProgression(restoreReviewSummaryAndTerminals(source)))
+  source = restoreReviewScheduling(restoreReviewProgression(restoreReviewSummaryAndTerminals(restoreReviewerLifecycleSource('controller.ts', source))))
   if (!source.includes(adapter)) throw new Error('Reviewer routing adapter changed without equivalence review')
   return source.replace("import { enterFoundationReview } from './stages/foundation-review/public'\n", '').replace(adapter, originalEntry)
 }

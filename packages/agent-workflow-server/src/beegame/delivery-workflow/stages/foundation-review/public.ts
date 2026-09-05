@@ -118,3 +118,6 @@ export { prepareFoundationDeterministicReview, prepareFoundationSemanticWave, ty
 export { prepareFoundationReviewSummary, type FoundationReviewSummaryInput } from './summary'
 export { admitFoundationSemanticReviewTerminal, isFoundationSemanticReviewComplete, projectFoundationSemanticTerminalTask, type FoundationSemanticTerminalReviewSnapshot } from './semantic-terminal'
 export { prepareFoundationFactTerminal, projectFoundationFactTerminalTask, type FoundationReviewFactTerminalInput } from './fact-terminal'
+export { replayFoundationReviewTerminals, foundationReviewContinuationFailure, foundationReviewFailureNeedsAction, type FoundationReviewReplayContext } from './recovery'
+export { prepareFoundationFactClaim, prepareFoundationSemanticClaim, type FoundationReviewFactClaimInput, type FoundationReviewSemanticClaimInput } from './claim'
+export { retryFoundationReviewTasks, stopFoundationReviewTask, projectFoundationReviewLifecycleTask } from './lifecycle'
