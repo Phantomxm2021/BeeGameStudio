@@ -1,3 +1,5 @@
+import { prepareFoundationReviewFacts, prepareFoundationDeterministicReview, prepareFoundationSemanticWave } from './stages/foundation-review/public'
+import { projectFoundationReviewFacts, projectFoundationDeterministicReview } from './foundation-review-boundary'
 import { enterFoundationReview, buildSemanticPacketFor, requireSectionAuditIssues, resumeFoundationReview, mayIgnoreDuplicateFoundationReviewDispatch } from './stages/foundation-review/public'
 import { projectFoundationReviewScheduling } from './foundation-review-boundary'
 import {
@@ -339,31 +341,15 @@ export function createDeliveryWorkflowController(input: {
   async function finalizeFoundationFacts(run: DeliveryRun): Promise<void> {
     const state = run.foundationAuditState
     if (!state || state.status !== 'facts_staged') return
-    const artifacts = await loadFoundationAuditArtifacts({ workspacePath: input.workspacePath, revision: state.revision, expectedState: state })
-    if (!artifacts) throw new Error('foundation fact section index is unavailable during finalization')
-    const documents = new Map(
-      await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(input.workspacePath, path), 'utf8')] as const)),
-    )
-    const mechanical = extractNormalizedFoundationFacts({ documents, sectionIndex: artifacts.sectionIndex })
-    const workerFacts: FoundationFact[] = []
-    const workerReceipts: FoundationFactReceipt[] = []
-    for (const task of foundationRuntimeTasks(state).filter(task => task.kind === 'document-facts')) {
-      if (!task.receiptPath || !task.receiptDigest || !task.terminalDigest) throw new Error('foundation fact task receipt binding is incomplete')
-      const receipt = await loadFoundationFactReceipt({ workspacePath: input.workspacePath, revision: state.revision, taskId: task.taskId, expectedPacketDigest: task.packetDigest, expectedTerminalDigest: task.terminalDigest, expectedReceiptPath: task.receiptPath, expectedReceiptDigest: task.receiptDigest })
-      workerFacts.push(...receipt.facts)
-      workerReceipts.push(...(receipt.receipts as FoundationFactReceipt[]))
-    }
-    const factStore = mergeFoundationFactResults({ mechanicalFacts: mechanical.facts, workerFacts, workerReceipts })
-    const normalizedFactDigest = digestFactStore(factStore)
-    const published = await publishFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision, documentDigests: artifacts.documentDigests, sectionIndex: artifacts.sectionIndex, factStore, normalizedFactDigest, manifest: artifacts.manifest as unknown as Record<string, unknown> })
+    const prepared = await prepareFoundationReviewFacts(projectFoundationReviewFacts(run, input.workspacePath))
     const lease = await store.mutationLock(run.runId)
     let derivedCommittedRun: DeliveryRun | undefined
     try {
       const locked = await store.load(lease)
       if (!locked?.foundationAuditState || locked.foundationAuditState.status === 'derived_committed') return
       if (locked.foundationAuditState.status !== 'facts_staged') throw new Error('foundation fact state changed before derived binding')
-      const derived = { manifestPath: `.beegame/audit/foundation/${state.revision}/derived/manifest.json`, manifestDigest: published.digests.manifest, markerPath: `.beegame/audit/foundation/${state.revision}/derived/COMMITTED.json`, markerDigest: published.digests.marker, factStorePath: `.beegame/audit/foundation/${state.revision}/derived/fact-store.json`, factStoreDigest: published.digests.factStore, sectionIndexPath: `.beegame/audit/foundation/${state.revision}/derived/section-index.json`, sectionIndexDigest: published.digests.sectionIndex }
-      derivedCommittedRun = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'derived_committed', derived }, status: 'running', blockedReason: undefined, thinking: 'working' }, { runId: locked.runId, type: 'foundation.fact.derived_committed', phase: locked.phase, status: 'running', revision: locked.revision, artifactManifestDigest: published.digests.manifest }, undefined, lease)
+      const derived = structuredClone(prepared.derived)
+      derivedCommittedRun = await store.commit({ ...locked, foundationAuditState: { ...locked.foundationAuditState, status: 'derived_committed', derived }, status: 'running', blockedReason: undefined, thinking: 'working' }, { runId: locked.runId, type: 'foundation.fact.derived_committed', phase: locked.phase, status: 'running', revision: locked.revision, artifactManifestDigest: prepared.manifestDigest }, undefined, lease)
     } finally { await store.unlock(lease) }
     if (derivedCommittedRun) await completeDeterministicFoundationAudit(derivedCommittedRun)
   }
@@ -371,35 +357,9 @@ export function createDeliveryWorkflowController(input: {
   async function completeDeterministicFoundationAudit(run: DeliveryRun): Promise<void> {
     const state = run.foundationAuditState
     if (!state || !['derived_committed', 'deterministic_ready'].includes(state.status)) return
-    if (!state.derived) throw new Error('committed deterministic audit inputs are unavailable')
-    const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: state.revision })
-    if (!committed) throw new Error('committed derived authority is unavailable')
-    const sectionIndex = committed.sectionIndex
-    const factStore = committed.factStore
-    let deterministic: NonNullable<FoundationAuditState['deterministic']>
-    let deterministicReviewDigest: string
-    let deterministicPrefix: Awaited<ReturnType<typeof loadDeterministicFoundationReview>>
-    if (state.status === 'deterministic_ready') {
-      if (!state.deterministic) throw new Error('deterministic-ready state is missing immutable review binding')
-      deterministic = state.deterministic
-      deterministicReviewDigest = deterministic.reviewDigest
-      deterministicPrefix = await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: state.revision, reviewDigest: deterministicReviewDigest })
-      if (!deterministicPrefix || deterministicPrefix.revision !== state.revision || deterministicPrefix.reviewDigest !== deterministic.reviewDigest || deterministicPrefix.digests.issueRegistry !== deterministic.issueRegistryDigest || deterministicPrefix.digests.manifest !== deterministic.manifestDigest || deterministicPrefix.digests.marker !== deterministic.markerDigest || deterministicPrefix.sectionIndexDigest !== deterministic.sectionIndexDigest || deterministicPrefix.factStoreDigest !== deterministic.factStoreDigest || deterministicPrefix.sectionIndexDigest !== committed.digests.sectionIndex || deterministicPrefix.factStoreDigest !== committed.digests.factStore || deterministicPrefix.manifestDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest || deterministicPrefix.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion || deterministicPrefix.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest || deterministic.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion || deterministic.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest || !sameDocumentDigests(deterministicPrefix.documentDigests, committed.documentDigests)) throw new Error('deterministic-ready review binding is stale')
-    } else {
-      const documents = new Map(
-        await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path =>
-          [path, await readFile(join(input.workspacePath, path), 'utf8')] as const,
-        )),
-      )
-      const issues = runProductionDeterministicFoundationAudit({ sectionIndex, factStore, documents })
-      const review = await publishDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: state.revision, documentDigests: committed.documentDigests, sectionIndex, factStore, issues })
-      if (review.manifestDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.digest || review.catalogVersion !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion || review.contractGraphDigest !== FOUNDATION_AUDIT_PRODUCTION_MANIFEST.contractGraphDigest) throw new Error('deterministic review is not bound to the controller production manifest')
-      const reviewRoot = `.beegame/audit/foundation/${state.revision}/staging/review/${review.reviewDigest}`
-      deterministicReviewDigest = review.reviewDigest
-      deterministic = { reviewDigest: review.reviewDigest, issueRegistryPath: `${reviewRoot}/issue-registry.json`, issueRegistryDigest: review.digests.issueRegistry, manifestPath: `${reviewRoot}/manifest.json`, manifestDigest: review.digests.manifest, markerPath: `${reviewRoot}/COMMITTED.json`, markerDigest: review.digests.marker, catalogVersion: review.catalogVersion, contractGraphDigest: review.contractGraphDigest, sectionIndexDigest: review.sectionIndexDigest, factStoreDigest: review.factStoreDigest }
-      deterministicPrefix = await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: state.revision, reviewDigest: deterministicReviewDigest })
-      if (!deterministicPrefix) throw new Error('deterministic review prefix failed closed')
-    }
+    const prepared = await prepareFoundationDeterministicReview(projectFoundationDeterministicReview(run, input.workspacePath))
+    const deterministic = structuredClone(prepared.binding)
+    const deterministicReviewDigest = deterministic.reviewDigest
     if (state.status === 'derived_committed') {
       const lease = await store.mutationLock(run.runId)
       try {
@@ -415,11 +375,7 @@ export function createDeliveryWorkflowController(input: {
         await store.unlock(lease)
       }
     }
-    const deterministicIssues = requireSectionAuditIssues(deterministicPrefix!.issues)
-    const semanticPackets = await Promise.all(FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks.map(check => buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: state.revision, checkId: check.checkId, sectionIndex, factStore, deterministicReviewDigest, deterministicIssuePrefix: deterministicIssues, documentDigests: committed.documentDigests })))
-    if (semanticPackets.length !== 10) throw new Error('semantic authority did not return exactly ten checks')
-    const phaseStartedAt = new Date().toISOString()
-    const semanticCollection = createFoundationSemanticTaskCollection({ revision: state.revision, phaseStartedAt, tasks: semanticPackets.map((packet, index) => ({ taskId: `${state.revision}:semantic:${index}:${packet.identity.slice(0, 12)}`, kind: 'semantic' as const, revision: state.revision, checkId: packet.checkId, packetDigest: packet.identity, modelTier: FOUNDATION_SEMANTIC_AUDIT_MANIFEST.checks[index]!.modelTier, status: 'pending' as const, attempt: 0 })) })
+    const { phaseStartedAt, collection: semanticCollection } = await prepareFoundationSemanticWave(prepared)
     const lease = await store.mutationLock(run.runId)
     let seededRun: DeliveryRun | undefined
     try {

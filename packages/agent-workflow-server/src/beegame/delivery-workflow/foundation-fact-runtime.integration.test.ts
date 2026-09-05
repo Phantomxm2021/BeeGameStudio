@@ -2696,9 +2696,24 @@ describe('foundation fact runtime controller integration', () => {
       let current = await controller.store.load()
       const task = current!.foundationAuditState!.tasks.find((candidate): candidate is FoundationRevisionImpactedFactsTask => candidate.kind === 'impacted-facts' && candidate.status === 'running')!
       await expect(controller.dispatcher.completeDispatch(task.dispatch!.dispatchId, {})).rejects.toThrow(/invalid|terminal/i)
-      current = await controller.store.load()
-      const secondAttempt = current!.foundationAuditState!.tasks.find((candidate): candidate is FoundationRevisionImpactedFactsTask => candidate.taskId === task.taskId && candidate.kind === 'impacted-facts' && candidate.status === 'running')!
+      let secondAttempt: FoundationRevisionImpactedFactsTask | undefined
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        current = await controller.store.load()
+        const candidate = current?.foundationAuditState?.tasks.find((item): item is FoundationRevisionImpactedFactsTask => item.taskId === task.taskId && item.kind === 'impacted-facts' && item.status === 'running' && item.attempt === 2)
+        if (candidate) {
+          secondAttempt = candidate
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      if (!secondAttempt) throw new Error('impacted fact task did not become durably running for attempt 2')
       await expect(controller.dispatcher.completeDispatch(secondAttempt.dispatch!.dispatchId, {})).rejects.toThrow(/invalid|terminal/i)
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        current = await controller.store.load()
+        const candidate = current?.foundationAuditState?.tasks.find(item => item.taskId === task.taskId && item.kind === 'impacted-facts' && item.status === 'running' && item.attempt === 3)
+        if (candidate) break
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
       const after = await controller.store.load()
       expect(after!.status).toBe('running')
       expect(after!.foundationAuditState!.tasks.find(candidate => candidate.taskId === task.taskId)).toMatchObject({ status: 'running', attempt: 3 })
