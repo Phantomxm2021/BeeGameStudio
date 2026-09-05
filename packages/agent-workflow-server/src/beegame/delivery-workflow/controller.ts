@@ -1,3 +1,5 @@
+import { enterFoundationReview, buildSemanticPacketFor, requireSectionAuditIssues, resumeFoundationReview, mayIgnoreDuplicateFoundationReviewDispatch } from './stages/foundation-review/public'
+import { projectFoundationReviewScheduling } from './foundation-review-boundary'
 import {
   applyAtomicTaskPlan,
   AtomicTaskPlanError,
@@ -159,14 +161,6 @@ function revisionBundleDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-function requireSectionAuditIssues(
-  issues: readonly FoundationReviewIssue[],
-): AuditIssue[] {
-  if (issues.some(issue => 'scope' in issue.source))
-    throw new Error('document-format issues cannot enter section semantic review')
-  return issues as AuditIssue[]
-}
-
 class FoundationFactAttemptError extends Error {
   constructor(message: string) {
     super(message)
@@ -196,33 +190,6 @@ async function deriveFoundationAudit(
     thinking: 'idle',
   }
 }
-
-function sectionBytes(documents: ReadonlyMap<string, string>, ref: { documentPath: string; startLine: number; endLine: number }): string {
-  const document = documents.get(ref.documentPath)
-  if (document === undefined) throw new Error(`semantic section document is missing: ${ref.documentPath}`)
-  return document.split('\n').slice(ref.startLine - 1, ref.endLine).join('\n')
-}
-
-async function buildSemanticPacketFor(input: {
-  workspacePath: string
-  revision: string
-  checkId: string
-  sectionIndex: readonly import('./foundation-section-index').SectionRef[]
-  factStore: readonly import('./foundation-fact-store').FoundationFact[]
-  deterministicReviewDigest: string
-  deterministicIssuePrefix: readonly import('./foundation-issue-registry').AuditIssue[]
-  documentDigests: readonly { path: string; digest: string }[]
-}): Promise<FoundationSemanticPacket> {
-  const documents = new Map(await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => [path, await readFile(join(input.workspacePath, path), 'utf8')] as const)))
-  for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
-    const expected = input.documentDigests.find(item => item.path === path)?.digest
-    const actual = createHash('sha256').update(documents.get(path)!).digest('hex')
-    if (!expected || expected !== actual) throw new Error(`semantic audit source changed after commit: ${path}`)
-  }
-  const bytes = Object.fromEntries(input.sectionIndex.map(ref => [`${ref.documentPath}#${ref.sectionId}`, sectionBytes(documents, ref)]))
-  return buildFoundationSemanticPacket({ revision: input.revision, checkId: input.checkId, sectionIndex: input.sectionIndex, sectionBytes: bytes, factStore: input.factStore, deterministicReviewDigest: input.deterministicReviewDigest, deterministicIssuePrefix: input.deterministicIssuePrefix })
-}
-
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
   ownerId: string
@@ -1982,16 +1949,26 @@ export function createDeliveryWorkflowController(input: {
         throw error
       const current = await store.load()
       const task = current?.foundationAuditState && foundationRuntimeTasks(current.foundationAuditState).find(candidate => candidate.taskId === request.taskId)
-      const sameTask = current && task && task.revision === request.revision && task.packetDigest === request.contract.packetDigest && (
-        request.workerType === 'foundation-fact-extractor'
-          ? task.kind === 'document-facts'
-          : (task.kind === 'semantic' || task.kind === 'confirmation')
-      )
-      if (!current || !task || !sameTask) throw error
-      if (task.status === 'running' && task.dispatch?.status === 'running' && task.dispatch.workerType === request.workerType)
-        return
-      if ((task.status === 'pending' || task.status === 'retryable') && (current.foundationAuditState ? foundationRuntimeTasks(current.foundationAuditState).filter(candidate => candidate.status === 'running').length : 0) >= 4)
-        return
+      if (mayIgnoreDuplicateFoundationReviewDispatch({
+        request: {
+          revision: request.revision,
+          workerType: request.workerType,
+          packetDigest: request.contract.packetDigest,
+        },
+        task: task ? {
+          revision: task.revision,
+          kind: task.kind,
+          packetDigest: task.packetDigest,
+          status: task.status,
+          dispatch: task.dispatch ? {
+            status: task.dispatch.status,
+            workerType: task.dispatch.workerType,
+          } : undefined,
+        } : undefined,
+        runningTaskCount: current?.foundationAuditState
+          ? foundationRuntimeTasks(current.foundationAuditState).filter(candidate => candidate.status === 'running').length
+          : 0,
+      })) return
       throw error
     }
   }
@@ -2286,72 +2263,32 @@ export function createDeliveryWorkflowController(input: {
       return
     }
     if (run.phase === 'DOCUMENT_REVIEW') {
-      if (run.foundationAuditState?.status === 'derived_committed') {
+      const reviewSchedule = await resumeFoundationReview(
+        projectFoundationReviewScheduling(run, input.workspacePath),
+        {
+          isTerminalAdmissionInFlight: dispatchId => terminalAdmissionInFlight.has(dispatchId),
+          replayTerminal: async dispatchId => {
+            const dispatch = run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).find(task => task.dispatch?.dispatchId === dispatchId)?.dispatch
+            if (!dispatch) throw new Error('review replay dispatch is unavailable')
+            await dispatcher.replayTerminal(dispatch, handleTerminalUnlocked)
+          },
+          dispatch: dispatchFoundationAuditTask,
+        },
+      )
+      if (reviewSchedule === 'complete-deterministic' || reviewSchedule === 'finalize-facts') {
         try {
-          await completeDeterministicFoundationAudit(run)
+          if (reviewSchedule === 'complete-deterministic') await completeDeterministicFoundationAudit(run)
+          else await finalizeFoundationFacts(run)
         } catch (error) {
           await failFoundationContinuation(run, error)
         }
         return
       }
-      if (run.foundationAuditState?.status === 'deterministic_ready') {
-        try {
-          await completeDeterministicFoundationAudit(run)
-        } catch (error) {
-          await failFoundationContinuation(run, error)
-        }
+      if (reviewSchedule === 'finalize-semantic') {
+        await finalizeFoundationSemanticReview(run)
         return
       }
-      if (run.foundationAuditState?.status === 'facts_staged') {
-        try {
-          await finalizeFoundationFacts(run)
-        } catch (error) {
-          await failFoundationContinuation(run, error)
-        }
-        return
-      }
-      if (run.foundationAuditState?.status === 'semantic_review') {
-        const runtimeTasks = foundationRuntimeTasks(run.foundationAuditState)
-        const replayable = runtimeTasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && task.status !== 'completed' && task.dispatch?.terminalResult && !terminalAdmissionInFlight.has(task.dispatch.dispatchId)).map(task => task.dispatch!)
-        if (replayable.length) { for (const dispatch of replayable) await dispatcher.replayTerminal(dispatch, handleTerminalUnlocked); return }
-        const semanticRuntime: FoundationSemanticTaskCollection = {
-          revision: run.foundationAuditState.revision,
-          phaseStartedAt: run.foundationAuditState.phaseStartedAt!,
-          status: 'semantic_review',
-          tasks: runtimeTasks.filter(task => task.kind === 'semantic' || task.kind === 'confirmation') as FoundationSemanticTaskCollection['tasks'],
-          aggregateUsage: run.foundationAuditState.semantic?.aggregateUsage ?? { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-          ...(run.foundationAuditState.semantic?.deepPhaseStartedAt ? { deepPhaseStartedAt: run.foundationAuditState.semantic.deepPhaseStartedAt } : {}),
-          ...(run.foundationAuditState.semantic?.deepAggregateUsage ? { deepAggregateUsage: run.foundationAuditState.semantic.deepAggregateUsage } : {}),
-        }
-        if (foundationSemanticTasksComplete(semanticRuntime)) {
-          await finalizeFoundationSemanticReview(run)
-          return
-        }
-        const available = runtimeTasks.filter(task => (task.kind === 'semantic' || task.kind === 'confirmation') && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; checkId: string; revision: string; packetDigest: string; modelTier: 'fast' | 'balanced' | 'strong'; kind: 'semantic' | 'confirmation'; sourceTaskId?: string }>
-        const running = runtimeTasks.filter(task => task.status === 'running').length
-        if (running >= FOUNDATION_SEMANTIC_MAX_RUNNING || !available.length) return
-        const committed = await loadCommittedFoundationDerivedArtifacts({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision })
-        const prefix = run.foundationAuditState.deterministic ? await loadDeterministicFoundationReview({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision, reviewDigest: run.foundationAuditState.deterministic.reviewDigest }) : undefined
-        if (!committed || !prefix) throw new Error('semantic audit immutable inputs are unavailable')
-        for (const task of available.slice(0, FOUNDATION_SEMANTIC_MAX_RUNNING - running)) {
-          const packet = await buildSemanticPacketFor({ workspacePath: input.workspacePath, revision: run.foundationAuditState.revision, checkId: task.checkId, sectionIndex: committed.sectionIndex, factStore: committed.factStore, deterministicReviewDigest: prefix.reviewDigest, deterministicIssuePrefix: requireSectionAuditIssues(prefix.issues), documentDigests: committed.documentDigests })
-          if (packet.identity !== task.packetDigest) throw new Error('semantic retry packet differs from immutable task packet')
-          await dispatchFoundationAuditTask({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-semantic-reviewer', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: foundationSemanticReviewerStructuredOutputJsonSchema as unknown as Record<string, unknown>, contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, revision: task.revision, workerType: 'foundation-semantic-reviewer', checkId: task.checkId, kind: task.kind, ...(task.kind === 'confirmation' ? { sourceTaskId: task.sourceTaskId } : {}) } })
-        }
-        return
-      }
-      if (run.foundationAuditState?.status === 'extracting_facts') {
-        const runtimeTasks = foundationRuntimeTasks(run.foundationAuditState)
-        const available = runtimeTasks.filter(task => task.kind === 'document-facts' && (task.status === 'pending' || task.status === 'retryable')) as Array<{ taskId: string; revision: string; packetDigest: string; modelTier: 'fast' }>
-        const running = runtimeTasks.filter(task => task.status === 'running').length
-        if (running >= 4 || available.length === 0) return
-        for (const task of available.slice(0, 4 - running)) {
-          const packetPath = join(input.workspacePath, `.beegame/audit/foundation/${run.foundationAuditState.revision}/staging/packets/${task.taskId}.json`)
-          const packet = JSON.parse(await readFile(packetPath, 'utf8')) as Record<string, unknown>
-          await dispatchFoundationAuditTask({ runId: run.runId, ownerId: run.ownerId, projectId: run.projectId, workspacePath: input.workspacePath, workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: task.taskId, revision: task.revision, allowedPaths: [], projectReadScope: 'empty', workflowJsonSchema: buildFoundationFactStructuredOutputJsonSchema(packet as FoundationFactPacket), contract: { packet, packetDigest: task.packetDigest, modelTier: task.modelTier, taskId: task.taskId, revision: task.revision, workerType: 'foundation-fact-extractor' } })
-        }
-        return
-      }
+      if (reviewSchedule === 'handled') return
       if (run.documentStep === 'CHECKLIST_DRAFTING') {
         await startChecklistDraftStage({
           run,
@@ -2646,4 +2583,3 @@ async function plannerContractFacts(
 export type DeliveryWorkflowController = ReturnType<
   typeof createDeliveryWorkflowController
 >
-import { enterFoundationReview } from './stages/foundation-review/public'

@@ -110,3 +110,6 @@ export async function enterFoundationReview(
     }
   }
 }
+export { buildSemanticPacketFor, requireSectionAuditIssues } from './packets'
+export { resumeFoundationReview, mayIgnoreDuplicateFoundationReviewDispatch, type FoundationReviewDuplicateDispatchContext, type FoundationReviewScheduleResult, type FoundationReviewSchedulingPorts } from './scheduler'
+export { projectReviewSchedulingTask, projectReviewSchedulingUsage, type FoundationReviewSchedulingContext } from './context'

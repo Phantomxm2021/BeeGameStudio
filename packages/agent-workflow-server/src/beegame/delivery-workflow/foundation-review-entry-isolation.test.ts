@@ -20,7 +20,7 @@ function executable(source: string): (run: DeliveryRun, path: string) => Promise
   return new Function(...Object.keys(dependencies), js + ';return deriveFoundationAudit')(...Object.values(dependencies))
 }
 const controller = readFileSync(join(import.meta.dir, 'controller.ts'), 'utf8')
-const currentEntry = controller.slice(controller.indexOf('async function deriveFoundationAudit('), controller.indexOf('\nfunction sectionBytes('))
+const currentEntry = controller.match(/async function deriveFoundationAudit\([\s\S]*?\n}\n/)![0]
 async function snapshot(root: string, path = ''): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   for (const entry of await readdir(join(root, path), { withFileTypes: true })) {
@@ -78,4 +78,3 @@ describe('Reviewer entry isolation', () => {
     })
   }
 })
-
