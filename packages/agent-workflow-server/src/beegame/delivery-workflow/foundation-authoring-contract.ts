@@ -36,6 +36,48 @@ const source = (
   })
 }
 
+// The producer instruction and its consumers select these same blocks. A
+// material name alone is not evidence that its referenced facts were supplied.
+// This is input metadata only: no new output syntax or runtime quality gate.
+export const FOUNDATION_AUTHORING_SOURCE_GROUPS = Object.freeze({
+  fairness: {
+    path: 'docs/GDD.md' as const,
+    rule: 'Keep fairness, advance-information requirements and counterplay obligations in challenge_recovery; use state materials only for transitions.',
+    blocks: [block('challenge_recovery', 'Fairness, required advance information, challenge and recovery obligations.')],
+  },
+  waveComposition: {
+    path: 'docs/LEVEL_SCENE_DESIGN.md' as const,
+    rule: 'Own complete encounter composition (entity types, quantities, group identities and computable spawn timing) in encounters, spawn/recovery semantics in spawn_checkpoint, and beat cadence/intensity references in material.pacing-beat-table. Do not replace composition with beat IDs or repeat totals in prose.',
+    blocks: [
+      block('encounters', 'Complete encounter composition: entity types, quantities, group identities and spawn timing.'),
+      block('spawn_checkpoint', 'Spawn and checkpoint semantics needed to interpret composition.'),
+      block('material.pacing-beat-table', 'Beat cadence and authored group references, interpreted with complete composition.'),
+    ],
+  },
+  interaction: {
+    path: 'docs/UI_UX_SPEC.md' as const,
+    rule: 'Keep action conflicts and focus-loss semantics in input, failures in feedback_errors, accessibility exceptions in accessibility, and concrete state/input mappings in material.screen-state-table and material.focus-accessibility-matrix. These together define the implementation handoff; do not redefine their behavior elsewhere.',
+    blocks: [
+      block('input', 'Action conflicts, focus loss and restoration semantics.'),
+      block('feedback_errors', 'Feedback, rejection and error behavior.'),
+      block('accessibility', 'Accessibility and media-failure exceptions.'),
+      block('material.screen-state-table', 'Canonical screen states and permitted inputs.'),
+      block('material.focus-accessibility-matrix', 'Canonical focus and keyboard mappings.'),
+    ],
+  },
+  audioDelivery: {
+    path: 'docs/AUDIO_DESIGN.md' as const,
+    rule: 'Keep variation semantics in sfx, integration fields in implementation, and cue identities, music transitions and delivery parameters in their event-cue-matrix, music-state-diagram and loudness-delivery-table owners. Refer to those records rather than repeating values.',
+    blocks: [
+      block('sfx', 'Source and variation semantics required for file delivery.'),
+      block('implementation', 'Audio integration fields and constraints.'),
+      block('material.event-cue-matrix', 'Canonical cue and variant requirements.'),
+      block('material.music-state-diagram', 'Music states and delivered layer requirements.'),
+      block('material.loudness-delivery-table', 'Canonical media/encoding delivery requirements.'),
+    ],
+  },
+})
+
 const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[]> = {
   'docs/GDD.md': [],
   'docs/LEVEL_SCENE_DESIGN.md': [
@@ -45,7 +87,7 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
       block('player_actions', 'Canonical player-facing actions and mechanics used by encounter coverage.'),
       block('rules_systems', 'Tracked gameplay resources and rules used to size objectives and rewards.'),
       block('progression', 'Progression decisions that shape level unlock and escalation.'),
-      block('challenge_recovery', 'Challenge and recovery behavior referenced by level failure/retry paths.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.fairness.blocks,
       block('accessibility_localization', 'Confirmed accessibility and localization constraints for scene presentation.'),
       block('metrics', 'Confirmed session-duration target used by pacing and completion expectations.'),
       block('material.core-loop-diagram', 'Canonical loop evidence for entry, exit and reward transitions.'),
@@ -56,18 +98,16 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
     source('docs/GDD.md',
       block('rules_systems', 'Gameplay rules and tracked resources used by affordability and reward formulas.'),
       block('progression', 'Progression decisions and costs that Balance parameterizes.'),
-      block('challenge_recovery', 'Challenge/recovery rules used by damage, leak and retry scenarios.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.fairness.blocks,
       block('metrics', 'Confirmed session-duration target used by balance pacing scenarios.'),
       block('material.core-loop-diagram', 'Canonical reward and progression transitions used as Balance context.'),
       block('material.game-state-flow', 'Canonical win, loss and recovery transitions used by Balance context.'),
     ),
     source('docs/LEVEL_SCENE_DESIGN.md',
-      block('encounters', 'Required encounter entity identities used to cover Balance parameters.'),
-      block('spawn_checkpoint', 'Spawn timing and checkpoint semantics used by combat timing.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.waveComposition.blocks,
       block('pacing_beats', 'Authored beat cadence and recovery windows used by balance scenarios.'),
       block('material.world-structure-diagram', 'Canonical path and placement literals referenced by Balance.'),
       block('material.route-choice-diagram', 'Canonical route and choice mappings referenced by Balance.'),
-      block('material.pacing-beat-table', 'Canonical computable pacing rows referenced by Balance.'),
     ),
   ],
   'docs/UI_UX_SPEC.md': [
@@ -77,6 +117,7 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
       block('accessibility_localization', 'Confirmed keyboard, accessibility and localization constraints for UI.'),
       block('metrics', 'Confirmed session-duration target used to size UI flow and feedback.'),
       block('content_narrative', 'Content labels and narrative context shown in UI states.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.fairness.blocks,
       block('material.core-loop-diagram', 'Canonical loop transitions referenced by player journeys.'),
       block('material.game-state-flow', 'Canonical state and recovery transitions referenced by screen states.'),
     ),
@@ -114,11 +155,10 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
       block('material.game-state-flow', 'Canonical state and recovery transitions implemented by runtime.'),
     ),
     source('docs/LEVEL_SCENE_DESIGN.md',
-      block('spawn_checkpoint', 'Spawn timing and checkpoint interfaces implemented by runtime.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.waveComposition.blocks,
       block('scene_states', 'Scene state identities and transitions implemented by runtime.'),
       block('material.world-structure-diagram', 'Canonical world topology and coordinates consumed by runtime.'),
       block('material.route-choice-diagram', 'Canonical route and choice mappings consumed by runtime.'),
-      block('material.pacing-beat-table', 'Canonical pacing rows consumed by runtime scheduling.'),
     ),
     source('docs/BALANCE_DESIGN.md',
       block('units_variables', 'Units and variable semantics required for runtime data.'),
@@ -127,9 +167,7 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
       block('material.variable-parameter-table', 'Canonical numeric variable IDs, values and ranges bound by runtime.'),
     ),
     source('docs/UI_UX_SPEC.md',
-      block('feedback_errors', 'UI feedback and error behaviors implemented by runtime.'),
-      block('material.screen-state-table', 'Canonical screen/state identities implemented by runtime.'),
-      block('material.focus-accessibility-matrix', 'Canonical focus and input mappings implemented by runtime.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.interaction.blocks,
     ),
   ],
   'docs/AUDIO_DESIGN.md': [
@@ -145,11 +183,7 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
       block('material.pacing-beat-table', 'Canonical pacing rows used to scope audio timing and layers.'),
     ),
     source('docs/UI_UX_SPEC.md',
-      block('input', 'Stable UI actions whose focus and loss-of-focus behavior produce audio events.'),
-      block('feedback_errors', 'UI feedback and error events requiring audio cues.'),
-      block('accessibility', 'Focus, media failure and inclusive-use behavior requiring audio isolation.'),
-      block('material.screen-state-table', 'Canonical screen/state identities used to scope loading and failure cues.'),
-      block('material.focus-accessibility-matrix', 'Canonical focus and accessibility mappings used by audio events.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.interaction.blocks,
     ),
   ],
   'docs/ASSET_PLAN.md': [
@@ -157,7 +191,7 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
     source('docs/LEVEL_SCENE_DESIGN.md',
       block('material.world-structure-diagram', 'Canonical topology and scene literals mapped to deliverables.'),
       block('material.route-choice-diagram', 'Canonical route and choice literals mapped to deliverables.'),
-      block('material.pacing-beat-table', 'Canonical pacing/content rows mapped to deliverables.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.waveComposition.blocks,
     ),
     source('docs/TECHNICAL_DESIGN.md',
       block('data_content', 'Stable content kinds and data boundaries required for delivery mapping.'),
@@ -178,11 +212,7 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
       block('material.focus-accessibility-matrix', 'Canonical focus/accessibility requirements mapped to resources.'),
     ),
     source('docs/AUDIO_DESIGN.md',
-      block('sfx', 'Audio source and variant constraints required to choose delivered files.'),
-      block('implementation', 'Audio implementation constraints required for delivered resources.'),
-      block('material.event-cue-matrix', 'Canonical event identifiers and cue mappings required by inventory rows.'),
-      block('material.music-state-diagram', 'Canonical music states and transitions mapped to delivered layers.'),
-      block('material.loudness-delivery-table', 'Canonical loudness and encoding acceptance requirements.'),
+      ...FOUNDATION_AUTHORING_SOURCE_GROUPS.audioDelivery.blocks,
     ),
   ],
 }
@@ -240,6 +270,10 @@ const ASSET_SECTION_PURPOSES: Readonly<Record<string, string>> = Object.freeze({
 const LEVEL_SECTION_PURPOSES: Readonly<Record<string, string>> = Object.freeze({
   world_structure: 'Reference world-structure-diagram for the complete coordinate, path, grid, trigger and off-screen literals. Keep only unique world hierarchy, scene relationships and traversal-boundary semantics here; do not reproduce geometry or derived coverage tables.',
   objectives_routes: 'Explain objectives, player choices and completion semantics. Reference route-choice-diagram for path, slot, trigger and mutual-exclusion mappings and world-structure-diagram for layout literals; do not derive another geometry or coverage table.',
+  encounters: 'Own complete encounter composition under the document authority rule; reference spawn_checkpoint for spawn/recovery semantics and pacing-beat-table for cadence without repeating their records.',
+  pacing_beats: 'State pacing intent and dependencies on combat parameters. Reference encounters for complete composition and pacing-beat-table for beat records; do not maintain another wave count, schedule or repeated arithmetic summary.',
+  camera_readability: 'State camera and readability requirements. Reference world-structure-diagram for geometry; do not invent derived minimum distances or repeat coordinates as proofs of readability.',
+  content_matrix: 'Own distinct content identities and reuse relationships. Reference encounters for composition and world-structure-diagram for scene geometry instead of restating their quantities and derived totals.',
   production_acceptance: 'Define production ownership, dependencies, budgets including a concrete finite non-negative complexity budget, and distinct completion checks. Describe how to check the existing world-structure-diagram and route-choice-diagram for layout constraints; reference their evidence without repeating geometry or coverage calculations.',
 })
 
@@ -315,7 +349,7 @@ export function foundationAuthoringDocumentContract(path: FoundationDocumentPath
   return {
     path,
     discipline: shared.discipline,
-    documentAuthorityRule: GUIDANCE[path],
+    documentAuthorityRule: [GUIDANCE[path], ...Object.values(FOUNDATION_AUTHORING_SOURCE_GROUPS).filter(group => group.path === path).map(group => group.rule)].join(' '),
     outputPolicy: shared.outputPolicy,
     mergeReferenceRule: shared.mergeReferenceRule,
     sections: shared.sections.map(section => ({

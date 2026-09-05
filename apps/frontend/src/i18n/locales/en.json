@@ -669,6 +669,7 @@
     "open": "Open",
     "diff": "Diff",
     "loadingArtifacts": "Loading artifacts...",
+    "artifactLoadFailed": "Failed to load deliverables. Please try again.",
     "noArtifacts": "No artifacts yet",
     "documentProgress": "Project documents",
     "documentProgressHint": "Produced in dependency order from the confirmed brief.",
@@ -829,6 +830,7 @@
         "paused": "Needs attention",
         "offline": "Offline",
         "finished": "Ready for review",
+        "foundationAuthoringPaused": "8 foundation documents complete; waiting for review",
         "idle": "Ready"
       },
       "starting": {

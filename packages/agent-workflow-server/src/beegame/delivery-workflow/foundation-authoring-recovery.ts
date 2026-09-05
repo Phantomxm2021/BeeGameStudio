@@ -90,6 +90,14 @@ export function recoverAuthorActiveUnit(input: {
         'unfinished canonical document has no active dispatch proof',
       )
     const contract = record(request.contract)
+    if (
+      contract?.authoringMode === 'initial' &&
+      currentItemId !== CANONICAL_FOUNDATION_DOCUMENTS[0]
+    )
+      input.reject(
+        'recovery_checkpoint_conflict',
+        'legacy serial initial authoring may only target the GDD',
+      )
     const dispatchId = stringValue(dispatch.dispatchId)
     const runId = stringValue(snapshot.runId)
     const dispatchTaskId = stringValue(dispatch.taskId)
@@ -182,6 +190,7 @@ export async function reconcileAuthorRecoveryReceipt(input: {
     rawActiveUnitId !== `document:${targetPath}` ||
     input.authoringMode !== 'initial' ||
     !targetPath ||
+    targetPath !== CANONICAL_FOUNDATION_DOCUMENTS[0] ||
     !completedPaths ||
     targetIndex < 0 ||
     !sameStrings(
@@ -263,6 +272,12 @@ export async function restoreAuthorDispatchReceipt(
     dispatch.terminalResult
   )
     return undefined
+  const contract = dispatch.request?.contract
+  if (
+    contract?.authoringMode === 'initial' &&
+    contract.foundationDocumentPath !== CANONICAL_FOUNDATION_DOCUMENTS[0]
+  )
+    throw new Error('legacy serial initial authoring may only target the GDD')
   const receipt = await reconcileAuthoredDocumentReceipt({
     workspacePath,
     dispatchId: dispatch.dispatchId,

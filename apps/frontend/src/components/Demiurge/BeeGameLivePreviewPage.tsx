@@ -52,6 +52,7 @@ interface BeeGameLivePreviewPageProps {
   projectName: string;
   status: DashboardStatus;
   phaseLabel: string;
+  handoffNotice?: string;
   credits?: {
     consumedCredits: number;
     weightedTokens?: number;
@@ -147,6 +148,7 @@ export function BeeGameLivePreviewPage({
   lang,
   projectName,
   status,
+  handoffNotice,
   credits,
   accountCreditBalance,
   isSyncing,
@@ -389,6 +391,14 @@ export function BeeGameLivePreviewPage({
             >
               <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               <span>{labels.syncing}</span>
+            </div>
+          ) : null}
+          {handoffNotice ? (
+            <div
+              data-testid="beegame-foundation-handoff-notice"
+              className="type-footnote max-w-[24rem] truncate rounded-xl border border-emerald-300/20 bg-emerald-300/[0.07] px-3 py-1 text-emerald-200"
+            >
+              {handoffNotice}
             </div>
           ) : null}
         </div>

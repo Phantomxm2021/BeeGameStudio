@@ -22,6 +22,7 @@ interface ArtifactsPanelProps {
     onDownload: (id: string, name: string) => void;
     canExportProject?: boolean;
     documentProgress?: DocumentProgressItem[];
+    error?: string | null;
     lang?: Language;
 }
 
@@ -32,6 +33,7 @@ export const ArtifactsPanel = memo(({
     onDownload,
     canExportProject = true,
     documentProgress,
+    error = null,
     lang = 'en',
 }: ArtifactsPanelProps) => {
     const text = useBeeGameText(lang);
@@ -97,6 +99,11 @@ export const ArtifactsPanel = memo(({
 
     return (
         <div className="h-full overflow-y-auto px-6 py-5">
+            {error ? (
+                <div role="alert" className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 type-caption-2 text-rose-200">
+                    {error}
+                </div>
+            ) : null}
             {documentProgress ? (
                 <section aria-label={text.documentProgress || 'Project documents'} className="mb-6">
                     <div className="mb-3 flex items-baseline justify-between">

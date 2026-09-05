@@ -153,7 +153,7 @@ describe('foundation audit cutover', () => {
         contract: {
           confirmedBriefDigest: run.confirmedBriefDigest,
           documentSet: 'foundation',
-          authoringMode: 'initial',
+          authoringMode: 'parallel-draft',
           foundationDocumentPath: finalPath,
         },
       }
@@ -179,8 +179,12 @@ describe('foundation audit cutover', () => {
         ...run,
         foundationDraftState: {
           completedPaths: CANONICAL_FOUNDATION_DOCUMENTS.slice(0, -1),
+          documents: CANONICAL_FOUNDATION_DOCUMENTS.map((path, index) =>
+            index === CANONICAL_FOUNDATION_DOCUMENTS.length - 1
+              ? { path, status: 'drafting' as const, dispatch: terminal }
+              : { path, status: 'committed' as const },
+          ),
         },
-        activeDispatch: terminal,
       }
       await store.save(terminalRun)
       const controller = createDeliveryWorkflowController({

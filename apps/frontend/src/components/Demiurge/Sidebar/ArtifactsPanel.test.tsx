@@ -94,6 +94,22 @@ describe('ArtifactsPanel', () => {
         expect(screen.queryByText('No artifacts yet')).not.toBeInTheDocument();
     });
 
+    it('shows artifact loading failures in the panel', () => {
+        render(
+            <ArtifactsPanel
+                artifacts={[]}
+                isLoading={false}
+                reviewStatuses={{}}
+                documentProgress={[]}
+                error="无法加载交付物，请稍后重试。"
+                onPreview={vi.fn()}
+                onDownload={vi.fn()}
+            />
+        );
+
+        expect(screen.getByRole('alert')).toHaveTextContent('无法加载交付物');
+    });
+
     it('falls back to id when artifact_id is absent', async () => {
         const user = userEvent.setup();
         const onPreview = vi.fn();

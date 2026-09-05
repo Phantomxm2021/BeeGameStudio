@@ -1,5 +1,6 @@
 import { CANONICAL_FOUNDATION_DOCUMENTS, type FoundationDocumentPath, type WorkerDispatchRequest } from './types'
 import { foundationAuthoringDocumentContract, FOUNDATION_AUTHORING_INSTRUCTION } from './foundation-authoring-contract'
+import { buildFoundationAuthoringDeliveryContract } from './foundation-authoring-delivery-contract'
 
 export function isFoundationAuthor(request: WorkerDispatchRequest): boolean {
   return request.workerType === 'document-author' && request.contract.documentSet === 'foundation' && ['initial', 'parallel-draft'].includes(String(request.contract.authoringMode))
@@ -21,6 +22,11 @@ export function buildFoundationAuthorPrompt(request: WorkerDispatchRequest): str
       'Confirmed Brief settings are higher authority than free-form idea text.',
       'Use the confirmed brief and committed upstream projection as authority. The dedicated Reviewer owns format, content and quality audit.',
       'Do not write frontmatter or beegame protocol comments; the service owns their injection. Do not call tools or create other documents.',
+      ...(path === 'docs/TECHNICAL_DESIGN.md' || path === 'docs/ASSET_PLAN.md'
+        ? [
+            'The read-only authoringDeliveryContract is the actual parser-backed delivery boundary for manifest and content decisions; do not invent manifest fields or unsupported content kinds.',
+          ]
+        : []),
       FOUNDATION_AUTHORING_INSTRUCTION,
       formatContract({
         ...request,
@@ -46,6 +52,20 @@ function formatContract(request: WorkerDispatchRequest): string {
     )
   if (initialFoundationAuthor) {
     delete contractWithoutDuplicatedBrief.availableUpstreamPaths
+    // The old systemDeliveryContract was an incomplete, Technical-only view
+    // of the runtime contract. Keep it out of every model prompt and provide
+    // the parser-derived private projection only to the two authors that must
+    // describe resource/content delivery.
+    delete contractWithoutDuplicatedBrief.systemDeliveryContract
+    if (
+      request.contract.foundationDocumentPath === 'docs/TECHNICAL_DESIGN.md' ||
+      request.contract.foundationDocumentPath === 'docs/ASSET_PLAN.md'
+    ) {
+      contractWithoutDuplicatedBrief.authoringDeliveryContract =
+        buildFoundationAuthoringDeliveryContract()
+    } else {
+      delete contractWithoutDuplicatedBrief.authoringDeliveryContract
+    }
     const completeDocumentContract =
       contractWithoutDuplicatedBrief.completeDocumentContract
     if (
@@ -113,8 +133,6 @@ function formatContract(request: WorkerDispatchRequest): string {
         },
       }
     }
-    if (request.contract.foundationDocumentPath !== 'docs/TECHNICAL_DESIGN.md')
-      delete contractWithoutDuplicatedBrief.systemDeliveryContract
   }
   return JSON.stringify(contractWithoutDuplicatedBrief)
 }

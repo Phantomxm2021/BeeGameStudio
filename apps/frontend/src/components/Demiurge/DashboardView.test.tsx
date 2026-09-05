@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 
 import { DashboardView } from './DashboardView';
 import type { ProjectBaselineStatusPayload } from '../../services/api';
+import { BEEGAME_DOCUMENT_BASELINE } from '../../utils/documentProgress';
 
 const loadPhases = vi.fn().mockResolvedValue(undefined);
 const loadTokenUsage = vi.fn().mockResolvedValue(undefined);
@@ -100,7 +101,14 @@ let mockedPhaseInfo = {
   phase_name: 'phase_0',
   history: [] as Array<{ phase: number; name: string; timestamp: number }>,
 };
-let mockedMessages: Array<{ id: string; sender: string; content: string; timestamp: number }> = [];
+let mockedMessages: Array<{
+  id: string;
+  sender: string;
+  content: string;
+  timestamp: number;
+  artifactPath?: string;
+  toolStatus?: 'running' | 'completed' | 'failed';
+}> = [];
 let mockedTokenUsage: Record<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number }> = {};
 let mockedIsSyncing = false;
 let mockedIsOpeningProject = false;
@@ -592,6 +600,39 @@ describe('DashboardView runtime loading', () => {
     await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
     expect(capturedRightSidebarProps?.projectStatus?.workflow?.status).toBe('blocked');
     expect(screen.queryByRole('status', { name: '正在启动项目' })).not.toBeInTheDocument();
+  });
+
+  it('shows the complete foundation handoff without presenting the whole workflow as finished', async () => {
+    mockedMessages = BEEGAME_DOCUMENT_BASELINE.map((document, index) => ({
+      id: `tool-${index}`,
+      sender: 'system',
+      content: '',
+      timestamp: index,
+      artifactPath: document.path,
+      toolStatus: 'completed' as const,
+    }));
+    mockedProjectStatus = {
+      ...mockedProjectStatus,
+      phase: 'DOCUMENT_DRAFTING',
+      blocked: true,
+      workflow: {
+        runId: 'run-foundation-handoff',
+        status: 'stopped',
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        block: {
+          message: 'Workflow is blocked and needs attention.',
+          detail: 'foundation authoring complete; paused before review',
+        },
+      },
+    };
+
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    expect(await screen.findByTestId('beegame-foundation-handoff-notice')).toHaveTextContent(
+      '8 份基础文档已完成，等待审查',
+    );
+    expect(screen.queryByText('项目已完成')).not.toBeInTheDocument();
   });
 
   it('does not expose internal reset controls through the production sidebar', async () => {

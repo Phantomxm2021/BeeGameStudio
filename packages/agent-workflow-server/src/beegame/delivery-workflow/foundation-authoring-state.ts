@@ -100,6 +100,7 @@ export function preserveAuthorSession(
 }
 
 import {
+  beginParallelFoundationAuthoring,
   recordFoundationDispatch,
   recordFoundationFailure,
 } from './foundation-authoring-batch'
@@ -109,9 +110,20 @@ export function claimAuthorBatchDispatch(
   path: FoundationDocumentPath,
   dispatch: DispatchRecord,
 ) {
+  let batchState = state
+  if (!batchState.documents) {
+    if (
+      batchState.completedPaths.length !== 1 ||
+      batchState.completedPaths[0] !== CANONICAL_FOUNDATION_DOCUMENTS[0]
+    )
+      throw new Error('parallel foundation authoring state is missing')
+    batchState = beginParallelFoundationAuthoring([
+      CANONICAL_FOUNDATION_DOCUMENTS[0],
+    ])
+  }
   return {
     foundationDraftState: recordFoundationDispatch(
-      state,
+      batchState,
       path,
       'drafting',
       dispatch,

@@ -220,11 +220,12 @@ describe('Stage 2 authoring cost contract (offline only)', () => {
     expect(purpose('production_acceptance')).toContain('concrete finite non-negative complexity budget')
     expect(purpose('production_acceptance')).toContain('without repeating geometry or coverage calculations')
 
-    for (const sectionId of ['world_structure', 'objectives_routes', 'production_acceptance']) {
+    const privateLevelSections = ['world_structure', 'objectives_routes', 'production_acceptance', 'encounters', 'pacing_beats', 'camera_readability', 'content_matrix']
+    for (const sectionId of privateLevelSections) {
       expect(purpose(sectionId)).not.toBe(shared.sections.find(section => section.sectionId === sectionId)!.purpose)
     }
     for (const section of shared.sections) {
-      if (['world_structure', 'objectives_routes', 'production_acceptance'].includes(section.sectionId)) continue
+      if (privateLevelSections.includes(section.sectionId)) continue
       expect(purpose(section.sectionId)).toBe(section.purpose)
     }
 
@@ -611,10 +612,10 @@ describe('Stage 2 authoring cost contract (offline only)', () => {
         sectionIds: [
           'encounters',
           'spawn_checkpoint',
+          'material.pacing-beat-table',
           'pacing_beats',
           'material.world-structure-diagram',
           'material.route-choice-diagram',
-          'material.pacing-beat-table',
         ],
       }),
     ])

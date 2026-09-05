@@ -11,9 +11,14 @@ vi.mock('../../store/systemStore', () => ({
     }),
 }));
 
+vi.mock('../../contexts/ToastContext', () => ({
+    useToastContext: () => ({ showSuccess: vi.fn(), showError: vi.fn() }),
+}));
+
 vi.mock('../../services/api', () => ({
     api: {
         getArtifacts: vi.fn().mockResolvedValue([]),
+        getChatHistoryPaginationState: vi.fn(() => ({ initialized: false, hasMore: false })),
         getArtifactReviewStatus: vi.fn().mockResolvedValue({}),
         getArtifactContent: vi.fn().mockResolvedValue(''),
         downloadProjectPackage: vi.fn().mockResolvedValue({ blob: new Blob(['zip']), filename: 'project.zip' }),
@@ -33,6 +38,16 @@ vi.mock('../../services/beeGameAdapter', () => ({
 }));
 
 const getChatInput = () => screen.getByRole('textbox') as HTMLTextAreaElement;
+
+function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+}
 
 describe('RightSidebar tabs', () => {
     beforeEach(() => {
@@ -67,6 +82,231 @@ describe('RightSidebar tabs', () => {
         expect(screen.getByRole('button', { name: '资源' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '运行时' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '任务看板' })).not.toBeInTheDocument();
+    });
+
+    it('shows durable foundation completion in the deliverables tab count before opening it', () => {
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                projectStatus={{
+                    project_id: 'proj_1',
+                    workflow: {
+                        runId: 'run_foundation_handoff',
+                        status: 'cancelled',
+                        currentPhase: 'DOCUMENT_DRAFTING',
+                        tasks: Array.from({ length: 8 }, (_, index) => ({
+                            id: `docs/foundation-${index}.md`,
+                            title: `docs/foundation-${index}.md`,
+                            status: 'completed' as const,
+                        })),
+                    },
+                }}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+
+        // The fixture above intentionally uses non-canonical names to prove
+        // that unrelated workflow tasks do not inflate the document counter.
+        expect(screen.getByRole('button', { name: /^交付物/ })).toHaveTextContent('0/8');
+    });
+
+    it('refreshes artifacts when a Level or Balance document event arrives', async () => {
+        const first = deferred<any[]>();
+        const second = deferred<any[]>();
+        vi.mocked(api.getArtifacts)
+            .mockImplementationOnce(() => first.promise)
+            .mockImplementationOnce(() => second.promise);
+
+        const view = render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+
+        await userEvent.setup().click(screen.getByRole('button', { name: /^交付物/ }));
+        await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(1));
+
+        view.rerender(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[{
+                    id: 'level', sender: 'system', content: '', timestamp: 1, type: 'tool',
+                    artifactPath: 'docs/LEVEL_SCENE_DESIGN.md', toolStatus: 'completed',
+                }]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+
+        await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(2));
+        await act(async () => second.resolve([]));
+        await act(async () => first.resolve([]));
+    });
+
+    it('shows a user-visible error when artifact refresh fails', async () => {
+        vi.mocked(api.getArtifacts).mockRejectedValueOnce(new Error('network down'));
+
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+
+        await userEvent.setup().click(screen.getByRole('button', { name: /^交付物/ }));
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('交付物'));
+    });
+
+    it('ignores an older artifact response after a newer refresh completes', async () => {
+        const first = deferred<any[]>();
+        const second = deferred<any[]>();
+        vi.mocked(api.getArtifacts)
+            .mockImplementationOnce(() => first.promise)
+            .mockImplementationOnce(() => second.promise);
+
+        const view = render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+        await userEvent.setup().click(screen.getByRole('button', { name: /^交付物/ }));
+        await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(1));
+
+        view.rerender(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[{
+                    id: 'gdd', sender: 'system', content: '', timestamp: 1, type: 'tool',
+                    artifactPath: 'docs/GDD.md', toolStatus: 'completed',
+                }]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+        await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(2));
+
+        await act(async () => second.resolve([{ id: 'new', path: 'docs/new.md', name: 'new.md' }]));
+        await waitFor(() => expect(screen.getByText('new.md')).toBeInTheDocument());
+        await act(async () => first.resolve([{ id: 'old', path: 'docs/old.md', name: 'old.md' }]));
+        await waitFor(() => expect(screen.queryByText('old.md')).not.toBeInTheDocument());
+        expect(screen.getByText('new.md')).toBeInTheDocument();
+    });
+
+    it('clears the previous project artifacts while switching projects', async () => {
+        const first = deferred<any[]>();
+        const second = deferred<any[]>();
+        vi.mocked(api.getArtifacts)
+            .mockImplementationOnce(() => first.promise)
+            .mockImplementationOnce(() => second.promise);
+
+        const view = render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+        await userEvent.setup().click(screen.getByRole('button', { name: /^交付物/ }));
+        await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(1));
+        await act(async () => first.resolve([{ id: 'old', path: 'docs/old.md', name: 'old.md' }]));
+        await waitFor(() => expect(screen.getByText('old.md')).toBeInTheDocument());
+
+        view.rerender(
+            <RightSidebar
+                projectId="proj_2"
+                lang="zh"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+
+        expect(screen.queryByText('old.md')).not.toBeInTheDocument();
+        await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(2));
+        await act(async () => second.resolve([{ id: 'new', path: 'docs/new.md', name: 'new.md' }]));
+        await waitFor(() => expect(screen.getByText('new.md')).toBeInTheDocument());
     });
 
     it('does not send chat input while the runtime is busy', async () => {

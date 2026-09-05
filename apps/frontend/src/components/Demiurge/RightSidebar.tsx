@@ -99,6 +99,7 @@ export function RightSidebar({
     const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([]);
     const [artifacts, setArtifacts] = useState<any[]>([]);
     const [isArtifactsLoading, setIsArtifactsLoading] = useState(false);
+    const [artifactsError, setArtifactsError] = useState(false);
     const [assetManifest, setAssetManifest] = useState<BeeGameAssetManifestPayload | null>(null);
     const [isAssetsLoading, setIsAssetsLoading] = useState(false);
     const [isUploadingProjectResource, setIsUploadingProjectResource] = useState(false);
@@ -153,20 +154,26 @@ export function RightSidebar({
     const isComposerLocked = isLoading || isRuntimeBusy;
     const canMutateAssets = canUploadAssets && !isRuntimeBusy;
     const documentProgress = useMemo(
-        () => deriveDocumentProgress(messages, artifacts),
-        [artifacts, messages],
+        () => deriveDocumentProgress(messages, artifacts, projectStatus?.workflow),
+        [artifacts, messages, projectStatus?.workflow],
     );
     const documentEventRevision = useMemo(
-        () => messages
-            .filter(message => isBaselineDocumentPath(message.artifactPath))
-            .map(message => `${message.id}:${message.toolStatus || ''}:${message.timestamp}`)
-            .join('|'),
-        [messages],
+        () => [
+            ...messages
+                .filter(message => isBaselineDocumentPath(message.artifactPath))
+                .map(message => `${message.id}:${message.toolStatus || ''}:${message.timestamp}`),
+            ...(projectStatus?.workflow?.tasks || [])
+                .map(task => `${task.title || task.id}:${task.status || ''}`)
+                .filter(entry => isBaselineDocumentPath(entry.split(':', 1)[0])),
+        ].join('|'),
+        [messages, projectStatus?.workflow?.tasks],
     );
 
     useEffect(() => {
         setAssetManifest(null);
-    setIsUploadingProjectResource(false);
+        setArtifacts([]);
+        setArtifactsError(false);
+        setIsUploadingProjectResource(false);
         setIsAssetsLoading(false);
     }, [projectId]);
 
@@ -281,19 +288,28 @@ export function RightSidebar({
     // runtime state; there is no second per-artifact permission transport.
     useEffect(() => {
         if (activeTab === 'artifacts') {
+            let cancelled = false;
             const fetchData = async () => {
                 try {
                     setIsArtifactsLoading(artifacts.length === 0);
+                    setArtifactsError(false);
                     const fetchedArtifacts = (await api.getArtifacts(projectId)) as unknown as any[];
+                    if (cancelled) return;
                     setArtifacts(fetchedArtifacts);
-                    setIsArtifactsLoading(false);
                 } catch (err) {
+                    if (cancelled) return;
                     console.error('Failed to load artifacts/permissions:', err);
-                    setIsArtifactsLoading(false);
+                    setArtifactsError(true);
+                } finally {
+                    if (!cancelled) setIsArtifactsLoading(false);
                 }
             };
             void fetchData();
+            return () => {
+                cancelled = true;
+            };
         }
+        return undefined;
     }, [activeTab, projectId, documentEventRevision]);
 
     useEffect(() => {
@@ -425,6 +441,7 @@ export function RightSidebar({
                                 onDownload={handleDownloadArtifact}
                                 canExportProject={canExportProject}
                                 documentProgress={documentProgress}
+                                error={artifactsError ? (uiText.artifactLoadFailed || 'Failed to load deliverables. Please try again.') : null}
                                 lang={lang}
                             />
                         ) : (

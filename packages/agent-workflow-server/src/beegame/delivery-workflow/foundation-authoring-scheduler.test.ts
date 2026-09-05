@@ -75,6 +75,78 @@ function capabilities(run: DeliveryRun, open = true) {
 }
 
 describe('Stage 2 private scheduling boundary', () => {
+  test('rejects legacy serial authoring after the GDD instead of dispatching or auditing', async () => {
+    const completedPaths = [
+      'docs/GDD.md',
+      'docs/LEVEL_SCENE_DESIGN.md',
+    ] as const
+    const run = {
+      ...createTestDeliveryRun({
+        runId: 'legacy-r',
+        ownerId: 'legacy-o',
+        projectId: 'legacy-p',
+        foundationDraftComplete: false,
+      }),
+      phase: 'DOCUMENT_DRAFTING' as const,
+      documentStep: 'FOUNDATION_DRAFTING' as const,
+      status: 'running' as const,
+      foundationDraftState: { completedPaths: [...completedPaths] },
+    }
+    const calls: string[] = []
+    const dispatcher = {
+      async dispatch() {
+        calls.push('dispatch')
+      },
+    }
+
+    await expect(
+      startDocumentStage({
+        run,
+        workspacePath: '/unused',
+        dispatcher,
+      }),
+    ).rejects.toThrow('legacy serial foundation authoring state')
+    expect(calls).toEqual([])
+
+    const dispatch = {
+      dispatchId: 'legacy-level',
+      workerType: 'document-author' as const,
+      phase: 'DOCUMENT_DRAFTING' as const,
+      revision: run.revision.document,
+      taskId: 'docs/BALANCE_DESIGN.md',
+      status: 'completed' as const,
+      startedAt: '2026-09-05T00:00:00.000Z',
+      request: {
+        dispatchId: 'legacy-level',
+        runId: run.runId,
+        ownerId: run.ownerId,
+        projectId: run.projectId,
+        workspacePath: '/unused',
+        workerType: 'document-author' as const,
+        phase: 'DOCUMENT_DRAFTING' as const,
+        revision: run.revision.document,
+        taskId: 'docs/BALANCE_DESIGN.md',
+        allowedPaths: ['docs/BALANCE_DESIGN.md'],
+        contract: {
+          authoringMode: 'initial' as const,
+          foundationDocumentPath: 'docs/BALANCE_DESIGN.md' as const,
+        },
+      },
+    }
+    await expect(
+      completeFoundationDocumentDraft({
+        run: { ...run, activeDispatch: dispatch },
+        workspacePath: '/unused',
+        terminal: {
+          workerType: 'document-author',
+          status: 'completed',
+          writtenPaths: ['docs/BALANCE_DESIGN.md'],
+          resolvedFindingIds: [],
+        },
+      }),
+    ).rejects.toThrow('legacy serial foundation authoring state')
+  })
+
   test('does not inspect workers or mutate another stage even with stale author state', async () => {
     for (const phase of [
       'DOCUMENT_REVIEW',

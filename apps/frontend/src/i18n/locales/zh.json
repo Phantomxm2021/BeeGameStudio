@@ -669,6 +669,7 @@
     "open": "打开",
     "diff": "对比",
     "loadingArtifacts": "正在加载交付物...",
+    "artifactLoadFailed": "无法加载交付物，请稍后重试。",
     "noArtifacts": "暂无交付物",
     "documentProgress": "项目文档",
     "documentProgressHint": "根据确认方案按依赖顺序生成。",
@@ -829,6 +830,7 @@
         "paused": "需要处理",
         "offline": "离线",
         "finished": "待复核",
+        "foundationAuthoringPaused": "8 份基础文档已完成，等待审查",
         "idle": "就绪"
       },
       "starting": {

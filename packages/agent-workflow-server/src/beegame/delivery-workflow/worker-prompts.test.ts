@@ -150,7 +150,8 @@ describe('worker prompts', () => {
         expect(prompt).not.toContain('Workspace root:')
         expect(prompt).not.toContain('max_tokens')
         expect(prompt).not.toContain('roundDeadlineAt')
-        expect(contract.systemDeliveryContract !== undefined).toBe(path === 'docs/TECHNICAL_DESIGN.md')
+        expect(contract.systemDeliveryContract).toBeUndefined()
+        expect(contract.authoringDeliveryContract !== undefined).toBe(path === 'docs/TECHNICAL_DESIGN.md' || path === 'docs/ASSET_PLAN.md')
         expect(JSON.stringify(getGameDocumentContract(path))).toBe(sharedBefore)
       }
     }

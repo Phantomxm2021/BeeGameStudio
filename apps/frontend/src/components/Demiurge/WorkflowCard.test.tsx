@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkflowCard } from './WorkflowCard';
+import { BEEGAME_DOCUMENT_BASELINE } from '../../utils/documentProgress';
 
 const toast = vi.hoisted(() => ({
   showSuccess: vi.fn(),
@@ -166,6 +167,36 @@ describe('WorkflowCard', () => {
       'data-task-icon',
       'write-completed',
     );
+  });
+
+  it('renders the explicit complete-authoring pause as waiting for review', () => {
+    render(
+      <WorkflowCard
+        workflow={{
+          runId: 'run_foundation_handoff',
+          status: 'cancelled',
+          currentPhase: 'DOCUMENT_DRAFTING',
+          documentStep: 'FOUNDATION_DRAFTING',
+          block: {
+            message: 'Workflow is blocked and needs attention.',
+            detail: 'foundation authoring complete; paused before review',
+            code: 'workflow_blocked',
+          },
+          tasks: BEEGAME_DOCUMENT_BASELINE.map(document => ({
+            id: document.path,
+            title: document.path,
+            status: 'completed' as const,
+          })),
+          completedTaskCount: 8,
+          totalTaskCount: 8,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('等待审查')).toBeInTheDocument();
+    expect(screen.getByText('8 份基础文档已完成，等待审查。')).toBeInTheDocument();
+    expect(screen.queryByText('Workflow is blocked and needs attention.')).not.toBeInTheDocument();
+    expect(screen.getByText('任务 8 / 8')).toBeInTheDocument();
   });
 
   it('labels the revision substage separately from the audit substage', () => {

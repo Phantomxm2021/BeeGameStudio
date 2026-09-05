@@ -30,6 +30,10 @@ import type {
   WorkflowCardTask,
   WorkflowRecoveryUnitKind,
 } from '../../types/message';
+import {
+  BEEGAME_DOCUMENT_BASELINE,
+  FOUNDATION_AUTHORING_PAUSE_REASON,
+} from '../../utils/documentProgress';
 
 const statusLabel: Record<WorkflowCardStageSnapshot['status'], string> = {
   draft: '准备中',
@@ -429,14 +433,29 @@ export function WorkflowStageCard({
         .filter(Boolean)
         .join('\n')
     : undefined;
-  const message = isRecoverable
+  const completedCount = snapshot.completedTaskCount ?? tasks.filter(task => task.status === 'completed').length;
+  const totalCount = snapshot.totalTaskCount ?? tasks.length;
+  const foundationDocumentsComplete = BEEGAME_DOCUMENT_BASELINE.every(document =>
+    tasks.some(task => task.title === document.path && task.status === 'completed'),
+  );
+  const isFoundationAuthoringHandoff =
+    (snapshot.status === 'cancelled' || (snapshot.status as string) === 'stopped') &&
+    snapshot.currentPhase === 'DOCUMENT_DRAFTING' &&
+    snapshot.documentStep === 'FOUNDATION_DRAFTING' &&
+    foundationDocumentsComplete &&
+    completedCount === 8 &&
+    totalCount === 8 &&
+    [snapshot.block?.message, snapshot.block?.detail].some(
+      value => String(value || '').trim().toLowerCase() === FOUNDATION_AUTHORING_PAUSE_REASON,
+    );
+  const message = isFoundationAuthoringHandoff
+    ? '8 份基础文档已完成，等待审查。'
+    : isRecoverable
     ? recoveryMessage
     : snapshot.thinking || (isBlocked ? snapshot.block?.message : undefined) || '正在准备当前阶段…';
   const { elementRef: messageRegionRef, isOverflowing: isMessageOverflowing } = useVerticalOverflow<HTMLDivElement>(
     message || '',
   );
-  const completedCount = snapshot.completedTaskCount ?? tasks.filter(task => task.status === 'completed').length;
-  const totalCount = snapshot.totalTaskCount ?? tasks.length;
   const repairTaskRounds = snapshot.substage === 'REPAIRING' ? tasks.map(task => task.round) : [];
   const firstRepairRound = repairTaskRounds[0];
   const repairRound =
@@ -563,7 +582,9 @@ export function WorkflowStageCard({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className="text-xs text-zinc-400">{statusLabel[snapshot.status]}</span>
+                <span className="text-xs text-zinc-400">
+                  {isFoundationAuthoringHandoff ? '等待审查' : statusLabel[snapshot.status]}
+                </span>
                 {hasFailureDetails && snapshot.block ? (
                   <div className="group relative">
                     <button

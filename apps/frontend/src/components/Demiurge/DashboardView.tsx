@@ -28,6 +28,7 @@ import {
 } from '../../services/creditsApi';
 import { normalizeI18nLanguage } from '../../i18n/useBeeGameTranslations';
 import { countPendingToolPermissions, usePermissionTabAttention } from '../../hooks/usePermissionTabAttention';
+import { isCompletedFoundationAuthoringPause } from '../../utils/documentProgress';
 
 interface DashboardViewProps {
   projectId: string;
@@ -291,6 +292,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const canUploadAssets = hasPermission('assets.upload') && !isProjectWorkspaceMutationLocked;
   const canExportProject = hasPermission('project.export');
 
+  const isFoundationAuthoringPaused = useMemo(
+    () => isCompletedFoundationAuthoringPause(displayMessages, projectRuntimeDisplay?.workflow),
+    [displayMessages, projectRuntimeDisplay?.workflow],
+  );
+
   // Derived state machine based on Requirements: 4.2
   const currentStatus = useMemo(() => {
     const workflow = projectRuntimeDisplay?.workflow;
@@ -494,10 +500,15 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   }, [currentStatus]);
 
   const phaseLabel = useMemo(() => {
+    if (isFoundationAuthoringPaused) {
+      return translateBeeGame('dashboard.turn.foundationAuthoringPaused', {
+        defaultValue: 'Foundation documents complete · waiting for review',
+      });
+    }
     return translateBeeGame(`dashboard.turn.${currentStatus}`, {
       defaultValue: translateBeeGame('dashboard.turn.idle'),
     });
-  }, [currentStatus, translateBeeGame]);
+  }, [currentStatus, isFoundationAuthoringPaused, translateBeeGame]);
 
   const displayProjectName = useMemo(() => {
     return getWorkspaceFolderName(activeProject?.root_path) || projectName;
@@ -522,6 +533,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         projectName={displayProjectName}
         status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
         phaseLabel={phaseLabel}
+        handoffNotice={isFoundationAuthoringPaused ? phaseLabel : undefined}
         credits={creditSummary}
         accountCreditBalance={creditBalance}
         isSyncing={isSyncing}

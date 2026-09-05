@@ -5156,12 +5156,22 @@ describe('delivery workflow recovery', () => {
     expect(restarted[0]).toMatchObject({
       workerType: 'document-author',
       taskId: nextPath,
-      contract: { foundationDocumentPath: nextPath },
+      contract: {
+        authoringMode: 'parallel-draft',
+        foundationDocumentPath: nextPath,
+      },
     })
     const durable = await restartedStore.load()
-    expect(durable).toMatchObject({
-      schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-      activeDispatch: {
+    expect(durable?.schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
+    expect(durable?.activeDispatch).toBeUndefined()
+    expect(
+      durable?.foundationDraftState.documents?.find(
+        document => document.path === nextPath,
+      ),
+    ).toMatchObject({
+      path: nextPath,
+      status: 'drafting',
+      dispatch: {
         workerType: 'document-author',
         status: 'running',
       },

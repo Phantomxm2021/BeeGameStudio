@@ -10,6 +10,7 @@ import {
   recordFoundationFailure,
 } from './foundation-authoring-batch'
 import {
+  claimAuthorBatchDispatch,
   retryAuthorState,
   stopAuthorState,
   runningAuthorDispatches,
@@ -161,6 +162,34 @@ describe('Stage 2 state boundary', () => {
     expect(retried.state.documents![2]!.status).toBe('needs_action')
   })
 
+  test('materializes a batch only from a GDD-only recovery prefix', () => {
+    const dispatch: DispatchRecord = {
+      dispatchId: 'recovered-level',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      taskId: 'docs/LEVEL_SCENE_DESIGN.md',
+      revision: 'rev',
+      status: 'running',
+      startedAt: '2026-09-05T00:00:00Z',
+    }
+    const recovered = claimAuthorBatchDispatch(
+      { completedPaths: ['docs/GDD.md'] },
+      'docs/LEVEL_SCENE_DESIGN.md',
+      dispatch,
+    ).foundationDraftState
+    expect(recovered.documents?.find(document => document.path === 'docs/GDD.md'))
+      .toMatchObject({ status: 'committed' })
+    expect(recovered.documents?.find(document => document.path === dispatch.taskId))
+      .toMatchObject({ status: 'drafting', dispatch })
+    expect(() =>
+      claimAuthorBatchDispatch(
+        { completedPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'] },
+        'docs/BALANCE_DESIGN.md',
+        dispatch,
+      ),
+    ).toThrow('parallel foundation authoring state is missing')
+  })
+
   test('raw author recovery does not claim another stage and reports malformed author evidence', () => {
     const reject = (code: string, message: string): never => {
       throw new Error(code + ': ' + message)
@@ -194,5 +223,32 @@ describe('Stage 2 state boundary', () => {
         },
       }),
     ).toThrow('recovery_checkpoint_missing')
+  })
+
+  test('rejects an old initial dispatch for any document after the GDD', () => {
+    const reject = (code: string, message: string): never => {
+      throw new Error(code + ': ' + message)
+    }
+    expect(() =>
+      recoverAuthorActiveUnit({
+        workspacePath: '/unused',
+        ownerId: 'o',
+        projectId: 'p',
+        confirmedBriefContext: 'brief',
+        reject,
+        snapshot: {
+          phase: 'DOCUMENT_DRAFTING',
+          documentStep: 'FOUNDATION_DRAFTING',
+          currentItemId: 'docs/LEVEL_SCENE_DESIGN.md',
+          activeDispatch: {
+            request: {
+              contract: {
+                authoringMode: 'initial',
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow('legacy serial initial authoring may only target the GDD')
   })
 })

@@ -25,7 +25,6 @@ import {
   parseSemanticVersion,
   documentMetadataIssues,
   type Dispatcher,
-  type ReadinessAudit,
 } from './document-publication-protocol'
 
 function exactStringSet(
@@ -46,10 +45,28 @@ export async function startDocumentStage(input: {
     throw new Error(
       `document stage requires DOCUMENT_DRAFTING, got ${input.run.phase}`,
     )
+  const activeContract = input.run.activeDispatch?.request?.contract
+  if (
+    input.run.activeDispatch?.status === 'running' &&
+    activeContract?.authoringMode === 'initial' &&
+    (input.run.foundationDraftState.completedPaths.length !== 0 ||
+      (activeContract.foundationDocumentPath as string | undefined) !==
+        CANONICAL_FOUNDATION_DOCUMENTS[0])
+  )
+    throw new Error('legacy serial foundation authoring state is unsupported')
   if (input.run.activeDispatch?.status === 'running')
     return input.run.activeDispatch
-  if (input.run.foundationDraftState.documents) {
-    const pendingDrafts = readyDraftPaths(input.run.foundationDraftState)
+  const foundationDraftState = input.run.foundationDraftState.documents
+    ? input.run.foundationDraftState
+    : input.run.foundationDraftState.completedPaths.length === 1 &&
+        input.run.foundationDraftState.completedPaths[0] ===
+          CANONICAL_FOUNDATION_DOCUMENTS[0]
+      ? beginParallelFoundationAuthoring([
+          CANONICAL_FOUNDATION_DOCUMENTS[0],
+        ])
+      : undefined
+  if (foundationDraftState?.documents) {
+    const pendingDrafts = readyDraftPaths(foundationDraftState)
     if (pendingDrafts.length) {
       return Promise.all(
         pendingDrafts.map(path =>
@@ -79,20 +96,15 @@ export async function startDocumentStage(input: {
         ),
       )
     }
-    const hasUnsettledDraft = input.run.foundationDraftState.documents.some(
+    const hasUnsettledDraft = foundationDraftState.documents.some(
       document => document.status === 'drafting',
     )
     if (hasUnsettledDraft) return input.run.foundationDraftState
     return input.run.foundationDraftState
   }
-  const initialPath =
-    CANONICAL_FOUNDATION_DOCUMENTS[
-      input.run.foundationDraftState.completedPaths.length
-    ]
-  if (!initialPath)
-    throw new Error(
-      'foundation drafting has no remaining canonical document task',
-    )
+  if (input.run.foundationDraftState.completedPaths.length !== 0)
+    throw new Error('legacy serial foundation authoring state is unsupported')
+  const initialPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
   const previousDocumentMetadata = input.run.changeRequest
     ? (() => {
         const metadata = readDocumentMetadata(input.workspacePath, initialPath)
@@ -132,7 +144,6 @@ export async function completeFoundationDocumentDraft(input: {
   run: FoundationAuthoringContext
   workspacePath: string
   terminal: Extract<WorkerTerminalResult, { workerType: 'document-author' }>
-  audit?: ReadinessAudit
 }): Promise<FoundationAuthoringContext> {
   if (input.run.phase !== 'DOCUMENT_DRAFTING')
     throw new Error('foundation author completion requires DOCUMENT_DRAFTING')
@@ -141,9 +152,15 @@ export async function completeFoundationDocumentDraft(input: {
   if (authoringMode === 'parallel-draft')
     return completeParallelFoundationDraft(input)
   const completedPaths = input.run.foundationDraftState.completedPaths
-  const expectedPath = CANONICAL_FOUNDATION_DOCUMENTS[completedPaths.length]
-  if (!expectedPath)
-    throw new Error('foundation initial-authoring cursor is already complete')
+  if (
+    authoringMode !== 'initial' ||
+    completedPaths.length !== 0 ||
+    (input.run.activeDispatch?.request?.contract
+      .foundationDocumentPath as string | undefined) !==
+      CANONICAL_FOUNDATION_DOCUMENTS[0]
+  )
+    throw new Error('legacy serial foundation authoring state is unsupported')
+  const expectedPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
 
   const normalizedWrittenPaths = input.terminal.writtenPaths.map(path =>
     path.split('\\').join('/'),
@@ -242,42 +259,9 @@ export async function completeFoundationDocumentDraft(input: {
   if (issues.length) return base
 
   const nextCompletedPaths = [...completedPaths, expectedPath]
-  if (nextCompletedPaths.length === 1)
-    return {
-      ...base,
-      foundationDraftState:
-        beginParallelFoundationAuthoring(nextCompletedPaths),
-      currentItemId: undefined,
-      blockedReason: undefined,
-    }
-  if (nextCompletedPaths.length < CANONICAL_FOUNDATION_DOCUMENTS.length)
-    return {
-      ...base,
-      foundationDraftState: { completedPaths: nextCompletedPaths },
-      currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[nextCompletedPaths.length],
-      blockedReason: undefined,
-    }
-
-  const readiness = input.audit
-    ? input.audit(input.workspacePath, {
-        includeChecklist: false,
-        includeAssetManifest: false,
-      })
-    : await defaultAudit(input.workspacePath, {
-        includeChecklist: false,
-        includeAssetManifest: false,
-      })
-  if (!readiness.valid)
-    return {
-      ...base,
-      foundationDraftState: { completedPaths: nextCompletedPaths },
-      blockedReason: readiness.issues.join('; '),
-    }
   return {
     ...base,
-    foundationDraftState: { completedPaths: nextCompletedPaths },
-    phase: 'DOCUMENT_REVIEW',
-    documentStep: 'FOUNDATION_REVIEW',
+    foundationDraftState: beginParallelFoundationAuthoring(nextCompletedPaths),
     currentItemId: undefined,
     blockedReason: undefined,
   }
