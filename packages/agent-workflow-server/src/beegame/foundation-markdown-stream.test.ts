@@ -388,6 +388,40 @@ describe('foundation Markdown stream sink', () => {
     }
   })
 
+  test('preserves the observed Asset mid-row continuation without inventing missing Markdown', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-asset-boundary-'))
+    try {
+      // Reduced from Asset dispatch 8ad27eae-d48d-4c15-9d21-cf409fbdfb3d:
+      // the provider omitted both the closing cell and newline before the next row.
+      const first = '| RES-AUD-CORE-DAMAGE | 音频制作 | Asset Lead + Producer（双签） | 音频层 | 音源文件 + 相对响度离线测量记录；双签的理由是它是唯一占专属槽位并触发闪避的条目'
+      const next = '| RES-AUD-PHASE-LOSE、RES-AUD-PHASE-WIN | 音频制作 | Asset Lead | 音频层 | 音源文件 + 时长与包络核对记录 |\n'
+      const markdown = renderTestCompleteGameDocument(targetPath, completeTestSubmission(targetPath))
+      const chunks = [markdown + '\n' + first, next]
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath, runId: 'run-asset-boundary', dispatchId: 'dispatch-asset-boundary',
+        targetPath, maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-asset-boundary')
+      for (const [index, text] of chunks.entries()) {
+        for (const message of [
+          streamEvent({ type: 'message_start', message: { id: 'message-' + index } }),
+          streamEvent({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+          streamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }),
+          streamEvent({ type: 'content_block_stop', index: 0 }),
+          streamEvent({ type: 'message_delta', delta: { stop_reason: index === 0 ? 'max_tokens' : 'end_turn' } }),
+          streamEvent({ type: 'message_stop' }),
+        ]) sink.observe(message)
+      }
+      sink.observe({ type: 'result', subtype: 'success', is_error: false, result: next })
+      await sink.commit()
+      const pending = await readFile(foundationMarkdownPendingPath(workspacePath, 'run-asset-boundary', 'dispatch-asset-boundary'), 'utf8')
+      expect(pending).toBe(chunks.join(''))
+      expect(pending).toContain('触发闪避的条目| RES-AUD-PHASE-LOSE')
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('replaces an incomplete trailing line replayed by a native continuation', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-line-replay-'))
     try {

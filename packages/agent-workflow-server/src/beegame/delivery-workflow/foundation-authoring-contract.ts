@@ -3,54 +3,191 @@ import type { FoundationDocumentPath } from './types'
 
 // Stage 2 input selection only. The shared contract graph is frozen audit
 // evidence and must not change when authoring dependencies are improved.
-type AuthoringSource = Readonly<{
+export type FoundationAuthoringInputBlock = Readonly<{
+  /** The canonical section/material marker that owns the supplied facts. */
+  ownerBlock: string
+  purpose: string
+}>
+
+export type FoundationAuthoringSource = Readonly<{
   path: FoundationDocumentPath
+  /** Block metadata is the declaration; sectionIds is a derived projection. */
+  blocks: readonly FoundationAuthoringInputBlock[]
   sectionIds: readonly string[]
 }>
 
-const source = (path: FoundationDocumentPath, ...sectionIds: string[]): AuthoringSource =>
-  Object.freeze({ path, sectionIds: Object.freeze(sectionIds) })
+const block = (
+  ownerBlock: string,
+  purpose: string,
+): FoundationAuthoringInputBlock =>
+  Object.freeze({ ownerBlock, purpose })
 
-const INPUTS: Record<FoundationDocumentPath, readonly AuthoringSource[]> = {
+const source = (
+  path: FoundationDocumentPath,
+  ...declaredBlocks: FoundationAuthoringInputBlock[]
+): FoundationAuthoringSource => {
+  const blocks = Object.freeze(declaredBlocks)
+  return Object.freeze({
+    path,
+    blocks,
+    // Keep this shape for the existing projector/scheduler. It is derived
+    // from the same block declarations above, rather than a second matrix.
+    sectionIds: Object.freeze(blocks.map(value => value.ownerBlock)),
+  })
+}
+
+const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[]> = {
   'docs/GDD.md': [],
   'docs/LEVEL_SCENE_DESIGN.md': [
-    source('docs/GDD.md', 'experience_pillars', 'core_loop', 'player_actions', 'rules_systems', 'progression', 'challenge_recovery', 'accessibility_localization', 'metrics', 'material.core-loop-diagram', 'material.game-state-flow'),
+    source('docs/GDD.md',
+      block('experience_pillars', 'Confirmed player-experience constraints for scene tone and scope.'),
+      block('core_loop', 'Core loop entry and reward semantics for level flow.'),
+      block('player_actions', 'Canonical player-facing actions and mechanics used by encounter coverage.'),
+      block('rules_systems', 'Tracked gameplay resources and rules used to size objectives and rewards.'),
+      block('progression', 'Progression decisions that shape level unlock and escalation.'),
+      block('challenge_recovery', 'Challenge and recovery behavior referenced by level failure/retry paths.'),
+      block('accessibility_localization', 'Confirmed accessibility and localization constraints for scene presentation.'),
+      block('metrics', 'Confirmed session-duration target used by pacing and completion expectations.'),
+      block('material.core-loop-diagram', 'Canonical loop evidence for entry, exit and reward transitions.'),
+      block('material.game-state-flow', 'Canonical state and recovery evidence for level transitions.'),
+    ),
   ],
   'docs/BALANCE_DESIGN.md': [
-    source('docs/GDD.md', 'rules_systems', 'progression', 'challenge_recovery', 'metrics', 'material.core-loop-diagram', 'material.game-state-flow'),
-    source('docs/LEVEL_SCENE_DESIGN.md', 'encounters', 'spawn_checkpoint', 'pacing_beats', 'material.world-structure-diagram', 'material.route-choice-diagram', 'material.pacing-beat-table'),
+    source('docs/GDD.md',
+      block('rules_systems', 'Gameplay rules and tracked resources used by affordability and reward formulas.'),
+      block('progression', 'Progression decisions and costs that Balance parameterizes.'),
+      block('challenge_recovery', 'Challenge/recovery rules used by damage, leak and retry scenarios.'),
+      block('metrics', 'Confirmed session-duration target used by balance pacing scenarios.'),
+      block('material.core-loop-diagram', 'Canonical reward and progression transitions used as Balance context.'),
+      block('material.game-state-flow', 'Canonical win, loss and recovery transitions used by Balance context.'),
+    ),
+    source('docs/LEVEL_SCENE_DESIGN.md',
+      block('encounters', 'Required encounter entity identities used to cover Balance parameters.'),
+      block('spawn_checkpoint', 'Spawn timing and checkpoint semantics used by combat timing.'),
+      block('pacing_beats', 'Authored beat cadence and recovery windows used by balance scenarios.'),
+      block('material.world-structure-diagram', 'Canonical path and placement literals referenced by Balance.'),
+      block('material.route-choice-diagram', 'Canonical route and choice mappings referenced by Balance.'),
+      block('material.pacing-beat-table', 'Canonical computable pacing rows referenced by Balance.'),
+    ),
   ],
   'docs/UI_UX_SPEC.md': [
-    source('docs/GDD.md', 'player_actions', 'rules_systems', 'accessibility_localization', 'content_narrative', 'material.core-loop-diagram', 'material.game-state-flow'),
-    source('docs/LEVEL_SCENE_DESIGN.md', 'camera_readability', 'scene_states', 'material.world-structure-diagram', 'material.route-choice-diagram', 'material.pacing-beat-table'),
+    source('docs/GDD.md',
+      block('player_actions', 'Canonical player-facing actions represented by UI controls.'),
+      block('rules_systems', 'Tracked gameplay resources represented in the HUD.'),
+      block('accessibility_localization', 'Confirmed keyboard, accessibility and localization constraints for UI.'),
+      block('metrics', 'Confirmed session-duration target used to size UI flow and feedback.'),
+      block('content_narrative', 'Content labels and narrative context shown in UI states.'),
+      block('material.core-loop-diagram', 'Canonical loop transitions referenced by player journeys.'),
+      block('material.game-state-flow', 'Canonical state and recovery transitions referenced by screen states.'),
+    ),
+    source('docs/LEVEL_SCENE_DESIGN.md',
+      block('camera_readability', 'Camera and off-screen readability constraints for UI overlays.'),
+      block('scene_states', 'Scene state identities used by UI screen behavior.'),
+      block('material.world-structure-diagram', 'Canonical world/layout literals referenced by UI geometry.'),
+      block('material.route-choice-diagram', 'Canonical route and choice mappings shown by UI.'),
+      block('material.pacing-beat-table', 'Canonical pacing rows used by UI feedback timing.'),
+    ),
   ],
   'docs/ART_DIRECTION.md': [
-    source('docs/GDD.md', 'experience_pillars', 'rules_systems', 'content_narrative', 'accessibility_localization'),
-    source('docs/LEVEL_SCENE_DESIGN.md', 'camera_readability', 'material.world-structure-diagram'),
-    source('docs/UI_UX_SPEC.md', 'hud', 'feedback_errors', 'material.wireframe-board'),
+    source('docs/GDD.md',
+      block('experience_pillars', 'Confirmed visual experience pillars and prohibited directions.'),
+      block('rules_systems', 'Gameplay rules that determine visual state and feedback semantics.'),
+      block('content_narrative', 'Narrative/content identities represented by visual assets.'),
+      block('accessibility_localization', 'Contrast, readability and localization constraints for visuals.'),
+      block('metrics', 'Confirmed session-duration target used to bound presentation density.'),
+    ),
+    source('docs/LEVEL_SCENE_DESIGN.md',
+      block('camera_readability', 'Camera, scale and off-screen readability constraints.'),
+      block('material.world-structure-diagram', 'Canonical topology and coordinate literals consumed by Art.'),
+    ),
+    source('docs/UI_UX_SPEC.md',
+      block('hud', 'HUD display sizes and visual states required for readability.'),
+      block('feedback_errors', 'Feedback and error states requiring visual treatment.'),
+      block('material.wireframe-board', 'Canonical labeled UI geometry and minimum regions consumed by Art.'),
+    ),
   ],
   'docs/TECHNICAL_DESIGN.md': [
-    source('docs/GDD.md', 'rules_systems', 'accessibility_localization', 'metrics', 'material.game-state-flow'),
-    source('docs/LEVEL_SCENE_DESIGN.md', 'spawn_checkpoint', 'scene_states', 'material.world-structure-diagram', 'material.route-choice-diagram', 'material.pacing-beat-table'),
-    source('docs/BALANCE_DESIGN.md', 'units_variables', 'formulas', 'bounds_exploits', 'material.variable-parameter-table'),
-    source('docs/UI_UX_SPEC.md', 'feedback_errors', 'material.screen-state-table', 'material.focus-accessibility-matrix'),
+    source('docs/GDD.md',
+      block('rules_systems', 'Gameplay interfaces and rules implemented by runtime systems.'),
+      block('accessibility_localization', 'Accessibility and localization behaviors implemented by runtime/UI.'),
+      block('metrics', 'Confirmed session-duration target used to bound runtime/session behavior.'),
+      block('material.game-state-flow', 'Canonical state and recovery transitions implemented by runtime.'),
+    ),
+    source('docs/LEVEL_SCENE_DESIGN.md',
+      block('spawn_checkpoint', 'Spawn timing and checkpoint interfaces implemented by runtime.'),
+      block('scene_states', 'Scene state identities and transitions implemented by runtime.'),
+      block('material.world-structure-diagram', 'Canonical world topology and coordinates consumed by runtime.'),
+      block('material.route-choice-diagram', 'Canonical route and choice mappings consumed by runtime.'),
+      block('material.pacing-beat-table', 'Canonical pacing rows consumed by runtime scheduling.'),
+    ),
+    source('docs/BALANCE_DESIGN.md',
+      block('units_variables', 'Units and variable semantics required for runtime data.'),
+      block('formulas', 'Owned formulas required for deterministic simulation.'),
+      block('bounds_exploits', 'Bounds and exploit constraints required for runtime safeguards.'),
+      block('material.variable-parameter-table', 'Canonical numeric variable IDs, values and ranges bound by runtime.'),
+    ),
+    source('docs/UI_UX_SPEC.md',
+      block('feedback_errors', 'UI feedback and error behaviors implemented by runtime.'),
+      block('material.screen-state-table', 'Canonical screen/state identities implemented by runtime.'),
+      block('material.focus-accessibility-matrix', 'Canonical focus and input mappings implemented by runtime.'),
+    ),
   ],
   'docs/AUDIO_DESIGN.md': [
-    source('docs/GDD.md', 'experience_pillars', 'rules_systems', 'accessibility_localization', 'material.game-state-flow'),
-    source('docs/LEVEL_SCENE_DESIGN.md', 'scene_states', 'material.pacing-beat-table'),
-    source('docs/UI_UX_SPEC.md', 'feedback_errors', 'accessibility', 'material.screen-state-table'),
+    source('docs/GDD.md',
+      block('experience_pillars', 'Confirmed emotional and sensory experience pillars for audio.'),
+      block('rules_systems', 'Gameplay rules and states that trigger audio feedback.'),
+      block('accessibility_localization', 'Accessibility and localization constraints for audio delivery.'),
+      block('metrics', 'Confirmed session-duration target used to bound music and feedback density.'),
+      block('material.game-state-flow', 'Canonical state and recovery transitions requiring audio cues.'),
+    ),
+    source('docs/LEVEL_SCENE_DESIGN.md',
+      block('scene_states', 'Scene state identities requiring audio state transitions.'),
+      block('material.pacing-beat-table', 'Canonical pacing rows used to scope audio timing and layers.'),
+    ),
+    source('docs/UI_UX_SPEC.md',
+      block('input', 'Stable UI actions whose focus and loss-of-focus behavior produce audio events.'),
+      block('feedback_errors', 'UI feedback and error events requiring audio cues.'),
+      block('accessibility', 'Focus, media failure and inclusive-use behavior requiring audio isolation.'),
+      block('material.screen-state-table', 'Canonical screen/state identities used to scope loading and failure cues.'),
+      block('material.focus-accessibility-matrix', 'Canonical focus and accessibility mappings used by audio events.'),
+    ),
   ],
   'docs/ASSET_PLAN.md': [
-    source('docs/GDD.md', 'scope_risks'),
-    source('docs/LEVEL_SCENE_DESIGN.md', 'material.world-structure-diagram', 'material.route-choice-diagram', 'material.pacing-beat-table'),
-    source('docs/TECHNICAL_DESIGN.md', 'data_content', 'performance', 'build_release'),
-    source('docs/ART_DIRECTION.md', 'asset_specifications', 'material.visual-language-board', 'material.animation-vfx-state-table'),
-    source('docs/UI_UX_SPEC.md', 'localization', 'material.screen-state-table', 'material.focus-accessibility-matrix'),
-    source('docs/AUDIO_DESIGN.md', 'implementation', 'material.event-cue-matrix', 'material.music-state-diagram', 'material.loudness-delivery-table'),
+    source('docs/GDD.md', block('scope_risks', 'Confirmed production scope and risk constraints for asset delivery.')),
+    source('docs/LEVEL_SCENE_DESIGN.md',
+      block('material.world-structure-diagram', 'Canonical topology and scene literals mapped to deliverables.'),
+      block('material.route-choice-diagram', 'Canonical route and choice literals mapped to deliverables.'),
+      block('material.pacing-beat-table', 'Canonical pacing/content rows mapped to deliverables.'),
+    ),
+    source('docs/TECHNICAL_DESIGN.md',
+      block('data_content', 'Stable content kinds and data boundaries required for delivery mapping.'),
+      block('performance', 'Target runtime performance constraints used to check delivery budgets.'),
+      block('build_release', 'Build and release constraints for delivered resources.'),
+    ),
+    source('docs/ART_DIRECTION.md',
+      block('character_style', 'Character silhouette and variant constraints required by concrete deliverables.'),
+      block('environment_style', 'Environment form constraints required by concrete deliverables.'),
+      block('color_lighting', 'Palette and lighting constraints required by concrete deliverables.'),
+      block('asset_specifications', 'Concrete visual asset specifications and required variants.'),
+      block('material.visual-language-board', 'Canonical visual-language acceptance evidence mapped to resources.'),
+      block('material.animation-vfx-state-table', 'Canonical animation/VFX state requirements mapped to resources.'),
+    ),
+    source('docs/UI_UX_SPEC.md',
+      block('localization', 'Localized text and media requirements mapped to resources.'),
+      block('material.screen-state-table', 'Canonical screens and states mapped to resource deliverables.'),
+      block('material.focus-accessibility-matrix', 'Canonical focus/accessibility requirements mapped to resources.'),
+    ),
+    source('docs/AUDIO_DESIGN.md',
+      block('sfx', 'Audio source and variant constraints required to choose delivered files.'),
+      block('implementation', 'Audio implementation constraints required for delivered resources.'),
+      block('material.event-cue-matrix', 'Canonical event identifiers and cue mappings required by inventory rows.'),
+      block('material.music-state-diagram', 'Canonical music states and transitions mapped to delivered layers.'),
+      block('material.loudness-delivery-table', 'Canonical loudness and encoding acceptance requirements.'),
+    ),
   ],
 }
 
-export function foundationAuthoringSources(path: FoundationDocumentPath): readonly AuthoringSource[] {
+export function foundationAuthoringSources(path: FoundationDocumentPath): readonly FoundationAuthoringSource[] {
   return Object.freeze(INPUTS[path])
 }
 
@@ -62,12 +199,13 @@ export function foundationAuthoringMarker(blockId: string): string {
 
 export const FOUNDATION_AUTHORING_INSTRUCTION = [
   'Write one complete raw Markdown document from the confirmed brief and supplied upstream blocks.',
-  'Confirmed product constraints remain binding. Own decisions in one section or material; other blocks reference that owner without retelling its table or state transitions.',
+  'Confirmed product constraints remain binding. Treat each section as the final decision record: complete every required section and material, using the minimum sufficient content for distinct implementable decisions and traceability, not document length. Keep rationale to the minimum needed for a production decision.',
+  'Represent each decision once in its owner section or material; elsewhere reference that owner. Do not narrate tables or diagrams, repeat state transitions, or expand a contract purpose phrase by phrase into H3 headings.',
   'Choose production scope appropriate to this actual game. Do not invent staffing, approval procedures, optional variants or elaborate subsystems merely to fill a heading.',
   'Keep every required heading. Explain N/A once in its owner block with its consequence; retain only a reference in another required block if necessary.',
   'Collect materially distinct acceptance scenarios in their declared acceptance sections or materials. Other sections state decisions without repeating equivalent test cases.',
   'Distinguish design targets, calculated results and observed test results. Never describe an unexecuted test or unobserved asset/license as verified.',
-  'Follow each section and material authority rule for examples; reference owner inputs and formulas rather than duplicating definitions.',
+  'Omit generic best-practice essays, tutorials, speculative alternatives, boilerplate and repeated derivations. Preserve required parameters, formulas, geometry, interfaces and materially distinct boundary examples under their authority rules; reference existing owner inputs and results instead of deriving them again. Do not impose fixed token, word, time or example caps or targets.',
   'Use the supplied evidence while authoring; leave cross-section consistency, format and quality review to Reviewer and Revision. Do not output a self-review report, call tools or launch a separate review.',
   'Use the existing canonical headings and material formats. Return Markdown, without a wrapper fence, JSON output or completion prose.',
 ].join(' ')
@@ -87,13 +225,87 @@ const GUIDANCE: Record<FoundationDocumentPath, string> = {
 // domain at its existing owner material. The shared audit contract remains
 // unchanged; only the model-facing section prose is narrowed here.
 const ASSET_SECTION_PURPOSES: Readonly<Record<string, string>> = Object.freeze({
-  inventory: 'Reference asset-inventory-table for complete resource identity, semantic requirement mappings, type, instance, file, quantity and unique detail. Add only inventory requirements not owned by that material; do not reproduce its table in section prose.',
+  inventory: 'Reference asset-inventory-table for complete resource identity, semantic requirement mappings, type, instance, file, quantity and delivery-specific detail. Add only inventory requirements not owned by that material; do not reproduce its table in section prose.',
   ownership: 'Reference responsibility-matrix for creator, approver, consumer and handoff mappings keyed by inventory IDs. Keep in section prose the rule for who is authorized to update status; reference milestone-maturity-table for each resource\'s maturity and status facts. Add only ownership context not owned by those materials; do not reproduce the responsibility matrix in section prose. Shared responsibility may use one row with explicit inventory IDs while exceptions remain explicit.',
   dependencies: 'Reference dependency-integration-diagram for upstream/downstream relationships, blocking dependencies and integration order keyed by inventory IDs. Add only dependency context not owned by that material; do not reproduce its diagram or repeat a full resource workflow in section prose.',
   source_license: 'Keep creation/source strategy and replacement rights as prose-only policy. Reference license-register for per-resource source, originality, attribution, restrictions and license evidence details keyed by inventory IDs. Add only sourcing or licensing context not owned by that material; do not reproduce its register in section prose. Shared licensing may use one row with explicit inventory IDs while exceptions remain explicit.',
-  formats_budgets: 'Define engine-neutral format capabilities, variants, dimensions, compression and technical file-budget rules. Reference asset-inventory-table for each resource\'s concrete type, instance, file and unique detail; do not restate per-resource specifications here.',
+  formats_budgets: 'Define only delivery-specific format capabilities and file-budget rules not already owned upstream. Reference upstream encoding, variants, dimensions and compression constraints without re-deriving them. Reference asset-inventory-table for per-resource files and delivery exceptions. Do not design runtime adapters or a second set of budgets. Different upper bounds alone are not a conflict; record only an evidenced incompatibility, without inventing a replacement target.',
   milestones: 'Reference milestone-maturity-table for production batches, capacity, schedule, maturity and status keyed by inventory IDs. Retain necessary estimates and capacity assumptions in prose without inventing staffing or headcount. Add only milestone context not owned by that material; do not reproduce its table in section prose. Shared milestones may use one row with explicit inventory IDs while exceptions remain explicit.',
-  validation: 'Define validation methods, status lifecycle, evidence, defect handling and readiness criteria against the unique inventory and owner-material records. Do not output a separate derived-totals table; recompute any totals from unique detail and retain the validation method and status.',
+  validation: 'Define validation methods, status lifecycle, evidence, defect handling and readiness criteria against the unique inventory and owner-material records. Reference upstream acceptance checks instead of reproducing their specifications. Do not output a separate derived-totals table; describe how to check the owned records without performing a second design audit.',
+})
+
+// Stage 2 narrows only Level prose that re-derived the canonical layout
+// materials. The materials themselves remain the complete literal owners;
+// unique production facts stay in their existing owner sections.
+const LEVEL_SECTION_PURPOSES: Readonly<Record<string, string>> = Object.freeze({
+  world_structure: 'Reference world-structure-diagram for the complete coordinate, path, grid, trigger and off-screen literals. Keep only unique world hierarchy, scene relationships and traversal-boundary semantics here; do not reproduce geometry or derived coverage tables.',
+  objectives_routes: 'Explain objectives, player choices and completion semantics. Reference route-choice-diagram for path, slot, trigger and mutual-exclusion mappings and world-structure-diagram for layout literals; do not derive another geometry or coverage table.',
+  production_acceptance: 'Define production ownership, dependencies, budgets including a concrete finite non-negative complexity budget, and distinct completion checks. Describe how to check the existing world-structure-diagram and route-choice-diagram for layout constraints; reference their evidence without repeating geometry or coverage calculations.',
+})
+
+// The following are private author-view purposes. They preserve the shared
+// contract's section/material identities while making repeated owner duties
+// explicit only where the author would otherwise be asked to emit the same
+// table, diagram, geometry or state record again.
+const PRIVATE_SECTION_PURPOSES: Readonly<Partial<Record<FoundationDocumentPath, Readonly<Record<string, string>>>>> = Object.freeze({
+  'docs/GDD.md': Object.freeze({
+    core_loop: 'Explain the loop meaning, pacing intent and player-facing consequences; reference core-loop-diagram for the canonical entry, exit and reward transitions instead of restating them.',
+    states_flow: 'Explain state ownership, invariants and recovery consequences; reference game-state-flow for the canonical transition record instead of repeating the diagram in prose.',
+    rules_systems: 'Own authoritative mechanics, entities, resources and rule priorities; reference core-loop-diagram and game-state-flow for transitions and avoid duplicating their records.',
+    challenge_recovery: 'Own fairness, challenge sources and counterplay expectations; reference game-state-flow for failure and recovery transitions instead of defining a second state machine.',
+    metrics: 'Own observable product and gameplay targets plus their measurement meaning; do not restate mechanics, formulas or transition records.',
+  }),
+  'docs/BALANCE_DESIGN.md': Object.freeze({
+    units_variables: 'Define units, precision and comparison conventions; reference variable-parameter-table for numeric IDs, values and ranges instead of copying parameter entries.',
+    entity_parameters: 'Define parameter identities, semantic roles and relationships; reference variable-parameter-table for numeric values and ranges instead of maintaining a second parameter list.',
+    formulas: 'Own formula IDs, symbolic ordering, clamping, rounding and distinct boundary cases; reference variable-parameter-table inputs without copying numeric rows or derived totals.',
+    economy: 'Explain resource flows, affordability and deadlock prevention by referencing parameter and formula IDs; do not reproduce their inputs or totals.',
+    progression_curves: 'Explain growth and unlock relationships by referencing parameter and formula IDs; keep only progression semantics not already represented by those owners.',
+    challenge_model: 'Explain difficulty, pressure and recovery relationships by referencing parameter and formula IDs; do not restate encounter schedules or numeric owner rows.',
+    rewards_value: 'Explain reward valuation and choice tradeoffs by referencing owned parameter and formula IDs; keep only distinct economic semantics.',
+    tuning_validation: 'Define validation methods, sensitivity scenarios, telemetry inputs and acceptance intervals with an auditable chain from inputs through calculated or observed results to acceptance; do not claim global playthrough or wave-clear proof and do not copy owner numeric inputs.',
+    risks_dependencies: 'Record uncertain inputs, assumptions and tuning risks; reference their owning sections without recreating a second parameter or schedule record.',
+  }),
+  'docs/TECHNICAL_DESIGN.md': Object.freeze({
+    architecture: 'Reference architecture-diagram for component boundaries and dependency direction. Keep only interface fields, ordering and implementation constraints not represented by that diagram.',
+    runtime_state: 'Reference runtime-lifecycle-diagram for lifecycle transitions. Keep only deterministic timing, queue and recovery details not represented by that diagram.',
+    data_content: 'Reference data-flow-diagram for content and persistence boundaries. Keep only schema fields, versioning and loading contracts not represented by that diagram.',
+    save_load: 'Reference save-recovery-table for canonical persistence acceptance rows. Keep only persistence boundaries, migration behavior and error semantics not represented by that table.',
+    input_interaction: 'Own delivery of the canonical GDD action labels and runtime mapping constraints; reference focus-accessibility-matrix for focus/remapping rows without duplicating them.',
+    performance: 'Own measurable runtime and capacity targets; reference the relevant architecture/data owners and do not restate their component or content maps.',
+    diagnostics: 'Own logging, crash evidence and telemetry fields; reference metrics and lifecycle owners instead of repeating gameplay or state records.',
+    testing: 'Define technical verification methods and evidence; reference the owned interfaces and acceptance materials instead of reproducing their specifications.',
+  }),
+  'docs/ART_DIRECTION.md': Object.freeze({
+    visual_pillars: 'Define visual intent, originality boundaries and prohibited directions; reference visual-language-board for compact visual acceptance evidence and do not repeat that evidence in prose.',
+    composition_readability: 'Define hierarchy, silhouettes and readability semantics while consuming Level/UI geometry; do not create another layout or wireframe record.',
+    animation: 'Define motion principles, state coverage and timing intent; reference animation-vfx-state-table for canonical state/event rows instead of repeating them.',
+    vfx: 'Define effect semantics, hierarchy and performance boundaries; reference animation-vfx-state-table for canonical VFX state/event rows instead of duplicating mappings.',
+    camera_presentation: 'Define framing and presentation semantics while consuming Level/UI geometry; reference their owner materials and do not invent a second geometry set.',
+    asset_specifications: 'Define visual quality bars, variants and handoff constraints; reference visual-language-board and animation-vfx-state-table for acceptance evidence, while Asset Plan owns resource identity and delivery.',
+    pipeline_risks: 'Record art-specific feasibility and handoff risks; reference Asset Plan for resource responsibility, source, licensing and milestones without reproducing those records.',
+  }),
+  'docs/UI_UX_SPEC.md': Object.freeze({
+    experience_architecture: 'Reference information-architecture-diagram for hierarchy and entry mappings. Keep only global interaction semantics and breakpoint/compression decisions not represented there; responsive geometry belongs to wireframe-board.',
+    player_journeys: 'Reference player-flow-diagram for canonical task flows. Keep only user goals, branch meaning and recovery intent not represented in that diagram.',
+    screen_inventory: 'Reference screen-state-table for the canonical screen and interface-state catalog. Keep only state-specific exceptions and presentation consequences, not another inventory.',
+    hud: 'Own information priority, timing and gameplay linkage; reference wireframe-board for all responsive geometry and screen-state-table for state identity.',
+    input: 'Own action conflicts, navigation semantics and remapping policy; reference focus-accessibility-matrix for canonical focus and input mappings instead of duplicating its rows.',
+    feedback_errors: 'Own confirmation, warning, failure and interruption semantics; reference player-flow-diagram and screen-state-table for canonical flow/state identities.',
+    accessibility: 'Own perceptual, motor and cognitive behavior; reference focus-accessibility-matrix for concrete mappings without recreating its evidence.',
+    localization: 'Own expansion, font, direction and culturalization constraints; reference screen-state-table for affected interfaces instead of copying screen inventory.',
+    prototype_acceptance: 'Define usability methods and interface acceptance evidence; reference wireframe-board and focus-accessibility-matrix for owned geometry and focus facts.',
+  }),
+  'docs/AUDIO_DESIGN.md': Object.freeze({
+    event_taxonomy: 'Define event-family meaning and cue responsibilities; reference event-cue-matrix for stable IDs, priorities and exceptions instead of repeating its rows.',
+    sfx: 'Define SFX variation, spatial behavior, repetition control and environment coverage; reference event-cue-matrix for event identity and cue ownership.',
+    music: 'Define musical structure and intensity semantics; reference music-state-diagram for canonical state transitions, including pause, focus loss and restoration.',
+    ambience: 'Define ambience layers, zones and environmental storytelling; reference music-state-diagram only for shared state transitions and keep ambience-specific behavior here.',
+    ui_feedback: 'Define UI cue semantics and non-visual alternatives; reference event-cue-matrix and focus-accessibility-matrix for stable event/focus mappings.',
+    mix: 'Define bus, ducking, loudness and critical-cue protection semantics; reference bus-ducking-diagram for canonical bus/priority mappings.',
+    implementation: 'Define audio integration fields, naming, diagnostics and delivery constraints not owned by event-cue-matrix or loudness-delivery-table; reference those materials for their canonical rows.',
+    production: 'Define implementation acceptance and handoff evidence; reference event-cue-matrix, music-state-diagram and loudness-delivery-table instead of reproducing their mappings or delivery rows.',
+  }),
 })
 
 // This is a model-facing Stage 2 view, never a replacement for the audit
@@ -111,8 +323,16 @@ export function foundationAuthoringDocumentContract(path: FoundationDocumentPath
       title: section.title,
       purpose: path === 'docs/ASSET_PLAN.md'
         ? ASSET_SECTION_PURPOSES[section.sectionId] ?? section.purpose
-        : section.purpose,
+        : path === 'docs/LEVEL_SCENE_DESIGN.md'
+          ? LEVEL_SECTION_PURPOSES[section.sectionId] ?? section.purpose
+          : PRIVATE_SECTION_PURPOSES[path]?.[section.sectionId] ?? section.purpose,
     })),
-    productionMaterials: shared.productionMaterials.map(({ checklistMode: _mode, ...material }) => material),
+    productionMaterials: shared.productionMaterials.map(({ checklistMode: _mode, ...material }) =>
+      path === 'docs/ASSET_PLAN.md' && material.materialId === 'asset-inventory-table'
+        ? {
+            ...material,
+            purpose: 'Own resource IDs, upstream requirement references, type, instance, files, quantities and delivery-specific exceptions. Unique detail means information needed to produce or hand off the deliverable, not copied gameplay, visual or audio design. Reference upstream owner IDs or sections for existing semantics, priorities, timings and design rationale; retain concrete delivery specifications and every required variant.',
+          }
+        : material),
   }
 }
