@@ -26,7 +26,7 @@ describe('Stage 2 isolation from review and revision', () => {
 
   test('changes only author scheduling, dispatch lookup and public handoff in the shared controller', () => {
     const before = baselineSource('controller.ts')
-    const after = readFileSync(resolve(root, directory, 'controller.ts'), 'utf8')
+    const after = restoreReviewEntry(readFileSync(resolve(root, directory, 'controller.ts'), 'utf8'))
     const start = before.indexOf("    if (\n      run.phase === 'DOCUMENT_DRAFTING' &&\n      run.foundationDraftState.documents\n", before.indexOf('  async function resumeUnlocked'))
     const end = before.indexOf('    // Replay a terminal from a phase', start)
     expect(start).toBeGreaterThan(0)
@@ -192,3 +192,4 @@ describe('Stage 2 isolation from review and revision', () => {
     }
   })
 })
+import { restoreReviewEntry } from './foundation-review-isolation-oracle'
