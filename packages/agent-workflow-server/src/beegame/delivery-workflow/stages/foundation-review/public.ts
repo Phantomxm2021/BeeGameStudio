@@ -115,3 +115,6 @@ export { resumeFoundationReview, mayIgnoreDuplicateFoundationReviewDispatch, typ
 export { projectReviewSchedulingTask, projectReviewSchedulingUsage, type FoundationReviewSchedulingContext } from './context'
 export { prepareFoundationReviewFacts, type FoundationReviewFactsInput, type FoundationReviewFactsResult } from './facts'
 export { prepareFoundationDeterministicReview, prepareFoundationSemanticWave, type FoundationDeterministicReviewInput, type FoundationDeterministicReviewPreparation } from './deterministic'
+export { prepareFoundationReviewSummary, type FoundationReviewSummaryInput } from './summary'
+export { admitFoundationSemanticReviewTerminal, isFoundationSemanticReviewComplete, projectFoundationSemanticTerminalTask, type FoundationSemanticTerminalReviewSnapshot } from './semantic-terminal'
+export { prepareFoundationFactTerminal, projectFoundationFactTerminalTask, type FoundationReviewFactTerminalInput } from './fact-terminal'
