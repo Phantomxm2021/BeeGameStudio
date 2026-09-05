@@ -1,6 +1,64 @@
 # 八文档生成质量调整
 
-## 当前实施：成本收缩（2026-09-05，取代下文实施顺序）
+## 当前唯一方案：先验证生效，再按关键依赖链减负
+
+状态：方案已整理，尚未执行新的生成或追加业务修改。代码检查点 `a9dfd81f9`；以下取代全部历史实施顺序，不另建第二份活动计划。
+
+### 证据与判断
+
+| 八文档指标 | 前轮 cdb6b899a313 | 最新 e880973fc2e1 | 变化 |
+| --- | ---: | ---: | ---: |
+| 最终 Token 合计（含缓存读取） | 503,020 | 390,176 | −22.4% |
+| 首个 author 开始至最后 author 完成 | 33分31秒 | 29分58秒 | −10.6% |
+| 输出 Token | 200,909 | 173,840 | −13.5% |
+| 文档 bytes（含服务元数据） | 402,158 | 362,958 | −9.7% |
+| 上游投影 bytes 合计 | 258,018 | 245,656 | −4.8% |
+| Asset 最终 Token | 158,227 | 67,740 | −57.2% |
+
+原始记录：[前轮 events](</Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/mushroom-tower-firefly-defense--cdb6b899a313/.beegame/workflow/events.jsonl>)、[最新 events](</Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/mushroom-forest-tower-defense--e880973fc2e1/.beegame/workflow/events.jsonl>)。这里只相加 documentPerformance 的八个 author terminal，不使用整个后续工作流的累计量。
+
+两轮均八份成功且 receipt digest 与文件一致；最新零续写、零失败重派。前轮 Asset 有一次 max_tokens 续写，约80.2%的总 Token 降幅集中在 Asset，其余七份合计只降6.5%。这不是“全链路已稳定节省22.4%”的证明。Token 不是价格加权费用，completion 也不等于最终 Markdown 的 Token；不得据此宣称账单节省相同比例。
+
+更关键的是，[最新 Level projection](</Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/mushroom-forest-tower-defense--e880973fc2e1/.beegame/workflow/document-projections/e62dc17a-ef5f-4412-8502-0ea2ec08d46c.json>) 仍缺新增 core_loop/metrics；[Balance projection](</Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/mushroom-forest-tower-defense--e880973fc2e1/.beegame/workflow/document-projections/e6baa69f-6760-4037-a60c-a23101454278.json>) 仍缺 pacing_beats。至少新增输入配置没有生效，不能把这次生成归因于已提交的新方案。最终 brief 也并非字节相同，生成波动和需求差异须保留为混杂因素。
+
+最新运行没有预设 authoring 暂停：02:25:08.9Z 完成八文档，随后启动4个 fact extractor，02:25:14.483Z 被用户暂停。不能称为“未进入 Reviewer”；这四个任务不计入上述 author 统计，取消前是否另有 provider 消耗须与已有计量记录单独核对，不把缺失 terminal 当成零费用。
+
+### 顺序一：完成已有优化的有效验收，不再先加代码
+
+1. **无模型调用的启动前核对。** 确认目标 worktree/commit、服务启动目录与进程；在没有活动任务时重启该测试 runtime，加载检查点。确认三项输入新增与 author outputPolicy、逐文档 mergeReferenceRule 来自同一份代码。保留已有测试，不为这次核对新增健康接口、版本系统或另一套调度。磁盘配置正确不等于旧进程已加载。
+2. **先建立停止边界，再花生成费用。** 使用现有 bootstrap 接口的显式测试 project ID，与现有 BEEGAME_FOUNDATION_AUTHORING_PAUSE_PROJECT_ID 一致；复用完整 confirmed brief，而非重新抽候选。该方式仍走生产 controller/author，不新增测试专用生成路径，并通过 Chrome 观察真实项目。沿用现有认证，不导出凭据。若现有环境不能安全调用该入口，则说明阻塞，不增加 debugger、修改浏览器随机数或事后篡改 journal 来绕过。纯 UI 随机 ID 路径在未解决暂停绑定前不用于这一验收。
+3. **只跑一个新项目。** run.created 必须记录 requested 暂停意图。运行期间检查已有持久投影是否实际包含新增块；若仍是旧输入，则暂停并留证，不再花完整八文档费用去验证一个未生效版本。不得在运行中改源码、需求或旧产物。八份完成后确认 stopped、pause reached、Reviewer dispatch 数为0；否则单独判定停止边界未通过。
+4. **按内容与实际成本决定下一步。** 保留逐文档输入、缓存、输出、投影/正文 bytes、耗时、续写与错误，以及阶段墙钟。现有固定 brief 与新运行可作更接近的对照，但上游生成仍随机；不得用一次运行承诺稳定收益。若已提交改动解决主要冗余且质量不退化，停止追加优化；不为了追求一个预设比例继续改造。
+
+### 顺序二：仅在有效验收仍显示冗余时，定向收缩作者职责
+
+只修改 Stage 2 私有作者契约及对应测试，替换重复 purpose，不追加一层自审指令。下表是依证据保留的候选修改，不在顺序一之前实施。
+
+| 优先对象 | 可收缩的重复 | 必须保留 |
+| --- | --- | --- |
+| Asset | 正文、多表重复的计数、未交付声明、M0/M1/M2规则、同路径替换说明；相同责任/许可/成熟度记录可列明确 ID 集合 | 完整需求映射、每个资源的文件/变体与例外；唯一库存计数口径；许可替换权、状态更新权和必要估算 |
+| Level | 布局/路线/节拍材料与正文复制同一坐标、波表、时长结果；多处重写相同验收解释 | 完整坐标、路径、格位、波次编排及节奏目标；正文独有的时长或语义不能假定已被图表覆盖 |
+| Technical | 重述玩法、状态流程及多处解释同一无联网/无存档决定；教程式实现说明 | 运行接口、事件顺序、固定步长、追赶上限、加载与恢复契约等可执行事实，不把参数名字当参数值 |
+| GDD / Balance | 重复胜负/操作权限说明；复制参数及同一推算结果；未经支持的定价论证 | 行为规则、动作授权、参数单位/精度、公式、必要独特边界和验证方法，不要求作者证明全部策略可通关 |
+| UI / Art / Audio | 跨正文与材料重复状态映射、表现约束、N/A和等价验收文字 | 几何、键盘路径、视觉状态、音频事件/层/编码等独有交付要求；不以缩短为由删变体 |
+
+时长优先依据本案例关键链 GDD → Level → Balance → Technical → Asset（约4:23 + 6:33 + 6:00 + 6:25 + 6:36），不是按单份 Token 从大到小盲排。UI/Art/Audio 已并行；缩短非关键路径可省 Token，但未必缩短总墙钟。其他案例的关键链从该案例日志重算，不硬编码此游戏顺序或数值。
+
+### 质量回退检查与不做事项
+
+已有文档问题作为离线验收检查点，不作为游戏关键词 prompt 补丁：同一胜负条件分叉、升级等级与备战时间多定义、DPS单位计算错误、几何重叠、技术时间参数缺失、渲染层顺序冲突、流式播放与零请求互斥、实例/文件计数混用、早期里程碑要求未来文件。特别是 Asset 第133/230行的一文件一条目与45条目冲突、第366行M0门禁，以及 Technical 缺dt/追赶值，均不能以文档更短认定为优化成功。
+
+保留既有 Reviewer/Revision 的语义审计责任；本方案不修改或运行它们来补救 Stage 2 成本验收。离线评审发现缺陷时分别报告新出现、仍存在、已消除，不把模型设计错误自动归因于传输或某条 prompt。必要生产事实缺失时否决对应收缩；成本上升但有明确必要覆盖收益时单独解释，不强行算成成本收益。
+
+不改 raw Markdown、不分区生成、不新增摘要模型/事实缓存/第二权威、不删不明用途的输入块、不加 Token/字数/时间上限、不改模型/SDK/全局 Claude Code 配置、不改调度并发、不修改共享审计契约或交接协议。开始前的版本与暂停核对属于验收操作，不进入 Stage 2 文档质量门禁。
+
+候选调整须先通过冻结 Stage 3/4、全部章节/材料身份、必要投影覆盖的现有回归与类型检查，再做一次有明确待验证假设的生成。无新增假设不重复整套测试；不同复杂度案例在首轮证明有收益后才扩展。此处不存在自动扩大实施范围的授权。
+
+### 检查点记录
+
+2026-09-05：现有全部50个文件改动已提交为 `a9dfd81f9`，提交前复跑67项聚焦测试通过（879 assertions，8 files），服务端 typecheck 通过。首次 staged whitespace 检查发现新文件末尾多余空行，随方案文档提交清理；没有业务行为改动。本次只保存方案，未重启服务、未发起新生成或修改历史项目。
+
+## 历史：上轮成本收缩实现（不再作为活动顺序）
 
 ### 审计结论与取舍
 

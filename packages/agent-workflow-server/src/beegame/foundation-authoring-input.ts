@@ -166,4 +166,3 @@ async function durableWriteProjection(
     throw error
   }
 }
-
