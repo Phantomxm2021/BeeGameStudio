@@ -1,3 +1,4 @@
+import { retryAuthorState } from './foundation-authoring-state'
 import { parseDeliveryRun } from './schema'
 import type {
   AtomicTask,
@@ -559,27 +560,11 @@ export function transitionDeliveryRun(
       )
         fail('retry task must be a failed task')
       {
-        let draftRevived = false
-        const nextDraftState =
-          run.phase === 'DOCUMENT_DRAFTING' && run.foundationDraftState.documents
-            ? {
-                ...run.foundationDraftState,
-                documents: run.foundationDraftState.documents.map(document => {
-                  if (
-                    document.status !== 'needs_action' ||
-                    (event.taskId && document.path !== event.taskId)
-                  )
-                    return document
-                  draftRevived = true
-                  return {
-                    ...document,
-                    status: 'pending' as const,
-                    dispatch: undefined,
-                    failureReason: undefined,
-                  }
-                }),
-              }
-            : undefined
+        const draftRetry = run.phase === 'DOCUMENT_DRAFTING'
+          ? retryAuthorState(run.foundationDraftState, event.taskId)
+          : undefined
+        const draftRevived = draftRetry?.revived ?? false
+        const nextDraftState = draftRetry?.state
         const revisionState =
           run.phase === 'FOUNDATION_REVISION' &&
           isFoundationRevisionPhase(run.foundationAuditState?.status)
@@ -655,10 +640,7 @@ export function transitionDeliveryRun(
             )
           : false
         const foundationStateInCurrentPhase = !!(
-          run.phase === 'DOCUMENT_DRAFTING' &&
-          run.foundationDraftState.documents?.some(
-            document => document.status === 'needs_action',
-          ) ||
+          draftRetry?.actionable ||
           auditState?.tasks.some(task => task.status === 'needs_action') ||
           (revisionState && run.status === 'needs_action') ||
           (revisionState && revisionState.status !== 'planning' && activeFoundationRevisionTasks(revisionState).some(task => task.status === 'needs_action'))

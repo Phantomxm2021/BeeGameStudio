@@ -18,7 +18,11 @@ import {
   startChecklistDraftStage,
   startDocumentStage,
 } from './document-stage'
-import { canStartFoundationAudit } from './foundation-audit-boundary'
+import {
+  canStartFoundationAudit,
+  readFoundationAuthoringPause,
+  pauseFoundationAuthoringHandoff,
+} from './foundation-audit-boundary'
 import { activeFoundationRevisionBundle, activeFoundationRevisionTasks, createFoundationAuditState, foundationRuntimeTasks, isFoundationRevisionPhase } from './foundation-audit-state'
 import { deriveFoundationAuditArtifacts } from './foundation-audit-artifacts'
 import {
@@ -68,7 +72,8 @@ import {
   buildFoundationFactStructuredOutputJsonSchema,
   type WorkerTerminalResult,
 } from './worker-contracts'
-import { recordFoundationFailure } from './foundation-authoring-batch'
+import { resumeFoundationAuthors } from './foundation-authoring-scheduler'
+import { authorHandoffCheckpoints, locateAuthorDispatch } from './foundation-authoring-state'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -174,13 +179,7 @@ async function deriveFoundationAudit(
   workspacePath: string,
 ): Promise<DeliveryRun> {
   if (run.foundationAuditState && run.foundationAuditState.status !== 'index_staged') return run
-  const checkpoints = run.foundationDraftState.documents ??
-    CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({
-      path,
-      status: run.foundationDraftState.completedPaths.includes(path)
-        ? ('committed' as const)
-        : ('pending' as const),
-    }))
+  const checkpoints = authorHandoffCheckpoints(run.foundationDraftState)
   try {
     const documents = new Map<FoundationDocumentPath, string>()
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
@@ -620,9 +619,7 @@ export function createDeliveryWorkflowController(input: {
   ): Promise<void> {
     const run = await store.load()
     const foundationRuntimeTaskList = run?.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState) : []
-    const foundationCheckpoint = run?.foundationDraftState.documents?.find(
-      document => document.dispatch?.dispatchId === record.dispatchId,
-    )
+    const foundationCheckpoint = run ? locateAuthorDispatch(run.foundationDraftState, record.dispatchId) : undefined
     const foundationFactTask = foundationRuntimeTaskList.find(
       task => task.dispatch?.dispatchId === record.dispatchId,
     )
@@ -1051,8 +1048,20 @@ export function createDeliveryWorkflowController(input: {
         terminal: result,
         documentSet,
       })
-      if (documentSet === 'foundation' && canStartFoundationAudit(next))
+      if (documentSet === 'foundation' && canStartFoundationAudit(next)) {
+        const pause = readFoundationAuthoringPause(
+          await store.readEvents(),
+          next.runId,
+        )
+        const paused = pauseFoundationAuthoringHandoff(next, pause)
+        if (paused) {
+          await persist(paused, 'foundation.authoring.pause_changed', {
+            foundationAuthoringPause: 'reached',
+          })
+          return
+        }
         next = await deriveFoundationAudit(next, input.workspacePath)
+      }
       if (documentSet !== 'foundation' && next.blockedReason && next.status === 'running') {
         next = {
           ...next,
@@ -2079,55 +2088,13 @@ export function createDeliveryWorkflowController(input: {
 
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
     if (run.status !== 'running') return
-    if (
-      run.phase === 'DOCUMENT_DRAFTING' &&
-      run.foundationDraftState.documents
-    ) {
-      const replayable = run.foundationDraftState.documents.find(
-        document => document.dispatch?.terminalResult,
-      )?.dispatch
-      if (replayable) {
-        await dispatcher.replayTerminal(replayable, handleTerminalUnlocked)
-        return
-      }
-      const runningDocuments = run.foundationDraftState.documents.filter(
-        document => document.dispatch?.status === 'running',
-      )
-      if (runningDocuments.length) {
-        const unavailable: typeof runningDocuments = []
-        for (const document of runningDocuments) {
-          const isOpen = await dispatcher
-            .workerIsOpen(document.dispatch!.dispatchId)
-            .catch(() => false)
-          if (!isOpen) unavailable.push(document)
-        }
-        if (!unavailable.length) {
-          await startDocumentStage({
-            run,
-            workspacePath: input.workspacePath,
-            dispatcher,
-          })
-          return
-        }
-        let foundationDraftState = run.foundationDraftState
-        for (const document of unavailable)
-          foundationDraftState = recordFoundationFailure(
-            foundationDraftState,
-            document.path,
-            'preserved native document session is unavailable',
-          )
-        const recovered = await persist(
-          {
-            ...run,
-            foundationDraftState,
-            status: 'needs_action',
-            blockedReason: 'preserved native document session is unavailable',
-          },
-          'document.parallel.session_unavailable',
-        )
-        return
-      }
-    }
+    if (await resumeFoundationAuthors({
+      run,
+      workspacePath: input.workspacePath,
+      dispatcher,
+      handleTerminal: handleTerminalUnlocked,
+      persist,
+    })) return
     // Replay a terminal from a phase that owns top-level dispatches. Foundation
     // review and revision terminals are nested under their own durable tasks
     // and never enter this route.
@@ -2170,17 +2137,25 @@ export function createDeliveryWorkflowController(input: {
           current.documentStep === 'FOUNDATION_REVIEW' &&
           canStartFoundationAudit(current)
         ) {
-          next = await deriveFoundationAudit(current, input.workspacePath)
+          const pause = readFoundationAuthoringPause(
+            await store.readEvents(),
+            current.runId,
+          )
+          const paused = pauseFoundationAuthoringHandoff(current, pause)
+          next = paused ?? await deriveFoundationAudit(current, input.workspacePath)
           await store.commit(
             next,
             {
               runId: next.runId,
-              type: next.foundationAuditState
+              type: paused
+                ? 'foundation.authoring.pause_changed'
+                : next.foundationAuditState
                 ? 'foundation.audit.index_staged'
                 : 'foundation.audit.derivation_failed',
               phase: next.phase,
               status: next.status,
               revision: next.revision,
+              ...(paused ? { foundationAuthoringPause: 'reached' } : {}),
             },
             undefined,
             lease,
@@ -2372,6 +2347,17 @@ export function createDeliveryWorkflowController(input: {
     }
     if (run.phase === 'DOCUMENT_DRAFTING') {
       if (canStartFoundationAudit(run)) {
+        const pause = readFoundationAuthoringPause(
+          await store.readEvents(),
+          run.runId,
+        )
+        const paused = pauseFoundationAuthoringHandoff(run, pause)
+        if (paused) {
+          await persist(paused, 'foundation.authoring.pause_changed', {
+            foundationAuthoringPause: 'reached',
+          })
+          return
+        }
         const next = await deriveFoundationAudit(run, input.workspacePath)
         await persist(
           next,
@@ -2661,7 +2647,21 @@ export function createDeliveryWorkflowController(input: {
   }
 
   function resume(run: DeliveryRun): Promise<void> {
-    return serialize(() => resumeUnlocked(run))
+    return serialize(async () => {
+      // Authoring handoff callers can hold a stale pre-pause snapshot. Read
+      // the durable run before entering those paths so a reached stop cannot
+      // be bypassed by immediately deriving the review state.
+      if (
+        run.phase === 'DOCUMENT_DRAFTING' ||
+        (run.phase === 'DOCUMENT_REVIEW' && !run.foundationAuditState)
+      ) {
+        const current = await store.load()
+        if (!current || current.runId !== run.runId) return
+        await resumeUnlocked(current)
+        return
+      }
+      await resumeUnlocked(run)
+    })
   }
 
   function ensureProgress(run: DeliveryRun): Promise<void> {

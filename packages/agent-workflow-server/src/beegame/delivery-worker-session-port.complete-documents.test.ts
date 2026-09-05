@@ -22,6 +22,12 @@ function canonicalSource(
     ]),
     '<!-- beegame-production-materials -->',
     '## Production Materials',
+    ...contract.productionMaterials.flatMap(material => [
+      `<!-- beegame-material:${material.materialId} -->`,
+      `### ${material.title}`,
+      `Authority content for material.${material.materialId}.`,
+    ]),
+    '<!-- beegame-section:unselected -->',
     'Unprojected production material payload.',
   ].join('\n')
 }

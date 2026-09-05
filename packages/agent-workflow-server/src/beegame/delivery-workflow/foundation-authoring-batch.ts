@@ -1,4 +1,4 @@
-import { getGameDocumentContract } from './game-document-contracts'
+import { foundationAuthoringSources } from './foundation-authoring-contract'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type DispatchRecord,
@@ -69,7 +69,7 @@ export function readyDraftPaths(
     .filter(document => document.path !== 'docs/GDD.md')
     .filter(document => document.status === 'pending')
     .filter(document =>
-      getGameDocumentContract(document.path).upstreamSections.every(source =>
+      foundationAuthoringSources(document.path).every(source =>
         documents.some(
           candidate =>
             candidate.path === source.path && candidate.status === 'committed',

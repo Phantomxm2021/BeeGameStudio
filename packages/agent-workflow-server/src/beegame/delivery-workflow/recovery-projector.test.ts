@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto'
 import { deriveFoundationAuditArtifacts } from './foundation-audit-artifacts'
 import { createFoundationAuditState } from './foundation-audit-state'
 import { getGameDocumentContract } from './game-document-contracts'
+import { foundationAuthoringSources } from './foundation-authoring-contract'
 import {
   canonicalFoundationAuthorityProjectionBytes,
   foundationProjectionRelativePath,
@@ -35,14 +36,14 @@ async function writeCommittedProjection(
 ): Promise<void> {
   const contract = getGameDocumentContract(targetPath)
   const documents = new Map(await Promise.all(
-    contract.upstreamSections.map(async source => [
+    foundationAuthoringSources(targetPath).map(async source => [
       source.path,
       await readFile(join(workspacePath, source.path), 'utf8'),
     ] as const),
   ))
   const projection = projectFoundationAuthority({
     targetPath,
-    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    availableUpstreamPaths: foundationAuthoringSources(targetPath).map(source => source.path),
     documents,
   })
   const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
@@ -65,6 +66,11 @@ describe('recovery projector foundation audit boundary', () => {
         .digest('hex')
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
       const units: AcceptedWorkflowUnit[] = []
+      // Recovery consumes a fully published Stage 2 package, not a serial author schedule.
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+        await writeFile(join(workspacePath, path), withTestDocumentMetadata(
+          path, renderTestCompleteGameDocument(path, completeTestSubmission(path)),
+        ))
       for (const [index, path] of CANONICAL_FOUNDATION_DOCUMENTS.entries()) {
         const dispatchId = `recovery-document-${index}`
         await writeFile(
@@ -127,6 +133,7 @@ describe('recovery projector foundation audit boundary', () => {
           status: 'needs_action',
           revision,
           createdAt: '2026-08-24T00:00:00.000Z',
+          foundationAuthoringPause: 'requested',
         },
         {
           eventId: 'recovery-cutover-usage',
@@ -210,6 +217,136 @@ describe('recovery projector foundation audit boundary', () => {
         status: 'running',
         foundationAuditState,
       })
+
+      const pausedRun: DeliveryRun = {
+        ...run,
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        status: 'stopped',
+        foundationAuditState: undefined,
+      }
+      await store.save(pausedRun)
+      const pausedInspection = await inspectWorkflowSnapshot({
+        snapshotPath: join(workspacePath, '.beegame/workflow/run.json'),
+        ownerId,
+      })
+      const pausedProjected = await projectExactResumeRun({
+        inspection: pausedInspection,
+        events: [
+          ...acceptedEvents,
+          {
+            eventId: 'recovery-cutover-pause',
+            runId,
+            type: 'foundation.authoring.pause_changed',
+            phase: 'DOCUMENT_DRAFTING' as const,
+            status: 'stopped' as const,
+            revision,
+            createdAt: '2026-08-24T00:03:00.000Z',
+            foundationAuthoringPause: 'reached',
+          },
+        ],
+        workspacePath,
+        ownerId,
+        projectId,
+        confirmedBriefContext,
+      })
+      expect(pausedProjected.activeUnitId).toBeUndefined()
+      expect(pausedProjected.run).toMatchObject({
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        status: 'stopped',
+      })
+
+      const requestedRun: DeliveryRun = {
+        ...pausedRun,
+        status: 'running',
+      }
+      await store.save(requestedRun)
+      const requestedInspection = await inspectWorkflowSnapshot({
+        snapshotPath: join(workspacePath, '.beegame/workflow/run.json'),
+        ownerId,
+      })
+      const requestedProjected = await projectExactResumeRun({
+        inspection: requestedInspection,
+        events: acceptedEvents,
+        workspacePath,
+        ownerId,
+        projectId,
+        confirmedBriefContext,
+      })
+      expect(requestedProjected.activeUnitId).toBe('foundation-audit:derive')
+      expect(requestedProjected.run).toMatchObject({
+        phase: 'DOCUMENT_DRAFTING',
+        documentStep: 'FOUNDATION_DRAFTING',
+        status: 'running',
+      })
+
+      const consumedRun: DeliveryRun = {
+        ...requestedRun,
+      }
+      await store.save(consumedRun)
+      const consumedInspection = await inspectWorkflowSnapshot({
+        snapshotPath: join(workspacePath, '.beegame/workflow/run.json'),
+        ownerId,
+      })
+      const consumedProjected = await projectExactResumeRun({
+        inspection: consumedInspection,
+        events: [
+          ...acceptedEvents,
+          {
+            eventId: 'recovery-cutover-pause-reached-before-consume',
+            runId,
+            type: 'foundation.authoring.pause_changed',
+            phase: 'DOCUMENT_DRAFTING' as const,
+            status: 'stopped' as const,
+            revision,
+            createdAt: '2026-08-24T00:02:30.000Z',
+            foundationAuthoringPause: 'reached',
+          },
+          {
+            eventId: 'recovery-cutover-pause-consumed',
+            runId,
+            type: 'foundation.authoring.pause_changed',
+            phase: 'DOCUMENT_DRAFTING' as const,
+            status: 'running' as const,
+            revision,
+            createdAt: '2026-08-24T00:03:00.000Z',
+            foundationAuthoringPause: null,
+          },
+        ],
+        workspacePath,
+        ownerId,
+        projectId,
+        confirmedBriefContext,
+      })
+      expect(consumedProjected.activeUnitId).toBe('foundation-audit:derive')
+
+      const invalidPauseInspection = await inspectWorkflowSnapshot({
+        snapshotPath: join(workspacePath, '.beegame/workflow/run.json'),
+        ownerId,
+      })
+      await expect(
+        projectExactResumeRun({
+          inspection: invalidPauseInspection,
+          events: [
+            ...acceptedEvents,
+            {
+              eventId: 'recovery-cutover-pause-invalid',
+              runId,
+              type: 'foundation.authoring.pause_changed',
+              phase: 'DOCUMENT_DRAFTING' as const,
+              status: 'stopped' as const,
+              revision,
+              createdAt: '2026-08-24T00:03:00.000Z',
+              foundationAuthoringPause: 'requested' as never,
+            },
+          ],
+          workspacePath,
+          ownerId,
+          projectId,
+          confirmedBriefContext,
+        }),
+      ).rejects.toThrow('invalid foundation authoring pause change')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

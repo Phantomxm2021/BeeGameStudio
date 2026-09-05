@@ -1042,6 +1042,9 @@ export function createAgentWorkflowApp(
     const confirmedBriefDigest = createHash('sha256')
       .update(input.briefContext)
       .digest('hex')
+    const foundationAuthoringPauseRequested =
+      process.env.BEEGAME_FOUNDATION_AUTHORING_PAUSE_PROJECT_ID?.trim() ===
+      input.projectId
     const initial = createInitialDeliveryRun({
       projectId: input.projectId,
       ownerId: input.user.id,
@@ -1056,6 +1059,9 @@ export function createAgentWorkflowApp(
       phase: initial.phase,
       status: initial.status,
       revision: initial.revision,
+      ...(foundationAuthoringPauseRequested
+        ? { foundationAuthoringPause: 'requested' }
+        : {}),
     })
     const drafting = transitionDeliveryRun(savedInitial, {
       type: 'documents_ready',

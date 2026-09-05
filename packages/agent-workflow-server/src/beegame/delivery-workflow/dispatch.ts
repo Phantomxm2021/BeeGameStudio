@@ -1,3 +1,4 @@
+import { isInitialAuthorRequest, parallelFoundationPathFor, authorDispatch, locateAuthorDispatch, runningAuthorDispatches, replaceAuthorDispatch, claimAuthorBatchDispatch, failAuthorBatchDispatch, preserveAuthorSession } from './foundation-authoring-state'
 import { createHash, randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -28,10 +29,6 @@ import { claimFoundationFactTasks, digestFoundationFactTerminal, type Foundation
 import { claimFoundationSemanticTasks, digestFoundationSemanticTerminal, type FoundationSemanticRuntimeTask, type FoundationSemanticTaskCollection } from './foundation-semantic-runtime'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
 import {
-  recordFoundationDispatch,
-  recordFoundationFailure,
-} from './foundation-authoring-batch'
-import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
 } from './types'
@@ -58,34 +55,8 @@ export type DispatchCredits = {
 
 const TRANSPORT_CLEANUP_TRACKING_TIMEOUT_MS = 5 * 1000
 
-function foundationPathFor(
-  request: WorkerDispatchRequest,
-): FoundationDocumentPath | undefined {
-  const path = request.contract.foundationDocumentPath
-  const mode = request.contract.authoringMode
-  return request.workerType === 'document-author' &&
-    (mode === 'initial' || mode === 'parallel-draft') &&
-    typeof path === 'string' &&
-    CANONICAL_FOUNDATION_DOCUMENTS.includes(path as FoundationDocumentPath)
-    ? (path as FoundationDocumentPath)
-    : undefined
-}
-
-function parallelFoundationPathFor(
-  request: WorkerDispatchRequest,
-): FoundationDocumentPath | undefined {
-  return request.contract.authoringMode === 'parallel-draft'
-    ? foundationPathFor(request)
-    : undefined
-}
-
-function foundationDispatch(
-  run: DeliveryRun,
-  path: FoundationDocumentPath,
-): DispatchRecord | undefined {
-  return run.foundationDraftState.documents?.find(
-    document => document.path === path,
-  )?.dispatch
+function foundationDispatch(run: DeliveryRun, path: FoundationDocumentPath): DispatchRecord | undefined {
+  return authorDispatch(run.foundationDraftState, path)
 }
 
 function dispatchLocation(
@@ -100,9 +71,8 @@ function dispatchLocation(
   | undefined {
   if (run.activeDispatch?.dispatchId === dispatchId)
     return { record: run.activeDispatch }
-  for (const document of run.foundationDraftState.documents ?? [])
-    if (document.dispatch?.dispatchId === dispatchId)
-      return { record: document.dispatch, path: document.path }
+  const author = locateAuthorDispatch(run.foundationDraftState, dispatchId)
+  if (author) return author
   for (const task of run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState) : [])
     if (task.dispatch?.dispatchId === dispatchId)
       return { record: task.dispatch, taskId: task.taskId }
@@ -134,30 +104,14 @@ function foundationStageTaskDispatch(run: DeliveryRun, taskId: string): Dispatch
 }
 
 function hasRunningFoundationDispatch(run: DeliveryRun): boolean {
-  return (run.foundationDraftState.documents ?? []).some(document => document.dispatch?.status === 'running') ||
+  return runningAuthorDispatches(run.foundationDraftState).length > 0 ||
     Boolean(run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(task => task.dispatch?.status === 'running'))
 }
 
-function withFoundationDispatch(
-  run: DeliveryRun,
-  path: FoundationDocumentPath,
-  dispatch: DispatchRecord,
-): DeliveryRun {
-  const documents = run.foundationDraftState.documents
-  if (!documents)
-    throw new DispatchError(
-      'blocked',
-      'parallel foundation authoring state is missing',
-    )
-  return {
-    ...run,
-    foundationDraftState: {
-      ...run.foundationDraftState,
-      documents: documents.map(document =>
-        document.path === path ? { ...document, dispatch } : { ...document },
-      ),
-    },
-  }
+function withFoundationDispatch(run: DeliveryRun, path: FoundationDocumentPath, dispatch: DispatchRecord): DeliveryRun {
+  if (!run.foundationDraftState.documents)
+    throw new DispatchError('blocked', 'parallel foundation authoring state is missing')
+  return { ...run, foundationDraftState: replaceAuthorDispatch(run.foundationDraftState, path, dispatch) }
 }
 
 
@@ -925,12 +879,7 @@ export function createDeliveryDispatcher(options: {
           : currentFoundationPath
             ? {
               ...current,
-              foundationDraftState: recordFoundationDispatch(
-                current.foundationDraftState,
-                currentFoundationPath,
-                'drafting',
-                record,
-              ),
+              ...claimAuthorBatchDispatch(current.foundationDraftState, currentFoundationPath, record),
               }
             : { ...current, activeDispatch: record }
         await options.store.commit(
@@ -1469,20 +1418,14 @@ export function createDeliveryDispatcher(options: {
         finishedAt: now(),
         failureReason: reason,
       })
-      const foundationPath = request ? foundationPathFor(request) : undefined
       const failedRun = location.path
         ? {
             ...run,
-            foundationDraftState: recordFoundationFailure(
-              run.foundationDraftState,
-              location.path,
-              reason,
-            ),
-            status: 'needs_action' as const,
+            ...failAuthorBatchDispatch(run.foundationDraftState, location.path, reason),
             blockedReason: reason,
             thinking: 'idle' as const,
           }
-        : foundationPath && request?.contract.authoringMode === 'initial'
+        : isInitialAuthorRequest(request)
           ? {
               ...run,
               status: 'needs_action' as const,
@@ -1601,7 +1544,7 @@ export function createDeliveryDispatcher(options: {
         await options.credits?.settle?.(key, result)
         creditSettled.add(key)
       }
-      if (request?.contract.authoringMode === 'parallel-draft') {
+      if (preserveAuthorSession(request)) {
         await options.workerPort.close?.(dispatchId, {
           preserveSession: true,
         })
@@ -1628,11 +1571,7 @@ export function createDeliveryDispatcher(options: {
         : undefined
       if (current && current.runId === run.runId && currentLocation) {
         const currentRequest = requests.get(dispatchId) ?? currentLocation.record.request
-        const initialFoundationFailure = Boolean(
-          currentRequest &&
-            currentRequest.contract.authoringMode === 'initial' &&
-            foundationPathFor(currentRequest),
-        )
+        const initialFoundationFailure = isInitialAuthorRequest(currentRequest)
         const handlerFailure = terminalHandlerStarted
         const status: DeliveryRun['status'] =
           handlerFailure
@@ -1641,12 +1580,7 @@ export function createDeliveryDispatcher(options: {
         const failedCurrent = currentLocation.path
           ? {
               ...current,
-              foundationDraftState: recordFoundationFailure(
-                current.foundationDraftState,
-                currentLocation.path,
-                reason,
-              ),
-              status: 'needs_action' as const,
+              ...failAuthorBatchDispatch(current.foundationDraftState, currentLocation.path, reason),
             }
           : initialFoundationFailure
             ? { ...current, status: 'needs_action' as const, blockedReason: reason, activeDispatch: failed }
@@ -1677,7 +1611,7 @@ export function createDeliveryDispatcher(options: {
         releaseDispatch(dispatchId, {
           preserveSession:
             terminalHandlerCompleted &&
-            request?.contract.authoringMode === 'parallel-draft',
+            preserveAuthorSession(request),
         })
     }
     return { record: completed, result }
@@ -1771,11 +1705,7 @@ export function createDeliveryDispatcher(options: {
         const failedRun = location.path
           ? {
               ...current,
-              foundationDraftState: recordFoundationFailure(
-                current.foundationDraftState,
-                location.path,
-                reason,
-              ),
+              ...failAuthorBatchDispatch(current.foundationDraftState, location.path, reason),
             }
           : { ...current, activeDispatch: failed }
         await options.store.commit(
@@ -1834,19 +1764,11 @@ export function createDeliveryDispatcher(options: {
       failureReason: reason,
     })
     const request = requests.get(dispatchId) ?? location.record.request
-    const initialFoundationFailure = Boolean(
-      request &&
-        request.contract.authoringMode === 'initial' &&
-        foundationPathFor(request),
-    )
+    const initialFoundationFailure = isInitialAuthorRequest(request)
     const failedRun = location.path
       ? {
           ...run,
-          foundationDraftState: recordFoundationFailure(
-            run.foundationDraftState,
-            location.path,
-            reason,
-          ),
+          ...failAuthorBatchDispatch(run.foundationDraftState, location.path, reason),
         }
       : { ...run, activeDispatch: failed }
     const status: DeliveryRun['status'] =
@@ -1907,11 +1829,7 @@ export function createDeliveryDispatcher(options: {
     const interruptedRun = location.path
       ? {
           ...run,
-          foundationDraftState: recordFoundationFailure(
-            run.foundationDraftState,
-            location.path,
-            reason,
-          ),
+          ...failAuthorBatchDispatch(run.foundationDraftState, location.path, reason),
         }
       : { ...run, activeDispatch: interrupted }
     const status: DeliveryRun['status'] = 'needs_action'

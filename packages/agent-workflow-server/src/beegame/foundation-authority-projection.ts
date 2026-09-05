@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod/v4'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { foundationAuthoringMarker, foundationAuthoringSources } from './delivery-workflow/foundation-authoring-contract'
 import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   type FoundationDocumentPath,
@@ -79,7 +80,7 @@ export function parseFoundationAuthorityProjectionBytes(
   if (new Set(value.sources.map(source => source.path)).size !== value.sources.length)
     throw new Error('committed upstream projection contains duplicate sources')
   for (const source of value.sources) {
-    const upstream = targetContract.upstreamSections.find(candidate => candidate.path === source.path)
+    const upstream = foundationAuthoringSources(stored.targetPath).find(candidate => candidate.path === source.path)
     if (!upstream)
       throw new Error(`committed upstream projection contains an undeclared source: ${source.path}`)
     if (
@@ -88,7 +89,7 @@ export function parseFoundationAuthorityProjectionBytes(
     ) throw new Error(`committed upstream projection contains undeclared section authority: ${source.path}`)
     if (createHash('sha256').update(source.content).digest('hex') !== source.contentDigest)
       throw new Error(`committed upstream projection contains an invalid content digest: ${source.path}`)
-    if (source.selectionScope === 'sections' && source.sectionIds.some(sectionId => !source.content.includes(`<!-- beegame-section:${sectionId} -->`)))
+    if (source.selectionScope === 'sections' && source.sectionIds.some(sectionId => !source.content.includes(foundationAuthoringMarker(sectionId))))
       throw new Error(`committed upstream projection section content is incomplete: ${source.path}`)
   }
   if (canonicalFoundationAuthorityProjectionBytes(value) !== raw)
@@ -121,7 +122,7 @@ export function projectFoundationAuthority(input: {
   documents: ReadonlyMap<FoundationDocumentPath, string>
 }): FoundationAuthorityProjection {
   const target = getGameDocumentContract(input.targetPath)
-  const contractedPaths = target.upstreamSections.map(source => source.path)
+  const contractedPaths = foundationAuthoringSources(input.targetPath).map(source => source.path)
   const availableUpstreamPaths =
     input.availableUpstreamPaths ?? []
   if (
@@ -146,36 +147,46 @@ export function projectFoundationAuthority(input: {
   )
     throw new Error('foundation authority target sections are invalid')
   const sources: FoundationAuthoritySource[] = []
-  for (const source of target.upstreamSections) {
+  for (const source of foundationAuthoringSources(input.targetPath)) {
     if (!available.has(source.path)) continue
     const markdown = input.documents.get(source.path)
     if (markdown === undefined)
       throw new Error(`canonical upstream document is missing: ${source.path}`)
     const lines = markdown.split('\n')
-    const sectionMarkerLines = lines.flatMap((line, index) =>
-      line.trim().startsWith('<!-- beegame-section:') ? [index] : [],
-    )
-    const productionMarkerLine = lines.findIndex(
-      line => line.trim() === '<!-- beegame-production-materials -->',
-    )
-    const selectedSections: string[] = []
+    // Only service markers outside fenced examples identify source blocks.
+    const boundaries: number[] = []
+    let fence: string | undefined
+    for (const [index, line] of lines.entries()) {
+      const fenced = line.match(/^\s*(`{3,}|~{3,})/)
+      if (fenced) {
+        if (!fence) fence = fenced[1]!
+        else if (fenced[1]![0] === fence[0] && fenced[1]!.length >= fence.length) fence = undefined
+        continue
+      }
+      if (!fence && /^<!-- beegame-(?:section:[^>]+|material:[^>]+|production-materials) -->$/.test(line.trim()))
+        boundaries.push(index)
+    }
+    const selectedSections = new Map<number, string>()
     let completeSelection = true
     for (const sectionId of source.sectionIds) {
-      const marker = `<!-- beegame-section:${sectionId} -->`
-      const markerLine = lines.findIndex(line => line.trim() === marker)
-      if (markerLine < 0) {
+      const marker = foundationAuthoringMarker(sectionId)
+      const matches = boundaries.filter(index => lines[index]!.trim() === marker)
+      const markerLine = matches[0]
+      if (matches.length !== 1 || markerLine === undefined) {
         completeSelection = false
         break
       }
-      const nextBoundary = [...sectionMarkerLines, productionMarkerLine]
+      const nextBoundary = boundaries
         .filter(line => line > markerLine)
         .sort((left, right) => left - right)[0]
       const endLine = nextBoundary ?? lines.length
       const content = lines.slice(markerLine, endLine).join('\n')
-      selectedSections.push(content)
+      selectedSections.set(markerLine, content)
     }
     const selectionScope = completeSelection ? 'sections' as const : 'document' as const
-    const content = completeSelection ? selectedSections.join('\n\n') : markdown
+    const content = completeSelection
+      ? [...selectedSections].sort(([left], [right]) => left - right).map(([, body]) => body).join('\n\n')
+      : markdown
     sources.push(
       Object.freeze({
         path: source.path,

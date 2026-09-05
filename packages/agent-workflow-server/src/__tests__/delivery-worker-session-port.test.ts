@@ -1081,7 +1081,7 @@ describe('delivery worker session credentials', () => {
       expect(submittedPrompt).not.toContain('complete when the turn ends')
       expect(submittedPrompt).not.toContain('file-operation sequence')
       expect(submittedPrompt).toContain(
-        'Return exactly one complete raw Markdown body for docs/GDD.md',
+        'Author exactly one complete raw Markdown body for docs/GDD.md',
       )
       expect(submittedPrompt).toContain('Do not call tools')
       expect(submittedPrompt).not.toContain(
@@ -1132,7 +1132,7 @@ describe('delivery worker session credentials', () => {
       await port.start(request)
       await port.submit(request.dispatchId!, buildWorkerPrompt(request))
 
-      expect(countOccurrences(submittedPrompt, 'Return exactly one complete raw Markdown body')).toBe(1)
+      expect(countOccurrences(submittedPrompt, 'Author exactly one complete raw Markdown body')).toBe(1)
       expect(countOccurrences(submittedPrompt, 'Do not call tools')).toBe(1)
       expect(countOccurrences(submittedPrompt, 'completeDocumentContract')).toBe(1)
       expect(countOccurrences(submittedPrompt, 'confirmed_build_brief')).toBe(1)
@@ -1198,9 +1198,7 @@ describe('delivery worker session credentials', () => {
               documentSet: 'foundation',
               foundationDocumentPath: path,
               completeDocumentContract: contract,
-              ...(authoringMode === 'initial'
-                ? { availableUpstreamPaths: contract.upstreamSections.map(source => source.path) }
-                : { availableUpstreamPaths: [] }),
+              availableUpstreamPaths: foundationAuthoringSources(path).map(source => source.path),
             },
           }
 
@@ -2160,3 +2158,4 @@ async function runResourceTerminal(input: {
   })
   return port.waitForTerminal!(`dispatch-${input.workerType}`)
 }
+import { foundationAuthoringSources } from '../beegame/delivery-workflow/foundation-authoring-contract'

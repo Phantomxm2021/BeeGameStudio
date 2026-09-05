@@ -8,7 +8,8 @@ import {
 } from '../native-resource-content-tool'
 import { validateFoundationAuditStateArtifacts } from './foundation-audit-artifacts'
 import { isFoundationRevisionPhase, parseFoundationAuditState } from './foundation-audit-state'
-import { getGameDocumentContract } from './game-document-contracts'
+import { recoverAuthorActiveUnit, authorUnitPredecessors, validateAuthorCompletedProofs } from './foundation-authoring-recovery'
+import { isRecord, record, stringValue, stringArray, sameStrings } from './recovery-values'
 import {
   computeDocumentRevision,
   computeResourceContentDigest,
@@ -40,6 +41,10 @@ import {
   type WorkflowUnitAcceptedEvent,
   type WorkflowUsage,
 } from './types'
+import {
+  readFoundationAuthoringPause,
+  type FoundationAuthoringPause,
+} from './foundation-audit-boundary'
 
 export { inspectWorkflowSnapshot }
 export type { WorkflowSnapshotInspection }
@@ -71,23 +76,7 @@ function recoveryError(code: RecoveryErrorCode, message: string): never {
   throw new WorkflowStoreError(message, code)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return isRecord(value) ? value : undefined
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === 'string' && value ? value : undefined
-}
-
-function stringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value) || value.some(item => !stringValue(item)))
-    return undefined
-  return value as string[]
-}
 
 function isCanonicalDispatchId(value: string | undefined): value is string {
   if (!value) return false
@@ -108,12 +97,7 @@ function stableValue(value: unknown): string {
     .join(',')}}`
 }
 
-function sameStrings(left: readonly string[], right: readonly string[]) {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  )
-}
+
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
@@ -134,13 +118,8 @@ function fixedUnitIds(): string[] {
 }
 
 function expectedFixedPredecessors(unitId: string): string[] | undefined {
-  const documentIndex = CANONICAL_FOUNDATION_DOCUMENTS.findIndex(
-    path => documentUnitId(path) === unitId,
-  )
-  if (documentIndex >= 0)
-    return documentIndex === 0
-      ? []
-      : [documentUnitId(CANONICAL_FOUNDATION_DOCUMENTS[documentIndex - 1]!)]
+  const authorPredecessors = authorUnitPredecessors(unitId)
+  if (authorPredecessors) return authorPredecessors
   if (unitId === RESOURCE_INVENTORY_UNIT_ID)
     return [documentUnitId(CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!)]
   if (unitId === RESOURCE_CONTENT_UNIT_ID) return [RESOURCE_INVENTORY_UNIT_ID]
@@ -296,7 +275,11 @@ function recoveryJournalMetadata(input: {
   let createdAt: string | undefined
   let usage: WorkflowUsage | undefined
   for (const event of input.events) {
-    if (event.type !== 'run.created' && event.type !== 'usage.updated') continue
+    if (
+      event.type !== 'run.created' &&
+      event.type !== 'usage.updated'
+    )
+      continue
     const eventRunId = stringValue(event.runId)
     const eventTimestamp = stringValue(event.createdAt)
     if (
@@ -422,27 +405,11 @@ async function historicalDocumentFacts(input: {
   snapshot: Record<string, unknown>
   proofs: Map<string, ProvenUnit>
 }): Promise<void> {
-  const completedPaths = stringArray(
-    record(input.snapshot.foundationDraftState)?.completedPaths,
-  )
-  if (!completedPaths) return
-  const expectedPrefix = CANONICAL_FOUNDATION_DOCUMENTS.slice(
-    0,
-    completedPaths.length,
-  )
-  if (!sameStrings(completedPaths, expectedPrefix))
-    recoveryError(
-      'recovery_checkpoint_conflict',
-      'snapshot completed documents are outside the current canonical prefix',
-    )
-  for (const path of completedPaths) {
-    const unitId = documentUnitId(path)
-    if (input.proofs.has(unitId)) continue
-    recoveryError(
-      'recovery_checkpoint_missing',
-      `snapshot-completed document ${path} has no dispatch-bound accepted journal event`,
-    )
-  }
+  validateAuthorCompletedProofs({
+    completedPaths: record(input.snapshot.foundationDraftState)?.completedPaths,
+    provenUnitIds: new Set(input.proofs.keys()),
+    reject: recoveryError,
+  })
 }
 
 function historicalResourceFacts(input: {
@@ -1086,96 +1053,37 @@ function rawActiveUnitId(input: {
 }): string | undefined {
   const snapshot = input.snapshot
   if (!snapshot) return undefined
-  const dispatch = record(snapshot.activeDispatch)
-  const currentItemId = stringValue(snapshot.currentItemId)
+  const draftState = record(snapshot.foundationDraftState)
+  const completedPaths = stringArray(draftState?.completedPaths)
+  const allFoundationDocumentsCommitted =
+    completedPaths?.length === CANONICAL_FOUNDATION_DOCUMENTS.length &&
+    CANONICAL_FOUNDATION_DOCUMENTS.every(path => completedPaths.includes(path))
   if (
-    currentItemId &&
-    CANONICAL_FOUNDATION_DOCUMENTS.includes(currentItemId as never)
-  ) {
-    if (
-      snapshot.phase !== 'DOCUMENT_DRAFTING' ||
-      snapshot.documentStep !== 'FOUNDATION_DRAFTING'
-    )
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        'canonical document current item contradicts the raw workflow phase',
-      )
-    const request = record(dispatch?.request)
-    if (!dispatch || !request)
-      recoveryError(
-        'recovery_checkpoint_missing',
-        'unfinished canonical document has no active dispatch proof',
-      )
-    const contract = record(request.contract)
-    const dispatchId = stringValue(dispatch.dispatchId)
-    const runId = stringValue(snapshot.runId)
-    const dispatchTaskId = stringValue(dispatch.taskId)
-    const requestTaskId = stringValue(request.taskId)
-    const dispatchRevision = stringValue(dispatch.revision)
-    const requestRevision = stringValue(request.revision)
-    const documentRevision = stringValue(record(snapshot.revision)?.document)
-    const requestWorkspacePath = stringValue(request.workspacePath)
-    const allowedPaths = stringArray(request.allowedPaths)
-    const completedPaths = stringArray(
-      record(snapshot.foundationDraftState)?.completedPaths,
-    )
-    const targetIndex = CANONICAL_FOUNDATION_DOCUMENTS.indexOf(
-      currentItemId as never,
-    )
-    const expectedBriefDigest = sha256(input.confirmedBriefContext)
-    const upstreamPaths = stringArray(contract?.availableUpstreamPaths)
-    if (
-      !dispatchId ||
-      !runId ||
-      !dispatchTaskId ||
-      !requestTaskId ||
-      !dispatchRevision ||
-      !requestRevision ||
-      !documentRevision ||
-      !requestWorkspacePath ||
-      dispatch.status !== 'running' ||
-      dispatch.workerType !== 'document-author' ||
-      dispatch.phase !== 'DOCUMENT_DRAFTING' ||
-      dispatchTaskId !== currentItemId ||
-      request.dispatchId !== dispatchId ||
-      request.runId !== runId ||
-      request.ownerId !== input.ownerId ||
-      request.projectId !== input.projectId ||
-      snapshot.ownerId !== input.ownerId ||
-      snapshot.projectId !== input.projectId ||
-      resolve(requestWorkspacePath) !== resolve(input.workspacePath) ||
-      request.workerType !== dispatch.workerType ||
-      request.phase !== dispatch.phase ||
-      requestTaskId !== currentItemId ||
-      requestRevision !== dispatchRevision ||
-      dispatchRevision !== documentRevision ||
-      snapshot.confirmedBriefDigest !== expectedBriefDigest ||
-      contract?.confirmedBriefDigest !== expectedBriefDigest ||
-      contract?.documentSet !== 'foundation' ||
-      contract.authoringMode !== 'initial' ||
-      contract.foundationDocumentPath !== currentItemId ||
-      !allowedPaths ||
-      !sameStrings(allowedPaths, [currentItemId]) ||
-      !upstreamPaths ||
-      !sameStrings(
-        upstreamPaths,
-        getGameDocumentContract(currentItemId as never).upstreamSections.map(
-          source => source.path,
-        ),
-      ) ||
-      !completedPaths ||
-      targetIndex < 0 ||
-      !sameStrings(
-        completedPaths,
-        CANONICAL_FOUNDATION_DOCUMENTS.slice(0, targetIndex),
-      )
-    )
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        'canonical document current item contradicts its active dispatch proof',
-      )
-    return documentUnitId(currentItemId)
-  }
+    snapshot.phase === 'DOCUMENT_DRAFTING' &&
+    !record(snapshot.foundationAuditState) &&
+    allFoundationDocumentsCommitted
+  )
+    return 'foundation-audit:derive'
+  const authorUnit = recoverAuthorActiveUnit({
+    workspacePath: input.workspacePath,
+    ownerId: input.ownerId,
+    projectId: input.projectId,
+    confirmedBriefContext: input.confirmedBriefContext,
+    snapshot: {
+      phase: snapshot.phase,
+      documentStep: snapshot.documentStep,
+      runId: snapshot.runId,
+      ownerId: snapshot.ownerId,
+      projectId: snapshot.projectId,
+      confirmedBriefDigest: snapshot.confirmedBriefDigest,
+      revision: snapshot.revision,
+      activeDispatch: snapshot.activeDispatch,
+      currentItemId: snapshot.currentItemId,
+      foundationDraftState: snapshot.foundationDraftState,
+    },
+    reject: recoveryError,
+  })
+  if (authorUnit) return authorUnit
   if (
     snapshot.phase === 'DOCUMENT_REVIEW' &&
     !record(snapshot?.foundationAuditState)
@@ -1237,6 +1145,7 @@ function buildProjectionRun(input: {
   ownerId: string
   projectId: string
   confirmedBriefContext: string
+  foundationAuthoringPause?: FoundationAuthoringPause
 }): DeliveryRun {
   const runId =
     stringValue(input.snapshot?.runId) ??
@@ -1287,8 +1196,16 @@ function buildProjectionRun(input: {
     ? acceptedUnitPayload(acceptance)
     : undefined
 
-  let phase: DeliveryRun['phase'] = 'DELIVERY'
+  const authoringPauseReached =
+    input.foundationAuthoringPause === 'reached' &&
+    documents.length === CANONICAL_FOUNDATION_DOCUMENTS.length &&
+    input.replayedUnitIds.length === CANONICAL_FOUNDATION_DOCUMENTS.length &&
+    !record(input.snapshot?.foundationAuditState)
+  let phase: DeliveryRun['phase'] = authoringPauseReached
+    ? 'DOCUMENT_DRAFTING'
+    : 'DELIVERY'
   let documentStep: DeliveryRun['documentStep']
+  if (authoringPauseReached) documentStep = 'FOUNDATION_DRAFTING'
   let currentItemId: string | undefined
   let resourceTask: DeliveryRun['resourceProductionState']['currentTask'] =
     'RESOURCE_PLAN'
@@ -1375,7 +1292,18 @@ function buildProjectionRun(input: {
     ...base,
     phase,
     ...(documentStep ? { documentStep } : {}),
-    status: activeUnitId ? 'running' : 'completed',
+    status: authoringPauseReached
+      ? 'stopped'
+      : activeUnitId
+        ? 'running'
+        : 'completed',
+    ...(authoringPauseReached
+      ? {
+          blockedReason:
+            'foundation authoring complete; paused before review',
+          thinking: 'idle' as const,
+        }
+      : {}),
     ...(activeUnitId === 'foundation-audit:derive'
       ? { blockedReason: undefined }
       : {}),
@@ -1564,6 +1492,21 @@ export async function projectExactResumeRun(input: {
     events: input.events,
     expectedRunId: snapshotRunId ?? acceptedEvents[0]?.runId,
   })
+  let foundationAuthoringPause: FoundationAuthoringPause | undefined
+  try {
+    foundationAuthoringPause = readFoundationAuthoringPause(
+      input.events,
+      snapshotRunId ?? journalMetadata.runId ?? acceptedEvents[0]?.runId ?? '',
+    )
+  } catch (error) {
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      error instanceof Error
+        ? error.message
+        : 'invalid foundation authoring pause journal proof',
+    )
+  }
+  /* journal is authoritative; snapshots carry no pause marker. */
   if (!snapshot && acceptedEvents.length === 0)
     recoveryError(
       'recovery_checkpoint_missing',
@@ -1602,12 +1545,20 @@ export async function projectExactResumeRun(input: {
     journal: acceptedEvents,
   })
   const graphActiveUnitId = graph[replayedUnitIds.length]
+  const pauseReachedInJournal =
+    foundationAuthoringPause === 'reached' &&
+    !record(snapshot?.foundationAuditState) &&
+    replayedUnitIds.filter(unitId => unitId.startsWith('document:')).length ===
+      CANONICAL_FOUNDATION_DOCUMENTS.length &&
+    graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID
   const activeUnitId =
-    graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID &&
-    !proofs.has(RESOURCE_INVENTORY_UNIT_ID) &&
-    !record(snapshot?.foundationAuditState)
-      ? 'foundation-audit:derive'
-      : graphActiveUnitId
+    pauseReachedInJournal
+      ? undefined
+      : graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID &&
+          !proofs.has(RESOURCE_INVENTORY_UNIT_ID) &&
+          !record(snapshot?.foundationAuditState)
+        ? 'foundation-audit:derive'
+        : graphActiveUnitId
   const rawProofInspection =
     input.receiptReconciliation?.sourceInspection ?? input.inspection
   const rawProofActiveUnitId = proveExactRawActiveUnitId({
@@ -1672,6 +1623,7 @@ export async function projectExactResumeRun(input: {
     ownerId: input.ownerId,
     projectId: input.projectId,
     confirmedBriefContext: input.confirmedBriefContext,
+    foundationAuthoringPause,
   })
   let foundationAuditState = run.foundationAuditState
   const storedFoundationAuditState = record(snapshot?.foundationAuditState)

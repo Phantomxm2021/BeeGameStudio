@@ -136,6 +136,258 @@ describe('foundation Markdown stream sink', () => {
     }
   })
 
+  test('does not replace a streamed continuation chain with the terminal tail', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-terminal-tail-'))
+    try {
+      const prefix = '# GDD\n\n## Executive Summary\n\nThe first message owns the beginning.\n'
+      const suffix = '\n## Balance Goals\n\nThe continuation owns the ending.\n'
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-terminal-tail',
+        dispatchId: 'dispatch-terminal-tail',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-terminal-tail')
+
+      for (const message of [
+        streamEvent({ type: 'message_start', message: { id: 'message-prefix' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 1,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: prefix },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 1 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }),
+        streamEvent({ type: 'message_stop' }),
+        streamEvent({ type: 'message_start', message: { id: 'message-suffix' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 1,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: suffix },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 1 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+        streamEvent({ type: 'message_stop' }),
+        { type: 'result', subtype: 'success', is_error: false, result: suffix },
+      ]) sink.observe(message)
+
+      await sink.commit()
+
+      expect(await readFile(
+        foundationMarkdownPendingPath(
+          workspacePath,
+          'run-terminal-tail',
+          'dispatch-terminal-tail',
+        ),
+        'utf8',
+      )).toBe(prefix + suffix)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('does not concatenate a new non-continuation message as another document segment', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-retry-message-'))
+    try {
+      const first = '# stale attempt\n'
+      const replacement = '# replacement attempt\n'
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-retry-message',
+        dispatchId: 'dispatch-retry-message',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-retry-message')
+
+      for (const message of [
+        streamEvent({ type: 'message_start', message: { id: 'message-first' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: first },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+        streamEvent({ type: 'message_stop' }),
+        streamEvent({ type: 'message_start', message: { id: 'message-replacement' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: replacement },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+        streamEvent({ type: 'message_stop' }),
+        { type: 'result', subtype: 'success', is_error: false },
+      ]) sink.observe(message)
+
+      await sink.commit()
+
+      expect(await readFile(
+        foundationMarkdownPendingPath(
+          workspacePath,
+          'run-retry-message',
+          'dispatch-retry-message',
+        ),
+        'utf8',
+      )).toBe(replacement)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects a max-token chain that has no completed continuation', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-open-continuation-'))
+    try {
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-open-continuation',
+        dispatchId: 'dispatch-open-continuation',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-open-continuation')
+
+      for (const message of [
+        streamEvent({ type: 'message_start', message: { id: 'message-open' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 1,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: '# Incomplete document' },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 1 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }),
+        streamEvent({ type: 'message_stop' }),
+        { type: 'result', subtype: 'success', is_error: false, result: 'tail only' },
+      ]) sink.observe(message)
+
+      await expect(sink.commit()).rejects.toThrow(/continuation/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects a terminal result unrelated to a completed continuation', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-mismatched-terminal-'))
+    try {
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-mismatched-terminal',
+        dispatchId: 'dispatch-mismatched-terminal',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-mismatched-terminal')
+
+      for (const message of [
+        streamEvent({ type: 'message_start', message: { id: 'message-prefix' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 1,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: 'prefix\n' },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 1 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }),
+        streamEvent({ type: 'message_stop' }),
+        streamEvent({ type: 'message_start', message: { id: 'message-suffix' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 1,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: 'suffix\n' },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 1 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+        streamEvent({ type: 'message_stop' }),
+        { type: 'result', subtype: 'success', is_error: false, result: 'unrelated' },
+      ]) sink.observe(message)
+
+      await expect(sink.commit()).rejects.toThrow(/match continuation/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects a continuation when the previous text block never closed', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-open-text-block-'))
+    try {
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath,
+        runId: 'run-open-text-block',
+        dispatchId: 'dispatch-open-text-block',
+        targetPath,
+        maxBytes: 512_000,
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-open-text-block')
+
+      for (const message of [
+        streamEvent({ type: 'message_start', message: { id: 'message-open' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 1,
+          content_block: { type: 'text', text: '' },
+        }),
+        streamEvent({
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: 'partial' },
+        }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }),
+        streamEvent({ type: 'message_stop' }),
+        streamEvent({ type: 'message_start', message: { id: 'message-next' } }),
+        streamEvent({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'thinking', thinking: '' },
+        }),
+        streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+        streamEvent({ type: 'message_stop' }),
+        { type: 'result', subtype: 'success', is_error: false, result: 'tail only' },
+      ]) sink.observe(message)
+
+      await expect(sink.commit()).rejects.toThrow(/text block closed/i)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('replaces an incomplete trailing line replayed by a native continuation', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-line-replay-'))
     try {
@@ -167,6 +419,7 @@ describe('foundation Markdown stream sink', () => {
           delta: { type: 'text_delta', text: markdown.slice(0, split) },
         }),
         streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }),
         streamEvent({ type: 'message_stop' }),
         streamEvent({ type: 'message_start', message: { id: 'message-2' } }),
         streamEvent({
@@ -180,6 +433,7 @@ describe('foundation Markdown stream sink', () => {
           delta: { type: 'text_delta', text: markdown.slice(lineStart) },
         }),
         streamEvent({ type: 'content_block_stop', index: 0 }),
+        streamEvent({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
         streamEvent({ type: 'message_stop' }),
         { type: 'result', subtype: 'success', is_error: false },
       ]) sink.observe(message)

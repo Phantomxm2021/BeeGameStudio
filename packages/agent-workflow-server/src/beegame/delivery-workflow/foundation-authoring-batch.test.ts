@@ -35,23 +35,23 @@ describe('parallel foundation authoring batch', () => {
     state = dispatchAndCommit(state, 'docs/LEVEL_SCENE_DESIGN.md')
     expect(readyDraftPaths(state)).toEqual([
       'docs/BALANCE_DESIGN.md',
-      'docs/ART_DIRECTION.md',
       'docs/UI_UX_SPEC.md',
     ])
 
     for (const path of [
       'docs/BALANCE_DESIGN.md',
-      'docs/ART_DIRECTION.md',
       'docs/UI_UX_SPEC.md',
     ] as const)
       state = dispatchAndCommit(state, path)
     expect(readyDraftPaths(state)).toEqual([
       'docs/TECHNICAL_DESIGN.md',
+      'docs/ART_DIRECTION.md',
       'docs/AUDIO_DESIGN.md',
     ])
 
     for (const path of [
       'docs/TECHNICAL_DESIGN.md',
+      'docs/ART_DIRECTION.md',
       'docs/AUDIO_DESIGN.md',
     ] as const)
       state = dispatchAndCommit(state, path)

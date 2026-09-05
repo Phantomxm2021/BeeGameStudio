@@ -78,7 +78,7 @@ async function writeProjectionForTarget(
   const contract = getGameDocumentContract(targetPath)
   const projection = projectFoundationAuthority({
     targetPath,
-    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    availableUpstreamPaths: foundationAuthoringSources(targetPath).map(source => source.path),
     documents,
   })
   const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
@@ -370,3 +370,4 @@ describe('native authored document receipts', () => {
   })
 
 })
+import { foundationAuthoringSources } from './delivery-workflow/foundation-authoring-contract'

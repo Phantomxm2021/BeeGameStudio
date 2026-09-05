@@ -32,14 +32,14 @@ async function writeCommittedProjection(
 ): Promise<void> {
   const contract = getGameDocumentContract(targetPath)
   const documents = new Map(await Promise.all(
-    contract.upstreamSections.map(async source => [
+    foundationAuthoringSources(targetPath).map(async source => [
       source.path,
       await readFile(join(workspacePath, source.path), 'utf8'),
     ] as const),
   ))
   const projection = projectFoundationAuthority({
     targetPath,
-    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    availableUpstreamPaths: foundationAuthoringSources(targetPath).map(source => source.path),
     documents,
   })
   const projectionPath = join(workspacePath, foundationProjectionRelativePath(dispatchId))
@@ -341,3 +341,4 @@ describe('foundation audit cutover', () => {
     }
   })
 })
+import { foundationAuthoringSources } from './foundation-authoring-contract'

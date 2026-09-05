@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
+import { foundationAuthoringSources, foundationAuthoringMarker } from './delivery-workflow/foundation-authoring-contract'
 import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
 import type { FoundationDocumentPath } from './delivery-workflow/types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
@@ -23,7 +24,14 @@ function sourceDocument(path: FoundationDocumentPath): string {
     ]),
     '<!-- beegame-production-materials -->',
     '## Production Materials',
-    'Source materials are intentionally outside the authority projection.',
+    ...contract.productionMaterials.flatMap(material => [
+      `<!-- beegame-material:${material.materialId} -->`,
+      `### ${material.title}`,
+      `Owned source content for material.${material.materialId}.`,
+      '',
+    ]),
+    '<!-- beegame-section:unselected -->',
+    'Source materials are intentionally unselected sentinel.',
   ].join('\n')
 }
 
@@ -37,16 +45,47 @@ function sources(paths: readonly FoundationDocumentPath[]) {
 }
 
 describe('foundation authority projection', () => {
+  test('selects materials in source order and ignores markers inside code examples', () => {
+    const path = 'docs/GDD.md'
+    const document = sourceDocument(path)
+    const example = '\n```markdown\n<!-- beegame-section:experience_pillars -->\n```\n'
+    const withExample = document.replace('Owned source content for experience_pillars.', 'Owned source content for experience_pillars.' + example)
+    const result = projectFoundationAuthority({
+      targetPath: 'docs/LEVEL_SCENE_DESIGN.md', availableUpstreamPaths: [path],
+      documents: new Map([[path, withExample]]),
+    })
+    const projected = result.sources[0]!
+    expect(projected.selectionScope).toBe('sections')
+    const positions = projected.sectionIds.map(id => ({
+      original: withExample.indexOf(foundationAuthoringMarker(id)),
+      projected: projected.content.indexOf(foundationAuthoringMarker(id)),
+    })).sort((a, b) => a.original - b.original)
+    expect(positions.map(p => p.projected)).toEqual(positions.map(p => p.projected).toSorted((a,b) => a-b))
+    expect(projected.content).toContain('Owned source content for material.core-loop-diagram.')
+    expect(projected.content).not.toContain('Owned source content for scope_risks.')
+  })
+
+  test('ambiguous canonical markers use exactly one unmodified source document', () => {
+    const path = 'docs/GDD.md'
+    const document = sourceDocument(path) + '\n<!-- beegame-section:experience_pillars -->\nAmbiguous block'
+    const result = projectFoundationAuthority({
+      targetPath: 'docs/LEVEL_SCENE_DESIGN.md', availableUpstreamPaths: [path],
+      documents: new Map([[path, document]]),
+    })
+    expect(result.sources).toHaveLength(1)
+    expect(result.sources[0]!.selectionScope).toBe('document')
+    expect(result.sources[0]!.content).toBe(document)
+  })
   test('keeps every downstream projection equal to its declared selector matrix', () => {
     for (const targetPath of CANONICAL_FOUNDATION_DOCUMENTS.slice(1)) {
       const contract = getGameDocumentContract(targetPath)
-      const input = sources(contract.upstreamSections.map(source => source.path))
+      const input = sources(foundationAuthoringSources(targetPath).map(source => source.path))
       const result = projectFoundationAuthority({
         targetPath,
-        availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+        availableUpstreamPaths: foundationAuthoringSources(targetPath).map(source => source.path),
         ...input,
       })
-      const declared = contract.upstreamSections.flatMap(source =>
+      const declared = foundationAuthoringSources(targetPath).flatMap(source =>
         source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
       )
       const projected = result.sources.flatMap(source =>
@@ -76,7 +115,7 @@ describe('foundation authority projection', () => {
       ...input,
     })
     const selectedSections = new Set(
-      getGameDocumentContract(targetPath).upstreamSections.flatMap(source =>
+      foundationAuthoringSources(targetPath).flatMap(source =>
         source.sectionIds.map(sectionId => `${source.path}#${sectionId}`),
       ),
     )
@@ -94,7 +133,7 @@ describe('foundation authority projection', () => {
         sectionIds: source.sectionIds,
       })),
     ).toEqual(
-      getGameDocumentContract(targetPath).upstreamSections.map(source => ({
+      foundationAuthoringSources(targetPath).map(source => ({
         path: source.path,
         selectionScope: 'sections',
         sectionIds: source.sectionIds,
@@ -128,7 +167,7 @@ describe('foundation authority projection', () => {
       expect(source.selectionScope).toBe('sections')
       expect(source.contentDigest).toBe(createHash('sha256').update(source.content).digest('hex'))
       for (const sectionId of source.sectionIds)
-        expect(source.content).toContain(`<!-- beegame-section:${sectionId} -->`)
+        expect(source.content).toContain(foundationAuthoringMarker(sectionId))
     }
     expect(serialized).toContain('"content":')
     expect(Object.isFrozen(result)).toBe(true)
@@ -148,8 +187,7 @@ describe('foundation authority projection', () => {
     ).toThrow(/document.*missing/i)
 
     const incompleteDocuments = new Map(input.documents)
-    const missingSectionId = getGameDocumentContract(targetPath)
-      .upstreamSections[0]!.sectionIds[0]!
+    const missingSectionId = foundationAuthoringSources(targetPath)[0]!.sectionIds[0]!
     incompleteDocuments.set(
       'docs/GDD.md',
       incompleteDocuments.get('docs/GDD.md')!.replace(
@@ -166,7 +204,7 @@ describe('foundation authority projection', () => {
     expect(projected.sources[0]).toMatchObject({
       path: 'docs/GDD.md',
       selectionScope: 'document',
-      sectionIds: getGameDocumentContract(targetPath).upstreamSections[0]!.sectionIds,
+      sectionIds: foundationAuthoringSources(targetPath)[0]!.sectionIds,
       content: incompleteDocuments.get('docs/GDD.md'),
     })
     expect(projected.rangeCount).toBe(1)
@@ -213,9 +251,9 @@ describe('foundation authority projection', () => {
     )
 
     expect(result.targetSectionIds).toEqual(['runtime_state'])
-    expect(projectedIds).toContain('docs/GDD.md#states_flow')
+    expect(projectedIds).toContain('docs/GDD.md#material.game-state-flow')
     expect(projectedIds).toContain('docs/LEVEL_SCENE_DESIGN.md#scene_states')
-    expect(projectedIds).toContain('docs/GDD.md#player_actions')
+    expect(projectedIds).toContain('docs/GDD.md#rules_systems')
     expect(projectedIds).toContain('docs/BALANCE_DESIGN.md#formulas')
     expect(
       result.sources.every(source =>

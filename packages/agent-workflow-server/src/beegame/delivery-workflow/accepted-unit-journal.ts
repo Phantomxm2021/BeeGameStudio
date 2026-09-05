@@ -1,4 +1,5 @@
 import type { AcceptedWorkflowUnit, DeliveryRun } from './types'
+import { authorDispatch, newlyCommittedAuthorPaths, precedingAuthorUnit, assertAuthorAcceptedDispatch } from './foundation-authoring-state'
 
 function stableValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableValue).join(',')}]`
@@ -17,11 +18,6 @@ function unit(
   return { eventSchemaVersion: 1, ...value }
 }
 
-function lastAcceptedDocumentUnitId(paths: readonly string[]): string[] {
-  const path = paths.at(-1)
-  return path ? [`document:${path}`] : []
-}
-
 function acceptedDispatchIdentity(input: {
   run: DeliveryRun
   workerType: 'document-author' | 'resource-content-author'
@@ -31,9 +27,7 @@ function acceptedDispatchIdentity(input: {
     input.run.activeDispatch?.taskId === input.taskId
       ? input.run.activeDispatch
       : input.workerType === 'document-author'
-        ? input.run.foundationDraftState.documents?.find(
-            document => document.path === input.taskId,
-          )?.dispatch
+        ? authorDispatch(input.run.foundationDraftState, input.taskId as never)
         : input.run.activeDispatch
   const request = dispatch?.request
   const expectedPhase =
@@ -68,17 +62,8 @@ function acceptedDispatchIdentity(input: {
     throw new Error(
       `accepted ${input.workerType} unit has no matching completed dispatch`,
     )
-  if (
-    input.workerType === 'document-author' &&
-    ((request.contract.authoringMode !== 'initial' &&
-      request.contract.authoringMode !== 'parallel-draft') ||
-      request.contract.foundationDocumentPath !== input.taskId ||
-      request.allowedPaths?.length !== 1 ||
-      request.allowedPaths[0] !== input.taskId)
-  )
-    throw new Error(
-      'accepted document unit contradicts its completed dispatch contract',
-    )
+  if (input.workerType === 'document-author')
+    assertAuthorAcceptedDispatch(request, input.taskId)
   if (
     input.workerType === 'resource-content-author' &&
     request.contract.task !== 'RESOURCE_CONTENT'
@@ -173,26 +158,7 @@ export function deriveAcceptedWorkflowUnits(
   next: DeliveryRun,
 ): AcceptedWorkflowUnit[] {
   const units: AcceptedWorkflowUnit[] = []
-  const previousCheckpoints = previous.foundationDraftState.documents
-  const nextCheckpoints = next.foundationDraftState.documents
-  const acceptedDocuments =
-    previousCheckpoints && nextCheckpoints
-      ? nextCheckpoints
-          .filter(document => document.status === 'committed')
-          .filter(
-            document =>
-              previousCheckpoints.find(
-                candidate => candidate.path === document.path,
-              )?.status !== 'committed',
-          )
-          .map(document => document.path)
-      : next.foundationDraftState.completedPaths.slice(
-          previous.foundationDraftState.completedPaths.length,
-        )
-  if (acceptedDocuments.length > 1)
-    throw new Error(
-      'accepted document transition contains more than one dispatch-backed unit',
-    )
+  const acceptedDocuments = newlyCommittedAuthorPaths(previous.foundationDraftState, next.foundationDraftState)
   for (const path of acceptedDocuments) {
     const identity = acceptedDispatchIdentity({
       run: previous,
@@ -204,9 +170,7 @@ export function deriveAcceptedWorkflowUnits(
         unitId: `document:${path}`,
         kind: 'document',
         phase: next.phase,
-        predecessorUnitIds: lastAcceptedDocumentUnitId(
-          previous.foundationDraftState.completedPaths,
-        ),
+        predecessorUnitIds: precedingAuthorUnit(previous.foundationDraftState),
         inputRevision: next.revision.document,
         dependencyDigests: {},
         ...identity,

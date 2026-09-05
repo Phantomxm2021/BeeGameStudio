@@ -28,6 +28,8 @@ import type {
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
 import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
 import { projectTaskTerminalEvidence } from './task-terminal-evidence'
+import { locateAuthorDispatch, mapAuthorDispatches } from './foundation-authoring-state'
+import { readFoundationAuthoringPause } from './foundation-audit-boundary'
 import {
   foundationRuntimeTasks,
   isFoundationRevisionPhase,
@@ -284,17 +286,7 @@ function withDispatchUsage(
   return {
     ...run,
     activeDispatch: update(run.activeDispatch),
-    foundationDraftState: {
-      ...run.foundationDraftState,
-      ...(run.foundationDraftState.documents
-        ? {
-            documents: run.foundationDraftState.documents.map(document => ({
-              ...document,
-              dispatch: update(document.dispatch),
-            })),
-          }
-        : {}),
-    },
+    foundationDraftState: mapAuthorDispatches(run.foundationDraftState, update),
     foundationAuditState: run.foundationAuditState
       ? {
           ...run.foundationAuditState,
@@ -845,6 +837,18 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         ? { stageSnapshot }
         : {}),
     } as WorkflowEvent
+    const pauseState = readFoundationAuthoringPause(events, run.runId)
+    const pauseChangedEvent =
+      (pauseState === 'reached' &&
+        run.status === 'running' &&
+        (event.type === 'run.resumed' || event.type === 'run.retry_requested'))
+        ? ({
+            ...ordinaryEventBase,
+            eventId: randomUUID(),
+            type: 'foundation.authoring.pause_changed',
+            foundationAuthoringPause: null,
+          } as WorkflowEvent)
+        : undefined
     const stageSnapshotEvent =
       stageSnapshot && event.type === 'tasks.planned'
         ? ({
@@ -856,6 +860,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         : undefined
     const pendingEvents: WorkflowEvent[] = [
       ordinaryEvent,
+      ...(pauseChangedEvent ? [pauseChangedEvent] : []),
       ...(stageSnapshotEvent ? [stageSnapshotEvent] : []),
       ...acceptedUnits.map(
         unit =>
@@ -1304,9 +1309,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const usageDispatch =
         run.activeDispatch?.dispatchId === dispatchId
           ? run.activeDispatch
-          : run.foundationDraftState.documents?.find(
-              document => document.dispatch?.dispatchId === dispatchId,
-            )?.dispatch
+          : locateAuthorDispatch(run.foundationDraftState, dispatchId)?.record
           ?? (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(
               task => task.dispatch?.dispatchId === dispatchId,
           )?.dispatch : undefined)
@@ -1380,9 +1383,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const progressDispatch = progress.dispatchId
         ? run.activeDispatch?.dispatchId === progress.dispatchId
           ? run.activeDispatch
-          : run.foundationDraftState.documents?.find(
-              document => document.dispatch?.dispatchId === progress.dispatchId,
-            )?.dispatch
+          : locateAuthorDispatch(run.foundationDraftState, progress.dispatchId)?.record
             ?? (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(
               task => task.dispatch?.dispatchId === progress.dispatchId,
             )?.dispatch : undefined)

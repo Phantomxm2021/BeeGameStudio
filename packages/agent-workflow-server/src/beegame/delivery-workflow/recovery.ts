@@ -1,3 +1,4 @@
+import { runningAuthorDispatches, stopAuthorState } from './foundation-authoring-state'
 import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { transitionDeliveryRun } from './transition'
@@ -13,8 +14,6 @@ import {
 } from '../asset-contract-audit'
 import {
   DELIVERY_RUN_SCHEMA_VERSION,
-  CANONICAL_FOUNDATION_DOCUMENTS,
-  CANONICAL_PROJECT_DOCUMENT_IDS,
   type AcceptedWorkflowUnit,
   type DeliveryRun,
   type DispatchRecord,
@@ -33,7 +32,7 @@ import {
 } from './recovery-projector'
 import { foundationRuntimeTasks } from './foundation-audit-state'
 import type { FoundationAuditTask } from './foundation-audit-state'
-import { reconcileAuthoredDocumentReceipt } from '../authored-document-receipt'
+import { reconcileAuthorRecoveryReceipt, restoreAuthorDispatchReceipt } from './foundation-authoring-recovery'
 import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
@@ -103,16 +102,6 @@ function stringArray(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every(item => typeof item === 'string')
     ? value
     : undefined
-}
-
-function sameStrings(
-  left: readonly string[],
-  right: readonly string[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((value, index) => value === right[index])
-  )
 }
 
 function hasStaleFoundationWorkers(run: DeliveryRun): boolean {
@@ -246,9 +235,6 @@ async function reconcileActiveCanonicalReceipt(input: {
     const completedPaths = stringArray(
       snapshotRecord(snapshot.foundationDraftState)?.completedPaths,
     )
-    const targetIndex = targetPath
-      ? CANONICAL_FOUNDATION_DOCUMENTS.indexOf(targetPath as never)
-      : -1
     const rawActiveUnitId = proveExactRawActiveUnitId({
       inspection: input.inspection,
       workspacePath: input.workspacePath,
@@ -256,81 +242,23 @@ async function reconcileActiveCanonicalReceipt(input: {
       projectId: input.projectId,
       confirmedBriefContext: input.confirmedBriefContext,
     })
-    if (
-      rawActiveUnitId !== `document:${targetPath}` ||
-      contract?.authoringMode !== 'initial' ||
-      !completedPaths ||
-      targetIndex < 0 ||
-      !sameStrings(
-        completedPaths,
-        CANONICAL_FOUNDATION_DOCUMENTS.slice(0, targetIndex),
-      )
-    )
-      recoveryConflict(
-        'canonical document receipt does not prove the exact active drafting unit',
-      )
-    const receipt = await reconcileAuthoredDocumentReceipt({
+    const reconciled = await reconcileAuthorRecoveryReceipt({
       workspacePath: input.workspacePath,
       dispatchId: identity.dispatchId,
+      targetPath, completedPaths,
+      authoringMode: contract?.authoringMode,
+      rawActiveUnitId,
+      confirmedBriefContext: input.confirmedBriefContext,
+      reject: recoveryConflict,
     })
-    if (!receipt)
-      return {
-        inspection: input.inspection,
-        events: input.events,
-        acceptedUnits: [],
-      }
-    if (receipt.status !== 'committed')
-      recoveryConflict(
-        'canonical Foundation document receipt is missing committed authority',
-      )
-    if (
-      receipt.dispatchId !== identity.dispatchId ||
-      receipt.targetPath !== targetPath ||
-      receipt.documentId !==
-        CANONICAL_PROJECT_DOCUMENT_IDS[
-          targetPath as keyof typeof CANONICAL_PROJECT_DOCUMENT_IDS
-        ]
-    )
-      recoveryConflict(
-        'canonical document receipt contradicts the proven active dispatch',
-      )
-    const confirmedBriefDigest = createHash('sha256')
-      .update(input.confirmedBriefContext)
-      .digest('hex')
-    const [documentRevision, workspaceRevision] = await Promise.all([
-      computeDocumentRevision(input.workspacePath, confirmedBriefDigest),
-      computeWorkspaceRevision(input.workspacePath),
-    ])
-    const revision = {
-      document: documentRevision,
-      workspace: workspaceRevision,
-    }
-    const acceptedAt = receipt.updatedAt
-    const unit: AcceptedWorkflowUnit = {
-      eventSchemaVersion: 1,
-      unitId: `document:${targetPath}`,
-      kind: 'document',
-      phase: 'DOCUMENT_DRAFTING',
-      predecessorUnitIds:
-        targetIndex === 0
-          ? []
-          : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[targetIndex - 1]}`],
-      inputRevision: documentRevision,
-      dependencyDigests: {
-        [targetPath]: receipt.finalDigest,
-      },
-      dispatchId: identity.dispatchId,
-      receiptRef: `.beegame/workflow/document-commits/${identity.dispatchId}.json`,
-      acceptedAt,
-      payload: { path: targetPath, revision: documentRevision },
-    }
-    const nextPath = CANONICAL_FOUNDATION_DOCUMENTS[targetIndex + 1]
+    if (!reconciled) return { inspection: input.inspection, events: input.events, acceptedUnits: [] }
+    const { unit, revision, acceptedAt, nextPath } = reconciled
     const parsedValue = {
       ...snapshot,
       revision,
       status: 'running',
       activeDispatch: undefined,
-      foundationDraftState: { completedPaths: [...completedPaths, targetPath] },
+      foundationDraftState: { completedPaths: reconciled.completedPaths },
       ...(nextPath
         ? {
             phase: 'DOCUMENT_DRAFTING',
@@ -753,36 +681,9 @@ async function restoreCanonicalDocumentCommit(
   run: DeliveryRun,
   workspacePath?: string,
 ): Promise<DeliveryRun> {
-  const dispatch = run.activeDispatch
-  if (
-    !workspacePath ||
-    !dispatch ||
-    dispatch.workerType !== 'document-author' ||
-    dispatch.terminalResult
-  )
-    return run
-  const receipt = await reconcileAuthoredDocumentReceipt({
-    workspacePath,
-    dispatchId: dispatch.dispatchId,
-  })
-  if (!receipt) return run
-  const finishedAt = new Date().toISOString()
-  return {
-    ...run,
-    activeDispatch: {
-      ...dispatch,
-      status: 'completed',
-      finishedAt,
-      terminalResult: {
-        workerType: 'document-author',
-        status: 'completed',
-        writtenPaths: [receipt.targetPath],
-        resolvedFindingIds: [],
-      },
-    },
-    blockedReason: undefined,
-    updatedAt: finishedAt,
-  }
+  const restored = await restoreAuthorDispatchReceipt(workspacePath, run.activeDispatch)
+  if (!restored) return run
+  return { ...run, activeDispatch: restored.dispatch, blockedReason: undefined, updatedAt: restored.finishedAt }
 }
 
 async function restoreResourceContentCommit(
@@ -1041,9 +942,8 @@ export async function stopRun(input: {
   const dispatchIds = new Set<string>()
   if (acquired.run.activeDispatch?.status === 'running')
     dispatchIds.add(acquired.run.activeDispatch.dispatchId)
-  for (const document of acquired.run.foundationDraftState.documents ?? [])
-    if (document.dispatch?.status === 'running')
-      dispatchIds.add(document.dispatch.dispatchId)
+  for (const dispatch of runningAuthorDispatches(acquired.run.foundationDraftState))
+    dispatchIds.add(dispatch.dispatchId)
   for (const task of acquired.run.foundationAuditState ? foundationRuntimeTasks(acquired.run.foundationAuditState) : [])
     if (task.dispatch?.status === 'running')
       dispatchIds.add(task.dispatch.dispatchId)
@@ -1067,23 +967,7 @@ export async function stopRun(input: {
         stopped.activeDispatch?.status === 'running'
           ? interruptedDispatch(stopped.activeDispatch)
           : stopped.activeDispatch,
-      foundationDraftState: {
-        ...stopped.foundationDraftState,
-        ...(stopped.foundationDraftState.documents
-          ? {
-              documents: stopped.foundationDraftState.documents.map(document =>
-                document.dispatch?.status === 'running'
-                  ? {
-                      ...document,
-                      status: 'needs_action' as const,
-                      failureReason: input.reason,
-                      dispatch: interruptedDispatch(document.dispatch),
-                    }
-                  : document,
-              ),
-            }
-          : {}),
-      },
+      foundationDraftState: stopAuthorState(stopped.foundationDraftState, input.reason, interruptedDispatch),
       ...(stopped.foundationAuditState
         ? {
             foundationAuditState: {

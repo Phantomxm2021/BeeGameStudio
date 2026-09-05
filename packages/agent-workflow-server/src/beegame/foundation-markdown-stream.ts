@@ -26,6 +26,7 @@ export type FoundationMarkdownStreamSink = {
 }
 
 type StreamState = {
+  activeMessageId?: string
   textBlockIndex?: number
   textBlockStarted: boolean
   textBlockClosed: boolean
@@ -34,6 +35,11 @@ type StreamState = {
   terminalText?: string
   receivedBytes: number
   eventIds: Set<string>
+  messageIds: Set<string>
+  ignoredMessageId?: string
+  lastStopReason?: string
+  continuationObserved: boolean
+  continuationOpen: boolean
   failure?: Error
 }
 
@@ -60,6 +66,9 @@ export async function createFoundationMarkdownStreamSink(
     terminal: false,
     receivedBytes: 0,
     eventIds: new Set(),
+    messageIds: new Set(),
+    continuationObserved: false,
+    continuationOpen: false,
   }
   let writeTail = Promise.resolve()
 
@@ -95,7 +104,63 @@ export async function createFoundationMarkdownStreamSink(
       if (message.type !== 'stream_event') return
       const event = objectField(message, 'event') ?? message
       const eventType = stringField(event, 'type')
+      if (eventType === 'message_start') {
+        const messageEnvelope = objectField(event, 'message')
+        const messageId = messageEnvelope
+          ? stringField(messageEnvelope, 'id')
+          : ''
+        if (messageId && state.messageIds.has(messageId)) {
+          // A replay can receive fresh transport UUIDs while retaining the
+          // provider message identity. Ignore that message instead of adding
+          // its text a second time.
+          state.ignoredMessageId = messageId
+          return
+        }
+        if (
+          state.activeMessageId &&
+          state.lastStopReason === 'max_tokens' &&
+          state.textBlockStarted &&
+          !state.textBlockClosed
+        ) {
+          fail('foundation Markdown continuation started before the previous text block closed')
+          return
+        }
+        if (
+          state.activeMessageId &&
+          state.lastStopReason !== 'max_tokens'
+        ) {
+          // A second message without an explicit max-token continuation is a
+          // retry/replacement, not another document segment.
+          state.textBlocks = []
+          state.receivedBytes = 0
+          state.continuationObserved = false
+          state.continuationOpen = false
+          state.textBlockStarted = false
+          state.textBlockClosed = false
+          state.textBlockIndex = undefined
+        }
+        state.activeMessageId = messageId || undefined
+        state.ignoredMessageId = undefined
+        state.lastStopReason = undefined
+        if (messageId) state.messageIds.add(messageId)
+        return
+      }
+      if (state.ignoredMessageId) return
       const index = numberField(event, 'index')
+      if (eventType === 'message_delta') {
+        const delta = objectField(event, 'delta')
+        const stopReason = delta ? stringField(delta, 'stop_reason') : ''
+        if (stopReason) {
+          state.lastStopReason = stopReason
+          if (stopReason === 'max_tokens') {
+            state.continuationObserved = true
+            state.continuationOpen = true
+          } else if (stopReason === 'end_turn') {
+            state.continuationOpen = false
+          }
+        }
+        return
+      }
       if (eventType === 'content_block_start') {
         const block = objectField(event, 'content_block')
         const blockType = block ? stringField(block, 'type') : ''
@@ -149,9 +214,28 @@ export async function createFoundationMarkdownStreamSink(
       if (state.failure) throw state.failure
       if (!state.terminal)
         throw new Error('foundation Markdown stream has no complete terminal response')
+      if (
+        state.continuationObserved &&
+        (state.continuationOpen || state.lastStopReason !== 'end_turn')
+      )
+        throw new Error('foundation Markdown stream ended before max-token continuation completed')
+      if (state.continuationObserved && !state.textBlockClosed)
+        throw new Error('foundation Markdown continuation contains an incomplete text block')
       if (!state.terminalText && !state.textBlockClosed)
         throw new Error('foundation Markdown stream has no complete terminal response')
-      const authoredBody = state.terminalText ?? mergeTextBlocks(state.textBlocks)
+      const streamedBody = mergeTextBlocks(state.textBlocks)
+      if (
+        state.continuationObserved &&
+        state.terminalText &&
+        streamedBody &&
+        streamedBody !== state.terminalText &&
+        !streamedBody.endsWith(state.terminalText)
+      )
+        throw new Error('foundation Markdown terminal result does not match continuation text')
+      const authoredBody =
+        state.continuationObserved && streamedBody
+          ? streamedBody
+          : state.terminalText ?? streamedBody
       if (Buffer.byteLength(authoredBody) === 0)
         throw new Error('foundation Markdown stream is empty')
       await writeFile(pendingPath, authoredBody, 'utf8')

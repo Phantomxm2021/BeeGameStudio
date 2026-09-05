@@ -224,14 +224,14 @@ async function commitMatrixFoundationDocument(input: {
   )
   const contract = getGameDocumentContract(input.path)
   const documents = new Map(await Promise.all(
-    contract.upstreamSections.map(async source => [
+    foundationAuthoringSources(input.path).map(async source => [
       source.path,
       await readFile(join(input.workspacePath, source.path), 'utf8'),
     ] as const),
   ))
   const projection = projectFoundationAuthority({
     targetPath: input.path,
-    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    availableUpstreamPaths: foundationAuthoringSources(input.path).map(source => source.path),
     documents,
   })
   const projectionPath = join(input.workspacePath, foundationProjectionRelativePath(input.dispatchId))
@@ -541,6 +541,9 @@ async function createWorkerRecoveryRun(input: {
   workspacePath: string
   workerType: DispatchWorkerType
 }): Promise<DeliveryRun> {
+  await mkdir(join(input.workspacePath, 'docs'), { recursive: true })
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+    await writeFile(join(input.workspacePath, path), matrixCompleteDocument(path))
   for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries()) {
     if (CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never))
       await commitMatrixFoundationDocument({
@@ -780,6 +783,9 @@ function sha256(value: string): string {
 
 async function createResourceRecoveryFixture() {
   const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-exact-resume-'))
+  await mkdir(join(workspacePath, 'docs'), { recursive: true })
+  for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
+    await writeFile(join(workspacePath, path), matrixCompleteDocument(path))
   for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries()) {
     if (CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never))
       await commitMatrixFoundationDocument({
@@ -3721,11 +3727,10 @@ describe('delivery workflow recovery', () => {
     })
 
     const resuming = controller.resume(run)
-    for (let index = 0; index < 400 && started.length < 3; index += 1)
+    for (let index = 0; index < 400 && started.length < 2; index += 1)
       await new Promise(resolve => setTimeout(resolve, 5))
     expect(started.map(request => request.taskId)).toEqual([
       'docs/BALANCE_DESIGN.md',
-      'docs/ART_DIRECTION.md',
       'docs/UI_UX_SPEC.md',
     ])
     rejectFirstBalanceTerminal!(new Error('balance heading missing'))
@@ -3733,7 +3738,7 @@ describe('delivery workflow recovery', () => {
     for (let index = 0; index < 400 && (await controller.store.load())?.status !== 'needs_action'; index += 1)
       await new Promise(resolve => setTimeout(resolve, 5))
     expect(started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md')).toHaveLength(1)
-    expect(started.filter(request => request.taskId === 'docs/ART_DIRECTION.md')).toHaveLength(1)
+    expect(started.filter(request => request.taskId === 'docs/ART_DIRECTION.md')).toHaveLength(0)
     expect(started.filter(request => request.taskId === 'docs/UI_UX_SPEC.md')).toHaveLength(1)
     expect(started.some(request => request.contract.priorFailureReason)).toBe(false)
     const saved = await controller.store.load()
@@ -4338,7 +4343,7 @@ describe('delivery workflow recovery', () => {
       workerType: 'document-author',
       phase: 'DOCUMENT_DRAFTING',
       revision: initial.revision.document,
-      contract: { documentSet: 'foundation' },
+      contract: { documentSet: 'foundation', authoringMode: 'initial', foundationDocumentPath: 'docs/GDD.md' },
     })
 
     await new Promise(resolve => setTimeout(resolve, 40))
@@ -5164,3 +5169,4 @@ describe('delivery workflow recovery', () => {
     expect(durable?.pendingEvents).toBeUndefined()
   })
 })
+import { foundationAuthoringSources } from '../beegame/delivery-workflow/foundation-authoring-contract'

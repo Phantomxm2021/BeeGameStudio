@@ -85,14 +85,14 @@ async function writeCommittedProjection(
 ): Promise<void> {
   const contract = getGameDocumentContract(targetPath)
   const documents = new Map(await Promise.all(
-    contract.upstreamSections.map(async source => [
+    foundationAuthoringSources(targetPath).map(async source => [
       source.path,
       await readFile(join(workspacePath, source.path), 'utf8'),
     ] as const),
   ))
   const projection = projectFoundationAuthority({
     targetPath,
-    availableUpstreamPaths: contract.upstreamSections.map(source => source.path),
+    availableUpstreamPaths: foundationAuthoringSources(targetPath).map(source => source.path),
     documents,
   })
   await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), {
@@ -324,3 +324,4 @@ describe('idea to complete game documents', () => {
     expect(run.foundationDraftState.completedPaths).toContain(path)
   })
 })
+import { foundationAuthoringSources } from '../beegame/delivery-workflow/foundation-authoring-contract'

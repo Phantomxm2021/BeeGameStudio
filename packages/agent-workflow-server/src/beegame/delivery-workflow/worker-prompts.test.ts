@@ -3,72 +3,13 @@ import { buildWorkerPrompt } from './worker-prompts'
 import { getGameDocumentContract } from './game-document-contracts'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import { foundationAuthoringDocumentContract, FOUNDATION_AUTHORING_INSTRUCTION } from './foundation-authoring-contract'
 
 function countOccurrences(value: string, needle: string): number {
   return value.split(needle).length - 1
 }
 
 describe('worker prompts', () => {
-  test('keeps the initial foundation author contract focused on the assigned document', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
-      allowedPaths: ['docs/TECHNICAL_DESIGN.md'],
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'initial',
-        foundationDocumentPath: 'docs/TECHNICAL_DESIGN.md',
-        availableUpstreamPaths: [
-          'docs/GDD.md',
-          'docs/LEVEL_SCENE_DESIGN.md',
-          'docs/BALANCE_DESIGN.md',
-        ],
-        completeDocumentContract: getGameDocumentContract(
-          'docs/TECHNICAL_DESIGN.md',
-        ),
-        systemDeliveryContract: buildSystemDeliveryContract(),
-      },
-    })
-
-    expect(prompt).toContain('one resource loading path')
-    expect(prompt).toContain('contract.systemDeliveryContract')
-    expect(prompt).toContain('assets/asset-manifest.json')
-    expect(prompt).not.toContain('48,000 UTF-8 bytes')
-    expect(prompt).not.toContain('Workspace root:')
-    expect(prompt).not.toContain('Writable paths:')
-    expect(prompt).not.toContain('Canonical artifacts:')
-    expect(prompt).not.toContain('Run: run')
-    expect(prompt).not.toContain('Revision: revision')
-    expect(prompt).not.toContain('availableUpstreamPaths')
-  })
-
-  test('passes only the canonical Foundation path namespace and one merge rule to both authoring modes', () => {
-    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
-      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
-        const prompt = buildWorkerPrompt({
-          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
-          allowedPaths: [foundationDocumentPath],
-          contract: {
-            documentSet: 'foundation', authoringMode, foundationDocumentPath,
-            completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
-          },
-        })
-        expect(prompt).toContain(`Canonical Foundation documents: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}`)
-        expect(prompt).toContain('Markdown cross-document references may use only these exact canonical Foundation paths')
-        const rule = getGameDocumentContract(foundationDocumentPath).mergeReferenceRule
-        expect(prompt).toContain(rule)
-        expect(countOccurrences(prompt, rule)).toBe(1)
-        expect(prompt).not.toContain('docs/UIUX_DESIGN.md')
-      }
-    }
-  })
-
   test('declares a closed H2 heading protocol for initial and parallel foundation authors', () => {
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
       const prompt = buildWorkerPrompt({
@@ -114,178 +55,6 @@ describe('worker prompts', () => {
     }
   })
 
-  test('aligns shared foundation authority instructions across all initial and parallel authors', () => {
-    const expectedSharedInstructions = [
-      'Use exactly one fact owner across the eight documents:',
-      'Define each fact once',
-      'Do not restate the confirmed brief or upstream authority',
-      'downstream documents may specialize already-authorized behavior but must not redefine upstream rules',
-    ]
-
-    let sharedAuthorityInstruction: string | undefined
-    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
-      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
-        const prompt = buildWorkerPrompt({
-          runId: 'run',
-          ownerId: 'owner',
-          projectId: 'project',
-          workspacePath: '/workspace',
-          workerType: 'document-author',
-          phase: 'DOCUMENT_DRAFTING',
-          revision: 'revision',
-          allowedPaths: [foundationDocumentPath],
-          contract: {
-            documentSet: 'foundation',
-            authoringMode,
-            foundationDocumentPath,
-            completeDocumentContract: getGameDocumentContract(
-              foundationDocumentPath,
-            ),
-          },
-        })
-
-        for (const instruction of expectedSharedInstructions)
-          expect(prompt).toContain(instruction)
-        const authorityStart = prompt.indexOf('Use exactly one fact owner across the eight documents:')
-        const authorityEnd = prompt.indexOf('must not redefine upstream rules.', authorityStart) + 'must not redefine upstream rules.'.length
-        const authorityInstruction = prompt.slice(authorityStart, authorityEnd)
-        expect(authorityInstruction).toContain('Use only this document and the contract-declared committed upstream section projection as content authority.')
-        if (sharedAuthorityInstruction === undefined)
-          sharedAuthorityInstruction = authorityInstruction
-        else expect(authorityInstruction).toBe(sharedAuthorityInstruction)
-        expect(prompt).not.toContain('Workspace root:')
-        expect(prompt).not.toContain('Writable paths:')
-        expect(prompt).not.toContain('Canonical artifacts:')
-        expect(prompt).not.toContain('Run: run')
-        expect(prompt).not.toContain('Revision: revision')
-      }
-    }
-  })
-
-  test('applies adaptive density and owner-only authority rules to every foundation author', () => {
-    const sharedRules = [
-      'Judge quality by distinct implementable decisions and traceability, not document length',
-      'Use the minimum sufficient headings, tables, rows, diagrams and examples',
-      'Do not expand a contract purpose phrase by phrase into H3 headings',
-      'Represent each decision in one authoritative prose, table or diagram representation',
-      'Do not narrate tables or diagrams',
-      'Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate',
-      'Record each genuinely N/A decision only in the contract block that owns that responsibility',
-      'Put acceptance tables and scenarios only in sections or materials whose declared purpose explicitly owns acceptance, validation, verification or testing',
-      'Each production-material row must own a distinct record or mapping',
-      'Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets',
-      'Every material is an owner representation for its declared facts and contains the single canonical representation',
-    ]
-    const rules = {
-      'docs/GDD.md': 'Behavior, state and gameplay rules are authoritative here; numeric values only declare Balance ownership and do not create a duplicate parameter table.',
-      'docs/LEVEL_SCENE_DESIGN.md': 'One canonical coordinate/layout source owns coordinate, path, slot and trigger literals; other tables and diagrams reference it without duplicating them.',
-      'docs/BALANCE_DESIGN.md': 'The variable-parameter-table uniquely owns all numeric `var.*` and `param.*` IDs, units, values and ranges; Units/Variables and Entity/Ability Parameters sections retain only semantic context and relationships, while formulas, economy, progression and tuning facts remain in their owning sections.',
-      'docs/TECHNICAL_DESIGN.md': 'Cover runtime and data boundaries only; do not repeat gameplay, write tutorials or include large pseudocode blocks.',
-      'docs/ART_DIRECTION.md': 'Own visual language and visual acceptance conditions; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
-      'docs/UI_UX_SPEC.md': 'One canonical responsive geometry/layout source owns layout; wireframes and flows reference it without repeating the screen-state catalog.',
-      'docs/AUDIO_DESIGN.md': 'Audio owns event-to-cue behavior and technical acceptance; Asset Plan owns resource IDs, production responsibility, sourcing, licensing and schedule facts.',
-      'docs/ASSET_PLAN.md': 'Asset materials share inventory IDs as their common key while each owns a distinct fact domain: inventory identity and semantic requirement mappings, responsibility, dependency/integration, source/licensing evidence, or milestone/maturity status.',
-    } as const
-
-    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
-      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
-        const prompt = buildWorkerPrompt({
-          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
-          allowedPaths: [foundationDocumentPath],
-          contract: {
-            documentSet: 'foundation', authoringMode, foundationDocumentPath,
-            completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
-          },
-        })
-        for (const rule of sharedRules) expect(prompt).toContain(rule)
-        expect(prompt).toContain(rules[foundationDocumentPath])
-        expect(countOccurrences(prompt, rules[foundationDocumentPath])).toBe(1)
-        expect(prompt).toContain('complete raw Markdown body')
-        expect(prompt).toContain('Do not call tools, return JSON')
-        expect(prompt).toContain('The Executive Summary is a concise authority index only')
-        expect(prompt).toContain('it contains no tables, diagrams, scenarios, acceptance criteria or duplicated owner facts')
-        expect(prompt).not.toContain('authorityMode')
-        expect(prompt).not.toContain('reference-only')
-        expect(prompt).not.toContain('reference_only')
-        expect(prompt).not.toContain('derived view')
-        expect(prompt).not.toContain('parallel-author')
-        expect(prompt).not.toContain('All Production Materials are derived')
-        expect(countOccurrences(prompt, 'Record each genuinely N/A decision only in the contract block that owns that responsibility')).toBe(1)
-        expect(prompt).toContain('Before returning, silently perform this internal closure check')
-        expect(prompt).toContain('every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once')
-        expect(prompt).toContain('every productionMaterials.entries H3 appears in order and exactly once')
-        expect(prompt).toContain('retain every required heading for N/A content and state its reason and impact')
-        expect(prompt).toContain('do not output a check report')
-        expect(prompt).not.toContain('do not add a redundant final verification')
-        expect(prompt).not.toContain('strict_structured_block_payload')
-        expect(prompt).not.toContain('native StructuredOutput object')
-      }
-    }
-  })
-
-  test('requires each material to contain one canonical owner representation', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
-      allowedPaths: ['docs/BALANCE_DESIGN.md'],
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'initial',
-        foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
-        completeDocumentContract: getGameDocumentContract(
-          'docs/BALANCE_DESIGN.md',
-        ),
-      },
-    })
-
-    expect(prompt).toContain('The Executive Summary is a concise authority index only')
-    expect(prompt).toContain('Every material is an owner representation for its declared facts and contains the single canonical representation')
-    expect(prompt).toContain('one complete raw Markdown body')
-    expect(prompt).toContain('one representation per fact')
-    expect(prompt).not.toContain('authorityMode')
-    expect(prompt).not.toContain('reference-only')
-    expect(prompt).not.toContain('reference_only')
-    expect(prompt).not.toContain('derived view')
-    expect(prompt).not.toContain('parallel-author')
-    expect(prompt).not.toContain('All Production Materials are derived')
-  })
-
-  test('serializes each material authority once for both raw-Markdown author modes', () => {
-    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
-      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
-        const contract = getGameDocumentContract(foundationDocumentPath)
-        const prompt = buildWorkerPrompt({
-          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
-          allowedPaths: [foundationDocumentPath],
-          contract: {
-            documentSet: 'foundation', authoringMode, foundationDocumentPath,
-            completeDocumentContract: contract,
-          },
-        })
-
-        expect(prompt).toContain('complete raw Markdown body')
-        expect(prompt).toContain('Every material is an owner representation for its declared facts and contains the single canonical representation')
-        expect(prompt).toContain('use one representation per fact')
-        expect(prompt).toContain('Record each genuinely N/A decision only in the contract block that owns that responsibility')
-        expect(prompt).not.toContain('authorityMode')
-        expect(prompt).not.toContain('reference-only')
-        expect(prompt).not.toContain('reference_only')
-        expect(prompt).not.toContain('derived view')
-        for (const material of contract.productionMaterials) {
-          expect(countOccurrences(prompt, material.authorityRule)).toBe(1)
-          expect(countOccurrences(prompt, `"authorityRule":"${material.authorityRule}"`)).toBe(1)
-        }
-      }
-    }
-  })
-
   test('derives one Markdown-table serialization rule for the evidence register', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
@@ -321,126 +90,6 @@ describe('worker prompts', () => {
     expect(licenseRegister?.serializationRule).toContain('key-value list')
   })
 
-  test('uses the same committed projection instruction regardless of upstream paths', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
-      allowedPaths: ['docs/BALANCE_DESIGN.md'],
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'parallel-draft',
-        foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
-        availableUpstreamPaths: ['docs/GDD.md'],
-        completeDocumentContract: getGameDocumentContract(
-          'docs/BALANCE_DESIGN.md',
-        ),
-      },
-    })
-
-    expect(prompt).toContain('Use only this document and the contract-declared committed upstream section projection as content authority.')
-    expect(prompt).not.toContain('unavailable upstream')
-    expect(prompt).not.toContain('classify freshness')
-  })
-
-  test('keeps Balance numeric literals in its single owner table for both author modes', () => {
-    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
-      const prompt = buildWorkerPrompt({
-        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
-        allowedPaths: ['docs/BALANCE_DESIGN.md'],
-        contract: {
-          documentSet: 'foundation', authoringMode,
-          foundationDocumentPath: 'docs/BALANCE_DESIGN.md',
-          completeDocumentContract: getGameDocumentContract('docs/BALANCE_DESIGN.md'),
-        },
-      })
-
-      expect(prompt).toContain('sole numeric literal store')
-      expect(prompt).toContain('symbolic formula IDs')
-      expect(prompt).toContain('without copying numeric inputs or storing derived totals')
-    }
-  })
-
-  test('keeps owner guidance concise without a Markdown semantic parser contract', () => {
-    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
-      for (const foundationDocumentPath of CANONICAL_FOUNDATION_DOCUMENTS) {
-        const prompt = buildWorkerPrompt({
-          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
-          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
-          allowedPaths: [foundationDocumentPath],
-          contract: {
-            documentSet: 'foundation', authoringMode, foundationDocumentPath,
-            completeDocumentContract: getGameDocumentContract(foundationDocumentPath),
-          },
-        })
-        expect(prompt).toContain('Define each fact once and use one representation per fact')
-        expect(prompt).toContain('Delegate responsibilities to a not-yet-generated downstream document by its canonical `Document Path` and discipline in ordinary Markdown')
-        expect(prompt).toContain('do not invent downstream facts, material IDs or inventory IDs')
-        expect(prompt).toContain('do not create aliases, placeholders or alternate spellings')
-        expect(prompt).not.toContain('Use two ID classes')
-        expect(prompt).not.toContain('reference-column')
-        expect(prompt).not.toContain('Mermaid dotted labels')
-        expect(prompt).not.toContain('symbol table')
-        expect(prompt).not.toContain('authorityMode')
-        expect(prompt).not.toContain('reference-only')
-        expect(prompt).not.toContain('reference_only')
-        expect(prompt).not.toContain('derived view')
-      }
-    }
-  })
-
-  test('derives checklist cardinality from observable scenarios without fixed business caps', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
-      allowedPaths: ['docs/acceptance/gameplay-checklist.md'],
-      contract: { documentSet: 'checklist' },
-    })
-
-    expect(prompt).toContain('distinct, independently observable acceptance condition explicitly present in a SCENARIO block')
-    expect(prompt).toContain('Do not expand sentences, table rows, variants, prior checklist entries, or generic best practice')
-    expect(countOccurrences(prompt, 'Author only the Checklist candidate at docs/acceptance/gameplay-checklist.md')).toBe(1)
-    expect(prompt).not.toContain('24-40 checkbox tasks')
-    expect(prompt).not.toContain('never exceed 64 checkbox tasks')
-  })
-
-  test('keeps output policy authority in the contract while avoiding repeated prose policy', () => {
-    const prompt = buildWorkerPrompt({
-      runId: 'run',
-      ownerId: 'owner',
-      projectId: 'project',
-      workspacePath: '/workspace',
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: 'revision',
-      allowedPaths: ['docs/GDD.md'],
-      contract: {
-        documentSet: 'foundation',
-        authoringMode: 'initial',
-        foundationDocumentPath: 'docs/GDD.md',
-        completeDocumentContract: getGameDocumentContract('docs/GDD.md'),
-      },
-    })
-
-    expect(prompt).toContain('"outputPolicy":{"sectionStyle":"final_owned_decisions"')
-    expect(prompt).toContain('Complete every required section and production material')
-    expect(prompt).toContain('acceptance, validation, verification or testing')
-    expect(prompt).toContain('Each production-material row must own a distinct record or mapping')
-    expect(prompt).not.toContain('Production materials are canonical compact views of owned decisions and must not repeat section narrative.')
-    expect(prompt).not.toContain('Use no more than one worked example per formula or system boundary')
-    expect(prompt).not.toContain('Include only materially distinct boundary and acceptance scenarios; do not enumerate equivalent cases.')
-  })
-
   test('does not ask foundation models to echo service-owned terminal identity', () => {
     for (const workerType of ['foundation-fact-extractor', 'foundation-semantic-reviewer'] as const) {
       const prompt = buildWorkerPrompt({
@@ -467,6 +116,75 @@ describe('worker prompts', () => {
       for (const serviceOwnedField of ['runId', 'dispatchId', 'taskId', 'revision', 'packetDigest'])
         expect(terminalInstruction).not.toContain(serviceOwnedField)
     }
+  })
+  test('keeps author configuration isolated while preserving Markdown output identities', () => {
+    for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+      for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+        const sharedBefore = JSON.stringify(getGameDocumentContract(path))
+        const prompt = buildWorkerPrompt({
+          runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision',
+          allowedPaths: [path],
+          contract: { documentSet: 'foundation', authoringMode, foundationDocumentPath: path,
+            completeDocumentContract: getGameDocumentContract(path),
+            systemDeliveryContract: buildSystemDeliveryContract(), availableUpstreamPaths: [],
+            confirmedBriefContext: 'DUPLICATE_BRIEF_SENTINEL' },
+        })
+        const contract = JSON.parse(prompt.split('\n').find(line => line.startsWith('{'))!)
+        const view = contract.completeDocumentContract
+        expect(view.documentAuthorityRule).toBe(foundationAuthoringDocumentContract(path).documentAuthorityRule)
+        expect(view.mechanicalMarkdownProtocol.closedHeadingSet).toEqual([
+          '## Executive Summary', ...getGameDocumentContract(path).sections.map(s => `## ${s.title}`),
+          '## Production Materials',
+        ])
+        expect(view.mechanicalMarkdownProtocol.productionMaterials.entries.map((m: any) => [m.materialId, m.serialization]))
+          .toEqual(getGameDocumentContract(path).productionMaterials.map(m => [m.materialId, m.serialization]))
+        expect(countOccurrences(prompt, FOUNDATION_AUTHORING_INSTRUCTION)).toBe(1)
+        expect(countOccurrences(prompt, view.documentAuthorityRule)).toBe(1)
+        expect(countOccurrences(prompt, view.mergeReferenceRule)).toBe(1)
+        expect(prompt).toContain('one complete raw Markdown')
+        expect(prompt).toContain('Reviewer owns format, content and quality audit')
+        expect(prompt).toContain('Do not call tools')
+        expect(prompt).not.toContain('DUPLICATE_BRIEF_SENTINEL')
+        expect(prompt).not.toContain('availableUpstreamPaths')
+        expect(prompt).not.toContain('Workspace root:')
+        expect(prompt).not.toContain('max_tokens')
+        expect(prompt).not.toContain('roundDeadlineAt')
+        expect(contract.systemDeliveryContract !== undefined).toBe(path === 'docs/TECHNICAL_DESIGN.md')
+        expect(JSON.stringify(getGameDocumentContract(path))).toBe(sharedBefore)
+      }
+    }
+  })
+
+  test('keeps Balance calculations auditable without reproducing upstream schedules', () => {
+    const contract = foundationAuthoringDocumentContract('docs/BALANCE_DESIGN.md')
+    const shared = getGameDocumentContract('docs/BALANCE_DESIGN.md')
+    expect(contract.documentAuthorityRule).toContain('not upstream geometry or wave schedules')
+    expect(contract.sections.map(section => section.purpose)).toEqual(shared.sections.map(section => section.purpose))
+    expect(contract.sections.find(s => s.sectionId === 'tuning_validation')!.purpose).toContain('validation chain from inputs through results to acceptance')
+    expect(JSON.stringify(contract.sections)).toContain('do not copy owner inputs or persist derived totals')
+    expect(FOUNDATION_AUTHORING_INSTRUCTION).not.toContain('Before returning')
+    expect(JSON.stringify(contract)).not.toContain('BALANCE_SECTIONS')
+  })
+
+  test('derives checklist cardinality from observable scenarios without fixed business caps', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run',
+      ownerId: 'owner',
+      projectId: 'project',
+      workspacePath: '/workspace',
+      workerType: 'document-author',
+      phase: 'DOCUMENT_DRAFTING',
+      revision: 'revision',
+      allowedPaths: ['docs/acceptance/gameplay-checklist.md'],
+      contract: { documentSet: 'checklist' },
+    })
+
+    expect(prompt).toContain('distinct, independently observable acceptance condition explicitly present in a SCENARIO block')
+    expect(prompt).toContain('Do not expand sentences, table rows, variants, prior checklist entries, or generic best practice')
+    expect(countOccurrences(prompt, 'Author only the Checklist candidate at docs/acceptance/gameplay-checklist.md')).toBe(1)
+    expect(prompt).not.toContain('24-40 checkbox tasks')
+    expect(prompt).not.toContain('never exceed 64 checkbox tasks')
   })
 
   test('keeps packet workers on the immutable packet-only contract', () => {

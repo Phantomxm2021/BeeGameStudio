@@ -8,7 +8,7 @@ import {
   parseFoundationAuthorityProjectionBytes,
   projectFoundationAuthority,
 } from './foundation-authority-projection'
-import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
+import { foundationAuthoringSources } from './delivery-workflow/foundation-authoring-contract'
 import {
   CANONICAL_PROJECT_DOCUMENT_IDS,
   type FoundationDocumentPath,
@@ -134,13 +134,12 @@ async function assertCommittedFoundationAuthority(input: {
   dispatchId: string
   targetPath: FoundationDocumentPath
 }): Promise<void> {
-  const contract = getGameDocumentContract(input.targetPath)
   const projectionPath = resolve(
     input.workspacePath,
     foundationProjectionRelativePath(input.dispatchId),
   )
   const rawProjection = await readFile(projectionPath, 'utf8')
-  const expectedPaths = contract.upstreamSections.map(source => source.path)
+  const expectedPaths = foundationAuthoringSources(input.targetPath).map(source => source.path)
   const documents = new Map(await Promise.all(
     expectedPaths.map(async path => [
       path,

@@ -1,19 +1,10 @@
 import {
   CANONICAL_PROJECT_ARTIFACTS,
   CANONICAL_PROJECT_DOCUMENTS,
-  CANONICAL_FOUNDATION_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
 import { foundationFactDefinition } from './foundation-fact-definitions'
-
-const DOCUMENT_AUTHORING_DENSITY_INSTRUCTION =
-  'Judge quality by distinct implementable decisions and traceability, not document length. Use the minimum sufficient headings, tables, rows, diagrams and examples. Do not expand a contract purpose phrase by phrase into H3 headings. Represent each decision in one authoritative prose, table or diagram representation; elsewhere use a stable owner reference. Do not narrate tables or diagrams. Remove generic best-practice essays, derivations, tutorials, speculative alternatives and boilerplate. Record each genuinely N/A decision only in the contract block that owns that responsibility, once with its reason and impact; every other block omits it. Put acceptance tables and scenarios only in sections or materials whose declared purpose explicitly owns acceptance, validation, verification or testing; other blocks state decisions without a repeated test table. Each production-material row must own a distinct record or mapping, never a prose recap or an equivalent scenario variant. Do not impose fixed token, word, time, heading, table, row, diagram or example caps or targets. Treat each section as the final decision record: Complete every required section and production material, omit only equivalent repetition, and keep rationale to the minimum needed for a production decision.'
-
-const FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION =
-  'Use exactly one fact owner across the eight documents: GDD owns player actions, loops, rules, states and outcomes; BALANCE_DESIGN owns units, sources, sinks, base values, formulas, bounds and tuning evidence; LEVEL_SCENE_DESIGN owns topology, placements, pacing and production acceptance; Technical owns runtime and data boundaries; Art owns visual language; UI/UX owns interaction; Audio owns event-to-cue behavior; Asset Plan owns resource responsibilities and production sourcing. Every material is an owner representation for its declared facts and contains the single canonical representation. Define each fact once and use one representation per fact in its owner section or production material; elsewhere reference that owner instead of copying the fact. Use only this document and the contract-declared committed upstream section projection as content authority. Delegate responsibilities to a not-yet-generated downstream document by its canonical `Document Path` and discipline in ordinary Markdown; do not invent downstream facts, material IDs or inventory IDs. Keep stable IDs unambiguous and do not create aliases, placeholders or alternate spellings. The Executive Summary is a concise authority index only: it contains no tables, diagrams, scenarios, acceptance criteria or duplicated owner facts. Each material owns the facts declared by its serialized authority rule. Do not restate the confirmed brief or upstream authority; downstream documents may specialize already-authorized behavior but must not redefine upstream rules.'
-
-const FOUNDATION_AUTHOR_CLOSURE_CHECK =
-  'Before returning, silently perform this internal closure check (do not output a check report): every H2 in mechanicalMarkdownProtocol.closedHeadingSet appears in order and exactly once; every productionMaterials.entries H3 appears in order and exactly once; retain every required heading for N/A content and state its reason and impact. Return only the complete raw Markdown body.'
+import { buildFoundationAuthorPrompt, isFoundationAuthor } from './foundation-authoring-prompt'
 
 const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
   'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. sourceSectionKey identifies the canonical owner evidence that makes expected authoritative; remediation.sectionKeys identify the incorrect block to change. For a cross-document conflict these are different sides: preserve the owner and patch the downstream conflict. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
@@ -25,16 +16,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   if (packetWorker) return buildPacketWorkerPrompt(request)
   if (request.workerType === 'foundation-document-reviser')
     return buildFoundationRevisionWorkerPrompt(request)
-  const streamedFoundationAuthor =
-    request.workerType === 'document-author' &&
-    request.contract.documentSet === 'foundation' &&
-    (request.contract.authoringMode === 'initial' ||
-      request.contract.authoringMode === 'parallel-draft')
-  if (
-    streamedFoundationAuthor &&
-    typeof request.contract.priorFailureReason === 'string'
-  )
-    throw new Error('foundation document author retry contract is removed')
+  if (isFoundationAuthor(request)) return buildFoundationAuthorPrompt(request)
   const resourceContentReadPaths =
     request.workerType === 'resource-content-author'
       ? [
@@ -57,59 +39,29 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     : request.allowedPaths?.length
       ? request.allowedPaths.join(', ')
       : 'read-only'
-  const foundationAuthorArtifacts =
-    request.workerType === 'document-author' &&
-    request.contract.documentSet === 'foundation' &&
-    ['initial', 'parallel-draft'].includes(
-      String(request.contract.authoringMode),
-    ) &&
-    typeof request.contract.foundationDocumentPath === 'string'
-      ? [
-          ...(Array.isArray(request.contract.availableUpstreamPaths)
-            ? request.contract.availableUpstreamPaths
-            : []),
-          request.contract.foundationDocumentPath,
-        ].filter(
-          (path, index, paths): path is string =>
-            typeof path === 'string' && paths.indexOf(path) === index,
-        )
-      : undefined
   const canonicalArtifacts =
-    foundationAuthorArtifacts ??
     (request.workerType === 'document-author' &&
           request.contract.documentSet === 'checklist'
         ? CANONICAL_PROJECT_DOCUMENTS
         : CANONICAL_PROJECT_ARTIFACTS)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
-    streamedFoundationAuthor ? undefined : `Phase: ${request.phase}`,
-    streamedFoundationAuthor ? undefined : `Run: ${request.runId}`,
-    streamedFoundationAuthor ? undefined : `Revision: ${request.revision}`,
-    streamedFoundationAuthor
-      ? undefined
-      : `Workspace root: ${request.workspacePath}`,
-    streamedFoundationAuthor ? undefined : `${pathScopeLabel}: ${pathScope}`,
-    streamedFoundationAuthor
-      ? undefined
-      : `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
+    `Phase: ${request.phase}`,
+    `Run: ${request.runId}`,
+    `Revision: ${request.revision}`,
+    `Workspace root: ${request.workspacePath}`,
+    `${pathScopeLabel}: ${pathScope}`,
+    `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
     'The durable confirmed brief context and its digest are the product authority for this run.',
     'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
-    streamedFoundationAuthor
-      ? `Canonical Foundation documents: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}`
-      : undefined,
-    streamedFoundationAuthor
-      ? 'Markdown cross-document references may use only these exact canonical Foundation paths named above; any other docs/*.md reference is invalid, including inside code fences.'
-      : undefined,
+    undefined,
+    undefined,
     workerInstruction(request),
-    streamedFoundationAuthor
-      ? undefined
-      : 'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
-    streamedFoundationAuthor
-      ? undefined
-      : 'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
+    'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
+    'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
     terminalInstruction(request),
     formatContract(request),
-    streamedFoundationAuthor ? FOUNDATION_AUTHOR_CLOSURE_CHECK : undefined,
+    undefined,
   ].join('\n')
 }
 
@@ -337,89 +289,8 @@ function projectRevisionPacketForModel(packet: Record<string, unknown>): Record<
 function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType === 'resource-content-author')
     return JSON.stringify(formatResourceContentContract(request.contract))
-  const {
-    confirmedBriefContext: _confirmedBriefContext,
-    ...contractWithoutDuplicatedBrief
-  } = request.contract
-  const initialFoundationAuthor =
-    request.workerType === 'document-author' &&
-    request.contract.documentSet === 'foundation' &&
-    ['initial', 'parallel-draft'].includes(
-      String(request.contract.authoringMode),
-    )
-  if (initialFoundationAuthor) {
-    delete contractWithoutDuplicatedBrief.availableUpstreamPaths
-    const completeDocumentContract =
-      contractWithoutDuplicatedBrief.completeDocumentContract
-    if (
-      completeDocumentContract &&
-      typeof completeDocumentContract === 'object' &&
-      !Array.isArray(completeDocumentContract)
-    ) {
-      const {
-        allowedUpstreamPaths: _allowedUpstreamPaths,
-        upstreamSections: _upstreamSections,
-        sections,
-        productionMaterials,
-        ...authorDocumentContract
-      } = completeDocumentContract as Record<string, unknown>
-      contractWithoutDuplicatedBrief.completeDocumentContract = {
-        ...authorDocumentContract,
-        mechanicalMarkdownProtocol: {
-          documentTitle: {
-            position: 'first_non_blank_line',
-            headingPrefix: '# ',
-          },
-          executiveSummary: {
-            heading: '## Executive Summary',
-          },
-          sections: Array.isArray(sections)
-            ? sections.map(value => {
-                const section = value as Record<string, unknown>
-                return {
-                  ...section,
-                  heading: `## ${section.title}`,
-                }
-              })
-            : sections,
-          productionMaterials: {
-            heading: '## Production Materials',
-            entries: Array.isArray(productionMaterials)
-              ? productionMaterials.map(value => {
-                  const material = value as Record<string, unknown>
-                  const serialization = material.serialization
-                  const serializationRule =
-                    serialization === 'markdown_table'
-                      ? 'Markdown table only: include a header row, a separator row, and data rows; do not use a fenced code block, YAML, JSON, or a key-value list.'
-                      : serialization === 'mermaid'
-                        ? 'Mermaid only: use one fenced ```mermaid block; do not replace it with prose, JSON, YAML, or a key-value list.'
-                        : serialization === 'inline_svg'
-                          ? 'Inline SVG only: use one inline <svg>...</svg> block; do not replace it with a fenced code block, JSON, YAML, or a key-value list.'
-                          : undefined
-                  return {
-                    ...material,
-                    heading: `### ${material.title}`,
-                    ...(serializationRule ? { serializationRule } : {}),
-                  }
-                })
-              : productionMaterials,
-          },
-          closedHeadingSet: [
-            '## Executive Summary',
-            ...(Array.isArray(sections)
-              ? sections.map(value => `## ${(value as Record<string, unknown>).title}`)
-              : []),
-            '## Production Materials',
-          ],
-          additionalH2: 'forbidden',
-          supportingContent: 'must be nested under one of the closed H2 headings',
-        },
-      }
-    }
-    if (request.contract.foundationDocumentPath !== 'docs/TECHNICAL_DESIGN.md')
-      delete contractWithoutDuplicatedBrief.systemDeliveryContract
-  }
-  return JSON.stringify(contractWithoutDuplicatedBrief)
+  const { confirmedBriefContext: _confirmedBriefContext, ...contract } = request.contract
+  return JSON.stringify(contract)
 }
 
 function formatResourceContentContract(
@@ -472,61 +343,16 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Preserve all section markers and document structure. Make every admitted expected true and remove each admitted actual; never use aliases, compatibility notes, risk registration, wording qualifications or downstream reinterpretation as a substitute. The service applies the raw Markdown atomically and derives changed sections, receipt, task, round, document, Issue and base-authority identity.',
       ].join(' ')
     case 'document-author':
+      if (request.contract.documentSet !== 'checklist')
+        throw new Error('Foundation author must use the dedicated authoring prompt')
       return [
-        request.contract.documentSet === 'checklist'
-          ? ''
-          : request.contract.authoringMode === 'initial' ||
-              request.contract.authoringMode === 'parallel-draft'
-            ? ''
-            : 'Unsupported Foundation document authoring mode.',
-        request.contract.documentSet === 'checklist'
-          ? [
-              `Author only the Checklist candidate at ${documentAuthorTargetPath(request)} from the injected frozen Checklist Authority Projection.`,
+        '',
+        `Author only the Checklist candidate at ${documentAuthorTargetPath(request)} from the injected frozen Checklist Authority Projection.`,
               'Every acceptance task must be one Markdown checkbox line with a stable ID, source tag, observable behavior and evidence expectation. Create a task only for a distinct, independently observable acceptance condition explicitly present in a SCENARIO block. Do not expand sentences, table rows, variants, prior checklist entries, or generic best practice into new work.',
               'Merge equivalent variants when they share one setup, action and observable outcome. Keep each task independently pass/fail and cite its one owning source block.',
               'Use the canonical form `- [ ] <stable-id> [docs/path.md#source_block] <observable check and evidence expectation>`. For a GATE REFERENCE use exactly `Owner gate passes; evidence: linked owner validation.` after its source tag; never copy or expand its owner details. Tables may add context but cannot replace checkbox tasks.',
               'Do not modify foundation documents, resources, the asset manifest or implementation files.',
-            ].join(' ')
-          : request.contract.authoringMode === 'parallel-draft'
-            ? [
-                `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation.`,
-                FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
-                DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                'Write the complete canonical Markdown body without YAML front matter or beegame protocol comments. BGS injects service-owned protocol comments when the exact canonical heading sequence is unambiguous; format and quality remain Stage 3 responsibilities.',
-              ].join(' ')
-            : request.contract.authoringMode === 'initial'
-              ? [
-                  `Return exactly one complete raw Markdown body for ${String(request.contract.foundationDocumentPath)} as the visible response. Do not call tools, return JSON, use a code fence, or add a completion explanation. This is one complete human development discipline assignment. Together, the eight documents must be sufficient for a human game development team to plan, build, produce, test, release and operate the approved game. Resolve this discipline now rather than delegating completeness to review.`,
-                  'The assigned Markdown must be complete and production-usable when the turn ends. The Markdown body is the sole human document authority and contains exactly one # document title. The first non-blank line must be the single # document title. Follow canonical structures in order: ## Executive Summary, every contract section, then every production material in canonical order. Do not author YAML front matter or beegame protocol comments. BGS injects document_id, version and updated_at deterministically. BGS injects all beegame protocol comments after the turn. Do not add an Audit Appendix; BGS writes those results to workflow audit metadata.',
-                  FOUNDATION_AUTHOR_AUTHORITY_INSTRUCTION,
-                  DOCUMENT_AUTHORING_DENSITY_INSTRUCTION,
-                  'Provide concrete choices, tradeoffs, examples, units, boundaries and observable criteria so the discipline is implementable and testable. Do not author .beegame metadata. Do not claim verified license status without concrete evidence.',
-                  'The dedicated Review stage owns format, content and quality audit; do not launch or wait for an independent review or audit.',
-                  ...(request.contract.foundationDocumentPath ===
-                  'docs/ASSET_PLAN.md'
-                    ? [
-                        'Define a reusable many-to-many semantic resource responsibility registry, source and license evidence, dependency and milestone ownership. Do not create one physical file per destination or invent Resource Library identities that were not observed.',
-                      ]
-                    : []),
-                  ...(request.contract.foundationDocumentPath ===
-                  'docs/TECHNICAL_DESIGN.md'
-                    ? [
-                        'Apply contract.systemDeliveryContract as the fixed delivery boundary and define one Manifest, one content root, one schema and one resource loading path without binding an unapproved engine or platform.',
-                      ]
-                    : []),
-                  ...(typeof request.contract.changeRequest === 'string' &&
-                  request.contract.changeRequest.trim()
-                    ? [
-                        'Apply the confirmed change request to the controlled baseline and preserve unrelated valid content.',
-                      ]
-                    : []),
-                  'Do not create the checklist, asset manifest, resources or implementation.',
-                ].join(' ')
-              : 'Unsupported Foundation document authoring mode.',
-        request.contract.documentSet === 'foundation' &&
-        request.contract.foundationDocumentPath === 'docs/BALANCE_DESIGN.md'
-          ? 'The Variable and Parameter Table is the sole numeric literal store for every var.* and param.* input, value, unit and range. Formula sections own symbolic formula IDs, evaluation order and boundary-case identities; their examples reference table IDs and source case IDs without copying numeric inputs or storing derived totals. Economy, progression, challenge, reward, exploit, tuning and risk sections reference those parameter, formula and case IDs instead of restating their literals or calculated results.'
-          : '',
+        '',
       ].join(' ')
     case 'resource-planner':
       return [
