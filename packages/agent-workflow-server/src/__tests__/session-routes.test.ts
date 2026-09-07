@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import type { createFoundationAuthoring } from '../beegame/stage-modules/foundation-authoring/public'
 import {
   mkdir,
   mkdtemp,
@@ -28,12 +29,7 @@ import { encryptSecret } from '../security/secret-crypto'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { DELIVERY_PROGRESS_STAGES } from '../beegame/delivery-workflow/display-progress'
-import { commitAuthoredFoundationDocument } from '../beegame/authored-document-receipt'
-import {
-  canonicalFoundationAuthorityProjectionBytes,
-  foundationProjectionRelativePath,
-  projectFoundationAuthority,
-} from '../beegame/foundation-authority-projection'
+import { seedHistoricalAuthoredDocument } from './historical-authored-document-fixture'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import {
@@ -106,32 +102,6 @@ function completeTestFoundationDocument(
       openDecisions: [],
     },
   })
-}
-
-async function writeCommittedProjection(
-  workspacePath: string,
-  dispatchId: string,
-  targetPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-): Promise<void> {
-  const contract = getGameDocumentContract(targetPath)
-  const documents = new Map(await Promise.all(
-    foundationAuthoringSources(targetPath).map(async source => [
-      source.path,
-      await readFile(join(workspacePath, source.path), 'utf8'),
-    ] as const),
-  ))
-  const projection = projectFoundationAuthority({
-    targetPath,
-    availableUpstreamPaths: foundationAuthoringSources(targetPath).map(source => source.path),
-    documents,
-  })
-  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), {
-    recursive: true,
-  })
-  await writeFile(
-    join(workspacePath, foundationProjectionRelativePath(dispatchId)),
-    canonicalFoundationAuthorityProjectionBytes(projection),
-  )
 }
 
 beforeEach(async () => {
@@ -626,6 +596,17 @@ describe('HttpOnly session routes', () => {
   })
 })
 
+// Routes exercise orchestration without launching the independent native runtime.
+function runningAuthorFixture(onStart: () => void = () => undefined): ReturnType<typeof createFoundationAuthoring> {
+  const handle = { protocolVersion: 1 as const, producer: 'foundation-authoring' as const, id: randomUUID() }
+  return {
+    async start() { onStart(); return handle },
+    async resume() { return handle },
+    async stop() { return { status: 'stopped', handle } },
+    async getResult() { return { status: 'running', handle } },
+  }
+}
+
 describe('delivery workflow session continuation', () => {
   it('persists simultaneous Continue mutations as exactly one resume', async () => {
     const root = await mkdtemp(join(tmpdir(), 'beegame-session-continue-'))
@@ -635,15 +616,17 @@ describe('delivery workflow session continuation', () => {
     const projectId = 'session-continue-project'
     const workspace = join(projectsRoot, 'users', ownerId, projectId)
     await mkdir(workspace, { recursive: true })
+    let authorStarts = 0
     let workflowWorkerStarts = 0
     let workflowControllerResumeCalls = 0
+    const author = runningAuthorFixture(() => { authorStarts += 1 })
     const createDeliveryController =
       deliveryControllerModule.createDeliveryWorkflowController
     const controllerFactory = spyOn(
       deliveryControllerModule,
       'createDeliveryWorkflowController',
     ).mockImplementation(input => {
-      const controller = createDeliveryController(input)
+      const controller = createDeliveryController({ ...input, author })
       const resume = controller.resume
       return {
         ...controller,
@@ -676,6 +659,7 @@ describe('delivery workflow session continuation', () => {
       registerCleanup: cleanup => cleanups.push(cleanup),
     })
 
+    let restoreSnapshot: (() => Promise<void>) | undefined
     try {
       const projectResponse = await app.request('/api/projects', {
         method: 'POST',
@@ -817,23 +801,22 @@ describe('delivery workflow session continuation', () => {
           expect.not.objectContaining({ error: expect.any(String) }),
         ],
       })
-      expect(workflowWorkerStarts).toBe(1)
+      expect(workflowWorkerStarts).toBe(0)
+      expect(authorStarts).toBe(1)
       expect(await store.load()).toMatchObject({
         schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
         runId: 'session-continue-run',
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
-        activeDispatch: {
-          workerType: 'document-author',
-          status: 'running',
-        },
+        authorStage: { handle: { producer: 'foundation-authoring' }, status: 'running' },
       })
       expect(
         (await store.readEvents()).filter(
-          event => event.type === 'run.resumed',
+          event => event.type === 'foundation.authoring.started',
         ),
       ).toHaveLength(1)
       expect(controllerFactory).toHaveBeenCalledTimes(1)
+      expect(workflowControllerResumeCalls).toBe(1)
       const validProjectBoundaries = await Promise.all([
         app.request(`/api/projects/${projectId}/workflow/resume`, {
           method: 'POST',
@@ -850,18 +833,20 @@ describe('delivery workflow session continuation', () => {
         200, 202,
       ])
       await new Promise(resolve => setTimeout(resolve, 0))
-      expect(workflowWorkerStarts).toBe(1)
-      expect(workflowControllerResumeCalls).toBe(1)
+      expect(workflowWorkerStarts).toBe(0)
+      expect(authorStarts).toBe(1)
+      expect(workflowControllerResumeCalls).toBe(3)
       expect(controllerFactory).toHaveBeenCalledTimes(1)
       expect(
         (await store.readEvents()).filter(
-          event => event.type === 'run.resumed',
+          event => event.type === 'foundation.authoring.started',
         ),
       ).toHaveLength(1)
 
       const currentSnapshot = JSON.parse(
         await readFile(store.paths.snapshot, 'utf8'),
       ) as Record<string, unknown>
+      restoreSnapshot = () => writeFile(store.paths.snapshot, `${JSON.stringify(currentSnapshot, null, 2)}\n`)
       const firstEvent = (await store.readEvents())[0]!
       await writeFile(
         store.paths.snapshot,
@@ -938,8 +923,7 @@ describe('delivery workflow session continuation', () => {
           completeTestFoundationDocument(acceptedPath),
         ),
       )
-      await writeCommittedProjection(workspace, acceptedDispatchId, acceptedPath)
-      await commitAuthoredFoundationDocument({
+      await seedHistoricalAuthoredDocument({
         workspacePath: workspace,
         dispatchId: acceptedDispatchId,
         targetPath: acceptedPath,
@@ -1040,14 +1024,7 @@ describe('delivery workflow session continuation', () => {
         workflow?: Record<string, unknown>
       }
       expect(recoveryRead.status).toBe(200)
-      expect(recoveryPayload.workflow).toMatchObject({
-        recoverable: true,
-        lastProvenPhase: 'DOCUMENT_DRAFTING',
-        lastProvenUnitId: `document:${acceptedPath}`,
-        lastProvenUnitKind: 'document',
-        lastProvenItemId: acceptedPath,
-        nextAction: 'resume',
-      })
+      expect(recoveryPayload.workflow).toMatchObject({ status: 'needs_action', workflowStateError: true })
       expect(await readFile(store.paths.snapshot, 'utf8')).toBe(
         snapshotBeforeRecoveryRead,
       )
@@ -1055,48 +1032,18 @@ describe('delivery workflow session continuation', () => {
         eventsBeforeRecoveryRead,
       )
       expect(workflowWorkerStarts).toBe(startsBeforeRecoveryRead)
-      await writeFile(store.paths.events, eventsBeforeRecoveryRead)
-      const startsBeforeInvalidRecovery = workflowWorkerStarts
-      const recoveredInvalid = await app.request(
-        `/api/projects/${projectId}/workflow/resume`,
-        { method: 'POST' },
-      )
-      expect({
-        status: recoveredInvalid.status,
-        body: await recoveredInvalid.clone().json(),
-      }).toEqual({
-        status: 200,
-        body: expect.not.objectContaining({ error: expect.any(String) }),
-      })
-      expect(workflowWorkerStarts).toBe(startsBeforeInvalidRecovery + 1)
-      expect(
-        (await store.readEvents()).filter(
-          event => event.type === 'workflow.run.reconstructed',
-        ),
-      ).toHaveLength(1)
-
-      await writeFile(store.paths.events, eventsBeforeRecoveryRead)
-      await writeFile(
-        store.paths.snapshot,
-        `${JSON.stringify(recoverableSnapshot, null, 2)}\n`,
-      )
-      const startsBeforeRetryRecovery = workflowWorkerStarts
-      const resumesBeforeRetryRecovery = workflowControllerResumeCalls
-      const recoveredRetry = await app.request(
-        `/api/projects/${projectId}/workflow/retry`,
-        { method: 'POST' },
-      )
-      expect(recoveredRetry.status).toBe(202)
-      expect(workflowWorkerStarts).toBe(startsBeforeRetryRecovery + 1)
-      expect(workflowControllerResumeCalls).toBe(resumesBeforeRetryRecovery + 1)
-      expect(
-        (await store.readEvents()).filter(
-          event => event.type === 'workflow.run.reconstructed',
-        ),
-      ).toHaveLength(1)
+      for (const action of ['resume', 'retry']) {
+        const rejected = await app.request(`/api/projects/${projectId}/workflow/${action}`, { method: 'POST' })
+        expect(rejected.status).toBe(409)
+        expect(await readFile(store.paths.snapshot, 'utf8')).toBe(snapshotBeforeRecoveryRead)
+        expect(await readFile(store.paths.events, 'utf8')).toBe(eventsBeforeRecoveryRead)
+        expect(workflowWorkerStarts).toBe(startsBeforeRecoveryRead)
+        expect(authorStarts).toBe(1)
+      }
     } finally {
+      await restoreSnapshot?.()
       controllerFactory.mockRestore()
-      for (const cleanup of cleanups) cleanup()
+      for (const cleanup of cleanups) await cleanup()
     }
   })
 
@@ -1123,7 +1070,7 @@ describe('delivery workflow session continuation', () => {
       'createDeliveryWorkflowController',
     ).mockImplementation(input => {
       controllerWorkspaces.push(input.workspacePath)
-      return createDeliveryController(input)
+      return createDeliveryController({ ...input, author: runningAuthorFixture() })
     })
     const runner: BeeGameSessionRunner = {
       start: async () => ({
@@ -1236,14 +1183,14 @@ describe('delivery workflow session continuation', () => {
       expect(await store.load()).toMatchObject({
         runId: 'session-workspace-run',
         projectId,
-        activeDispatch: { status: 'running' },
+        authorStage: { handle: { producer: 'foundation-authoring' }, status: 'running' },
       })
       expect(
         await Bun.file(join(projectRoot, '.beegame/workflow/run.json')).exists(),
       ).toBe(false)
     } finally {
       controllerFactory.mockRestore()
-      for (const cleanup of cleanups) cleanup()
+      for (const cleanup of cleanups) await cleanup()
     }
   })
 
@@ -1270,7 +1217,7 @@ describe('delivery workflow session continuation', () => {
       'createDeliveryWorkflowController',
     ).mockImplementation(input => {
       controllerWorkspaces.push(input.workspacePath)
-      return createDeliveryController(input)
+      return createDeliveryController({ ...input, author: runningAuthorFixture() })
     })
     const persistedSessions = spyOn(
       DashboardRepository.prototype,
@@ -1384,7 +1331,7 @@ describe('delivery workflow session continuation', () => {
       expect(controllerWorkspaces).toEqual([await realpath(sessionWorkspace)])
       expect(await store.load()).toMatchObject({
         runId: 'persisted-session-run',
-        activeDispatch: { status: 'running' },
+        authorStage: { handle: { producer: 'foundation-authoring' }, status: 'running' },
       })
       expect(
         await Bun.file(join(projectRoot, '.beegame/workflow/run.json')).exists(),
@@ -1392,7 +1339,7 @@ describe('delivery workflow session continuation', () => {
     } finally {
       controllerFactory.mockRestore()
       persistedSessions.mockRestore()
-      for (const cleanup of cleanups) cleanup()
+      for (const cleanup of cleanups) await cleanup()
     }
   })
 
@@ -1440,12 +1387,11 @@ describe('delivery workflow session continuation', () => {
     const store = createRunStore(workspace, ownerId)
     await store.save({
       ...run,
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
+      phase: 'BRIEF_CONFIRMED',
       activeDispatch: {
         dispatchId: 'orphaned-author-dispatch',
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
+        workerType: 'question-answerer',
+        phase: 'BRIEF_CONFIRMED',
         revision: run.revision.document,
         status: 'running',
         startedAt: run.updatedAt,
@@ -1501,4 +1447,3 @@ function frozenStageEvent(
     },
   }
 }
-import { foundationAuthoringSources } from '../beegame/delivery-workflow/foundation-authoring-contract'

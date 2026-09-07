@@ -1,6 +1,8 @@
 # Bee Game Studio Stage Isolation and Game IR Redesign
 
-状态：设计待确认
+状态：历史领域设计；已有实现但符合性审计未通过，须先整改，再接入当前独立模块。
+
+2026-09-07 修订：当前接入以 [Game IR 回收、适配与接入计划](game-ir-module-implementation-plan-2026-09-07.md) 为准。六域及编译基础已有实现，最新 stateless semantic slices 与 obligation preflight 位于 `codex/game-ir-packet-once-evaluation`；不重新执行本文从 Core 到六域的历史开发阶段。本文保留领域语义参考；旧 Stage 编号、私有 READY adapter 和 DeliveryRun 控制方式不代表当前公开模块合同，不据此恢复或改动已验收 Foundation 私有实现。最新编译协议与源码来源见新计划 §1.1。
 
 日期：2026-08-30
 

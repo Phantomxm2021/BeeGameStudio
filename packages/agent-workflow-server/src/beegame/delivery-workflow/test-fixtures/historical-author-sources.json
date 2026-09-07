@@ -1,0 +1,659 @@
+{
+  "docs/GDD.md": [],
+  "docs/LEVEL_SCENE_DESIGN.md": [
+    {
+      "path": "docs/GDD.md",
+      "blocks": [
+        {
+          "ownerBlock": "experience_pillars",
+          "purpose": "Confirmed player-experience constraints for scene tone and scope."
+        },
+        {
+          "ownerBlock": "core_loop",
+          "purpose": "Core loop entry and reward semantics for level flow."
+        },
+        {
+          "ownerBlock": "player_actions",
+          "purpose": "Canonical player-facing actions and mechanics used by encounter coverage."
+        },
+        {
+          "ownerBlock": "rules_systems",
+          "purpose": "Tracked gameplay resources and rules used to size objectives and rewards."
+        },
+        {
+          "ownerBlock": "progression",
+          "purpose": "Progression decisions that shape level unlock and escalation."
+        },
+        {
+          "ownerBlock": "challenge_recovery",
+          "purpose": "Fairness, required advance information, challenge and recovery obligations."
+        },
+        {
+          "ownerBlock": "accessibility_localization",
+          "purpose": "Confirmed accessibility and localization constraints for scene presentation."
+        },
+        {
+          "ownerBlock": "metrics",
+          "purpose": "Confirmed session-duration target used by pacing and completion expectations."
+        },
+        {
+          "ownerBlock": "material.core-loop-diagram",
+          "purpose": "Canonical loop evidence for entry, exit and reward transitions."
+        },
+        {
+          "ownerBlock": "material.game-state-flow",
+          "purpose": "Canonical state and recovery evidence for level transitions."
+        }
+      ],
+      "sectionIds": [
+        "experience_pillars",
+        "core_loop",
+        "player_actions",
+        "rules_systems",
+        "progression",
+        "challenge_recovery",
+        "accessibility_localization",
+        "metrics",
+        "material.core-loop-diagram",
+        "material.game-state-flow"
+      ]
+    }
+  ],
+  "docs/BALANCE_DESIGN.md": [
+    {
+      "path": "docs/GDD.md",
+      "blocks": [
+        {
+          "ownerBlock": "rules_systems",
+          "purpose": "Gameplay rules and tracked resources used by affordability and reward formulas."
+        },
+        {
+          "ownerBlock": "progression",
+          "purpose": "Progression decisions and costs that Balance parameterizes."
+        },
+        {
+          "ownerBlock": "challenge_recovery",
+          "purpose": "Fairness, required advance information, challenge and recovery obligations."
+        },
+        {
+          "ownerBlock": "metrics",
+          "purpose": "Confirmed session-duration target used by balance pacing scenarios."
+        },
+        {
+          "ownerBlock": "material.core-loop-diagram",
+          "purpose": "Canonical reward and progression transitions used as Balance context."
+        },
+        {
+          "ownerBlock": "material.game-state-flow",
+          "purpose": "Canonical win, loss and recovery transitions used by Balance context."
+        }
+      ],
+      "sectionIds": [
+        "rules_systems",
+        "progression",
+        "challenge_recovery",
+        "metrics",
+        "material.core-loop-diagram",
+        "material.game-state-flow"
+      ]
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "encounters",
+          "purpose": "Complete encounter composition: entity types, quantities, group identities and spawn timing."
+        },
+        {
+          "ownerBlock": "spawn_checkpoint",
+          "purpose": "Spawn and checkpoint semantics needed to interpret composition."
+        },
+        {
+          "ownerBlock": "material.pacing-beat-table",
+          "purpose": "Beat cadence and authored group references, interpreted with complete composition."
+        },
+        {
+          "ownerBlock": "pacing_beats",
+          "purpose": "Authored beat cadence and recovery windows used by balance scenarios."
+        },
+        {
+          "ownerBlock": "material.world-structure-diagram",
+          "purpose": "Canonical path and placement literals referenced by Balance."
+        },
+        {
+          "ownerBlock": "material.route-choice-diagram",
+          "purpose": "Canonical route and choice mappings referenced by Balance."
+        }
+      ],
+      "sectionIds": [
+        "encounters",
+        "spawn_checkpoint",
+        "material.pacing-beat-table",
+        "pacing_beats",
+        "material.world-structure-diagram",
+        "material.route-choice-diagram"
+      ]
+    }
+  ],
+  "docs/TECHNICAL_DESIGN.md": [
+    {
+      "path": "docs/GDD.md",
+      "blocks": [
+        {
+          "ownerBlock": "rules_systems",
+          "purpose": "Gameplay interfaces and rules implemented by runtime systems."
+        },
+        {
+          "ownerBlock": "accessibility_localization",
+          "purpose": "Accessibility and localization behaviors implemented by runtime/UI."
+        },
+        {
+          "ownerBlock": "metrics",
+          "purpose": "Confirmed session-duration target used to bound runtime/session behavior."
+        },
+        {
+          "ownerBlock": "material.game-state-flow",
+          "purpose": "Canonical state and recovery transitions implemented by runtime."
+        }
+      ],
+      "sectionIds": [
+        "rules_systems",
+        "accessibility_localization",
+        "metrics",
+        "material.game-state-flow"
+      ]
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "encounters",
+          "purpose": "Complete encounter composition: entity types, quantities, group identities and spawn timing."
+        },
+        {
+          "ownerBlock": "spawn_checkpoint",
+          "purpose": "Spawn and checkpoint semantics needed to interpret composition."
+        },
+        {
+          "ownerBlock": "material.pacing-beat-table",
+          "purpose": "Beat cadence and authored group references, interpreted with complete composition."
+        },
+        {
+          "ownerBlock": "scene_states",
+          "purpose": "Scene state identities and transitions implemented by runtime."
+        },
+        {
+          "ownerBlock": "material.world-structure-diagram",
+          "purpose": "Canonical world topology and coordinates consumed by runtime."
+        },
+        {
+          "ownerBlock": "material.route-choice-diagram",
+          "purpose": "Canonical route and choice mappings consumed by runtime."
+        }
+      ],
+      "sectionIds": [
+        "encounters",
+        "spawn_checkpoint",
+        "material.pacing-beat-table",
+        "scene_states",
+        "material.world-structure-diagram",
+        "material.route-choice-diagram"
+      ]
+    },
+    {
+      "path": "docs/BALANCE_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "units_variables",
+          "purpose": "Units and variable semantics required for runtime data."
+        },
+        {
+          "ownerBlock": "formulas",
+          "purpose": "Owned formulas required for deterministic simulation."
+        },
+        {
+          "ownerBlock": "bounds_exploits",
+          "purpose": "Bounds and exploit constraints required for runtime safeguards."
+        },
+        {
+          "ownerBlock": "material.variable-parameter-table",
+          "purpose": "Canonical numeric variable IDs, values and ranges bound by runtime."
+        }
+      ],
+      "sectionIds": [
+        "units_variables",
+        "formulas",
+        "bounds_exploits",
+        "material.variable-parameter-table"
+      ]
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "blocks": [
+        {
+          "ownerBlock": "input",
+          "purpose": "Action conflicts, focus loss and restoration semantics."
+        },
+        {
+          "ownerBlock": "feedback_errors",
+          "purpose": "Feedback, rejection and error behavior."
+        },
+        {
+          "ownerBlock": "accessibility",
+          "purpose": "Accessibility and media-failure exceptions."
+        },
+        {
+          "ownerBlock": "material.screen-state-table",
+          "purpose": "Canonical screen states and permitted inputs."
+        },
+        {
+          "ownerBlock": "material.focus-accessibility-matrix",
+          "purpose": "Canonical focus and keyboard mappings."
+        }
+      ],
+      "sectionIds": [
+        "input",
+        "feedback_errors",
+        "accessibility",
+        "material.screen-state-table",
+        "material.focus-accessibility-matrix"
+      ]
+    }
+  ],
+  "docs/ART_DIRECTION.md": [
+    {
+      "path": "docs/GDD.md",
+      "blocks": [
+        {
+          "ownerBlock": "experience_pillars",
+          "purpose": "Confirmed visual experience pillars and prohibited directions."
+        },
+        {
+          "ownerBlock": "rules_systems",
+          "purpose": "Gameplay rules that determine visual state and feedback semantics."
+        },
+        {
+          "ownerBlock": "content_narrative",
+          "purpose": "Narrative/content identities represented by visual assets."
+        },
+        {
+          "ownerBlock": "accessibility_localization",
+          "purpose": "Contrast, readability and localization constraints for visuals."
+        },
+        {
+          "ownerBlock": "metrics",
+          "purpose": "Confirmed session-duration target used to bound presentation density."
+        }
+      ],
+      "sectionIds": [
+        "experience_pillars",
+        "rules_systems",
+        "content_narrative",
+        "accessibility_localization",
+        "metrics"
+      ]
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "camera_readability",
+          "purpose": "Camera, scale and off-screen readability constraints."
+        },
+        {
+          "ownerBlock": "material.world-structure-diagram",
+          "purpose": "Canonical topology and coordinate literals consumed by Art."
+        }
+      ],
+      "sectionIds": [
+        "camera_readability",
+        "material.world-structure-diagram"
+      ]
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "blocks": [
+        {
+          "ownerBlock": "hud",
+          "purpose": "HUD display sizes and visual states required for readability."
+        },
+        {
+          "ownerBlock": "feedback_errors",
+          "purpose": "Feedback and error states requiring visual treatment."
+        },
+        {
+          "ownerBlock": "material.wireframe-board",
+          "purpose": "Canonical labeled UI geometry and minimum regions consumed by Art."
+        }
+      ],
+      "sectionIds": [
+        "hud",
+        "feedback_errors",
+        "material.wireframe-board"
+      ]
+    }
+  ],
+  "docs/UI_UX_SPEC.md": [
+    {
+      "path": "docs/GDD.md",
+      "blocks": [
+        {
+          "ownerBlock": "player_actions",
+          "purpose": "Canonical player-facing actions represented by UI controls."
+        },
+        {
+          "ownerBlock": "rules_systems",
+          "purpose": "Tracked gameplay resources represented in the HUD."
+        },
+        {
+          "ownerBlock": "accessibility_localization",
+          "purpose": "Confirmed keyboard, accessibility and localization constraints for UI."
+        },
+        {
+          "ownerBlock": "metrics",
+          "purpose": "Confirmed session-duration target used to size UI flow and feedback."
+        },
+        {
+          "ownerBlock": "content_narrative",
+          "purpose": "Content labels and narrative context shown in UI states."
+        },
+        {
+          "ownerBlock": "challenge_recovery",
+          "purpose": "Fairness, required advance information, challenge and recovery obligations."
+        },
+        {
+          "ownerBlock": "material.core-loop-diagram",
+          "purpose": "Canonical loop transitions referenced by player journeys."
+        },
+        {
+          "ownerBlock": "material.game-state-flow",
+          "purpose": "Canonical state and recovery transitions referenced by screen states."
+        }
+      ],
+      "sectionIds": [
+        "player_actions",
+        "rules_systems",
+        "accessibility_localization",
+        "metrics",
+        "content_narrative",
+        "challenge_recovery",
+        "material.core-loop-diagram",
+        "material.game-state-flow"
+      ]
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "camera_readability",
+          "purpose": "Camera and off-screen readability constraints for UI overlays."
+        },
+        {
+          "ownerBlock": "scene_states",
+          "purpose": "Scene state identities used by UI screen behavior."
+        },
+        {
+          "ownerBlock": "material.world-structure-diagram",
+          "purpose": "Canonical world/layout literals referenced by UI geometry."
+        },
+        {
+          "ownerBlock": "material.route-choice-diagram",
+          "purpose": "Canonical route and choice mappings shown by UI."
+        },
+        {
+          "ownerBlock": "material.pacing-beat-table",
+          "purpose": "Canonical pacing rows used by UI feedback timing."
+        }
+      ],
+      "sectionIds": [
+        "camera_readability",
+        "scene_states",
+        "material.world-structure-diagram",
+        "material.route-choice-diagram",
+        "material.pacing-beat-table"
+      ]
+    }
+  ],
+  "docs/AUDIO_DESIGN.md": [
+    {
+      "path": "docs/GDD.md",
+      "blocks": [
+        {
+          "ownerBlock": "experience_pillars",
+          "purpose": "Confirmed emotional and sensory experience pillars for audio."
+        },
+        {
+          "ownerBlock": "rules_systems",
+          "purpose": "Gameplay rules and states that trigger audio feedback."
+        },
+        {
+          "ownerBlock": "accessibility_localization",
+          "purpose": "Accessibility and localization constraints for audio delivery."
+        },
+        {
+          "ownerBlock": "metrics",
+          "purpose": "Confirmed session-duration target used to bound music and feedback density."
+        },
+        {
+          "ownerBlock": "material.game-state-flow",
+          "purpose": "Canonical state and recovery transitions requiring audio cues."
+        }
+      ],
+      "sectionIds": [
+        "experience_pillars",
+        "rules_systems",
+        "accessibility_localization",
+        "metrics",
+        "material.game-state-flow"
+      ]
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "scene_states",
+          "purpose": "Scene state identities requiring audio state transitions."
+        },
+        {
+          "ownerBlock": "material.pacing-beat-table",
+          "purpose": "Canonical pacing rows used to scope audio timing and layers."
+        }
+      ],
+      "sectionIds": [
+        "scene_states",
+        "material.pacing-beat-table"
+      ]
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "blocks": [
+        {
+          "ownerBlock": "input",
+          "purpose": "Action conflicts, focus loss and restoration semantics."
+        },
+        {
+          "ownerBlock": "feedback_errors",
+          "purpose": "Feedback, rejection and error behavior."
+        },
+        {
+          "ownerBlock": "accessibility",
+          "purpose": "Accessibility and media-failure exceptions."
+        },
+        {
+          "ownerBlock": "material.screen-state-table",
+          "purpose": "Canonical screen states and permitted inputs."
+        },
+        {
+          "ownerBlock": "material.focus-accessibility-matrix",
+          "purpose": "Canonical focus and keyboard mappings."
+        }
+      ],
+      "sectionIds": [
+        "input",
+        "feedback_errors",
+        "accessibility",
+        "material.screen-state-table",
+        "material.focus-accessibility-matrix"
+      ]
+    }
+  ],
+  "docs/ASSET_PLAN.md": [
+    {
+      "path": "docs/GDD.md",
+      "blocks": [
+        {
+          "ownerBlock": "scope_risks",
+          "purpose": "Confirmed production scope and risk constraints for asset delivery."
+        }
+      ],
+      "sectionIds": [
+        "scope_risks"
+      ]
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "material.world-structure-diagram",
+          "purpose": "Canonical topology and scene literals mapped to deliverables."
+        },
+        {
+          "ownerBlock": "material.route-choice-diagram",
+          "purpose": "Canonical route and choice literals mapped to deliverables."
+        },
+        {
+          "ownerBlock": "encounters",
+          "purpose": "Complete encounter composition: entity types, quantities, group identities and spawn timing."
+        },
+        {
+          "ownerBlock": "spawn_checkpoint",
+          "purpose": "Spawn and checkpoint semantics needed to interpret composition."
+        },
+        {
+          "ownerBlock": "material.pacing-beat-table",
+          "purpose": "Beat cadence and authored group references, interpreted with complete composition."
+        }
+      ],
+      "sectionIds": [
+        "material.world-structure-diagram",
+        "material.route-choice-diagram",
+        "encounters",
+        "spawn_checkpoint",
+        "material.pacing-beat-table"
+      ]
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "data_content",
+          "purpose": "Stable content kinds and data boundaries required for delivery mapping."
+        },
+        {
+          "ownerBlock": "performance",
+          "purpose": "Target runtime performance constraints used to check delivery budgets."
+        },
+        {
+          "ownerBlock": "build_release",
+          "purpose": "Build and release constraints for delivered resources."
+        }
+      ],
+      "sectionIds": [
+        "data_content",
+        "performance",
+        "build_release"
+      ]
+    },
+    {
+      "path": "docs/ART_DIRECTION.md",
+      "blocks": [
+        {
+          "ownerBlock": "character_style",
+          "purpose": "Character silhouette and variant constraints required by concrete deliverables."
+        },
+        {
+          "ownerBlock": "environment_style",
+          "purpose": "Environment form constraints required by concrete deliverables."
+        },
+        {
+          "ownerBlock": "color_lighting",
+          "purpose": "Palette and lighting constraints required by concrete deliverables."
+        },
+        {
+          "ownerBlock": "asset_specifications",
+          "purpose": "Concrete visual asset specifications and required variants."
+        },
+        {
+          "ownerBlock": "material.visual-language-board",
+          "purpose": "Canonical visual-language acceptance evidence mapped to resources."
+        },
+        {
+          "ownerBlock": "material.animation-vfx-state-table",
+          "purpose": "Canonical animation/VFX state requirements mapped to resources."
+        }
+      ],
+      "sectionIds": [
+        "character_style",
+        "environment_style",
+        "color_lighting",
+        "asset_specifications",
+        "material.visual-language-board",
+        "material.animation-vfx-state-table"
+      ]
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "blocks": [
+        {
+          "ownerBlock": "localization",
+          "purpose": "Localized text and media requirements mapped to resources."
+        },
+        {
+          "ownerBlock": "material.screen-state-table",
+          "purpose": "Canonical screens and states mapped to resource deliverables."
+        },
+        {
+          "ownerBlock": "material.focus-accessibility-matrix",
+          "purpose": "Canonical focus/accessibility requirements mapped to resources."
+        }
+      ],
+      "sectionIds": [
+        "localization",
+        "material.screen-state-table",
+        "material.focus-accessibility-matrix"
+      ]
+    },
+    {
+      "path": "docs/AUDIO_DESIGN.md",
+      "blocks": [
+        {
+          "ownerBlock": "sfx",
+          "purpose": "Source and variation semantics required for file delivery."
+        },
+        {
+          "ownerBlock": "implementation",
+          "purpose": "Audio integration fields and constraints."
+        },
+        {
+          "ownerBlock": "material.event-cue-matrix",
+          "purpose": "Canonical cue and variant requirements."
+        },
+        {
+          "ownerBlock": "material.music-state-diagram",
+          "purpose": "Music states and delivered layer requirements."
+        },
+        {
+          "ownerBlock": "material.loudness-delivery-table",
+          "purpose": "Canonical media/encoding delivery requirements."
+        }
+      ],
+      "sectionIds": [
+        "sfx",
+        "implementation",
+        "material.event-cue-matrix",
+        "material.music-state-diagram",
+        "material.loudness-delivery-table"
+      ]
+    }
+  ]
+}

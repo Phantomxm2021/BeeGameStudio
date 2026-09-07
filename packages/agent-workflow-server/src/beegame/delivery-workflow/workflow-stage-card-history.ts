@@ -14,6 +14,7 @@ import {
   projectWorkflowCurrentMessage,
   projectWorkflowDisplayReason,
 } from './workflow-display-message'
+import { projectPublicAuthorDisplay } from './public-author-display'
 import type {
   DeliveryRun,
   DeliveryRunStatus,
@@ -21,7 +22,6 @@ import type {
   ResourceProductionTask,
   WorkflowEvent,
 } from './types'
-import type { FoundationIssueSummary, FoundationRevisionRound } from './foundation-audit-state'
 
 export type WorkflowStageCardTask = {
   id: string
@@ -29,8 +29,8 @@ export type WorkflowStageCardTask = {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
   operation?: 'write' | 'review' | 'revise' | 'produce' | 'assemble'
   attempt?: number
-  round?: FoundationRevisionRound
-  issueSummary?: FoundationIssueSummary
+  round?: DocumentDisplayTask['round']
+  issueSummary?: DocumentDisplayTask['issueSummary']
   usage?: WorkflowStageCardTaskUsage
   durationMs?: number
   failureReason?: string
@@ -357,6 +357,12 @@ function documentTasks(
   run: DeliveryRun,
   workspacePath: string,
 ): DocumentDisplayTask[] {
+  if (run.foundationReviewStage) return [{ id: 'foundation-public-stage',
+    title: run.phase === 'FOUNDATION_REVISION' ? 'Foundation Revision' : 'Foundation Reviewer',
+    status: run.foundationReviewStage.acceptedReview ? 'completed' : run.status === 'running' ? 'running' : run.status === 'stopped' ? 'stopped' : 'failed',
+    attempt: 0, operation: run.phase === 'FOUNDATION_REVISION' ? 'revise' : 'review' }]
+  const publicAuthorDisplay = projectPublicAuthorDisplay(run.authorStage)
+  if (publicAuthorDisplay) return publicAuthorDisplay.tasks
   const documentStep = run.documentStep
   const input: Parameters<typeof projectDocumentDisplayTasks>[0] = {
     workspacePath,
@@ -369,7 +375,6 @@ function documentTasks(
     documentStep: documentStep as DocumentWorkflowStep | undefined,
     workflowStatus: run.status,
     thinking: workflowThinking(run),
-    foundationAuditState: run.foundationAuditState,
   }
   return projectDocumentDisplayTasks(input)
 }

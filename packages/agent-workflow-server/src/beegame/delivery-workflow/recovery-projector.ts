@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { assertNoRetiredFoundationReviewRun } from './retired-foundation-review'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
@@ -6,9 +7,8 @@ import {
   computeResourceContentRootDigest,
   readResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import { validateFoundationAuditStateArtifacts } from './foundation-audit-artifacts'
-import { isFoundationRevisionPhase, parseFoundationAuditState } from './foundation-audit-state'
-import { recoverAuthorActiveUnit, authorUnitPredecessors, validateAuthorCompletedProofs } from './foundation-authoring-recovery'
+import { authorUnitPredecessors, validateAuthorCompletedProofs } from './historical-document-evidence'
+import { RETIRED_FOUNDATION_AUTHOR, assertNoRetiredAuthorRun, assertNoRetiredAuthorHandoff } from './retired-foundation-author'
 import { isRecord, record, stringValue, stringArray, sameStrings } from './recovery-values'
 import {
   computeDocumentRevision,
@@ -41,10 +41,6 @@ import {
   type WorkflowUnitAcceptedEvent,
   type WorkflowUsage,
 } from './types'
-import {
-  readFoundationAuthoringPause,
-  type FoundationAuthoringPause,
-} from './foundation-audit-boundary'
 
 export { inspectWorkflowSnapshot }
 export type { WorkflowSnapshotInspection }
@@ -1053,37 +1049,7 @@ function rawActiveUnitId(input: {
 }): string | undefined {
   const snapshot = input.snapshot
   if (!snapshot) return undefined
-  const draftState = record(snapshot.foundationDraftState)
-  const completedPaths = stringArray(draftState?.completedPaths)
-  const allFoundationDocumentsCommitted =
-    completedPaths?.length === CANONICAL_FOUNDATION_DOCUMENTS.length &&
-    CANONICAL_FOUNDATION_DOCUMENTS.every(path => completedPaths.includes(path))
-  if (
-    snapshot.phase === 'DOCUMENT_DRAFTING' &&
-    !record(snapshot.foundationAuditState) &&
-    allFoundationDocumentsCommitted
-  )
-    return 'foundation-audit:derive'
-  const authorUnit = recoverAuthorActiveUnit({
-    workspacePath: input.workspacePath,
-    ownerId: input.ownerId,
-    projectId: input.projectId,
-    confirmedBriefContext: input.confirmedBriefContext,
-    snapshot: {
-      phase: snapshot.phase,
-      documentStep: snapshot.documentStep,
-      runId: snapshot.runId,
-      ownerId: snapshot.ownerId,
-      projectId: snapshot.projectId,
-      confirmedBriefDigest: snapshot.confirmedBriefDigest,
-      revision: snapshot.revision,
-      activeDispatch: snapshot.activeDispatch,
-      currentItemId: snapshot.currentItemId,
-      foundationDraftState: snapshot.foundationDraftState,
-    },
-    reject: recoveryError,
-  })
-  if (authorUnit) return authorUnit
+  assertNoRetiredAuthorRun(snapshot)
   if (
     snapshot.phase === 'DOCUMENT_REVIEW' &&
     !record(snapshot?.foundationAuditState)
@@ -1145,7 +1111,6 @@ function buildProjectionRun(input: {
   ownerId: string
   projectId: string
   confirmedBriefContext: string
-  foundationAuthoringPause?: FoundationAuthoringPause
 }): DeliveryRun {
   const runId =
     stringValue(input.snapshot?.runId) ??
@@ -1196,27 +1161,15 @@ function buildProjectionRun(input: {
     ? acceptedUnitPayload(acceptance)
     : undefined
 
-  const authoringPauseReached =
-    input.foundationAuthoringPause === 'reached' &&
-    documents.length === CANONICAL_FOUNDATION_DOCUMENTS.length &&
-    input.replayedUnitIds.length === CANONICAL_FOUNDATION_DOCUMENTS.length &&
-    !record(input.snapshot?.foundationAuditState)
-  let phase: DeliveryRun['phase'] = authoringPauseReached
-    ? 'DOCUMENT_DRAFTING'
-    : 'DELIVERY'
+  let phase: DeliveryRun['phase'] = 'DELIVERY'
   let documentStep: DeliveryRun['documentStep']
-  if (authoringPauseReached) documentStep = 'FOUNDATION_DRAFTING'
   let currentItemId: string | undefined
   let resourceTask: DeliveryRun['resourceProductionState']['currentTask'] =
     'RESOURCE_PLAN'
   const activeUnitId = input.activeUnitId
   if (activeUnitId === 'foundation-audit:derive') {
-    phase = 'DOCUMENT_DRAFTING'
-    documentStep = 'FOUNDATION_DRAFTING'
-  } else if (activeUnitId?.startsWith('document:')) {
-    phase = 'DOCUMENT_DRAFTING'
-    documentStep = 'FOUNDATION_DRAFTING'
-    currentItemId = activeUnitId.slice('document:'.length)
+    phase = 'DOCUMENT_REVIEW'
+    documentStep = 'FOUNDATION_REVIEW'
   } else if (activeUnitId === RESOURCE_INVENTORY_UNIT_ID) {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'FOUNDATION_REVIEW'
@@ -1292,18 +1245,7 @@ function buildProjectionRun(input: {
     ...base,
     phase,
     ...(documentStep ? { documentStep } : {}),
-    status: authoringPauseReached
-      ? 'stopped'
-      : activeUnitId
-        ? 'running'
-        : 'completed',
-    ...(authoringPauseReached
-      ? {
-          blockedReason:
-            'foundation authoring complete; paused before review',
-          thinking: 'idle' as const,
-        }
-      : {}),
+    status: activeUnitId ? 'running' : 'completed',
     ...(activeUnitId === 'foundation-audit:derive'
       ? { blockedReason: undefined }
       : {}),
@@ -1464,6 +1406,9 @@ export async function projectExactResumeRun(input: {
       'receipt reconciliation does not belong to the projected raw snapshot',
     )
   const snapshot = rawSnapshotRecord(input.inspection)
+  if (snapshot) assertNoRetiredFoundationReviewRun(snapshot)
+  if (snapshot?.authorStage) recoveryError('recovery_checkpoint_conflict', 'Public Author recovery belongs to its module')
+  if (snapshot) assertNoRetiredAuthorRun(snapshot)
   const snapshotRunId = assertSnapshotIdentity({
     snapshot,
     ownerId: input.ownerId,
@@ -1492,21 +1437,8 @@ export async function projectExactResumeRun(input: {
     events: input.events,
     expectedRunId: snapshotRunId ?? acceptedEvents[0]?.runId,
   })
-  let foundationAuthoringPause: FoundationAuthoringPause | undefined
-  try {
-    foundationAuthoringPause = readFoundationAuthoringPause(
-      input.events,
-      snapshotRunId ?? journalMetadata.runId ?? acceptedEvents[0]?.runId ?? '',
-    )
-  } catch (error) {
-    recoveryError(
-      'recovery_checkpoint_conflict',
-      error instanceof Error
-        ? error.message
-        : 'invalid foundation authoring pause journal proof',
-    )
-  }
-  /* journal is authoritative; snapshots carry no pause marker. */
+  if (!record(snapshot?.foundationAuditState))
+    assertNoRetiredAuthorHandoff(input.events, snapshotRunId ?? journalMetadata.runId ?? acceptedEvents[0]?.runId ?? '')
   if (!snapshot && acceptedEvents.length === 0)
     recoveryError(
       'recovery_checkpoint_missing',
@@ -1545,20 +1477,14 @@ export async function projectExactResumeRun(input: {
     journal: acceptedEvents,
   })
   const graphActiveUnitId = graph[replayedUnitIds.length]
-  const pauseReachedInJournal =
-    foundationAuthoringPause === 'reached' &&
-    !record(snapshot?.foundationAuditState) &&
-    replayedUnitIds.filter(unitId => unitId.startsWith('document:')).length ===
-      CANONICAL_FOUNDATION_DOCUMENTS.length &&
-    graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID
   const activeUnitId =
-    pauseReachedInJournal
-      ? undefined
-      : graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID &&
+    graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID &&
           !proofs.has(RESOURCE_INVENTORY_UNIT_ID) &&
           !record(snapshot?.foundationAuditState)
         ? 'foundation-audit:derive'
         : graphActiveUnitId
+  if (activeUnitId?.startsWith('document:'))
+    recoveryError('recovery_checkpoint_conflict', RETIRED_FOUNDATION_AUTHOR)
   const rawProofInspection =
     input.receiptReconciliation?.sourceInspection ?? input.inspection
   const rawProofActiveUnitId = proveExactRawActiveUnitId({
@@ -1623,62 +1549,9 @@ export async function projectExactResumeRun(input: {
     ownerId: input.ownerId,
     projectId: input.projectId,
     confirmedBriefContext: input.confirmedBriefContext,
-    foundationAuthoringPause,
   })
-  let foundationAuditState = run.foundationAuditState
-  const storedFoundationAuditState = record(snapshot?.foundationAuditState)
-  if (storedFoundationAuditState) {
-    try {
-      const state = parseFoundationAuditState(storedFoundationAuditState)
-      const runningFactTasks = state.tasks.filter(task => task.status === 'running')
-      if (runningFactTasks.length > 4)
-        recoveryError(
-          'recovery_checkpoint_conflict',
-          'foundation fact recovery contains more than four running tasks',
-        )
-      for (const task of state.tasks) {
-        const dispatch = task.dispatch
-        if (!dispatch) continue
-        const request = dispatch.request
-        const contract = request?.contract
-        if (dispatch.taskId !== task.taskId || dispatch.revision !== task.revision || (typeof request?.taskId === 'string' && request.taskId !== task.taskId) || (typeof request?.revision === 'string' && request.revision !== task.revision) || (contract && typeof contract === 'object' && 'packetDigest' in contract && contract.packetDigest !== task.packetDigest))
-          recoveryError(
-            'recovery_checkpoint_conflict',
-            `foundation fact recovery dispatch identity is inconsistent for ${task.taskId}`,
-          )
-      }
-      if (
-        (state.status === 'facts_staged' || state.status === 'derived_committed') &&
-        !state.tasks.filter(task => task.kind === 'document-facts').every(task => task.status === 'completed' && task.receiptPath && task.receiptDigest)
-      )
-        recoveryError(
-          'recovery_checkpoint_missing',
-          'foundation fact recovery state is staged without every immutable receipt',
-        )
-      await validateFoundationAuditStateArtifacts({
-        workspacePath: input.workspacePath,
-        state,
-      })
-      foundationAuditState = state
-    } catch (error) {
-      recoveryError(
-        'recovery_artifact_digest_mismatch',
-        `stored foundation audit state failed byte validation: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-  }
-  const projectedRun = foundationAuditState
-    ? isFoundationRevisionPhase(foundationAuditState.status)
-      ? {
-          ...run,
-          phase: 'FOUNDATION_REVISION' as const,
-          documentStep: 'FOUNDATION_REVISION' as const,
-          foundationAuditState,
-        }
-      : { ...run, foundationAuditState }
-    : run
   return {
-    run: projectedRun,
+    run,
     ...(activeUnitId ? { activeUnitId } : {}),
     replayedUnitIds,
     sourceSnapshotDigest: input.inspection.digest,

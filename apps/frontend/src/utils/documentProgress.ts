@@ -18,6 +18,7 @@ export interface DocumentProgressItem {
  * should see a completed document set waiting for acceptance/review.
  */
 export interface FoundationAuthoringWorkflowSignal {
+  foundationDocuments?: readonly { path?: unknown; status?: unknown }[];
   status?: unknown;
   currentPhase?: unknown;
   documentStep?: unknown;
@@ -66,6 +67,15 @@ export function isCompletedFoundationAuthoringPause(
   if (!workflow) return false;
 
   const status = String(workflow.status || '').trim().toLowerCase();
+  if (workflow.block?.code === 'public_author_handoff') {
+    const phase = String(workflow.currentPhase || '').trim().toUpperCase();
+    if (!['needs_action', 'blocked', 'stopped', 'cancelled'].includes(status) ||
+      !['DOCUMENT_DRAFTING', 'DOCUMENT_REVIEW'].includes(phase)) return false;
+    // A public handoff must carry the complete current result projection.
+    // Stale transcript artifacts cannot fill gaps in that result.
+    return BEEGAME_DOCUMENT_BASELINE.every(document => workflow.tasks?.some(task =>
+      normalizeDocumentPath(task.title ?? task.id) === document.path && task.status === 'completed'));
+  }
   if (status !== 'stopped' && status !== 'cancelled') return false;
   if (String(workflow.currentPhase || '').trim().toUpperCase() !== 'DOCUMENT_DRAFTING') {
     return false;
@@ -111,6 +121,13 @@ export function deriveDocumentProgress(
     if (taskStatus === 'completed') statusByPath.set(path, 'ready');
     else if (taskStatus === 'running') statusByPath.set(path, 'writing');
     else if (taskStatus === 'failed' || taskStatus === 'blocked') statusByPath.set(path, 'failed');
+  }
+
+  // The completed public author result survives switches to review/revision.
+  // Do not infer audit acceptance or drive execution from this display field.
+  for (const document of workflow?.foundationDocuments || []) {
+    const path = normalizeDocumentPath(document.path);
+    if (isBaselineDocumentPath(path) && document.status === 'ready') statusByPath.set(path, 'ready');
   }
 
   return BEEGAME_DOCUMENT_BASELINE.map((document) => {

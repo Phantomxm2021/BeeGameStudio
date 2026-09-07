@@ -1,0 +1,188 @@
+{
+  "fixtureOnly": true,
+  "description": "Protocol design examples, not completed production author receipts or audited game documents",
+  "author": {
+    "input": {
+      "protocolVersion": 1,
+      "requestId": "author-fixture-1",
+      "ownerId": "fixture-owner",
+      "projectId": "fixture-project",
+      "confirmedBriefContext": "offline fixture only",
+      "confirmedBriefDigest": "58d7cf1216cad9e2606b70029ae47a8baa132771000d8f8a69fd79d19cdaa0c0"
+    },
+    "handle": {
+      "runId": "author-run-fixture"
+    },
+    "sourceDocuments": [
+      {
+        "path": "docs/GDD.md",
+        "content": "# Offline fixture: docs/GDD.md\n",
+        "digest": "f43d71d50ebc9c62154ad4fa33b83260f1ce4df9914f0b95be16f71f780c314d",
+        "byteLength": 31
+      },
+      {
+        "path": "docs/TECHNICAL_DESIGN.md",
+        "content": "# Offline fixture: docs/TECHNICAL_DESIGN.md\n",
+        "digest": "a49df864540aed5eb9a2955d06acaa9ed6b458c945366e2851b2226df9b9b587",
+        "byteLength": 44
+      },
+      {
+        "path": "docs/ART_DIRECTION.md",
+        "content": "# Offline fixture: docs/ART_DIRECTION.md\n",
+        "digest": "c78ace4b029a2835c8f272802bc2f2c224a580bad595dade9a6d7c5bf752466c",
+        "byteLength": 41
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "content": "# Offline fixture: docs/UI_UX_SPEC.md\n",
+        "digest": "dd4f83f6248076fadbe20520580c2a2ef55ea8ef10caed3619ea809fc9aff636",
+        "byteLength": 38
+      },
+      {
+        "path": "docs/LEVEL_SCENE_DESIGN.md",
+        "content": "# Offline fixture: docs/LEVEL_SCENE_DESIGN.md\n",
+        "digest": "c6d5e0bc9ea64bb692025c576af8827afc1e59858ec03aa3420d80eaada694d5",
+        "byteLength": 46
+      },
+      {
+        "path": "docs/BALANCE_DESIGN.md",
+        "content": "# Offline fixture: docs/BALANCE_DESIGN.md\n",
+        "digest": "2fff760b859e39def8cb2022e503a86044c7750fbf129b64f017f7919bfc0602",
+        "byteLength": 42
+      },
+      {
+        "path": "docs/ASSET_PLAN.md",
+        "content": "# Offline fixture: docs/ASSET_PLAN.md\n",
+        "digest": "a8e3cbd2f4531272cd0a44103a9c2fcfd5a569c2dc8d6c859add322f95826f7f",
+        "byteLength": 38
+      },
+      {
+        "path": "docs/AUDIO_DESIGN.md",
+        "content": "# Offline fixture: docs/AUDIO_DESIGN.md\n",
+        "digest": "2ae091adc48e53880770b6a4b1665907cb7d7364f14d639ffe315ebd0315c550",
+        "byteLength": 40
+      }
+    ],
+    "result": {
+      "status": "completed",
+      "result": {
+        "protocolVersion": 1,
+        "resultId": "author-result-fixture",
+        "producer": "foundation-authoring",
+        "documentVersion": "ff8e124da2dead42672b0c4011e89ad980223f6c74868b2cfb0f24547b031870",
+        "confirmedBriefDigest": "58d7cf1216cad9e2606b70029ae47a8baa132771000d8f8a69fd79d19cdaa0c0",
+        "documents": [
+          {
+            "path": "docs/GDD.md",
+            "digest": "f43d71d50ebc9c62154ad4fa33b83260f1ce4df9914f0b95be16f71f780c314d",
+            "byteLength": 31
+          },
+          {
+            "path": "docs/TECHNICAL_DESIGN.md",
+            "digest": "a49df864540aed5eb9a2955d06acaa9ed6b458c945366e2851b2226df9b9b587",
+            "byteLength": 44
+          },
+          {
+            "path": "docs/ART_DIRECTION.md",
+            "digest": "c78ace4b029a2835c8f272802bc2f2c224a580bad595dade9a6d7c5bf752466c",
+            "byteLength": 41
+          },
+          {
+            "path": "docs/UI_UX_SPEC.md",
+            "digest": "dd4f83f6248076fadbe20520580c2a2ef55ea8ef10caed3619ea809fc9aff636",
+            "byteLength": 38
+          },
+          {
+            "path": "docs/LEVEL_SCENE_DESIGN.md",
+            "digest": "c6d5e0bc9ea64bb692025c576af8827afc1e59858ec03aa3420d80eaada694d5",
+            "byteLength": 46
+          },
+          {
+            "path": "docs/BALANCE_DESIGN.md",
+            "digest": "2fff760b859e39def8cb2022e503a86044c7750fbf129b64f017f7919bfc0602",
+            "byteLength": 42
+          },
+          {
+            "path": "docs/ASSET_PLAN.md",
+            "digest": "a8e3cbd2f4531272cd0a44103a9c2fcfd5a569c2dc8d6c859add322f95826f7f",
+            "byteLength": 38
+          },
+          {
+            "path": "docs/AUDIO_DESIGN.md",
+            "digest": "2ae091adc48e53880770b6a4b1665907cb7d7364f14d639ffe315ebd0315c550",
+            "byteLength": 40
+          }
+        ]
+      }
+    }
+  },
+  "review": {
+    "protocolVersion": 1,
+    "resultId": "review-fixture-1",
+    "producer": "foundation-reviewer",
+    "documentVersion": "ff8e124da2dead42672b0c4011e89ad980223f6c74868b2cfb0f24547b031870",
+    "kind": "issues_found",
+    "issues": [
+      {
+        "id": "fixture-issue",
+        "documentPath": "docs/GDD.md",
+        "location": "# Offline fixture",
+        "actual": "fixture actual",
+        "expected": "fixture expected",
+        "evidence": "offline fixture only",
+        "allowedPaths": [
+          "docs/GDD.md"
+        ]
+      }
+    ]
+  },
+  "revision": {
+    "input": {
+      "protocolVersion": 1,
+      "requestId": "revision-fixture-1",
+      "documentVersion": "ff8e124da2dead42672b0c4011e89ad980223f6c74868b2cfb0f24547b031870",
+      "sourceReviewResultId": "review-fixture-1"
+    },
+    "candidate": {
+      "protocolVersion": 1,
+      "resultId": "revision-result-fixture",
+      "producer": "foundation-revision",
+      "kind": "candidate_ready",
+      "candidateId": "candidate-fixture-1",
+      "baseDocumentVersion": "ff8e124da2dead42672b0c4011e89ad980223f6c74868b2cfb0f24547b031870",
+      "sourceReviewResultId": "review-fixture-1"
+    }
+  },
+  "negativeCases": [
+    {
+      "name": "same-request-different-input",
+      "change": "brief content changed under author-fixture-1",
+      "expect": "reject identity conflict"
+    },
+    {
+      "name": "input-digest-mismatch",
+      "change": "change document bytes without changing manifest digest",
+      "expect": "reject input"
+    },
+    {
+      "name": "private-state-in-public-input",
+      "change": "inject foundationDraftState or DeliveryRun",
+      "expect": "reject unknown fields"
+    },
+    {
+      "name": "stale-candidate-pass",
+      "change": "passed for candidate A while current candidate is B",
+      "expect": "reject handoff"
+    },
+    {
+      "name": "revision-self-pass",
+      "change": "revision result kind passed",
+      "expect": "reject result"
+    },
+    {
+      "name": "stop-races-completed",
+      "change": "stop intent persisted before result acknowledgment",
+      "expect": "retain result and do not start next stage"
+    }
+  ]
+}

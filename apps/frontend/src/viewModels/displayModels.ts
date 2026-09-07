@@ -4,6 +4,7 @@ import type {
   PendingToolPermissionItem,
   ProjectBaselineStatusPayload,
 } from '../services/api'
+import { isBaselineDocumentPath, normalizeDocumentPath } from '../utils/documentProgress'
 import type {
   Message,
   WorkflowCardPayload,
@@ -440,6 +441,14 @@ const normalizeWorkflowDisplay = (
   return {
     runId,
     ...fields,
+    ...(Array.isArray(source.foundationDocuments)
+      ? { foundationDocuments: source.foundationDocuments.flatMap(value => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+          const document = value as Record<string, unknown>
+          if (typeof document.path !== 'string' || !isBaselineDocumentPath(document.path) || document.status !== 'ready') return []
+          return [{ path: normalizeDocumentPath(document.path), status: 'ready' as const }]
+        }) }
+      : {}),
     nextAction:
       nextActionValue === 'resume' || nextActionValue === 'retry'
         ? nextActionValue

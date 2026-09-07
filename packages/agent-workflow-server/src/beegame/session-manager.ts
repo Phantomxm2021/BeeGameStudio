@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
+  readCanonicalProjectArtifactConsistently,
+  type ProjectArtifactIdentity,
+} from './project-artifact-store'
+import {
   appendFileSync,
   existsSync,
   mkdirSync,
@@ -52,16 +56,6 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
-import {
-  createFoundationMarkdownStreamSink,
-  type FoundationMarkdownStreamContract,
-  type FoundationMarkdownStreamSink,
-} from './foundation-markdown-stream'
-import {
-  createFoundationRevisionMarkdownStreamSink,
-  type FoundationRevisionMarkdownStreamContract,
-  type FoundationRevisionMarkdownStreamSink,
-} from './foundation-revision-markdown-stream'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -272,9 +266,6 @@ export type BeeGameSessionRunnerStartInput = {
   /** Native structured-output authority for workers that must return JSON. */
   workflowJsonSchema?: Record<string, unknown>
   workflowResourceContentCommitContract?: ResourceContentCommitContract
-  workflowRevisionContract?: Record<string, unknown>
-  workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
-  workflowRevisionMarkdownStreamContract?: FoundationRevisionMarkdownStreamContract
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -292,10 +283,6 @@ export type RuntimeLaunchContract = {
 }
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
-  'BEEGAME_WORKFLOW_WORKER_TYPE',
-  'BEEGAME_REVISION_CONTRACT',
-  'BEEGAME_WORKSPACE_PATH',
-  'BEEGAME_REVISION_STAGED_PATH',
   'BEEGAME_CONFIG_DIR',
   'BEEGAME_MODEL_TYPE',
   'ANTHROPIC_BASE_URL',
@@ -403,8 +390,6 @@ type SessionRecord = {
   workflowDispatchId?: string
   workflowWorkerType?: string
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
-  workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
-  workflowRevisionMarkdownStreamContract?: FoundationRevisionMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
@@ -412,8 +397,6 @@ type SessionRecord = {
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
   workflowResourceContentCommitContract?: ResourceContentCommitContract
-  workflowRevisionContract?: Record<string, unknown>
-  nativeRuntimeCwd?: string
   atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
@@ -658,8 +641,6 @@ export type StartBeeGameSessionInput = {
   workflowDispatchId?: string
   workflowWorkerType?: string
   workflowModelTier?: 'fast' | 'balanced' | 'strong'
-  workflowMarkdownStreamContract?: FoundationMarkdownStreamContract
-  workflowRevisionMarkdownStreamContract?: FoundationRevisionMarkdownStreamContract
   workflowAllowedPaths?: string[]
   workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
@@ -667,7 +648,6 @@ export type StartBeeGameSessionInput = {
   workflowReadOnlyPaths?: string[]
   workflowJsonSchema?: Record<string, unknown>
   workflowResourceContentCommitContract?: ResourceContentCommitContract
-  workflowRevisionContract?: Record<string, unknown>
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -732,6 +712,13 @@ export class BeeGameSessionManager {
   }
 
   start(input: StartBeeGameSessionInput): BeeGameSession {
+    if (
+      'workflowMarkdownStreamContract' in input ||
+      'workflowRevisionContract' in input ||
+      'workflowRevisionMarkdownStreamContract' in input ||
+      input.workflowWorkerType === 'foundation-document-reviser'
+    )
+      throw new Error('Legacy document revision and Markdown sessions are retired')
     if (!isAbsolute(input.workspacePath)) {
       throw new Error('Workspace path must be absolute')
     }
@@ -756,11 +743,6 @@ export class BeeGameSessionManager {
       )
     }
     mkdirSync(cwd, { recursive: true })
-    const nativeRuntimeCwd =
-      input.workflowWorkerType === 'foundation-document-reviser'
-        ? join(cwd, '.beegame', 'workflow', 'native-sandbox', randomUUID())
-        : undefined
-    if (nativeRuntimeCwd) mkdirSync(nativeRuntimeCwd, { recursive: true })
     const runtime = input.modelConfigId
       ? mapModelConfigToRuntime(input.modelConfigId)
       : undefined
@@ -806,18 +788,6 @@ export class BeeGameSessionManager {
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
       ...(input.workflowModelTier ? { workflowModelTier: input.workflowModelTier } : {}),
-      ...(input.workflowMarkdownStreamContract
-        ? {
-            workflowMarkdownStreamContract:
-              input.workflowMarkdownStreamContract,
-          }
-        : {}),
-      ...(input.workflowRevisionMarkdownStreamContract
-        ? {
-            workflowRevisionMarkdownStreamContract:
-              input.workflowRevisionMarkdownStreamContract,
-          }
-        : {}),
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
         : {}),
@@ -842,10 +812,6 @@ export class BeeGameSessionManager {
               input.workflowResourceContentCommitContract,
           }
         : {}),
-      ...(input.workflowRevisionContract
-        ? { workflowRevisionContract: structuredClone(input.workflowRevisionContract) }
-        : {}),
-      ...(nativeRuntimeCwd ? { nativeRuntimeCwd } : {}),
       runtime,
       userId: input.userId,
       ...(input.authToken ? { authToken: input.authToken } : {}),
@@ -1341,8 +1307,6 @@ export class BeeGameSessionManager {
       getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
       { force: true },
     )
-    if (record.nativeRuntimeCwd)
-      await rm(record.nativeRuntimeCwd, { recursive: true, force: true })
     this.sessions.delete(sessionId)
   }
 
@@ -1446,30 +1410,46 @@ export class BeeGameSessionManager {
     ) {
       throw new Error('Artifact path must stay inside the session workspace')
     }
-    return {
+    return readCanonicalProjectArtifactConsistently(record.session.cwd, async () => ({
       path: relativePath,
       content: await readFile(targetPath, 'utf8'),
-    }
+    }))
   }
 
   async createProjectPackage(
-    sessionId: string,
+    sessionId: string | undefined,
     workspacePath?: string,
+    expectedIdentity?: ProjectArtifactIdentity,
   ): Promise<BeeGameProjectPackage> {
-    const record = this.sessions.get(sessionId)
+    const record = sessionId ? this.sessions.get(sessionId) : undefined
     if (!record && !workspacePath) throw new Error('Session not found')
     if (!record && workspacePath && !isAbsolute(workspacePath)) {
       throw new Error('Workspace path must be absolute')
     }
     const root = resolve(record?.session.cwd ?? workspacePath ?? '')
-    const files = await collectPackageFiles(root)
-    const data = createZipArchive(
-      await Promise.all(
-        files.map(async file => ({
-          path: file,
-          data: await readFile(resolve(root, file)),
-        })),
-      ),
+    if (record && expectedIdentity &&
+      (expectedIdentity.ownerId !== record.userId ||
+       (record.projectId !== undefined && expectedIdentity.projectId !== record.projectId))) {
+      throw new Error('Artifact identity does not match the session owner or project')
+    }
+    const data = await readCanonicalProjectArtifactConsistently(
+      root,
+      async () => {
+        // Package the canonical workspace. Application-owned publication files
+        // are internal bookkeeping and must never be reintroduced into the archive.
+        const files = (await collectPackageFiles(root))
+          .filter(file => !file.startsWith('.beegame/artifacts/'))
+          .sort()
+        const data = createZipArchive(
+          await Promise.all(
+            files.map(async file => ({
+              path: file,
+              data: await readFile(resolve(root, file)),
+            })),
+          ),
+        )
+        return data
+      },
     )
     return {
       filename: `${basename(root) || 'beegame-project'}.zip`,
@@ -1483,8 +1463,6 @@ export class BeeGameSessionManager {
     prompt: BeeGamePromptInput,
     attachmentDirectory?: string,
   ): Promise<void> {
-    let markdownStreamSink: FoundationMarkdownStreamSink | undefined
-    let revisionMarkdownStreamSink: FoundationRevisionMarkdownStreamSink | undefined
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
@@ -1498,59 +1476,7 @@ export class BeeGameSessionManager {
         if (!record.workflowModelTier) throw new Error('foundation semantic model tier is missing')
         selectedEnvironment = selectFoundationSemanticRuntime(record.runtime, selectedEnvironment, record.workflowModelTier)
       }
-      let revisionStagedPath: string | undefined
-      if (
-        record.workflowWorkerType === 'foundation-document-reviser' &&
-        record.workflowRevisionContract
-      ) {
-        const configuredPath = record.workflowRevisionContract.stagedPath
-        if (typeof configuredPath !== 'string' || !configuredPath.trim())
-          throw new Error('foundation revision staged path authority is missing')
-        const candidate = resolve(record.session.cwd, configuredPath)
-        const workspaceRelative = relative(resolve(record.session.cwd), candidate)
-        if (
-          workspaceRelative === '' ||
-          workspaceRelative.startsWith('..') ||
-          isAbsolute(workspaceRelative)
-        )
-          throw new Error('foundation revision staged path escaped the project workspace')
-        revisionStagedPath = candidate
-      }
-      const env = buildRuntimeEnv({
-        ...selectedEnvironment,
-        ...(record.workflowWorkerType === 'foundation-document-reviser' && record.workflowRevisionContract
-          ? {
-              BEEGAME_WORKFLOW_WORKER_TYPE: record.workflowWorkerType,
-              // The native process deliberately runs in an empty sandbox cwd.
-              // These values are the only trusted bridge back to the project.
-              // Document scope may read the exact staged artifact once; all
-              // mutation, metadata and receipt work remains service-owned.
-              BEEGAME_WORKSPACE_PATH: record.session.cwd,
-              BEEGAME_REVISION_STAGED_PATH: revisionStagedPath!,
-              BEEGAME_REVISION_CONTRACT: JSON.stringify({
-                taskId: record.workflowRevisionContract.taskId,
-                revision: record.workflowRevisionContract.revision,
-                round: record.workflowRevisionContract.round,
-                scope: record.workflowRevisionContract.scope,
-                documentPath: record.workflowRevisionContract.documentPath,
-                issueIds: record.workflowRevisionContract.issueIds,
-                sectionIds: record.workflowRevisionContract.sectionIds,
-                stagedPath: record.workflowRevisionContract.stagedPath,
-                baseDocumentDigest: record.workflowRevisionContract.baseDocumentDigest,
-              }),
-            }
-          : {}),
-      })
-      if (record.workflowMarkdownStreamContract) {
-        markdownStreamSink = await createFoundationMarkdownStreamSink(
-          record.workflowMarkdownStreamContract,
-        )
-      }
-      if (record.workflowRevisionMarkdownStreamContract) {
-        revisionMarkdownStreamSink = await createFoundationRevisionMarkdownStreamSink(
-          record.workflowRevisionMarkdownStreamContract,
-        )
-      }
+      const env = buildRuntimeEnv(selectedEnvironment)
       const runner =
         record.runner ??
         (await this.runner.start({
@@ -1563,7 +1489,7 @@ export class BeeGameSessionManager {
             record.nativeSessionId = nativeSessionId
             this.persistRuntimeSnapshot(record)
           },
-          cwd: record.nativeRuntimeCwd ?? record.session.cwd,
+          cwd: record.session.cwd,
           env,
           runtimeLaunchContract: buildRuntimeLaunchContract(
             selectedEnvironment,
@@ -1582,18 +1508,6 @@ export class BeeGameSessionManager {
             : {}),
           ...(record.workflowDispatchId
             ? { workflowDispatchId: record.workflowDispatchId }
-            : {}),
-          ...(record.workflowMarkdownStreamContract
-            ? {
-                workflowMarkdownStreamContract:
-                  record.workflowMarkdownStreamContract,
-              }
-            : {}),
-          ...(record.workflowRevisionMarkdownStreamContract
-            ? {
-                workflowRevisionMarkdownStreamContract:
-                  record.workflowRevisionMarkdownStreamContract,
-              }
             : {}),
           ...(record.workflowAllowedPaths
             ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
@@ -1619,13 +1533,6 @@ export class BeeGameSessionManager {
                   record.workflowResourceContentCommitContract,
               }
             : {}),
-          ...(record.workflowRevisionContract
-            ? {
-                workflowRevisionContract: structuredClone(
-                  record.workflowRevisionContract,
-                ),
-              }
-            : {}),
           requestPermission: request => this.requestPermission(record, request),
         }))
       record.runner = runner
@@ -1634,10 +1541,7 @@ export class BeeGameSessionManager {
         runner,
         prompt,
         signal,
-        markdownStreamSink ?? revisionMarkdownStreamSink,
       )
-      if (markdownStreamSink) await markdownStreamSink.commit()
-      if (revisionMarkdownStreamSink) await revisionMarkdownStreamSink.commit()
       try {
         if (!signal.aborted && record.session.status === 'running') {
           const turnId = record.currentTurnId
@@ -1667,12 +1571,6 @@ export class BeeGameSessionManager {
         }
       }
     } catch (err) {
-      if (markdownStreamSink) {
-        await markdownStreamSink.abort(toErrorMessage(err))
-      }
-      if (revisionMarkdownStreamSink) {
-        await revisionMarkdownStreamSink.abort(toErrorMessage(err))
-      }
       disposeRunner(record.runner)
       record.runner = null
       if (record.session.status === 'running') {
@@ -1742,7 +1640,6 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
-    markdownStreamSink?: Pick<FoundationMarkdownStreamSink, 'observe'>,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
@@ -1753,7 +1650,6 @@ export class BeeGameSessionManager {
         : {}),
       signal,
       onMessage: message => {
-        markdownStreamSink?.observe(message)
         appendProjectAgentRawLog(record, message)
         trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {
@@ -2272,9 +2168,6 @@ export class BeeGameSessionManager {
             ...(record.workflowWorkerType
               ? { workerType: record.workflowWorkerType }
               : {}),
-          ...(record.workflowRevisionContract
-            ? { workflowRevisionContract: structuredClone(record.workflowRevisionContract) }
-            : {}),
             ...(record.workflowDispatchId
               ? { dispatchId: record.workflowDispatchId }
               : {}),
@@ -3988,7 +3881,7 @@ function projectWorkspaceFileAccessAuthority(
       return {
         behavior: 'deny',
         reason: 'project_workspace_read_scope_empty',
-        message: 'Scoped revision workers may use Read only on the assigned staged path.',
+        message: 'Scoped workflow workers may use Read only on an assigned path.',
       }
     const inputPath = request.input.file_path
     if (typeof inputPath !== 'string' || !inputPath.trim())
@@ -4015,7 +3908,7 @@ function projectWorkspaceFileAccessAuthority(
       : {
           behavior: 'deny',
           reason: 'project_workspace_read_scope_empty',
-          message: 'Scoped revision workers may read only their assigned staged path.',
+          message: 'Scoped workflow workers may read only their assigned path.',
         }
   }
   const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'

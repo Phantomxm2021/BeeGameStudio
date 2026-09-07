@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentWorkflowApp } from '../app'
-import type { BeeGameSessionRunner } from '../beegame/session-manager'
+import { randomUUID } from 'node:crypto'
+import type { AuthorResult } from '../beegame/stage-modules/foundation-authoring/public'
 
 const originalPauseProject =
   process.env.BEEGAME_FOUNDATION_AUTHORING_PAUSE_PROJECT_ID
@@ -47,30 +48,15 @@ async function readObservedDispatch(cwd: string): Promise<ObservedDispatch> {
   }
 }
 
-describe('Foundation authoring pause request at workflow creation', () => {
-  test('targets only a new run, persists before its first dispatch, and does not retrofit an existing run', async () => {
+describe('Retired Foundation authoring pause control', () => {
+  test('ignores the retired environment control for new and existing public Author runs', async () => {
     const root = await mkdtemp(join(tmpdir(), 'beegame-foundation-pause-'))
     temporaryDirectories.push(root)
     const projectsRoot = join(root, 'projects')
     await mkdir(projectsRoot, { recursive: true })
 
     const observations: ObservedDispatch[] = []
-    const runner: BeeGameSessionRunner = {
-      start: async input => {
-        observations.push(await readObservedDispatch(input.cwd))
-        return {
-          submit: async ({ signal }) =>
-            await new Promise<void>(resolve => {
-              if (signal.aborted) {
-                resolve()
-                return
-              }
-              signal.addEventListener('abort', () => resolve(), { once: true })
-            }),
-          stop: () => undefined,
-        }
-      },
-    }
+    const results = new Map<string, AuthorResult>()
     const cleanups: Array<() => void | Promise<void>> = []
     const app = createAgentWorkflowApp({
       currentUser: { id: 'pause-owner', role: 'owner' },
@@ -78,7 +64,18 @@ describe('Foundation authoring pause request at workflow creation', () => {
       defaultWorkspacePath: projectsRoot,
       modelConfigStore: false,
       skillsConfig: false,
-      sessionRunner: runner,
+      sessionRunner: { async start() { throw new Error('Author must not enter the legacy session runner') } },
+      foundationAuthoringHostFactory: options => ({
+        async start() {
+          observations.push(await readObservedDispatch(options.workspacePath))
+          const handle = { protocolVersion: 1 as const, producer: 'foundation-authoring' as const, id: randomUUID() }
+          results.set(handle.id, { status: 'running', handle })
+          return handle
+        },
+        async resume({ handle }) { return handle },
+        async stop({ handle }) { const result = { status: 'stopped' as const, handle }; results.set(handle.id, result); return result },
+        async getResult(handle) { return results.get(handle.id)! },
+      }),
       registerCleanup: cleanup => cleanups.push(cleanup),
     })
 
@@ -131,19 +128,25 @@ describe('Foundation authoring pause request at workflow creation', () => {
       const target = await bootstrap(targetProjectId)
       expect(observations).toHaveLength(1)
       expect(observations[0]!.snapshot.projectId).toBe(targetProjectId)
+      expect(observations[0]!.snapshot.authorStage).toMatchObject({ status: 'starting' })
+      expect(observations[0]!.snapshot.activeDispatch).toBeUndefined()
       expect(
         Object.hasOwn(observations[0]!.snapshot, 'foundationAuthoringPause'),
       ).toBe(false)
       expect(observations[0]!.eventTypes[0]).toBe('run.created')
-      expect(observations[0]!.events[0]!.foundationAuthoringPause).toBe(
-        'requested',
-      )
+      expect(observations[0]!.events.every(event =>
+        !Object.hasOwn(event, 'foundationAuthoringPause'))).toBe(true)
       expect(
         observations[0]!.events.filter(
           event => event.type === 'foundation.authoring.pause_changed',
         ),
       ).toHaveLength(0)
       expect(target.runId).toBe(observations[0]!.snapshot.runId as string)
+      const targetResume = await app.request(
+        `/api/projects/${targetProjectId}/workflow/resume`,
+        { method: 'POST' },
+      )
+      expect(targetResume.status).toBe(200)
 
       const other = await bootstrap(otherProjectId)
       expect(observations).toHaveLength(2)

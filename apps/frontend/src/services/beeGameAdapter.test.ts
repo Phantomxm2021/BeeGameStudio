@@ -3224,6 +3224,35 @@ describe('beeGameAdapter prompt rules', () => {
     expect(artifacts.map(artifact => artifact.name)).not.toContain('restored-docs__12345678.jsonl');
   });
 
+  it('uses an index-only project when the legacy session events endpoint is gone', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/projects/project_index_only/artifact-index') {
+        return jsonResponse({
+          workspacePath: '/tmp/beegame-projects/index-only',
+          artifacts: [{
+            path: 'docs/GDD.md',
+            name: 'GDD.md',
+            artifact_type: 'Document',
+            created_at: '2026-07-01T00:00:00.000Z',
+          }],
+        });
+      }
+      if (url.startsWith('/api/projects/project_index_only/events')) {
+        return jsonResponse({ error: 'Session not found' }, 404);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const artifacts = await beeGameAdapter.getArtifacts('project_index_only');
+    expect(artifacts.map(artifact => artifact.path).filter(Boolean)).toEqual(['docs/GDD.md']);
+    expect(artifacts.find(artifact => artifact.package_download)).toEqual(expect.objectContaining({
+      name: 'index-only.zip',
+    }));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/events'))).toBe(false);
+  });
+
   it('downloads the project package through the project-scoped endpoint', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/api/projects/project_zip/package') {

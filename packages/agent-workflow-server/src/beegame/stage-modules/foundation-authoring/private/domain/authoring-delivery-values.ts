@@ -1,0 +1,18 @@
+export const BEEGAME_RESOURCE_ROOTS = { runtime: 'assets/runtime', content: 'assets/content', generated: 'assets/generated' } as const
+export const BEEGAME_RESOURCE_STATUSES = ['available', 'verified', 'failed'] as const
+export const CURRENT_ASSET_MANIFEST_VERSION = 8 as const
+export const BEEGAME_CONTENT_SCHEMA = 'beegame-content-v1' as const
+export const BEEGAME_JSON_CONTENT_KINDS = ['resource-registry','entity-definitions','ui-configuration','audio-configuration','event-definitions','wave-definitions','numeric-configuration'] as const
+export const BEEGAME_YAML_CONTENT_KINDS = ['world-definition','scene-definitions','hierarchy-definition','placement-definitions'] as const
+export const RESOURCE_DIMENSIONS = ['2D','3D','agnostic'] as const
+export const RESOURCE_USAGE_TAGS = ['character','npc','creature','weapon-equipment','prop','vehicle','building','environment','terrain','vegetation','scene','level-map','tile','ui','icon','effect','combat','interaction','narrative','music','sound-effect','ambient-audio','voice'] as const
+export const RESOURCE_ASSET_KINDS = ['image','texture','sprite','sprite-sheet','sprite-atlas','frame-animation','tileset','tilemap','mesh','model','scene','material','rig','animation-clip','animation-library','ui-document','ui-screen','font','audio-clip','audio-cue','audio-bank','music','ambience','voice','vfx','shader','physical-material','collider','input-profile','data'] as const
+export const RESOURCE_CAPABILITIES = ['alpha','tileable','nine-slice','sprite-slicing','frame-sequence','atlas-regions','tile-collision','skinned','rigged','contains-animations','contains-materials','contains-textures','morph-targets','lod','collision','navigation','modular','connection-points','scene-layout','spawn-markers','objective-markers','ui-states','focus-navigation','safe-area','particle','flipbook','trail','spatial-audio','loop-points','audio-variants','physical-properties','ragdoll','input-actions','touch-controls','gamepad-controls'] as const
+export const RESOURCE_EMBEDDED_COMPONENT_KINDS = ['sprite-frame','atlas-region','tile','tile-layer','mesh','skinned-mesh','skeleton','animation-clip','material','texture','morph-target','collider','lod','scene-node'] as const
+export const RESOURCE_RELATION_KINDS = ['uses-texture','uses-material','uses-rig','animation-for','collision-for','lod-of','variant-of','component-of','audio-for','vfx-for'] as const
+export const CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS = [
+  { format: 'gltf', assetKinds: ['model','mesh'] },
+  { format: 'png', assetKinds: ['image','texture','sprite','sprite-sheet','sprite-atlas','frame-animation','tileset','tilemap','ui-document'] },
+  { format: 'wav', assetKinds: ['audio-clip','audio-cue','audio-bank','music','ambience','voice'] },
+  { format: 'json', assetKinds: RESOURCE_ASSET_KINDS.filter(kind => !['audio-clip','audio-cue','audio-bank','music','ambience','voice'].includes(kind)) },
+] as const

@@ -1,5 +1,5 @@
-import { runningAuthorDispatches, stopAuthorState } from './foundation-authoring-state'
-import { stopFoundationReviewTask, projectFoundationReviewLifecycleTask } from './stages/foundation-review/public'
+import { RETIRED_FOUNDATION_AUTHOR, assertNoRetiredAuthorRun } from './retired-foundation-author'
+import { assertNoRetiredFoundationReviewRun, retiredFoundationRunningDispatches } from './retired-foundation-review'
 import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { transitionDeliveryRun } from './transition'
@@ -31,14 +31,10 @@ import {
   projectExactResumeRun,
   proveExactRawActiveUnitId,
 } from './recovery-projector'
-import { foundationRuntimeTasks } from './foundation-audit-state'
-import type { FoundationAuditTask } from './foundation-audit-state'
-import { reconcileAuthorRecoveryReceipt, restoreAuthorDispatchReceipt } from './foundation-authoring-recovery'
 import {
   createResourceContentTerminalFromReceipt,
   reconcileResourceContentCommitReceipt,
 } from '../native-resource-content-tool'
-import { projectTaskTerminalEvidence } from './task-terminal-evidence'
 
 export {
   inspectWorkflowSnapshot,
@@ -108,11 +104,7 @@ function stringArray(value: unknown): string[] | undefined {
 function hasStaleFoundationWorkers(run: DeliveryRun): boolean {
   return Boolean(
       run.status !== 'running' &&
-      run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(
-          task =>
-          task.status === 'running' &&
-          task.dispatch?.status === 'running',
-      ),
+      retiredFoundationRunningDispatches(run).length > 0,
   )
 }
 
@@ -225,80 +217,9 @@ async function reconcileActiveCanonicalReceipt(input: {
     }
 
   if (dispatch.workerType === 'document-author') {
-    const identity = assertActiveRequestIdentity({
-      ...input,
-      snapshot,
-      dispatch,
-      request,
-    })
-    const contract = snapshotRecord(request.contract)
-    const targetPath = stringValue(contract?.foundationDocumentPath)
-    const completedPaths = stringArray(
-      snapshotRecord(snapshot.foundationDraftState)?.completedPaths,
-    )
-    const rawActiveUnitId = proveExactRawActiveUnitId({
-      inspection: input.inspection,
-      workspacePath: input.workspacePath,
-      ownerId: input.ownerId,
-      projectId: input.projectId,
-      confirmedBriefContext: input.confirmedBriefContext,
-    })
-    const reconciled = await reconcileAuthorRecoveryReceipt({
-      workspacePath: input.workspacePath,
-      dispatchId: identity.dispatchId,
-      targetPath, completedPaths,
-      authoringMode: contract?.authoringMode,
-      rawActiveUnitId,
-      confirmedBriefContext: input.confirmedBriefContext,
-      reject: recoveryConflict,
-    })
-    if (!reconciled) return { inspection: input.inspection, events: input.events, acceptedUnits: [] }
-    const { unit, revision, acceptedAt, nextPath } = reconciled
-    const parsedValue = {
-      ...snapshot,
-      revision,
-      status: 'running',
-      activeDispatch: undefined,
-      foundationDraftState: { completedPaths: reconciled.completedPaths },
-      ...(nextPath
-        ? {
-            phase: 'DOCUMENT_DRAFTING',
-            documentStep: 'FOUNDATION_DRAFTING',
-            currentItemId: nextPath,
-          }
-        : {
-            phase: 'DOCUMENT_DRAFTING',
-            documentStep: 'FOUNDATION_DRAFTING',
-            status: 'running',
-            foundationAuditState: undefined,
-          }),
-      updatedAt: acceptedAt,
-    }
-    const activeUnitId = nextPath
-      ? `document:${nextPath}`
-      : 'foundation-audit:derive'
-    if (acceptedUnitAlreadyJournaled(input.events, unit.unitId))
-      return {
-        inspection: { ...input.inspection, parsedValue },
-        events: input.events,
-        acceptedUnits: [],
-        receiptReconciliation: {
-          sourceInspection: input.inspection,
-          successorActiveUnitId: activeUnitId,
-        },
-      }
-    return {
-      inspection: { ...input.inspection, parsedValue },
-      events: [
-        ...input.events,
-        acceptedEvent({ ...input, unit, runId: identity.runId, revision }),
-      ],
-      acceptedUnits: [unit],
-      receiptReconciliation: {
-        sourceInspection: input.inspection,
-        successorActiveUnitId: activeUnitId,
-      },
-    }
+    if (snapshotRecord(request.contract)?.documentSet !== 'checklist')
+      recoveryConflict(RETIRED_FOUNDATION_AUTHOR)
+    return { inspection: input.inspection, events: input.events, acceptedUnits: [] }
   }
 
   if (dispatch.workerType === 'resource-content-author') {
@@ -537,6 +458,7 @@ export async function recoverAndResumeRun(input: {
       const source = await input.store.inspectWorkflowSnapshot()
       assertRecoveryAuthority({ ...input, inspection: source })
       if (source.currentRun) {
+        if (!source.currentRun.authorStage) assertNoRetiredFoundationReviewRun(source.currentRun)
         let currentRun = source.currentRun
         if (hasStaleFoundationWorkers(currentRun)) {
           try {
@@ -583,6 +505,9 @@ export async function recoverAndResumeRun(input: {
         }
       }
       const stoppedRecord = snapshotRecord(stoppedSource.parsedValue)
+      // Shutdown must be acknowledged before rejection. Unsupported projects
+      // must never reach receipt reconciliation or reconstruct a review state.
+      if (stoppedRecord) assertNoRetiredFoundationReviewRun(stoppedRecord)
       const runId = stringValue(stoppedRecord?.runId)
       if (!runId)
         throw new WorkflowStoreError(
@@ -678,14 +603,6 @@ export async function recoverAndResumeRun(input: {
   })
 }
 
-async function restoreCanonicalDocumentCommit(
-  run: DeliveryRun,
-  workspacePath?: string,
-): Promise<DeliveryRun> {
-  const restored = await restoreAuthorDispatchReceipt(workspacePath, run.activeDispatch)
-  if (!restored) return run
-  return { ...run, activeDispatch: restored.dispatch, blockedReason: undefined, updatedAt: restored.finishedAt }
-}
 
 async function restoreResourceContentCommit(
   run: DeliveryRun,
@@ -747,6 +664,7 @@ export async function reconcileRunOnStartup(input: {
 }): Promise<DeliveryRun | null> {
   const initial = await input.store.load()
   if (!initial) return null
+  if (initial.authorStage) return initial
   const acquired = await acquireAndLoad({
     store: input.store,
     runId: initial.runId,
@@ -775,21 +693,26 @@ async function acquireAndLoad(input: {
       ...(current.activeDispatch?.status === 'running'
         ? [current.activeDispatch]
         : []),
-      ...(current.foundationAuditState ? foundationRuntimeTasks(current.foundationAuditState) : [])
-        .filter(task => task.status === 'running' && task.dispatch)
-        .map(task => task.dispatch!),
+      ...retiredFoundationRunningDispatches(current),
     ]
     if (!runningDispatches.length) return false
     if (!input.sessionIsOpen) return true
     return (await Promise.all(runningDispatches.map(dispatch => input.sessionIsOpen!(dispatch)))).some(Boolean)
   })
   try {
+    const beforeRecovery = await input.store.load(lease)
+    if (beforeRecovery && !beforeRecovery.authorStage) {
+      assertNoRetiredAuthorRun(beforeRecovery)
+      assertNoRetiredFoundationReviewRun(beforeRecovery)
+    }
     const run = await input.store.reconcile(
       input.sessionIsOpen ?? (async () => false),
       lease,
     )
     if (!run || run.runId !== input.runId)
       throw new Error('delivery run not found')
+    if (run.authorStage)
+      throw new Error('Public author invocation must be controlled through its module, not legacy recovery')
     return { run, lease, unlock: () => input.store.unlock(lease) }
   } catch (error) {
     await input.store.unlock(lease)
@@ -805,19 +728,13 @@ export async function resumeRun(input: {
 }): Promise<DeliveryRun> {
   const acquired = await acquireAndLoad(input)
   try {
-    const foundationFactRunning = acquired.run.foundationAuditState !== undefined && foundationRuntimeTasks(acquired.run.foundationAuditState).some(
-      task => task.status === 'running' && task.dispatch?.status === 'running',
-    )
+    const foundationFactRunning = retiredFoundationRunningDispatches(acquired.run).length > 0
     if (
       acquired.run.status === 'completed' ||
       acquired.run.activeDispatch?.status === 'running' ||
       foundationFactRunning
     )
       return acquired.run
-    acquired.run = await restoreCanonicalDocumentCommit(
-      acquired.run,
-      input.workspacePath,
-    )
     acquired.run = await restoreResourceContentCommit(
       acquired.run,
       input.workspacePath,
@@ -867,10 +784,6 @@ export async function retryRun(input: {
 }): Promise<DeliveryRun> {
   const acquired = await acquireAndLoad(input)
   try {
-    acquired.run = await restoreCanonicalDocumentCommit(
-      acquired.run,
-      input.workspacePath,
-    )
     acquired.run = await restoreResourceContentCommit(
       acquired.run,
       input.workspacePath,
@@ -943,14 +856,6 @@ export async function stopRun(input: {
   const dispatchIds = new Set<string>()
   if (acquired.run.activeDispatch?.status === 'running')
     dispatchIds.add(acquired.run.activeDispatch.dispatchId)
-  for (const dispatch of runningAuthorDispatches(acquired.run.foundationDraftState))
-    dispatchIds.add(dispatch.dispatchId)
-  for (const task of acquired.run.foundationAuditState ? foundationRuntimeTasks(acquired.run.foundationAuditState) : [])
-    if (task.dispatch?.status === 'running')
-      dispatchIds.add(task.dispatch.dispatchId)
-  const activeTaskIds = acquired.run.foundationAuditState
-    ? new Set(foundationRuntimeTasks(acquired.run.foundationAuditState).map(task => task.taskId))
-    : new Set<string>()
   try {
     const stopped = transitionDeliveryRun(acquired.run, {
       type: 'stop',
@@ -968,36 +873,6 @@ export async function stopRun(input: {
         stopped.activeDispatch?.status === 'running'
           ? interruptedDispatch(stopped.activeDispatch)
           : stopped.activeDispatch,
-      foundationDraftState: stopAuthorState(stopped.foundationDraftState, input.reason, interruptedDispatch),
-      ...(stopped.foundationAuditState
-        ? {
-            foundationAuditState: {
-              ...stopped.foundationAuditState,
-              tasks: stopped.foundationAuditState.tasks.map(task =>
-                activeTaskIds.has(task.taskId) && task.dispatch?.status === 'running'
-                  ? task.kind === 'document-facts' || task.kind === 'semantic' || task.kind === 'confirmation'
-                    ? stopFoundationReviewTask({ task: projectFoundationReviewLifecycleTask(task), reason: input.reason, interruptDispatch: interruptedDispatch }) as FoundationAuditTask
-                    : (() => {
-                      const terminal = interruptedDispatch(task.dispatch!)
-                      return projectTaskTerminalEvidence(
-                        {
-                          ...task,
-                          // A user stop interrupts the current attempt; it is
-                          // not a worker failure and must not consume the
-                          // attempt available to the next Continue action.
-                          status: 'retryable' as const,
-                          attempt: Math.max(0, task.attempt - 1),
-                          failureReason: input.reason,
-                          dispatch: terminal,
-                        } as FoundationAuditTask,
-                        terminal,
-                      )
-                    })()
-                  : task,
-              ),
-            },
-          }
-        : {}),
     }
     persisted = await input.store.commit(
       persisted,

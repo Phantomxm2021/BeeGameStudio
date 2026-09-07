@@ -17,13 +17,16 @@ import {
   retryRun,
   stopRun,
 } from '../beegame/delivery-workflow/recovery'
-import { completeDocumentDraft } from '../beegame/delivery-workflow/document-stage'
 import { createDeliveryDispatcher } from '../beegame/delivery-workflow/dispatch'
-import { projectTaskTerminalEvidence } from '../beegame/delivery-workflow/task-terminal-evidence'
-import {
-  beginParallelFoundationAuthoring,
-  recordFoundationDispatch,
-} from '../beegame/delivery-workflow/foundation-authoring-batch'
+import type { DispatchRecord } from '../beegame/delivery-workflow/types'
+import type { HistoricalAuthorDraftState } from '../beegame/delivery-workflow/historical-author-checkpoint'
+// Historical fixture construction only: no scheduler or recovery implementation.
+function beginParallelFoundationAuthoring(completedPaths: readonly FoundationDocumentPath[]): HistoricalAuthorDraftState {
+  return { completedPaths: [...completedPaths], documents: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, status: completedPaths.includes(path) ? 'committed' : 'pending' })) }
+}
+function recordFoundationDispatch(state: HistoricalAuthorDraftState, path: FoundationDocumentPath, status: 'drafting', dispatch: DispatchRecord): HistoricalAuthorDraftState {
+  return { ...state, documents: state.documents!.map(d => d.path === path ? { ...d, status, dispatch } : d) }
+}
 import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/controller'
 import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
 import {
@@ -52,9 +55,7 @@ import {
 } from '../beegame/delivery-workflow/types'
 import { WORKER_TYPES } from '../beegame/delivery-workflow/schema'
 import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
-import {
-  commitAuthoredFoundationDocument,
-} from '../beegame/authored-document-receipt'
+import { seedHistoricalAuthoredDocument } from './historical-authored-document-fixture'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
 import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
@@ -66,14 +67,6 @@ import {
   computeResourceInventoryRevision,
   computeResourceRevision,
 } from '../beegame/delivery-workflow/revision'
-import { createFoundationAuditState, parseFoundationAuditState } from '../beegame/delivery-workflow/foundation-audit-state'
-import { foundationRevisionPacketDigest, foundationRevisionPacketPath, foundationRevisionStagePath, writeFoundationRevisionPacket } from '../beegame/delivery-workflow/foundation-revision-stage'
-import { FOUNDATION_AUDIT_PRODUCTION_MANIFEST } from '../beegame/delivery-workflow/foundation-audit-production-manifest'
-import {
-  canonicalFoundationAuthorityProjectionBytes,
-  foundationProjectionRelativePath,
-  projectFoundationAuthority,
-} from '../beegame/foundation-authority-projection'
 
 const RECOVERY_OWNER_ID = 'recovery-owner'
 
@@ -112,6 +105,9 @@ const EXACT_RESUME_WORKER_CHECKPOINTS = [
   'unit-accepted',
 ] as const
 
+const LEGACY_AUTHOR_RETIRED_ERROR =
+  'retired'
+
 const CANONICAL_RECEIPT_WORKERS: readonly DispatchWorkerType[] = [
   'document-author',
   'resource-content-author',
@@ -119,6 +115,67 @@ const CANONICAL_RECEIPT_WORKERS: readonly DispatchWorkerType[] = [
 
 type ExactResumeWorkerCheckpoint =
   (typeof EXACT_RESUME_WORKER_CHECKPOINTS)[number]
+
+function legacyAuthorHistoricalSnapshot(
+  run: DeliveryRun,
+  checkpoint: ExactResumeWorkerCheckpoint,
+  workspacePath: string,
+): DeliveryRun {
+  const path = 'docs/GDD.md' as const
+  const request: WorkerDispatchRequest = {
+    dispatchId: `legacy-author-${checkpoint}`,
+    runId: run.runId,
+    ownerId: run.ownerId,
+    projectId: run.projectId,
+    workspacePath,
+    workerType: 'document-author',
+    phase: 'DOCUMENT_DRAFTING',
+    taskId: path,
+    revision: run.revision.document,
+    allowedPaths: [path],
+    contract: {
+      confirmedBriefDigest: run.confirmedBriefDigest,
+      documentSet: 'foundation',
+      authoringMode: 'initial',
+      foundationDocumentPath: path,
+      availableUpstreamPaths: [],
+    },
+  }
+  const dispatch = {
+    dispatchId: request.dispatchId!,
+    workerType: 'document-author' as const,
+    phase: 'DOCUMENT_DRAFTING' as const,
+    taskId: path,
+    revision: request.revision,
+    status: checkpoint === 'open' ? ('running' as const) : ('completed' as const),
+    startedAt: run.updatedAt,
+    ...(checkpoint === 'open'
+      ? {}
+      : {
+          finishedAt: run.updatedAt,
+          terminalResult: {
+            workerType: 'document-author' as const,
+            status: 'completed' as const,
+            writtenPaths: [path],
+            resolvedFindingIds: [],
+          },
+        }),
+    request,
+  }
+  return {
+    ...run,
+    phase: 'DOCUMENT_DRAFTING',
+    documentStep: 'FOUNDATION_DRAFTING',
+    foundationDraftState: {
+      completedPaths: checkpoint === 'unit-accepted' ? [path] : [],
+    },
+    ...(checkpoint === 'before-dispatch'
+      ? { activeDispatch: undefined }
+      : checkpoint === 'unit-accepted'
+        ? { activeDispatch: undefined }
+        : { activeDispatch: dispatch }),
+  }
+}
 
 function exactResumeCheckpointsForWorker(
   workerType: DispatchWorkerType,
@@ -222,22 +279,7 @@ async function commitMatrixFoundationDocument(input: {
     join(input.workspacePath, input.path),
     input.body ?? matrixCompleteDocument(input.path),
   )
-  const contract = getGameDocumentContract(input.path)
-  const documents = new Map(await Promise.all(
-    foundationAuthoringSources(input.path).map(async source => [
-      source.path,
-      await readFile(join(input.workspacePath, source.path), 'utf8'),
-    ] as const),
-  ))
-  const projection = projectFoundationAuthority({
-    targetPath: input.path,
-    availableUpstreamPaths: foundationAuthoringSources(input.path).map(source => source.path),
-    documents,
-  })
-  const projectionPath = join(input.workspacePath, foundationProjectionRelativePath(input.dispatchId))
-  await mkdir(join(input.workspacePath, '.beegame/workflow/document-projections'), { recursive: true })
-  await writeFile(projectionPath, canonicalFoundationAuthorityProjectionBytes(projection))
-  await commitAuthoredFoundationDocument({
+  await seedHistoricalAuthoredDocument({
     workspacePath: input.workspacePath,
     dispatchId: input.dispatchId,
     targetPath: input.path,
@@ -1056,7 +1098,6 @@ async function createCanonicalReceiptRecoveryFixture(input?: {
   const runId = 'run-1'
   const store = createRunStore(workspacePath, ownerId)
   const firstPath = CANONICAL_FOUNDATION_DOCUMENTS[0]
-  const nextPath = CANONICAL_FOUNDATION_DOCUMENTS[1]
   const dispatchId = 'committed-document-dispatch'
   await commitMatrixFoundationDocument({
     workspacePath,
@@ -1177,7 +1218,6 @@ async function createCanonicalReceiptRecoveryFixture(input?: {
     ownerId,
     projectId,
     firstPath,
-    nextPath,
     started,
     recover: () =>
       recoverAndResumeRun({
@@ -1198,519 +1238,139 @@ describe('delivery workflow recovery', () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
   })
 
-  test('resume preserves durable foundation task evidence and phase timing', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'durable-evidence-'))
-    const digest = 'a'.repeat(64)
-    const revision = 'recovery-facts'
-    const seed = createFoundationAuditState({
-      revision,
-      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      manifest: { revision, status: 'index_staged', derivationMode: 'complete', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+  test('does not resume when stale worker shutdown fails', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-stop-failure-'))
+    const initial = createTestDeliveryRun({
+      runId: 'recovery-stop-failure',
+      projectId: RECOVERY_PROJECT_ID,
+      ownerId: RECOVERY_OWNER_ID,
+      confirmedBriefContext: RECOVERY_BRIEF,
     })
-    const foundationAuditState = parseFoundationAuditState({
-      ...seed,
-      status: 'extracting_facts',
-      phaseStartedAt: '2020-01-01T00:00:00.000Z',
-      tasks: [{
-        taskId: 'fact-0', kind: 'document-facts', revision, packetDigest: digest, factKeyCount: 1, modelTier: 'fast', status: 'completed', attempt: 1,
-        terminalDigest: digest, receiptPath: `.beegame/audit/foundation/${revision}/staging/receipts/fact-0.json`, receiptDigest: digest,
-        usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 }, durationMs: 42,
-        dispatch: { dispatchId: 'fact-dispatch', workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'fact-0', revision, status: 'completed', startedAt: '2020-01-01T00:00:00.000Z', finishedAt: '2020-01-01T00:00:01.000Z', terminalResult: { workerType: 'foundation-fact-extractor', status: 'completed', runId: 'run', dispatchId: 'fact-dispatch', taskId: 'fact-0', revision, packetDigest: digest, results: [] } },
-      }],
-    })
-    const run = { ...createTestDeliveryRun({ runId: 'recovery-durable-evidence', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'DOCUMENT_REVIEW' as const, documentStep: 'FOUNDATION_REVIEW' as const, status: 'needs_action' as const, blockedReason: 'durable evidence test', foundationAuditState }
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    await store.save(run)
-    const recovered = await resumeRun({ store, runId: run.runId })
-    expect(recovered.foundationAuditState).toEqual(foundationAuditState)
-    expect(recovered.foundationAuditState?.phaseStartedAt).toBe('2020-01-01T00:00:00.000Z')
-    expect(recovered.foundationAuditState?.tasks[0]).toMatchObject({
-      attempt: 1,
-      usage: { total_tokens: 12 },
-      durationMs: 42,
-      terminalDigest: digest,
-      receiptDigest: digest,
-      dispatch: { status: 'completed', terminalResult: expect.any(Object) },
-    })
-    const retried = await retryRun({ store, runId: run.runId })
-    expect(retried.foundationAuditState).toEqual(foundationAuditState)
-  })
-
-  test('recovery keeps revision worker failures retryable beyond the former cap', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'foundation-terminal-retry-'))
-    const digest = 'd'.repeat(64)
-    const revision = 'terminal-retry'
-    const documents = [
-      { taskId: 'revision-a', documentPath: 'docs/GDD.md' as const, sectionId: 'vision' },
-      { taskId: 'revision-b', documentPath: 'docs/LEVEL_SCENE_DESIGN.md' as const, sectionId: 'scene_flow' },
-    ]
-    const baseDocumentDigest = new Map<string, string>()
-    for (const document of documents) {
-      const markdown = `# ${document.documentPath}\n\nbase\n`
-      const documentPath = join(workspace, document.documentPath)
-      await mkdir(join(documentPath, '..'), { recursive: true })
-      await writeFile(documentPath, markdown)
-      baseDocumentDigest.set(document.taskId, createHash('sha256').update(markdown).digest('hex'))
-    }
-    const packetDigests = new Map<string, string>()
-    const packetPaths = new Map<string, string>()
-    for (const document of documents) {
-      const packet = { schema: 'test-foundation-revision-packet', revision, round: 1, taskId: document.taskId, documentPath: document.documentPath, sections: [] }
-      const packetDigest = foundationRevisionPacketDigest(packet)
-      packetDigests.set(document.taskId, packetDigest)
-      packetPaths.set(document.taskId, await writeFoundationRevisionPacket({ workspacePath: workspace, revision, round: 1, taskId: document.taskId, documentPath: document.documentPath, packet, packetDigest }))
-    }
-    const bundleId = `${revision}.bundle.1`
-    const foundationAuditState = parseFoundationAuditState({
-      ...createFoundationAuditState({
-        revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-        manifest: {
-          revision,
-          status: 'index_staged',
-          derivationMode: 'complete',
-          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
-          sectionIndexDigest: digest,
-        },
-      }),
-      status: 'revising' as const,
-      authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      },
-      roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
-      round: 1 as const,
-      activeBundleId: bundleId,
-      revisionBundles: [{ bundleId, status: 'active' as const, round: 1, baseDocumentRevision: revision, baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), remediationDigest: digest, taskIds: documents.map(document => document.taskId), frozenTaskIds: [] }],
-      phaseStartedAt: new Date().toISOString(),
-      issueSummary: { total: 2, blocker: 0, high: 2, medium: 0, low: 0 },
-      tasks: [
-        ...documents.map(document => ({ taskId: document.taskId, kind: 'document-revision' as const, scope: 'section' as const, revision, round: 1 as const, bundleId, packetPath: packetPaths.get(document.taskId)!, packetDigest: packetDigests.get(document.taskId)!, status: 'pending' as const, attempt: 0, documentPath: document.documentPath, issueIds: ['AUD-1'], sectionIds: [document.sectionId], stagedPath: foundationRevisionStagePath(revision, document.documentPath), baseDocumentDigest: baseDocumentDigest.get(document.taskId)!, dependencyDigests: {}, frozen: false })),
-      ],
-    })
-    const run = {
-      ...createTestDeliveryRun({ runId: 'terminal-retry', projectId: 'project', ownerId: RECOVERY_OWNER_ID }),
-      phase: 'FOUNDATION_REVISION' as const,
-      documentStep: 'FOUNDATION_REVISION' as const,
-      foundationAuditState,
-    }
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    await store.save(run)
-    const taskByDispatch = new Map<string, string>()
-    let releaseSibling!: () => void
-    const siblingGate = new Promise<void>(resolve => { releaseSibling = resolve })
-    const missingTerminal = () => {
-      const error = new Error('foundation revision completed without a committed Markdown receipt')
-      error.name = 'WorkerNeedsActionError'
-      return error
-    }
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      workerPort: {
-        async start(request) {
-          taskByDispatch.set(request.dispatchId!, request.taskId!)
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
-        },
-        async submit() {},
-        async waitForTerminal(dispatchId) {
-          if (taskByDispatch.get(dispatchId) === 'revision-b') await siblingGate
-          throw missingTerminal()
-        },
-        async stop() {},
-        async close() {},
-        async status() { throw new Error('not used') },
-      },
-    })
-    const request = (taskId: string): WorkerDispatchRequest => ({
-      runId: run.runId,
-      ownerId: run.ownerId,
-      projectId: run.projectId,
-      workspacePath: workspace,
-      workerType: 'foundation-document-reviser',
-      phase: 'FOUNDATION_REVISION',
-      taskId,
-      revision,
-      contract: { workerType: 'foundation-document-reviser', taskId, round: 1, documentPath: documents.find(document => document.taskId === taskId)!.documentPath, issueIds: ['AUD-1'], sectionIds: [documents.find(document => document.taskId === taskId)!.sectionId], stagedPath: foundationRevisionStagePath(revision, documents.find(document => document.taskId === taskId)!.documentPath), baseDocumentDigest: baseDocumentDigest.get(taskId)!, packetPath: packetPaths.get(taskId)!, packetDigest: packetDigests.get(taskId)! },
-    })
-
-    await dispatcher.dispatch(request('revision-a'))
-    await dispatcher.waitForTerminalReconciliation()
-    const firstAttempt = await store.load()
-    expect(firstAttempt?.status).toBe('running')
-    expect(firstAttempt?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 1 })
-
-    await dispatcher.dispatch(request('revision-b'))
-    await dispatcher.dispatch(request('revision-a'))
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const current = await store.load()
-      const task = current?.foundationAuditState?.tasks.find(candidate => candidate.taskId === 'revision-a')
-      if (current?.status === 'running' && task?.status === 'retryable' && task.attempt === 2) break
-      await new Promise(resolve => setTimeout(resolve, 5))
-    }
-    const afterSecondAttempt = await store.load()
-    expect(afterSecondAttempt).toMatchObject({ status: 'running' })
-    expect(afterSecondAttempt?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 2 })
-    releaseSibling()
-    await dispatcher.waitForTerminalReconciliation()
-    const final = await store.load()
-    expect(final).toMatchObject({ status: 'running' })
-    expect(final?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 2 })
-    expect(final?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-b')).toMatchObject({
-      status: 'retryable',
-      attempt: 1,
-      dispatch: { status: 'failed', failureReason: 'foundation revision completed without a committed Markdown receipt' },
-    })
-
-    const stale = {
-      ...final!,
+    const staleRun = {
+      ...initial,
+      status: 'needs_action' as const,
       foundationAuditState: {
-        ...final!.foundationAuditState!,
-        tasks: final!.foundationAuditState!.tasks.map(task => task.taskId === 'revision-a'
-          ? { ...task, status: 'running' as const, failureReason: undefined, dispatch: { ...task.dispatch!, status: 'running' as const, finishedAt: undefined, failureReason: undefined } }
-          : task),
+        tasks: [
+          {
+            status: 'running',
+            dispatch: { dispatchId: 'retired-dispatch', status: 'running' },
+          },
+        ],
       },
-    }
-    await store.save(stale)
-    const recovered = await store.reconcile(async () => false)
-    expect(recovered).toMatchObject({ status: 'running' })
-    expect(recovered?.foundationAuditState?.tasks.find(task => task.taskId === 'revision-a')).toMatchObject({ status: 'retryable', attempt: 2 })
-  })
-
-  test('retryRun resumes a failed revision planning boundary without redispatching', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'revision-planning-retry-'))
-    const digest = 'c'.repeat(64)
-    const revision = 'revision-planning-retry'
-    const revisionState = parseFoundationAuditState({
-      ...createFoundationAuditState({
-        revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-        manifest: {
-          revision,
-          status: 'index_staged',
-          derivationMode: 'complete',
-          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
-          sectionIndexDigest: digest,
-        },
-      }),
-      status: 'planning' as const,
-      authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      },
-      roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
-      round: 1 as const,
-      phaseStartedAt: '2026-08-25T00:00:00.000Z',
-      issueSummary: { total: 0, blocker: 0, high: 0, medium: 0, low: 0 },
-      tasks: [],
-    })
-    const run = {
-      ...createTestDeliveryRun({ runId: 'revision-planning-retry', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }),
-      phase: 'FOUNDATION_REVISION' as const,
-      documentStep: 'FOUNDATION_REVISION' as const,
-      status: 'needs_action' as const,
-      blockedReason: 'foundation revision planning materialization failed: transient store error',
-      foundationAuditState: revisionState,
-    }
+    } as unknown as DeliveryRun
     const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    await store.save(run)
-
-    const retried = await retryRun({ store, runId: run.runId })
-
-    expect(retried.status).toBe('running')
-    expect(retried.blockedReason).toBeUndefined()
-    expect(retried.foundationAuditState).toEqual(revisionState)
-  })
-
-  test('recoverAndResumeRun reconciles stale active foundation workers in a terminal snapshot', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'stale-foundation-current-run-'))
-    const digest = 'e'.repeat(64)
-    const revision = 'stale-foundation-current-run'
-    const activeBundleId = `${revision}.bundle.active`
-    const supersededBundleId = `${revision}.bundle.old`
-    const task = (taskId: string, bundleId: string, dispatchId: string) => ({
-      taskId,
-      kind: 'document-revision' as const,
-      scope: 'section' as const,
-      revision,
-      round: 1 as const,
-      bundleId,
-      packetPath: foundationRevisionPacketPath(revision, 1, taskId),
-      packetDigest: digest,
-      status: 'running' as const,
-      attempt: 2,
-      documentPath: 'docs/GDD.md' as const,
-      issueIds: ['AUD-1'],
-      sectionIds: ['vision'],
-      stagedPath: foundationRevisionStagePath(revision, 'docs/GDD.md'),
-      baseDocumentDigest: digest,
-      dependencyDigests: {},
-      frozen: false,
-      dispatch: {
-        dispatchId,
-        workerType: 'foundation-document-reviser' as const,
-        phase: 'FOUNDATION_REVISION' as const,
-        taskId,
-        revision,
-        status: 'running' as const,
-        startedAt: '2026-08-26T00:00:00.000Z',
+    await mkdir(store.paths.directory, { recursive: true })
+    const rawText = `${JSON.stringify(staleRun, null, 2)}\n`
+    await writeFile(store.paths.snapshot, rawText)
+    await writeFile(store.paths.events, '')
+    const beforeSnapshot = await readFile(store.paths.snapshot, 'utf8')
+    const beforeEvents = await readFile(store.paths.events, 'utf8')
+    const inspectOrder: string[] = []
+    let inspectCalls = 0
+    const inspect = store.inspectWorkflowSnapshot.bind(store)
+    const recoveryStore = {
+      ...store,
+      inspectWorkflowSnapshot: async () => {
+        inspectCalls += 1
+        inspectOrder.push(`inspect:${inspectCalls}`)
+        return inspect()
       },
-    })
-    const foundationAuditState = parseFoundationAuditState({
-      ...createFoundationAuditState({
-        revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-        manifest: {
-          revision,
-          status: 'index_staged',
-          derivationMode: 'complete',
-          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
-          sectionIndexDigest: digest,
-        },
-      }),
-      status: 'revising' as const,
-      authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      },
-      roundBefore: {
-        documentRevision: 'revision-before',
-        issueRegistryDigest: digest,
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-      },
-      round: 1 as const,
-      activeBundleId,
-      revisionBundles: [
-        {
-          bundleId: activeBundleId,
-          status: 'active' as const,
-          round: 1 as const,
-          baseDocumentRevision: revision,
-          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-          remediationDigest: digest,
-          taskIds: ['gdd-task'],
-          frozenTaskIds: [],
-        },
-        {
-          bundleId: supersededBundleId,
-          status: 'superseded' as const,
-          round: 1 as const,
-          baseDocumentRevision: revision,
-          baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-          remediationDigest: digest,
-          taskIds: ['old-task'],
-          frozenTaskIds: [],
-        },
-      ],
-      phaseStartedAt: '2026-08-26T00:00:00.000Z',
-      issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
-      tasks: [
-        task('gdd-task', activeBundleId, 'gdd-dispatch'),
-        task('old-task', supersededBundleId, 'old-dispatch'),
-      ],
-    })
-    const run = {
-      ...createTestDeliveryRun({
-        runId: 'stale-foundation-current-run',
-        projectId: RECOVERY_PROJECT_ID,
-        ownerId: RECOVERY_OWNER_ID,
-        confirmedBriefContext: RECOVERY_BRIEF,
-      }),
-      phase: 'FOUNDATION_REVISION' as const,
-      documentStep: 'FOUNDATION_REVISION' as const,
-      status: 'needs_action' as const,
-      blockedReason: 'foundation revision requires action',
-      foundationAuditState,
     }
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    await store.save(run)
     let stopCalls = 0
     let resumeCalls = 0
 
-    const recovered = await recoverAndResumeRun({
-      store,
+    const failure = await recoverAndResumeRun({
+      store: recoveryStore,
       workspacePath: workspace,
       ownerId: RECOVERY_OWNER_ID,
       projectId: RECOVERY_PROJECT_ID,
       confirmedBriefContext: RECOVERY_BRIEF,
       stopWorkspaceWorkers: async () => {
         stopCalls += 1
+        inspectOrder.push('stop:start')
+        throw new Error('worker transport did not stop')
       },
       resumeCurrentRun: async () => {
         resumeCalls += 1
       },
-    })
+    }).catch(error => error)
 
+    expect(failure).toMatchObject({ code: 'recovery_worker_stop_failed' })
+    expect(failure.cause).toMatchObject({
+      message: 'worker transport did not stop',
+    })
+    expect(inspectOrder).toEqual(['inspect:1', 'stop:start'])
+    expect(inspectCalls).toBe(1)
     expect(stopCalls).toBe(1)
-    expect(resumeCalls).toBe(1)
-    expect(recovered).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'foundation revision requires action',
-      foundationAuditState: {
-        tasks: [
-          { taskId: 'gdd-task', status: 'needs_action', dispatch: { status: 'interrupted' } },
-          { taskId: 'old-task', status: 'running', dispatch: { status: 'running' } },
-        ],
-      },
-    })
-    expect(recovered.foundationAuditState?.tasks[0]?.failureReason).toBe(
-      'foundation revision requires action',
-    )
-    expect(recovered.foundationAuditState?.tasks[0]?.dispatch?.failureReason).toBe(
-      'foundation revision requires action',
-    )
-    expect(
-      (await store.readEvents()).some(
-        event => event.type === 'foundation.recovery.needs_action',
-      ),
-    ).toBe(true)
+    expect(resumeCalls).toBe(0)
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(beforeSnapshot)
+    expect(await readFile(store.paths.events, 'utf8')).toBe(beforeEvents)
+  })
 
-    const activeCompleted = {
-      ...recovered,
-      status: 'running' as const,
-      blockedReason: undefined,
-      foundationAuditState: {
-        ...recovered.foundationAuditState!,
-        tasks: recovered.foundationAuditState!.tasks.map(task =>
-          task.taskId === 'gdd-task'
-            ? {
-                ...task,
-                status: 'pending' as const,
-                failureReason: undefined,
-                dispatch: undefined,
-              }
-            : {
-                ...task,
-                status: 'needs_action' as const,
-                dispatch: {
-                  ...task.dispatch!,
-                  status: 'interrupted' as const,
-                },
-              },
-        ),
+  test('stops workers before rejecting an obsolete review snapshot', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-retired-review-'))
+    const initial = createTestDeliveryRun({
+      runId: 'recovery-retired-review',
+      projectId: RECOVERY_PROJECT_ID,
+      ownerId: RECOVERY_OWNER_ID,
+      confirmedBriefContext: RECOVERY_BRIEF,
+    })
+    const legacySnapshot = {
+      ...initial,
+      phase: 'DOCUMENT_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVIEW' as const,
+      foundationAuditState: { status: 'facts_staged' },
+    } as unknown as DeliveryRun
+    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
+    await mkdir(store.paths.directory, { recursive: true })
+    const rawText = `${JSON.stringify(legacySnapshot, null, 2)}\n`
+    await writeFile(store.paths.snapshot, rawText)
+    await writeFile(store.paths.events, '')
+    const beforeSnapshot = await readFile(store.paths.snapshot, 'utf8')
+    const beforeEvents = await readFile(store.paths.events, 'utf8')
+    const inspectOrder: string[] = []
+    let inspectCalls = 0
+    const inspect = store.inspectWorkflowSnapshot.bind(store)
+    const recoveryStore = {
+      ...store,
+      inspectWorkflowSnapshot: async () => {
+        inspectCalls += 1
+        inspectOrder.push(`inspect:${inspectCalls}`)
+        return inspect()
       },
     }
-    await store.save(activeCompleted)
-    const activeOnly = await store.reconcile(async () => false)
-    expect(activeOnly).toMatchObject({
-      status: 'running',
-      foundationAuditState: {
-        tasks: [
-          { taskId: 'gdd-task', status: 'pending' },
-          { taskId: 'old-task', status: 'needs_action' },
-        ],
-      },
-    })
-  })
+    let stopCalls = 0
+    let resumeCalls = 0
 
-  test('reconcile projects orphaned foundation fact dispatch evidence onto the task', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'orphaned-foundation-fact-evidence-'))
-    const digest = 'a'.repeat(64)
-    const revision = 'orphaned-facts'
-    const seed = createFoundationAuditState({
-      revision,
-      documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      manifest: { revision, status: 'index_staged', derivationMode: 'complete', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
-    })
-    const foundationAuditState = parseFoundationAuditState({
-      ...seed,
-      status: 'extracting_facts',
-      phaseStartedAt: '2020-01-01T00:00:00.000Z',
-      tasks: [{
-        taskId: 'fact-0', kind: 'document-facts', revision, packetDigest: digest, factKeyCount: 1, modelTier: 'fast', status: 'running', attempt: 1,
-        dispatch: {
-          dispatchId: 'fact-dispatch', workerType: 'foundation-fact-extractor', phase: 'DOCUMENT_REVIEW', taskId: 'fact-0', revision, status: 'running',
-          startedAt: '2020-01-01T00:00:00.000Z',
-          usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 },
+    await expect(
+      recoverAndResumeRun({
+        store: recoveryStore,
+        workspacePath: workspace,
+        ownerId: RECOVERY_OWNER_ID,
+        projectId: RECOVERY_PROJECT_ID,
+        confirmedBriefContext: RECOVERY_BRIEF,
+        stopWorkspaceWorkers: async () => {
+          stopCalls += 1
+          inspectOrder.push('stop:start')
+          inspectOrder.push('stop:done')
         },
-      }],
-    })
-    const run = { ...createTestDeliveryRun({ runId: 'orphaned-foundation-fact', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'DOCUMENT_REVIEW' as const, documentStep: 'FOUNDATION_REVIEW' as const, status: 'running' as const, foundationAuditState }
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    await store.save(run)
-    const recovered = await store.reconcile(async () => false)
-    expect(recovered?.foundationAuditState?.tasks[0]).toMatchObject({
-      status: 'retryable',
-      usage: { total_tokens: 12 },
-      durationMs: expect.any(Number),
-      failureReason: 'server stopped before the foundation fact terminal was admitted',
-      dispatch: { status: 'interrupted', failureReason: 'server stopped before the foundation fact terminal was admitted' },
-    })
-  })
-
-  test('reconcile projects orphaned revision dispatch evidence onto the sole audit task state', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'orphaned-foundation-revision-evidence-'))
-    const digest = 'b'.repeat(64)
-    const revision = 'orphaned-revision'
-    const taskId = 'revision-task'
-    const round = 1 as const
-    const bundleId = `${revision}.bundle.1`
-    const packetPath = foundationRevisionPacketPath(revision, round, taskId)
-    const foundationAuditState = parseFoundationAuditState({
-      ...createFoundationAuditState({
-        revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-        manifest: { revision, status: 'index_staged', derivationMode: 'complete', catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion, sectionIndexDigest: digest },
+        resumeCurrentRun: async () => {
+          resumeCalls += 1
+        },
       }),
-      status: 'revising' as const,
-      authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      },
-      roundBefore: { documentRevision: 'revision-before', issueRegistryDigest: digest, issueAuthority: { kind: 'review', reviewDigest: digest, issueRegistryDigest: digest } },
-      round,
-      activeBundleId: bundleId,
-      revisionBundles: [{ bundleId, status: 'active' as const, round, baseDocumentRevision: revision, baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), remediationDigest: digest, taskIds: [taskId], frozenTaskIds: [] }],
-      phaseStartedAt: '2026-08-25T00:00:00.000Z',
-      issueSummary: { total: 1, blocker: 0, high: 1, medium: 0, low: 0 },
-      tasks: [{
-        taskId,
-        kind: 'document-revision' as const,
-        scope: 'section' as const,
-        revision,
-        round,
-        bundleId,
-        packetPath,
-        packetDigest: digest,
-        status: 'running' as const,
-        attempt: 1,
-        documentPath: 'docs/GDD.md' as const,
-        issueIds: ['AUD-1'],
-        sectionIds: ['vision'],
-        stagedPath: foundationRevisionStagePath(revision, 'docs/GDD.md'),
-        baseDocumentDigest: digest,
-        dependencyDigests: {},
-        frozen: false,
-        dispatch: {
-          dispatchId: 'revision-dispatch',
-          workerType: 'foundation-document-reviser' as const,
-          phase: 'FOUNDATION_REVISION' as const,
-          taskId,
-          revision,
-          status: 'running' as const,
-          request: { taskId, revision, contract: { packetDigest: digest, packetPath, round } },
-          startedAt: '2026-08-25T00:00:00.000Z',
-          usage: { input_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0, completion_tokens: 2, total_tokens: 12 },
-        },
-      }],
-    })
-    const run = { ...createTestDeliveryRun({ runId: 'orphaned-foundation-revision', projectId: 'recovery-project', ownerId: RECOVERY_OWNER_ID }), phase: 'FOUNDATION_REVISION' as const, documentStep: 'FOUNDATION_REVISION' as const, status: 'running' as const, foundationAuditState }
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    await store.save(run)
+    ).rejects.toThrow('Legacy Foundation review/revision is retired')
 
-    const recovered = await store.reconcile(async () => false)
-    expect(recovered).toMatchObject({ status: 'running', foundationAuditState: { status: 'revising' } })
-    expect(recovered?.foundationAuditState?.tasks[0]).toMatchObject({
-      status: 'retryable',
-      usage: { total_tokens: 12 },
-      durationMs: expect.any(Number),
-      failureReason: 'server stopped before the foundation revision terminal was admitted',
-      dispatch: { status: 'interrupted', failureReason: 'server stopped before the foundation revision terminal was admitted' },
-    })
-    expect((await store.readEvents()).at(-1)?.type).toBe('foundation.revision.recovered')
+    expect(inspectOrder).toEqual([
+      'inspect:1',
+      'stop:start',
+      'stop:done',
+      'inspect:2',
+    ])
+    expect(inspectCalls).toBe(2)
+    expect(stopCalls).toBe(1)
+    expect(resumeCalls).toBe(0)
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(beforeSnapshot)
+    expect(await readFile(store.paths.events, 'utf8')).toBe(beforeEvents)
   })
 
   test('defines every exact-resume checkpoint for every persisted worker type', () => {
@@ -1740,7 +1400,11 @@ describe('delivery workflow recovery', () => {
           workerType,
         })
         const store = createRunStore(workspace, run.ownerId)
-        await store.save(run)
+        const historicalRun =
+          workerType === 'document-author'
+            ? legacyAuthorHistoricalSnapshot(run, checkpoint, workspace)
+            : run
+        await store.save(historicalRun)
         const started: WorkerDispatchRequest[] = []
         const workerPort = {
           async start(startedRequest: WorkerDispatchRequest) {
@@ -1773,8 +1437,33 @@ describe('delivery workflow recovery', () => {
           return restartedStore
         }
 
+        if (workerType === 'document-author') {
+          const before = await readFile(store.paths.snapshot, 'utf8')
+          const controller = createDeliveryWorkflowController({
+            workspacePath: workspace,
+            ownerId: run.ownerId,
+            workerPort,
+          })
+          await expect(controller.resume(historicalRun)).rejects.toThrow(
+            LEGACY_AUTHOR_RETIRED_ERROR,
+          )
+          expect(started).toHaveLength(0)
+          expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
+          return
+        }
+
         if (checkpoint === 'before-dispatch') {
-          await resumeFromDisk(false)
+          if (workerType === 'change-impact-analyzer') {
+            const controller = createDeliveryWorkflowController({
+              workspacePath: workspace,
+              ownerId: run.ownerId,
+              workerPort,
+            })
+            await controller.requestChange(
+              historicalRun,
+              historicalRun.changeRequest ?? 'Synthetic change request.',
+            )
+          } else await resumeFromDisk(false)
           expect(started.map(request => request.workerType)).toEqual([
             workerType,
           ])
@@ -1786,7 +1475,12 @@ describe('delivery workflow recovery', () => {
           ownerId: run.ownerId,
           workerPort,
         })
-        await firstController.resume(run)
+        if (workerType === 'change-impact-analyzer')
+          await firstController.requestChange(
+            run,
+            run.changeRequest ?? 'Synthetic change request.',
+          )
+        else await firstController.resume(run)
         const active = (await store.load())?.activeDispatch
         expect(active?.request?.workerType).toBe(workerType)
         const originalRequest = active!.request!
@@ -1810,40 +1504,13 @@ describe('delivery workflow recovery', () => {
             )
           }
           const recoveredStore = await resumeFromDisk(false)
-          if (
-            workerType === 'document-author' &&
-            checkpoint === 'terminal-accepted'
-          ) {
-            const completedEvent = (await recoveredStore.readEvents()).find(
-              event =>
-                event.type === 'dispatch.completed' &&
-                event.dispatchId === active!.dispatchId,
-            )
-            expect(completedEvent?.documentPerformance).toMatchObject({
-              targetPath: originalRequest.taskId,
-              usage: {
-                input_tokens: 0,
-                cache_read_tokens: 0,
-                completion_tokens: 0,
-              },
-              retryReason: null,
-            })
-            expect(
-              (completedEvent?.documentPerformance as { markdownBytes: number })
-                .markdownBytes,
-            ).toBeGreaterThan(0)
-          }
           if (checkpoint === 'canonical-receipt') {
-            const acceptedUnitId =
-              workerType === 'document-author'
-                ? `document:${originalRequest.taskId}`
-                : 'resource:content'
             expect(
               (await recoveredStore.readEvents()).filter(
                 event =>
                   event.type === 'workflow.unit.accepted' &&
                   (event.unit as AcceptedWorkflowUnit).unitId ===
-                    acceptedUnitId,
+                    'resource:content',
               ),
             ).toHaveLength(1)
           }
@@ -1906,48 +1573,20 @@ describe('delivery workflow recovery', () => {
       blockedReason: 'worker transport was interrupted',
     })
 
-    const resumed = await retryRun({
-      store,
-      runId: initial.runId,
-      workspacePath: workspace,
-    })
-
-    expect(resumed.status).toBe('running')
-    expect(resumed.activeDispatch).toMatchObject({
-      dispatchId: request.dispatchId,
-      status: 'completed',
-      terminalResult: {
-        workerType: 'document-author',
-        writtenPaths: ['docs/GDD.md'],
-      },
-    })
+    const before = await readFile(store.paths.snapshot, 'utf8')
+    await expect(retryRun({ store, runId: initial.runId, workspacePath: workspace })).rejects.toThrow('retired')
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
   })
 
-  test('reconciles an invalid snapshots active canonical document receipt before projection', async () => {
+  test('does not reconcile a retired Author receipt or append accepted units', async () => {
     const fixture = await createCanonicalReceiptRecoveryFixture()
     workspace = fixture.workspacePath
-
-    const recovered = await fixture.recover()
-
-    expect(recovered.foundationDraftState.completedPaths).toEqual([
-      fixture.firstPath,
-    ])
-    expect(fixture.started).toHaveLength(1)
-    expect(fixture.started[0]).toMatchObject({
-      workerType: 'document-author',
-      taskId: fixture.nextPath,
-      contract: { foundationDocumentPath: fixture.nextPath },
-    })
-    expect(
-      fixture.started.some(candidate => candidate.taskId === fixture.firstPath),
-    ).toBe(false)
-    const accepted = (await fixture.store.readEvents()).filter(
-      event =>
-        event.type === 'workflow.unit.accepted' &&
-        (event.unit as AcceptedWorkflowUnit).unitId ===
-          `document:${fixture.firstPath}`,
-    )
-    expect(accepted).toHaveLength(1)
+    const before = await readFile(fixture.store.paths.snapshot, 'utf8')
+    const events = await fixture.store.readEvents()
+    await expect(fixture.recover()).rejects.toThrow('retired')
+    expect(await readFile(fixture.store.paths.snapshot, 'utf8')).toBe(before)
+    expect(await fixture.store.readEvents()).toEqual(events)
+    expect(fixture.started).toHaveLength(0)
   })
 
   test('rejects a later-phase stale canonical drafting hint even with its matching receipt', async () => {
@@ -2002,149 +1641,7 @@ describe('delivery workflow recovery', () => {
     ).toHaveLength(0)
   })
 
-  test('reconciles an invalid current snapshots active Resource Content receipt before projection', async () => {
-    const fixture = await createResourceRecoveryFixture()
-    workspace = fixture.workspacePath
-    const dispatchId = 'committed-resource-content-dispatch'
-    const inventoryReceipt =
-      fixture.snapshot.resourceProductionState.inventoryReceipt
-    const commitContract = {
-      dispatchId,
-      inventoryRevision: inventoryReceipt.revision,
-      baselineResourceRevision: await computeResourceRevision(workspace, ''),
-      requiredRequirementIds: ['fixture-requirement'],
-      verifiedResourceIds: ['fixture-resource'],
-      inventoryBindings: inventoryReceipt.bindings,
-      writablePaths: ['assets/content/resource-registry.json'],
-    }
-    const tool = createNativeResourceContentTool({
-      buildTool: definition => definition,
-      workspacePath: workspace,
-      contract: commitContract,
-      assertMutationAuthority: () => undefined,
-    }) as { call(input: unknown): Promise<unknown> }
-    await tool.call({
-      action: 'commit',
-      documents: {
-        'assets/content/resource-registry.json': {
-          schema: 'beegame-content-v1',
-          id: 'resource-registry',
-          kind: 'resource-registry',
-          fulfills: ['fixture-requirement'],
-          resources: ['fixture-resource'],
-          data: {
-            bindings: [
-              {
-                requirementId: 'fixture-requirement',
-                resourceIds: ['fixture-resource'],
-              },
-            ],
-          },
-        },
-      },
-    })
-    const retainedEvents = (await fixture.store.readEvents()).filter(
-      event =>
-        event.type !== 'workflow.unit.accepted' ||
-        !['resource:content', 'resource:gate'].includes(
-          (event.unit as AcceptedWorkflowUnit).unitId,
-        ),
-    )
-    await writeFile(
-      fixture.store.paths.events,
-      `${retainedEvents.map(event => JSON.stringify(event)).join('\n')}\n`,
-    )
-    const request: WorkerDispatchRequest = {
-      dispatchId,
-      runId: RECOVERY_RUN_ID,
-      ownerId: RECOVERY_OWNER_ID,
-      projectId: RECOVERY_PROJECT_ID,
-      workspacePath: workspace,
-      workerType: 'resource-content-author',
-      phase: 'RESOURCE_PREPARATION',
-      taskId: 'RESOURCE_CONTENT',
-      revision: fixture.snapshot.revision.document,
-      contract: {
-        ...commitContract,
-        task: 'RESOURCE_CONTENT',
-      },
-    }
-    await writeFile(
-      fixture.store.paths.snapshot,
-      `${JSON.stringify(
-        {
-          ...fixture.snapshot,
-          schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-          invalidRecoveryMarker: true,
-          phase: 'RESOURCE_PREPARATION',
-          documentStep: undefined,
-          currentItemId: undefined,
-          evidence: {},
-          resourceProductionState: {
-            currentTask: 'RESOURCE_CONTENT',
-            inventoryReceipt,
-          },
-          activeDispatch: {
-            dispatchId,
-            workerType: 'resource-content-author',
-            phase: 'RESOURCE_PREPARATION',
-            taskId: 'RESOURCE_CONTENT',
-            revision: request.revision,
-            status: 'running',
-            startedAt: RECOVERY_ACCEPTED_AT,
-            request,
-          },
-        },
-        null,
-        2,
-      )}\n`,
-    )
-    const started: WorkerDispatchRequest[] = []
-    const controller = createDeliveryWorkflowController({
-      workspacePath: workspace,
-      ownerId: RECOVERY_OWNER_ID,
-      workerPort: {
-        async start(nextRequest) {
-          started.push(nextRequest)
-          return {
-            sessionId: nextRequest.dispatchId!,
-            dispatchId: nextRequest.dispatchId!,
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-
-    const recovered = await recoverAndResumeRun({
-      store: fixture.store,
-      workspacePath: workspace,
-      ownerId: RECOVERY_OWNER_ID,
-      projectId: RECOVERY_PROJECT_ID,
-      confirmedBriefContext: RECOVERY_BRIEF,
-      stopWorkspaceWorkers: async () => undefined,
-      resumeCurrentRun: run => controller.resume(run),
-    })
-
-    expect(
-      recovered.resourceProductionState.contentReceipt?.contentDigest,
-    ).toBe(await computeResourceContentDigest(workspace))
-    expect(
-      started.some(request => request.workerType === 'resource-content-author'),
-    ).toBe(false)
-    expect(
-      (await fixture.store.readEvents()).filter(
-        event =>
-          event.type === 'workflow.unit.accepted' &&
-          (event.unit as AcceptedWorkflowUnit).unitId === 'resource:content',
-      ),
-    ).toHaveLength(1)
-  })
-
-  test('recovers and consumes a committed resource content dispatch without redispatching the author', async () => {
+  test('recovers committed resource content but rejects retired Author continuation', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-receipt-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -2277,11 +1774,13 @@ describe('delivery workflow recovery', () => {
       },
     })
 
+    const resumedAuthorDispatches: WorkerDispatchRequest[] = []
     const controller = createDeliveryWorkflowController({
       workspacePath: workspace,
       ownerId: initial.ownerId,
       workerPort: {
         async start(nextRequest) {
+          resumedAuthorDispatches.push(nextRequest)
           return {
             sessionId: 'recovery-next-session',
             dispatchId: nextRequest.dispatchId!,
@@ -2295,13 +1794,14 @@ describe('delivery workflow recovery', () => {
       },
     })
 
-    await controller.resume(retried)
+    await expect(controller.resume(retried)).rejects.toThrow(
+      LEGACY_AUTHOR_RETIRED_ERROR,
+    )
 
     const progressed = await store.load()
-    expect(progressed?.activeDispatch?.dispatchId).not.toBe(
-      commitContract.dispatchId,
-    )
-    expect(progressed?.activeDispatch?.failureReason).toBeUndefined()
+    expect(resumedAuthorDispatches).toHaveLength(0)
+    expect(progressed?.activeDispatch).toMatchObject({ status: 'failed', failureReason: expect.stringContaining('retired') })
+    expect(await readFile(join(workspace, '.beegame/workflow/resource-content-commits', `${commitContract.dispatchId}.json`), 'utf8')).toContain('committed')
   }, 2_000)
 
   test('treats a duplicate retry for an already resumed run as idempotent', async () => {
@@ -2442,71 +1942,6 @@ describe('delivery workflow recovery', () => {
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(snapshot)
   })
 
-  test('persists a usage tail that races with a terminal dispatch commit', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-usage-terminal-race-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'usage-terminal-race',
-      projectId: 'usage-terminal-race-project',
-      ownerId: 'owner-1',
-    })
-    const running = {
-      ...initial,
-      phase: 'DOCUMENT_REVIEW' as const,
-      documentStep: 'FOUNDATION_REVIEW' as const,
-      foundationAuditState: undefined,
-      activeDispatch: {
-        dispatchId: 'usage-terminal-dispatch',
-        workerType: 'foundation-semantic-reviewer' as const,
-        phase: 'DOCUMENT_REVIEW' as const,
-        revision: initial.revision.document,
-        status: 'running' as const,
-        startedAt: new Date().toISOString(),
-      },
-    }
-    await store.save(running)
-    const terminal = {
-      ...running,
-      status: 'needs_action' as const,
-      blockedReason: 'terminal failed',
-      activeDispatch: {
-        ...running.activeDispatch,
-        status: 'failed' as const,
-        finishedAt: new Date().toISOString(),
-        failureReason: 'terminal failed',
-      },
-    }
-    const usage = {
-      input_tokens: 1,
-      cache_read_tokens: 0,
-      cache_creation_tokens: 0,
-      completion_tokens: 2,
-      total_tokens: 3,
-    }
-    const [terminalResult] = await Promise.all([
-      store.commit(terminal, {
-        runId: terminal.runId,
-        type: 'dispatch.failed',
-        phase: terminal.phase,
-        status: terminal.status,
-        revision: terminal.revision,
-        dispatchId: terminal.activeDispatch.dispatchId,
-      }),
-      store.addWorkflowUsage(
-        running.runId,
-        usage,
-        running.activeDispatch.dispatchId,
-      ),
-    ])
-
-    expect(terminalResult.status).toBe('needs_action')
-    expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      usage,
-      activeDispatch: { status: 'failed', usage },
-    })
-  })
-
   test('stale worker progress does not migrate or rewrite a version-11 snapshot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-stale-progress-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -2612,12 +2047,11 @@ describe('delivery workflow recovery', () => {
     })
     await store.save({
       ...initial,
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
+      phase: 'BRIEF_CONFIRMED',
       activeDispatch: {
         dispatchId: 'dispatch-1',
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
+        workerType: 'question-answerer',
+        phase: 'BRIEF_CONFIRMED',
         revision: initial.revision.document,
         status: 'running',
         startedAt: new Date().toISOString(),
@@ -2640,8 +2074,7 @@ describe('delivery workflow recovery', () => {
     const retried = await retryRun({ store, runId: initial.runId })
     expect(retried).toMatchObject({
       status: 'running',
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
+      phase: 'BRIEF_CONFIRMED',
     })
     expect(retried.activeDispatch).toBeUndefined()
   })
@@ -2742,391 +2175,6 @@ describe('delivery workflow recovery', () => {
     })
     expect(continued.activeTaskId).toBeUndefined()
     expect(continued.activeDispatch).toBeUndefined()
-  })
-
-  test('stopping a foundation review interrupts every nested worker and preserves stopped-tail usage', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-stop-foundation-review-'))
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    const digest = 'e'.repeat(64)
-    const revision = 'stop-foundation-review'
-    const bundleId = `${revision}.bundle.1`
-    const documents = CANONICAL_FOUNDATION_DOCUMENTS.slice(0, 4)
-    const foundationAuditState = parseFoundationAuditState({
-      ...createFoundationAuditState({
-        revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-        manifest: {
-          revision,
-          status: 'index_staged',
-          derivationMode: 'complete',
-          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
-          sectionIndexDigest: digest,
-        },
-      }),
-      status: 'revising' as const,
-      authority: {
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-        derivedDigests: { sectionIndex: digest, factStore: digest, manifest: digest },
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-      },
-      roundBefore: {
-        documentRevision: 'revision-before',
-        issueRegistryDigest: digest,
-        issueAuthority: { kind: 'review' as const, reviewDigest: digest, issueRegistryDigest: digest },
-      },
-      round: 1,
-      activeBundleId: bundleId,
-      revisionBundles: [{ bundleId, status: 'active' as const, round: 1, baseDocumentRevision: revision, baseDocumentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })), remediationDigest: digest, taskIds: documents.map((_, index) => `revision-${index}`), frozenTaskIds: [] }],
-      phaseStartedAt: new Date().toISOString(),
-      issueSummary: { total: 4, blocker: 0, high: 4, medium: 0, low: 0 },
-      tasks: documents.map((documentPath, index) => {
-        const taskId = `revision-${index}`
-        const dispatchId = `dispatch-${index}`
-        return {
-          taskId,
-          kind: 'document-revision' as const,
-          scope: 'section' as const,
-          revision,
-          round: 1,
-          bundleId,
-          packetPath: foundationRevisionPacketPath(revision, 1, taskId),
-          packetDigest: digest,
-          status: 'running' as const,
-          attempt: 2,
-          documentPath,
-          issueIds: [`AUD-${index}`],
-          sectionIds: ['section'],
-          stagedPath: foundationRevisionStagePath(revision, documentPath),
-          baseDocumentDigest: digest,
-          dependencyDigests: {},
-          frozen: false,
-          dispatch: {
-            dispatchId,
-            workerType: 'foundation-document-reviser' as const,
-            phase: 'FOUNDATION_REVISION' as const,
-            taskId,
-            revision,
-            status: 'running' as const,
-            startedAt: new Date().toISOString(),
-          },
-        }
-      }),
-    })
-    const run = {
-      ...createTestDeliveryRun({
-        runId: 'stop-foundation-review',
-        projectId: 'project',
-        ownerId: RECOVERY_OWNER_ID,
-      }),
-      phase: 'FOUNDATION_REVISION' as const,
-      documentStep: 'FOUNDATION_REVISION' as const,
-      foundationAuditState,
-    }
-    await store.save(run)
-    expect((await store.load())?.foundationAuditState?.tasks).toHaveLength(4)
-    expect((await store.load())?.foundationAuditState?.tasks.every(task => task.dispatch?.status === 'running')).toBe(true)
-
-    const stoppedDispatches: string[] = []
-    const stoppedTailResults: Array<DeliveryRun | null> = []
-    const stopped = await stopRun({
-      store,
-      runId: run.runId,
-      reason: 'user stopped workflow',
-      sessionIsOpen: async () => true,
-      stopDispatch: async dispatchId => {
-        stoppedDispatches.push(dispatchId)
-        stoppedTailResults.push(
-          await store.addWorkflowUsage(
-            run.runId,
-            {
-              input_tokens: 1,
-              cache_read_tokens: 0,
-              cache_creation_tokens: 0,
-              completion_tokens: 0,
-              total_tokens: 1,
-            },
-            dispatchId,
-          ),
-        )
-      },
-    })
-
-    expect(stopped.status).toBe('stopped')
-    expect(stoppedDispatches).toEqual([
-      'dispatch-0',
-      'dispatch-1',
-      'dispatch-2',
-      'dispatch-3',
-    ])
-    expect(stopped.foundationAuditState?.tasks).toHaveLength(4)
-    expect(stopped.foundationAuditState?.tasks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          status: 'retryable',
-          dispatch: expect.objectContaining({ status: 'interrupted' }),
-        }),
-      ]),
-    )
-    expect(stopped.foundationAuditState?.tasks.every(task => task.dispatch?.status === 'interrupted')).toBe(true)
-    expect(stoppedTailResults.every(result => result?.status === 'stopped')).toBe(true)
-    expect(stoppedTailResults.every(result => (result?.usage?.total_tokens ?? 0) > 0)).toBe(true)
-    expect(
-      stoppedTailResults.every(result =>
-        result?.foundationAuditState?.tasks.some(
-          task => task.usage?.total_tokens === 1 && task.durationMs !== undefined,
-        ),
-      ),
-    ).toBe(true)
-
-    const continued = await retryRun({ store, runId: run.runId })
-    expect(continued).toMatchObject({
-      status: 'running',
-      foundationAuditState: {
-        tasks: expect.arrayContaining([
-          expect.objectContaining({ status: 'pending', attempt: 1 }),
-        ]),
-      },
-    })
-  })
-
-  test('late terminal handler failure cannot reopen a run stopped after terminal admission', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-stop-handler-race-'))
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    const digest = 'f'.repeat(64)
-    const revision = 'stop-handler-race'
-    const dispatchId = 'semantic-dispatch-race'
-    const taskId = 'semantic-task-race'
-    const foundationAuditState = parseFoundationAuditState({
-      ...createFoundationAuditState({
-        revision,
-        documentDigests: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest })),
-        manifest: {
-          revision,
-          status: 'index_staged',
-          derivationMode: 'complete',
-          catalogVersion: FOUNDATION_AUDIT_PRODUCTION_MANIFEST.catalogVersion,
-          sectionIndexDigest: digest,
-        },
-      }),
-      status: 'extracting_facts' as const,
-      phaseStartedAt: new Date().toISOString(),
-      aggregateUsage: {
-        input_tokens: 0,
-        cache_read_tokens: 0,
-        cache_creation_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-      },
-      tasks: [{
-        taskId,
-        kind: 'document-facts' as const,
-        revision,
-        factKeyCount: 1,
-        modelTier: 'fast' as const,
-        packetDigest: digest,
-        status: 'running' as const,
-        attempt: 1,
-        dispatch: {
-          dispatchId,
-          workerType: 'foundation-fact-extractor' as const,
-          phase: 'DOCUMENT_REVIEW' as const,
-          taskId,
-          revision,
-          status: 'running' as const,
-          startedAt: new Date().toISOString(),
-          request: {
-            runId: 'stop-handler-race-run',
-            ownerId: RECOVERY_OWNER_ID,
-            projectId: 'stop-handler-race-project',
-            workspacePath: workspace,
-            workerType: 'foundation-fact-extractor',
-            phase: 'DOCUMENT_REVIEW',
-            revision,
-            allowedPaths: ['.beegame/audit/foundation/'],
-            taskId,
-            contract: { packetDigest: digest },
-          },
-        },
-      }],
-    })
-    const run = {
-      ...createTestDeliveryRun({
-        runId: 'stop-handler-race-run',
-        projectId: 'stop-handler-race-project',
-        ownerId: RECOVERY_OWNER_ID,
-      }),
-      phase: 'DOCUMENT_REVIEW' as const,
-      documentStep: 'FOUNDATION_REVIEW' as const,
-      foundationAuditState,
-    }
-    await store.save(run)
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      workerPort: {
-        async start(request) {
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
-        },
-        async submit() {},
-        async stop() {},
-        async close() {},
-        async status() { throw new Error('not used') },
-      },
-      onTerminal: async () => {
-        const admitted = (await store.load())!
-        const admittedTask = admitted.foundationAuditState!.tasks.map(task =>
-          task.taskId === taskId
-            ? projectTaskTerminalEvidence(
-                {
-                  ...task,
-                  status: 'completed' as const,
-                  terminalDigest: digest,
-                  receiptPath: `.beegame/audit/foundation/${revision}/receipts/${taskId}.json`,
-                  receiptDigest: digest,
-                },
-                task.dispatch!,
-              )
-            : task,
-        )
-        await store.commit(
-          {
-            ...admitted,
-            foundationAuditState: {
-              ...admitted.foundationAuditState!,
-              status: 'facts_staged',
-              tasks: admittedTask,
-            },
-          },
-          {
-            runId: admitted.runId,
-            type: 'foundation.fact.terminal.admitted',
-            phase: admitted.phase,
-            status: admitted.status,
-            revision: admitted.revision,
-            taskId,
-            dispatchId,
-          },
-        )
-        await stopRun({
-          store,
-          runId: run.runId,
-          reason: 'user stopped workflow',
-        })
-        throw new Error('workflow project is locked')
-      },
-    })
-
-    await expect(
-      dispatcher.completeDispatch(dispatchId, {
-        workerType: 'foundation-fact-extractor',
-        status: 'completed',
-        runId: run.runId,
-        dispatchId,
-        taskId,
-        revision,
-        packetDigest: digest,
-        results: [],
-      }),
-    ).rejects.toThrow('workflow project is locked')
-
-    const stopped = await store.load()
-    const task = stopped?.foundationAuditState?.tasks.find(candidate => candidate.taskId === taskId)
-    expect(stopped).toMatchObject({
-      status: 'stopped',
-      foundationAuditState: { status: 'facts_staged' },
-    })
-    expect(task).toMatchObject({
-      status: 'completed',
-      attempt: 1,
-      dispatch: { status: 'completed' },
-    })
-    expect(task?.failureReason).toBeUndefined()
-    expect(stopped?.blockedReason).toBe('user stopped workflow')
-  })
-
-  test('stopping parallel foundation drafts stops nested documents exactly once alongside active dispatch', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-stop-foundation-drafts-'))
-    const store = createRunStore(workspace, RECOVERY_OWNER_ID)
-    const initial = createTestDeliveryRun({
-      runId: 'stop-foundation-drafts',
-      projectId: 'project',
-      ownerId: RECOVERY_OWNER_ID,
-    })
-    const dispatch = (dispatchId: string, taskId: string) => ({
-      dispatchId,
-      workerType: 'document-author' as const,
-      phase: 'DOCUMENT_DRAFTING' as const,
-      taskId,
-      revision: initial.revision.document,
-      status: 'running' as const,
-      startedAt: new Date().toISOString(),
-    })
-    let foundationDraftState = beginParallelFoundationAuthoring(['docs/GDD.md'])
-    foundationDraftState = recordFoundationDispatch(
-      foundationDraftState,
-      'docs/LEVEL_SCENE_DESIGN.md',
-      'drafting',
-      dispatch('draft-dispatch-1', 'docs/LEVEL_SCENE_DESIGN.md'),
-    )
-    foundationDraftState = recordFoundationDispatch(
-      foundationDraftState,
-      'docs/BALANCE_DESIGN.md',
-      'drafting',
-      dispatch('draft-dispatch-2', 'docs/BALANCE_DESIGN.md'),
-    )
-    const run = {
-      ...initial,
-      phase: 'DOCUMENT_DRAFTING' as const,
-      documentStep: 'FOUNDATION_DRAFTING' as const,
-      activeDispatch: dispatch('active-dispatch', 'docs/GDD.md'),
-      foundationDraftState,
-    }
-    await store.save(run)
-
-    const stoppedDispatches: string[] = []
-    const stopping = stopRun({
-      store,
-      runId: run.runId,
-      reason: 'user stopped workflow',
-      sessionIsOpen: async () => true,
-      stopDispatch: async dispatchId => {
-        stoppedDispatches.push(dispatchId)
-        if (dispatchId === 'active-dispatch')
-          throw new Error('transport stop failed')
-      },
-    })
-    await expect(stopping).rejects.toThrow('transport stop failed')
-    const stopped = await store.load()
-    if (!stopped) throw new Error('stopped workflow snapshot is missing')
-
-    expect(stopped.status).toBe('stopped')
-    expect(stoppedDispatches).toHaveLength(3)
-    expect(new Set(stoppedDispatches)).toEqual(
-      new Set(['active-dispatch', 'draft-dispatch-1', 'draft-dispatch-2']),
-    )
-    expect(stopped.activeDispatch).toMatchObject({
-      dispatchId: 'active-dispatch',
-      status: 'interrupted',
-    })
-    expect(stopped.foundationDraftState.documents).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: 'docs/LEVEL_SCENE_DESIGN.md',
-          status: 'needs_action',
-          dispatch: expect.objectContaining({
-            dispatchId: 'draft-dispatch-1',
-            status: 'interrupted',
-          }),
-        }),
-        expect.objectContaining({
-          path: 'docs/BALANCE_DESIGN.md',
-          status: 'needs_action',
-          dispatch: expect.objectContaining({
-            dispatchId: 'draft-dispatch-2',
-            status: 'interrupted',
-          }),
-        }),
-      ]),
-    )
   })
 
   test('continue repairs an implementation snapshot stopped before active-task release was persisted', async () => {
@@ -3323,278 +2371,7 @@ describe('delivery workflow recovery', () => {
     expect(running?.lastProgressAt).toBe(dispatch.startedAt)
   })
 
-  test('keeps one durable dispatch slot per parallel foundation document', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-parallel-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-foundation-parallel',
-      projectId: 'project-foundation-parallel',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-      foundationDraftComplete: false,
-    })
-    await store.save({
-      ...initial,
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
-      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
-    })
-    const started: string[] = []
-    const closed: string[] = []
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      workerPort: {
-        async start(request) {
-          started.push(request.taskId!)
-          return {
-            sessionId: `session:${request.taskId}`,
-            dispatchId: request.dispatchId!,
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async close(dispatchId) {
-          closed.push(dispatchId)
-        },
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-    const paths = CANONICAL_FOUNDATION_DOCUMENTS.slice(1)
-    const records = []
-    for (const path of paths) {
-      records.push(
-        await dispatcher.dispatch({
-          runId: initial.runId,
-          ownerId: initial.ownerId,
-          projectId: initial.projectId,
-          workspacePath: workspace,
-          workerType: 'document-author',
-          phase: 'DOCUMENT_DRAFTING',
-          taskId: path,
-          revision: initial.revision.document,
-          allowedPaths: [path],
-          contract: {
-            authoringMode: 'parallel-draft',
-            documentSet: 'foundation',
-            foundationDocumentPath: path,
-          },
-        }),
-      )
-    }
-
-    expect(started).toEqual(paths)
-    expect((await store.load())?.activeDispatch).toBeUndefined()
-    expect(
-      (await store.load())?.foundationDraftState.documents
-        ?.slice(1)
-        .map(document => document.dispatch?.status),
-    ).toEqual(paths.map(() => 'running'))
-
-    const parallelUsage = {
-      input_tokens: 1,
-      cache_read_tokens: 0,
-      cache_creation_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 1,
-    }
-    expect(
-      await store.addWorkflowUsage(
-        initial.runId,
-        parallelUsage,
-        records[0]!.dispatchId,
-      ),
-    ).not.toBeNull()
-    expect(
-      await store.addWorkflowUsage(
-        initial.runId,
-        parallelUsage,
-        records[1]!.dispatchId,
-      ),
-    ).not.toBeNull()
-    expect((await store.load())?.usage?.total_tokens).toBe(2)
-
-    const duplicate = await dispatcher.dispatch({
-      ...records[0]!.request!,
-      dispatchId: undefined,
-    })
-    expect(duplicate.dispatchId).toBe(records[0]!.dispatchId)
-    await expect(
-      dispatcher.dispatch({
-        runId: initial.runId,
-        ownerId: initial.ownerId,
-        projectId: initial.projectId,
-        workspacePath: workspace,
-        workerType: 'question-answerer',
-        phase: 'DOCUMENT_DRAFTING',
-        revision: initial.revision.document,
-        contract: {},
-      }),
-    ).rejects.toThrow('foundation document authoring batch is active')
-
-    for (const [index, record] of [...records].reverse().entries()) {
-      const path = record.taskId as (typeof paths)[number]
-      await dispatcher.completeDispatch(record.dispatchId, {
-        workerType: 'document-author',
-        status: 'completed',
-        writtenPaths: [path],
-        resolvedFindingIds: [],
-      })
-      if (index === 0)
-        await expect(
-          dispatcher.completeDispatch(record.dispatchId, {
-            workerType: 'document-author',
-            status: 'completed',
-            writtenPaths: [path],
-            resolvedFindingIds: [],
-          }),
-        ).rejects.toThrow('dispatch is not active')
-    }
-    expect(closed).toHaveLength(paths.length)
-  })
-
-  test('fails closed on one invalid foundation terminal while preserving sibling evidence', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-isolation-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-foundation-isolation',
-      projectId: 'project-foundation-isolation',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-      foundationDraftComplete: false,
-    })
-    await store.save({
-      ...initial,
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
-      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
-    })
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      workerPort: {
-        async start(request) {
-          return {
-            sessionId: `session:${request.taskId}`,
-            dispatchId: request.dispatchId!,
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async close() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-    const dispatchFor = (path: FoundationDocumentPath) =>
-      dispatcher.dispatch({
-        runId: initial.runId,
-        ownerId: initial.ownerId,
-        projectId: initial.projectId,
-        workspacePath: workspace,
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
-        taskId: path,
-        revision: initial.revision.document,
-        allowedPaths: [path],
-        contract: {
-          authoringMode: 'parallel-draft',
-          documentSet: 'foundation',
-          foundationDocumentPath: path,
-        },
-      })
-    const failed = await dispatchFor('docs/LEVEL_SCENE_DESIGN.md')
-    const running = await dispatchFor('docs/BALANCE_DESIGN.md')
-
-    await expect(
-      dispatcher.completeDispatch(failed.dispatchId, {}),
-    ).rejects.toThrow('invalid worker terminal result')
-    const saved = await store.load()
-    expect(saved?.status).toBe('needs_action')
-    expect(
-      saved?.foundationDraftState.documents?.find(
-        document => document.path === 'docs/LEVEL_SCENE_DESIGN.md',
-      ),
-    ).toMatchObject({
-      status: 'needs_action',
-      failureReason: expect.any(String),
-    })
-    expect(
-      saved?.foundationDraftState.documents?.find(
-        document => document.path === 'docs/BALANCE_DESIGN.md',
-      )?.dispatch?.dispatchId,
-    ).toBe(running.dispatchId)
-  })
-
-  test('fails a parallel document closed without returning it to pending', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-dispatch-failure-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-foundation-dispatch-failure',
-      projectId: 'project-foundation-dispatch-failure',
-      ownerId: 'owner-1',
-      foundationDraftComplete: false,
-    })
-    await store.save({
-      ...initial,
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
-      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
-    })
-    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      workerPort: {
-        async start(request) {
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
-        },
-        async submit() {
-          throw new Error('canonical heading missing')
-        },
-        async stop() {},
-        async close() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-
-    await expect(
-      dispatcher.dispatch({
-        runId: initial.runId,
-        ownerId: initial.ownerId,
-        projectId: initial.projectId,
-        workspacePath: workspace,
-        workerType: 'document-author',
-        phase: 'DOCUMENT_DRAFTING',
-        taskId: path,
-        revision: initial.revision.document,
-        allowedPaths: [path],
-        contract: {
-          authoringMode: 'parallel-draft',
-          documentSet: 'foundation',
-          foundationDocumentPath: path,
-        },
-      }),
-    ).rejects.toThrow('canonical heading missing')
-
-    expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'canonical heading missing',
-      foundationDraftState: {
-        documents: expect.arrayContaining([
-          expect.objectContaining({
-            path,
-            status: 'needs_action',
-            failureReason: 'canonical heading missing',
-          }),
-        ]),
-      },
-    })
-  })
-
-  test('does not automatically retry a failed parallel document', async () => {
+  test('rejects a legacy failed parallel document without redispatching', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-prior-failure-'))
     const store = createRunStore(workspace, 'owner-1')
     const initial = createTestDeliveryRun({
@@ -3635,30 +2412,33 @@ describe('delivery workflow recovery', () => {
     })
     const run = (await store.load())!
     await controller.store.save(run)
+    const before = await readFile(store.paths.snapshot, 'utf8')
 
-    await expect(controller.resume(run)).rejects.toThrow('provider disconnected')
-    expect(started).toHaveLength(1)
-    expect(prompts).toHaveLength(1)
+    await expect(controller.resume(run)).rejects.toThrow(
+      LEGACY_AUTHOR_RETIRED_ERROR,
+    )
+    expect(started).toHaveLength(0)
+    expect(prompts).toHaveLength(0)
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
     const failed = await controller.store.load()
     const failedDocument = failed?.foundationDraftState.documents?.find(
       document => document.path === path,
     )
     expect(failed).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'provider disconnected',
+      status: 'running',
       foundationDraftState: {
         documents: expect.arrayContaining([
           expect.objectContaining({
             path,
-            status: 'needs_action',
+            status: 'pending',
           }),
         ]),
       },
     })
-    expect(failedDocument?.failureReason).toBe('provider disconnected')
+    expect(failedDocument?.failureReason).toBeUndefined()
   })
 
-  test('does not refill a failed parallel foundation slot while sibling evidence remains open', async () => {
+  test('rejects a legacy parallel snapshot without refilling a foundation slot', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-parallel-refill-'))
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-parallel-refill',
@@ -3688,22 +2468,17 @@ describe('delivery workflow recovery', () => {
       documentStep: 'FOUNDATION_DRAFTING' as const,
       foundationDraftState,
     }
-    await createRunStore(workspace, 'owner-1').save(run)
+    const store = createRunStore(workspace, 'owner-1')
+    await store.save(run)
+    const before = await readFile(store.paths.snapshot, 'utf8')
 
     const started: WorkerDispatchRequest[] = []
-    let firstBalanceDispatchId: string | undefined
-    let rejectFirstBalanceTerminal: ((error: Error) => void) | undefined
-    const firstBalanceTerminal = new Promise<never>((_, reject) => {
-      rejectFirstBalanceTerminal = reject
-    })
     const controller = createDeliveryWorkflowController({
       workspacePath: workspace,
       ownerId: initial.ownerId,
       workerPort: {
         async start(request) {
           started.push(request)
-          if (request.taskId === 'docs/BALANCE_DESIGN.md' && !firstBalanceDispatchId)
-            firstBalanceDispatchId = request.dispatchId
           return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
         },
         async submit() {},
@@ -3719,34 +2494,17 @@ describe('delivery workflow recovery', () => {
             startedAt: new Date().toISOString(),
           }
         },
-        async waitForTerminal(dispatchId) {
-          if (dispatchId === firstBalanceDispatchId) return firstBalanceTerminal
-          return new Promise(() => {})
-        },
       },
     })
 
-    const resuming = controller.resume(run)
-    for (let index = 0; index < 400 && started.length < 2; index += 1)
-      await new Promise(resolve => setTimeout(resolve, 5))
-    expect(started.map(request => request.taskId)).toEqual([
-      'docs/BALANCE_DESIGN.md',
-      'docs/UI_UX_SPEC.md',
-    ])
-    rejectFirstBalanceTerminal!(new Error('balance heading missing'))
-    await resuming
-    for (let index = 0; index < 400 && (await controller.store.load())?.status !== 'needs_action'; index += 1)
-      await new Promise(resolve => setTimeout(resolve, 5))
-    expect(started.filter(request => request.taskId === 'docs/BALANCE_DESIGN.md')).toHaveLength(1)
-    expect(started.filter(request => request.taskId === 'docs/ART_DIRECTION.md')).toHaveLength(0)
-    expect(started.filter(request => request.taskId === 'docs/UI_UX_SPEC.md')).toHaveLength(1)
-    expect(started.some(request => request.contract.priorFailureReason)).toBe(false)
-    const saved = await controller.store.load()
-    expect(saved?.status).toBe('needs_action')
-    expect(saved?.blockedReason).toBe('balance heading missing')
+    await expect(controller.resume(run)).rejects.toThrow(
+      LEGACY_AUTHOR_RETIRED_ERROR,
+    )
+    expect(started).toHaveLength(0)
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
   })
 
-  test('does not automatically restart a failed initial document author', async () => {
+  test('rejects a legacy initial Author snapshot without restarting it', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-initial-foundation-retry-'))
     const initial = createTestDeliveryRun({
       runId: 'run-initial-foundation-retry',
@@ -3784,81 +2542,21 @@ describe('delivery workflow recovery', () => {
       },
     })
     await controller.store.save(run)
+    const before = await readFile(controller.store.paths.snapshot, 'utf8')
 
-    await expect(controller.resume(run)).rejects.toThrow('initial provider disconnected')
-    expect(started).toHaveLength(1)
-    expect(prompts).toHaveLength(1)
+    await expect(controller.resume(run)).rejects.toThrow(
+      LEGACY_AUTHOR_RETIRED_ERROR,
+    )
+    expect(started).toHaveLength(0)
+    expect(prompts).toHaveLength(0)
+    expect(await readFile(controller.store.paths.snapshot, 'utf8')).toBe(before)
     expect(await controller.store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'initial provider disconnected',
-      activeDispatch: { status: 'failed' },
+      status: 'running',
+      foundationDraftState: { completedPaths: [] },
     })
   })
 
-  test('keeps a parallel document WorkerNeedsActionError at the human boundary', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-needs-action-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-foundation-needs-action',
-      projectId: 'project-foundation-needs-action',
-      ownerId: 'owner-1',
-      foundationDraftComplete: false,
-    })
-    await store.save({
-      ...initial,
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
-      foundationDraftState: beginParallelFoundationAuthoring(['docs/GDD.md']),
-    })
-    const path = 'docs/LEVEL_SCENE_DESIGN.md' as const
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      workerPort: {
-        async start(request) {
-          return { sessionId: request.dispatchId!, dispatchId: request.dispatchId! }
-        },
-        async submit() {},
-        async waitForTerminal() {
-          const error = new Error('external prerequisite unavailable')
-          error.name = 'WorkerNeedsActionError'
-          throw error
-        },
-        async stop() {},
-        async close() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-    await dispatcher.dispatch({
-      runId: initial.runId,
-      ownerId: initial.ownerId,
-      projectId: initial.projectId,
-      workspacePath: workspace,
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      taskId: path,
-      revision: initial.revision.document,
-      allowedPaths: [path],
-      contract: {
-        authoringMode: 'parallel-draft',
-        documentSet: 'foundation',
-        foundationDocumentPath: path,
-      },
-    })
-    await dispatcher.waitForTerminalReconciliation()
-
-    expect(await store.load()).toMatchObject({
-      status: 'needs_action',
-      foundationDraftState: {
-        documents: expect.arrayContaining([
-          expect.objectContaining({ path, status: 'needs_action' }),
-        ]),
-      },
-    })
-  })
-
-  test('fails an orphaned parallel author closed without starting a replacement', async () => {
+  test('rejects an orphaned parallel Author without private needs_action migration', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-foundation-orphan-'))
     const initial = createTestDeliveryRun({
       runId: 'run-foundation-orphan',
@@ -3923,22 +2621,29 @@ describe('delivery workflow recovery', () => {
       },
     })
     await controller.store.save(run)
+    const before = await readFile(controller.store.paths.snapshot, 'utf8')
 
-    await controller.resume(run)
+    await expect(controller.resume(run)).rejects.toThrow(
+      LEGACY_AUTHOR_RETIRED_ERROR,
+    )
 
     expect(await controller.store.load()).toMatchObject({
-      status: 'needs_action',
-      blockedReason: 'preserved native document session is unavailable',
+      status: 'running',
       foundationDraftState: {
         documents: expect.arrayContaining([
           expect.objectContaining({
             path,
-            status: 'needs_action',
+            status: 'drafting',
+            dispatch: expect.objectContaining({
+              dispatchId: 'orphan-level',
+              status: 'running',
+            }),
           }),
         ]),
       },
     })
     expect(started).toHaveLength(0)
+    expect(await readFile(controller.store.paths.snapshot, 'utf8')).toBe(before)
   })
 
   test('claims the first dispatch durably across independent dispatcher instances', async () => {
@@ -4308,51 +3013,6 @@ describe('delivery workflow recovery', () => {
     })
   })
 
-  test('does not stop document work while a model turn remains active', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-document-submit-clock-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-    })
-    await store.save({ ...initial, phase: 'DOCUMENT_DRAFTING' })
-    const dispatcher = createDeliveryDispatcher({
-      store,
-      workerPort: {
-        async start(request) {
-          return {
-            sessionId: 'session-1',
-            dispatchId: request.dispatchId ?? 'missing-dispatch-id',
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-
-    await dispatcher.dispatch({
-      runId: initial.runId,
-      ownerId: initial.ownerId,
-      projectId: initial.projectId,
-      workspacePath: workspace,
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      revision: initial.revision.document,
-      contract: { documentSet: 'foundation', authoringMode: 'initial', foundationDocumentPath: 'docs/GDD.md' },
-    })
-
-    await new Promise(resolve => setTimeout(resolve, 40))
-    expect(await store.load()).toMatchObject({
-      status: 'running',
-      activeDispatch: { status: 'running' },
-    })
-  })
-
   test('does not stop resource work because no mutation has occurred yet', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-no-mutation-'))
     const store = createRunStore(workspace, 'owner-1')
@@ -4469,13 +3129,13 @@ describe('delivery workflow recovery', () => {
       runId: 'run-terminal-drain',
       projectId: 'project-1',
       ownerId: 'owner-1',
-      foundationDraftComplete: false,
+      foundationDraftComplete: true,
     })
-    const path = CANONICAL_FOUNDATION_DOCUMENTS[0]
+    const path = 'docs/acceptance/gameplay-checklist.md'
     await store.save({
       ...initial,
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'CHECKLIST_DRAFTING',
       currentItemId: path,
     })
     let releaseTerminal!: () => void
@@ -4525,14 +3185,14 @@ describe('delivery workflow recovery', () => {
       projectId: initial.projectId,
       workspacePath: workspace,
       workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
+      phase: 'DOCUMENT_REVIEW',
       taskId: path,
       revision: initial.revision.document,
       allowedPaths: [path],
       contract: {
-        documentSet: 'foundation',
-        authoringMode: 'initial',
-        foundationDocumentPath: path,
+        documentSet: 'checklist',
+
+
       },
     })
     let drained = false
@@ -4928,255 +3588,18 @@ describe('delivery workflow recovery', () => {
     ).toBe(false)
   })
 
-  test('holds one exact lease from journal read through reconstruction commit', async () => {
-    const fixture = await createResourceRecoveryFixture()
+  test('rejects a persisted legacy reconstruction marker without applying it', async () => {
+    const fixture = await createCanonicalReceiptRecoveryFixture()
     workspace = fixture.workspacePath
-    let journalLeaseId: string | undefined
-    let casCalls = 0
-    const racedStore: typeof fixture.store = {
-      ...fixture.store,
-      readEvents: async (...args) => {
-        const lease = JSON.parse(
-          await readFile(fixture.store.paths.lock, 'utf8'),
-        ) as { leaseId: string; runId: string; processId: number }
-        expect(lease.runId).toBe(RECOVERY_RUN_ID)
-        expect(lease.processId).toBe(process.pid)
-        journalLeaseId = lease.leaseId
-        return fixture.store.readEvents(...args)
-      },
-      replaceSnapshotIfDigest: async input => {
-        casCalls += 1
-        expect(input.lease?.leaseId).toBe(journalLeaseId)
-        return fixture.store.replaceSnapshotIfDigest(input)
-      },
+    const raw = JSON.parse(await readFile(fixture.store.paths.snapshot, 'utf8'))
+    const before = JSON.stringify({ ...raw, pendingEvents: [{ type: 'workflow.run.reconstructed', legacy: true }] })
+    await writeFile(fixture.store.paths.snapshot, before)
+    const events = await fixture.store.readEvents()
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(fixture.recover()).rejects.toThrow('retired')
+      expect(await readFile(fixture.store.paths.snapshot, 'utf8')).toBe(before)
+      expect(await fixture.store.readEvents()).toEqual(events)
     }
-
-    await recoverAndResumeRun({
-      store: racedStore,
-      workspacePath: fixture.workspacePath,
-      ownerId: RECOVERY_OWNER_ID,
-      projectId: RECOVERY_PROJECT_ID,
-      confirmedBriefContext: RECOVERY_BRIEF,
-      stopWorkspaceWorkers: async () => undefined,
-      resumeCurrentRun: async () => undefined,
-    })
-
-    expect(casCalls).toBe(1)
-    expect(journalLeaseId).toBeTruthy()
-    await expect(
-      readFile(fixture.store.paths.lock, 'utf8'),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-
-  test('restarts projection from source bytes changed while workers stop', async () => {
-    const fixture = await createResourceRecoveryFixture()
-    workspace = fixture.workspacePath
-    const before = await readFile(fixture.store.paths.snapshot, 'utf8')
-    const changed = `${before}\n`
-
-    let resumeCalls = 0
-    const recovered = await recoverAndResumeRun({
-      store: fixture.store,
-      workspacePath: fixture.workspacePath,
-      ownerId: RECOVERY_OWNER_ID,
-      projectId: RECOVERY_PROJECT_ID,
-      confirmedBriefContext: RECOVERY_BRIEF,
-      stopWorkspaceWorkers: async () => {
-        await writeFile(fixture.store.paths.snapshot, changed)
-      },
-      resumeCurrentRun: async () => {
-        resumeCalls += 1
-      },
-    })
-    expect(recovered.runId).toBe(RECOVERY_RUN_ID)
-    expect(resumeCalls).toBe(1)
-    expect(await readFile(fixture.store.paths.snapshot, 'utf8')).not.toBe(
-      changed,
-    )
-    expect(
-      (await fixture.store.readEvents()).filter(
-        event => event.type === 'workflow.run.reconstructed',
-      ),
-    ).toHaveLength(1)
-  })
-
-  test('restarts a persisted reconstruction marker with fresh store and dispatcher instances', async () => {
-    const fixture = await createResourceRecoveryFixture()
-    workspace = fixture.workspacePath
-    const journalEvents = await fixture.store.readEvents()
-    await writeFile(
-      fixture.store.paths.events,
-      `${journalEvents
-        .filter(event => event.type !== 'workflow.unit.accepted')
-        .map(event => JSON.stringify(event))
-        .join('\n')}\n`,
-    )
-    const activePath = CANONICAL_FOUNDATION_DOCUMENTS[0]
-    const nextPath = CANONICAL_FOUNDATION_DOCUMENTS[1]
-    const dispatchId = 'fixture-document-0'
-    const request: WorkerDispatchRequest = {
-      dispatchId,
-      runId: RECOVERY_RUN_ID,
-      ownerId: RECOVERY_OWNER_ID,
-      projectId: RECOVERY_PROJECT_ID,
-      workspacePath: fixture.workspacePath,
-      workerType: 'document-author',
-      phase: 'DOCUMENT_DRAFTING',
-      taskId: activePath,
-      revision: fixture.journalRun.revision.document,
-      allowedPaths: [activePath],
-      contract: {
-        confirmedBriefDigest: fixture.journalRun.confirmedBriefDigest,
-        documentSet: 'foundation',
-        authoringMode: 'initial',
-        foundationDocumentPath: activePath,
-        availableUpstreamPaths: [],
-      },
-    }
-    await writeFile(
-      fixture.store.paths.snapshot,
-      `${JSON.stringify(
-        {
-          ...fixture.journalRun,
-          schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-          invalidRecoveryMarker: true,
-          phase: 'DOCUMENT_DRAFTING',
-          documentStep: 'FOUNDATION_DRAFTING',
-          status: 'running',
-          currentItemId: activePath,
-          foundationDraftState: { completedPaths: [] },
-          resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
-          evidence: {},
-          activeDispatch: {
-            dispatchId,
-            workerType: 'document-author',
-            phase: 'DOCUMENT_DRAFTING',
-            taskId: activePath,
-            revision: fixture.journalRun.revision.document,
-            status: 'running',
-            startedAt: fixture.journalRun.updatedAt,
-            request,
-          },
-        },
-        null,
-        2,
-      )}\n`,
-    )
-    const firstStarted: WorkerDispatchRequest[] = []
-    const firstController = createDeliveryWorkflowController({
-      workspacePath: fixture.workspacePath,
-      ownerId: RECOVERY_OWNER_ID,
-      workerPort: {
-        async start(request) {
-          firstStarted.push(request)
-          return {
-            sessionId: request.dispatchId!,
-            dispatchId: request.dispatchId!,
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-    await chmod(fixture.store.paths.events, 0o444)
-    try {
-      await expect(
-        recoverAndResumeRun({
-          store: fixture.store,
-          workspacePath: fixture.workspacePath,
-          ownerId: RECOVERY_OWNER_ID,
-          projectId: RECOVERY_PROJECT_ID,
-          confirmedBriefContext: RECOVERY_BRIEF,
-          stopWorkspaceWorkers: async () => undefined,
-          resumeCurrentRun: run => firstController.resume(run),
-        }),
-      ).rejects.toBeInstanceOf(Error)
-    } finally {
-      await chmod(fixture.store.paths.events, 0o644)
-    }
-    const interruptedSnapshot = JSON.parse(
-      await readFile(fixture.store.paths.snapshot, 'utf8'),
-    ) as DeliveryRun
-    expect(interruptedSnapshot.pendingEvents).toEqual([
-      expect.objectContaining({ type: 'workflow.run.reconstructed' }),
-      expect.objectContaining({
-        type: 'workflow.unit.accepted',
-        unit: expect.objectContaining({ unitId: `document:${activePath}` }),
-      }),
-    ])
-    expect(firstStarted).toHaveLength(0)
-
-    const restartedStore = createRunStore(
-      fixture.workspacePath,
-      RECOVERY_OWNER_ID,
-    )
-    const restarted: WorkerDispatchRequest[] = []
-    const restartedController = createDeliveryWorkflowController({
-      workspacePath: fixture.workspacePath,
-      ownerId: RECOVERY_OWNER_ID,
-      workerPort: {
-        async start(request) {
-          restarted.push(request)
-          return {
-            sessionId: request.dispatchId!,
-            dispatchId: request.dispatchId!,
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-    await recoverAndResumeRun({
-      store: restartedStore,
-      workspacePath: fixture.workspacePath,
-      ownerId: RECOVERY_OWNER_ID,
-      projectId: RECOVERY_PROJECT_ID,
-      confirmedBriefContext: RECOVERY_BRIEF,
-      stopWorkspaceWorkers: async () => undefined,
-      resumeCurrentRun: run => restartedController.resume(run),
-    })
-    const events = await restartedStore.readEvents()
-    expect(
-      events.filter(event => event.type === 'workflow.run.reconstructed'),
-    ).toHaveLength(1)
-    const accepted = events.filter(
-      event => event.type === 'workflow.unit.accepted',
-    )
-    expect(accepted).toHaveLength(1)
-    expect(accepted[0]).toMatchObject({
-      unit: { unitId: `document:${activePath}` },
-    })
-    expect(restarted).toHaveLength(1)
-    expect(restarted[0]).toMatchObject({
-      workerType: 'document-author',
-      taskId: nextPath,
-      contract: {
-        authoringMode: 'parallel-draft',
-        foundationDocumentPath: nextPath,
-      },
-    })
-    const durable = await restartedStore.load()
-    expect(durable?.schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
-    expect(durable?.activeDispatch).toBeUndefined()
-    expect(
-      durable?.foundationDraftState.documents?.find(
-        document => document.path === nextPath,
-      ),
-    ).toMatchObject({
-      path: nextPath,
-      status: 'drafting',
-      dispatch: {
-        workerType: 'document-author',
-        status: 'running',
-      },
-    })
-    expect(durable?.pendingEvents).toBeUndefined()
+    expect(fixture.started).toHaveLength(0)
   })
 })
-import { foundationAuthoringSources } from '../beegame/delivery-workflow/foundation-authoring-contract'

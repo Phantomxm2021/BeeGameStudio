@@ -12,10 +12,55 @@ import {
   projectCurrentStageCard,
   projectWorkflowStageCardHistory,
 } from './workflow-stage-card-history'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
 const workspacePath = process.cwd()
 
 describe('workflow stage card history', () => {
+  test('uses the public author result before legacy document state', () => {
+    const base = createTestDeliveryRun({
+      projectId: 'project-public-author-display',
+      ownerId: 'owner-public-author-display',
+      foundationDraftComplete: false,
+    })
+    const digest = 'a'.repeat(64)
+    const run: DeliveryRun = {
+      ...base,
+      phase: 'DOCUMENT_REVIEW',
+      documentStep: 'FOUNDATION_REVIEW',
+      authorStage: {
+        protocolVersion: 1,
+        requestId: 'author-request',
+        inputDigest: digest,
+        status: 'completed',
+        handle: {
+          protocolVersion: 1,
+          producer: 'foundation-authoring',
+          id: '550e8400-e29b-41d4-a716-446655440000',
+        },
+        result: {
+          protocolVersion: 1,
+          producer: 'foundation-authoring',
+          kind: 'foundation_documents',
+          resultId: 'b'.repeat(64),
+          inputDigest: digest,
+          ownerId: base.ownerId,
+          projectId: base.projectId,
+          confirmedBriefDigest: base.confirmedBriefDigest,
+          documents: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest, byteLength: 1, artifactPath: `.beegame/workflow/foundation-authoring/artifacts/${path}` })),
+          documentRevision: 'document-revision',
+          workspaceRevision: 'workspace-revision',
+          receiptSetDigest: 'c'.repeat(64),
+        },
+        control: { sequence: 1, action: 'run', requestId: 'author-request' },
+      },
+    }
+    const card = projectCurrentStageCard({ run, workspacePath })
+    expect(card?.stageId).toBe('DOCUMENT_DRAFTING')
+    expect(card?.substage).toBe('INITIAL_DRAFTING')
+    expect(card?.tasks).toHaveLength(8)
+    expect(card?.tasks.every(task => task.status === 'completed')).toBe(true)
+  })
   test('freezes the previous display stage when the next stage is entered', () => {
     const base = createTestDeliveryRun({
       projectId: 'project-stage-history',
@@ -64,7 +109,7 @@ describe('workflow stage card history', () => {
     ).toBeUndefined()
   })
 
-  test('freezes audit stage 3 before entering durable revision stage 4', () => {
+  test('freezes public Reviewer stage 3 before entering public Revision stage 4', () => {
     const base = createTestDeliveryRun({
       projectId: 'project-audit-revision-stages',
       ownerId: 'owner-audit-revision-stages',
@@ -73,12 +118,13 @@ describe('workflow stage card history', () => {
       ...base,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
+      foundationReviewStage: { invocation: { stage: 'reviewer' } } as never,
     }
     const next: DeliveryRun = {
       ...previous,
       phase: 'FOUNDATION_REVISION',
       documentStep: 'FOUNDATION_REVISION',
-      foundationAuditState: { status: 'planning', tasks: [] } as never,
+      foundationReviewStage: { invocation: { stage: 'revision' } } as never,
       updatedAt: '2026-08-06T00:00:02.000Z',
     }
     const frozen = freezePreviousStageCard({
@@ -234,7 +280,7 @@ describe('workflow stage card history', () => {
     })
   })
 
-  test('derives the revision cursor for an active repair snapshot', () => {
+  test('projects one public Revision task for an active repair stage', () => {
     const base = createTestDeliveryRun({
       projectId: 'project-revision-cursor',
       ownerId: 'owner-revision-cursor',
@@ -246,39 +292,7 @@ describe('workflow stage card history', () => {
         documentStep: 'FOUNDATION_REVISION',
         currentMessage: 'The active reviser says this is worker prose.',
         status: 'running',
-        foundationAuditState: {
-          status: 'revising',
-          revision: base.revision,
-          activeBundleId: 'bundle-revision-cursor',
-          revisionBundles: [{
-            bundleId: 'bundle-revision-cursor',
-            status: 'active',
-            round: 1,
-            baseDocumentRevision: base.revision,
-            baseDocumentDigests: [],
-            remediationDigest: 'c'.repeat(64),
-            taskIds: ['revision:gdd'],
-            frozenTaskIds: [],
-          }],
-          tasks: [{
-            taskId: 'revision:gdd',
-            kind: 'document-revision',
-            revision: base.revision,
-            round: 1,
-            bundleId: 'bundle-revision-cursor',
-            packetPath: '.beegame/packet.json',
-            packetDigest: 'a'.repeat(64),
-            attempt: 1,
-            status: 'running',
-            documentPath: 'docs/GDD.md',
-            issueIds: ['AUD-1'],
-            sectionIds: ['progression'],
-            stagedPath: '.beegame/staged/GDD.md',
-            baseDocumentDigest: 'b'.repeat(64),
-            dependencyDigests: {},
-            frozen: false,
-          }],
-        },
+        foundationReviewStage: { invocation: { stage: 'revision' } },
       } as never,
       workspacePath,
     })
@@ -288,7 +302,7 @@ describe('workflow stage card history', () => {
       phaseIndex: 4,
       substage: 'REPAIRING',
       documentStep: 'FOUNDATION_REVISION',
-      tasks: [expect.objectContaining({ id: 'revision:docs/GDD.md', operation: 'revise' })],
+      tasks: [expect.objectContaining({ id: 'foundation-public-stage', operation: 'revise' })],
     })
     expect(card?.message).toBeUndefined()
   })

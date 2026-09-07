@@ -3,20 +3,17 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
-import { foundationFactDefinition } from './foundation-fact-definitions'
-import { buildFoundationAuthorPrompt, isFoundationAuthor } from './foundation-authoring-prompt'
+import { RETIRED_FOUNDATION_REVIEW } from './retired-foundation-review'
+import { assertSharedDocumentWorker } from './retired-foundation-author'
 
-const FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT =
-  'Semantic Issue remediation must be exactly {"kind":"patch","sectionKeys":["..."]}. Do not wrap the result in `params` or add fields such as summary, steps, description, or value. sourceSectionKey identifies the canonical owner evidence that makes expected authoritative; remediation.sectionKeys identify the incorrect block to change. For a cross-document conflict these are different sides: preserve the owner and patch the downstream conflict. Resolve conflicts by the fixed Source of Truth order GDD > Technical > Level/Balance/UI/Art > Asset Plan, then by explicit packet hard constraints, then by the smallest authorized semantic change. Choose that repair directly; never request a user choice or preserve alternatives. All patch sectionKeys must belong to the same canonical document; never mix document prefixes in one patch. If a conflict spans documents, split it into separate Issues with independent single-document patch authority. A wording-only rewrite, synonym, alias, compatibility note, qualification, or restatement is not a repair unless it makes the exact expected condition true and removes the actual condition.'
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
+  assertSharedDocumentWorker(request)
   const packetWorker =
     request.workerType === 'foundation-fact-extractor' ||
-    request.workerType === 'foundation-semantic-reviewer'
-  if (packetWorker) return buildPacketWorkerPrompt(request)
-  if (request.workerType === 'foundation-document-reviser')
-    return buildFoundationRevisionWorkerPrompt(request)
-  if (isFoundationAuthor(request)) return buildFoundationAuthorPrompt(request)
+    request.workerType === 'foundation-semantic-reviewer' ||
+    request.workerType === 'foundation-document-reviser'
+  if (packetWorker) throw new Error(RETIRED_FOUNDATION_REVIEW)
   const resourceContentReadPaths =
     request.workerType === 'resource-content-author'
       ? [
@@ -65,227 +62,6 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   ].join('\n')
 }
 
-function buildFoundationRevisionWorkerPrompt(
-  request: WorkerDispatchRequest,
-): string {
-  const packet = request.contract.packet
-  const stagedPath = request.contract.stagedPath
-  if (!packet || typeof packet !== 'object' || Array.isArray(packet))
-    throw new Error('foundation revision worker requires one immutable packet')
-  if (typeof stagedPath !== 'string' || !stagedPath.trim())
-    throw new Error('foundation revision worker requires one staged path')
-  const documentScoped = request.contract.scope === 'document'
-  if (
-    documentScoped &&
-    (!('documentContract' in packet) ||
-      !packet.documentContract ||
-      typeof packet.documentContract !== 'object' ||
-      Array.isArray(packet.documentContract))
-  ) {
-    throw new Error('document-scoped foundation revision worker requires one complete canonical documentContract')
-  }
-  const priorFailureReason = typeof request.contract.priorFailureReason === 'string'
-    ? request.contract.priorFailureReason
-    : undefined
-  return [
-    `Revision evidence: ${JSON.stringify(projectRevisionPacketForModel(packet as Record<string, unknown>))}`,
-    documentScoped
-      ? 'The complete assigned staged document is the write authority because Stage 3 could not establish trustworthy section boundaries. Call ReadAssignedFoundationRevision exactly once with {}, prepare the repair in memory, then return the complete revised document as the visible raw Markdown response. Repair only packet.issues; do not discover or repair unrelated defects. packet.documentContract is preservation authority, not a second review checklist: retain every declared marker and heading in order and preserve substantive content outside the minimum structural collateral required by the admitted Issues. Do not call mutation or submission tools, use Read/Edit/Bash, wrap the Markdown in a code fence, or add terminal JSON or prose.'
-      : 'The packet sectionIds and packet.sections[].text are the complete current write authority: only sectionIds may change. Do not read the staged document; the service preserves every unassigned byte. Return only the complete replacement Markdown for every authorized section, in packet.sectionIds order. Each replacement must start with its exact canonical heading and include its complete body exactly like packet.sections[].text; omit protocol markers. Do not include read-only evidence sections, JSON, a wrapper code fence, preface, completion explanation, mutation tool call or submission tool call. Make every admitted Issue expected true and remove its actual. For fact/schema repairs, packet.factConstraints is binding authority: do not substitute a standalone fact declaration for its required semantic structure.',
-    ...(priorFailureReason
-      ? [`Automatic retry after the previous strict validation failure: ${priorFailureReason}. Correct that failure only inside the assigned staged ${documentScoped ? 'document' : 'sections'}; do not broaden scope.`]
-      : []),
-  ].join('\n')
-}
-
-function buildPacketWorkerPrompt(request: WorkerDispatchRequest): string {
-  const contract = formatPacketContract(request)
-  return [
-    `BeeGame delivery worker: ${request.workerType}`,
-    'The packet is the sole input for this task. It is immutable service-owned authority.',
-    'Do not read project files, call Read, Grep or Glob, inspect the workspace, use native tools, write files, mutate the platform, or add context from any other source.',
-    'Return only the strict structured result for the assigned packet; do not return Markdown, prose explanations, or additional fields.',
-    workerInstruction(request),
-    terminalInstruction(request),
-    `Model packet contract: ${contract}`,
-  ].join('\n')
-}
-
-function formatPacketContract(request: WorkerDispatchRequest): string {
-  const packet = request.contract.packet
-  const projected = packet && typeof packet === 'object' && !Array.isArray(packet)
-    ? projectPacketForModel(request.workerType, packet as Record<string, unknown>)
-    : undefined
-  const contract: Record<string, unknown> = {
-    workerType: request.workerType,
-    ...(typeof request.contract.kind === 'string' ? { kind: request.contract.kind } : {}),
-    ...(typeof request.contract.checkId === 'string' ? { checkId: request.contract.checkId } : {}),
-    ...(projected ? { packet: projected } : {}),
-  }
-  return JSON.stringify(contract)
-}
-
-function semanticRef(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const ref = value as Record<string, unknown>
-  if (typeof ref.documentPath !== 'string' || typeof ref.sectionId !== 'string')
-    return undefined
-  return {
-    documentPath: ref.documentPath,
-    sectionId: ref.sectionId,
-    ...(typeof ref.heading === 'string' ? { heading: ref.heading } : {}),
-  }
-}
-
-function modelSection(value: unknown, contentKey: 'text' | 'bytes'): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const section = value as Record<string, unknown>
-  const ref = semanticRef(section.ref ?? section)
-  const content = section[contentKey]
-  if (!ref || typeof content !== 'string') return undefined
-  return {
-    ...ref,
-    ...(typeof section.sectionKey === 'string' ? { sectionKey: section.sectionKey } : {}),
-    content,
-  }
-}
-
-function projectItems<T>(
-  values: unknown[],
-  project: (value: unknown) => T | undefined,
-  label: string,
-): T[] {
-  return values.map((value, index) => {
-    const projected = project(value)
-    if (projected === undefined)
-      throw new Error(`model-facing ${label} item ${index} is invalid`)
-    return projected
-  })
-}
-
-function modelFact(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const fact = value as Record<string, unknown>
-  const source = semanticRef(fact.source)
-  if (typeof fact.key !== 'string' || source === undefined || !('value' in fact)) return undefined
-  return { key: fact.key, value: fact.value, source }
-}
-
-function modelIssue(value: unknown, includeId: boolean): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const issue = value as Record<string, unknown>
-  const remediation = issue.remediation
-  if (
-    (includeId && typeof issue.id !== 'string') ||
-    typeof issue.expected !== 'string' ||
-    typeof issue.actual !== 'string' ||
-    !remediation || typeof remediation !== 'object' || Array.isArray(remediation)
-  ) return undefined
-  const fix = remediation as Record<string, unknown>
-  const rawSource = issue.source
-  if (!rawSource || typeof rawSource !== 'object' || Array.isArray(rawSource)) return undefined
-  const sourceRecord = rawSource as Record<string, unknown>
-  if (sourceRecord.scope === 'document') {
-    if (
-      typeof sourceRecord.documentPath !== 'string' ||
-      fix.kind !== 'patch' ||
-      fix.scope !== 'document' ||
-      fix.documentPath !== sourceRecord.documentPath ||
-      issue.target !== undefined
-    ) return undefined
-    return {
-      ...(includeId ? { id: issue.id } : {}),
-      ...(typeof issue.severity === 'string' ? { severity: issue.severity } : {}),
-      ...(typeof issue.type === 'string' ? { type: issue.type } : {}),
-      source: { scope: 'document', documentPath: sourceRecord.documentPath },
-      expected: issue.expected,
-      actual: issue.actual,
-      remediation: { kind: 'patch', scope: 'document', documentPath: fix.documentPath },
-      ...(typeof issue.reasonCode === 'string' ? { reasonCode: issue.reasonCode } : {}),
-    }
-  }
-  const source = semanticRef(rawSource)
-  const target = issue.target === undefined ? undefined : semanticRef(issue.target)
-  if (source === undefined || fix.kind !== 'patch' || fix.scope !== 'section' || typeof fix.documentPath !== 'string' || !Array.isArray(fix.sectionIds) || fix.sectionIds.some(sectionId => typeof sectionId !== 'string') || (issue.target !== undefined && target === undefined)) return undefined
-  return {
-    ...(includeId ? { id: issue.id } : {}),
-    ...(typeof issue.severity === 'string' ? { severity: issue.severity } : {}),
-    ...(typeof issue.type === 'string' ? { type: issue.type } : {}),
-    source,
-    ...(target ? { target } : {}),
-    expected: issue.expected,
-    actual: issue.actual,
-    remediation: {
-      kind: 'patch',
-      scope: 'section',
-      documentPath: fix.documentPath,
-      sectionIds: fix.sectionIds,
-    },
-    ...(typeof issue.reasonCode === 'string' ? { reasonCode: issue.reasonCode } : {}),
-  }
-}
-
-function projectPacketForModel(
-  workerType: WorkerDispatchRequest['workerType'],
-  packet: Record<string, unknown>,
-): Record<string, unknown> {
-  if (workerType === 'foundation-fact-extractor') {
-    return {
-      keys: Array.isArray(packet.keys) ? packet.keys : [],
-      sections: Array.isArray(packet.sections)
-        ? projectItems(packet.sections, section => modelSection(section, 'text'), 'fact section')
-        : [],
-    }
-  }
-  if (workerType === 'foundation-semantic-reviewer') {
-    const projected: Record<string, unknown> = {
-      ...(typeof packet.checkId === 'string' ? { checkId: packet.checkId } : {}),
-      sections: Array.isArray(packet.sections)
-        ? projectItems(packet.sections, section => modelSection(section, 'bytes') ?? modelSection(section, 'text'), 'semantic section')
-        : [],
-      facts: Array.isArray(packet.facts)
-        ? projectItems(packet.facts, modelFact, 'semantic fact')
-        : [],
-      deterministicIssuePrefix: Array.isArray(packet.deterministicIssuePrefix)
-        ? projectItems(packet.deterministicIssuePrefix, issue => modelIssue(issue, false), 'deterministic issue')
-        : [],
-    }
-    if (typeof packet.expected === 'string') projected.expected = packet.expected
-    if (typeof packet.actual === 'string') projected.actual = packet.actual
-    if (packet.patchOperation && typeof packet.patchOperation === 'object' && !Array.isArray(packet.patchOperation)) {
-      const operation = packet.patchOperation as Record<string, unknown>
-      projected.patchOperation = {
-        ...(typeof operation.kind === 'string' ? { kind: operation.kind } : {}),
-        ...(typeof operation.documentPath === 'string' ? { documentPath: operation.documentPath } : {}),
-        ...(typeof operation.sectionId === 'string' ? { sectionId: operation.sectionId } : {}),
-      }
-    }
-    return projected
-  }
-  return packet
-}
-
-function projectRevisionPacketForModel(packet: Record<string, unknown>): Record<string, unknown> {
-  return {
-    ...(typeof packet.documentPath === 'string' ? { documentPath: packet.documentPath } : {}),
-    ...(Array.isArray(packet.issueIds) ? { issueIds: packet.issueIds } : {}),
-    ...(Array.isArray(packet.sectionIds) ? { sectionIds: packet.sectionIds } : {}),
-    issues: Array.isArray(packet.issues)
-      ? projectItems(packet.issues, issue => modelIssue(issue, true), 'revision issue')
-      : [],
-    sections: Array.isArray(packet.sections)
-      ? projectItems(packet.sections, section => modelSection(section, 'text'), 'revision section')
-      : [],
-    normalizedFacts: Array.isArray(packet.normalizedFacts)
-      ? projectItems(packet.normalizedFacts, modelFact, 'revision fact')
-      : [],
-    ...(Array.isArray(packet.factConstraints) ? { factConstraints: packet.factConstraints } : {}),
-    ...(packet.scope === 'document' && packet.documentContract && typeof packet.documentContract === 'object' && !Array.isArray(packet.documentContract)
-      ? { documentContract: packet.documentContract }
-      : {}),
-  }
-}
-
 function formatContract(request: WorkerDispatchRequest): string {
   if (request.workerType === 'resource-content-author')
     return JSON.stringify(formatResourceContentContract(request.contract))
@@ -322,26 +98,9 @@ function formatResourceContentContract(
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'foundation-fact-extractor':
-      return [
-        'Extract only the declared fact keys from the exact packet sections.',
-        ...factExtractionInstructions(request),
-        'Account for every assigned key exactly once as present, absent, or uncertain. Present values must be typed. Do not return evidence, section prose, or values not declared by the packet.',
-      ].join(' ')
     case 'foundation-semantic-reviewer':
-      if (request.contract.kind === 'confirmation')
-        return 'This is a strong independent confirmation of the completed source task. Re-evaluate only the same immutable packet and the same check, and return your own supported PASS, ISSUES, or UNDECIDABLE outcome. Do not inherit or preserve the source outcome. Do not expand scope, create a second audit track, introduce a new check, or read any other context.'
-      if (typeof request.contract.issueId === 'string')
-        return 'Recheck only the admitted Issue expected against the packet current evidence. Return only PASS or FAIL in the supplied StructuredOutput schema. PASS means the exact expected is now true and the admitted actual is removed. FAIL requires one structured diagnostic grounded in packet evidence; do not discover, split, rewrite, or remediate Issues.'
-      return [
-        'Review only the exact semantic packet sections, normalized facts, and deterministic references.',
-        FOUNDATION_SEMANTIC_REMEDIATION_CONTRACT,
-        'Issue drafts must use only assigned section keys and contain no IDs.',
-      ].join(' ')
     case 'foundation-document-reviser':
-      return [
-        'Revise only the assigned staged canonical Markdown document and exact target sections for the supplied Issue Registry issue IDs. For document scope, read it once through the zero-argument ReadAssignedFoundationRevision tool. For section scope, packet.sections[].text is the complete current authority and no staged-document read is allowed. Return the revision as visible raw Markdown; never encode document content inside JSON or a tool argument.',
-        'Preserve all section markers and document structure. Make every admitted expected true and remove each admitted actual; never use aliases, compatibility notes, risk registration, wording qualifications or downstream reinterpretation as a substitute. The service applies the raw Markdown atomically and derives changed sections, receipt, task, round, document, Issue and base-authority identity.',
-      ].join(' ')
+      throw new Error(RETIRED_FOUNDATION_REVIEW)
     case 'document-author':
       if (request.contract.documentSet !== 'checklist')
         throw new Error('Foundation author must use the dedicated authoring prompt')
@@ -403,30 +162,13 @@ function workerInstruction(request: WorkerDispatchRequest): string {
   }
 }
 
-function factExtractionInstructions(request: WorkerDispatchRequest): string[] {
-  const packet = request.contract.packet
-  if (!packet || typeof packet !== 'object' || Array.isArray(packet)) return []
-  const keys = (packet as { keys?: unknown }).keys
-  if (!Array.isArray(keys)) return []
-  return keys.flatMap(key => {
-    if (typeof key !== 'string') return []
-    const instruction = foundationFactDefinition(key)?.extractionInstruction
-    return instruction ? [`Fact ${key}: ${instruction}`] : []
-  })
-}
 
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
     case 'foundation-fact-extractor':
-      return 'Return exactly one native StructuredOutput value conforming to the supplied foundation fact schema with the complete bounded result set. For each assigned key, return exactly one status: present requires key, status, and value; omit evidence and reason. Absent requires only key and status and must omit value, evidence, and reason. Uncertain requires key, status, and reason; omit evidence and value. The service binds immutable provenance from the packet owner section into the durable terminal.'
     case 'foundation-semantic-reviewer':
-      if (typeof request.contract.issueId === 'string')
-        return 'Return exactly one native StructuredOutput value conforming to the targeted semantic recheck schema. Use PASS without diagnostic, or FAIL with exactly one structured diagnostic containing observedActual, evidence, and failureReasonCode. Do not return ISSUES or UNDECIDABLE; the service determines scope assessment.'
-      return 'Return exactly one native StructuredOutput value conforming to the supplied semantic schema. Use exactly one outcome shape: PASS omits issues and reason; ISSUES includes a non-empty issues array and omits reason; UNDECIDABLE includes reason and omits issues.'
     case 'foundation-document-reviser':
-      return request.contract.scope === 'document'
-        ? 'After the single assigned read, return exactly one complete raw Markdown document as the visible response. Do not call mutation or submission tools and do not return JSON, a wrapper fence, or completion prose.'
-        : 'Return exactly the complete raw Markdown replacements for all packet.sectionIds in their declared order, each beginning with its exact canonical heading. Do not call tools and do not return JSON, protocol markers, a wrapper fence, or completion prose.'
+      throw new Error(RETIRED_FOUNDATION_REVIEW)
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||

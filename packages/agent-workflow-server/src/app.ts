@@ -1,8 +1,13 @@
 import { Hono, type Context } from 'hono'
+import { retiredFoundationRunningDispatches } from './beegame/delivery-workflow/retired-foundation-review'
+import {
+  readCanonicalProjectArtifactConsistently as readProjectArtifactConsistently,
+  type ProjectArtifactIdentity,
+} from './beegame/project-artifact-store'
 import { cors } from 'hono/cors'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import {
   listModelConfigs,
@@ -190,6 +195,14 @@ import { createInitialDeliveryRun } from './beegame/delivery-workflow/run-store'
 import { transitionDeliveryRun } from './beegame/delivery-workflow/transition'
 import { createDeliveryWorkflowController } from './beegame/delivery-workflow/controller'
 import { createBeeGameDeliveryWorkerPort } from './beegame/delivery-worker-session-port'
+import {
+  createFoundationAuthoringHost,
+  type FoundationAuthoringHost,
+  type FoundationAuthoringHostOptions,
+} from './beegame/foundation-authoring-host'
+import { createFoundationReviewerHost, type FoundationReviewerHostOptions, type FoundationReviewerHost } from './beegame/foundation-reviewer-host'
+import { createFoundationRevisionHost, type FoundationRevisionHostOptions, type FoundationRevisionHost } from './beegame/foundation-revision-host'
+import { resolveNativeRuntimeCommand } from './beegame/native-runtime-process-path'
 import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delivery-gate'
 import type {
   DeliveryRun,
@@ -197,9 +210,6 @@ import type {
   ResourceProductionTask,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
-import { foundationRuntimeTasks, summarizeFoundationIssues, type FoundationAuditState } from './beegame/delivery-workflow/foundation-audit-state'
-import { loadCommittedFoundationDerivedArtifacts, loadFoundationSemanticReview } from './beegame/delivery-workflow/foundation-audit-artifacts'
-import { loadCommittedFoundationRevisionAuthority } from './beegame/delivery-workflow/foundation-revision-publication'
 import {
   FOUNDATION_REVISION_STAGE,
   projectDeliveryProgress,
@@ -213,12 +223,13 @@ import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
 } from './beegame/delivery-workflow/document-display-tasks'
+import { projectPublicAuthorDisplay, projectPublicAuthorResultDisplay } from './beegame/delivery-workflow/public-author-display'
 import {
   projectWorkflowCurrentMessage,
   projectWorkflowDisplayReason,
   sanitizeWorkflowDisplayMessage,
 } from './beegame/delivery-workflow/workflow-display-message'
-import { workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
+import { authorStageLinkSchema, workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
 
 type JsonObject = Record<string, unknown>
 
@@ -405,6 +416,12 @@ export type AgentWorkflowAppOptions = {
   resourceSelectionRuntimeConfig?: ResourceSelectionRuntimeConfig
   invitationService?: InvitationService | false
   registerCleanup?: (cleanup: () => void) => void
+  /** Offline/test hosts may provide a public authoring port directly. */
+  foundationAuthoringHostFactory?: (
+    options: FoundationAuthoringHostOptions,
+  ) => FoundationAuthoringHost
+  foundationReviewerHostFactory?: (options: FoundationReviewerHostOptions) => FoundationReviewerHost
+  foundationRevisionHostFactory?: (options: FoundationRevisionHostOptions) => FoundationRevisionHost
 }
 
 export const ROUTE_PERMISSION = {
@@ -621,14 +638,33 @@ export function createAgentWorkflowApp(
         )
     : undefined
   const projectAssetStorage = createR2ProjectAssetStorageFromEnv()
+  const remoteUsageBilling = createRemoteUsageBillingClient(
+    billingConfig,
+    serviceFetch,
+  )
+  // Authoring uses the same remote usage authority as regular model sessions.
+  // Keep a callable disabled adapter in local/offline mode so host assembly
+  // remains lazy and route construction does not require billing credentials.
+  const foundationAuthoringBilling =
+    remoteUsageBilling ?? {
+      recordUsage: async () => {
+        throw new BeeGameUsageBillingError(
+          'Foundation authoring usage billing is unavailable',
+          false,
+        )
+      },
+      debitRealTimeUsage: async () => {
+        throw new BeeGameUsageBillingError(
+          'Foundation authoring usage billing is unavailable',
+          false,
+        )
+      },
+    }
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
     supabaseStore,
     supabaseRuntimeEnvClient,
-    remoteUsageBilling: createRemoteUsageBillingClient(
-      billingConfig,
-      serviceFetch,
-    ),
+    remoteUsageBilling,
     skillsConfig: options.skillsConfig,
     getUserDataRoot: getCurrentUserDataRoot,
     getAuthToken: getRequestAuthToken,
@@ -724,10 +760,36 @@ export function createAgentWorkflowApp(
         (await createRunStore(workspaceKey, input.user.id).load())
           ?.confirmedBriefContext,
     })
+    const authoringHostOptions: FoundationAuthoringHostOptions = {
+      ownerId: input.user.id,
+      workspacePath: workspaceKey,
+      dataDir: getCurrentUserDataRoot(input.request),
+      ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
+      ...(input.language ? { language: input.language } : {}),
+      getCommand: () => resolveNativeRuntimeCommand(),
+      getCredential: () => deliveryAuthContext.credential,
+      getRuntimeEnv: (dataDir, ownerId, authToken, modelConfigId) =>
+        dashboardRepository.getRuntimeEnv(
+          dataDir,
+          ownerId,
+          authToken,
+          modelConfigId,
+        ),
+      billingClient: foundationAuthoringBilling,
+    }
+    const author = (
+      options.foundationAuthoringHostFactory ?? createFoundationAuthoringHost
+    )(authoringHostOptions)
+    const { language: _authorLanguage, ...reviewHostOptions } = authoringHostOptions
+    const reviewer = (options.foundationReviewerHostFactory ?? createFoundationReviewerHost)(reviewHostOptions)
+    const revision = (options.foundationRevisionHostFactory ?? createFoundationRevisionHost)(reviewHostOptions)
     const controller = createDeliveryWorkflowController({
       workspacePath: workspaceKey,
       ownerId: input.user.id,
       workerPort,
+      author,
+      reviewer,
+      revision,
     })
     deliveryControllers.set(key, {
       controller,
@@ -889,6 +951,39 @@ export function createAgentWorkflowApp(
           'workflow snapshot does not belong to the owned project',
           'recovery_checkpoint_conflict',
         )
+      // Foundation authoring is a public stage module. Its Continue and
+      // Retry routes must go through the controller so the module's opaque
+      // handle and durable control sequence remain authoritative.
+      if (inspection.currentRun.authorStage || inspection.currentRun.foundationReviewStage) {
+        if (input.taskId)
+          throw new WorkflowStoreError(
+            'taskId is not supported for public foundation authoring',
+            'invalid',
+          )
+        if (inspection.currentRun.status === 'completed') return inspection.currentRun
+        await controller.resume(inspection.currentRun)
+        return (await store.load()) ?? inspection.currentRun
+      }
+      if (inspection.currentRun.phase === 'DOCUMENT_DRAFTING') {
+        const draft = inspection.currentRun.foundationDraftState
+        if (
+          draft.documents ||
+          draft.completedPaths.length > 0 ||
+          inspection.currentRun.activeDispatch
+        )
+          throw new WorkflowStoreError(
+            'Legacy document drafting checkpoint requires explicit migration',
+            'recovery_checkpoint_conflict',
+          )
+        if (input.taskId)
+          throw new WorkflowStoreError(
+            'taskId is not supported for public foundation authoring',
+            'invalid',
+          )
+        if (inspection.currentRun.status === 'completed') return inspection.currentRun
+        await controller.start(inspection.currentRun)
+        return (await store.load()) ?? inspection.currentRun
+      }
       const current =
         input.mode === 'retry'
           ? await retryRun({
@@ -1021,7 +1116,9 @@ export function createAgentWorkflowApp(
         )
       }
       const controller = getDeliveryController(input)
-      const reconciled = await reconcileRunOnStartup({
+      const reconciled = existing.authorStage || existing.foundationReviewStage || existing.phase === 'DOCUMENT_DRAFTING'
+        ? existing
+        : await reconcileRunOnStartup({
         store,
         sessionIsOpen: async dispatch => {
           try {
@@ -1031,7 +1128,11 @@ export function createAgentWorkflowApp(
           }
         },
       })
-      if (reconciled) await controller.resume(reconciled)
+      if (reconciled) {
+        if (reconciled.authorStage || reconciled.foundationReviewStage)
+          await controller.ensureProgress(reconciled)
+        else await controller.resume(reconciled)
+      }
       const restored = await store.load()
       if (!restored)
         throw new Error(
@@ -1042,9 +1143,6 @@ export function createAgentWorkflowApp(
     const confirmedBriefDigest = createHash('sha256')
       .update(input.briefContext)
       .digest('hex')
-    const foundationAuthoringPauseRequested =
-      process.env.BEEGAME_FOUNDATION_AUTHORING_PAUSE_PROJECT_ID?.trim() ===
-      input.projectId
     const initial = createInitialDeliveryRun({
       projectId: input.projectId,
       ownerId: input.user.id,
@@ -1059,9 +1157,6 @@ export function createAgentWorkflowApp(
       phase: initial.phase,
       status: initial.status,
       revision: initial.revision,
-      ...(foundationAuthoringPauseRequested
-        ? { foundationAuthoringPause: 'requested' }
-        : {}),
     })
     const drafting = transitionDeliveryRun(savedInitial, {
       type: 'documents_ready',
@@ -1086,7 +1181,21 @@ export function createAgentWorkflowApp(
   )
   options.registerCleanup?.(async () => {
     beeGamePreviews.dispose()
-    await beeGameSessions.dispose()
+    const controllerCleanup = await Promise.allSettled(
+      [...deliveryControllers.values()].map(entry => entry.controller.dispose()),
+    )
+    deliveryControllers.clear()
+    let sessionCleanupError: unknown
+    try {
+      await beeGameSessions.dispose()
+    } catch (error) {
+      sessionCleanupError = error
+    }
+    const rejectedController = controllerCleanup.find(
+      result => result.status === 'rejected',
+    )
+    if (rejectedController?.status === 'rejected') throw rejectedController.reason
+    if (sessionCleanupError) throw sessionCleanupError
   })
   const beeGameDeployments = new BeeGameDeploymentManager({
     dataRoot: dashboardDataRoot,
@@ -2255,6 +2364,8 @@ export function createAgentWorkflowApp(
 
     let destinationWorkspacePath: string | undefined
     let registeredProjectId: string | undefined
+    let copiedWorkspacePath: string | undefined
+    let executionRequested = false
     try {
       const sourceProject = await getOwnedProjectMetadata(
         c.req.raw,
@@ -2277,9 +2388,14 @@ export function createAgentWorkflowApp(
       const snapshotMetadata = await stat(snapshotPath)
       if (!snapshotMetadata.isFile() || snapshotMetadata.size > 2 * 1024 * 1024)
         return c.json({ error: 'Confirmed brief snapshot is invalid' }, 400)
-      const rawSnapshot = JSON.parse(await readFile(snapshotPath, 'utf8')) as {
-        confirmedBriefContext?: unknown
-      }
+      const rawSnapshot = JSON.parse(await readFile(snapshotPath, 'utf8')) as Record<string, unknown>
+      // Import only accepted public provenance. Old snapshots remain immutable
+      // archives: this is not a migration or a restoration of their execution.
+      if (!rawSnapshot || rawSnapshot.ownerId !== user.id || rawSnapshot.projectId !== sourceProject.id)
+        return c.json({ error: 'Source public Author ownership does not match project' }, 400)
+      const sourceAuthor = authorStageLinkSchema.parse(rawSnapshot.authorStage)
+      if (sourceAuthor.status !== 'completed' || !sourceAuthor.result)
+        return c.json({ error: 'Source project requires completed public Author artifacts' }, 400)
       const confirmedBriefContext =
         typeof rawSnapshot.confirmedBriefContext === 'string'
           ? rawSnapshot.confirmedBriefContext
@@ -2289,6 +2405,8 @@ export function createAgentWorkflowApp(
           { error: 'Source project has no durable confirmed brief context' },
           400,
         )
+      if (typeof rawSnapshot.confirmedBriefDigest !== 'string')
+        return c.json({ error: 'Source confirmed brief digest is missing' }, 400)
 
       const projectId = randomUUID()
       const modelConfigId = await resolveDefaultModelConfigId(
@@ -2316,7 +2434,11 @@ export function createAgentWorkflowApp(
         ownerId: user.id,
         projectId,
         confirmedBriefContext,
+        sourceRun: { ownerId: user.id, projectId: sourceProject.id,
+          confirmedBriefContext, confirmedBriefDigest: rawSnapshot.confirmedBriefDigest,
+          authorStage: sourceAuthor },
       })
+      copiedWorkspacePath = copy.workspacePath
       const project = await dashboardRepository.upsertProject(c.req.raw, user, {
         id: projectId,
         name: `${sourceProject.name} Review Copy`,
@@ -2329,6 +2451,7 @@ export function createAgentWorkflowApp(
         },
       })
       registeredProjectId = projectId
+      executionRequested = true
       const workflow = await startBeeGameDeliveryWorkflow({
         request: c.req.raw,
         user,
@@ -2342,12 +2465,14 @@ export function createAgentWorkflowApp(
         201,
       )
     } catch (error) {
-      if (registeredProjectId)
+      // An ambiguous public start may own live work. Preserve its project and
+      // evidence; never delete a pre-existing destination after copy rejection.
+      if (registeredProjectId && !executionRequested)
         await dashboardRepository
           .deleteProject(c.req.raw, user, registeredProjectId)
           .catch(() => undefined)
-      if (destinationWorkspacePath)
-        await rm(destinationWorkspacePath, { recursive: true, force: true }).catch(
+      if (copiedWorkspacePath && !executionRequested)
+        await rm(copiedWorkspacePath, { recursive: true, force: true }).catch(
           () => undefined,
         )
       if (error instanceof ProjectQuotaExceededError)
@@ -2609,7 +2734,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
+      const artifactRef = await resolveBeeGameProjectArtifactReference({
         request: c.req.raw,
         user,
         project,
@@ -2617,10 +2742,11 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
       })
-      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
-      return c.json(
-        await readBeeGameProjectArtifact(sessionRef.workspacePath, path),
-      )
+      if (!artifactRef) return c.json({ error: 'Project workspace not found' }, 404)
+      return c.json(await readProjectArtifactConsistently(
+        artifactRef.workspacePath,
+        () => readBeeGameProjectArtifact(artifactRef.workspacePath, path),
+      ))
     } catch (err) {
       const message = toErrorMessage(err)
       return tracedRouteError(
@@ -2646,7 +2772,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
+      const artifactRef = await resolveBeeGameProjectArtifactReference({
         request: c.req.raw,
         user,
         project,
@@ -2654,12 +2780,13 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
       })
-      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      if (!artifactRef) return c.json({ error: 'Project workspace not found' }, 404)
       return c.json({
-        sessionId: sessionRef.sessionId,
-        workspacePath: sessionRef.workspacePath,
-        artifacts: await discoverBeeGameProjectArtifacts(
-          sessionRef.workspacePath,
+        ...(artifactRef.sessionId ? { sessionId: artifactRef.sessionId } : {}),
+        workspacePath: artifactRef.workspacePath,
+        artifacts: await readProjectArtifactConsistently(
+          artifactRef.workspacePath,
+          () => discoverBeeGameProjectArtifacts(artifactRef.workspacePath),
         ),
       })
     } catch (err) {
@@ -2679,7 +2806,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
+      const artifactRef = await resolveBeeGameProjectArtifactReference({
         request: c.req.raw,
         user,
         project,
@@ -2687,10 +2814,14 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
       })
-      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
-      const projectPackage = await beeGameSessions.createProjectPackage(
-        sessionRef.sessionId,
-        sessionRef.workspacePath,
+      if (!artifactRef) return c.json({ error: 'Project workspace not found' }, 404)
+      const projectPackage = await readProjectArtifactConsistently(
+        artifactRef.workspacePath,
+        () => beeGameSessions.createProjectPackage(
+          artifactRef.sessionId,
+          artifactRef.workspacePath,
+          artifactRef.expectedIdentity,
+        ),
       )
       const body = projectPackage.data.buffer.slice(
         projectPackage.data.byteOffset,
@@ -2758,10 +2889,15 @@ export function createAgentWorkflowApp(
         ? createRunStore(workflowWorkspacePath, user.id)
         : undefined
       const workflowRun = await workflowStore?.load()
+      let workflowStopResult: DeliveryRun | undefined
       if (
         workflowWorkspacePath &&
         workflowStore &&
-        workflowRun?.status === 'running'
+        workflowRun &&
+        ((workflowRun.foundationReviewStage && workflowRun.status !== 'stopped') || (workflowRun.authorStage &&
+          (['starting', 'running'].includes(workflowRun.authorStage.status) ||
+            workflowRun.authorStage.status === 'completed' && workflowRun.status !== 'stopped')) ||
+          (!workflowRun.authorStage && workflowRun.status === 'running'))
       ) {
         const controller = getDeliveryController({
           request: c.req.raw,
@@ -2769,22 +2905,29 @@ export function createAgentWorkflowApp(
           projectId: workflowRun.projectId,
           workspacePath: workflowWorkspacePath,
         })
-        const stopBridge = createWorkflowDispatchStopBridge({
-          isManagedDispatchOpen: dispatchId =>
-            beeGameSessions.isWorkflowWorkerOpen(dispatchId),
-          disposeManagedDispatch: dispatchId =>
-            beeGameSessions.disposeWorkflowDispatch(dispatchId),
-          fallbackIsOpen: dispatchId =>
-            controller.dispatcher.workerIsOpen(dispatchId),
-          fallbackStop: (dispatchId, reason) =>
-            controller.dispatcher.stop(dispatchId, reason),
-        })
-        await stopRun({
-          store: workflowStore,
-          runId: workflowRun.runId,
-          reason: 'user stopped workflow',
-          ...stopBridge,
-        })
+        if (workflowRun.authorStage || workflowRun.foundationReviewStage) {
+          workflowStopResult = await controller.stopFoundation(
+            workflowRun,
+            'user stopped workflow',
+          )
+        } else {
+          const stopBridge = createWorkflowDispatchStopBridge({
+            isManagedDispatchOpen: dispatchId =>
+              beeGameSessions.isWorkflowWorkerOpen(dispatchId),
+            disposeManagedDispatch: dispatchId =>
+              beeGameSessions.disposeWorkflowDispatch(dispatchId),
+            fallbackIsOpen: dispatchId =>
+              controller.dispatcher.workerIsOpen(dispatchId),
+            fallbackStop: (dispatchId, reason) =>
+              controller.dispatcher.stop(dispatchId, reason),
+          })
+          workflowStopResult = await stopRun({
+            store: workflowStore,
+            runId: workflowRun.runId,
+            reason: 'user stopped workflow',
+            ...stopBridge,
+          })
+        }
       }
       const sessionRef = await resolveBeeGameProjectSessionReference({
         request: c.req.raw,
@@ -2795,11 +2938,19 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       if (!sessionRef) {
-        if (workflowRun && workflowWorkspacePath) {
+        if (workflowStopResult && workflowWorkspacePath) {
+          return c.json({
+            id: workflowStopResult.runId,
+            cwd: workflowWorkspacePath,
+            status: workflowStopResult.status,
+            turnStatus: 'idle',
+          })
+        }
+        if (workflowRun && workflowWorkspacePath && workflowRun.status === 'stopped') {
           return c.json({
             id: workflowRun.runId,
             cwd: workflowWorkspacePath,
-            status: 'stopped',
+            status: workflowRun.status,
             turnStatus: 'idle',
           })
         }
@@ -3068,6 +3219,9 @@ export function createAgentWorkflowApp(
         projectId: run.projectId,
         workspacePath: project.root_path,
       })
+      if (run.authorStage || run.foundationReviewStage) {
+        return c.json(await controller.stopFoundation(run, reason))
+      }
       const stopBridge = createWorkflowDispatchStopBridge({
         isManagedDispatchOpen: dispatchId =>
           beeGameSessions.isWorkflowWorkerOpen(dispatchId),
@@ -5624,17 +5778,12 @@ async function foundationResumeOnReconnectRequired(
     !run.foundationAuditState
   )
     return false
-  const runningTasks = foundationRuntimeTasks(run.foundationAuditState).filter(
-    task => task.status === 'running',
-  )
-  if (!runningTasks.length) return false
+  // Safety recognition only: inspect every old task, never schedule or repair it.
+  const runningDispatches = retiredFoundationRunningDispatches(run)
+  if (!runningDispatches.length) return false
   const liveWorker = (
     await Promise.all(
-      runningTasks.map(task =>
-        task.dispatch?.status === 'running' && task.dispatch
-          ? Promise.resolve(sessionIsOpen(task.dispatch))
-          : false,
-      ),
+      runningDispatches.map(dispatch => Promise.resolve(sessionIsOpen(dispatch))),
     )
   ).some(Boolean)
   return !liveWorker
@@ -6150,6 +6299,8 @@ function workflowThinkingStatus(
 }
 
 function workflowMessageKey(workflow: JsonObject): string {
+  const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
+  if (publicAuthor?.completed && !workflow.foundationReviewStage) return 'workflow.documentReview'
   const status = workflowStatus(workflow)
   if (status === 'stopped') return 'workflow.stopped'
   if (status === 'blocked' || status === 'needs_action')
@@ -6164,6 +6315,8 @@ function workflowMessageKey(workflow: JsonObject): string {
       return 'workflow.documentDrafting'
     case 'DOCUMENT_REVIEW':
       return 'workflow.documentReview'
+    case 'FOUNDATION_REVISION':
+      return 'workflow.foundationRevision'
     case 'RESOURCE_PREPARATION':
       return 'workflow.resourcePreparation'
     case 'ATOMIC_TASK_PLANNING':
@@ -6184,6 +6337,9 @@ function workflowMessageKey(workflow: JsonObject): string {
 function workflowNextAction(
   workflow: JsonObject,
 ): 'resume' | 'retry' | undefined {
+  const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
+  if (publicAuthor?.completed && !workflow.foundationReviewStage) return undefined
+  if (isObject(workflow.foundationReviewStage) && workflow.foundationReviewStage.acceptedReview) return undefined
   if (workflow.workflowStateError === true)
     return workflow.recoverable === true ? 'resume' : undefined
   const status = workflowStatus(workflow)
@@ -6200,20 +6356,17 @@ function workflowViewForDisplay(
 ): JsonObject {
   const messageKey = workflowMessageKey(workflow)
   const nextAction = workflowNextAction(workflow)
+  const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
+  const completedAuthor = publicAuthor?.completed ? publicAuthor :
+    isObject(workflow.foundationReviewStage)
+      ? projectPublicAuthorResultDisplay(workflow.foundationReviewStage.importedAuthorResult) : undefined
   const tasks = Array.isArray(workflow.tasks) ? workflow.tasks : []
   const activeFoundationRepair =
     workflow.phase === 'FOUNDATION_REVISION'
-  const foundationAuditReady =
-    workflow.phase === 'DOCUMENT_REVIEW' &&
-    isObject(workflow.foundationAuditState) &&
-    workflow.foundationAuditState.status === 'audit_ready'
-  // Revision keeps the FOUNDATION_REVIEW document authority until checklist
-  // drafting begins. Older durable snapshots can omit this cursor, so derive
-  // it from the existing audit state for display only.
   const displayDocumentStep =
     typeof workflow.documentStep === 'string'
       ? workflow.documentStep
-      : activeFoundationRepair || foundationAuditReady
+      : activeFoundationRepair
         ? 'FOUNDATION_REVIEW'
         : undefined
   const currentMessage = projectWorkflowCurrentMessage({
@@ -6221,7 +6374,17 @@ function workflowViewForDisplay(
     phase: workflow.phase,
     documentStep: displayDocumentStep,
   })
-  const blockedReason = workflowDisplayReason(workflow)
+  const blockedReason = publicAuthor?.completed && !workflow.foundationReviewStage
+    ? {
+        message:
+          typeof workflow.currentMessage === 'string' &&
+          workflow.currentMessage.trim()
+            ? workflow.currentMessage
+            : 'Foundation authoring is ready for review acceptance.',
+        code: 'public_author_handoff',
+        diagnosticId: 'public-author-handoff',
+      }
+    : workflowDisplayReason(workflow)
   const atomicDisplayTasks = tasks.flatMap(task => {
     if (!isObject(task) || typeof task.id !== 'string') return []
     return [
@@ -6242,8 +6405,13 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_DRAFTING' ||
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
-  const displayTaskSource =
-    documentPhase && workspacePath
+  const displayTaskSource = isObject(workflow.foundationReviewStage)
+    ? [{ id: 'foundation-public-stage', title: workflow.phase === 'FOUNDATION_REVISION' ? 'Foundation Revision' : 'Foundation Reviewer',
+        status: workflow.foundationReviewStage.acceptedReview ? 'completed' : workflow.status === 'running' ? 'running' : workflow.status === 'stopped' ? 'stopped' : 'failed',
+        attempt: 0, operation: workflow.phase === 'FOUNDATION_REVISION' ? 'revise' : 'review' }]
+    : publicAuthor
+    ? publicAuthor.tasks
+    : documentPhase && workspacePath
       ? projectDocumentDisplayTasks({
           workspacePath,
           currentItemId:
@@ -6292,9 +6460,6 @@ function workflowViewForDisplay(
               : undefined,
           workflowStatus: workflowStatus(workflow),
           thinking: workflowThinkingStatus(workflow),
-          foundationAuditState: isObject(workflow.foundationAuditState)
-            ? (workflow.foundationAuditState as FoundationAuditState)
-            : undefined,
         })
       : assetPhase && workspacePath
         ? projectAssetDisplayTasks({
@@ -6353,6 +6518,11 @@ function workflowViewForDisplay(
       ? { documentStep: displayDocumentStep }
       : {}),
     tasks: displayTasks,
+    // Completed author artifacts remain visible when current-stage tasks switch
+    // to Reviewer/Revision. This is a public-result projection, not stage state.
+    ...(completedAuthor?.completed
+      ? { foundationDocuments: completedAuthor.tasks.map(task => ({ path: task.title, status: 'ready' })) }
+      : {}),
     evidence,
     ...(typeof workflow.activeTaskId === 'string'
       ? { activeTaskId: workflow.activeTaskId }
@@ -6708,6 +6878,100 @@ async function resolveBeeGameProjectSessionReference(input: {
     ...(live ? { live } : {}),
     ...(latest ? { latest } : {}),
   }
+}
+
+/**
+ * Resolve a project-owned workspace for read-only artifact operations without
+ * inventing a session identity. A project can have durable files before a
+ * BeeGame session exists, so artifact routes must not require session recovery.
+ */
+async function resolveBeeGameProjectArtifactReference(input: {
+  request: Request
+  user: BeeGameUserContext
+  project: BeeGameProjectMetadata
+  defaultWorkspacePath?: string
+  beeGameSessions: BeeGameSessionManager
+  dashboardRepository: DashboardRepository
+}): Promise<
+  | {
+      workspacePath: string
+      sessionId?: string
+      expectedIdentity: ProjectArtifactIdentity
+    }
+  | undefined
+> {
+  const latest = await getLatestProjectSessionMetadata(input)
+  const live = findLiveProjectSession(
+    input.beeGameSessions,
+    input.user.id,
+    input.project.id,
+  )
+  const workspacePath = live?.cwd || latest?.workspacePath || input.project.root_path
+  if (!workspacePath) return undefined
+  const expectedIdentity: ProjectArtifactIdentity = {
+    ownerId: input.user.id,
+    projectId: input.project.id,
+  }
+  const resolvedWorkspacePath = await resolveOwnedProjectArtifactWorkspace(
+    workspacePath,
+    input.defaultWorkspacePath,
+    input.user.id,
+  )
+  return {
+    workspacePath: resolvedWorkspacePath,
+    ...(live?.id || latest?.id
+      ? { sessionId: live?.id || latest?.id }
+      : {}),
+    expectedIdentity,
+  }
+}
+
+/**
+ * Resolve a project artifact workspace against the authenticated user's
+ * canonical root. The metadata store is user-scoped in local mode, but the
+ * persisted root path is still untrusted input; realpath validation prevents
+ * a foreign user directory or symlink target from becoming an artifact read
+ * boundary.
+ */
+async function resolveOwnedProjectArtifactWorkspace(
+  workspacePath: string,
+  defaultWorkspacePath: string | undefined,
+  ownerId: string,
+): Promise<string> {
+  const resolvedWorkspacePath = await resolveSessionWorkspacePath(
+    workspacePath,
+    defaultWorkspacePath,
+  )
+  const defaultRoot = resolve(
+    await getDefaultWorkspacePath({ defaultWorkspacePath }),
+  )
+  const ownerRoot = resolve(getUserDashboardDataRoot(defaultRoot, ownerId))
+  const [canonicalOwnerRoot, canonicalWorkspacePath] = await Promise.all([
+    realpath(ownerRoot),
+    realpath(resolvedWorkspacePath),
+  ])
+  const ownerRelativeWorkspace = relative(
+    canonicalOwnerRoot,
+    canonicalWorkspacePath,
+  )
+  if (
+    ownerRelativeWorkspace === '' ||
+    !isPathInsideWorkspace(canonicalOwnerRoot, canonicalWorkspacePath)
+  ) {
+    throw new Error('Workspace path must stay inside the current user workspace')
+  }
+  // Do not accept a project root that is itself a symlink (or has a symlink
+  // component). The configured Projects root itself may be a symlink, so
+  // compare the canonical candidate with the path obtained by applying the
+  // textual owner-relative path to the canonical owner root.
+  const expectedCanonicalWorkspacePath = resolve(
+    canonicalOwnerRoot,
+    relative(ownerRoot, resolvedWorkspacePath),
+  )
+  if (canonicalWorkspacePath !== expectedCanonicalWorkspacePath) {
+    throw new Error('Workspace path must not contain symlink components')
+  }
+  return canonicalWorkspacePath
 }
 
 function getPendingBeeGamePermissionEvents(
@@ -7357,14 +7621,21 @@ function registerBeeGameSessionRoutes(
     const path = c.req.query('path')
     if (!path) return c.json({ error: 'Missing query: path' }, 400)
     try {
+      const sessionId = c.req.param('id')
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
-        c.req.param('id'),
+        sessionId,
       )
-      if (!beeGameSessions.get(c.req.param('id'))) {
-        return c.json(await readBeeGameProjectArtifact(workspacePath, path))
+      if (!beeGameSessions.get(sessionId)) {
+        return c.json(await readProjectArtifactConsistently(
+          workspacePath,
+          () => readBeeGameProjectArtifact(workspacePath, path),
+        ))
       }
-      return c.json(await beeGameSessions.readArtifact(c.req.param('id'), path))
+      return c.json(await readProjectArtifactConsistently(
+        workspacePath,
+        () => beeGameSessions.readArtifact(sessionId, path),
+      ))
     } catch (err) {
       const message = toErrorMessage(err)
       return publicSessionRouteError(
@@ -7386,11 +7657,16 @@ function registerBeeGameSessionRoutes(
     const forbidden = check(c.req.raw, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     try {
+      const sessionId = c.req.param('id')
+      const metadata = beeGameSessions.metadata(sessionId)
       const workspacePath = await getSessionWorkspacePath(
         c.req.raw,
-        c.req.param('id'),
+        sessionId,
       )
-      return c.json(await discoverBeeGameProjectArtifacts(workspacePath))
+      return c.json(await readProjectArtifactConsistently(
+        workspacePath,
+        () => discoverBeeGameProjectArtifacts(workspacePath),
+      ))
     } catch (err) {
       return publicSessionRouteError(
         c,
@@ -7409,9 +7685,18 @@ function registerBeeGameSessionRoutes(
     const forbidden = check(c.req.raw, ROUTE_PERMISSION.projectExport)
     if (forbidden) return c.json(forbidden, 403)
     try {
-      const projectPackage = await beeGameSessions.createProjectPackage(
-        c.req.param('id'),
-        await getSessionWorkspacePath(c.req.raw, c.req.param('id')),
+      const sessionId = c.req.param('id')
+      const metadata = beeGameSessions.metadata(sessionId)
+      const workspacePath = await getSessionWorkspacePath(c.req.raw, sessionId)
+      const projectPackage = await readProjectArtifactConsistently(
+        workspacePath,
+        () => beeGameSessions.createProjectPackage(
+          sessionId,
+          workspacePath,
+          metadata?.projectId
+            ? { ownerId: metadata.userId, projectId: metadata.projectId }
+            : undefined,
+        ),
       )
       const body = projectPackage.data.buffer.slice(
         projectPackage.data.byteOffset,

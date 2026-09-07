@@ -9,11 +9,9 @@ import { auditAssetContract } from './asset-contract-audit'
 import { resolveWorkflowEvidencePath } from './delivery-workflow/evidence'
 import {
   CANONICAL_ASSET_MANIFEST,
-  CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
   type DeliveryWorkerPort,
   type DispatchRecord,
-  type FoundationDocumentPath,
   type WorkerDispatchRequest,
 } from './delivery-workflow/types'
 import { atomicTaskPlannerTerminalSchema } from './delivery-workflow/worker-contracts'
@@ -27,14 +25,11 @@ import {
   resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
-import { buildFoundationFactStructuredOutputJsonSchema, foundationDocumentReviserTerminalSchema, foundationFactExtractorTerminalSchema, foundationFactModelPayloadSchema, foundationSemanticModelPayloadSchema, foundationSemanticRecheckStructuredOutputJsonSchema, foundationSemanticRecheckTerminalSchema, foundationSemanticRecheckWorkerPayloadSchema, foundationSemanticReviewerTerminalSchema, foundationSemanticReviewerStructuredOutputJsonSchema } from './delivery-workflow/worker-contracts'
 import type {
   BeeGameSessionManager,
   BeeGameEvent,
   BeeGameSessionLanguage,
 } from './session-manager'
-import { selectFoundationFactFastRuntime, selectFoundationSemanticRuntime } from './session-manager'
-import { mapModelConfigToRuntime } from '@bee-game-studio/agent-workflow'
 import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import {
   createResourceContentTerminalFromReceipt,
@@ -42,134 +37,9 @@ import {
   resourceContentCommitContractSchema,
 } from './native-resource-content-tool'
 import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
-import { buildWorkerPrompt } from './delivery-workflow/worker-prompts'
-import {
-  foundationFactDefinition,
-  isFoundationFactKey,
-  type FoundationFactKey,
-} from './delivery-workflow/foundation-fact-definitions'
-import type { FoundationFactPacket } from './delivery-workflow/foundation-fact-extraction'
-import {
-  modelFoundationAuthorityProjectionBytes,
-  type FoundationAuthorityProjection,
-} from './foundation-authority-projection'
+import { assertSharedDocumentWorker } from './delivery-workflow/retired-foundation-author'
 import { buildChecklistAuthorityProjection } from './checklist-authority-projection'
-import { readFoundationRevisionCommitReceipt } from './foundation-revision-markdown-stream'
-import { buildFoundationAuthorAuthorityBlock, isFoundationDocumentAuthoringTurn } from './foundation-authoring-input'
-
-type FoundationFactPacketContract = {
-  keys: FoundationFactKey[]
-  sections: Array<{
-    documentPath: string
-    sectionId: string
-    startLine: number
-    endLine: number
-    digest: string
-  }>
-}
-
-function foundationFactOwnerSection(
-  packet: FoundationFactPacketContract,
-  key: FoundationFactKey,
-): FoundationFactPacketContract['sections'][number] {
-  const definition = foundationFactDefinition(key)
-  if (!definition)
-    throw new Error(`foundation fact result has an unknown key: ${key}`)
-  const section = packet.sections.find(
-    candidate =>
-      candidate.documentPath === definition.owner.documentPath &&
-      candidate.sectionId === definition.owner.sectionId,
-  )
-  if (!section)
-    throw new Error(`foundation fact packet owner section is missing: ${key}`)
-  return section
-}
-
-function foundationFactEvidenceForPacket(
-  packet: FoundationFactPacketContract,
-  key: FoundationFactKey,
-) {
-  const { documentPath, sectionId, startLine, endLine, digest } =
-    foundationFactOwnerSection(packet, key)
-  return { documentPath, sectionId, startLine, endLine, digest }
-}
-
-function foundationFactPacketForRequest(
-  request: WorkerDispatchRequest,
-): FoundationFactPacketContract {
-  const packet = request.contract.packet
-  const keys =
-    packet &&
-    typeof packet === 'object' &&
-    Array.isArray((packet as { keys?: unknown }).keys) &&
-    (packet as { keys: unknown[] }).keys.every(
-      key => typeof key === 'string' && isFoundationFactKey(key),
-    )
-      ? (packet as { keys: string[] }).keys
-      : undefined
-  const sections =
-    packet &&
-    typeof packet === 'object' &&
-    Array.isArray((packet as { sections?: unknown }).sections) &&
-    (packet as { sections: unknown[] }).sections.every(section => {
-      if (!section || typeof section !== 'object') return false
-      const value = section as Record<string, unknown>
-      return (
-        typeof value.documentPath === 'string' &&
-        value.documentPath.length > 0 &&
-        typeof value.sectionId === 'string' &&
-        value.sectionId.length > 0 &&
-        typeof value.startLine === 'number' &&
-        Number.isInteger(value.startLine) &&
-        value.startLine > 0 &&
-        typeof value.endLine === 'number' &&
-        Number.isInteger(value.endLine) &&
-        value.endLine >= value.startLine &&
-        typeof value.digest === 'string' &&
-        /^[a-f0-9]{64}$/.test(value.digest)
-      )
-    })
-  if (!keys || !sections)
-    throw new Error('foundation fact extractor requires one complete packet')
-  const completePacket = {
-    keys: (packet as { keys: FoundationFactKey[] }).keys,
-    sections: (packet as { sections: FoundationFactPacketContract['sections'] }).sections,
-  }
-  for (const key of completePacket.keys)
-    foundationFactOwnerSection(completePacket, key)
-  return completePacket
-}
-
-function foundationFactSchemaForRequest(
-  request: WorkerDispatchRequest,
-): Record<string, unknown> {
-  const packet = foundationFactPacketForRequest(request)
-  return buildFoundationFactStructuredOutputJsonSchema(
-    packet as unknown as FoundationFactPacket,
-  ) as unknown as Record<string, unknown>
-}
 import { documentAuthoringMetrics } from './document-authoring-metrics'
-import { readAuthoredDocumentReceipt } from './authored-document-receipt'
-
-export const FOUNDATION_WORKER_OUTPUT_MAX_BYTES = 2 * 1024 * 1024
-
-function assertFoundationStructuredOutputWithinInfrastructureBoundary(
-  value: unknown,
-): void {
-  const serialized = JSON.stringify(value)
-  if (serialized === undefined)
-    throw new Error('foundation structured output is not serializable')
-  if (
-    Buffer.byteLength(serialized, 'utf8') >
-    FOUNDATION_WORKER_OUTPUT_MAX_BYTES
-  ) {
-    const error = new Error(
-      `foundation structured output exceeds infrastructure boundary (${FOUNDATION_WORKER_OUTPUT_MAX_BYTES} bytes)`,
-    )
-    error.name = 'WorkerInfrastructureBoundaryError'
-    throw error
-  }
-}
 
 function taskTypeForWorker(
   workerType: WorkerDispatchRequest['workerType'],
@@ -185,9 +55,9 @@ function taskTypeForWorker(
 
 export async function buildDocumentAuthorAuthorityBlock(
   request: WorkerDispatchRequest,
-  onProjection?: (projection: FoundationAuthorityProjection) => void,
 ): Promise<string> {
   if (request.workerType !== 'document-author') return ''
+  assertSharedDocumentWorker(request)
   if (
     request.contract.authoringMode === undefined &&
     request.contract.documentSet === 'checklist'
@@ -209,7 +79,7 @@ export async function buildDocumentAuthorAuthorityBlock(
       projection,
     ].join('\n\n')
   }
-  return buildFoundationAuthorAuthorityBlock(request, onProjection)
+  throw new Error('Checklist authoringMode must be absent')
 }
 
 
@@ -231,11 +101,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
   const records = new Map<string, DispatchRecord>()
   const requests = new Map<string, WorkerDispatchRequest>()
   const documentAuthorityBlocks = new Map<string, string>()
-  const documentAuthorityProjections = new Map<
-    string,
-    FoundationAuthorityProjection
-  >()
-  const documentPromptByteLengths = new Map<string, number>()
   const eventOffsets = new Map<string, number>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
@@ -248,22 +113,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
       input.sessions.stop(sessionId)
   }
   return {
-    async assertFoundationFactFastReady(request) {
-      if (request.workerType !== 'foundation-fact-extractor') return
-      const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
-      if (runtime) selectFoundationFactFastRuntime(runtime, runtime.env)
-    },
-    async assertFoundationSemanticModelReady(request) {
-      if (request.workerType !== 'foundation-semantic-reviewer') return
-      const tier = request.contract.modelTier
-      if (tier !== 'fast' && tier !== 'balanced' && tier !== 'strong') throw new Error('foundation semantic model tier is missing')
-      const runtime = input.modelConfigId ? mapModelConfigToRuntime(input.modelConfigId) : undefined
-      if (runtime) selectFoundationSemanticRuntime(runtime, runtime.env, tier)
-    },
     async start(request: WorkerDispatchRequest) {
+      if (['foundation-fact-extractor', 'foundation-semantic-reviewer', 'foundation-document-reviser'].includes(request.workerType))
+        throw new Error('Legacy Foundation workers are retired; use the stage public host')
+      assertSharedDocumentWorker(request)
       const dispatchId = request.dispatchId ?? randomUUID()
-      const packetWorker = request.workerType === 'foundation-fact-extractor' || request.workerType === 'foundation-semantic-reviewer'
-      const revisionWorker = request.workerType === 'foundation-document-reviser'
       const requestedResumeSession = request.contract.resumeWorkerSessionId
       if (requestedResumeSession !== undefined)
         throw new Error('document author session resume is not supported')
@@ -302,35 +156,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? { workflowAllowedTools: ['Write', 'Edit'] }
           : {}),
         ...(request.contract.modelTier === 'fast' || request.contract.modelTier === 'balanced' || request.contract.modelTier === 'strong' ? { workflowModelTier: request.contract.modelTier } : {}),
-        ...(request.workerType === 'foundation-document-reviser'
-          ? {
-              workflowRevisionContract: request.contract,
-              workflowRevisionMarkdownStreamContract: {
-                workspacePath: request.workspacePath,
-                runId: request.runId,
-                dispatchId,
-                taskId: request.taskId!,
-                revision: request.revision,
-                round: request.contract.round as number,
-                scope: request.contract.scope as 'section' | 'document',
-                documentPath: request.contract.documentPath as FoundationDocumentPath,
-                issueIds: request.contract.issueIds as string[],
-                sectionIds: request.contract.sectionIds as string[],
-                stagedPath: request.contract.stagedPath as string,
-                baseDocumentDigest: request.contract.baseDocumentDigest as string,
-                maxBytes: FOUNDATION_WORKER_OUTPUT_MAX_BYTES,
-              },
-            }
-          : {}),
         workflowAllowedPaths: request.allowedPaths ?? [],
-        ...(request.workerType === 'foundation-fact-extractor'
-          ? { workflowJsonSchema: request.workflowJsonSchema ?? foundationFactSchemaForRequest(request) }
-          : request.workerType === 'foundation-semantic-reviewer'
-            ? { workflowJsonSchema: request.workflowJsonSchema ?? (typeof request.contract.issueId === 'string' ? foundationSemanticRecheckStructuredOutputJsonSchema : foundationSemanticReviewerStructuredOutputJsonSchema) as unknown as Record<string, unknown> }
-          : {}),
-        ...(packetWorker
-          ? { workflowProjectReadScope: 'empty' as const }
-          : request.projectReadScope
+        ...(request.projectReadScope
           ? { workflowProjectReadScope: request.projectReadScope }
           : {}),
         ...(request.workerType !== 'resource-content-author' &&
@@ -353,18 +180,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
                 ],
               }
             : {}),
-        ...(isStreamedFoundationAuthoringTurn(request)
-          ? {
-              workflowMarkdownStreamContract: {
-                workspacePath: request.workspacePath,
-                runId: request.runId,
-                dispatchId,
-                targetPath: request.contract
-                  .foundationDocumentPath as FoundationDocumentPath,
-                maxBytes: FOUNDATION_WORKER_OUTPUT_MAX_BYTES,
-              },
-            }
-          : {}),
         ...(request.workerType === 'resource-content-author'
           ? {
               workflowResourceContentCommitContract:
@@ -403,24 +218,16 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const authToken = await input.getAuthToken?.()
       input.sessions.updateAuthToken(sessionId, authToken)
       const request = requests.get(dispatchId)
-      const packetWorker =
-        request?.workerType === 'foundation-fact-extractor' ||
-        request?.workerType === 'foundation-semantic-reviewer'
-      const revisionWorker = request?.workerType === 'foundation-document-reviser'
       const confirmedBriefContext =
-        packetWorker || revisionWorker
-          ? undefined
-          : input.confirmedBriefContext ??
-            (await input.getConfirmedBriefContext?.())
+        input.confirmedBriefContext ??
+        (await input.getConfirmedBriefContext?.())
       const languageInstruction = input.language
         ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
         : ''
       const documentAuthorAuthorityBlock =
         documentAuthorityBlocks.get(dispatchId) ||
         (request
-          ? await buildDocumentAuthorAuthorityBlock(request, projection =>
-              documentAuthorityProjections.set(dispatchId, projection),
-            )
+          ? await buildDocumentAuthorAuthorityBlock(request)
           : '')
       const nativeToolAutonomyInstruction =
         request && request.workerType !== 'document-author'
@@ -454,34 +261,25 @@ export function createBeeGameDeliveryWorkerPort(input: {
             ? 'Use ResourceLibrary match_requirements once, then CommitResourceInventory as the only mutation and terminal operation.'
             : ''
       const workerPrompt = [
-        ...(packetWorker || revisionWorker ? [] : [languageInstruction]),
-        ...(packetWorker || revisionWorker ? [] : [confirmedBriefContext, documentAuthorAuthorityBlock]),
-        (packetWorker || revisionWorker) && request && request.contract.packet
-          ? buildWorkerPrompt(request)
-          : prompt,
-        ...(packetWorker || revisionWorker
-          ? []
-          : [
-              nativeToolAutonomyInstruction,
-              atomicTaskEvidenceInstruction,
-              implementationResultInstruction,
-              validationResultInstruction,
-              workflowResultInstruction,
-              assetManifestInstruction,
-            ]),
+        languageInstruction,
+        confirmedBriefContext,
+        documentAuthorAuthorityBlock,
+        prompt,
+        nativeToolAutonomyInstruction,
+        atomicTaskEvidenceInstruction,
+        implementationResultInstruction,
+        validationResultInstruction,
+        workflowResultInstruction,
+        assetManifestInstruction,
       ]
         .filter(Boolean)
         .join('\n\n')
-      documentPromptByteLengths.set(
-        dispatchId,
-        new TextEncoder().encode(workerPrompt).byteLength,
-      )
       await input.sessions.sendWithDisplay(sessionId, workerPrompt, {
         taskType: taskTypeForWorker(
           records.get(dispatchId)?.workerType ?? 'question-answerer',
         ),
         displayKind: 'workflow_worker',
-        ...(!packetWorker && !revisionWorker && confirmedBriefContext ? { confirmedBriefContext } : {}),
+        ...(confirmedBriefContext ? { confirmedBriefContext } : {}),
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
@@ -527,8 +325,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         records.delete(dispatchId)
         requests.delete(dispatchId)
         documentAuthorityBlocks.delete(dispatchId)
-        documentAuthorityProjections.delete(dispatchId)
-        documentPromptByteLengths.delete(dispatchId)
         eventOffsets.delete(dispatchId)
       }
     },
@@ -624,35 +420,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
             continue
           }
         }
-        if (request?.workerType === 'foundation-document-reviser') {
-          const receipt = await readFoundationRevisionCommitReceipt({
-            workspacePath: request.workspacePath,
-            dispatchId,
-          })
-          if (receipt) {
-            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-            return foundationDocumentReviserTerminalSchema.parse({
-              workerType: 'foundation-document-reviser',
-              status: 'completed',
-              runId: request.runId,
-              dispatchId: request.dispatchId,
-              taskId: request.taskId,
-              revision: request.revision,
-              packetDigest: request.contract.packetDigest,
-              round: request.contract.round,
-              documentPath: request.contract.documentPath,
-              declaration: { status: 'APPLIED', receipt },
-            })
-          }
-        }
         // The accepted structured submission is durable workflow evidence, but
         // Bee Game Studio still owns its normal turn completion. Drain the native
         // turn before the workflow controller is allowed to close the session.
-        if (request?.workerType === 'foundation-fact-extractor') {
-          const factTerminal = createDeterministicFoundationFactTerminal({ request, events })
-          if (factTerminal) return factTerminal
-        }
         if (request && hasCompletedStructuredSubmission(request, events)) {
           if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
             await input.sessions.waitForWorkflowWorkerIdle(sessionId)
@@ -667,16 +437,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
               event.type === 'turn.empty',
           )
         if (result) {
-          let terminalEvents = events
-          if (
-            result.type === 'result' &&
-            request &&
-            isStreamedFoundationAuthoringTurn(request)
-          ) {
-            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-            terminalEvents = sessionEvents(sessionId).slice(eventOffset)
-          }
+          const terminalEvents = events
           const drainedFailure = [...terminalEvents]
             .reverse()
             .find(event => event.type === 'turn.failed')
@@ -684,37 +445,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
             const error = new Error(
               drainedFailure.text || 'document author stream commit failed',
             )
-            if (
-              error.message.startsWith('foundation_transport_needs_action:') ||
-              (request && isStreamedFoundationAuthoringTurn(request))
-            )
+            if (error.message.startsWith('foundation_transport_needs_action:'))
               error.name = 'WorkerNeedsActionError'
             throw error
-          }
-          if (
-            result.type === 'result' &&
-            request?.workerType === 'foundation-document-reviser'
-          ) {
-            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-            const receipt = await readFoundationRevisionCommitReceipt({
-              workspacePath: request.workspacePath,
-              dispatchId,
-            })
-            if (!receipt)
-              throw new Error('foundation revision completed without a committed Markdown receipt')
-            return foundationDocumentReviserTerminalSchema.parse({
-              workerType: 'foundation-document-reviser',
-              status: 'completed',
-              runId: request.runId,
-              dispatchId: request.dispatchId,
-              taskId: request.taskId,
-              revision: request.revision,
-              packetDigest: request.contract.packetDigest,
-              round: request.contract.round,
-              documentPath: request.contract.documentPath,
-              declaration: { status: 'APPLIED', receipt },
-            })
           }
           if (result.type === 'result' || result.type === 'turn.empty') {
             const missingTerminal = request
@@ -749,30 +482,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
             const targetPath = request.allowedPaths?.[0]
             if (!targetPath)
               throw new Error('document author target is missing')
-            if (isStreamedFoundationAuthoringTurn(request)) {
-              const receipt = await readAuthoredDocumentReceipt(
-                request.workspacePath,
-                dispatchId,
-              )
-              if (
-                receipt?.status !== 'committed' ||
-                receipt.targetPath !== targetPath
-              )
-                throw new Error(
-                  'document author completed without a committed Markdown stream receipt',
-                )
-              return createDeterministicDocumentAuthorTerminal(
-                request,
-                [receipt.targetPath],
-                documentAuthoringMetrics(
-                  sessionEvents(sessionId),
-                  projectionMetrics(
-                    documentAuthorityProjections.get(dispatchId),
-                    documentPromptByteLengths.get(dispatchId),
-                  ),
-                ),
-              )
-            }
             let body: string
             try {
               body = await readFile(
@@ -795,13 +504,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
             return createDeterministicDocumentAuthorTerminal(
               request,
               [targetPath],
-              documentAuthoringMetrics(
-                sessionEvents(sessionId),
-                projectionMetrics(
-                  documentAuthorityProjections.get(dispatchId),
-                  documentPromptByteLengths.get(dispatchId),
-                ),
-              ),
+              documentAuthoringMetrics(sessionEvents(sessionId)),
             )
           }
           if (request)
@@ -836,34 +539,6 @@ function isDocumentAuthor(request: WorkerDispatchRequest): boolean {
 
 
 
-function isStreamedFoundationAuthoringTurn(
-  request: WorkerDispatchRequest,
-): boolean {
-  return (
-    isFoundationDocumentAuthoringTurn(request) &&
-    (request.contract.authoringMode === 'initial' ||
-      request.contract.authoringMode === 'parallel-draft')
-  )
-}
-
-
-
-function projectionMetrics(
-  projection?: FoundationAuthorityProjection,
-  promptByteLength?: number,
-) {
-  return projection
-    ? {
-        byteLength: projection.byteLength,
-        modelByteLength: new TextEncoder().encode(
-          modelFoundationAuthorityProjectionBytes(projection),
-        ).byteLength,
-        ...(promptByteLength !== undefined ? { promptByteLength } : {}),
-        rangeCount: projection.rangeCount,
-        projectedLineCount: projection.projectedLineCount,
-      }
-    : undefined
-}
 
 function createDeterministicDocumentAuthorTerminal(
   request: WorkerDispatchRequest,
@@ -891,8 +566,6 @@ function structuredSubmissionToolName(
       return 'SubmitAtomicTaskPlan'
     case 'implementation-worker':
       return 'SubmitImplementationResult'
-    case 'foundation-document-reviser':
-      return undefined
     case 'implementation-auditor':
     case 'acceptance-validator':
       return 'SubmitValidationResult'
@@ -950,16 +623,6 @@ async function createDeterministicStructuredTerminal(input: {
       throw new Error(
         'canonical document completion must use its commit receipt',
       )
-    case 'foundation-fact-extractor':
-      return createDeterministicFoundationFactTerminal(input) ?? (() => {
-        throw new Error('worker terminal result is missing a valid StructuredOutput fact result')
-      })()
-    case 'foundation-semantic-reviewer':
-      return createDeterministicFoundationSemanticTerminal(input) ?? (() => {
-        throw new Error('worker terminal result is missing a valid StructuredOutput semantic result')
-      })()
-    case 'foundation-document-reviser':
-      throw new Error('foundation revision terminal requires a committed Markdown receipt')
     case 'atomic-task-planner':
       return createDeterministicAtomicTaskPlannerTerminal(input)
     case 'implementation-worker':
@@ -982,79 +645,6 @@ async function createDeterministicStructuredTerminal(input: {
         'resource content terminal requires a committed durable content receipt',
       )
   }
-}
-
-function createDeterministicFoundationFactTerminal(input: {
-  request: WorkerDispatchRequest
-  events: ReturnType<BeeGameSessionManager['events']>
-}): ReturnType<typeof foundationFactExtractorTerminalSchema.parse> | undefined {
-  const resultEvent = [...input.events].reverse().find(event => event.type === 'result')
-  const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
-    ? (resultEvent.payload as Record<string, unknown>).structured_output
-    : undefined
-  if (structured === undefined) return undefined
-  assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
-  const payload = foundationFactModelPayloadSchema.parse(structured)
-  const packet = foundationFactPacketForRequest(input.request)
-  const results = payload.results.map(result => {
-    if (!isFoundationFactKey(result.key))
-      throw new Error(`foundation fact result has an unknown key: ${result.key}`)
-    if (!packet.keys.includes(result.key))
-      throw new Error(`foundation fact result key is not assigned: ${result.key}`)
-    return result.status === 'absent'
-      ? result
-      : { ...result, evidence: foundationFactEvidenceForPacket(packet, result.key) }
-  })
-  return foundationFactExtractorTerminalSchema.parse({
-    workerType: 'foundation-fact-extractor',
-    status: payload.status,
-    runId: input.request.runId,
-    dispatchId: input.request.dispatchId,
-    taskId: input.request.taskId,
-    revision: input.request.revision,
-    packetDigest: input.request.contract.packetDigest,
-    results,
-  })
-}
-
-function createDeterministicFoundationSemanticTerminal(input: {
-  request: WorkerDispatchRequest
-  events: ReturnType<BeeGameSessionManager['events']>
-}): ReturnType<typeof foundationSemanticReviewerTerminalSchema.parse> | undefined {
-  const resultEvent = [...input.events].reverse().find(event => event.type === 'result')
-  const structured = resultEvent?.payload && typeof resultEvent.payload === 'object' && 'structured_output' in resultEvent.payload
-    ? (resultEvent.payload as Record<string, unknown>).structured_output : undefined
-  if (structured === undefined) return undefined
-  assertFoundationStructuredOutputWithinInfrastructureBoundary(structured)
-  if (typeof input.request.contract.issueId === 'string') {
-    const payload = foundationSemanticRecheckWorkerPayloadSchema.parse(structured)
-    return foundationSemanticRecheckTerminalSchema.parse({
-      workerType: 'foundation-semantic-reviewer',
-      status: 'completed',
-      runId: input.request.runId,
-      dispatchId: input.request.dispatchId,
-      taskId: input.request.taskId,
-      revision: input.request.revision,
-      packetDigest: input.request.contract.packetDigest,
-      outcome: payload.status,
-      ...(payload.status === 'FAIL'
-        ? { diagnostic: { ...payload.diagnostic, scopeAssessment: 'repairable_in_scope' as const } }
-        : {}),
-    })
-  }
-  const payload = foundationSemanticModelPayloadSchema.parse(structured)
-  return foundationSemanticReviewerTerminalSchema.parse({
-    workerType: 'foundation-semantic-reviewer',
-    status: payload.status,
-    runId: input.request.runId,
-    dispatchId: input.request.dispatchId,
-    taskId: input.request.taskId,
-    revision: input.request.revision,
-    packetDigest: input.request.contract.packetDigest,
-    outcome: payload.outcome,
-    ...(payload.issues ? { issues: payload.issues } : {}),
-    ...(payload.reason ? { reason: payload.reason } : {}),
-  })
 }
 
 function completedToolInputs(

@@ -1,5 +1,5 @@
 import type { AcceptedWorkflowUnit, DeliveryRun } from './types'
-import { authorDispatch, newlyCommittedAuthorPaths, precedingAuthorUnit, assertAuthorAcceptedDispatch } from './foundation-authoring-state'
+import { RETIRED_FOUNDATION_AUTHOR } from './retired-foundation-author'
 
 function stableValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableValue).join(',')}]`
@@ -20,20 +20,12 @@ function unit(
 
 function acceptedDispatchIdentity(input: {
   run: DeliveryRun
-  workerType: 'document-author' | 'resource-content-author'
+  workerType: 'resource-content-author'
   taskId: string
 }): { dispatchId: string; receiptRef: string } {
-  const dispatch =
-    input.run.activeDispatch?.taskId === input.taskId
-      ? input.run.activeDispatch
-      : input.workerType === 'document-author'
-        ? authorDispatch(input.run.foundationDraftState, input.taskId as never)
-        : input.run.activeDispatch
+  const dispatch = input.run.activeDispatch
   const request = dispatch?.request
-  const expectedPhase =
-    input.workerType === 'document-author'
-      ? 'DOCUMENT_DRAFTING'
-      : 'RESOURCE_PREPARATION'
+  const expectedPhase = 'RESOURCE_PREPARATION'
   const allowedDispatchCharacters = new Set(
     'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'.split(
       '',
@@ -62,8 +54,6 @@ function acceptedDispatchIdentity(input: {
     throw new Error(
       `accepted ${input.workerType} unit has no matching completed dispatch`,
     )
-  if (input.workerType === 'document-author')
-    assertAuthorAcceptedDispatch(request, input.taskId)
   if (
     input.workerType === 'resource-content-author' &&
     request.contract.task !== 'RESOURCE_CONTENT'
@@ -71,10 +61,7 @@ function acceptedDispatchIdentity(input: {
     throw new Error(
       'accepted Resource Content unit contradicts its completed dispatch contract',
     )
-  const directory =
-    input.workerType === 'document-author'
-      ? 'document-commits'
-      : 'resource-content-commits'
+  const directory = 'resource-content-commits'
   return {
     dispatchId: dispatch.dispatchId,
     receiptRef: `.beegame/workflow/${directory}/${dispatch.dispatchId}.json`,
@@ -158,27 +145,9 @@ export function deriveAcceptedWorkflowUnits(
   next: DeliveryRun,
 ): AcceptedWorkflowUnit[] {
   const units: AcceptedWorkflowUnit[] = []
-  const acceptedDocuments = newlyCommittedAuthorPaths(previous.foundationDraftState, next.foundationDraftState)
-  for (const path of acceptedDocuments) {
-    const identity = acceptedDispatchIdentity({
-      run: previous,
-      workerType: 'document-author',
-      taskId: path,
-    })
-    units.push(
-      unit({
-        unitId: `document:${path}`,
-        kind: 'document',
-        phase: next.phase,
-        predecessorUnitIds: precedingAuthorUnit(previous.foundationDraftState),
-        inputRevision: next.revision.document,
-        dependencyDigests: {},
-        ...identity,
-        acceptedAt: next.updatedAt,
-        payload: { path, revision: next.revision.document },
-      }),
-    )
-  }
+  if (next.phase === 'DOCUMENT_DRAFTING' &&
+    stableValue(previous.foundationDraftState) !== stableValue(next.foundationDraftState))
+    throw new Error(RETIRED_FOUNDATION_AUTHOR)
   units.push(...acceptedResourceUnits(previous, next))
 
   if (previous.tasks.length === 0 && next.tasks.length > 0)

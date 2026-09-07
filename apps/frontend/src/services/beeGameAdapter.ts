@@ -124,7 +124,7 @@ type BeeGameProjectTranscriptPage = BeeGameTranscriptPage & {
 }
 
 type BeeGameProjectArtifactIndex = {
-  sessionId: string
+  sessionId?: string
   workspacePath: string
   artifacts: BeeGameDiscoveredArtifact[]
 }
@@ -628,41 +628,56 @@ export const beeGameAdapter = {
   },
 
   async getArtifacts(projectId: string): Promise<BeeGameArtifact[]> {
-    let eventResult: BeeGameProjectEvents
-    let artifactIndex: BeeGameProjectArtifactIndex
+    let artifactIndex: BeeGameProjectArtifactIndex | undefined
     try {
-      eventResult = await fetchProjectEvents(projectId)
-      artifactIndex = await fetchProjectArtifactIndex(projectId).catch(() => ({
-        sessionId: eventResult.sessionId,
-        workspacePath: eventResult.workspacePath,
-        artifacts: [],
-      }))
+      artifactIndex = await fetchProjectArtifactIndex(projectId)
     } catch (error) {
-      if (isSessionNotFoundError(error)) return []
-      throw error
+      // Older servers may not expose the project-scoped index yet. Keep the
+      // event-derived fallback for those servers, but never hide auth or
+      // transport failures behind an empty artifact list.
+      if (!isNotFoundError(error)) throw error
     }
-    const binding: ProjectSessionBinding = {
+
+    let eventResult: BeeGameProjectEvents | undefined
+    if (artifactIndex?.sessionId) {
+      try {
+        eventResult = await fetchProjectEvents(projectId)
+      } catch (error) {
+        if (!isSessionNotFoundError(error)) throw error
+      }
+    } else if (!artifactIndex) {
+      try {
+        eventResult = await fetchProjectEvents(projectId)
+      } catch (error) {
+        if (isSessionNotFoundError(error)) return []
+        throw error
+      }
+    }
+
+    const workspacePath = artifactIndex?.workspacePath || eventResult?.workspacePath
+    if (!workspacePath) return []
+    const binding = {
       projectId,
-      sessionId: eventResult.sessionId,
-      workspacePath: eventResult.workspacePath,
+      workspacePath,
+      ...(artifactIndex?.sessionId || eventResult?.sessionId
+        ? { sessionId: artifactIndex?.sessionId || eventResult?.sessionId }
+        : {}),
     }
     return [
       ...mergeArtifactsByPath([
-        ...artifactIndex.artifacts
+        ...(artifactIndex?.artifacts || [])
           .filter(artifact => !isInternalRuntimeArtifact(artifact))
           .map(artifact =>
             discoveredArtifactToPanelArtifact(binding, artifact),
           ),
-        ...extractArtifacts(
-          projectId,
-          eventResult.events,
-          eventResult.workspacePath,
-        ),
+        ...(eventResult
+          ? extractArtifacts(projectId, eventResult.events, eventResult.workspacePath)
+          : []),
       ]),
       {
         artifact_id: encodeProjectPackageArtifactId(projectId),
         id: encodeProjectPackageArtifactId(projectId),
-        name: `${binding.workspacePath.split('/').filter(Boolean).at(-1) || 'project'}.zip`,
+        name: `${workspacePath.split('/').filter(Boolean).at(-1) || 'project'}.zip`,
         artifact_type: 'Project Package',
         status: 'active',
         created_by: 'beegame',
@@ -880,6 +895,12 @@ function isSessionNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   const message = error.message.toLowerCase()
   return message === 'session not found' || message === 'not found'
+}
+
+function isNotFoundError(error: unknown): boolean {
+  if (isSessionNotFoundError(error)) return true
+  if (!(error instanceof Error)) return false
+  return (error as Error & { status?: number }).status === 404
 }
 
 function isDeleteAlreadyGoneError(error: unknown): boolean {
@@ -1997,7 +2018,9 @@ function extractArtifacts(
 }
 
 function discoveredArtifactToPanelArtifact(
-  binding: ProjectSessionBinding,
+  binding: Pick<ProjectSessionBinding, 'projectId' | 'workspacePath'> & {
+    sessionId?: string
+  },
   artifact: BeeGameDiscoveredArtifact,
 ): BeeGameArtifact {
   const artifactId = encodeArtifactId(
@@ -2094,23 +2117,35 @@ export function isBeeGameProjectPackageArtifactId(artifactId: string): boolean {
 
 function encodeArtifactId(
   projectId: string,
-  sessionId: string,
+  sessionId: string | undefined,
   path: string,
 ): string {
-  return `${ARTIFACT_ID_PREFIX}${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}:${encodeURIComponent(path)}`
+  const encodedProjectId = encodeURIComponent(projectId)
+  const encodedPath = encodeURIComponent(path)
+  return sessionId
+    ? `${ARTIFACT_ID_PREFIX}${encodedProjectId}:${encodeURIComponent(sessionId)}:${encodedPath}`
+    : `${ARTIFACT_ID_PREFIX}${encodedProjectId}:${encodedPath}`
 }
 
 function decodeArtifactId(
   artifactId: string,
-): { projectId: string; sessionId: string; path: string } | null {
+): { projectId: string; sessionId?: string; path: string } | null {
   if (!artifactId.startsWith(ARTIFACT_ID_PREFIX)) return null
   const parts = artifactId.slice(ARTIFACT_ID_PREFIX.length).split(':')
-  if (parts.length !== 3) return null
-  return {
-    projectId: decodeURIComponent(parts[0]),
-    sessionId: decodeURIComponent(parts[1]),
-    path: decodeURIComponent(parts[2]),
+  if (parts.length === 3) {
+    return {
+      projectId: decodeURIComponent(parts[0]),
+      sessionId: decodeURIComponent(parts[1]),
+      path: decodeURIComponent(parts[2]),
+    }
   }
+  if (parts.length === 2) {
+    return {
+      projectId: decodeURIComponent(parts[0]),
+      path: decodeURIComponent(parts[1]),
+    }
+  }
+  return null
 }
 
 function permissionEventToReview(

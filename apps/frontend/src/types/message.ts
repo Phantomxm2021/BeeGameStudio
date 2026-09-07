@@ -124,6 +124,8 @@ export type WorkflowRecoveryUnitKind =
 
 export interface WorkflowCardPayload {
   runId: string
+  /** Display-only completed author artifacts, independent of active stage tasks. */
+  foundationDocuments?: { path: string; status: 'ready' }[]
   status: WorkflowCardStatus
   currentPhase?: string
   /** One-based current position in the server-owned delivery phase order. */

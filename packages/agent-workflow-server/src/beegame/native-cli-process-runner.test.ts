@@ -12,9 +12,7 @@ const fixturePath = fileURLToPath(
 
 function startRuntime(
   options: {
-    markdownStream?: boolean
     workflowJsonSchema?: Record<string, unknown>
-    workflowWorkerType?: 'foundation-document-reviser'
   } = {},
 ) {
   return createNativeCliProcessRunner({
@@ -31,22 +29,8 @@ function startRuntime(
     sessionId: 'session-1',
     cwd: process.cwd(),
     env: {},
-    ...(options.markdownStream
-      ? {
-          workflowMarkdownStreamContract: {
-            workspacePath: process.cwd(),
-            runId: 'run-1',
-            dispatchId: 'dispatch-1',
-            targetPath: 'docs/GDD.md' as const,
-            maxBytes: 512_000,
-          },
-        }
-      : {}),
     ...(options.workflowJsonSchema
       ? { workflowJsonSchema: options.workflowJsonSchema }
-      : {}),
-    ...(options.workflowWorkerType
-      ? { workflowWorker: true, workflowWorkerType: options.workflowWorkerType }
       : {}),
   })
 }
@@ -154,46 +138,6 @@ describe('native CLI process runner', () => {
     expect(
       command.some(argument => argument.startsWith('--allowedTools=')),
     ).toBe(false)
-  })
-
-  test('disables native tools only for a foundation Markdown stream turn', () => {
-    const command = nativeRuntimeCommand({
-      sessionId: 'beegame_stream_author',
-      cwd: process.cwd(),
-      env: {},
-      workflowWorker: true,
-      workflowWorkerType: 'document-author',
-      workflowMarkdownStreamContract: {
-        workspacePath: process.cwd(),
-        runId: 'run-1',
-        dispatchId: 'dispatch-1',
-        targetPath: 'docs/GDD.md',
-        maxBytes: 512_000,
-      },
-    })
-
-    expect(command).toContain('--tools')
-    expect(command[command.indexOf('--tools') + 1]).toBe('')
-  })
-
-  test('disables tools for a section revision raw Markdown worker', () => {
-    const command = nativeRuntimeCommand({
-      sessionId: 'beegame_revision_worker', cwd: process.cwd(), env: {},
-      workflowWorker: true, workflowWorkerType: 'foundation-document-reviser',
-      workflowRevisionContract: { scope: 'section' },
-    })
-    expect(command.slice(command.indexOf('--tools') + 1)).toEqual([''])
-  })
-
-  test('adds the bound reader only for a document revision worker', () => {
-    const command = nativeRuntimeCommand({
-      sessionId: 'beegame_document_revision_worker', cwd: process.cwd(), env: {},
-      workflowWorker: true, workflowWorkerType: 'foundation-document-reviser',
-      workflowRevisionContract: { scope: 'document' },
-    })
-    expect(command.slice(command.indexOf('--tools') + 1)).toEqual([
-      'ReadAssignedFoundationRevision',
-    ])
   })
 
   test('disables built-in tools for a StructuredOutput workflow turn while retaining its JSON schema', () => {
@@ -358,116 +302,6 @@ describe('native CLI process runner', () => {
         requestPermission: async () => ({ behavior: 'deny' }),
       }),
     ).rejects.toThrow('exited without a terminal result')
-  })
-
-  test('recovers a thinking-only provider result in the same Markdown dispatch and session', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    const messages: Record<string, unknown>[] = []
-    await expect(
-      runtime.submit({
-        prompt: 'incomplete-success',
-        signal: new AbortController().signal,
-        onMessage: message => messages.push(message),
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).resolves.toBeUndefined()
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      stop_reason: 'end_turn',
-      received_user_count: 2,
-    })
-    expect(messages.at(-1)?.result).toContain('# Visible Markdown')
-    runtime.dispose?.()
-  })
-
-  test('accepts visible Markdown when provider stop metadata is missing', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    const messages: Record<string, unknown>[] = []
-    await expect(
-      runtime.submit({
-        prompt: 'complete-markdown-without-stop-reason',
-        signal: new AbortController().signal,
-        onMessage: message => messages.push(message),
-        requestPermission: async () => ({ behavior: 'deny' }),
-      }),
-    ).resolves.toBeUndefined()
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      stop_reason: '',
-      received_user_count: 1,
-    })
-    expect(messages).toHaveLength(3)
-    runtime.dispose?.()
-  })
-
-  test('accepts a nonempty Markdown result without structural continuation', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    const messages: Record<string, unknown>[] = []
-
-    await runtime.submit({
-      prompt: 'truncated-markdown',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      stop_reason: '',
-      received_user_count: 1,
-    })
-    expect(messages.at(-1)?.result).toContain('## Executive Summary')
-    runtime.dispose?.()
-  })
-
-  test('does not continue a long Markdown document based on structure', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-    const messages: Record<string, unknown>[] = []
-
-    await runtime.submit({
-      prompt: 'truncated-markdown-twice',
-      signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
-      requestPermission: async () => ({ behavior: 'deny' }),
-    })
-
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      received_user_count: 1,
-    })
-    expect(messages.at(-1)?.result).not.toContain('## Production Materials')
-    runtime.dispose?.()
-  })
-
-  test('accepts structurally incomplete Markdown for downstream Review', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-
-    await expect(runtime.submit({
-        prompt: 'truncated-markdown-forever',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      })).resolves.toBeUndefined()
-    runtime.dispose?.()
-  })
-
-  test('accepts structurally invalid Markdown for downstream Review', async () => {
-    const runtime = await startRuntime({ markdownStream: true })
-
-    await expect(runtime.submit({
-        prompt: 'malformed-markdown-end-turn',
-        signal: new AbortController().signal,
-        onMessage: () => undefined,
-        requestPermission: async () => ({ behavior: 'deny' }),
-      })).resolves.toBeUndefined()
-    runtime.dispose?.()
   })
 
   test('routes native permission requests through the BGS authority callback', async () => {

@@ -1,0 +1,758 @@
+{
+  "provenance": {
+    "generatedFrom": [
+      "foundation-reviewer/private/test-fixtures/review-fixture",
+      "foundation-reviewer/private/test-fixtures/candidate-fixture"
+    ],
+    "publicFieldsOnly": true,
+    "excludes": [
+      "Reviewer prepared state",
+      "Revision prepared plan"
+    ]
+  },
+  "retry": {
+    "input": {
+      "kind": "retry_same_round",
+      "sourceResult": {
+        "protocolVersion": 1,
+        "producer": "foundation-reviewer",
+        "ownerId": "owner",
+        "projectId": "project",
+        "requestId": "review",
+        "subject": {
+          "kind": "initial",
+          "sourceResultId": "author",
+          "sourceDocumentRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "confirmedBriefDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "inputDigest": "3795605788236b0b9be0b045a8257228a8901010e9b26abe3e84f205875a73fc",
+        "kind": "issues_found",
+        "documentSetDigest": "cfe1fbf7bd467bcd22abf9a6e68a990dc32a0e3a80841c6c20e894e5dd371fdb",
+        "documents": [
+          {
+            "path": "docs/GDD.md",
+            "content": "# Complete docs/GDD.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:vision -->\n## Vision and Product Promise\n\nProduction-ready Vision and Product Promise authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.players.max: 4\n\n\ngame.platform: quest\n\n\n<!-- beegame-section:experience_pillars -->\n## Player Experience and Design Pillars\n\nProduction-ready Player Experience and Design Pillars authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:core_loop -->\n## Core and Session Loops\n\nProduction-ready Core and Session Loops authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:player_actions -->\n## Player Actions and Controls\n\nProduction-ready Player Actions and Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.mechanics: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:rules_systems -->\n## Gameplay Rules and Systems\n\nProduction-ready Gameplay Rules and Systems authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.resources: [\"hp\",\"energy\"]\n\n\n<!-- beegame-section:states_flow -->\n## Game States and Flow\n\nProduction-ready Game States and Flow authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.states: [\"menu\",\"playing\",\"won\",\"lost\"]\n\n\ngame.win_conditions: [\"boss_defeated\"]\n\n\ngame.loss_conditions: [\"player_defeated\"]\n\n\n<!-- beegame-section:progression -->\n## Progression, Rewards and Economy Boundary\n\nProduction-ready Progression, Rewards and Economy Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:content_narrative -->\n## Content and Narrative Framework\n\nProduction-ready Content and Narrative Framework authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:challenge_recovery -->\n## Challenge, Failure and Recovery\n\nProduction-ready Challenge, Failure and Recovery authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:accessibility_localization -->\n## Accessibility and Localization Intent\n\nProduction-ready Accessibility and Localization Intent authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:metrics -->\n## Success Metrics and Analytics Intent\n\nProduction-ready Success Metrics and Analytics Intent authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:scope_risks -->\n## Scope, Dependencies and Open Decisions\n\nProduction-ready Scope, Dependencies and Open Decisions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:game-state-flow -->\n### Game State Flow\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "906e7214ee48be3cc411aa407d498f2400968a4ed9ef17328062e4d53f148d08",
+            "byteLength": 3809
+          },
+          {
+            "path": "docs/LEVEL_SCENE_DESIGN.md",
+            "content": "# Complete docs/LEVEL_SCENE_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:world_structure -->\n## World and Scene Structure\n\nProduction-ready World and Scene Structure authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:level_sequence -->\n## Level and Content Sequence\n\nProduction-ready Level and Content Sequence authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:objectives_routes -->\n## Objectives, Routes and Player Choices\n\nProduction-ready Objectives, Routes and Player Choices authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pacing_beats -->\n## Pacing and Gameplay Beats\n\nProduction-ready Pacing and Gameplay Beats authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:encounters -->\n## Encounters and Challenge Placement\n\nProduction-ready Encounters and Challenge Placement authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.required_entities: [\"Player\",\"Boss_A\"]\n\n\n<!-- beegame-section:spawn_checkpoint -->\n## Spawn, Checkpoint and Recovery Rules\n\nProduction-ready Spawn, Checkpoint and Recovery Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:camera_readability -->\n## Camera, Scale and Readability\n\nProduction-ready Camera, Scale and Readability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:scene_states -->\n## Scene States and Transitions\n\nProduction-ready Scene States and Transitions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:content_matrix -->\n## Content Matrix and Replay Structure\n\nProduction-ready Content Matrix and Replay Structure authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.required_assets: [\"player_model\",\"boss_model\"]\n\n\n<!-- beegame-section:production_acceptance -->\n## Level Production and Acceptance\n\nProduction-ready Level Production and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.complexity_budget: 100\n\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:world-structure-diagram -->\n### World Structure Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:route-choice-diagram -->\n### Route and Choice Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:pacing-beat-table -->\n### Pacing Beat Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "f09bb1d82f345d72788b73c52deff7055262c1066e1fcfa04c54688cad6a81a0",
+            "byteLength": 3368
+          },
+          {
+            "path": "docs/BALANCE_DESIGN.md",
+            "content": "# Complete docs/BALANCE_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:units_variables -->\n## Units, Variables and Conventions\n\nProduction-ready Units, Variables and Conventions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:entity_parameters -->\n## Entity and Ability Parameters\n\nProduction-ready Entity and Ability Parameters authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nbalance.entity_ids: [\"Player\",\"Boss_A\"]\n\n\n<!-- beegame-section:formulas -->\n## Authoritative Formulas\n\nProduction-ready Authoritative Formulas authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:economy -->\n## Economy Sources, Sinks and Constraints\n\nProduction-ready Economy Sources, Sinks and Constraints authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:progression_curves -->\n## Progression and Capability Curves\n\nProduction-ready Progression and Capability Curves authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:challenge_model -->\n## Challenge and Pressure Model\n\nProduction-ready Challenge and Pressure Model authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:rewards_value -->\n## Rewards and Relative Value\n\nProduction-ready Rewards and Relative Value authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:bounds_exploits -->\n## Bounds, Degenerate Strategies and Exploit Controls\n\nProduction-ready Bounds, Degenerate Strategies and Exploit Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:tuning_validation -->\n## Tuning and Validation Method\n\nProduction-ready Tuning and Validation Method authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:risks_dependencies -->\n## Balance Dependencies and Risks\n\nProduction-ready Balance Dependencies and Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:variable-parameter-table -->\n### Variable and Parameter Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\nbalance.variable_ids: [\"player_hp\",\"boss_hp\"]\n\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "91a4a52562746d5c49ccd273f10ad52b01208df2f45e8e8f2986efb6aa00a27f",
+            "byteLength": 3131
+          },
+          {
+            "path": "docs/TECHNICAL_DESIGN.md",
+            "content": "# Complete docs/TECHNICAL_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:architecture -->\n## System Architecture and Boundaries\n\nProduction-ready System Architecture and Boundaries authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:runtime_state -->\n## Runtime State and Lifecycle\n\nProduction-ready Runtime State and Lifecycle authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:data_content -->\n## Data and Content Contracts\n\nProduction-ready Data and Content Contracts authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.content_kinds: [\"model\",\"texture\",\"audio\"]\n\n\n<!-- beegame-section:save_load -->\n## Persistence, Save and Migration\n\nProduction-ready Persistence, Save and Migration authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:input_interaction -->\n## Input and Interaction Boundary\n\nProduction-ready Input and Interaction Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:performance -->\n## Performance and Capacity Budgets\n\nProduction-ready Performance and Capacity Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.target_fps: 72\n\n\n<!-- beegame-section:online_boundary -->\n## Online, Networking and Service Applicability\n\nProduction-ready Online, Networking and Service Applicability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:security_privacy -->\n## Security, Privacy and Data Safety\n\nProduction-ready Security, Privacy and Data Safety authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:diagnostics -->\n## Diagnostics, Analytics and Operability\n\nProduction-ready Diagnostics, Analytics and Operability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:build_release -->\n## Build, Configuration and Release\n\nProduction-ready Build, Configuration and Release authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:testing -->\n## Technical Verification Strategy\n\nProduction-ready Technical Verification Strategy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:risks -->\n## Technical Risks and Dependencies\n\nProduction-ready Technical Risks and Dependencies authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:architecture-diagram -->\n### Architecture Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:data-flow-diagram -->\n### Data Flow Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:runtime-lifecycle-diagram -->\n### Runtime Lifecycle Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:save-recovery-table -->\n### Save and Recovery Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "d851f68b8b48ab418200190fa65667a07092c9902731c5bd47c656f4a57f739c",
+            "byteLength": 3983
+          },
+          {
+            "path": "docs/ART_DIRECTION.md",
+            "content": "# Complete docs/ART_DIRECTION.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:visual_pillars -->\n## Visual Pillars and References\n\nProduction-ready Visual Pillars and References authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nart.style_constraints: [\"low_poly\",\"readable_silhouette\"]\n\n\n<!-- beegame-section:composition_readability -->\n## Composition and Gameplay Readability\n\nProduction-ready Composition and Gameplay Readability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:character_style -->\n## Characters and Entities\n\nProduction-ready Characters and Entities authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:environment_style -->\n## World, Environment and Props\n\nProduction-ready World, Environment and Props authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:color_lighting -->\n## Color, Lighting and Material Rules\n\nProduction-ready Color, Lighting and Material Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:animation -->\n## Animation Language\n\nProduction-ready Animation Language authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:vfx -->\n## Visual Effects and Feedback\n\nProduction-ready Visual Effects and Feedback authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:camera_presentation -->\n## Camera and Presentation\n\nProduction-ready Camera and Presentation authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:asset_specifications -->\n## Art Asset Specifications\n\nProduction-ready Art Asset Specifications authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pipeline_risks -->\n## Art Pipeline Risks\n\nProduction-ready Art Pipeline Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:visual-language-board -->\n### Visual Language Board\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:animation-vfx-state-table -->\n### Animation and VFX State Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "fd4fa0f8945d17e9e41ce15f65112a7743f34a250bbc28a2c9197f80c14cd05e",
+            "byteLength": 3128
+          },
+          {
+            "path": "docs/UI_UX_SPEC.md",
+            "content": "# Complete docs/UI_UX_SPEC.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:experience_architecture -->\n## Experience and Information Architecture\n\nProduction-ready Experience and Information Architecture authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:player_journeys -->\n## Player Journeys and Task Flows\n\nProduction-ready Player Journeys and Task Flows authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:screen_inventory -->\n## Screen and Interface State Inventory\n\nProduction-ready Screen and Interface State Inventory authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:hud -->\n## HUD and In-Game Information\n\nProduction-ready HUD and In-Game Information authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nui.displayed_resources: [\"hp\",\"energy\"]\n\n\n<!-- beegame-section:input -->\n## Input, Focus and Interaction\n\nProduction-ready Input, Focus and Interaction authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nui.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:feedback_errors -->\n## Feedback, Errors and Recovery\n\nProduction-ready Feedback, Errors and Recovery authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:onboarding -->\n## Onboarding and Learnability\n\nProduction-ready Onboarding and Learnability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:accessibility -->\n## Accessibility Requirements\n\nProduction-ready Accessibility Requirements authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:localization -->\n## Localization and Culturalization\n\nProduction-ready Localization and Culturalization authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:prototype_acceptance -->\n## Prototype, Usability and Acceptance\n\nProduction-ready Prototype, Usability and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:information-architecture-diagram -->\n### Information Architecture Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:player-flow-diagram -->\n### Player Flow Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:screen-state-table -->\n### Screen and State Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:wireframe-board -->\n### Wireframe Board\n\n<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"10\" height=\"10\"/></svg>\n\n<!-- beegame-material:focus-accessibility-matrix -->\n### Focus and Accessibility Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "8679ae5ccc616eb3de3fa68ff68843d02c8837d5484a86ebdf7cef4fbab7f13f",
+            "byteLength": 3613
+          },
+          {
+            "path": "docs/AUDIO_DESIGN.md",
+            "content": "# Complete docs/AUDIO_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:audio_pillars -->\n## Audio Pillars and Experience\n\nProduction-ready Audio Pillars and Experience authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:event_taxonomy -->\n## Event and Cue Taxonomy\n\nProduction-ready Event and Cue Taxonomy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:sfx -->\n## Gameplay and Environment Sound\n\nProduction-ready Gameplay and Environment Sound authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:music -->\n## Music System and States\n\nProduction-ready Music System and States authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ambience -->\n## Ambience and World Audio\n\nProduction-ready Ambience and World Audio authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ui_feedback -->\n## UI, Feedback and Accessibility Cues\n\nProduction-ready UI, Feedback and Accessibility Cues authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:voice -->\n## Voice and Dialogue Applicability\n\nProduction-ready Voice and Dialogue Applicability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:mix -->\n## Mix, Buses and Dynamic Rules\n\nProduction-ready Mix, Buses and Dynamic Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:implementation -->\n## Audio Data and Technical Budgets\n\nProduction-ready Audio Data and Technical Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:production -->\n## Audio Production and Acceptance\n\nProduction-ready Audio Production and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:event-cue-matrix -->\n### Event to Cue Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\naudio.event_ids: [\"boss_spawn\",\"boss_defeated\"]\n\n\n<!-- beegame-material:music-state-diagram -->\n### Music State Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:bus-ducking-diagram -->\n### Bus and Ducking Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:loudness-delivery-table -->\n### Loudness and Delivery Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "44d86ded656f178bc1b991d76149ba53baed78b9e60d5ff9f706c4d86468da12",
+            "byteLength": 3306
+          },
+          {
+            "path": "docs/ASSET_PLAN.md",
+            "content": "# Complete docs/ASSET_PLAN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:inventory -->\n## Asset and Content Inventory\n\nProduction-ready Asset and Content Inventory authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ownership -->\n## Ownership and Responsibility\n\nProduction-ready Ownership and Responsibility authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:dependencies -->\n## Dependencies and Integration Order\n\nProduction-ready Dependencies and Integration Order authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:source_license -->\n## Source, Originality and Licensing\n\nProduction-ready Source, Originality and Licensing authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:formats_budgets -->\n## Formats, Variants and Budgets\n\nProduction-ready Formats, Variants and Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pipeline -->\n## Production Pipeline and Naming\n\nProduction-ready Production Pipeline and Naming authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:milestones -->\n## Milestones, Capacity and Schedule\n\nProduction-ready Milestones, Capacity and Schedule authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:validation -->\n## Validation and Quality Status\n\nProduction-ready Validation and Quality Status authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:placeholder_replacement -->\n## Placeholder and Replacement Strategy\n\nProduction-ready Placeholder and Replacement Strategy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:delivery_risks -->\n## Delivery, Release and Risks\n\nProduction-ready Delivery, Release and Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:asset-inventory-table -->\n### Asset Inventory Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\nasset.inventory_ids: [\"player_model\",\"boss_model\"]\n\n\nasset.covered_level_requirements: [\"player_model\",\"boss_model\"]\n\n\nasset.formats: [\"glb\",\"png\",\"wav\"]\n\n\n<!-- beegame-material:responsibility-matrix -->\n### Responsibility Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:dependency-integration-diagram -->\n### Dependency and Integration Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\nasset.art_constraint_refs: [\"low_poly\",\"readable_silhouette\"]\n\n\n<!-- beegame-material:license-register -->\n### License Register\n\n| Evidence | Status |\n| --- | --- |\n| fixture | unverified |\n\n<!-- beegame-material:milestone-maturity-table -->\n### Milestone and Maturity Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "32fea82b02a792147e96e40ececbbb592821de3cf5b7472de11af7092b6fd3fd",
+            "byteLength": 3741
+          }
+        ],
+        "policyDigest": "dc093f92aac81ef7f2e23e7ea8beb70675c4c7e1a0f202425a072904e2cb35e8",
+        "issueRegistryDigest": "23d1e9b5b6959b0cd187d599496d31c2c6b346d82144bfbb044f5eb11416d644",
+        "evidenceDigest": "63c8ca00f8f4748ea085f6a161c8ef8975ee2dfbcc392dda04e28a3a251c20a0",
+        "issues": [
+          {
+            "issue": {
+              "id": "AUD-B16956C5BA7BB0558029D731",
+              "severity": "HIGH",
+              "type": "semantic",
+              "source": {
+                "documentPath": "docs/UI_UX_SPEC.md",
+                "sectionId": "input",
+                "heading": "Input, Focus and Interaction",
+                "startLine": 32,
+                "endLine": 38,
+                "digest": "b195a053e0cbc81913dddaf828630f297bf84b699617305276c4d27c50b7f7e0"
+              },
+              "expected": "navigation feedback",
+              "actual": "missing",
+              "remediation": {
+                "kind": "patch",
+                "scope": "section",
+                "documentPath": "docs/UI_UX_SPEC.md",
+                "sectionIds": [
+                  "input"
+                ]
+              }
+            },
+            "sections": [
+              {
+                "path": "docs/UI_UX_SPEC.md",
+                "sectionId": "input",
+                "content": "## Input, Focus and Interaction\n\nProduction-ready Input, Focus and Interaction authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nui.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n",
+                "digest": "b195a053e0cbc81913dddaf828630f297bf84b699617305276c4d27c50b7f7e0"
+              }
+            ],
+            "facts": [
+              {
+                "key": "ui.supported_actions",
+                "value": [
+                  "move",
+                  "attack",
+                  "dash"
+                ],
+                "source": {
+                  "documentPath": "docs/UI_UX_SPEC.md",
+                  "sectionId": "input",
+                  "heading": "Input, Focus and Interaction",
+                  "startLine": 32,
+                  "endLine": 38,
+                  "digest": "b195a053e0cbc81913dddaf828630f297bf84b699617305276c4d27c50b7f7e0"
+                },
+                "evidence": {
+                  "documentPath": "docs/UI_UX_SPEC.md",
+                  "sectionId": "input",
+                  "startLine": 36,
+                  "endLine": 36,
+                  "digest": "2be4d09784a7f73c4e96b513d8aafc4797b2f1a4023f9317e52bcb1ba74729c8"
+                }
+              }
+            ]
+          },
+          {
+            "issue": {
+              "id": "AUD-EF112621C8972E994CB43240",
+              "severity": "HIGH",
+              "type": "semantic",
+              "source": {
+                "documentPath": "docs/GDD.md",
+                "sectionId": "player_actions",
+                "heading": "Player Actions and Controls",
+                "startLine": 30,
+                "endLine": 36,
+                "digest": "15abb2a9e052fd00176d647497f50995529bb72da9fdd7ff79617ddfcbd3477f"
+              },
+              "expected": "readable feedback",
+              "actual": "missing",
+              "remediation": {
+                "kind": "patch",
+                "scope": "section",
+                "documentPath": "docs/GDD.md",
+                "sectionIds": [
+                  "player_actions"
+                ]
+              }
+            },
+            "sections": [
+              {
+                "path": "docs/GDD.md",
+                "sectionId": "player_actions",
+                "content": "## Player Actions and Controls\n\nProduction-ready Player Actions and Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.mechanics: [\"move\",\"attack\",\"dash\"]\n\n",
+                "digest": "15abb2a9e052fd00176d647497f50995529bb72da9fdd7ff79617ddfcbd3477f"
+              }
+            ],
+            "facts": [
+              {
+                "key": "game.mechanics",
+                "value": [
+                  "move",
+                  "attack",
+                  "dash"
+                ],
+                "source": {
+                  "documentPath": "docs/GDD.md",
+                  "sectionId": "player_actions",
+                  "heading": "Player Actions and Controls",
+                  "startLine": 30,
+                  "endLine": 36,
+                  "digest": "15abb2a9e052fd00176d647497f50995529bb72da9fdd7ff79617ddfcbd3477f"
+                },
+                "evidence": {
+                  "documentPath": "docs/GDD.md",
+                  "sectionId": "player_actions",
+                  "startLine": 34,
+                  "endLine": 34,
+                  "digest": "40f1e4945c7ffe519faa6ae14ab4447f2bb52470331fbffc2a3fafac8ba807fd"
+                }
+              },
+              {
+                "key": "technical.supported_actions",
+                "value": [
+                  "move",
+                  "attack",
+                  "dash"
+                ],
+                "source": {
+                  "documentPath": "docs/TECHNICAL_DESIGN.md",
+                  "sectionId": "input_interaction",
+                  "heading": "Input and Interaction Boundary",
+                  "startLine": 32,
+                  "endLine": 38,
+                  "digest": "c603a0d794d10d3ab929c353cd5a8262e8e09651ce60a80e6e5b2894902e4df3"
+                },
+                "evidence": {
+                  "documentPath": "docs/TECHNICAL_DESIGN.md",
+                  "sectionId": "input_interaction",
+                  "startLine": 36,
+                  "endLine": 36,
+                  "digest": "48052c6033f26fda6d0b475f485711973ea6155f59cb080058ef1e57861d9635"
+                }
+              }
+            ]
+          }
+        ],
+        "resultId": "a47f4affaf24dc836a5ca2853548eb04d3179122adce8b34689f5b92fce3bf9e"
+      },
+      "sourceBinding": {
+        "ownerId": "owner",
+        "projectId": "project",
+        "resultId": "a47f4affaf24dc836a5ca2853548eb04d3179122adce8b34689f5b92fce3bf9e",
+        "resultDigest": "317fdd02a8feb6c30850524f14a6e5091ccc797f8cfba0f611ce3d59675668f6"
+      },
+      "previousCandidateResult": {
+        "protocolVersion": 1,
+        "producer": "foundation-revision",
+        "kind": "candidate_ready",
+        "ownerId": "owner",
+        "projectId": "project",
+        "requestId": "repair",
+        "candidateId": "candidate-one",
+        "round": 1,
+        "baseDocumentSetDigest": "cfe1fbf7bd467bcd22abf9a6e68a990dc32a0e3a80841c6c20e894e5dd371fdb",
+        "sourceReviewResultId": "a47f4affaf24dc836a5ca2853548eb04d3179122adce8b34689f5b92fce3bf9e",
+        "sourceReviewResultDigest": "317fdd02a8feb6c30850524f14a6e5091ccc797f8cfba0f611ce3d59675668f6",
+        "documentSetDigest": "b3acb7957843256477c30f31cd31865f42a6fdc0c31abb9434867cba1cc6cc71",
+        "documents": [
+          {
+            "path": "docs/GDD.md",
+            "content": "# Complete docs/GDD.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:vision -->\n## Vision and Product Promise\n\nProduction-ready Vision and Product Promise authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.players.max: 4\n\n\ngame.platform: quest\n\n\n<!-- beegame-section:experience_pillars -->\n## Player Experience and Design Pillars\n\nProduction-ready Player Experience and Design Pillars authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:core_loop -->\n## Core and Session Loops\n\nProduction-ready Core and Session Loops authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:player_actions -->\n## Player Actions and Controls\n\nProduction-ready Player Actions and Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nReadable feedback added.\n\ngame.mechanics: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:rules_systems -->\n## Gameplay Rules and Systems\n\nProduction-ready Gameplay Rules and Systems authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.resources: [\"hp\",\"energy\"]\n\n\n<!-- beegame-section:states_flow -->\n## Game States and Flow\n\nProduction-ready Game States and Flow authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.states: [\"menu\",\"playing\",\"won\",\"lost\"]\n\n\ngame.win_conditions: [\"boss_defeated\"]\n\n\ngame.loss_conditions: [\"player_defeated\"]\n\n\n<!-- beegame-section:progression -->\n## Progression, Rewards and Economy Boundary\n\nProduction-ready Progression, Rewards and Economy Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:content_narrative -->\n## Content and Narrative Framework\n\nProduction-ready Content and Narrative Framework authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:challenge_recovery -->\n## Challenge, Failure and Recovery\n\nProduction-ready Challenge, Failure and Recovery authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:accessibility_localization -->\n## Accessibility and Localization Intent\n\nProduction-ready Accessibility and Localization Intent authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:metrics -->\n## Success Metrics and Analytics Intent\n\nProduction-ready Success Metrics and Analytics Intent authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:scope_risks -->\n## Scope, Dependencies and Open Decisions\n\nProduction-ready Scope, Dependencies and Open Decisions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:game-state-flow -->\n### Game State Flow\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "7bf5c8ffd70a31d5745a8591dd407c0d6e7c2142d2e34632d4723286745f4ddd",
+            "byteLength": 3835
+          },
+          {
+            "path": "docs/LEVEL_SCENE_DESIGN.md",
+            "content": "# Complete docs/LEVEL_SCENE_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:world_structure -->\n## World and Scene Structure\n\nProduction-ready World and Scene Structure authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:level_sequence -->\n## Level and Content Sequence\n\nProduction-ready Level and Content Sequence authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:objectives_routes -->\n## Objectives, Routes and Player Choices\n\nProduction-ready Objectives, Routes and Player Choices authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pacing_beats -->\n## Pacing and Gameplay Beats\n\nProduction-ready Pacing and Gameplay Beats authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:encounters -->\n## Encounters and Challenge Placement\n\nProduction-ready Encounters and Challenge Placement authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.required_entities: [\"Player\",\"Boss_A\"]\n\n\n<!-- beegame-section:spawn_checkpoint -->\n## Spawn, Checkpoint and Recovery Rules\n\nProduction-ready Spawn, Checkpoint and Recovery Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:camera_readability -->\n## Camera, Scale and Readability\n\nProduction-ready Camera, Scale and Readability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:scene_states -->\n## Scene States and Transitions\n\nProduction-ready Scene States and Transitions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:content_matrix -->\n## Content Matrix and Replay Structure\n\nProduction-ready Content Matrix and Replay Structure authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.required_assets: [\"player_model\",\"boss_model\"]\n\n\n<!-- beegame-section:production_acceptance -->\n## Level Production and Acceptance\n\nProduction-ready Level Production and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.complexity_budget: 100\n\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:world-structure-diagram -->\n### World Structure Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:route-choice-diagram -->\n### Route and Choice Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:pacing-beat-table -->\n### Pacing Beat Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "f09bb1d82f345d72788b73c52deff7055262c1066e1fcfa04c54688cad6a81a0",
+            "byteLength": 3368
+          },
+          {
+            "path": "docs/BALANCE_DESIGN.md",
+            "content": "# Complete docs/BALANCE_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:units_variables -->\n## Units, Variables and Conventions\n\nProduction-ready Units, Variables and Conventions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:entity_parameters -->\n## Entity and Ability Parameters\n\nProduction-ready Entity and Ability Parameters authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nbalance.entity_ids: [\"Player\",\"Boss_A\"]\n\n\n<!-- beegame-section:formulas -->\n## Authoritative Formulas\n\nProduction-ready Authoritative Formulas authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:economy -->\n## Economy Sources, Sinks and Constraints\n\nProduction-ready Economy Sources, Sinks and Constraints authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:progression_curves -->\n## Progression and Capability Curves\n\nProduction-ready Progression and Capability Curves authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:challenge_model -->\n## Challenge and Pressure Model\n\nProduction-ready Challenge and Pressure Model authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:rewards_value -->\n## Rewards and Relative Value\n\nProduction-ready Rewards and Relative Value authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:bounds_exploits -->\n## Bounds, Degenerate Strategies and Exploit Controls\n\nProduction-ready Bounds, Degenerate Strategies and Exploit Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:tuning_validation -->\n## Tuning and Validation Method\n\nProduction-ready Tuning and Validation Method authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:risks_dependencies -->\n## Balance Dependencies and Risks\n\nProduction-ready Balance Dependencies and Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:variable-parameter-table -->\n### Variable and Parameter Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\nbalance.variable_ids: [\"player_hp\",\"boss_hp\"]\n\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "91a4a52562746d5c49ccd273f10ad52b01208df2f45e8e8f2986efb6aa00a27f",
+            "byteLength": 3131
+          },
+          {
+            "path": "docs/TECHNICAL_DESIGN.md",
+            "content": "# Complete docs/TECHNICAL_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:architecture -->\n## System Architecture and Boundaries\n\nProduction-ready System Architecture and Boundaries authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:runtime_state -->\n## Runtime State and Lifecycle\n\nProduction-ready Runtime State and Lifecycle authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:data_content -->\n## Data and Content Contracts\n\nProduction-ready Data and Content Contracts authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.content_kinds: [\"model\",\"texture\",\"audio\"]\n\n\n<!-- beegame-section:save_load -->\n## Persistence, Save and Migration\n\nProduction-ready Persistence, Save and Migration authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:input_interaction -->\n## Input and Interaction Boundary\n\nProduction-ready Input and Interaction Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:performance -->\n## Performance and Capacity Budgets\n\nProduction-ready Performance and Capacity Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.target_fps: 72\n\n\n<!-- beegame-section:online_boundary -->\n## Online, Networking and Service Applicability\n\nProduction-ready Online, Networking and Service Applicability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:security_privacy -->\n## Security, Privacy and Data Safety\n\nProduction-ready Security, Privacy and Data Safety authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:diagnostics -->\n## Diagnostics, Analytics and Operability\n\nProduction-ready Diagnostics, Analytics and Operability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:build_release -->\n## Build, Configuration and Release\n\nProduction-ready Build, Configuration and Release authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:testing -->\n## Technical Verification Strategy\n\nProduction-ready Technical Verification Strategy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:risks -->\n## Technical Risks and Dependencies\n\nProduction-ready Technical Risks and Dependencies authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:architecture-diagram -->\n### Architecture Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:data-flow-diagram -->\n### Data Flow Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:runtime-lifecycle-diagram -->\n### Runtime Lifecycle Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:save-recovery-table -->\n### Save and Recovery Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "d851f68b8b48ab418200190fa65667a07092c9902731c5bd47c656f4a57f739c",
+            "byteLength": 3983
+          },
+          {
+            "path": "docs/ART_DIRECTION.md",
+            "content": "# Complete docs/ART_DIRECTION.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:visual_pillars -->\n## Visual Pillars and References\n\nProduction-ready Visual Pillars and References authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nart.style_constraints: [\"low_poly\",\"readable_silhouette\"]\n\n\n<!-- beegame-section:composition_readability -->\n## Composition and Gameplay Readability\n\nProduction-ready Composition and Gameplay Readability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:character_style -->\n## Characters and Entities\n\nProduction-ready Characters and Entities authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:environment_style -->\n## World, Environment and Props\n\nProduction-ready World, Environment and Props authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:color_lighting -->\n## Color, Lighting and Material Rules\n\nProduction-ready Color, Lighting and Material Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:animation -->\n## Animation Language\n\nProduction-ready Animation Language authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:vfx -->\n## Visual Effects and Feedback\n\nProduction-ready Visual Effects and Feedback authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:camera_presentation -->\n## Camera and Presentation\n\nProduction-ready Camera and Presentation authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:asset_specifications -->\n## Art Asset Specifications\n\nProduction-ready Art Asset Specifications authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pipeline_risks -->\n## Art Pipeline Risks\n\nProduction-ready Art Pipeline Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:visual-language-board -->\n### Visual Language Board\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:animation-vfx-state-table -->\n### Animation and VFX State Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "fd4fa0f8945d17e9e41ce15f65112a7743f34a250bbc28a2c9197f80c14cd05e",
+            "byteLength": 3128
+          },
+          {
+            "path": "docs/UI_UX_SPEC.md",
+            "content": "# Complete docs/UI_UX_SPEC.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:experience_architecture -->\n## Experience and Information Architecture\n\nProduction-ready Experience and Information Architecture authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:player_journeys -->\n## Player Journeys and Task Flows\n\nProduction-ready Player Journeys and Task Flows authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:screen_inventory -->\n## Screen and Interface State Inventory\n\nProduction-ready Screen and Interface State Inventory authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:hud -->\n## HUD and In-Game Information\n\nProduction-ready HUD and In-Game Information authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nui.displayed_resources: [\"hp\",\"energy\"]\n\n\n<!-- beegame-section:input -->\n## Input, Focus and Interaction\n\nProduction-ready Input, Focus and Interaction authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nNavigation note added.\n\nui.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:feedback_errors -->\n## Feedback, Errors and Recovery\n\nProduction-ready Feedback, Errors and Recovery authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:onboarding -->\n## Onboarding and Learnability\n\nProduction-ready Onboarding and Learnability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:accessibility -->\n## Accessibility Requirements\n\nProduction-ready Accessibility Requirements authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:localization -->\n## Localization and Culturalization\n\nProduction-ready Localization and Culturalization authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:prototype_acceptance -->\n## Prototype, Usability and Acceptance\n\nProduction-ready Prototype, Usability and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:information-architecture-diagram -->\n### Information Architecture Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:player-flow-diagram -->\n### Player Flow Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:screen-state-table -->\n### Screen and State Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:wireframe-board -->\n### Wireframe Board\n\n<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"10\" height=\"10\"/></svg>\n\n<!-- beegame-material:focus-accessibility-matrix -->\n### Focus and Accessibility Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "ebb7970d6aefc30273518c1fe5d2983dfeb4579294acf676b8761325368132ce",
+            "byteLength": 3637
+          },
+          {
+            "path": "docs/AUDIO_DESIGN.md",
+            "content": "# Complete docs/AUDIO_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:audio_pillars -->\n## Audio Pillars and Experience\n\nProduction-ready Audio Pillars and Experience authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:event_taxonomy -->\n## Event and Cue Taxonomy\n\nProduction-ready Event and Cue Taxonomy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:sfx -->\n## Gameplay and Environment Sound\n\nProduction-ready Gameplay and Environment Sound authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:music -->\n## Music System and States\n\nProduction-ready Music System and States authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ambience -->\n## Ambience and World Audio\n\nProduction-ready Ambience and World Audio authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ui_feedback -->\n## UI, Feedback and Accessibility Cues\n\nProduction-ready UI, Feedback and Accessibility Cues authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:voice -->\n## Voice and Dialogue Applicability\n\nProduction-ready Voice and Dialogue Applicability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:mix -->\n## Mix, Buses and Dynamic Rules\n\nProduction-ready Mix, Buses and Dynamic Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:implementation -->\n## Audio Data and Technical Budgets\n\nProduction-ready Audio Data and Technical Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:production -->\n## Audio Production and Acceptance\n\nProduction-ready Audio Production and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:event-cue-matrix -->\n### Event to Cue Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\naudio.event_ids: [\"boss_spawn\",\"boss_defeated\"]\n\n\n<!-- beegame-material:music-state-diagram -->\n### Music State Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:bus-ducking-diagram -->\n### Bus and Ducking Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:loudness-delivery-table -->\n### Loudness and Delivery Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "44d86ded656f178bc1b991d76149ba53baed78b9e60d5ff9f706c4d86468da12",
+            "byteLength": 3306
+          },
+          {
+            "path": "docs/ASSET_PLAN.md",
+            "content": "# Complete docs/ASSET_PLAN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:inventory -->\n## Asset and Content Inventory\n\nProduction-ready Asset and Content Inventory authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ownership -->\n## Ownership and Responsibility\n\nProduction-ready Ownership and Responsibility authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:dependencies -->\n## Dependencies and Integration Order\n\nProduction-ready Dependencies and Integration Order authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:source_license -->\n## Source, Originality and Licensing\n\nProduction-ready Source, Originality and Licensing authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:formats_budgets -->\n## Formats, Variants and Budgets\n\nProduction-ready Formats, Variants and Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pipeline -->\n## Production Pipeline and Naming\n\nProduction-ready Production Pipeline and Naming authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:milestones -->\n## Milestones, Capacity and Schedule\n\nProduction-ready Milestones, Capacity and Schedule authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:validation -->\n## Validation and Quality Status\n\nProduction-ready Validation and Quality Status authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:placeholder_replacement -->\n## Placeholder and Replacement Strategy\n\nProduction-ready Placeholder and Replacement Strategy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:delivery_risks -->\n## Delivery, Release and Risks\n\nProduction-ready Delivery, Release and Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:asset-inventory-table -->\n### Asset Inventory Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\nasset.inventory_ids: [\"player_model\",\"boss_model\"]\n\n\nasset.covered_level_requirements: [\"player_model\",\"boss_model\"]\n\n\nasset.formats: [\"glb\",\"png\",\"wav\"]\n\n\n<!-- beegame-material:responsibility-matrix -->\n### Responsibility Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:dependency-integration-diagram -->\n### Dependency and Integration Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\nasset.art_constraint_refs: [\"low_poly\",\"readable_silhouette\"]\n\n\n<!-- beegame-material:license-register -->\n### License Register\n\n| Evidence | Status |\n| --- | --- |\n| fixture | unverified |\n\n<!-- beegame-material:milestone-maturity-table -->\n### Milestone and Maturity Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "32fea82b02a792147e96e40ececbbb592821de3cf5b7472de11af7092b6fd3fd",
+            "byteLength": 3741
+          }
+        ],
+        "changes": [
+          {
+            "scope": "section",
+            "kind": "REPLACE",
+            "documentPath": "docs/GDD.md",
+            "sectionId": "player_actions",
+            "issueIds": [
+              "AUD-EF112621C8972E994CB43240"
+            ],
+            "beforeDigest": "15abb2a9e052fd00176d647497f50995529bb72da9fdd7ff79617ddfcbd3477f",
+            "afterDigest": "1f3c4013b065b13d53df45c0be1423917f3ae3cbc1b0a37e67e827f732d21223"
+          },
+          {
+            "scope": "section",
+            "kind": "REPLACE",
+            "documentPath": "docs/UI_UX_SPEC.md",
+            "sectionId": "input",
+            "issueIds": [
+              "AUD-B16956C5BA7BB0558029D731"
+            ],
+            "beforeDigest": "b195a053e0cbc81913dddaf828630f297bf84b699617305276c4d27c50b7f7e0",
+            "afterDigest": "7d7ba7bd76cb4e9ef664435ff2e80cf57dde4010d04729125938784915a2137d"
+          }
+        ],
+        "repairClaims": [
+          {
+            "issueId": "AUD-B16956C5BA7BB0558029D731",
+            "status": "APPLIED"
+          },
+          {
+            "issueId": "AUD-EF112621C8972E994CB43240",
+            "status": "APPLIED"
+          }
+        ],
+        "unresolvedIssues": [],
+        "resultId": "822a4acf28f169149c90925c96fc6ac34110079d4d1857d513a6cebf515daaa7"
+      },
+      "previousCandidateBinding": {
+        "ownerId": "owner",
+        "projectId": "project",
+        "resultId": "822a4acf28f169149c90925c96fc6ac34110079d4d1857d513a6cebf515daaa7",
+        "resultDigest": "a75ef08809b4dc6ae0338c56f5de5c2a89cb564632249dcc8280cd9ed20da56f"
+      },
+      "previousRecheckResult": {
+        "protocolVersion": 1,
+        "producer": "foundation-reviewer",
+        "resultId": "cfeef7e4eb9fdfd8a9639142a2ca353d1b61b9bb41f8f4b9c688ce71b0c5aca1",
+        "inputDigest": "33f91b90892a57c6f067487baa8c7f9347c241c14f0acfb65ea14534f589690f",
+        "ownerId": "owner",
+        "projectId": "project",
+        "requestId": "followup-recheck",
+        "subject": {
+          "kind": "candidate",
+          "candidateId": "candidate-one",
+          "candidateResultId": "822a4acf28f169149c90925c96fc6ac34110079d4d1857d513a6cebf515daaa7",
+          "baseDocumentSetDigest": "cfe1fbf7bd467bcd22abf9a6e68a990dc32a0e3a80841c6c20e894e5dd371fdb",
+          "sourceReviewResultId": "a47f4affaf24dc836a5ca2853548eb04d3179122adce8b34689f5b92fce3bf9e",
+          "sourceReviewResultDigest": "317fdd02a8feb6c30850524f14a6e5091ccc797f8cfba0f611ce3d59675668f6"
+        },
+        "kind": "issues_found",
+        "documentSetDigest": "b3acb7957843256477c30f31cd31865f42a6fdc0c31abb9434867cba1cc6cc71",
+        "policyDigest": "dc093f92aac81ef7f2e23e7ea8beb70675c4c7e1a0f202425a072904e2cb35e8",
+        "issueRegistryDigest": "706146bab92c1c7a9ad2d0ca6f9102423a6714756221c1d7b4f23b0279c181da",
+        "evidenceDigest": "538bc6bd3fb250b2d69a8fe274ea47d657ef8efed9290fb01e37ec64c037ceb7",
+        "documents": [
+          {
+            "path": "docs/GDD.md",
+            "content": "# Complete docs/GDD.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:vision -->\n## Vision and Product Promise\n\nProduction-ready Vision and Product Promise authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.players.max: 4\n\n\ngame.platform: quest\n\n\n<!-- beegame-section:experience_pillars -->\n## Player Experience and Design Pillars\n\nProduction-ready Player Experience and Design Pillars authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:core_loop -->\n## Core and Session Loops\n\nProduction-ready Core and Session Loops authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:player_actions -->\n## Player Actions and Controls\n\nProduction-ready Player Actions and Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nReadable feedback added.\n\ngame.mechanics: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:rules_systems -->\n## Gameplay Rules and Systems\n\nProduction-ready Gameplay Rules and Systems authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.resources: [\"hp\",\"energy\"]\n\n\n<!-- beegame-section:states_flow -->\n## Game States and Flow\n\nProduction-ready Game States and Flow authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.states: [\"menu\",\"playing\",\"won\",\"lost\"]\n\n\ngame.win_conditions: [\"boss_defeated\"]\n\n\ngame.loss_conditions: [\"player_defeated\"]\n\n\n<!-- beegame-section:progression -->\n## Progression, Rewards and Economy Boundary\n\nProduction-ready Progression, Rewards and Economy Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:content_narrative -->\n## Content and Narrative Framework\n\nProduction-ready Content and Narrative Framework authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:challenge_recovery -->\n## Challenge, Failure and Recovery\n\nProduction-ready Challenge, Failure and Recovery authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:accessibility_localization -->\n## Accessibility and Localization Intent\n\nProduction-ready Accessibility and Localization Intent authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:metrics -->\n## Success Metrics and Analytics Intent\n\nProduction-ready Success Metrics and Analytics Intent authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:scope_risks -->\n## Scope, Dependencies and Open Decisions\n\nProduction-ready Scope, Dependencies and Open Decisions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:game-state-flow -->\n### Game State Flow\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "7bf5c8ffd70a31d5745a8591dd407c0d6e7c2142d2e34632d4723286745f4ddd",
+            "byteLength": 3835
+          },
+          {
+            "path": "docs/LEVEL_SCENE_DESIGN.md",
+            "content": "# Complete docs/LEVEL_SCENE_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:world_structure -->\n## World and Scene Structure\n\nProduction-ready World and Scene Structure authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:level_sequence -->\n## Level and Content Sequence\n\nProduction-ready Level and Content Sequence authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:objectives_routes -->\n## Objectives, Routes and Player Choices\n\nProduction-ready Objectives, Routes and Player Choices authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pacing_beats -->\n## Pacing and Gameplay Beats\n\nProduction-ready Pacing and Gameplay Beats authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:encounters -->\n## Encounters and Challenge Placement\n\nProduction-ready Encounters and Challenge Placement authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.required_entities: [\"Player\",\"Boss_A\"]\n\n\n<!-- beegame-section:spawn_checkpoint -->\n## Spawn, Checkpoint and Recovery Rules\n\nProduction-ready Spawn, Checkpoint and Recovery Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:camera_readability -->\n## Camera, Scale and Readability\n\nProduction-ready Camera, Scale and Readability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:scene_states -->\n## Scene States and Transitions\n\nProduction-ready Scene States and Transitions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:content_matrix -->\n## Content Matrix and Replay Structure\n\nProduction-ready Content Matrix and Replay Structure authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.required_assets: [\"player_model\",\"boss_model\"]\n\n\n<!-- beegame-section:production_acceptance -->\n## Level Production and Acceptance\n\nProduction-ready Level Production and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.complexity_budget: 100\n\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:world-structure-diagram -->\n### World Structure Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:route-choice-diagram -->\n### Route and Choice Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:pacing-beat-table -->\n### Pacing Beat Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "f09bb1d82f345d72788b73c52deff7055262c1066e1fcfa04c54688cad6a81a0",
+            "byteLength": 3368
+          },
+          {
+            "path": "docs/BALANCE_DESIGN.md",
+            "content": "# Complete docs/BALANCE_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:units_variables -->\n## Units, Variables and Conventions\n\nProduction-ready Units, Variables and Conventions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:entity_parameters -->\n## Entity and Ability Parameters\n\nProduction-ready Entity and Ability Parameters authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nbalance.entity_ids: [\"Player\",\"Boss_A\"]\n\n\n<!-- beegame-section:formulas -->\n## Authoritative Formulas\n\nProduction-ready Authoritative Formulas authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:economy -->\n## Economy Sources, Sinks and Constraints\n\nProduction-ready Economy Sources, Sinks and Constraints authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:progression_curves -->\n## Progression and Capability Curves\n\nProduction-ready Progression and Capability Curves authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:challenge_model -->\n## Challenge and Pressure Model\n\nProduction-ready Challenge and Pressure Model authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:rewards_value -->\n## Rewards and Relative Value\n\nProduction-ready Rewards and Relative Value authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:bounds_exploits -->\n## Bounds, Degenerate Strategies and Exploit Controls\n\nProduction-ready Bounds, Degenerate Strategies and Exploit Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:tuning_validation -->\n## Tuning and Validation Method\n\nProduction-ready Tuning and Validation Method authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:risks_dependencies -->\n## Balance Dependencies and Risks\n\nProduction-ready Balance Dependencies and Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:variable-parameter-table -->\n### Variable and Parameter Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\nbalance.variable_ids: [\"player_hp\",\"boss_hp\"]\n\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "91a4a52562746d5c49ccd273f10ad52b01208df2f45e8e8f2986efb6aa00a27f",
+            "byteLength": 3131
+          },
+          {
+            "path": "docs/TECHNICAL_DESIGN.md",
+            "content": "# Complete docs/TECHNICAL_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:architecture -->\n## System Architecture and Boundaries\n\nProduction-ready System Architecture and Boundaries authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:runtime_state -->\n## Runtime State and Lifecycle\n\nProduction-ready Runtime State and Lifecycle authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:data_content -->\n## Data and Content Contracts\n\nProduction-ready Data and Content Contracts authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.content_kinds: [\"model\",\"texture\",\"audio\"]\n\n\n<!-- beegame-section:save_load -->\n## Persistence, Save and Migration\n\nProduction-ready Persistence, Save and Migration authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:input_interaction -->\n## Input and Interaction Boundary\n\nProduction-ready Input and Interaction Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:performance -->\n## Performance and Capacity Budgets\n\nProduction-ready Performance and Capacity Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.target_fps: 72\n\n\n<!-- beegame-section:online_boundary -->\n## Online, Networking and Service Applicability\n\nProduction-ready Online, Networking and Service Applicability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:security_privacy -->\n## Security, Privacy and Data Safety\n\nProduction-ready Security, Privacy and Data Safety authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:diagnostics -->\n## Diagnostics, Analytics and Operability\n\nProduction-ready Diagnostics, Analytics and Operability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:build_release -->\n## Build, Configuration and Release\n\nProduction-ready Build, Configuration and Release authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:testing -->\n## Technical Verification Strategy\n\nProduction-ready Technical Verification Strategy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:risks -->\n## Technical Risks and Dependencies\n\nProduction-ready Technical Risks and Dependencies authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:architecture-diagram -->\n### Architecture Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:data-flow-diagram -->\n### Data Flow Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:runtime-lifecycle-diagram -->\n### Runtime Lifecycle Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:save-recovery-table -->\n### Save and Recovery Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "d851f68b8b48ab418200190fa65667a07092c9902731c5bd47c656f4a57f739c",
+            "byteLength": 3983
+          },
+          {
+            "path": "docs/ART_DIRECTION.md",
+            "content": "# Complete docs/ART_DIRECTION.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:visual_pillars -->\n## Visual Pillars and References\n\nProduction-ready Visual Pillars and References authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nart.style_constraints: [\"low_poly\",\"readable_silhouette\"]\n\n\n<!-- beegame-section:composition_readability -->\n## Composition and Gameplay Readability\n\nProduction-ready Composition and Gameplay Readability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:character_style -->\n## Characters and Entities\n\nProduction-ready Characters and Entities authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:environment_style -->\n## World, Environment and Props\n\nProduction-ready World, Environment and Props authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:color_lighting -->\n## Color, Lighting and Material Rules\n\nProduction-ready Color, Lighting and Material Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:animation -->\n## Animation Language\n\nProduction-ready Animation Language authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:vfx -->\n## Visual Effects and Feedback\n\nProduction-ready Visual Effects and Feedback authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:camera_presentation -->\n## Camera and Presentation\n\nProduction-ready Camera and Presentation authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:asset_specifications -->\n## Art Asset Specifications\n\nProduction-ready Art Asset Specifications authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pipeline_risks -->\n## Art Pipeline Risks\n\nProduction-ready Art Pipeline Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:visual-language-board -->\n### Visual Language Board\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:animation-vfx-state-table -->\n### Animation and VFX State Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "fd4fa0f8945d17e9e41ce15f65112a7743f34a250bbc28a2c9197f80c14cd05e",
+            "byteLength": 3128
+          },
+          {
+            "path": "docs/UI_UX_SPEC.md",
+            "content": "# Complete docs/UI_UX_SPEC.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:experience_architecture -->\n## Experience and Information Architecture\n\nProduction-ready Experience and Information Architecture authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:player_journeys -->\n## Player Journeys and Task Flows\n\nProduction-ready Player Journeys and Task Flows authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:screen_inventory -->\n## Screen and Interface State Inventory\n\nProduction-ready Screen and Interface State Inventory authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:hud -->\n## HUD and In-Game Information\n\nProduction-ready HUD and In-Game Information authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nui.displayed_resources: [\"hp\",\"energy\"]\n\n\n<!-- beegame-section:input -->\n## Input, Focus and Interaction\n\nProduction-ready Input, Focus and Interaction authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nNavigation note added.\n\nui.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:feedback_errors -->\n## Feedback, Errors and Recovery\n\nProduction-ready Feedback, Errors and Recovery authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:onboarding -->\n## Onboarding and Learnability\n\nProduction-ready Onboarding and Learnability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:accessibility -->\n## Accessibility Requirements\n\nProduction-ready Accessibility Requirements authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:localization -->\n## Localization and Culturalization\n\nProduction-ready Localization and Culturalization authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:prototype_acceptance -->\n## Prototype, Usability and Acceptance\n\nProduction-ready Prototype, Usability and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:information-architecture-diagram -->\n### Information Architecture Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:player-flow-diagram -->\n### Player Flow Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:screen-state-table -->\n### Screen and State Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:wireframe-board -->\n### Wireframe Board\n\n<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"10\" height=\"10\"/></svg>\n\n<!-- beegame-material:focus-accessibility-matrix -->\n### Focus and Accessibility Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "ebb7970d6aefc30273518c1fe5d2983dfeb4579294acf676b8761325368132ce",
+            "byteLength": 3637
+          },
+          {
+            "path": "docs/AUDIO_DESIGN.md",
+            "content": "# Complete docs/AUDIO_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:audio_pillars -->\n## Audio Pillars and Experience\n\nProduction-ready Audio Pillars and Experience authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:event_taxonomy -->\n## Event and Cue Taxonomy\n\nProduction-ready Event and Cue Taxonomy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:sfx -->\n## Gameplay and Environment Sound\n\nProduction-ready Gameplay and Environment Sound authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:music -->\n## Music System and States\n\nProduction-ready Music System and States authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ambience -->\n## Ambience and World Audio\n\nProduction-ready Ambience and World Audio authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ui_feedback -->\n## UI, Feedback and Accessibility Cues\n\nProduction-ready UI, Feedback and Accessibility Cues authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:voice -->\n## Voice and Dialogue Applicability\n\nProduction-ready Voice and Dialogue Applicability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:mix -->\n## Mix, Buses and Dynamic Rules\n\nProduction-ready Mix, Buses and Dynamic Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:implementation -->\n## Audio Data and Technical Budgets\n\nProduction-ready Audio Data and Technical Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:production -->\n## Audio Production and Acceptance\n\nProduction-ready Audio Production and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:event-cue-matrix -->\n### Event to Cue Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\naudio.event_ids: [\"boss_spawn\",\"boss_defeated\"]\n\n\n<!-- beegame-material:music-state-diagram -->\n### Music State Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:bus-ducking-diagram -->\n### Bus and Ducking Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:loudness-delivery-table -->\n### Loudness and Delivery Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "44d86ded656f178bc1b991d76149ba53baed78b9e60d5ff9f706c4d86468da12",
+            "byteLength": 3306
+          },
+          {
+            "path": "docs/ASSET_PLAN.md",
+            "content": "# Complete docs/ASSET_PLAN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:inventory -->\n## Asset and Content Inventory\n\nProduction-ready Asset and Content Inventory authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ownership -->\n## Ownership and Responsibility\n\nProduction-ready Ownership and Responsibility authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:dependencies -->\n## Dependencies and Integration Order\n\nProduction-ready Dependencies and Integration Order authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:source_license -->\n## Source, Originality and Licensing\n\nProduction-ready Source, Originality and Licensing authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:formats_budgets -->\n## Formats, Variants and Budgets\n\nProduction-ready Formats, Variants and Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pipeline -->\n## Production Pipeline and Naming\n\nProduction-ready Production Pipeline and Naming authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:milestones -->\n## Milestones, Capacity and Schedule\n\nProduction-ready Milestones, Capacity and Schedule authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:validation -->\n## Validation and Quality Status\n\nProduction-ready Validation and Quality Status authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:placeholder_replacement -->\n## Placeholder and Replacement Strategy\n\nProduction-ready Placeholder and Replacement Strategy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:delivery_risks -->\n## Delivery, Release and Risks\n\nProduction-ready Delivery, Release and Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:asset-inventory-table -->\n### Asset Inventory Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\nasset.inventory_ids: [\"player_model\",\"boss_model\"]\n\n\nasset.covered_level_requirements: [\"player_model\",\"boss_model\"]\n\n\nasset.formats: [\"glb\",\"png\",\"wav\"]\n\n\n<!-- beegame-material:responsibility-matrix -->\n### Responsibility Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:dependency-integration-diagram -->\n### Dependency and Integration Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\nasset.art_constraint_refs: [\"low_poly\",\"readable_silhouette\"]\n\n\n<!-- beegame-material:license-register -->\n### License Register\n\n| Evidence | Status |\n| --- | --- |\n| fixture | unverified |\n\n<!-- beegame-material:milestone-maturity-table -->\n### Milestone and Maturity Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "32fea82b02a792147e96e40ececbbb592821de3cf5b7472de11af7092b6fd3fd",
+            "byteLength": 3741
+          }
+        ],
+        "issues": [
+          {
+            "issue": {
+              "id": "AUD-B16956C5BA7BB0558029D731",
+              "severity": "HIGH",
+              "expected": "navigation feedback",
+              "actual": "missing",
+              "type": "semantic",
+              "source": {
+                "documentPath": "docs/UI_UX_SPEC.md",
+                "sectionId": "input",
+                "heading": "Input, Focus and Interaction",
+                "startLine": 32,
+                "endLine": 40,
+                "digest": "7d7ba7bd76cb4e9ef664435ff2e80cf57dde4010d04729125938784915a2137d"
+              },
+              "remediation": {
+                "kind": "patch",
+                "scope": "section",
+                "documentPath": "docs/UI_UX_SPEC.md",
+                "sectionIds": [
+                  "input"
+                ]
+              }
+            },
+            "facts": [
+              {
+                "key": "ui.supported_actions",
+                "value": [
+                  "move",
+                  "attack",
+                  "dash"
+                ],
+                "source": {
+                  "documentPath": "docs/UI_UX_SPEC.md",
+                  "sectionId": "input",
+                  "heading": "Input, Focus and Interaction",
+                  "startLine": 32,
+                  "endLine": 40,
+                  "digest": "7d7ba7bd76cb4e9ef664435ff2e80cf57dde4010d04729125938784915a2137d"
+                },
+                "evidence": {
+                  "documentPath": "docs/UI_UX_SPEC.md",
+                  "sectionId": "input",
+                  "startLine": 38,
+                  "endLine": 38,
+                  "digest": "2be4d09784a7f73c4e96b513d8aafc4797b2f1a4023f9317e52bcb1ba74729c8"
+                }
+              }
+            ],
+            "sections": [
+              {
+                "path": "docs/UI_UX_SPEC.md",
+                "sectionId": "input",
+                "content": "## Input, Focus and Interaction\n\nProduction-ready Input, Focus and Interaction authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nNavigation note added.\n\nui.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n",
+                "digest": "7d7ba7bd76cb4e9ef664435ff2e80cf57dde4010d04729125938784915a2137d"
+              }
+            ]
+          }
+        ],
+        "recheck": {
+          "kind": "targeted",
+          "round": 1,
+          "candidateResultDigest": "a75ef08809b4dc6ae0338c56f5de5c2a89cb564632249dcc8280cd9ed20da56f",
+          "policyDigest": "0710343fd365c169fccc4fef54115569ed9c5a826a9d7beb6ce67eb262592cdf",
+          "decision": "retry_same_round",
+          "issueVerdicts": [
+            {
+              "issueId": "AUD-B16956C5BA7BB0558029D731",
+              "kind": "semantic",
+              "status": "FAIL",
+              "diagnostic": {
+                "unmetExpected": "navigation feedback",
+                "observedActual": "navigation feedback is still missing",
+                "evidence": [
+                  {
+                    "documentPath": "docs/UI_UX_SPEC.md",
+                    "sectionId": "input",
+                    "heading": "Input, Focus and Interaction",
+                    "startLine": 32,
+                    "endLine": 40,
+                    "digest": "7d7ba7bd76cb4e9ef664435ff2e80cf57dde4010d04729125938784915a2137d"
+                  }
+                ],
+                "dependencySections": [
+                  {
+                    "documentPath": "docs/UI_UX_SPEC.md",
+                    "sectionId": "input",
+                    "heading": "Input, Focus and Interaction",
+                    "startLine": 32,
+                    "endLine": 40,
+                    "digest": "7d7ba7bd76cb4e9ef664435ff2e80cf57dde4010d04729125938784915a2137d"
+                  }
+                ],
+                "failureReasonCode": "expected_not_met",
+                "scopeAssessment": "repairable_in_scope"
+              }
+            },
+            {
+              "issueId": "AUD-EF112621C8972E994CB43240",
+              "kind": "semantic",
+              "status": "PASS"
+            }
+          ],
+          "documentVerdicts": [
+            {
+              "documentPath": "docs/GDD.md",
+              "documentDigest": "7bf5c8ffd70a31d5745a8591dd407c0d6e7c2142d2e34632d4723286745f4ddd",
+              "issueIds": [
+                "AUD-EF112621C8972E994CB43240"
+              ],
+              "retryIssueIds": [],
+              "status": "PASS"
+            },
+            {
+              "documentPath": "docs/UI_UX_SPEC.md",
+              "documentDigest": "ebb7970d6aefc30273518c1fe5d2983dfeb4579294acf676b8761325368132ce",
+              "issueIds": [
+                "AUD-B16956C5BA7BB0558029D731"
+              ],
+              "retryIssueIds": [
+                "AUD-B16956C5BA7BB0558029D731"
+              ],
+              "status": "FAIL"
+            }
+          ]
+        }
+      },
+      "previousRecheckBinding": {
+        "ownerId": "owner",
+        "projectId": "project",
+        "resultId": "cfeef7e4eb9fdfd8a9639142a2ca353d1b61b9bb41f8f4b9c688ce71b0c5aca1",
+        "resultDigest": "1bd5b2abe704d7f05d41d1368d3c098390174e95303195e91137d53709dafdda"
+      }
+    },
+    "sectionText": "## Input, Focus and Interaction\n\nProduction-ready Input, Focus and Interaction authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nNavigation feedback implemented.\n\nui.supported_actions: [\"move\",\"attack\",\"dash\"]"
+  },
+  "nextRound": {
+    "input": {
+      "kind": "next_round",
+      "sourceResult": {
+        "protocolVersion": 1,
+        "producer": "foundation-reviewer",
+        "resultId": "ed7a3055f33825fea32b66bad6e8a9c6f11f15178621c25582c787bcf9cd0509",
+        "inputDigest": "6f5912f6211372f32b81a86bf222a3f7c0dd039ee271f5735417d5748d216af2",
+        "ownerId": "owner",
+        "projectId": "project",
+        "requestId": "public-round-one-recheck",
+        "subject": {
+          "kind": "candidate",
+          "candidateId": "candidate-one",
+          "candidateResultId": "50fa765d30b75bc2db83272f9ae250ba85812287202220ebdfa47e40d675883a",
+          "baseDocumentSetDigest": "cfe1fbf7bd467bcd22abf9a6e68a990dc32a0e3a80841c6c20e894e5dd371fdb",
+          "sourceReviewResultId": "722da1681dc2808b06b51b8db6a9e6cc7cc34dc36913335abb9fbe6f31266bb2",
+          "sourceReviewResultDigest": "5d613d2409590666a8a2ae3b77f2ff706c0822b3603ba7ec29252d2ca2ffcd11"
+        },
+        "kind": "issues_found",
+        "documentSetDigest": "30ec3a7f1244d449a91e163d6d3586d32e357b413385e51f25bb8b6550f89357",
+        "policyDigest": "dc093f92aac81ef7f2e23e7ea8beb70675c4c7e1a0f202425a072904e2cb35e8",
+        "issueRegistryDigest": "995be691191fd21e57cfe3bb4bd99892f019b7a2e31fd20689c825983f671dba",
+        "evidenceDigest": "2b8a038c5a5f2dbd2fadacfb5a340a493bdde99b1d33f8b0058442955b62c376",
+        "documents": [
+          {
+            "path": "docs/GDD.md",
+            "content": "# Complete docs/GDD.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:vision -->\n## Vision and Product Promise\n\nProduction-ready Vision and Product Promise authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.players.max: 4\n\n\ngame.platform: quest\n\n\n<!-- beegame-section:experience_pillars -->\n## Player Experience and Design Pillars\n\nProduction-ready Player Experience and Design Pillars authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:core_loop -->\n## Core and Session Loops\n\nProduction-ready Core and Session Loops authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:player_actions -->\n## Player Actions and Controls\n\nProduction-ready Player Actions and Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.mechanics: [\"move\",\"attack\",\"dash\",\"parry\"]\n\n\n<!-- beegame-section:rules_systems -->\n## Gameplay Rules and Systems\n\nProduction-ready Gameplay Rules and Systems authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.resources: [\"hp\",\"energy\"]\n\n\n<!-- beegame-section:states_flow -->\n## Game States and Flow\n\nProduction-ready Game States and Flow authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.states: [\"menu\",\"playing\",\"won\",\"lost\"]\n\n\ngame.win_conditions: [\"boss_defeated\"]\n\n\ngame.loss_conditions: [\"player_defeated\"]\n\n\n<!-- beegame-section:progression -->\n## Progression, Rewards and Economy Boundary\n\nProduction-ready Progression, Rewards and Economy Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:content_narrative -->\n## Content and Narrative Framework\n\nProduction-ready Content and Narrative Framework authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:challenge_recovery -->\n## Challenge, Failure and Recovery\n\nProduction-ready Challenge, Failure and Recovery authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:accessibility_localization -->\n## Accessibility and Localization Intent\n\nProduction-ready Accessibility and Localization Intent authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:metrics -->\n## Success Metrics and Analytics Intent\n\nProduction-ready Success Metrics and Analytics Intent authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:scope_risks -->\n## Scope, Dependencies and Open Decisions\n\nProduction-ready Scope, Dependencies and Open Decisions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:core-loop-diagram -->\n### Core Loop Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:game-state-flow -->\n### Game State Flow\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "7310e48a4ddc8c5eb6e4d207a6e66e9f29c70dcb2a21ec013a1edd2531d2bf35",
+            "byteLength": 3817
+          },
+          {
+            "path": "docs/LEVEL_SCENE_DESIGN.md",
+            "content": "# Complete docs/LEVEL_SCENE_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:world_structure -->\n## World and Scene Structure\n\nProduction-ready World and Scene Structure authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:level_sequence -->\n## Level and Content Sequence\n\nProduction-ready Level and Content Sequence authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:objectives_routes -->\n## Objectives, Routes and Player Choices\n\nProduction-ready Objectives, Routes and Player Choices authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pacing_beats -->\n## Pacing and Gameplay Beats\n\nProduction-ready Pacing and Gameplay Beats authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:encounters -->\n## Encounters and Challenge Placement\n\nProduction-ready Encounters and Challenge Placement authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.required_entities: [\"Player\",\"Boss_A\"]\n\n\n<!-- beegame-section:spawn_checkpoint -->\n## Spawn, Checkpoint and Recovery Rules\n\nProduction-ready Spawn, Checkpoint and Recovery Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:camera_readability -->\n## Camera, Scale and Readability\n\nProduction-ready Camera, Scale and Readability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:scene_states -->\n## Scene States and Transitions\n\nProduction-ready Scene States and Transitions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:content_matrix -->\n## Content Matrix and Replay Structure\n\nProduction-ready Content Matrix and Replay Structure authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.required_assets: [\"player_model\",\"boss_model\"]\n\n\n<!-- beegame-section:production_acceptance -->\n## Level Production and Acceptance\n\nProduction-ready Level Production and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nlevel.complexity_budget: 100\n\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:world-structure-diagram -->\n### World Structure Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:route-choice-diagram -->\n### Route and Choice Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:pacing-beat-table -->\n### Pacing Beat Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "f09bb1d82f345d72788b73c52deff7055262c1066e1fcfa04c54688cad6a81a0",
+            "byteLength": 3368
+          },
+          {
+            "path": "docs/BALANCE_DESIGN.md",
+            "content": "# Complete docs/BALANCE_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:units_variables -->\n## Units, Variables and Conventions\n\nProduction-ready Units, Variables and Conventions authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:entity_parameters -->\n## Entity and Ability Parameters\n\nProduction-ready Entity and Ability Parameters authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nbalance.entity_ids: [\"Player\",\"Boss_A\"]\n\n\n<!-- beegame-section:formulas -->\n## Authoritative Formulas\n\nProduction-ready Authoritative Formulas authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:economy -->\n## Economy Sources, Sinks and Constraints\n\nProduction-ready Economy Sources, Sinks and Constraints authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:progression_curves -->\n## Progression and Capability Curves\n\nProduction-ready Progression and Capability Curves authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:challenge_model -->\n## Challenge and Pressure Model\n\nProduction-ready Challenge and Pressure Model authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:rewards_value -->\n## Rewards and Relative Value\n\nProduction-ready Rewards and Relative Value authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:bounds_exploits -->\n## Bounds, Degenerate Strategies and Exploit Controls\n\nProduction-ready Bounds, Degenerate Strategies and Exploit Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:tuning_validation -->\n## Tuning and Validation Method\n\nProduction-ready Tuning and Validation Method authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:risks_dependencies -->\n## Balance Dependencies and Risks\n\nProduction-ready Balance Dependencies and Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:variable-parameter-table -->\n### Variable and Parameter Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\nbalance.variable_ids: [\"player_hp\",\"boss_hp\"]\n\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "91a4a52562746d5c49ccd273f10ad52b01208df2f45e8e8f2986efb6aa00a27f",
+            "byteLength": 3131
+          },
+          {
+            "path": "docs/TECHNICAL_DESIGN.md",
+            "content": "# Complete docs/TECHNICAL_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:architecture -->\n## System Architecture and Boundaries\n\nProduction-ready System Architecture and Boundaries authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:runtime_state -->\n## Runtime State and Lifecycle\n\nProduction-ready Runtime State and Lifecycle authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:data_content -->\n## Data and Content Contracts\n\nProduction-ready Data and Content Contracts authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.content_kinds: [\"model\",\"texture\",\"audio\"]\n\n\n<!-- beegame-section:save_load -->\n## Persistence, Save and Migration\n\nProduction-ready Persistence, Save and Migration authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:input_interaction -->\n## Input and Interaction Boundary\n\nProduction-ready Input and Interaction Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:performance -->\n## Performance and Capacity Budgets\n\nProduction-ready Performance and Capacity Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.target_fps: 72\n\n\n<!-- beegame-section:online_boundary -->\n## Online, Networking and Service Applicability\n\nProduction-ready Online, Networking and Service Applicability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:security_privacy -->\n## Security, Privacy and Data Safety\n\nProduction-ready Security, Privacy and Data Safety authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:diagnostics -->\n## Diagnostics, Analytics and Operability\n\nProduction-ready Diagnostics, Analytics and Operability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:build_release -->\n## Build, Configuration and Release\n\nProduction-ready Build, Configuration and Release authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:testing -->\n## Technical Verification Strategy\n\nProduction-ready Technical Verification Strategy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:risks -->\n## Technical Risks and Dependencies\n\nProduction-ready Technical Risks and Dependencies authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:architecture-diagram -->\n### Architecture Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:data-flow-diagram -->\n### Data Flow Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:runtime-lifecycle-diagram -->\n### Runtime Lifecycle Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:save-recovery-table -->\n### Save and Recovery Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "d851f68b8b48ab418200190fa65667a07092c9902731c5bd47c656f4a57f739c",
+            "byteLength": 3983
+          },
+          {
+            "path": "docs/ART_DIRECTION.md",
+            "content": "# Complete docs/ART_DIRECTION.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:visual_pillars -->\n## Visual Pillars and References\n\nProduction-ready Visual Pillars and References authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nart.style_constraints: [\"low_poly\",\"readable_silhouette\"]\n\n\n<!-- beegame-section:composition_readability -->\n## Composition and Gameplay Readability\n\nProduction-ready Composition and Gameplay Readability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:character_style -->\n## Characters and Entities\n\nProduction-ready Characters and Entities authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:environment_style -->\n## World, Environment and Props\n\nProduction-ready World, Environment and Props authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:color_lighting -->\n## Color, Lighting and Material Rules\n\nProduction-ready Color, Lighting and Material Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:animation -->\n## Animation Language\n\nProduction-ready Animation Language authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:vfx -->\n## Visual Effects and Feedback\n\nProduction-ready Visual Effects and Feedback authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:camera_presentation -->\n## Camera and Presentation\n\nProduction-ready Camera and Presentation authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:asset_specifications -->\n## Art Asset Specifications\n\nProduction-ready Art Asset Specifications authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pipeline_risks -->\n## Art Pipeline Risks\n\nProduction-ready Art Pipeline Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:visual-language-board -->\n### Visual Language Board\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:animation-vfx-state-table -->\n### Animation and VFX State Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "fd4fa0f8945d17e9e41ce15f65112a7743f34a250bbc28a2c9197f80c14cd05e",
+            "byteLength": 3128
+          },
+          {
+            "path": "docs/UI_UX_SPEC.md",
+            "content": "# Complete docs/UI_UX_SPEC.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:experience_architecture -->\n## Experience and Information Architecture\n\nProduction-ready Experience and Information Architecture authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:player_journeys -->\n## Player Journeys and Task Flows\n\nProduction-ready Player Journeys and Task Flows authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:screen_inventory -->\n## Screen and Interface State Inventory\n\nProduction-ready Screen and Interface State Inventory authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:hud -->\n## HUD and In-Game Information\n\nProduction-ready HUD and In-Game Information authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nui.displayed_resources: [\"hp\",\"energy\"]\n\n\n<!-- beegame-section:input -->\n## Input, Focus and Interaction\n\nProduction-ready Input, Focus and Interaction authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\nui.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n\n<!-- beegame-section:feedback_errors -->\n## Feedback, Errors and Recovery\n\nProduction-ready Feedback, Errors and Recovery authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:onboarding -->\n## Onboarding and Learnability\n\nProduction-ready Onboarding and Learnability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:accessibility -->\n## Accessibility Requirements\n\nProduction-ready Accessibility Requirements authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:localization -->\n## Localization and Culturalization\n\nProduction-ready Localization and Culturalization authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:prototype_acceptance -->\n## Prototype, Usability and Acceptance\n\nProduction-ready Prototype, Usability and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:information-architecture-diagram -->\n### Information Architecture Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:player-flow-diagram -->\n### Player Flow Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:screen-state-table -->\n### Screen and State Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:wireframe-board -->\n### Wireframe Board\n\n<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"10\" height=\"10\"/></svg>\n\n<!-- beegame-material:focus-accessibility-matrix -->\n### Focus and Accessibility Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "8679ae5ccc616eb3de3fa68ff68843d02c8837d5484a86ebdf7cef4fbab7f13f",
+            "byteLength": 3613
+          },
+          {
+            "path": "docs/AUDIO_DESIGN.md",
+            "content": "# Complete docs/AUDIO_DESIGN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:audio_pillars -->\n## Audio Pillars and Experience\n\nProduction-ready Audio Pillars and Experience authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:event_taxonomy -->\n## Event and Cue Taxonomy\n\nProduction-ready Event and Cue Taxonomy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:sfx -->\n## Gameplay and Environment Sound\n\nProduction-ready Gameplay and Environment Sound authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:music -->\n## Music System and States\n\nProduction-ready Music System and States authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ambience -->\n## Ambience and World Audio\n\nProduction-ready Ambience and World Audio authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ui_feedback -->\n## UI, Feedback and Accessibility Cues\n\nProduction-ready UI, Feedback and Accessibility Cues authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:voice -->\n## Voice and Dialogue Applicability\n\nProduction-ready Voice and Dialogue Applicability authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:mix -->\n## Mix, Buses and Dynamic Rules\n\nProduction-ready Mix, Buses and Dynamic Rules authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:implementation -->\n## Audio Data and Technical Budgets\n\nProduction-ready Audio Data and Technical Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:production -->\n## Audio Production and Acceptance\n\nProduction-ready Audio Production and Acceptance authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:event-cue-matrix -->\n### Event to Cue Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\naudio.event_ids: [\"boss_spawn\",\"boss_defeated\"]\n\n\n<!-- beegame-material:music-state-diagram -->\n### Music State Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:bus-ducking-diagram -->\n### Bus and Ducking Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\n<!-- beegame-material:loudness-delivery-table -->\n### Loudness and Delivery Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "44d86ded656f178bc1b991d76149ba53baed78b9e60d5ff9f706c4d86468da12",
+            "byteLength": 3306
+          },
+          {
+            "path": "docs/ASSET_PLAN.md",
+            "content": "# Complete docs/ASSET_PLAN.md\n\n<!-- beegame-executive-summary -->\n## Executive Summary\n\nThis complete production document establishes actionable authority for the implementation team.\n\n<!-- beegame-section:inventory -->\n## Asset and Content Inventory\n\nProduction-ready Asset and Content Inventory authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:ownership -->\n## Ownership and Responsibility\n\nProduction-ready Ownership and Responsibility authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:dependencies -->\n## Dependencies and Integration Order\n\nProduction-ready Dependencies and Integration Order authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:source_license -->\n## Source, Originality and Licensing\n\nProduction-ready Source, Originality and Licensing authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:formats_budgets -->\n## Formats, Variants and Budgets\n\nProduction-ready Formats, Variants and Budgets authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:pipeline -->\n## Production Pipeline and Naming\n\nProduction-ready Production Pipeline and Naming authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:milestones -->\n## Milestones, Capacity and Schedule\n\nProduction-ready Milestones, Capacity and Schedule authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:validation -->\n## Validation and Quality Status\n\nProduction-ready Validation and Quality Status authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:placeholder_replacement -->\n## Placeholder and Replacement Strategy\n\nProduction-ready Placeholder and Replacement Strategy authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-section:delivery_risks -->\n## Delivery, Release and Risks\n\nProduction-ready Delivery, Release and Risks authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\n<!-- beegame-production-materials -->\n## Production Materials\n\n<!-- beegame-material:asset-inventory-table -->\n### Asset Inventory Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\nasset.inventory_ids: [\"player_model\",\"boss_model\"]\n\n\nasset.covered_level_requirements: [\"player_model\",\"boss_model\"]\n\n\nasset.formats: [\"glb\",\"png\",\"wav\"]\n\n\n<!-- beegame-material:responsibility-matrix -->\n### Responsibility Matrix\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-material:dependency-integration-diagram -->\n### Dependency and Integration Diagram\n\n```mermaid\ngraph TD\nA --> B\n```\n\nasset.art_constraint_refs: [\"low_poly\",\"readable_silhouette\"]\n\n\n<!-- beegame-material:license-register -->\n### License Register\n\n| Evidence | Status |\n| --- | --- |\n| fixture | unverified |\n\n<!-- beegame-material:milestone-maturity-table -->\n### Milestone and Maturity Table\n\n| Field | Value |\n| --- | --- |\n| authority | complete |\n\n<!-- beegame-audit-appendix -->\n## Audit Appendix\n\n### Acceptance Criteria\n\n- The full production authority is actionable and mechanically verifiable.\n",
+            "digest": "32fea82b02a792147e96e40ececbbb592821de3cf5b7472de11af7092b6fd3fd",
+            "byteLength": 3741
+          }
+        ],
+        "issues": [
+          {
+            "issue": {
+              "id": "AUD-D1FCF2A4B6F1930545129242",
+              "severity": "HIGH",
+              "expected": "technical.supported_actions and game.mechanics must match",
+              "actual": "[\"move\",\"attack\",\"dash\"] != [\"move\",\"attack\",\"dash\",\"parry\"]",
+              "type": "contract",
+              "source": {
+                "documentPath": "docs/TECHNICAL_DESIGN.md",
+                "sectionId": "input_interaction",
+                "heading": "Input and Interaction Boundary",
+                "startLine": 32,
+                "endLine": 38,
+                "digest": "c603a0d794d10d3ab929c353cd5a8262e8e09651ce60a80e6e5b2894902e4df3"
+              },
+              "target": {
+                "documentPath": "docs/GDD.md",
+                "sectionId": "player_actions",
+                "heading": "Player Actions and Controls",
+                "startLine": 30,
+                "endLine": 36,
+                "digest": "354be734160cc1d2536793e23176740943c09ba94afc29f3497f671f88e6cde5"
+              },
+              "remediation": {
+                "kind": "patch",
+                "scope": "section",
+                "documentPath": "docs/TECHNICAL_DESIGN.md",
+                "sectionIds": [
+                  "input_interaction"
+                ]
+              }
+            },
+            "facts": [
+              {
+                "key": "game.mechanics",
+                "value": [
+                  "move",
+                  "attack",
+                  "dash",
+                  "parry"
+                ],
+                "source": {
+                  "documentPath": "docs/GDD.md",
+                  "sectionId": "player_actions",
+                  "heading": "Player Actions and Controls",
+                  "startLine": 30,
+                  "endLine": 36,
+                  "digest": "354be734160cc1d2536793e23176740943c09ba94afc29f3497f671f88e6cde5"
+                },
+                "evidence": {
+                  "documentPath": "docs/GDD.md",
+                  "sectionId": "player_actions",
+                  "startLine": 34,
+                  "endLine": 34,
+                  "digest": "25a3ade6cef7de79a086db9ef1cdc75396e140389c3ed4b6417e99af2d94d898"
+                }
+              },
+              {
+                "key": "technical.supported_actions",
+                "value": [
+                  "move",
+                  "attack",
+                  "dash"
+                ],
+                "source": {
+                  "documentPath": "docs/TECHNICAL_DESIGN.md",
+                  "sectionId": "input_interaction",
+                  "heading": "Input and Interaction Boundary",
+                  "startLine": 32,
+                  "endLine": 38,
+                  "digest": "c603a0d794d10d3ab929c353cd5a8262e8e09651ce60a80e6e5b2894902e4df3"
+                },
+                "evidence": {
+                  "documentPath": "docs/TECHNICAL_DESIGN.md",
+                  "sectionId": "input_interaction",
+                  "startLine": 36,
+                  "endLine": 36,
+                  "digest": "48052c6033f26fda6d0b475f485711973ea6155f59cb080058ef1e57861d9635"
+                }
+              }
+            ],
+            "sections": [
+              {
+                "path": "docs/TECHNICAL_DESIGN.md",
+                "sectionId": "input_interaction",
+                "content": "## Input and Interaction Boundary\n\nProduction-ready Input and Interaction Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.supported_actions: [\"move\",\"attack\",\"dash\"]\n\n",
+                "digest": "c603a0d794d10d3ab929c353cd5a8262e8e09651ce60a80e6e5b2894902e4df3"
+              },
+              {
+                "path": "docs/GDD.md",
+                "sectionId": "player_actions",
+                "content": "## Player Actions and Controls\n\nProduction-ready Player Actions and Controls authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ngame.mechanics: [\"move\",\"attack\",\"dash\",\"parry\"]\n\n",
+                "digest": "354be734160cc1d2536793e23176740943c09ba94afc29f3497f671f88e6cde5"
+              }
+            ]
+          }
+        ],
+        "recheck": {
+          "kind": "targeted",
+          "round": 1,
+          "candidateResultDigest": "fc8cd3a84b1565bd26f04c33daf638f5344efdde98f2ff9d2563a4626a01032f",
+          "policyDigest": "0710343fd365c169fccc4fef54115569ed9c5a826a9d7beb6ce67eb262592cdf",
+          "decision": "round_complete",
+          "issueVerdicts": [
+            {
+              "issueId": "AUD-EF112621C8972E994CB43240",
+              "kind": "semantic",
+              "status": "PASS"
+            }
+          ],
+          "documentVerdicts": [
+            {
+              "documentPath": "docs/GDD.md",
+              "documentDigest": "7310e48a4ddc8c5eb6e4d207a6e66e9f29c70dcb2a21ec013a1edd2531d2bf35",
+              "issueIds": [
+                "AUD-EF112621C8972E994CB43240"
+              ],
+              "retryIssueIds": [],
+              "status": "PASS"
+            }
+          ]
+        }
+      },
+      "sourceBinding": {
+        "ownerId": "owner",
+        "projectId": "project",
+        "resultId": "ed7a3055f33825fea32b66bad6e8a9c6f11f15178621c25582c787bcf9cd0509",
+        "resultDigest": "3edbe08ab275a5ab90c9d0637b9141e2894807d1d31ae03ab5a03cb5415d04ca"
+      }
+    },
+    "previousCandidateId": "candidate-one",
+    "previousIssueIds": [
+      "AUD-EF112621C8972E994CB43240"
+    ],
+    "sectionText": "## Input and Interaction Boundary\n\nProduction-ready Input and Interaction Boundary authority with explicit implementation direction, ownership, constraints, and verification detail for the full game team.\n\ntechnical.supported_actions: [\"move\",\"attack\",\"dash\",\"parry\"]"
+  }
+}

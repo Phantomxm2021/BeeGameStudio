@@ -27,14 +27,8 @@ import type {
 } from './types'
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
 import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
-import { projectTaskTerminalEvidence } from './task-terminal-evidence'
-import { locateAuthorDispatch, mapAuthorDispatches } from './foundation-authoring-state'
-import { readFoundationAuthoringPause } from './foundation-audit-boundary'
-import {
-  foundationRuntimeTasks,
-  isFoundationRevisionPhase,
-} from './foundation-audit-state'
-import type { FoundationAuditTask, FoundationRevisionTask } from './foundation-audit-state'
+import { assertNoRetiredAuthorRun, assertNoRetiredAuthorHandoff } from './retired-foundation-author'
+import { assertNoRetiredFoundationReviewRun } from './retired-foundation-review'
 
 export type { WorkflowEvent } from './types'
 
@@ -80,23 +74,6 @@ function now(): string {
   return new Date().toISOString()
 }
 
-function foundationNeedsAction(run: DeliveryRun): boolean {
-  return Boolean(
-    run.foundationAuditState && foundationRuntimeTasks(run.foundationAuditState).some(
-      task => task.status === 'needs_action',
-    ),
-  )
-}
-
-function isFoundationRevisionTask(
-  task: FoundationAuditTask,
-): task is FoundationRevisionTask {
-  return (
-    task.kind === 'document-revision' ||
-    task.kind === 'impacted-facts' ||
-    task.kind === 'semantic-recheck'
-  )
-}
 
 function isMissingFile(error: unknown): boolean {
   return (
@@ -280,24 +257,7 @@ function withDispatchUsage(
 ): DeliveryRun {
   const update = (dispatch: DispatchRecord | undefined) =>
     dispatch?.dispatchId === dispatchId ? { ...dispatch, usage } : dispatch
-  const activeTaskIds = run.foundationAuditState
-    ? new Set(foundationRuntimeTasks(run.foundationAuditState).map(task => task.taskId))
-    : new Set<string>()
-  return {
-    ...run,
-    activeDispatch: update(run.activeDispatch),
-    foundationDraftState: mapAuthorDispatches(run.foundationDraftState, update),
-    foundationAuditState: run.foundationAuditState
-      ? {
-          ...run.foundationAuditState,
-          tasks: run.foundationAuditState.tasks.map(task =>
-            activeTaskIds.has(task.taskId) && task.dispatch?.dispatchId === dispatchId
-              ? { ...task, usage, dispatch: update(task.dispatch) }
-              : task,
-          ),
-        }
-      : run.foundationAuditState,
-  }
+  return { ...run, activeDispatch: update(run.activeDispatch) }
 }
 
 function journalUsageHighWater(
@@ -837,18 +797,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         ? { stageSnapshot }
         : {}),
     } as WorkflowEvent
-    const pauseState = readFoundationAuthoringPause(events, run.runId)
-    const pauseChangedEvent =
-      (pauseState === 'reached' &&
-        run.status === 'running' &&
-        (event.type === 'run.resumed' || event.type === 'run.retry_requested'))
-        ? ({
-            ...ordinaryEventBase,
-            eventId: randomUUID(),
-            type: 'foundation.authoring.pause_changed',
-            foundationAuthoringPause: null,
-          } as WorkflowEvent)
-        : undefined
     const stageSnapshotEvent =
       stageSnapshot && event.type === 'tasks.planned'
         ? ({
@@ -860,7 +808,6 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         : undefined
     const pendingEvents: WorkflowEvent[] = [
       ordinaryEvent,
-      ...(pauseChangedEvent ? [pauseChangedEvent] : []),
       ...(stageSnapshotEvent ? [stageSnapshotEvent] : []),
       ...acceptedUnits.map(
         unit =>
@@ -1126,151 +1073,15 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     return runMutation(runId, lease, async () => {
       const run = await loadUnlocked()
       if (!run) return run
-      if (run.foundationAuditState) {
-        const tasks = run.foundationAuditState.tasks
-        const staleTerminalTasks =
-          run.status !== 'running'
-            ? foundationRuntimeTasks(run.foundationAuditState).filter(
-                task => task.status === 'running' && task.dispatch?.status === 'running',
-              )
-            : []
-        if (staleTerminalTasks.length) {
-          const blockedReason =
-            run.blockedReason ??
-            'foundation workflow requires action after recovery'
-          const staleTaskIds = new Set(
-            staleTerminalTasks.map(task => task.taskId),
-          )
-          const nextState = {
-            ...run.foundationAuditState,
-            tasks: tasks.map(task => {
-              if (!staleTaskIds.has(task.taskId) || !task.dispatch)
-                return task
-              const interruptedDispatch = {
-                ...task.dispatch,
-                status: 'interrupted' as const,
-                finishedAt: now(),
-                failureReason: blockedReason,
-              }
-              return projectTaskTerminalEvidence(
-                {
-                  ...task,
-                  status: 'needs_action' as const,
-                  failureReason: blockedReason,
-                  dispatch: interruptedDispatch,
-                },
-                interruptedDispatch,
-              )
-            }),
-          }
-          const recovered = {
-            ...run,
-            status: 'needs_action' as const,
-            thinking: 'idle' as const,
-            blockedReason,
-            foundationAuditState: nextState,
-          }
-          return commitUnlocked(recovered, {
-            runId: recovered.runId,
-            type: 'foundation.recovery.needs_action',
-            phase: recovered.phase,
-            status: recovered.status,
-            revision: recovered.revision,
-            reason: blockedReason,
-          })
-        }
-        const runtimeTaskIds = new Set(foundationRuntimeTasks(run.foundationAuditState).map(task => task.taskId))
-        const runningTasks = tasks.filter(task => runtimeTaskIds.has(task.taskId) && task.status === 'running')
-        if (runningTasks.length > 4)
-          throw new WorkflowStoreError('foundation recovery exceeds the four-worker limit', 'conflict')
-        for (const task of tasks) {
-          if (!runtimeTaskIds.has(task.taskId)) continue
-          const dispatch = task.dispatch
-          if (!dispatch) continue
-          const request = dispatch.request
-          const contract = request?.contract
-          const contractRecord =
-            contract && typeof contract === 'object' ? contract : undefined
-          if (
-            dispatch.taskId !== task.taskId ||
-            dispatch.revision !== task.revision ||
-            (typeof request?.taskId === 'string' && request.taskId !== task.taskId) ||
-            (typeof request?.revision === 'string' && request.revision !== task.revision) ||
-            (contractRecord &&
-              'packetDigest' in contractRecord &&
-              contractRecord.packetDigest !== task.packetDigest) ||
-            (contractRecord &&
-              isFoundationRevisionTask(task) &&
-              (contractRecord.packetDigest !== task.packetDigest ||
-                contractRecord.packetPath !== task.packetPath ||
-                contractRecord.round !== task.round))
-          )
-            throw new WorkflowStoreError('foundation recovery dispatch identity is inconsistent', 'conflict')
-        }
-        const unavailable: typeof tasks = []
-        for (const task of runningTasks) {
-          if (!task.dispatch) continue
-          if (!(await sessionIsOpen(task.dispatch))) unavailable.push(task)
-        }
-        if (unavailable.length) {
-          const nextState = {
-            ...run.foundationAuditState,
-            tasks: tasks.map(task => {
-              if (!unavailable.some(item => item.taskId === task.taskId)) return task
-              const hasPersistedTerminal = Boolean(task.dispatch?.terminalResult)
-              const failureReason = isFoundationRevisionTask(task)
-                ? 'server stopped before the foundation revision terminal was admitted'
-                : 'server stopped before the foundation fact terminal was admitted'
-              const terminal = task.dispatch
-                ? {
-                    ...task.dispatch,
-                    status: hasPersistedTerminal
-                      ? ('completed' as const)
-                      : ('interrupted' as const),
-                    finishedAt: now(),
-                    ...(hasPersistedTerminal ? {} : { failureReason }),
-                  }
-                : undefined
-              const recovered = {
-                ...task,
-                // A terminal envelope is durable evidence for controller
-                // replay. Keep the business task running until admission has
-                // written its immutable receipt under the controller lock.
-                status: hasPersistedTerminal
-                  ? ('running' as const)
-                  : isFoundationRevisionTask(task) || task.attempt < 2
-                    ? ('retryable' as const)
-                    : ('needs_action' as const),
-                dispatch: terminal,
-                ...(hasPersistedTerminal ? {} : { failureReason }),
-              }
-              return terminal ? projectTaskTerminalEvidence(recovered, terminal) : recovered
-            }),
-          }
-          const nextStatus = foundationNeedsAction({ ...run, foundationAuditState: nextState }) ? 'needs_action' as const : 'running' as const
-          const eventType = isFoundationRevisionPhase(run.foundationAuditState.status)
-            ? 'foundation.revision.recovered'
-            : 'foundation.fact.recovered'
-          return commitUnlocked({ ...run, foundationAuditState: nextState, status: nextStatus, blockedReason: nextStatus === 'needs_action' ? run.blockedReason ?? 'foundation workflow requires action after recovery' : undefined, thinking: nextStatus === 'running' ? 'working' : 'idle' }, { runId: run.runId, type: eventType, phase: run.phase, status: nextStatus, revision: run.revision })
-        }
-      }
-      if (!run.activeDispatch || run.activeDispatch.status !== 'running') {
-        if (run.status !== 'running' || !foundationNeedsAction(run)) return run
-        const recovered = {
-          ...run,
-          status: 'needs_action' as const,
-          thinking: 'idle' as const,
-          blockedReason: run.blockedReason ?? 'foundation workflow requires action after recovery',
-        }
-        return commitUnlocked(recovered, {
-          runId: recovered.runId,
-          type: 'foundation.recovery.needs_action',
-          phase: recovered.phase,
-          status: recovered.status,
-          revision: recovered.revision,
-          reason: recovered.blockedReason,
-        })
-      }
+      // The public author module owns execution recovery. This store may
+      // observe its orchestration link, but cannot repair private author state.
+      if (run.authorStage) return run
+      // Public links return above; empty pre-invocation snapshots pass too.
+      // Only records with actual obsolete Author execution evidence are rejected.
+      assertNoRetiredAuthorRun(run)
+      if (!run.authorStage) assertNoRetiredFoundationReviewRun(run)
+      assertNoRetiredAuthorHandoff(await readEvents(), run.runId)
+      if (!run.activeDispatch || run.activeDispatch.status !== 'running') return run
       if (await sessionIsOpen(run.activeDispatch)) return run
       const interrupted = {
         ...run,
@@ -1309,10 +1120,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const usageDispatch =
         run.activeDispatch?.dispatchId === dispatchId
           ? run.activeDispatch
-          : locateAuthorDispatch(run.foundationDraftState, dispatchId)?.record
-          ?? (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(
-              task => task.dispatch?.dispatchId === dispatchId,
-          )?.dispatch : undefined)
+          : undefined
       const acceptsRunningUsage =
         run.status === 'running' && usageDispatch?.status === 'running'
       const acceptsStoppedTailUsage =
@@ -1383,10 +1191,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       const progressDispatch = progress.dispatchId
         ? run.activeDispatch?.dispatchId === progress.dispatchId
           ? run.activeDispatch
-          : locateAuthorDispatch(run.foundationDraftState, progress.dispatchId)?.record
-            ?? (run.foundationAuditState ? foundationRuntimeTasks(run.foundationAuditState).find(
-              task => task.dispatch?.dispatchId === progress.dispatchId,
-            )?.dispatch : undefined)
+          : undefined
         : undefined
       if (
         progress.dispatchId &&

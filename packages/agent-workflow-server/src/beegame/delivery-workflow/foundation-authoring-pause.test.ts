@@ -2,18 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { commitAuthoredFoundationDocument } from '../authored-document-receipt'
-import {
-  canonicalFoundationAuthorityProjectionBytes,
-  foundationProjectionRelativePath,
-  projectFoundationAuthority,
-} from '../foundation-authority-projection'
+import { seedHistoricalAuthoredDocument } from '../../__tests__/historical-authored-document-fixture'
 import { createDeliveryWorkflowController } from './controller'
-import {
-  pauseFoundationAuthoringHandoff,
-  readFoundationAuthoringPause,
-} from './foundation-audit-boundary'
-import { foundationAuthoringSources } from './foundation-authoring-contract'
 import { getGameDocumentContract } from './game-document-contracts'
 import { resumeRun } from './recovery'
 import { createRunStore } from './run-store'
@@ -29,35 +19,6 @@ import {
   renderTestCompleteGameDocument,
 } from '../../__tests__/complete-game-document-fixture'
 import { createTestDeliveryRun, withTestDocumentMetadata } from '../../__tests__/delivery-workflow-test-helpers'
-
-async function writeCommittedProjection(
-  workspacePath: string,
-  dispatchId: string,
-  targetPath: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-): Promise<void> {
-  const documents = new Map(
-    await Promise.all(
-      foundationAuthoringSources(targetPath).map(async source => [
-        source.path,
-        await readFile(join(workspacePath, source.path), 'utf8'),
-      ] as const),
-    ),
-  )
-  const projection = projectFoundationAuthority({
-    targetPath,
-    availableUpstreamPaths: foundationAuthoringSources(targetPath).map(
-      source => source.path,
-    ),
-    documents,
-  })
-  await mkdir(join(workspacePath, '.beegame/workflow/document-projections'), {
-    recursive: true,
-  })
-  await writeFile(
-    join(workspacePath, foundationProjectionRelativePath(dispatchId)),
-    canonicalFoundationAuthorityProjectionBytes(projection),
-  )
-}
 
 function baseRun(): DeliveryRun {
   return {
@@ -134,61 +95,6 @@ function workerPortThatRejectsDispatches(dispatches: unknown[]) {
 }
 
 describe('Foundation authoring handoff pause', () => {
-  test('keeps default and partial authoring runs unchanged and stops a complete eight-document run', () => {
-    expect(pauseFoundationAuthoringHandoff(baseRun(), undefined)).toBeUndefined()
-
-    const defaultRun = baseRun()
-    expect(pauseFoundationAuthoringHandoff(defaultRun, 'requested')).toBeUndefined()
-
-    const partialRun = {
-      ...defaultRun,
-      foundationDraftState: {
-        completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
-      },
-    }
-    expect(pauseFoundationAuthoringHandoff(partialRun, 'requested')).toBeUndefined()
-
-    const completeUnpaused = eightCommittedRun()
-    expect(
-      pauseFoundationAuthoringHandoff(completeUnpaused, undefined),
-    ).toBeUndefined()
-
-    const paused = pauseFoundationAuthoringHandoff(
-      eightCommittedRun(),
-      'requested',
-    )
-    expect(paused).toMatchObject({
-      phase: 'DOCUMENT_DRAFTING',
-      documentStep: 'FOUNDATION_DRAFTING',
-      status: 'stopped',
-      blockedReason: 'foundation authoring complete; paused before review',
-    })
-    expect(Object.hasOwn(paused ?? {}, 'foundationAuthoringPause')).toBe(false)
-    expect(paused?.foundationAuditState).toBeUndefined()
-
-    const pausedNeedsAction = pauseFoundationAuthoringHandoff(
-      { ...eightCommittedRun(), status: 'needs_action' },
-      'requested',
-    )
-    expect(pausedNeedsAction).toMatchObject({
-      status: 'stopped',
-    })
-    expect(Object.hasOwn(pausedNeedsAction ?? {}, 'foundationAuthoringPause')).toBe(false)
-
-    const alreadyAudited = {
-      ...eightCommittedRun(),
-      foundationAuditState: { status: 'extracting_facts' } as never,
-    }
-    expect(
-      pauseFoundationAuthoringHandoff(alreadyAudited, 'requested'),
-    ).toBeUndefined()
-
-    const alreadyStopped = eightCommittedRun('stopped')
-    expect(pauseFoundationAuthoringHandoff(alreadyStopped, 'reached')).toBe(
-      alreadyStopped,
-    )
-  })
-
   test('stale resume and ensureProgress do not consume a reached pause or dispatch review', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-pause-stale-'))
     try {
@@ -220,7 +126,7 @@ describe('Foundation authoring handoff pause', () => {
       expect(saved?.foundationAuditState).toBeUndefined()
       expect(Object.hasOwn(saved ?? {}, 'foundationAuthoringPause')).toBe(false)
       expect(
-        readFoundationAuthoringPause(await store.readEvents(), durableRun.runId),
+        (await store.readEvents()).findLast(event => event.foundationAuthoringPause !== undefined)?.foundationAuthoringPause,
       ).toBe('reached')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
@@ -240,28 +146,13 @@ describe('Foundation authoring handoff pause', () => {
       const store = createRunStore(workspacePath, run.ownerId)
       await journalRequested(store, run)
 
-      const resumed = await resumeRun({
-        store,
-        runId: run.runId,
-        workspacePath,
-      })
-
-      expect(resumed).toMatchObject({
-        status: 'running',
-        foundationDraftState: {
-          completedPaths: [CANONICAL_FOUNDATION_DOCUMENTS[0]],
-        },
-      })
-      expect(Object.hasOwn(resumed, 'foundationAuthoringPause')).toBe(false)
-      expect(
-        readFoundationAuthoringPause(await store.readEvents(), run.runId),
-      ).toBe('requested')
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
+      const before = await readFile(store.paths.snapshot, 'utf8')
+      await expect(resumeRun({ store, runId: run.runId, workspacePath })).rejects.toThrow('retired')
+      expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 
-  test('stops immediately after the real eighth author terminal without audit or reviewer dispatch', async () => {
+  test('preserves a historical eighth-author terminal instead of replaying the retired controller path', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-pause-terminal-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -275,8 +166,7 @@ describe('Foundation authoring handoff pause', () => {
         )
       const finalPath = CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!
       const dispatchId = 'eighth-author-pause-terminal'
-      await writeCommittedProjection(workspacePath, dispatchId, finalPath)
-      await commitAuthoredFoundationDocument({
+      await seedHistoricalAuthoredDocument({
         workspacePath,
         dispatchId,
         targetPath: finalPath,
@@ -350,23 +240,23 @@ describe('Foundation authoring handoff pause', () => {
         workerPort: workerPortThatRejectsDispatches(dispatches),
       })
 
-      await controller.resume(terminalRun)
+      const snapshotBeforeResume = await readFile(store.paths.snapshot, 'utf8')
+      await expect(controller.resume(terminalRun)).rejects.toThrow('legacy author execution is retired')
 
       const saved = await store.load()
       expect(dispatches).toEqual([])
       expect(saved).toMatchObject({
         phase: 'DOCUMENT_DRAFTING',
         documentStep: 'FOUNDATION_DRAFTING',
-        status: 'stopped',
+        status: 'running',
       })
       expect(saved?.foundationAuditState).toBeUndefined()
       expect(Object.hasOwn(saved ?? {}, 'foundationAuthoringPause')).toBe(false)
       expect(
-        readFoundationAuthoringPause(await store.readEvents(), run.runId),
-      ).toBe('reached')
-      expect(saved?.foundationDraftState.completedPaths).toEqual([
-        ...CANONICAL_FOUNDATION_DOCUMENTS,
-      ])
+        (await store.readEvents()).findLast(event => event.foundationAuthoringPause !== undefined)?.foundationAuthoringPause,
+      ).toBe('requested')
+      expect(saved?.foundationDraftState.completedPaths).toEqual(CANONICAL_FOUNDATION_DOCUMENTS.slice(0, -1))
+      expect(await readFile(store.paths.snapshot, 'utf8')).toBe(snapshotBeforeResume)
       const auditEntries = await readdir(
         join(workspacePath, '.beegame/audit/foundation'),
       ).catch(() => undefined)
@@ -383,8 +273,8 @@ describe('Foundation authoring handoff pause', () => {
         ...terminalRun,
         status: 'running' as const,
       }
-      await recreated.resume(staleTerminalRun)
-      await recreated.ensureProgress(staleTerminalRun)
+      await expect(recreated.resume(staleTerminalRun)).rejects.toThrow('legacy author execution is retired')
+      await expect(recreated.ensureProgress(staleTerminalRun)).rejects.toThrow('legacy author execution is retired')
       expect(replayDispatches).toEqual([])
       expect(await readFile(store.paths.snapshot, 'utf8')).toBe(
         snapshotAfterPause,
@@ -394,7 +284,7 @@ describe('Foundation authoring handoff pause', () => {
     }
   })
 
-  test('explicit resume consumes the pause and enters ordinary Foundation review', async () => {
+  test('a historical pause record cannot authorize crossing the retired Author-to-Reviewer path', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-pause-resume-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -407,8 +297,7 @@ describe('Foundation authoring handoff pause', () => {
           ),
         )
       const finalPath = CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!
-      await writeCommittedProjection(workspacePath, 'resume-authority', finalPath)
-      await commitAuthoredFoundationDocument({
+      await seedHistoricalAuthoredDocument({
         workspacePath,
         dispatchId: 'resume-authority',
         targetPath: finalPath,
@@ -444,32 +333,10 @@ describe('Foundation authoring handoff pause', () => {
         },
       })
 
-      const resumed = await resumeRun({
-        store,
-        runId: run.runId,
-        workspacePath,
-      })
-      expect(resumed).toMatchObject({
-        status: 'running',
-      })
-      expect(Object.hasOwn(resumed, 'foundationAuthoringPause')).toBe(false)
-      expect(
-        readFoundationAuthoringPause(await store.readEvents(), run.runId),
-      ).toBeUndefined()
-      await controller.resume(resumed)
-
-      const saved = await store.load()
-      expect(saved).toMatchObject({
-        phase: 'DOCUMENT_REVIEW',
-        documentStep: 'FOUNDATION_REVIEW',
-        status: 'running',
-        foundationAuditState: { status: 'extracting_facts' },
-      })
-      expect(Object.hasOwn(saved ?? {}, 'foundationAuthoringPause')).toBe(false)
-      expect(dispatches).toHaveLength(4)
-      expect(new Set(dispatches.map(request => request.taskId)).size).toBe(4)
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
+      const before = await readFile(store.paths.snapshot, 'utf8')
+      await expect(resumeRun({ store, runId: run.runId, workspacePath })).rejects.toThrow('retired')
+      expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
+      expect(dispatches).toHaveLength(0)
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
   })
 })

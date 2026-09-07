@@ -8,6 +8,7 @@ import {
   workflowUnitAcceptedEventSchema,
 } from './schema'
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
+import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
 
 const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
   13: '263640f06ada501afb0421806f29215b83e54b4fb239591b9dc1256e8e4b5067',
@@ -46,6 +47,9 @@ const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
   46: '0943c244ec5e633b2f32d137717070b40f9e967275991a40e46044c55d1fdf9b',
   47: '5fa13496659ae7b476c0120e44afde5fde2d3745b64bb71546ee2153e90b512d',
   48: '5cec21bcb907435fc9c4b639cff430799668bd01fb2e366e94e33674d16b4516',
+  49: '24b475e780e60c2694ba2cfff87ccee97ba2280c0b0b229c402de0e171a1482c',
+  50: '7bce90a8e6b3bac5dc93d4e41dc05347aed9f1a5df59e9a6134812b1b6c864c0',
+  51: 'cc87efa7fd1c49bece3376a2f20f7c80e3a52be1a043c65d97725d362cdd128d',
 }
 
 function canonicalize(value: unknown): unknown {
@@ -92,5 +96,25 @@ describe('persisted workflow schema evolution', () => {
         startedAt: '2026-09-05T00:00:00.000Z',
       }),
     ).toThrow('foundation document reviser can only run in FOUNDATION_REVISION')
+  })
+
+  test('rejects retired reviewer checkpoints and review without a public handoff', () => {
+    const base = createTestDeliveryRun({
+      projectId: 'schema-public-review',
+      ownerId: 'schema-public-review-owner',
+    })
+    expect(
+      deliveryRunSchema.safeParse({
+        ...base,
+        foundationAuditState: { status: 'audit_ready' },
+      }).success,
+    ).toBe(false)
+    expect(
+      deliveryRunSchema.safeParse({
+        ...base,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+      }).success,
+    ).toBe(false)
   })
 })

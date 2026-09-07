@@ -31,6 +31,29 @@ export function projectDeliveryProgress(
   workflow: Record<string, unknown>,
 ): DeliveryProgress | undefined {
   if (!DELIVERY_PHASES.includes(workflow.phase as never)) return undefined
+  const authorStage = workflow.authorStage
+  const authorLinkPresent =
+    Boolean(authorStage) &&
+    typeof authorStage === 'object' &&
+    !Array.isArray(authorStage)
+  // A completed public author result still belongs to the drafting stage until
+  // Reviewer has durable audit state. This prevents the handoff gap from
+  // being rendered as a started review.
+  const authorStillOwnsDisplay =
+    authorLinkPresent &&
+    (workflow.phase === 'DOCUMENT_DRAFTING' ||
+      (workflow.phase === 'DOCUMENT_REVIEW' &&
+        !workflow.foundationReviewStage &&
+        (typeof workflow.foundationAuditState !== 'object' ||
+          workflow.foundationAuditState === null ||
+          Array.isArray(workflow.foundationAuditState))))
+  if (authorStillOwnsDisplay)
+    return {
+      stageId: 'DOCUMENT_DRAFTING',
+      phaseIndex: DELIVERY_PROGRESS_STAGES.indexOf('DOCUMENT_DRAFTING') + 1,
+      phaseCount: DELIVERY_PROGRESS_STAGES.length,
+      substage: 'INITIAL_DRAFTING',
+    }
   const stageId =
     workflow.phase === 'DOCUMENT_REVIEW' &&
     workflow.documentStep === 'CHECKLIST_DRAFTING'

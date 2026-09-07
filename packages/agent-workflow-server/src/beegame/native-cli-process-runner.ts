@@ -25,9 +25,6 @@ type RuntimeProcess = ReturnType<typeof Bun.spawn> & {
   stderr: ReadableStream<Uint8Array>
 }
 
-const MARKDOWN_PROTOCOL_RESTART_PROMPT =
-  'No visible Markdown was emitted. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
-
 export function createNativeCliProcessRunner(options: {
   command?: string[]
   observabilityFactory?: (input: {
@@ -67,19 +64,10 @@ export function nativeRuntimeCommand(
     ...(input.workflowJsonSchema
       ? ['--json-schema', JSON.stringify(input.workflowJsonSchema)]
       : []),
-    // StructuredOutput fact turns receive the packet as their sole input;
-    // disable the native built-in inventory while retaining --json-schema as
-    // the one terminal lane. Markdown streams keep their existing boundary.
-    ...(input.workflowWorkerType === 'foundation-document-reviser'
-      ? [
-          '--tools',
-          ...(input.workflowRevisionContract?.scope === 'document'
-            ? ['ReadAssignedFoundationRevision']
-            : ['']),
-        ]
-      : input.workflowJsonSchema || input.workflowMarkdownStreamContract
-        ? ['--tools', '']
-        : []),
+    // StructuredOutput turns receive the packet as their sole input; disable
+    // the native built-in inventory while retaining --json-schema as the one
+    // terminal lane.
+    ...(input.workflowJsonSchema ? ['--tools', ''] : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }
@@ -88,9 +76,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private activeTurn: {
     input: BeeGameSessionSubmitInput
     requestId: string
-    markdownOutput: string
-    markdownStreamDeltaSeen: boolean
-    markdownEmptyRetryIssued: boolean
     resolve(): void
     reject(error: Error): void
     abort(): void
@@ -99,7 +84,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private stderrTail = ''
   private nativeSessionId: string | undefined
   private readonly structuredOutputCalls = new Map<string, unknown>()
-  private readonly revisionToolCalls = new Map<string, string>()
 
   private constructor(
     private readonly child: RuntimeProcess,
@@ -167,9 +151,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       this.activeTurn = {
         input,
         requestId,
-        markdownOutput: '',
-        markdownStreamDeltaSeen: false,
-        markdownEmptyRetryIssued: false,
         resolve: () => {
           input.signal.removeEventListener('abort', abort)
           resolve()
@@ -255,50 +236,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     const turn = this.activeTurn
     if (!turn) return
     this.observability.observeMessage(message)
-    const markdownOutputContract =
-      this.sessionInput.workflowMarkdownStreamContract ||
-      this.sessionInput.workflowRevisionMarkdownStreamContract
-    if (markdownOutputContract) {
-      const streamedText = streamedMarkdownText(message)
-      if (message.type === 'stream_event') {
-        turn.markdownStreamDeltaSeen = true
-        turn.markdownOutput += streamedText
-      } else if (
-        message.type === 'assistant' &&
-        (!turn.markdownStreamDeltaSeen || !turn.markdownOutput)
-      ) {
-        const text = assistantMarkdownText(message)
-        turn.markdownOutput += text
-      } else if (message.type === 'result' && !turn.markdownOutput) {
-        const text = stringField(message, 'result')
-        turn.markdownOutput = text
-      }
-    }
-    if (
-      message.type === 'result' &&
-      markdownOutputContract &&
-      !isErrorResult(message)
-    ) {
-      if (isMissingVisibleMarkdownResult(message)) {
-        if (!turn.markdownOutput.trim() && !turn.markdownEmptyRetryIssued)
-          await this.recoverMissingMarkdownTurn(turn)
-        else
-          await this.rejectMarkdownTurn(
-            turn,
-            new Error(
-              'Bee Game Studio native model response ended without visible Markdown',
-            ),
-          )
-        return
-      }
-    }
     turn.input.onMessage(message as DashboardSDKMessage)
     this.captureStructuredOutputCall(message)
-    const revisionToolFailure = this.revisionToolFailure(message)
-    if (revisionToolFailure) {
-      await this.rejectRevisionToolTurn(turn, revisionToolFailure)
-      return
-    }
     const structuredOutput = this.successfulStructuredOutput(message)
     if (
       this.sessionInput.workflowJsonSchema &&
@@ -330,37 +269,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     turn.resolve()
   }
 
-  private async recoverMissingMarkdownTurn(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-  ): Promise<void> {
-    turn.markdownEmptyRetryIssued = true
-    this.write({
-      type: 'user',
-      uuid: crypto.randomUUID(),
-      session_id: this.nativeSessionId ?? '',
-      parent_tool_use_id: null,
-      message: {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: MARKDOWN_PROTOCOL_RESTART_PROMPT,
-          },
-        ],
-      },
-    })
-  }
-
-  private async rejectMarkdownTurn(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-    error: Error,
-  ): Promise<void> {
-    this.activeTurn = null
-    this.observability.finishTurn({ outcome: 'error', error })
-    await this.observability.flush()
-    turn.reject(error)
-  }
-
   private captureStructuredOutputCall(message: Record<string, unknown>): void {
     if (message.type !== 'assistant') return
     const assistant = objectField(message, 'message')
@@ -376,54 +284,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       ) {
         this.structuredOutputCalls.set(value.id, value.input)
       }
-      if (
-        value.type === 'tool_use' &&
-        typeof value.id === 'string' &&
-        typeof value.name === 'string' &&
-        value.name === 'ReadAssignedFoundationRevision'
-      ) this.revisionToolCalls.set(value.id, value.name)
     }
-  }
-
-  private revisionToolFailure(message: Record<string, unknown>): string | undefined {
-    if (
-      this.sessionInput.workflowWorkerType !== 'foundation-document-reviser' ||
-      message.type !== 'user'
-    ) return undefined
-    const user = objectField(message, 'message')
-    const content = user?.content
-    if (!Array.isArray(content)) return undefined
-    for (const block of content) {
-      if (!block || typeof block !== 'object' || Array.isArray(block)) continue
-      const value = block as Record<string, unknown>
-      const toolUseID = stringField(value, 'tool_use_id')
-      if (
-        value.type === 'tool_result' &&
-        value.is_error === true &&
-        this.revisionToolCalls.has(toolUseID)
-      ) {
-        const toolName = this.revisionToolCalls.get(toolUseID)!
-        const detail = typeof value.content === 'string' && value.content.trim()
-          ? value.content.trim()
-          : `${toolName} failed`
-        return `${toolName}: ${detail}`
-      }
-    }
-    return undefined
-  }
-
-  private async rejectRevisionToolTurn(
-    turn: NonNullable<NativeCliProcessRuntime['activeTurn']>,
-    detail: string,
-  ): Promise<void> {
-    const error = new Error(`foundation revision tool failed: ${detail}`)
-    this.activeTurn = null
-    this.observability.finishTurn({ outcome: 'error', error })
-    await this.observability.flush()
-    turn.reject(error)
-    this.disposed = true
-    this.child.stdin.end()
-    if (this.child.exitCode === null) this.child.kill('SIGTERM')
   }
 
   private successfulStructuredOutput(
@@ -645,35 +506,6 @@ async function* ndjsonLines(
 function isErrorResult(message: Record<string, unknown>): boolean {
   return message.is_error === true ||
     (typeof message.subtype === 'string' && message.subtype !== 'success')
-}
-
-function isMissingVisibleMarkdownResult(
-  message: Record<string, unknown>,
-): boolean {
-  return stringField(message, 'result').trim().length === 0
-}
-
-function streamedMarkdownText(message: Record<string, unknown>): string {
-  if (message.type !== 'stream_event') return ''
-  const event = objectField(message, 'event')
-  const delta = event ? objectField(event, 'delta') : undefined
-  return delta && stringField(delta, 'type') === 'text_delta'
-    ? stringField(delta, 'text')
-    : ''
-}
-
-function assistantMarkdownText(message: Record<string, unknown>): string {
-  if (message.type !== 'assistant') return ''
-  const assistant = objectField(message, 'message')
-  if (!assistant || !Array.isArray(assistant.content)) return ''
-  return assistant.content
-    .filter(
-      (block): block is Record<string, unknown> =>
-        !!block && typeof block === 'object' && !Array.isArray(block),
-    )
-    .filter(block => block.type === 'text')
-    .map(block => stringField(block, 'text'))
-    .join('')
 }
 
 function nativeErrorDetail(message: Record<string, unknown>): string {

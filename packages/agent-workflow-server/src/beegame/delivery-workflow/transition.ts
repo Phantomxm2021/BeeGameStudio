@@ -1,18 +1,12 @@
-import { retryAuthorState } from './foundation-authoring-state'
-import { retryFoundationReviewStateTasks } from './foundation-review-boundary'
+import { RETIRED_FOUNDATION_AUTHOR } from './retired-foundation-author'
+import { assertNoRetiredFoundationReviewRun } from './retired-foundation-review'
 import { parseDeliveryRun } from './schema'
 import type {
-  AtomicTask,
-  DeliveryRun,
-  EvidenceRef,
-  EvidenceStatus,
+AtomicTask,
+DeliveryRun,
+EvidenceRef,
+EvidenceStatus,
 } from './types'
-import type {
-  FoundationAuditState,
-  FoundationAuditTask,
-  FoundationRevisionTask,
-} from './foundation-audit-state'
-import { activeFoundationRevisionTasks, foundationRuntimeTasks, isFoundationRevisionPhase } from './foundation-audit-state'
 
 export class WorkflowTransitionError extends Error {
   constructor(
@@ -60,86 +54,6 @@ export type DeliveryTransition =
   | { type: 'retry'; taskId?: string }
 
 const timestamp = () => new Date().toISOString()
-
-const FOUNDATION_MODEL_CONFIGURATION_FAILURES = new Set([
-  'foundation fact fast model is not configured',
-  'foundation fact extractor fast model is not configured',
-  'foundation semantic fast model is not configured',
-  'foundation semantic balanced model is not configured',
-  'foundation semantic strong model is not configured',
-  'foundation semantic model is not configured',
-])
-
-type FoundationRetryTask = FoundationAuditTask | FoundationRevisionTask
-
-function isEligibleFoundationRetryTask(
-  task: FoundationRetryTask,
-  taskId: string | undefined,
-): boolean {
-  const value = task as FoundationRetryTask & {
-    receiptPath?: unknown
-    receiptDigest?: unknown
-    resultDigest?: unknown
-    resultPath?: unknown
-    receipt?: unknown
-    result?: unknown
-    admittedResult?: unknown
-  }
-  return (
-    (!taskId || task.taskId === taskId) &&
-    task.status === 'needs_action' &&
-    task.attempt === 0 &&
-    FOUNDATION_MODEL_CONFIGURATION_FAILURES.has(task.failureReason ?? '') &&
-    task.dispatch === undefined &&
-    task.terminalDigest === undefined &&
-    task.usage === undefined &&
-    task.durationMs === undefined &&
-    value.receiptPath === undefined &&
-    value.receiptDigest === undefined &&
-    value.resultDigest === undefined &&
-    value.resultPath === undefined &&
-    value.receipt === undefined &&
-    value.result === undefined &&
-    value.admittedResult === undefined
-  )
-}
-
-function isUserStoppedFoundationRetryTask(
-  task: FoundationRetryTask,
-  taskId: string | undefined,
-): boolean {
-  return (
-    (!taskId || task.taskId === taskId) &&
-    task.status === 'retryable' &&
-    task.dispatch?.status === 'interrupted' &&
-    /(?:user|operator) stopped/i.test(task.failureReason ?? '')
-  )
-}
-
-function isActionableDocumentRevisionRetryTask(
-  task: FoundationRetryTask,
-  taskId: string | undefined,
-): boolean {
-  return (
-    (!taskId || task.taskId === taskId) &&
-    task.kind === 'document-revision' &&
-    task.status === 'needs_action' &&
-    (task.dispatch?.status === 'invalid' || task.dispatch?.status === 'failed')
-  )
-}
-
-function isRetryableFoundationRevisionBoundary(
-  state: FoundationAuditState,
-  runStatus: DeliveryRun['status'],
-  taskId: string | undefined,
-): boolean {
-  if (taskId) return false
-  if (runStatus !== 'needs_action') return false
-  if (state.status === 'planning') return true
-  if (!['validating', 'round_closing'].includes(state.status)) return false
-  const activeTasks = activeFoundationRevisionTasks(state)
-  return activeTasks.length > 0 && activeTasks.every(task => task.status === 'completed')
-}
 
 function fail(message: string): never {
   throw new WorkflowTransitionError('invalid_transition', message)
@@ -292,6 +206,8 @@ export function transitionDeliveryRun(
   event: DeliveryTransition,
 ): DeliveryRun {
   const run = assertDeliveryRunInvariants(input)
+  if (run.foundationReviewStage) fail('Public Foundation chain must be controlled through its stage ports')
+  assertNoRetiredFoundationReviewRun(run)
   let next: DeliveryRun
   switch (event.type) {
     case 'documents_ready':
@@ -545,6 +461,7 @@ export function transitionDeliveryRun(
       }
       break
     case 'retry':
+      if (run.phase === 'DOCUMENT_DRAFTING') fail(RETIRED_FOUNDATION_AUTHOR)
       if (
         run.status !== 'needs_action' &&
         run.status !== 'blocked' &&
@@ -561,84 +478,9 @@ export function transitionDeliveryRun(
       )
         fail('retry task must be a failed task')
       {
-        const draftRetry = run.phase === 'DOCUMENT_DRAFTING'
-          ? retryAuthorState(run.foundationDraftState, event.taskId)
-          : undefined
-        const draftRevived = draftRetry?.revived ?? false
-        const nextDraftState = draftRetry?.state
-        const revisionState =
-          run.phase === 'FOUNDATION_REVISION' &&
-          isFoundationRevisionPhase(run.foundationAuditState?.status)
-            ? run.foundationAuditState
-            : undefined
-        const auditState =
-          run.phase === 'DOCUMENT_REVIEW' && !revisionState
-            ? run.foundationAuditState
-            : undefined
-        const auditRetry = auditState ? retryFoundationReviewStateTasks(auditState, event.taskId) : undefined
-        const auditRevived = auditRetry?.revived ?? false
-        const nextAuditState = auditState && auditRetry
-          ? { ...auditState, tasks: auditRetry.tasks }
-          : undefined
-    let revisionRevived = false
-    const nextRevisionState = revisionState && revisionState.status !== 'planning'
-          ? {
-              ...revisionState,
-              ...(() => {
-                const activeTaskIds = new Set(foundationRuntimeTasks(revisionState).map(task => task.taskId))
-                return {
-              tasks: revisionState.tasks.map(task => {
-                if (!activeTaskIds.has(task.taskId)) return task
-                const actionableDocumentRetry =
-                  revisionState.status === 'revising' &&
-                  isActionableDocumentRevisionRetryTask(task, event.taskId)
-                const userStoppedRetry = isUserStoppedFoundationRetryTask(
-                  task,
-                  event.taskId,
-                )
-                const canReviveDocument =
-                  task.kind === 'document-revision' &&
-                  (actionableDocumentRetry || userStoppedRetry)
-                const canReviveRevisionWorker =
-                  ['impacted-facts', 'semantic-recheck'].includes(task.kind) &&
-                  (isEligibleFoundationRetryTask(task, event.taskId) ||
-                    userStoppedRetry)
-                if (!canReviveDocument && !canReviveRevisionWorker)
-                  return task
-                revisionRevived = true
-                return {
-                  ...task,
-                  status: 'pending' as const,
-                  failureReason: undefined,
-                }
-              }),
-                }
-              })(),
-            }
-          : undefined
-        const revisionBoundaryRevived = revisionState
-          ? isRetryableFoundationRevisionBoundary(
-              revisionState,
-              run.status,
-              event.taskId,
-            )
-          : false
-        const foundationStateInCurrentPhase = !!(
-          draftRetry?.actionable ||
-          auditState?.tasks.some(task => task.status === 'needs_action') ||
-          (revisionState && run.status === 'needs_action') ||
-          (revisionState && revisionState.status !== 'planning' && activeFoundationRevisionTasks(revisionState).some(task => task.status === 'needs_action'))
-        )
-        const foundationRevived =
-          draftRevived || auditRevived || revisionRevived || revisionBoundaryRevived
-        const preserveFoundationActionableState =
-          foundationStateInCurrentPhase && !foundationRevived
         next = {
           ...run,
-          status: preserveFoundationActionableState ? run.status : 'running',
-          ...(draftRevived ? { foundationDraftState: nextDraftState } : {}),
-          ...(auditRevived ? { foundationAuditState: nextAuditState } : {}),
-          ...(revisionRevived ? { foundationAuditState: nextRevisionState } : {}),
+          status: 'running',
           ...(run.phase === 'IMPLEMENTATION' && run.activeTaskId
             ? {
                 activeTaskId: undefined,
@@ -649,9 +491,7 @@ export function transitionDeliveryRun(
                 ),
               }
             : {}),
-          blockedReason: preserveFoundationActionableState
-            ? run.blockedReason
-            : undefined,
+          blockedReason: undefined,
           updatedAt: timestamp(),
         }
       }

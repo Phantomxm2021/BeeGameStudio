@@ -17,8 +17,6 @@ import {
   type Dispatcher,
   type ReadinessAudit,
 } from './document-publication-protocol'
-import { completeFoundationDocumentDraft } from './foundation-authoring-boundary'
-export { startDocumentStage } from './foundation-authoring-boundary'
 
 export async function startChecklistDraftStage(input: {
   run: DeliveryRun
@@ -62,14 +60,10 @@ export async function completeDocumentDraft(input: {
   audit?: ReadinessAudit
   documentSet?: 'foundation' | 'checklist'
 }): Promise<DeliveryRun> {
-  const documentSet = input.documentSet ?? 'foundation'
-  if (
-    input.run.phase !== 'DOCUMENT_DRAFTING' &&
-    !(documentSet === 'checklist' && input.run.phase === 'DOCUMENT_REVIEW')
-  )
+  // The only production caller is the controller's checklist terminal branch.
+  // Foundation completion is owned by the isolated Author public module.
+  if (input.documentSet !== 'checklist' || input.run.phase !== 'DOCUMENT_REVIEW')
     throw new Error('document draft is not the active phase')
-  if (documentSet === 'foundation')
-    return completeFoundationDocumentDraft(input)
 
   const candidatePath =
     input.run.activeDispatch?.request?.contract.checklistCandidatePath

@@ -7,6 +7,31 @@ import {
 } from './documentProgress';
 
 describe('documentProgress', () => {
+  it('retains completed author artifacts while reviewer or revision owns the active task', () => {
+    for (const currentPhase of ['DOCUMENT_REVIEW', 'FOUNDATION_REVISION']) {
+      const workflow = {
+        status: 'running', currentPhase,
+        tasks: [{ id: 'foundation-public-stage', title: 'Foundation Reviewer', status: 'running' }],
+        foundationDocuments: BEEGAME_DOCUMENT_BASELINE.map(document => ({ path: document.path, status: 'ready' })),
+      };
+      expect(deriveDocumentProgress([], [], workflow).every(document => document.status === 'ready')).toBe(true);
+      expect(isCompletedFoundationAuthoringPause([], workflow)).toBe(false);
+    }
+    expect(deriveDocumentProgress([], [], { foundationDocuments: [{ path: 'docs/GDD.md', status: 'pending' }] })
+      .every(document => document.status === 'pending')).toBe(true);
+  });
+  it('recognizes a complete public result handoff without matching an English reason', () => {
+    const workflow = {
+      status: 'blocked', currentPhase: 'DOCUMENT_REVIEW',
+      block: { code: 'public_author_handoff', message: '八份文档已完成，等待交接验收。' },
+      tasks: BEEGAME_DOCUMENT_BASELINE.map(document => ({ id: document.path, title: document.path, status: 'completed' })),
+    };
+    expect(isCompletedFoundationAuthoringPause([], workflow)).toBe(true);
+    expect(deriveDocumentProgress([], [], workflow).filter(item => item.status === 'ready')).toHaveLength(8);
+    expect(isCompletedFoundationAuthoringPause([], { ...workflow, tasks: workflow.tasks.slice(0, 7) })).toBe(false);
+    expect(isCompletedFoundationAuthoringPause([], { ...workflow, status: 'failed' })).toBe(false);
+    expect(isCompletedFoundationAuthoringPause([], { ...workflow, currentPhase: 'IMPLEMENTATION' })).toBe(false);
+  });
   it('derives live baseline state from structured artifact paths and discovered files', () => {
     const progress = deriveDocumentProgress([
       {

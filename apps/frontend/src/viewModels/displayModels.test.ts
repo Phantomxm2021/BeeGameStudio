@@ -5,6 +5,21 @@ import {
 } from './displayModels'
 
 describe('displayModels', () => {
+  it('allowlists public foundation document display fields independently of current tasks', () => {
+    const display = toProjectRuntimeDisplayModel({
+      workflow: {
+        runId: 'review-run', status: 'running', phase: 'DOCUMENT_REVIEW',
+        tasks: [{ id: 'review', title: 'Foundation Reviewer', status: 'running' }],
+        foundationDocuments: [
+          { path: 'docs/GDD.md', status: 'ready', privateState: 'must not leak' },
+          { path: 'docs/UNKNOWN.md', status: 'ready' },
+          { path: 'docs/ASSET_PLAN.md', status: 'pending' },
+        ],
+      },
+    });
+    expect(display.workflow?.foundationDocuments).toEqual([{ path: 'docs/GDD.md', status: 'ready' }]);
+    expect(display.workflow?.tasks).toHaveLength(1);
+  });
   it('maps only canonical tool-permission fields', () => {
     const review = {
       gate_id: 'permission-1',

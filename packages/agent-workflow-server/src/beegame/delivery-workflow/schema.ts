@@ -1,12 +1,15 @@
 import { z } from 'zod/v4'
+import type { HistoricalAuthorDraftState } from './historical-author-checkpoint'
+import { createFoundationReviewLinkSchema } from './foundation-review-link-schema'
+import { assertImportedFoundationAuthorBoundary } from './foundation-review-link'
 import type {
   AtomicTask,
   AcceptedWorkflowUnit,
+  AuthorStageLink,
   DeliveryPhase,
   DeliveryRun,
   DispatchRecord,
   EvidenceRef,
-  FoundationDraftState,
   Revision,
   TasksPlannedEvent,
   TaskVerification,
@@ -15,14 +18,14 @@ import type {
   WorkerDispatchRequest,
 } from './types'
 import {
-  foundationAuditStateSchema,
-  isFoundationRevisionPhase,
-} from './foundation-audit-state'
-import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
   RESOURCE_PRODUCTION_TASKS,
 } from './types'
+import type {
+  AuthorDocumentsResult,
+  AuthorHandle,
+} from '../stage-modules/foundation-authoring/public'
 
 export const DELIVERY_PHASES = [
   'BRIEF_CONFIRMED',
@@ -239,7 +242,8 @@ export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
   })
   .strict()
 
-const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
+// Historical wire format only; new Author state is validated by authorStage below.
+const historicalAuthorDraftStateSchema: z.ZodType<HistoricalAuthorDraftState> = z
   .object({
     completedPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)),
     documents: z
@@ -293,6 +297,124 @@ const foundationDraftStateSchema: z.ZodType<FoundationDraftState> = z
             'parallel foundation document checkpoints must exactly match canonical order',
         })
     }
+  })
+
+const sha256DigestSchema = z.string().regex(/^[a-f0-9]{64}$/)
+
+// This is deliberately a local mirror of the foundation-authoring public
+// contract. Delivery persistence must not import or parse private author
+// checkpoints.
+const authorHandleSchema: z.ZodType<AuthorHandle> = z
+  .strictObject({
+    protocolVersion: z.literal(1),
+    producer: z.literal('foundation-authoring'),
+    id: z.string().uuid(),
+  })
+
+const authorDocumentArtifactSchema = z
+  .strictObject({
+    path: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+    digest: sha256DigestSchema,
+    byteLength: z.number().int().nonnegative(),
+    artifactPath: z.string().min(1).max(1024),
+  })
+
+const authorDocumentsResultSchema: z.ZodType<AuthorDocumentsResult> = z
+  .strictObject({
+    protocolVersion: z.literal(1),
+    producer: z.literal('foundation-authoring'),
+    kind: z.literal('foundation_documents'),
+    resultId: sha256DigestSchema,
+    inputDigest: sha256DigestSchema,
+    ownerId: z.string().min(1).max(256),
+    projectId: z.string().min(1).max(256),
+    confirmedBriefDigest: sha256DigestSchema,
+    documents: z
+      .array(authorDocumentArtifactSchema)
+      .length(CANONICAL_FOUNDATION_DOCUMENTS.length)
+      .superRefine((documents, context) => {
+        for (const [index, document] of documents.entries()) {
+          if (document.path !== CANONICAL_FOUNDATION_DOCUMENTS[index])
+            context.addIssue({
+              code: 'custom',
+              path: [index, 'path'],
+              message: 'author result documents must use canonical order',
+            })
+        }
+      }),
+    documentRevision: z.string().min(1),
+    workspaceRevision: z.string().min(1),
+    receiptSetDigest: sha256DigestSchema,
+  })
+
+export const authorStageLinkSchema: z.ZodType<AuthorStageLink> = z
+  .strictObject({
+    protocolVersion: z.literal(1),
+    requestId: z.string().min(1).max(256),
+    inputDigest: sha256DigestSchema,
+    handle: authorHandleSchema.optional(),
+    status: z.enum([
+      'starting',
+      'running',
+      'stopped',
+      'needs_action',
+      'failed',
+      'completed',
+    ]),
+    result: authorDocumentsResultSchema.optional(),
+    control: z
+      .strictObject({
+        sequence: z.number().int().nonnegative(),
+        action: z.enum(['run', 'stop']),
+        requestId: z.string().min(1).max(256),
+        reason: z.string().min(1).max(2000).optional(),
+      }),
+  })
+  .superRefine((link, context) => {
+    if (link.control.requestId !== link.requestId)
+      context.addIssue({
+        code: 'custom',
+        path: ['control', 'requestId'],
+        message: 'author control request must bind the stage request',
+      })
+    const handleRequired =
+      link.status === 'running' ||
+      link.status === 'needs_action' ||
+      link.status === 'completed'
+    if (handleRequired && !link.handle)
+      context.addIssue({
+        code: 'custom',
+        path: ['handle'],
+        message: `${link.status} author stage link requires a handle`,
+      })
+    if (
+      link.status === 'stopped' &&
+      !link.handle &&
+      link.control.action !== 'stop'
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['control', 'action'],
+        message: 'a stopped author stage without a handle must be stop-before-start',
+      })
+    if (link.status === 'completed' && !link.result)
+      context.addIssue({
+        code: 'custom',
+        path: ['result'],
+        message: 'completed author stage link requires a result',
+      })
+    if (link.result && link.status !== 'completed')
+      context.addIssue({
+        code: 'custom',
+        path: ['result'],
+        message: 'author result is only valid for completed stage links',
+      })
+    if (link.result && link.result.inputDigest !== link.inputDigest)
+      context.addIssue({
+        code: 'custom',
+        path: ['result', 'inputDigest'],
+        message: 'author result input digest does not match the stage link',
+      })
   })
 
 const workflowEventSchema: z.ZodType<WorkflowEvent> = z
@@ -527,8 +649,11 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         acceptance: evidenceRefSchema.optional(),
       })
       .strict(),
-    foundationDraftState: foundationDraftStateSchema,
-    foundationAuditState: foundationAuditStateSchema.optional(),
+    foundationDraftState: historicalAuthorDraftStateSchema,
+    authorStage: authorStageLinkSchema.optional(),
+    foundationReviewStage: createFoundationReviewLinkSchema(authorDocumentsResultSchema).optional(),
+    // Old project review state is unsupported, not a migration/read compatibility surface.
+    foundationAuditState: z.never().optional(),
     resourceProductionState: resourceProductionStateSchema,
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),
@@ -543,6 +668,10 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
   })
   .strict()
   .superRefine((run, context) => {
+    if (run.phase === 'DOCUMENT_REVIEW' && run.documentStep !== 'CHECKLIST_DRAFTING' &&
+        !run.foundationReviewStage && run.authorStage?.status !== 'completed')
+      context.addIssue({ code: 'custom', path: ['foundationReviewStage'],
+        message: 'Legacy Reviewer projects are unsupported; review requires a public stage invocation or completed public Author handoff' })
     const requiresCompletedFoundation =
       run.phase === 'DOCUMENT_REVIEW' ||
       run.phase === 'FOUNDATION_REVISION' ||
@@ -554,6 +683,11 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       run.phase === 'DELIVERY'
     if (
       requiresCompletedFoundation &&
+      !(
+        run.phase === 'DOCUMENT_REVIEW' &&
+        run.documentStep === 'FOUNDATION_REVIEW' &&
+        run.authorStage?.status === 'completed'
+      ) && !run.foundationReviewStage &&
       run.foundationDraftState.completedPaths.length !==
         CANONICAL_FOUNDATION_DOCUMENTS.length
     )
@@ -564,20 +698,73 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
           'foundation review and downstream phases require all durable authoring checkpoints',
       })
 
-    const revisionStatus = isFoundationRevisionPhase(
-      run.foundationAuditState?.status,
-    )
-    if (revisionStatus && (run.phase !== 'FOUNDATION_REVISION' || run.documentStep !== 'FOUNDATION_REVISION'))
+    if (run.authorStage) {
+      if (run.activeDispatch?.workerType === 'document-author')
+        context.addIssue({
+          code: 'custom',
+          path: ['activeDispatch'],
+          message: 'author stage link cannot coexist with legacy author dispatch',
+        })
+      if (run.foundationDraftState.completedPaths.length > 0)
+        context.addIssue({
+          code: 'custom',
+          path: ['foundationDraftState', 'completedPaths'],
+          message: 'author stage link cannot coexist with legacy author checkpoints',
+        })
+      if ((run.foundationDraftState.documents?.length ?? 0) > 0)
+        context.addIssue({
+          code: 'custom',
+          path: ['foundationDraftState', 'documents'],
+          message: 'author stage link cannot coexist with legacy author documents',
+        })
+
+      const result = run.authorStage.result
+      if (result) {
+        if (result.ownerId !== run.ownerId)
+          context.addIssue({
+            code: 'custom',
+            path: ['authorStage', 'result', 'ownerId'],
+            message: 'author result owner does not match delivery run owner',
+          })
+        if (result.projectId !== run.projectId)
+          context.addIssue({
+            code: 'custom',
+            path: ['authorStage', 'result', 'projectId'],
+            message: 'author result project does not match delivery run project',
+          })
+        if (result.confirmedBriefDigest !== run.confirmedBriefDigest)
+          context.addIssue({
+            code: 'custom',
+            path: ['authorStage', 'result', 'confirmedBriefDigest'],
+            message: 'author result brief does not match delivery run brief',
+          })
+      }
+    }
+
+    if (run.foundationReviewStage) {
+      const link = run.foundationReviewStage
+      const imported = link.importedAuthorResult
+      try { assertImportedFoundationAuthorBoundary(run) }
+      catch (error) { context.addIssue({ code: 'custom', path: ['foundationReviewStage'], message: String(error) }) }
+      if ((!imported && (run.authorStage?.status !== 'completed' || link.authorResultId !== run.authorStage.result?.resultId)) ||
+          link.invocation.request.ownerId !== run.ownerId || link.invocation.request.projectId !== run.projectId ||
+          run.activeDispatch || run.foundationAuditState ||
+          (run.phase !== 'DOCUMENT_REVIEW' && run.phase !== 'FOUNDATION_REVISION'))
+        context.addIssue({ code: 'custom', path: ['foundationReviewStage'],
+          message: 'Public foundation chain must bind its author and cannot coexist with legacy execution or downstream phases' })
+      const revision = link.invocation.stage === 'revision' && !link.acceptedReview
+      if (run.phase !== (revision ? 'FOUNDATION_REVISION' : 'DOCUMENT_REVIEW') ||
+          run.documentStep !== (revision ? 'FOUNDATION_REVISION' : 'FOUNDATION_REVIEW'))
+        context.addIssue({ code: 'custom', path: ['documentStep'], message: 'Public foundation phase must match its active public module' })
+    }
+
+    const publicRevision = run.foundationReviewStage?.invocation.stage === 'revision' &&
+      !run.foundationReviewStage.acceptedReview
+    if (run.phase === 'FOUNDATION_REVISION' && (!publicRevision || run.documentStep !== 'FOUNDATION_REVISION'))
       context.addIssue({
         code: 'custom',
-        path: ['phase'],
-        message: 'foundation revision state requires the exclusive FOUNDATION_REVISION phase and document step',
-      })
-    if (run.phase === 'FOUNDATION_REVISION' && (!revisionStatus || run.documentStep !== 'FOUNDATION_REVISION'))
-      context.addIssue({
-        code: 'custom',
-        path: ['foundationAuditState'],
-        message: 'FOUNDATION_REVISION requires an active revision state',
+        path: ['foundationReviewStage'],
+        message: 'FOUNDATION_REVISION requires an active public revision invocation',
       })
     if (run.documentStep === 'FOUNDATION_REVISION' && run.phase !== 'FOUNDATION_REVISION')
       context.addIssue({

@@ -165,8 +165,10 @@ export function RightSidebar({
             ...(projectStatus?.workflow?.tasks || [])
                 .map(task => `${task.title || task.id}:${task.status || ''}`)
                 .filter(entry => isBaselineDocumentPath(entry.split(':', 1)[0])),
+            ...(projectStatus?.workflow?.foundationDocuments || [])
+                .map(document => `${document.path}:${document.status}`),
         ].join('|'),
-        [messages, projectStatus?.workflow?.tasks],
+        [messages, projectStatus?.workflow?.tasks, projectStatus?.workflow?.foundationDocuments],
     );
 
     useEffect(() => {

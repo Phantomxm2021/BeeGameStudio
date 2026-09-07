@@ -1,44 +1,26 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  FOUNDATION_REVISION_PHASES,
-  isFoundationRevisionPhase,
-} from './foundation-audit-state'
-import {
   DELIVERY_PROGRESS_STAGES,
   projectDeliveryProgress,
 } from './display-progress'
 
 describe('delivery progress projection', () => {
-  test('projects every active repair state only from the durable revision phase', () => {
-    expect(FOUNDATION_REVISION_PHASES).toEqual([
-      'planning',
-      'revising',
-      'rebuilding_facts',
-      'validating',
-      'semantic_recheck',
-      'publishing',
-      'round_closing',
-    ])
-
-    for (const status of FOUNDATION_REVISION_PHASES) {
-      expect(isFoundationRevisionPhase(status)).toBe(true)
-      expect(
-        projectDeliveryProgress({
-          phase: 'FOUNDATION_REVISION',
-          documentStep: 'FOUNDATION_REVISION',
-          foundationAuditState: { status },
-        }),
-      ).toMatchObject({ stageId: 'FOUNDATION_REVISION', substage: 'REPAIRING' })
-    }
-
-    expect(isFoundationRevisionPhase('revision_ready')).toBe(false)
+  test('projects public Reviewer and Revision links as their display stages', () => {
     expect(
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        foundationAuditState: { status: 'revision_ready' },
+        foundationReviewStage: { invocation: { stage: 'reviewer' } },
       }),
     ).toMatchObject({ stageId: 'DOCUMENT_REVIEW', substage: 'INITIAL_REVIEW' })
+
+    expect(
+      projectDeliveryProgress({
+        phase: 'FOUNDATION_REVISION',
+        documentStep: 'FOUNDATION_REVISION',
+        foundationReviewStage: { invocation: { stage: 'revision' } },
+      }),
+    ).toMatchObject({ stageId: 'FOUNDATION_REVISION', substage: 'REPAIRING' })
   })
 
   test('projects the document audit boundary directly from the workflow phase', () => {
@@ -69,6 +51,29 @@ describe('delivery progress projection', () => {
     })
   })
 
+  test('keeps a public author handoff in drafting until Reviewer has a public link', () => {
+    expect(
+      projectDeliveryProgress({
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        authorStage: { protocolVersion: 1, status: 'completed' },
+      }),
+    ).toEqual({
+      stageId: 'DOCUMENT_DRAFTING',
+      phaseIndex: 2,
+      phaseCount: DELIVERY_PROGRESS_STAGES.length,
+      substage: 'INITIAL_DRAFTING',
+    })
+    expect(
+      projectDeliveryProgress({
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'FOUNDATION_REVIEW',
+        authorStage: { protocolVersion: 1, status: 'completed' },
+        foundationReviewStage: { invocation: { stage: 'reviewer' } },
+      }),
+    ).toMatchObject({ stageId: 'DOCUMENT_REVIEW', substage: 'INITIAL_REVIEW' })
+  })
+
   test('uses only the deterministic checklist authoring substage', () => {
     expect(
       projectDeliveryProgress({
@@ -83,7 +88,7 @@ describe('delivery progress projection', () => {
       projectDeliveryProgress({
         phase: 'FOUNDATION_REVISION',
         documentStep: 'FOUNDATION_REVISION',
-        foundationAuditState: { status: 'planning' },
+        foundationReviewStage: { invocation: { stage: 'revision' } },
       }),
     ).toMatchObject({
       stageId: 'FOUNDATION_REVISION',
@@ -96,7 +101,7 @@ describe('delivery progress projection', () => {
       projectDeliveryProgress({
         phase: 'FOUNDATION_REVISION',
         documentStep: 'FOUNDATION_REVISION',
-        foundationAuditState: { status: 'revising' },
+        foundationReviewStage: { invocation: { stage: 'revision' } },
       }),
     ).toMatchObject({
       stageId: 'FOUNDATION_REVISION',

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInitialDeliveryRun, createRunStore } from './run-store'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
+import { assertNoRetiredAuthorHandoff } from './retired-foundation-author'
 
 const temporaryDirectories: string[] = []
 
@@ -17,7 +18,7 @@ afterEach(async () => {
 })
 
 describe('foundation authoring pause recovery authority', () => {
-  test('journals requested, reached and consumed transitions durably', async () => {
+  test('preserves historical pause evidence without synthesizing consumption on ordinary commits', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-authoring-pause-'))
     temporaryDirectories.push(workspacePath)
     const confirmedBriefContext = 'pause recovery brief'
@@ -85,8 +86,8 @@ describe('foundation authoring pause recovery authority', () => {
       .filter(event => event.type === 'foundation.authoring.pause_changed')
     expect(events.map(event => event.foundationAuthoringPause)).toEqual([
       'reached',
-      null,
     ])
+    expect(() => assertNoRetiredAuthorHandoff(events, run.runId)).toThrow('retired')
     const snapshot = JSON.parse(
       await readFile(join(workspacePath, '.beegame/workflow/run.json'), 'utf8'),
     ) as Record<string, unknown>

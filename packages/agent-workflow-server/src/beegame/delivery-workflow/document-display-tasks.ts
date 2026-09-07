@@ -8,8 +8,6 @@ import {
   type ResourceProductionTask,
   type DocumentWorkflowStep,
 } from './types'
-import { foundationRuntimeTasks } from './foundation-audit-state'
-import type { FoundationAuditState, FoundationIssueSummary, FoundationRevisionTask, FoundationRevisionRound } from './foundation-audit-state'
 import type { WorkflowUsage } from './types'
 
 export type DocumentDisplayTask = {
@@ -18,8 +16,8 @@ export type DocumentDisplayTask = {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
   attempt: number
   operation: 'write' | 'review' | 'revise' | 'produce'
-  round?: FoundationRevisionRound
-  issueSummary?: FoundationIssueSummary
+  round?: number
+  issueSummary?: { total: number; blocker: number; high: number; medium: number; low: number }
   usage?: WorkflowUsage
   durationMs?: number
   failureReason?: string
@@ -45,162 +43,8 @@ export type DocumentDisplayTaskInput = {
   documentStep?: DocumentWorkflowStep
   workflowStatus?: string
   thinking?: string
-  foundationAuditState?: FoundationAuditState
 }
 
-const auditTaskTitles = {
-  deterministic: '确定性检查',
-  semantic: '语义检查',
-  issues: '问题汇编',
-} as const
-
-function phaseTaskStatus(input: {
-  active: boolean
-  completed: boolean
-  workflowStatus?: string
-}): DocumentDisplayTask['status'] {
-  if (input.completed) return 'completed'
-  if (!input.active) return 'pending'
-  if (workflowStopped(input.workflowStatus)) return 'stopped'
-  if (workflowFailed(input.workflowStatus)) return 'failed'
-  return 'running'
-}
-
-function projectFoundationAuditTasks(
-  input: DocumentDisplayTaskInput,
-): DocumentDisplayTask[] {
-  const state = input.foundationAuditState
-  if (!state) return []
-  const factTasks = state.tasks.filter(task => task.kind === 'document-facts')
-  const semanticTasks = state.tasks.filter(
-    task => task.kind === 'semantic' || task.kind === 'confirmation',
-  )
-  const semanticCompleted =
-    semanticTasks.length > 0 && semanticTasks.every(task => task.status === 'completed')
-  const semanticActive = state.status === 'semantic_review'
-  const issueActive = semanticActive && semanticCompleted
-  const auditReady = state.status === 'audit_ready'
-  const factDisplayTasks = factTasks.map(task => projectFoundationAuditTask({
-    task,
-    title: `事实提取 · ${task.taskId}`,
-    input,
-  }))
-  const semanticDisplayTasks = semanticTasks.map(task => projectFoundationAuditTask({
-    task,
-    title: task.kind === 'confirmation' ? `深度确认 · ${task.checkId}` : `语义检查 · ${task.checkId}`,
-    input,
-  }))
-  const semanticTasksForDisplay = semanticTasks.length
-    ? semanticDisplayTasks
-    : [{
-        id: 'audit:semantic',
-        title: auditTaskTitles.semantic,
-        status: phaseTaskStatus({ active: semanticActive, completed: semanticCompleted || auditReady, workflowStatus: input.workflowStatus }),
-        attempt: 0,
-        operation: 'review' as const,
-      }]
-  return [
-    ...factDisplayTasks,
-    {
-      id: 'audit:deterministic',
-      title: auditTaskTitles.deterministic,
-      status: phaseTaskStatus({
-        active: state.status === 'derived_committed',
-        completed: [
-          'deterministic_ready',
-          'semantic_review',
-          'audit_ready',
-        ].includes(state.status),
-        workflowStatus: input.workflowStatus,
-      }),
-      attempt: 0,
-      operation: 'review',
-    },
-    ...semanticTasksForDisplay,
-    {
-      id: 'audit:issues',
-      title: auditTaskTitles.issues,
-      status: phaseTaskStatus({
-        active: issueActive,
-        completed: auditReady,
-        workflowStatus: input.workflowStatus,
-      }),
-      attempt: 0,
-      operation: 'review',
-      ...(state.review?.issueSummary ? { issueSummary: state.review.issueSummary } : {}),
-    },
-  ]
-}
-
-function projectFoundationAuditTask(input: {
-  task: Extract<FoundationAuditState['tasks'][number], { kind: 'document-facts' | 'semantic' | 'confirmation' }>
-  title: string
-  input: DocumentDisplayTaskInput
-}): DocumentDisplayTask {
-  const task = input.task
-  const status = task.status === 'completed'
-    ? 'completed'
-    : workflowStopped(input.input.workflowStatus) && task.dispatch?.status === 'interrupted'
-      ? 'stopped'
-      : task.status === 'needs_action'
-        ? 'failed'
-        : task.status === 'running'
-          ? 'running'
-          : 'pending'
-  return {
-    id: task.taskId || `${task.kind}:${task.kind === 'document-facts' ? 'facts' : task.checkId}`,
-    title: input.title.replace('undefined', task.kind === 'document-facts' ? 'facts' : (task.checkId || task.kind)),
-    status,
-    attempt: task.attempt,
-    operation: 'review',
-    ...(task.usage ? { usage: task.usage } : {}),
-    ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
-    ...(task.failureReason && (status === 'failed' || status === 'stopped')
-      ? { failureReason: task.failureReason }
-      : {}),
-  }
-}
-
-function projectFoundationRevisionTasks(
-  input: DocumentDisplayTaskInput,
-): DocumentDisplayTask[] {
-  const state = input.foundationAuditState
-  if (!state) return []
-  const revisionTasks = foundationRuntimeTasks(state).filter((task): task is FoundationRevisionTask => task.kind === 'document-revision' || task.kind === 'impacted-facts' || task.kind === 'semantic-recheck')
-  return revisionTasks.map((task, index) => {
-    const status = revisionTaskDisplayStatus(task, input.workflowStatus)
-    const base = {
-      id: task.kind === 'document-revision' ? `revision:${task.documentPath}` : task.taskId || `${task.kind}:${task.kind === 'semantic-recheck' ? task.issueId : 'unknown'}`,
-      title: task.kind === 'document-revision'
-        ? task.documentPath
-        : task.kind === 'impacted-facts'
-          ? '影响事实验证'
-          : `定向语义验证 · ${task.issueId}`,
-      status,
-      attempt: task.attempt,
-      operation: task.kind === 'document-revision' ? 'revise' as const : 'review' as const,
-      round: task.round,
-      ...(index === 0 && state.issueSummary ? { issueSummary: state.issueSummary } : {}),
-      ...(task.usage ? { usage: task.usage } : {}),
-      ...(task.durationMs !== undefined ? { durationMs: task.durationMs } : {}),
-      ...(task.failureReason && (status === 'failed' || status === 'stopped')
-        ? { failureReason: task.failureReason }
-        : {}),
-    }
-    return base
-  })
-}
-
-function revisionTaskDisplayStatus(
-  task: FoundationRevisionTask,
-  workflowStatus?: string,
-): DocumentDisplayTask['status'] {
-  if (task.status === 'completed') return 'completed'
-  if (workflowStopped(workflowStatus) && task.dispatch?.status === 'interrupted') return 'stopped'
-  if (task.status === 'needs_action') return 'failed'
-  if (task.status === 'running') return 'running'
-  return 'pending'
-}
 
 /**
  * Projects document work from its phase authority. Authoring completion comes
@@ -211,10 +55,10 @@ function revisionTaskDisplayStatus(
 export function projectDocumentDisplayTasks(
   input: DocumentDisplayTaskInput,
 ): DocumentDisplayTask[] {
-  if (input.documentStep === 'FOUNDATION_REVISION')
-    return projectFoundationRevisionTasks(input)
-  if (input.documentStep === 'FOUNDATION_REVIEW')
-    return projectFoundationAuditTasks(input)
+  // Public Reviewer/Revision links are projected by the public stage-card path.
+  // No legacy task list is reconstructed from old project checkpoints.
+  if (input.documentStep === 'FOUNDATION_REVISION' || input.documentStep === 'FOUNDATION_REVIEW')
+    return []
   const workspace = resolve(input.workspacePath)
   const canonicalReviewArtifacts = [
     ...CANONICAL_PROJECT_DOCUMENTS,

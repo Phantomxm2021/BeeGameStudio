@@ -1,12 +1,9 @@
-import type { FoundationAuditState } from './foundation-audit-state'
-export type {
-  FoundationAuditState,
-  FoundationRevisionDocumentTask,
-  FoundationRevisionImpactedFactsTask,
-  FoundationRevisionRound,
-  FoundationRevisionSemanticRecheckTask,
-  FoundationRevisionTask,
-} from './foundation-audit-state'
+import type { HistoricalAuthorDraftState } from './historical-author-checkpoint'
+import type { FoundationReviewLinkState } from './foundation-review-link'
+import type {
+  AuthorDocumentsResult,
+  AuthorHandle,
+} from '../stage-modules/foundation-authoring/public'
 
 export const CANONICAL_FOUNDATION_DOCUMENTS = [
   'docs/GDD.md',
@@ -42,25 +39,25 @@ export const CANONICAL_PROJECT_DOCUMENT_IDS = {
 export type FoundationDocumentPath =
   (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
 
-export type FoundationAuthoringStatus =
-  | 'pending'
-  | 'drafting'
-  | 'committed'
-  | 'needs_action'
-
-export type FoundationDocumentCheckpoint = {
-  path: FoundationDocumentPath
-  status: FoundationAuthoringStatus
-  upstreamDigests?: Record<string, string>
-  dispatch?: DispatchRecord
-  failureReason?: string
-}
-
-export type FoundationDraftState = {
-  /** Completed initial-authoring checkpoints in canonical dependency order. */
-  completedPaths: FoundationDocumentPath[]
-  /** Per-document state exists only for the parallel downstream authoring batch. */
-  documents?: FoundationDocumentCheckpoint[]
+export type AuthorStageLink = {
+  protocolVersion: 1
+  requestId: string
+  inputDigest: string
+  handle?: AuthorHandle
+  status:
+    | 'starting'
+    | 'running'
+    | 'stopped'
+    | 'needs_action'
+    | 'failed'
+    | 'completed'
+  result?: AuthorDocumentsResult
+  control: {
+    sequence: number
+    action: 'run' | 'stop'
+    requestId: string
+    reason?: string
+  }
 }
 
 export const CANONICAL_DOCUMENT_ARTIFACTS = [
@@ -145,7 +142,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 48 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 51 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',
@@ -326,9 +323,13 @@ export type DeliveryRun = {
     acceptance?: EvidenceRef
   }
   /** Sole durable cursor for the initial eight-document authoring pass. */
-  foundationDraftState: FoundationDraftState
-  /** Deterministic post-authoring Section Index + Fact Store binding. */
-  foundationAuditState?: FoundationAuditState
+  /** Historical evidence; never a resumable Author execution checkpoint. */
+  foundationDraftState: HistoricalAuthorDraftState
+  /** Public author lifecycle handoff; never contains private checkpoints or worker state. */
+  authorStage?: AuthorStageLink
+  foundationReviewStage?: FoundationReviewLinkState
+  /** Reserved solely to reject obsolete snapshots; no old project state is accepted. */
+  foundationAuditState?: never
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
   usage?: WorkflowUsage
@@ -367,10 +368,6 @@ export type WorkerDispatchRequest = {
 }
 
 export type DeliveryWorkerPort = {
-  /** Front-door validation for the fact worker's persisted fast model route. */
-  assertFoundationFactFastReady?(request: WorkerDispatchRequest): Promise<void>
-  /** Front-door validation for persisted semantic model tier routing. */
-  assertFoundationSemanticModelReady?(request: WorkerDispatchRequest): Promise<void>
   start(
     request: WorkerDispatchRequest,
   ): Promise<{ sessionId: string; dispatchId: string }>
