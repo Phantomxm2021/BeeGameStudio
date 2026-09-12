@@ -1,6 +1,7 @@
 {
   "landing": {
     "intake": {
+      "devProjectPurge": {"button":"開發測試：清空全部專案","confirm":"將永久刪除目前帳號的 {{count}} 個專案及可清理的工作區，無法復原。不會刪除帳號或資源庫。","delete":"永久刪除全部專案","cancel":"取消","pending":"處理中，請勿重複提交…","result":"已刪除 {{deleted}} 個專案，失敗 {{failed}} 個。請檢查剩餘清單。","changed":"專案清單已變更，請重新檢視清單後確認。","failed":"無法確認清理結果。請重新整理專案清單後檢查；不要直接重複提交。"},
       "modal": {
         "chooseOption": "選擇方案",
         "productionSettings": "製作設定",
@@ -51,6 +52,8 @@
       "errors": {
         "missingPlatformModel": "平台尚未配置預設模型。請聯絡管理員在系統設定的平台頁配置後再生成。",
         "projectStartFailed": "專案啟動失敗，請檢查服務後重試。",
+        "projectQuotaExceeded": "專案數量已達上限：目前 {{projectCount}} 個，上限 {{limit}} 個。請在「歷史專案」中刪除不再需要的專案後重試，或聯絡管理員調整配額。這不是 Credit 餘額不足。",
+        "projectQuotaExceededUnknown": "專案數量已達上限，無法建立新專案。請在「歷史專案」中刪除不再需要的專案後重試，或聯絡管理員調整配額。這不是 Credit 餘額不足。",
         "authNotConfigured": "Supabase Auth 尚未配置。",
         "missingEmailPassword": "請輸入信箱和密碼。",
         "missingDisplayName": "請設定暱稱。",

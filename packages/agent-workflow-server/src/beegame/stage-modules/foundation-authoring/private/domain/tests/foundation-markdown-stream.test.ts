@@ -62,6 +62,28 @@ async function writeEmptyGddProjection(workspacePath: string, dispatchId: string
 }
 
 describe('foundation Markdown stream sink', () => {
+  test('preserves long imperfect Markdown for Reviewer without JSON parsing or a quality gate', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-raw-markdown-'))
+    try {
+      const markdown = '# 任意 idea\n\n## 非标准章节\n\n' +
+        '中文“引号”与 "quotes"，反斜杠 \\ 和不成对的 { 内容。\n'.repeat(2000) +
+        '\n## 非标准章节\n\n重复章节与缺失章节留给 Reviewer。\n' +
+        '\n```mermaid\nflowchart TD\nA["开始"] --> B["结束"]\n```\n' +
+        '<svg><text x="0">原样保存</text></svg>\n'
+      const sink = await createFoundationMarkdownStreamSink({
+        workspacePath, runId: 'run-raw', dispatchId: 'dispatch-raw',
+        targetPath, maxBytes: 512_000, authorBodyVersion: 'foundation-author-body.v2',
+      })
+      await writeEmptyGddProjection(workspacePath, 'dispatch-raw')
+      for (const message of successfulMessages(markdown)) sink.observe(message)
+      expect((await sink.commit()).status).toBe('committed')
+      expect(await readFile(foundationMarkdownPendingPath(workspacePath, 'run-raw', 'dispatch-raw'), 'utf8')).toBe(markdown)
+      expect(await readFile(join(workspacePath, targetPath), 'utf8')).toContain(markdown)
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true })
+    }
+  })
+
   test('publishes ordered text blocks produced by a native max-token continuation', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-continuation-'))
     try {
@@ -571,7 +593,7 @@ describe('foundation Markdown stream sink', () => {
     }
   })
 
-  test('rejects tool use without replacing an existing canonical document', async () => {
+  test('tool use alone is not a document and cannot replace canonical content', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'foundation-tool-'))
     try {
       await mkdir(join(workspacePath, 'docs'), { recursive: true })
@@ -590,7 +612,7 @@ describe('foundation Markdown stream sink', () => {
       }))
       sink.observe({ type: 'result', subtype: 'success', is_error: false })
 
-      await expect(sink.commit()).rejects.toThrow(/tool/i)
+      await expect(sink.commit()).rejects.toThrow(/complete terminal response/i)
       expect(await readFile(join(workspacePath, targetPath), 'utf8')).toBe(
         'existing canonical bytes',
       )

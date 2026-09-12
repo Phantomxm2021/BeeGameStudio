@@ -308,6 +308,13 @@ describe('public foundation authoring app routes', () => {
     expect(view.workflow.messageKey).toBe('workflow.documentReview')
     expect(view.workflow.block?.code).toBe('public_author_handoff')
     expect(view.workflow.block?.nextAction).toBeUndefined()
+    const completed = await store.load()
+    if (!completed?.authorStage) throw new Error('missing completed author checkpoint')
+    await store.save({ ...completed, status: 'stopped', phase: 'DOCUMENT_DRAFTING', documentStep: 'FOUNDATION_DRAFTING',
+      authorStage: { ...completed.authorStage, control: { ...completed.authorStage.control, action: 'stop' } } })
+    const pausedResponse = await f.app.request(`/api/projects/${projectId}/workflow`)
+    const paused = await pausedResponse.json() as { workflow: { nextAction?: string } }
+    expect(paused.workflow.nextAction).toBe('resume')
     await Promise.all(f.cleanups.map(cleanup => cleanup()))
   })
 })

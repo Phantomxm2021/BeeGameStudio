@@ -9,10 +9,6 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 
 export type FoundationCandidateResult = Extract<RevisionResult, { status: 'completed' }>['result']
 export type FoundationHandoffIdentity = { ownerId: string; projectId: string }
-export type FoundationPreviousReview = {
-  candidate: FoundationCandidateResult
-  recheck: ReviewerReviewResult
-}
 
 // Encoding of copied public contracts, not a stage parser or execution kernel.
 export function foundationPublicJson(value: unknown): string {
@@ -30,7 +26,11 @@ const bytesDigest = (bytes: Uint8Array) => createHash('sha256').update(bytes).di
  * A digest detects changed bytes; it does not itself authenticate a producer. */
 export function foundationResultBinding(identity: FoundationHandoffIdentity,
   result: ReviewerReviewResult | FoundationCandidateResult) {
-  if (result.protocolVersion !== 1 || result.ownerId !== identity.ownerId || result.projectId !== identity.projectId)
+  const supportedVersion = result.producer === 'foundation-reviewer'
+    ? result.protocolVersion === 3
+    : result.producer === 'foundation-revision' && result.protocolVersion === 2
+  if (!supportedVersion) throw new Error('Foundation public result producer or protocol version is unsupported')
+  if (result.ownerId !== identity.ownerId || result.projectId !== identity.projectId)
     throw new Error('Foundation public result owner or project mismatch')
   const { resultId, ...body } = result
   if (resultId !== foundationPublicDigest(body)) throw new Error('Foundation public result digest mismatch')
@@ -42,6 +42,7 @@ export function foundationResultBinding(identity: FoundationHandoffIdentity,
 export async function createFoundationInitialReviewRequest(value: {
   workspacePath: string
   requestId: string
+  confirmedBriefContext: string
   expected: FoundationHandoffIdentity & { inputDigest: string; confirmedBriefDigest: string }
   result: AuthorDocumentsResult
 }): Promise<ReviewerStartInput> {
@@ -86,8 +87,11 @@ export async function createFoundationInitialReviewRequest(value: {
     const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
     documents.push({ path: document.path as typeof CANONICAL_FOUNDATION_DOCUMENTS[number], content })
   }
+  if (!captured.confirmedBriefContext.trim() || bytesDigest(Buffer.from(captured.confirmedBriefContext)) !== expected.confirmedBriefDigest)
+    throw new Error('Confirmed brief content does not match the accepted digest')
   const input = { subject: { kind: 'initial' as const, sourceResultId: result.resultId,
-    sourceDocumentRevision: result.documentRevision, confirmedBriefDigest: result.confirmedBriefDigest }, documents }
+    sourceDocumentRevision: result.documentRevision, confirmedBriefDigest: result.confirmedBriefDigest }, documents,
+    requirements: { status: 'available' as const, content: captured.confirmedBriefContext, digest: expected.confirmedBriefDigest } }
   return { protocolVersion: 1, ...expectedIdentity(expected), requestId: captured.requestId, input,
     inputDigest: foundationReviewerInputDigest({ ...expectedIdentity(expected), input }) }
 }
@@ -97,39 +101,45 @@ function expectedIdentity(value: FoundationHandoffIdentity): FoundationHandoffId
 }
 
 export function createFoundationRepairRequest(value: FoundationHandoffIdentity & {
-  requestId: string; source: ReviewerReviewResult; previous?: FoundationPreviousReview
+  requestId: string; source: ReviewerReviewResult
 }): RevisionStartInput {
   const captured = structuredClone(value)
   const identity = expectedIdentity(captured)
   if (captured.source.producer !== 'foundation-reviewer' || captured.source.kind !== 'issues_found')
     throw new Error('Revision requires an accepted Reviewer issue result')
   const source = { sourceResult: captured.source, sourceBinding: foundationResultBinding(identity, captured.source) }
-  const input: RevisionStartInput['input'] = captured.previous ? {
-    ...source, kind: 'retry_same_round',
-    previousCandidateResult: captured.previous.candidate,
-    previousCandidateBinding: foundationResultBinding(identity, captured.previous.candidate),
-    previousRecheckResult: captured.previous.recheck,
-    previousRecheckBinding: foundationResultBinding(identity, captured.previous.recheck),
-  } : { ...source, kind: captured.source.subject.kind === 'initial' ? 'initial' : 'next_round' }
+  const input: RevisionStartInput['input'] = source
   return { protocolVersion: 1, ...identity, requestId: captured.requestId, input,
     inputDigest: foundationRevisionInputDigest({ ...identity, input }) }
 }
 
 export function createFoundationCandidateReviewRequest(value: FoundationHandoffIdentity & {
-  requestId: string; source: ReviewerReviewResult; candidate: FoundationCandidateResult; previous?: FoundationPreviousReview
+  requestId: string; source: ReviewerReviewResult; candidate: FoundationCandidateResult
 }): ReviewerStartInput {
   const captured = structuredClone(value)
   const identity = expectedIdentity(captured)
   if (captured.candidate.producer !== 'foundation-revision' || captured.candidate.kind !== 'candidate_ready')
     throw new Error('Reviewer requires an accepted Revision candidate')
-  const source = { sourceResult: captured.source, sourceBinding: foundationResultBinding(identity, captured.source),
-    candidateResult: captured.candidate, candidateBinding: foundationResultBinding(identity, captured.candidate) }
-  const input: ReviewerStartInput['input'] = captured.previous ? {
-    ...source, kind: 'retry', previousCandidateResult: captured.previous.candidate,
-    previousCandidateBinding: foundationResultBinding(identity, captured.previous.candidate),
-    previousRecheckResult: captured.previous.recheck,
-    previousRecheckBinding: foundationResultBinding(identity, captured.previous.recheck),
-  } : { ...source, kind: 'first' }
+  const sourceBinding = foundationResultBinding(identity, captured.source)
+  foundationResultBinding(identity, captured.candidate)
+  const candidate = captured.candidate
+  if (captured.source.kind !== 'issues_found' || candidate.sourceReviewResultId !== captured.source.resultId ||
+    candidate.sourceReviewResultDigest !== sourceBinding.resultDigest || candidate.baseDocumentSetDigest !== captured.source.documentSetDigest ||
+    candidate.round !== (captured.source.subject.kind === 'initial' ? 1 : captured.source.subject.round + 1) ||
+    candidate.documents.length !== 8 || candidate.documents.some((doc, index) => doc.path !== CANONICAL_FOUNDATION_DOCUMENTS[index] ||
+      bytesDigest(Buffer.from(doc.content)) !== doc.digest || Buffer.byteLength(doc.content) !== doc.byteLength) ||
+    bytesDigest(Buffer.from(JSON.stringify(candidate.documents.map(({ path, digest }) => [path, digest])))) !== candidate.documentSetDigest)
+    throw new Error('Revision candidate does not match the accepted full-audit source')
+  const input: ReviewerStartInput['input'] = { subject: { kind: 'candidate', candidateId: candidate.candidateId,
+    candidateResultId: candidate.resultId, sourceReviewResultId: captured.source.resultId, sourceReviewResultDigest: sourceBinding.resultDigest,
+    baseDocumentSetDigest: candidate.baseDocumentSetDigest, round: candidate.round }, requirements: captured.source.requirements,
+    documents: candidate.documents.map(({ path, content }) => ({ path, content })),
+    comparison: { baseDocuments: captured.source.documents.map(({ path, content }) => ({ path, content })),
+      reviewEvidence: {
+        issues: captured.source.issues.map(({ issue }) => ({ id: issue.id, title: issue.title,
+          actual: issue.actual, expected: issue.expected, documentPath: issue.source.documentPath })),
+        revisionSummary: candidate.revisionSummary,
+      } } }
   return { protocolVersion: 1, ...identity, requestId: captured.requestId, input,
     inputDigest: foundationReviewerInputDigest({ ...identity, input }) }
 }

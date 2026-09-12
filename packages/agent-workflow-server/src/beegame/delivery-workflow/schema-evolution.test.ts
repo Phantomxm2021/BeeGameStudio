@@ -6,6 +6,8 @@ import {
   dispatchRecordSchema,
   tasksPlannedEventSchema,
   workflowUnitAcceptedEventSchema,
+  isCompatibleLegacyFoundationSnapshot,
+  migrateLegacyFoundationSnapshot,
 } from './schema'
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
@@ -50,6 +52,8 @@ const PERSISTED_SCHEMA_FINGERPRINTS: Readonly<Record<number, string>> = {
   49: '24b475e780e60c2694ba2cfff87ccee97ba2280c0b0b229c402de0e171a1482c',
   50: '7bce90a8e6b3bac5dc93d4e41dc05347aed9f1a5df59e9a6134812b1b6c864c0',
   51: 'cc87efa7fd1c49bece3376a2f20f7c80e3a52be1a043c65d97725d362cdd128d',
+  52: '36891826b6f75e6b0425e1ed4618ac43500695655ead638bc8f3f7d21630ed4f',
+  53: '72358e7c627657abd802f875c6563683b1eabfd5d944ec6230dfd9a05f2dcc9c',
 }
 
 function canonicalize(value: unknown): unknown {
@@ -116,5 +120,17 @@ describe('persisted workflow schema evolution', () => {
         documentStep: 'FOUNDATION_REVIEW',
       }).success,
     ).toBe(false)
+  })
+
+  test('recognizes only a legacy v52 public link for in-memory migration and does not rewrite its source', () => {
+    const legacy = { schemaVersion: 52, phase: 'DOCUMENT_REVIEW', foundationReviewStage: {
+      invocation: { stage: 'reviewer' },
+    } }
+    expect(isCompatibleLegacyFoundationSnapshot(legacy)).toBe(true)
+    const migrated = migrateLegacyFoundationSnapshot(legacy) as { schemaVersion: number }
+    expect(migrated.schemaVersion).toBe(DELIVERY_RUN_SCHEMA_VERSION)
+    expect(legacy.schemaVersion).toBe(52)
+    expect(isCompatibleLegacyFoundationSnapshot({ ...legacy,
+      foundationReviewStage: { ...legacy.foundationReviewStage, policyVersion: 'foundation-acceptance.v1' } })).toBe(false)
   })
 })

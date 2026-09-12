@@ -1,17 +1,17 @@
 import { expect, test } from 'bun:test'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../domain/types'
 import { bindRevisionDocuments, type RevisionDocumentInput } from '../document-snapshot'
-// Test-only peer oracle; Revision production must not import this owner.
-import { bindReviewDocuments } from '../../../foundation-reviewer/private/prepare-review'
+import { createHash } from 'node:crypto'
 
 const fixture = () => CANONICAL_FOUNDATION_DOCUMENTS.map((path, index) => ({ path, content: `# 文档 ${index}\r\n\n正文 😀\n` }))
 
 test('canonical bytes and set digest match the existing public handoff encoding', () => {
   const input = fixture().reverse()
   const actual = bindRevisionDocuments(input)
-  const expected = bindReviewDocuments(input)
-  expect(actual.documentSetDigest).toBe(expected.digest)
-  expect(actual.documents).toEqual(expected.documents.map(document => ({ ...document, byteLength: Buffer.byteLength(document.content, 'utf8') })))
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  const expected = fixture().map(document => ({ ...document, digest: hash(document.content), byteLength: Buffer.byteLength(document.content) }))
+  expect(actual.documentSetDigest).toBe(hash(JSON.stringify(expected.map(document => [document.path, document.digest]))))
+  expect(actual.documents).toEqual(expected)
   expect(actual).toEqual(bindRevisionDocuments([...input].reverse()))
   input[0]!.content = 'caller mutation'
   expect(actual.documents.some(document => document.content === 'caller mutation')).toBe(false)

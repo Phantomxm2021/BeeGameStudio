@@ -1,4 +1,10 @@
 import { Hono, type Context } from 'hono'
+import { projectFoundationReviewDisplay } from './beegame/delivery-workflow/foundation-review-display'
+import { createFoundationRiskDecision, FOUNDATION_ACCEPTANCE_POLICY_VERSION,
+  type FoundationPolicyAuthorization } from './beegame/delivery-workflow/foundation-acceptance-policy'
+import { foundationResultBinding, foundationPublicDigest } from './beegame/delivery-workflow/foundation-public-handoff'
+import { z } from 'zod/v4'
+import { registerDevProjectPurgeRoutes } from './dev-project-purge'
 import { retiredFoundationRunningDispatches } from './beegame/delivery-workflow/retired-foundation-review'
 import {
   readCanonicalProjectArtifactConsistently as readProjectArtifactConsistently,
@@ -1308,7 +1314,9 @@ export function createAgentWorkflowApp(
     await next()
   })
 
-  app.get('/health', c => c.json({ status: 'ok' }))
+  app.get('/health', c => c.json({ status: 'ok', foundationReviewCapabilities: {
+    version: 'native-file-review-loop.v4', comparison: true,
+  } }))
 
   app.post('/api/internal/resource-semantic-curation', async c => {
     const serviceToken = options.resourceSelectionRuntimeConfig?.serviceToken
@@ -2345,6 +2353,7 @@ export function createAgentWorkflowApp(
         return c.json(
           {
             error: err.message,
+            code: 'PROJECT_QUOTA_EXCEEDED',
             limit: err.limit,
             projectCount: err.projectCount,
           },
@@ -2367,6 +2376,10 @@ export function createAgentWorkflowApp(
     let copiedWorkspacePath: string | undefined
     let executionRequested = false
     try {
+      const body = await c.req.text()
+      const reviewOptions = z.object({ tokenBudget: z.number().int().positive().safe().nullable().optional(),
+        stopAfterReview: z.boolean().optional() }).strict()
+        .parse(body.trim() ? JSON.parse(body) : {})
       const sourceProject = await getOwnedProjectMetadata(
         c.req.raw,
         user,
@@ -2434,6 +2447,7 @@ export function createAgentWorkflowApp(
         ownerId: user.id,
         projectId,
         confirmedBriefContext,
+        ...reviewOptions,
         sourceRun: { ownerId: user.id, projectId: sourceProject.id,
           confirmedBriefContext, confirmedBriefDigest: rawSnapshot.confirmedBriefDigest,
           authorStage: sourceAuthor },
@@ -2479,6 +2493,7 @@ export function createAgentWorkflowApp(
         return c.json(
           {
             error: error.message,
+            code: 'PROJECT_QUOTA_EXCEEDED',
             limit: error.limit,
             projectCount: error.projectCount,
           },
@@ -2599,6 +2614,7 @@ export function createAgentWorkflowApp(
         return c.json(
           {
             error: err.message,
+            code: 'PROJECT_QUOTA_EXCEEDED',
             limit: err.limit,
             projectCount: err.projectCount,
           },
@@ -3139,6 +3155,100 @@ export function createAgentWorkflowApp(
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
+  })
+
+  /** Explicit, auditable Foundation acceptance adjudication. Ordinary resume
+   * never waives findings, increases budget, or changes policy. */
+  app.post('/api/projects/:id/workflow/foundation-decision', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project?.root_path) return c.json({ error: 'Project not found' }, 404)
+      const body = await readJson(c.req.raw)
+      const action = typeof body.action === 'string' ? body.action : undefined
+      const reason = typeof body.reason === 'string' ? body.reason : undefined
+      const decisionId = typeof body.decisionId === 'string' ? body.decisionId : undefined
+      const authorizationId = typeof body.authorizationId === 'string' ? body.authorizationId : undefined
+      const findingIds = Array.isArray(body.findingIds) ? body.findingIds : undefined
+      const reportResultId = typeof body.reportResultId === 'string' ? body.reportResultId : undefined
+      const reportResultDigest = typeof body.reportResultDigest === 'string' ? body.reportResultDigest : undefined
+      const documentSetDigest = typeof body.documentSetDigest === 'string' ? body.documentSetDigest : undefined
+      const controlSequence = typeof body.controlSequence === 'number' ? body.controlSequence : undefined
+      const expectedPolicyVersion = typeof body.policyVersion === 'string' ? body.policyVersion : body.policyVersion === null ? undefined : '__missing__'
+      const expectedAutomaticRepairLimit = typeof body.automaticRepairLimit === 'number' ? body.automaticRepairLimit : body.automaticRepairLimit === null ? undefined : '__missing__'
+      const expectedCompletedRepairCount = typeof body.completedRepairCount === 'number' ? body.completedRepairCount : body.completedRepairCount === null ? undefined : '__missing__'
+      const additionalRepairRounds = typeof body.additionalRepairRounds === 'number' ? body.additionalRepairRounds : undefined
+      if (!action || !['accept_risk', 'grant_repair_budget', 'switch_policy'].includes(action) || !reason?.trim())
+        return c.json({ error: 'Explicit Foundation decision action and reason are required' }, 400)
+      const run = await createRunStore(project.root_path, user.id).load()
+      if (!run) return c.json({ error: 'document_review_not_started' }, 409)
+      const link = run.foundationReviewStage
+      if (!link) return c.json({ error: 'foundation_review_not_started' }, 409)
+      if (body.runId !== run.runId || !Number.isSafeInteger(controlSequence) || expectedPolicyVersion === '__missing__' ||
+          expectedAutomaticRepairLimit === '__missing__' || expectedCompletedRepairCount === '__missing__')
+        return c.json({ error: 'Foundation decision precondition is missing or stale' }, 409)
+      const precondition = { runId: run.runId, controlSequence: controlSequence!, policyVersion: expectedPolicyVersion as string | undefined,
+        automaticRepairLimit: expectedAutomaticRepairLimit as number | undefined, completedRepairCount: expectedCompletedRepairCount as number | undefined }
+      const now = new Date().toISOString()
+      if (action === 'accept_risk') {
+        if (!decisionId?.trim() || !findingIds || findingIds.length < 1 || !findingIds.every((id: unknown) => typeof id === 'string' && id.trim()))
+          return c.json({ error: 'Risk decisions require a stable decisionId and findingIds' }, 400)
+        const review = link.latestReview ?? link.sourceReview ?? (link.invocation.stage === 'reviewer' && link.invocation.outcome?.status === 'completed'
+          ? link.invocation.outcome.result : undefined)
+        if (!review || review.producer !== 'foundation-reviewer') return c.json({ error: 'No settled Foundation report is available for adjudication' }, 409)
+        const binding = foundationResultBinding({ ownerId: run.ownerId, projectId: run.projectId }, review)
+        if (reportResultId !== review.resultId || reportResultDigest !== binding.resultDigest || documentSetDigest !== review.documentSetDigest)
+          return c.json({ error: 'Foundation decision report binding is stale or incomplete' }, 409)
+        const riskDecisions = findingIds.map((findingId: string) => {
+          const stableId = `${decisionId}:${findingId}`
+          const prior = link.riskDecisions?.find(item => item.decisionId === stableId)
+          if (prior) {
+            if (prior.actorId !== user.id || prior.reason !== reason.trim() || prior.findingId !== findingId)
+              throw new Error('Foundation risk decision ID payload conflict')
+            return prior
+          }
+          return createFoundationRiskDecision({ ownerId: run.ownerId,
+            projectId: run.projectId, review, findingId, actorId: user.id, reason: reason.trim(),
+            decisionId: stableId, recordedAt: now })
+        })
+        const updated = await getDeliveryController({ request: c.req.raw, user, projectId: run.projectId, workspacePath: project.root_path })
+          .applyFoundationPolicyDecision(run, { riskDecisions, riskDecisionRequestId: decisionId, precondition })
+        return c.json(updated)
+      }
+      if (!authorizationId?.trim())
+        return c.json({ error: 'Budget or policy changes require a stable authorizationId' }, 400)
+      const authorization: FoundationPolicyAuthorization = action === 'grant_repair_budget'
+        ? { authorizationId, action: 'grant_repair_budget', actorId: user.id, reason: reason.trim(), recordedAt: now,
+            fromPolicyVersion: link.policyVersion, toPolicyVersion: FOUNDATION_ACCEPTANCE_POLICY_VERSION,
+            // Build the durable authorization against the request's snapshot,
+            // not the post-mutation state. This keeps a replay's payload
+            // stable after the first grant has advanced the live limit.
+            previousAutomaticRepairLimit: expectedAutomaticRepairLimit as number | undefined,
+            newAutomaticRepairLimit: (expectedAutomaticRepairLimit ?? link.automaticRepairLimit ?? 0) +
+              (typeof additionalRepairRounds === 'number' && Number.isSafeInteger(additionalRepairRounds) && additionalRepairRounds > 0 ? additionalRepairRounds : 0) }
+        : { authorizationId, action: 'switch_policy', actorId: user.id, reason: reason.trim(), recordedAt: now,
+            // A replay carries the legacy precondition (null on the wire),
+            // while the live link is already upgraded. Preserve the original
+            // authorization's source policy rather than comparing to v1.
+            fromPolicyVersion: expectedPolicyVersion, toPolicyVersion: FOUNDATION_ACCEPTANCE_POLICY_VERSION,
+            newAutomaticRepairLimit: (expectedCompletedRepairCount ?? link.completedRepairCount ?? Math.floor(link.sequence / 2)) + 2 }
+      const priorAuthorization = link.policyAuthorizations?.find(item => item.authorizationId === authorizationId)
+      if (priorAuthorization) {
+        if (priorAuthorization.actorId !== user.id || priorAuthorization.reason !== reason.trim() || priorAuthorization.action !== authorization.action ||
+            priorAuthorization.newAutomaticRepairLimit !== authorization.newAutomaticRepairLimit ||
+            priorAuthorization.previousAutomaticRepairLimit !== authorization.previousAutomaticRepairLimit ||
+            priorAuthorization.fromPolicyVersion !== authorization.fromPolicyVersion || priorAuthorization.toPolicyVersion !== authorization.toPolicyVersion)
+          return c.json({ error: 'Foundation authorization ID payload conflict' }, 409)
+      }
+      const durableAuthorization = priorAuthorization ?? authorization
+      if (action === 'grant_repair_budget' && (durableAuthorization.newAutomaticRepairLimit ?? 0) <= (link.automaticRepairLimit ?? 0) && !priorAuthorization)
+        return c.json({ error: 'additionalRepairRounds must be a positive integer' }, 400)
+      const updated = await getDeliveryController({ request: c.req.raw, user, projectId: run.projectId, workspacePath: project.root_path })
+        .applyFoundationPolicyDecision(run, { authorization: durableAuthorization, precondition })
+      return c.json(updated)
+    } catch (err) { return c.json({ error: toErrorMessage(err) }, 409) }
   })
 
   app.post('/api/projects/:id/workflow/retry', async c => {
@@ -3816,19 +3926,17 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.delete('/api/projects/:id', async c => {
-    const user = getCurrentUser(c.req.raw)
-    try {
+  async function deleteOwnedProject(request: Request, user: BeeGameUserContext, projectId: string) {
       const project = await getOwnedProjectMetadata(
-        c.req.raw,
+        request,
         user,
-        c.req.param('id'),
+        projectId,
         dashboardRepository,
       )
       // Ownership is the authorization boundary for deleting a project. A
       // workspace-wide administrative grant must not prevent a creator from
       // removing their own project.
-      if (!project) return c.json({ deleted: false })
+      if (!project) return { deleted: false }
       const liveSession = findLiveProjectSession(
         beeGameSessions,
         user.id,
@@ -3840,9 +3948,9 @@ export function createAgentWorkflowApp(
         await beeGameSessions.delete(liveSession.id, { deleteArtifacts: false })
       }
       const deleted = await dashboardRepository.deleteProject(
-        c.req.raw,
+        request,
         user,
-        c.req.param('id'),
+        projectId,
       )
       const deletedWorkspacePath =
         deleted && project?.root_path
@@ -3858,11 +3966,11 @@ export function createAgentWorkflowApp(
           : 'metadata_deleted'
       if (deleted) {
         await appendAuditEventBestEffort('project.deleted', () =>
-          dashboardRepository.appendAuditEvent(c.req.raw, user, {
+          dashboardRepository.appendAuditEvent(request, user, {
             actorId: user.id,
             action: 'project.deleted',
             targetType: 'project',
-            targetId: c.req.param('id'),
+            targetId: projectId,
             projectReference: 'detached',
             metadata: {
               cleanupOutcome,
@@ -3874,10 +3982,22 @@ export function createAgentWorkflowApp(
           }),
         )
       }
-      return c.json({
+      return {
         deleted,
         ...(deletedWorkspacePath ? { deletedWorkspacePath } : {}),
-      })
+      }
+  }
+
+  registerDevProjectPurgeRoutes(app, {
+    getUser: getCurrentUser,
+    listProjects: (request, user) => dashboardRepository.listProjects(request, user),
+    deleteProject: deleteOwnedProject,
+  })
+
+  app.delete('/api/projects/:id', async c => {
+    const user = getCurrentUser(c.req.raw)
+    try {
+      return c.json(await deleteOwnedProject(c.req.raw, user, c.req.param('id')))
     } catch (error) {
       return tracedRouteError(c, 'project.delete', error)
     }
@@ -6292,6 +6412,12 @@ function workflowThinkingStatus(
   workflow: JsonObject,
 ): 'working' | 'waiting' | 'idle' {
   if (workflowStatus(workflow) !== 'running') return 'idle'
+  if (isObject(workflow.foundationReviewStage)) {
+    const invocation = isObject(workflow.foundationReviewStage.invocation)
+      ? workflow.foundationReviewStage.invocation : undefined
+    const outcome = invocation && isObject(invocation.outcome) ? invocation.outcome : undefined
+    if (outcome?.status === 'running') return 'working'
+  }
   const dispatch = isObject(workflow.activeDispatch)
     ? workflow.activeDispatch
     : undefined
@@ -6338,8 +6464,11 @@ function workflowNextAction(
   workflow: JsonObject,
 ): 'resume' | 'retry' | undefined {
   const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
-  if (publicAuthor?.completed && !workflow.foundationReviewStage) return undefined
-  if (isObject(workflow.foundationReviewStage) && workflow.foundationReviewStage.acceptedReview) return undefined
+  if (publicAuthor?.completed && !workflow.foundationReviewStage)
+    return workflowStatus(workflow) === 'stopped' ? 'resume' : undefined
+  const foundation = projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status)
+  if (foundation?.resumeAvailable) return 'resume'
+  if (foundation?.terminal) return undefined
   if (workflow.workflowStateError === true)
     return workflow.recoverable === true ? 'resume' : undefined
   const status = workflowStatus(workflow)
@@ -6374,7 +6503,56 @@ function workflowViewForDisplay(
     phase: workflow.phase,
     documentStep: displayDocumentStep,
   })
-  const blockedReason = publicAuthor?.completed && !workflow.foundationReviewStage
+  const foundationDisplay = projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status)
+  const acceptanceDecision = isObject(workflow.foundationReviewStage)
+    ? displayFoundationAcceptanceDecision(workflow.foundationReviewStage.acceptanceDecision)
+    : undefined
+  const reviewReport = isObject(workflow.foundationReviewStage)
+    ? displayFoundationReviewReport(workflow.foundationReviewStage.acceptedReview ?? workflow.foundationReviewStage.latestReview ?? workflow.foundationReviewStage.sourceReview)
+    : undefined
+  const foundationInvocation = isObject(workflow.foundationReviewStage)
+    && isObject(workflow.foundationReviewStage.invocation)
+    ? workflow.foundationReviewStage.invocation
+    : undefined
+  const foundationLink = isObject(workflow.foundationReviewStage)
+    ? workflow.foundationReviewStage
+    : undefined
+  const foundationOutcome = isObject(foundationInvocation?.outcome)
+    ? foundationInvocation.outcome
+    : undefined
+  const foundationControl = isObject(foundationLink?.control)
+    ? foundationLink.control
+    : undefined
+  const stoppedLegacyFoundationSwitchAvailable = isObject(workflow.foundationReviewStage) &&
+    workflow.foundationReviewStage.policyVersion === undefined &&
+    workflow.status === 'stopped' &&
+    foundationControl?.action === 'stop' &&
+    foundationOutcome?.status === 'stopped' &&
+    foundationOutcome.billingStatus === 'settled'
+  const foundationDecisionContext = isObject(workflow.foundationReviewStage) && typeof workflow.runId === 'string' &&
+    isObject(workflow.foundationReviewStage.control)
+    ? { runId: workflow.runId, controlSequence: workflow.foundationReviewStage.control.sequence,
+        policyVersion: typeof workflow.foundationReviewStage.policyVersion === 'string' ? workflow.foundationReviewStage.policyVersion : null,
+        automaticRepairLimit: Number.isSafeInteger(workflow.foundationReviewStage.automaticRepairLimit) ? workflow.foundationReviewStage.automaticRepairLimit : null,
+        completedRepairCount: Number.isSafeInteger(workflow.foundationReviewStage.completedRepairCount) ? workflow.foundationReviewStage.completedRepairCount : null,
+        availableActions: workflow.foundationReviewStage.acceptedReview ? [] : workflow.foundationReviewStage.convergenceStop
+          ? (workflow.foundationReviewStage.control.action === 'stop' ? [] : workflow.foundationReviewStage.policyVersion
+            ? ['accept_risk', 'grant_repair_budget'] : ['switch_policy'])
+          : stoppedLegacyFoundationSwitchAvailable ? ['switch_policy'] : [] }
+    : undefined
+  const foundationTiming = isObject(workflow.foundationReviewStage) &&
+    Number.isFinite(Number(workflow.elapsedMs)) && Number(workflow.elapsedMs) >= 0
+    ? { elapsedMs: Number(workflow.elapsedMs), scope: 'merged_foundation_stage_elapsed',
+        includesModelNetworkWait: true, includesToolAndSubtaskWait: true,
+        ...(Number.isFinite(Number(workflow.foundationReviewStage.currentCallElapsedMs)) && Number(workflow.foundationReviewStage.currentCallElapsedMs) >= 0
+          ? { currentCallElapsedMs: Number(workflow.foundationReviewStage.currentCallElapsedMs), currentCallScope: 'workflow_public_invocation_observed' }
+          : {}),
+        ...(Number.isFinite(Number(workflow.foundationReviewStage.historicalElapsedMs)) && Number(workflow.foundationReviewStage.historicalElapsedMs) >= 0
+          ? { historicalElapsedMs: Number(workflow.foundationReviewStage.historicalElapsedMs), historicalScope: 'workflow_public_invocation_completed_sum' }
+          : {}),
+        ...(typeof workflow.updatedAt === 'string' ? { observedAt: workflow.updatedAt } : {}) }
+    : undefined
+  const blockedReason = foundationDisplay?.block ?? (publicAuthor?.completed && !workflow.foundationReviewStage
     ? {
         message:
           typeof workflow.currentMessage === 'string' &&
@@ -6384,7 +6562,7 @@ function workflowViewForDisplay(
         code: 'public_author_handoff',
         diagnosticId: 'public-author-handoff',
       }
-    : workflowDisplayReason(workflow)
+    : workflowDisplayReason(workflow))
   const atomicDisplayTasks = tasks.flatMap(task => {
     if (!isObject(task) || typeof task.id !== 'string') return []
     return [
@@ -6407,7 +6585,7 @@ function workflowViewForDisplay(
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
   const displayTaskSource = isObject(workflow.foundationReviewStage)
     ? [{ id: 'foundation-public-stage', title: workflow.phase === 'FOUNDATION_REVISION' ? 'Foundation Revision' : 'Foundation Reviewer',
-        status: workflow.foundationReviewStage.acceptedReview ? 'completed' : workflow.status === 'running' ? 'running' : workflow.status === 'stopped' ? 'stopped' : 'failed',
+        status: foundationDisplay!.taskStatus,
         attempt: 0, operation: workflow.phase === 'FOUNDATION_REVISION' ? 'revise' : 'review' }]
     : publicAuthor
     ? publicAuthor.tasks
@@ -6536,6 +6714,10 @@ function workflowViewForDisplay(
     ...(blockedReason
       ? { block: { ...blockedReason, ...(nextAction ? { nextAction } : {}) } }
       : {}),
+    ...(acceptanceDecision ? { acceptanceDecision } : {}),
+    ...(reviewReport ? { reviewReport } : {}),
+    ...(foundationDecisionContext ? { foundationDecisionContext } : {}),
+    ...(foundationTiming ? { foundationTiming } : {}),
     ...(typeof workflow.workflowStateError === 'boolean'
       ? { workflowStateError: workflow.workflowStateError }
       : {}),
@@ -6566,6 +6748,12 @@ function workflowViewForDisplay(
       : {}),
     ...(typeof workflow.activeSince === 'string'
       ? { activeSince: workflow.activeSince }
+      : {}),
+    ...(isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.currentCallElapsedMs)) && Number(workflow.foundationReviewStage.currentCallElapsedMs) >= 0
+      ? { currentCallElapsedMs: Number(workflow.foundationReviewStage.currentCallElapsedMs) }
+      : {}),
+    ...(isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.historicalElapsedMs)) && Number(workflow.foundationReviewStage.historicalElapsedMs) >= 0
+      ? { historicalElapsedMs: Number(workflow.foundationReviewStage.historicalElapsedMs) }
       : {}),
     ...(workflow.resumeOnReconnect === true
       ? { resumeOnReconnect: true }
@@ -6599,6 +6787,37 @@ function displayIssueSummary(value: unknown): JsonObject | undefined {
   )
     return undefined
   return { total, blocker, high, medium, low }
+}
+
+function displayFoundationAcceptanceDecision(value: unknown): JsonObject | undefined {
+  if (!isObject(value) || typeof value.policyVersion !== 'string' || typeof value.reviewResultId !== 'string' ||
+      typeof value.reviewResultDigest !== 'string' || typeof value.documentSetDigest !== 'string' ||
+      typeof value.disposition !== 'string' || typeof value.reason !== 'string' ||
+      !['accepted', 'accepted_with_advisories', 'repair_required', 'needs_action'].includes(value.disposition) ||
+      !Array.isArray(value.advisoryFindingIds) || !Array.isArray(value.blockingFindingIds) || !Array.isArray(value.waivedFindingIds) ||
+      !value.advisoryFindingIds.every(id => typeof id === 'string') || !value.blockingFindingIds.every(id => typeof id === 'string') ||
+      !value.waivedFindingIds.every(id => typeof id === 'string') || !Number.isSafeInteger(value.automaticRepairLimit) ||
+      !Number.isSafeInteger(value.completedRepairCount)) return undefined
+  return { policyVersion: value.policyVersion, reviewResultId: value.reviewResultId, reviewResultDigest: value.reviewResultDigest,
+    documentSetDigest: value.documentSetDigest, disposition: value.disposition, advisoryFindingIds: value.advisoryFindingIds,
+    blockingFindingIds: value.blockingFindingIds, waivedFindingIds: value.waivedFindingIds,
+    automaticRepairLimit: value.automaticRepairLimit, completedRepairCount: value.completedRepairCount, reason: value.reason }
+}
+
+function displayFoundationReviewReport(value: unknown): JsonObject | undefined {
+  if (!isObject(value) || value.producer !== 'foundation-reviewer' || typeof value.resultId !== 'string' ||
+      !['passed', 'issues_found'].includes(String(value.kind)) || typeof value.documentSetDigest !== 'string' ||
+      !Array.isArray(value.issues)) return undefined
+  const findings = value.issues.flatMap(entry => {
+    if (!isObject(entry) || !isObject(entry.issue)) return []
+    const issue = entry.issue
+    if (typeof issue.id !== 'string' || typeof issue.severity !== 'string' || typeof issue.title !== 'string' ||
+        typeof issue.actual !== 'string' || typeof issue.expected !== 'string') return []
+    return [{ id: issue.id, severity: issue.severity, title: issue.title, actual: issue.actual, expected: issue.expected,
+      ...(isObject(issue.source) && typeof issue.source.documentPath === 'string' ? { documentPath: issue.source.documentPath } : {}) }]
+  })
+  return { resultId: value.resultId, resultDigest: foundationPublicDigest(value), documentSetDigest: value.documentSetDigest,
+    kind: value.kind, ...(isObject(value.audit) && typeof value.audit.summary === 'string' ? { summary: value.audit.summary } : {}), findings }
 }
 
 function displayUsage(value: unknown): JsonObject | undefined {
@@ -6685,9 +6904,9 @@ export function workflowStageSnapshotsForDisplay(
       phaseIndex: currentProgress.phaseIndex,
       phaseCount: currentProgress.phaseCount,
       status: (workflowStatus(workflow) || 'failed') as WorkflowStageCardSnapshot['status'],
-      currentPhase: 'DOCUMENT_REVIEW' as const,
+      currentPhase: 'FOUNDATION_REVISION' as const,
       substage: 'REPAIRING' as const,
-      documentStep: 'FOUNDATION_REVIEW' as const,
+      documentStep: 'FOUNDATION_REVISION' as const,
       tasks: liveTasks as WorkflowStageCardSnapshot['tasks'],
       completedTaskCount: liveTasks.filter(task => task.status === 'completed').length,
       totalTaskCount: liveTasks.length,
@@ -6701,9 +6920,14 @@ export function workflowStageSnapshotsForDisplay(
           ? reached[index].elapsedMs
           : 0,
     }
-    // A worker update is durable evidence, but is not stage-card copy.
+    // Drop stale copy, then project only the trusted native progress vocabulary.
     delete liveSnapshot.message
     delete liveSnapshot.thinking
+    if (workflow.status === 'running') {
+      const message = projectWorkflowCurrentMessage({ value: workflow.currentMessage,
+        phase: workflow.phase, documentStep: workflow.documentStep })
+      if (message) liveSnapshot.message = message
+    }
     if (index >= 0) reached[index] = liveSnapshot
     else reached = [...reached, liveSnapshot]
   }
@@ -6720,7 +6944,8 @@ export function workflowStageSnapshotsForDisplay(
     const blockReason = snapshot.block
       ? projectWorkflowDisplayReason(snapshot.block)
       : undefined
-    const block = blockReason
+    const foundationDisplay = isLive ? projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status) : undefined
+    const block = foundationDisplay?.block ?? (blockReason
       ? {
           ...blockReason,
           ...(snapshot.block?.code ? { code: snapshot.block.code } : {}),
@@ -6733,7 +6958,7 @@ export function workflowStageSnapshotsForDisplay(
             ? { nextAction: snapshot.block.nextAction }
             : {}),
         }
-      : undefined
+      : undefined)
     return {
       stageId: snapshot.stageId,
       phaseIndex: snapshot.phaseIndex,

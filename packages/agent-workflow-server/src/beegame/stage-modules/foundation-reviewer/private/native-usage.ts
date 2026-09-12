@@ -1,5 +1,5 @@
 export type ReviewNativeUsage = { prompt_tokens: number; completion_tokens: number; cache_read_tokens: number; cache_creation_tokens: number; total_tokens: number }
-export type ReviewUsageEvent = { type: 'result' | 'usage'; payload: Record<string, unknown> }
+export type ReviewUsageEvent = { type: 'result' | 'usage'; payload: Record<string, unknown>; messageId?: string }
 
 export function getLatestRuntimeUsage(
   events: ReviewUsageEvent[],
@@ -48,13 +48,14 @@ function latestCumulativeUsageEvent(
   events: ReviewUsageEvent[],
   afterIndex: number,
 ): ReviewNativeUsage {
-  // Native message_delta usage is a cumulative snapshot, not a delta. Keep
-  // the greatest observed value for each counter so partial snapshots (for
-  // example input tokens at message_start and output tokens at message_delta)
-  // compose without summing the same cumulative work repeatedly.
-  const latest = emptyRuntimeUsage()
+  // Counters are cumulative WITHIN a message, not across native model turns.
+  // Replayed assistant snapshots share their message id with stream frames.
+  // Legacy callers without ids retain the previous single-message behavior.
+  const messages = new Map<string, ReviewNativeUsage>()
   for (const event of events.slice(afterIndex + 1)) {
     if (event.type !== 'usage') continue
+    const key = event.messageId ?? 'legacy-unidentified-message'
+    const latest = messages.get(key) ?? emptyRuntimeUsage()
     const usage = getUsageFromEventPayload(event.payload)
     latest.prompt_tokens = Math.max(latest.prompt_tokens, usage.prompt_tokens)
     latest.completion_tokens = Math.max(
@@ -69,13 +70,10 @@ function latestCumulativeUsageEvent(
       latest.cache_creation_tokens,
       usage.cache_creation_tokens,
     )
+    latest.total_tokens = latest.prompt_tokens + latest.completion_tokens + latest.cache_read_tokens + latest.cache_creation_tokens
+    messages.set(key, latest)
   }
-  latest.total_tokens =
-    latest.prompt_tokens +
-    latest.completion_tokens +
-    latest.cache_read_tokens +
-    latest.cache_creation_tokens
-  return latest
+  return [...messages.values()].reduce((total, message) => { addRuntimeUsage(total, message); return total }, emptyRuntimeUsage())
 }
 
 function getUsageFromEventPayload(

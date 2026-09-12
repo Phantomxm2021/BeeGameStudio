@@ -1,10 +1,7 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { isAbsolute } from 'node:path'
 import {
-  buildTool,
   toolMatchesName,
   type Tool,
-  type ToolDef,
   type Tools,
 } from './Tool.js'
 import { AgentTool } from '@bee-game-studio/builtin-tools/tools/AgentTool/AgentTool.js'
@@ -124,7 +121,6 @@ export {
   COORDINATOR_MODE_ALLOWED_TOOLS,
 } from './constants/tools.js'
 import { feature } from 'bun:bundle'
-import { createNativeFoundationRevisionReadTool } from '@bee-game-studio/agent-workflow-server/beegame/native-foundation-revision-read-tool.js'
 // Dead code elimination: conditional import for OVERFLOW_TEST_TOOL
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const OverflowTestTool = feature('OVERFLOW_TEST_TOOL')
@@ -224,9 +220,9 @@ export function getToolsForDefaultPreset(): string[] {
  * NOTE: This MUST stay in sync with https://console.statsig.com/4aF3Ewatb6xPVpCwxb5nA3/dynamic_configs/claude_code_global_system_caching, in order to cache the system prompt across users.
  */
 export function getAllBaseTools(): Tools {
-  const foundationRevisionTools = createFoundationRevisionToolsForWorker()
-  if (process.env.BEEGAME_WORKFLOW_WORKER_TYPE === 'foundation-document-reviser')
-    return foundationRevisionTools
+  // Retired protocols fail closed. Native file agents use the regular tools
+  // below with an explicit --tools allowlist and workspace-bound permissions.
+  if (['foundation-reviewer-tools-v2', 'foundation-document-reviser'].includes(process.env.BEEGAME_WORKFLOW_WORKER_TYPE ?? '')) return []
   return [
     AgentTool,
     TaskOutputTool,
@@ -291,36 +287,9 @@ export function getAllBaseTools(): Tools {
     // ExecuteExtraTool (ExecuteTool) is a first-class tool — always available, not deferred.
     // Models use it to invoke deferred tools discovered via SearchExtraTools.
     ExecuteTool,
-    ...foundationRevisionTools,
   ]
 }
 
-function createFoundationRevisionToolsForWorker(): Tool[] {
-  if (process.env.BEEGAME_WORKFLOW_WORKER_TYPE !== 'foundation-document-reviser') return []
-  let contract: Record<string, unknown>
-  try {
-    const parsed: unknown = JSON.parse(process.env.BEEGAME_REVISION_CONTRACT ?? '')
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return []
-    contract = parsed as Record<string, unknown>
-  } catch {
-    return []
-  }
-  const stringValue = (key: string) => typeof contract[key] === 'string' ? contract[key] as string : undefined
-  const sectionIds = Array.isArray(contract.sectionIds) ? contract.sectionIds.filter((value): value is string => typeof value === 'string') : []
-  const scope = contract.scope === 'section' || contract.scope === 'document' ? contract.scope : undefined
-  const round = typeof contract.round === 'number' && Number.isSafeInteger(contract.round) && contract.round > 0 ? contract.round : undefined
-  const workspacePath = process.env.BEEGAME_WORKSPACE_PATH
-  if (!stringValue('taskId') || !stringValue('revision') || !stringValue('documentPath') || !stringValue('baseDocumentDigest') || !stringValue('stagedPath') || !round || !scope || (scope === 'section' && !sectionIds.length) || (scope === 'document' && sectionIds.length > 0) || !workspacePath || !isAbsolute(workspacePath)) return []
-  if (scope === 'section') return []
-  const buildNativeTool = (definition: Record<string, unknown>) =>
-    buildTool(definition as ToolDef)
-  const readTool = createNativeFoundationRevisionReadTool({
-    buildTool: buildNativeTool,
-    workspacePath,
-    expectedStagedPath: stringValue('stagedPath')!,
-  }) as Tool
-  return [readTool]
-}
 
 /**
  * Filters out tools that are blanket-denied by the permission context.

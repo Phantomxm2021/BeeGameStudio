@@ -1,6 +1,7 @@
 {
   "landing": {
     "intake": {
+      "devProjectPurge": {"button":"Development/test: delete all projects","confirm":"Permanently delete this account’s {{count}} projects and eligible workspaces. This cannot be undone. The account and resource library are not deleted.","delete":"Permanently delete all projects","cancel":"Cancel","pending":"Processing. Do not submit again…","result":"Deleted {{deleted}} projects; {{failed}} failed. Check the remaining list.","changed":"The project list changed. Review the list again before confirming.","failed":"Could not confirm the cleanup result. Refresh and check the project list before submitting again."},
       "modal": {
         "chooseOption": "Choose a direction",
         "productionSettings": "Build settings",
@@ -55,6 +56,8 @@
       "errors": {
         "missingPlatformModel": "The platform default model is not configured. Contact an administrator to configure it in platform settings before generating.",
         "projectStartFailed": "Unable to start the project. Check the service and try again.",
+        "projectQuotaExceeded": "Project limit reached: {{projectCount}} projects, limit {{limit}}. Delete unneeded projects in Project History and try again, or ask an administrator to adjust the limit. This is not a Credit balance issue.",
+        "projectQuotaExceededUnknown": "Project limit reached. Delete unneeded projects in Project History and try again, or ask an administrator to adjust the limit. This is not a Credit balance issue.",
         "authNotConfigured": "Supabase Auth is not configured.",
         "missingEmailPassword": "Enter your email and password.",
         "missingDisplayName": "Set a display name.",
@@ -802,6 +805,7 @@
     "confirmDelete": "Confirm Delete",
     "deletingProject": "Deleting project",
     "createReviewCopy": "Create Review Copy",
+    "stopAfterReview": "Stop after review (no revision)",
     "creatingReviewCopy": "Creating review copy",
     "artifactDownloadFailed": "Download failed. Please try again later.",
     "artifactPreviewFailed": "Failed to load artifact content. Please try downloading instead.",

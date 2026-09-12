@@ -33,6 +33,8 @@ export type ShellCommand = {
   background: (backgroundTaskId: string) => boolean
   result: Promise<ExecResult>
   kill: () => void
+  /** Wait until an asynchronous process-tree kill has actually been issued. */
+  waitForTermination?: () => Promise<void>
   status: 'running' | 'backgrounded' | 'completed' | 'killed'
   /**
    * Cleans up stream resources (event listeners).
@@ -130,6 +132,8 @@ class ShellCommandImpl implements ShellCommand {
   #resultResolver: ((result: ExecResult) => void) | null = null
   #exitCodeResolver: ((code: number) => void) | null = null
   #boundAbortHandler: (() => void) | null = null
+  #termination: Promise<void> | undefined
+  #terminationError: Error | undefined
   readonly taskOutput: TaskOutput
 
   static #handleTimeout(self: ShellCommandImpl): void {
@@ -336,14 +340,25 @@ class ShellCommandImpl implements ShellCommand {
 
   #doKill(code?: number): void {
     this.#status = 'killed'
-    if (this.#childProcess.pid) {
-      treeKill(this.#childProcess.pid, 'SIGKILL')
+    if (this.#childProcess?.pid && !this.#termination) {
+      const pid = this.#childProcess.pid
+      this.#termination = new Promise(resolve => {
+        treeKill(pid, 'SIGKILL', error => {
+          if (error && (error as NodeJS.ErrnoException).code !== 'ESRCH') this.#terminationError = error
+          resolve()
+        })
+      })
     }
     this.#resolveExitCode(code ?? SIGKILL)
   }
 
   kill(): void {
     this.#doKill()
+  }
+
+  async waitForTermination(): Promise<void> {
+    await this.#termination
+    if (this.#terminationError) throw this.#terminationError
   }
 
   background(taskId: string): boolean {

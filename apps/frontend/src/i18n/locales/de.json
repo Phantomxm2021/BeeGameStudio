@@ -368,6 +368,7 @@
   },
   "landing": {
     "intake": {
+      "devProjectPurge": {"button":"Entwicklung/Test: Alle Projekte löschen","confirm":"Die {{count}} Projekte dieses Kontos und zugehörige löschbare Arbeitsbereiche dauerhaft löschen. Dies kann nicht rückgängig gemacht werden. Konto und Ressourcenbibliothek bleiben erhalten.","delete":"Alle Projekte dauerhaft löschen","cancel":"Abbrechen","pending":"Wird verarbeitet. Nicht erneut absenden…","result":"{{deleted}} Projekte gelöscht; {{failed}} fehlgeschlagen. Prüfen Sie die verbleibende Liste.","changed":"Die Projektliste hat sich geändert. Prüfen Sie sie vor der Bestätigung erneut.","failed":"Das Ergebnis konnte nicht bestätigt werden. Aktualisieren und prüfen Sie die Liste, bevor Sie die Anfrage erneut senden."},
       "modal": {
         "chooseOption": "Choose a direction",
         "productionSettings": "Build settings",
@@ -418,6 +419,8 @@
       "errors": {
         "missingPlatformModel": "The platform default model is not configured. Contact an administrator to configure it in platform settings before generating.",
         "projectStartFailed": "Unable to start the project. Check the service and try again.",
+        "projectQuotaExceeded": "Projektlimit erreicht: {{projectCount}} Projekte, Limit {{limit}}. Löschen Sie nicht benötigte Projekte im Projektverlauf und versuchen Sie es erneut, oder bitten Sie einen Administrator, das Limit anzupassen. Dies liegt nicht am Credit-Guthaben.",
+        "projectQuotaExceededUnknown": "Projektlimit erreicht. Löschen Sie nicht benötigte Projekte im Projektverlauf und versuchen Sie es erneut, oder bitten Sie einen Administrator, das Limit anzupassen. Dies liegt nicht am Credit-Guthaben.",
         "authNotConfigured": "Supabase Auth is not configured.",
         "missingEmailPassword": "Enter your email and password.",
         "missingDisplayName": "Set a display name.",

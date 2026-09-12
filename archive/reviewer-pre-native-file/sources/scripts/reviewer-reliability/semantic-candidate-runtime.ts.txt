@@ -1,0 +1,32 @@
+/** Experimental process-only module binding. Never imported by production. */
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { resolve } from 'node:path'
+import { createSemanticPromptCandidate } from './semantic-prompt-candidate'
+import type { createNativeToolReviewTask as BaselineFactory } from '../../packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-tool-task'
+
+export const createNativeToolReviewTask: typeof BaselineFactory = (input, transcript) =>
+  createSemanticPromptCandidate(input, transcript).task
+
+const anchor = "import { createNativeToolReviewTask } from './single-agent-tool-task'"
+export function bindCandidateLifecycle(source: string): string {
+  assert.equal(source.split(anchor).length, 2, 'Lifecycle task binding drifted')
+  return source.replace(anchor, `import { createNativeToolReviewTask } from ${JSON.stringify(import.meta.path)}`)
+}
+
+export function installSemanticCandidateRuntime(expectedLifecycleSha256: string) {
+  const target = resolve(import.meta.dir, '../../packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-lifecycle.ts')
+  let loads = 0
+  Bun.plugin({ name: 'isolated-semantic-instructions-r1', setup(builder) {
+    builder.onLoad({ filter: /single-agent-lifecycle\.ts$/ }, args => {
+      if (resolve(args.path) !== target) return undefined
+      const source = readFileSync(target, 'utf8')
+      assert.equal(createHash('sha256').update(source).digest('hex'), expectedLifecycleSha256, 'Lifecycle source drifted')
+      loads++
+      return { contents: bindCandidateLifecycle(source), loader: 'ts' }
+    })
+  } })
+  // Bun runtime plugins live until this isolated process exits; do not clear unrelated plugins.
+  return { assertBound() { assert.equal(loads, 1, 'Candidate lifecycle was not bound exactly once; refusing model execution') } }
+}

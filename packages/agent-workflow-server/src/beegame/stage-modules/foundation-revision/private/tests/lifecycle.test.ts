@@ -37,7 +37,7 @@ afterEach(async () => {
       const leases = await openRevisionExecutionLease(root, registration.prepared.request, { readOnlyHandle: handle.id })
       const attempts = await openRevisionAttemptStore(root, registration.prepared.request, { readOnlyHandle: handle.id })
       const state = await attempts.readRequest()
-      if (state.activeAttemptIds.length === 0 && await leases.status() === 'free') { closed = true; break }
+      if (state.activeAttemptId === null && await leases.status() === 'free') { closed = true; break }
       await new Promise(resolve => setTimeout(resolve, 20))
     }
     expect(closed).toBe(true)
@@ -48,6 +48,7 @@ afterEach(async () => {
 function requestInput(requestId = 'lifecycle-request') {
   const fixture = structuredClone(initialInputs.lifecycle)
   fixture.start.requestId = requestId
+  fixture.start.inputDigest = foundationRevisionInputDigest({ ownerId: fixture.start.ownerId, projectId: fixture.start.projectId, input: fixture.start.input })
   return fixture
 }
 
@@ -89,7 +90,7 @@ function runtime(options: { mode?: 'valid' | 'wait'; ready?: string; resolve?: (
     async resolve() {
       calls += 1
       if (options.resolve?.()) throw new Error('runtime authorization unavailable')
-      const command = [process.execPath, join(import.meta.dir, 'owned-attempt-fixture.ts'), options.mode ?? 'valid',
+      const command = [process.execPath, join(import.meta.dir, 'native-file-revision.ts'), options.mode ?? 'valid',
         Buffer.from(options.body ?? initialInputs.lifecycle.validMarkdown).toString('base64')]
       if (options.ready) command.push(options.ready)
       return { command, env: { OPENAI_API_KEY: 'offline-unused-secret-sentinel' } }
@@ -119,6 +120,53 @@ function remember(root: string, stageValue: ReturnType<typeof createFoundationRe
   return handle
 }
 
+test('empty candidate file settles one child and pauses without automatic redispatch', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'revision-set-failure-')))
+  roots.push(root)
+  const request = requestInput('set-failure').start
+  request.inputDigest = foundationRevisionInputDigest({ ownerId: request.ownerId, projectId: request.projectId, input: request.input })
+  let calls = 0
+  const configured: RuntimeConfigurationClient = { protocolVersion: 1, ownerId: 'owner', async resolve() {
+    calls++
+    return { command: [process.execPath, join(import.meta.dir, 'native-file-revision.ts'), 'valid',
+      Buffer.from(' ').toString('base64')], env: {} }
+  } }
+  const module = stage(root, { runtimeConfiguration: configured, billing: billing().client })
+  const handle = remember(root, module, await module.start(request))
+  const result = await waitFor(module, handle, result => result.status === 'needs_action' && result.billingStatus === 'settled')
+  expect(result.status).toBe('needs_action')
+  const registration = await readRevisionRequestByHandle(root, handle.id, 'owner')
+  const store = await openRevisionAttemptStore(root, registration.prepared.request)
+  expect((await store.read()).attempt).toBe(1)
+  expect((await store.read()).lastSettlement).toMatchObject({
+    failureCode: 'output_invalid',
+  })
+  await new Promise(resolve => setTimeout(resolve, 100))
+  await module.getResult(handle)
+  expect(calls).toBe(1)
+  expect((await store.readRequest()).activeAttemptId).toBeNull()
+})
+
+test('public Revision retains concerns in its summary without source changes or automatic retries', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'revision-lifecycle-unresolved-')))
+  roots.push(root)
+  const request = requestInput('unresolved-request').start
+  const configuration = runtime({ body: JSON.stringify({ status: 'unresolved', reason: 'The cited source does not support the proposed change.' }) })
+  const meter = billing()
+  const module = stage(root, { runtimeConfiguration: configuration.client, billing: meter.client })
+  const handle = remember(root, module, await module.start(request))
+  const source = (await readRevisionRequestByHandle(root, handle.id, 'owner')).prepared.source
+  const result = await waitFor(module, handle, result => result.status === 'completed' && result.billingStatus === 'settled')
+  if (result.status !== 'completed') throw new Error('Expected completed assessment')
+  expect(result.result.documents).toEqual(source.documents)
+  expect(result.result.revisionSummary).toContain('does not support')
+  const calls = meter.calls.length
+  await module.getResult(handle)
+  await module.resume({ handle, requestId: 'repeat-completed-assessment' })
+  expect(configuration.calls()).toBe(1)
+  expect(meter.calls.length).toBe(calls)
+})
+
 test('completes, reopens, and replays idempotently without caller mutation or respawn', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'revision-lifecycle-complete-')))
   roots.push(root)
@@ -141,7 +189,7 @@ test('completes, reopens, and replays idempotently without caller mutation or re
     completed.result.documents[0]!.content = '# returned mutation'
     expect((await reopened.getResult(handle)).status).toBe('completed')
     const unchanged = await reopened.getResult(handle)
-    if (unchanged.status === 'completed') expect(unchanged.result.documents[0]!.content).toBe(requests.validMarkdown.trim())
+    if (unchanged.status === 'completed') expect(unchanged.result.documents[0]!.content).toBe(requests.validMarkdown)
   }
   expect(configured.calls()).toBe(1)
 })
@@ -185,7 +233,7 @@ test('remote stop waits for the owned child, then resume starts a fresh valid at
   const remote = stage(root, { runtimeConfiguration: resumedRuntime.client, billing: charged.client })
   remember(root, remote, handle)
   const stopped = await remote.stop({ handle, requestId: 'user-stop', reason: 'user_requested' })
-  expect(['stopped', 'needs_action']).toContain(stopped.status)
+  expect(['stopped', 'running']).toContain(stopped.status)
   await waitFor(remote, handle, result => result.status === 'stopped')
   const resumed = await remote.resume({ handle, requestId: 'resume-after-stop' })
   expect(['running', 'completed', 'needs_action']).toContain(resumed.status)
@@ -274,22 +322,25 @@ test('accepted billing continuation is not lost while another instance still own
   } finally { await tail.release() }
 }, 15_000)
 
-test('public document repair remains an open retry loop beyond two failed attempts', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'revision-lifecycle-retry-')))
+test('nonempty edits are passed to Reviewer without host structural adjudication', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'revision-lifecycle-no-progress-')))
   roots.push(root)
-  const requests = requestInput('open-retry-request')
+  const requests = requestInput('no-progress-request')
   let calls = 0
   const runtimeConfiguration: RuntimeConfigurationClient = { protocolVersion: 1, ownerId: 'owner', async resolve() {
     calls += 1
-    const body = calls <= 3 ? '# invalid document body' : requests.validMarkdown
-    return { command: [process.execPath, join(import.meta.dir, 'owned-attempt-fixture.ts'), 'valid', Buffer.from(body).toString('base64')], env: {} }
+    return { command: [process.execPath, join(import.meta.dir, 'native-file-revision.ts'), 'valid',
+      Buffer.from('# identical rejected document').toString('base64')], env: {} }
   } }
   const charged = billing()
-  const first = stage(root, { runtimeConfiguration, billing: charged.client })
-  const handle = remember(root, first, await first.start(requests.start))
-  await waitFor(first, handle, result => result.status === 'completed' && result.billingStatus === 'settled', 10_000)
-  expect(calls).toBe(4)
-  expect(new Set(charged.calls.filter(call => call.startsWith('record:'))).size).toBe(4)
+  const api = stage(root, { runtimeConfiguration, billing: charged.client })
+  const handle = remember(root, api, await api.start(requests.start))
+  const result = await waitFor(api, handle, result => result.status === 'completed' && result.billingStatus === 'settled', 10_000)
+  expect(result.status).toBe('completed')
+  if (result.status !== 'completed') throw new Error('Candidate was not retained')
+  expect(result.result.documents[0]!.content).toBe('# identical rejected document')
+  expect(calls).toBe(1)
+  expect(new Set(charged.calls.filter(call => call.startsWith('record:'))).size).toBe(1)
 }, 15_000)
 
 test('detached public bundle executes and reopens a complete Revision without source-runtime imports', async () => {

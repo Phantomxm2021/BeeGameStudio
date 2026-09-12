@@ -1,0 +1,417 @@
+import { join, isAbsolute } from 'node:path'
+import { readdir } from 'node:fs/promises'
+import { z } from 'zod/v4'
+import { journalImmutableFiles as files } from './journal-storage'
+import { captureSingleReviewInput, reviewDigest, reviewJson, REVIEW_DOCUMENT_PATHS, type SingleReviewInput } from './single-agent-contract'
+import { admitNativeReviewReport, nativeReviewReportSchema, type SingleReviewTranscriptEntry } from './single-agent-report'
+import { executeSingleReviewTool, REVIEW_BINARY_OPERATORS, REVIEW_AGGREGATE_OPERATORS } from './single-agent-tools'
+import { reviewProgressStalled } from './single-agent-budget'
+import { auditedCalculations } from './independent-audit-validation'
+
+export const REVIEW_TOOL_PROTOCOL = 'foundation-reviewer-tools-v2'
+export class ReviewToolLimitError extends Error {
+  constructor(readonly code: 'audit_progress_stalled' | 'review_tool_budget_exhausted') { super(code) }
+}
+const identifier = z.string().min(1).max(200)
+const digest = z.string().regex(/^[a-f0-9]{64}$/)
+const recoveryPrompt = z.string().min(1).max(4 * 1024 * 1024)
+const recoverySchema = z.object({ workId: identifier, prompt: recoveryPrompt }).strict()
+const descriptorRecoverySchema = z.object({ workId: identifier, promptDigest: digest }).strict()
+const descriptorSchema = z.object({ directory: z.string().refine(isAbsolute), sessionId: identifier,
+  inputDigest: digest, recovery: descriptorRecoverySchema.optional() }).strict()
+export type ReviewToolDescriptor = z.infer<typeof descriptorSchema>
+export type ReviewNativeRecovery = z.infer<typeof recoverySchema>
+export function parseReviewToolDescriptor(value: unknown): ReviewToolDescriptor { return descriptorSchema.parse(value) }
+export type ReviewToolRecord = { version: 2; sequence: number; sessionId: string; inputDigest: string;
+  toolUseId: string; name: string; arguments: unknown; argumentDigest: string; previousDigest: string;
+  entry: SingleReviewTranscriptEntry; digest: string }
+type Context = { protocol: typeof REVIEW_TOOL_PROTOCOL; sessionId: string; inputDigest: string;
+  input: SingleReviewInput; transcript: SingleReviewTranscriptEntry[]; recovery?: ReviewNativeRecovery }
+type Definition = { name: string; schema: z.ZodType; description: string; call(value: any): unknown;
+  recoveryOnly?: boolean; legacyOnly?: boolean; persisted?: boolean }
+const legacyDefinitions: Definition[] = [
+  { name: 'review_read', schema: z.object({ path: z.enum([...REVIEW_DOCUMENT_PATHS, 'requirements']),
+    startLine: z.number().int().positive().safe(), endLine: z.number().int().positive().safe() }).strict(),
+    description: 'Read exact copied review source, inclusive one-based lines, at most 200 lines. No filesystem paths outside the supplied sources.',
+    call: value => ({ tool: 'read', ...value }) },
+  ...REVIEW_BINARY_OPERATORS.map(op => ({ name: `review_${op}`,
+    schema: z.object({ left: z.number().finite(), right: z.number().finite() }).strict(),
+    description: `Calculate ${op} of exactly two finite numbers: left ${op} right. Power with right=0.5 is square root. No expressions or strings.`,
+    call: (value: { left: number; right: number }) => ({ tool: 'calculate', expression: { op, args: [value.left, value.right] } }) })),
+  ...REVIEW_AGGREGATE_OPERATORS.map(op => ({ name: `review_${op}`,
+    schema: z.object({ values: z.array(z.number().finite()).min(2).max(32) }).strict(),
+    description: `Calculate ${op} over 2 to 32 finite numeric values. No expression objects or numeric strings.`,
+    call: (value: { values: number[] }) => ({ tool: 'calculate', expression: { op, args: value.values } }) })),
+  { name: 'review_save_draft', schema: nativeReviewReportSchema,
+    description: 'Save an optional full report draft for this review only. Returns admission and a bound draft digest. Does not finish the review or write source documents. Submit a corrected full draft if necessary.',
+    call: value => ({ action: 'draft', report: value }) },
+]
+const recoveryDefinitions: Definition[] = [
+  ...legacyDefinitions.filter(definition => definition.name !== 'review_save_draft'),
+  { name: 'review_recover_context', schema: z.object({}).strict(),
+    description: 'Restore this batch review task from the host-owned recovery context. Returns the complete batch task explanation and only independently verified calculation receipts from this same bound input and sealed call history. Cite receipt integers in the report; do not invent or copy calculation hashes.',
+    call: () => ({}), recoveryOnly: true, persisted: false },
+]
+const definitionsFor = (recovery: boolean) => recovery ? recoveryDefinitions : legacyDefinitions
+const definitionFor = (name: string, recovery: boolean) => definitionsFor(recovery).find(tool => tool.name === name)
+export const REVIEW_NATIVE_TOOL_NAMES = legacyDefinitions.map(tool => tool.name)
+export const REVIEW_NATIVE_RECOVERY_TOOL_NAMES = recoveryDefinitions.map(tool => tool.name)
+export function reviewNativeToolNames(recovery = false) { return [...(recovery ? REVIEW_NATIVE_RECOVERY_TOOL_NAMES : REVIEW_NATIVE_TOOL_NAMES)] }
+export const reviewNativeToolSchemas = (recovery = false) => definitionsFor(recovery).map(tool => ({ name: tool.name,
+  input_schema: z.toJSONSchema(tool.schema, { target: 'draft-7' }) }))
+
+/** The parent owns this immutable capability. Neither paths nor source bytes come from tool arguments. */
+export async function prepareReviewToolSession(directory: string, sessionId: string, input: SingleReviewInput,
+  transcript: readonly SingleReviewTranscriptEntry[], recovery?: ReviewNativeRecovery): Promise<ReviewToolDescriptor> {
+  const captured = captureSingleReviewInput(input)
+  const capturedRecovery = recovery === undefined ? undefined : recoverySchema.parse(structuredClone(recovery))
+  const descriptor = descriptorSchema.parse({ directory, sessionId, inputDigest: reviewDigest(captured),
+    ...(capturedRecovery ? { recovery: { workId: capturedRecovery.workId, promptDigest: reviewDigest(capturedRecovery.prompt) } } : {}) })
+  await files.ensureDirectories(join(directory, 'calls'))
+  if (capturedRecovery) await files.ensureDirectories(join(directory, 'progress'))
+  await files.publishJson(join(directory, 'context.json'), { protocol: REVIEW_TOOL_PROTOCOL, sessionId,
+    inputDigest: descriptor.inputDigest, input: captured, transcript: structuredClone(transcript),
+    ...(capturedRecovery ? { recovery: capturedRecovery } : {}) })
+  return descriptor
+}
+async function contextFor(descriptor: ReviewToolDescriptor): Promise<Context> {
+  await files.assertDirectories(descriptor.directory)
+  const context = await files.readJson(join(descriptor.directory, 'context.json')) as Context
+  const contextRecovery = context.recovery === undefined ? undefined : recoverySchema.parse(context.recovery)
+  if (context.protocol !== REVIEW_TOOL_PROTOCOL || context.sessionId !== descriptor.sessionId ||
+    context.inputDigest !== descriptor.inputDigest || !Array.isArray(context.transcript) ||
+    (descriptor.recovery === undefined) !== (contextRecovery === undefined) ||
+    (descriptor.recovery !== undefined && contextRecovery !== undefined &&
+      (descriptor.recovery.workId !== contextRecovery.workId || descriptor.recovery.promptDigest !== reviewDigest(contextRecovery.prompt))) ||
+    reviewDigest(captureSingleReviewInput(context.input)) !== descriptor.inputDigest)
+    throw new Error('Review tool source binding changed')
+  return { ...context, ...(contextRecovery ? { recovery: contextRecovery } : {}) }
+}
+export async function readReviewToolStop(descriptor: ReviewToolDescriptor): Promise<ReviewToolLimitError['code'] | undefined> {
+  let value: unknown
+  try { value = await files.readJson(join(descriptor.directory, 'STOP.json')) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
+  const stop = z.object({ sessionId: identifier, inputDigest: z.string(),
+    code: z.enum(['audit_progress_stalled', 'review_tool_budget_exhausted']) }).strict().parse(value)
+  if (stop.sessionId !== descriptor.sessionId || stop.inputDigest !== descriptor.inputDigest) throw new Error('Review tool stop binding mismatch')
+  return stop.code
+}
+
+/** Durable before delivery. Immutable records are replayed, never inferred from model prose. */
+export async function readReviewToolRecords(descriptor: ReviewToolDescriptor): Promise<ReviewToolRecord[]> {
+  const context = await contextFor(descriptor)
+  const directory = join(descriptor.directory, 'calls')
+  await files.assertDirectories(directory)
+  const names = (await readdir(directory)).filter(name => /^\d{6}\.json$/.test(name)).sort()
+  const records: ReviewToolRecord[] = [], ids = new Set<string>()
+  let previousDigest = reviewDigest({ sessionId: descriptor.sessionId, inputDigest: descriptor.inputDigest })
+  for (const [index, name] of names.entries()) {
+    if (name !== `${String(index + 1).padStart(6, '0')}.json`) throw new Error('Review tool log is not contiguous')
+    const record = await files.readJson(join(directory, name)) as ReviewToolRecord
+    const { digest, ...payload } = record
+    const definition = definitionFor(record.name, Boolean(context.recovery))
+    if (!definition || record.version !== 2 || record.sequence !== index + 1 || record.sessionId !== context.sessionId ||
+      record.inputDigest !== context.inputDigest || record.previousDigest !== previousDigest || reviewDigest(payload) !== digest ||
+      record.argumentDigest !== reviewDigest({ name: record.name, arguments: record.arguments }) ||
+      !identifier.safeParse(record.toolUseId).success || ids.has(record.toolUseId)) throw new Error('Review tool record binding mismatch')
+    definition.schema.parse(record.arguments)
+    // Reconstruct pure results to reject edited logs; this executes no I/O or model requests.
+    const expected = evaluate(context, records, definition, record.arguments)
+    if (!expected.entry || reviewJson(expected.entry) !== reviewJson(record.entry)) throw new Error('Review tool result binding mismatch')
+    records.push(record); ids.add(record.toolUseId); previousDigest = digest
+  }
+  return records
+}
+type Evaluation = { entry?: SingleReviewTranscriptEntry; feedback: unknown }
+
+type VerifiedCalculation = { result: unknown; calculationId: string; value: number; expression: unknown; receipt: number }
+
+/**
+ * Build a cache only from results that the independent audit recomputes from
+ * the bound input.  In particular, a model-written calculationId or receipt
+ * is never enough to make a cache entry.
+ */
+function verifiedCalculationCache(context: Context, records: readonly ReviewToolRecord[]): Map<string, VerifiedCalculation> {
+  const entries = [...context.transcript, ...records.map(record => record.entry)]
+  let calculations: ReturnType<typeof auditedCalculations>
+  try { calculations = auditedCalculations(context.input, entries) }
+  catch { return new Map() }
+  const cache = new Map<string, VerifiedCalculation>()
+  for (const [index, calculation] of calculations.entries()) {
+    // `auditedCalculations` has already proved that at least one transcript
+    // feedback exactly matches the host executor.  Rebuild the result from
+    // that canonical expression instead of selecting an arbitrary later
+    // feedback by model-written calculationId.  A forged same-ID result in a
+    // subsequent entry must never poison the recovery cache.
+    try {
+      const result = executeSingleReviewTool(context.input, { tool: 'calculate', expression: calculation.expression })
+      if (!result || typeof result !== 'object' ||
+        (result as { calculationId?: unknown }).calculationId !== calculation.calculationId ||
+        (result as { value?: unknown }).value !== calculation.value) continue
+      cache.set(calculation.calculationId, { ...calculation, result: structuredClone(result), receipt: index + 1 })
+    } catch { /* Invalid/foreign expressions cannot become cached evidence. */ }
+  }
+  return cache
+}
+
+function calculationIdFor(input: SingleReviewInput, call: unknown) {
+  return 'calc-' + reviewDigest({ inputDigest: reviewDigest(input), call })
+}
+
+function calculationReceipt(context: Context, records: readonly ReviewToolRecord[], entry: SingleReviewTranscriptEntry,
+  calculationId: string): number | undefined {
+  try {
+    const calculations = auditedCalculations(context.input, [
+      ...context.transcript, ...records.map(record => record.entry), entry,
+    ])
+    const index = calculations.findIndex(calculation => calculation.calculationId === calculationId)
+    return index < 0 ? undefined : index + 1
+  } catch { return undefined }
+}
+
+function calculationFeedback(call: unknown, result: unknown, receipt?: number, cached = false): { call: unknown; result: unknown; receipt?: number; cached?: true } {
+  return { call, result, ...(receipt === undefined ? {} : { receipt }), ...(cached ? { cached: true } : {}) }
+}
+
+function evaluate(context: Context, records: readonly ReviewToolRecord[], definition: Definition, args: unknown): Evaluation {
+  const action: any = definition.call(args)
+  if (definition.name === 'review_save_draft') {
+    const decision = admitNativeReviewReport(context.input, action.report,
+      [...context.transcript, ...records.map(record => record.entry)], 'draft')
+    const feedback = { admission: decision.kind, draftDigest: reviewDigest((decision.action as any).report),
+        ...(decision.kind === 'rejected' ? { diagnostic: decision.diagnostic } : {}),
+        instruction: 'Draft only. Continue the audit and submit the full final report through StructuredOutput. Do not treat a draft acknowledgement as completion.' }
+    return { entry: { action: decision.action, ...(decision.kind === 'rejected' ? { admitted: false } : {}), feedback },
+      feedback }
+  }
+  if (definition.name === 'review_recover_context') throw new Error('Recovery context is not a persisted call')
+
+  let feedback: { call: unknown; result?: unknown; error?: string; receipt?: number; cached?: true }
+  if (action.tool === 'calculate' && context.recovery) {
+    const calculationId = calculationIdFor(context.input, action)
+    const cached = verifiedCalculationCache(context, records).get(calculationId)
+    if (cached) {
+      const baseEntry: SingleReviewTranscriptEntry = { action: { action: 'tools', rationale: `Native ${definition.name} invocation`, calls: [action] },
+        feedback: [calculationFeedback(action, cached.result, cached.receipt, true)] }
+      return { entry: baseEntry, feedback: baseEntry.feedback }
+    }
+  }
+  try {
+    const result = executeSingleReviewTool(context.input, action)
+    const baseEntry: SingleReviewTranscriptEntry = { action: { action: 'tools', rationale: `Native ${definition.name} invocation`, calls: [action] },
+      feedback: [{ call: action, result }] }
+    const receipt = context.recovery && action.tool === 'calculate'
+      ? calculationReceipt(context, records, baseEntry, result && typeof result === 'object' && 'calculationId' in result
+        ? String((result as { calculationId: unknown }).calculationId) : '') : undefined
+    feedback = calculationFeedback(action, result, receipt)
+  } catch (error) {
+    feedback = { call: action, error: error instanceof Error ? error.message : 'Bounded tool failed; do not infer a result.' }
+  }
+  const entry: SingleReviewTranscriptEntry = { action: { action: 'tools', rationale: `Native ${definition.name} invocation`, calls: [action] }, feedback: [feedback] }
+  return { entry, feedback: entry.feedback }
+}
+
+export type ReviewCalculationReceipt = Readonly<{
+  receipt: number
+  calculationId: string
+  value: number
+  expression: unknown
+}>
+export type ReviewRecoveryContext = Readonly<{
+  workId: string
+  prompt: string
+  calculations: readonly ReviewCalculationReceipt[]
+}>
+
+export type ReviewRecoveryPrompt = Readonly<{
+  workId: string
+  prompt: string
+}>
+
+/** Read only the immutable task prompt when checking whether a marker survived compaction. */
+export async function readReviewRecoveryPrompt(descriptor: ReviewToolDescriptor): Promise<ReviewRecoveryPrompt> {
+  const context = await contextFor(descriptor)
+  if (!context.recovery) throw new Error('Review recovery is not enabled for this session')
+  return { workId: context.recovery.workId, prompt: context.recovery.prompt }
+}
+
+/** The only context that the recovery tool or CLI reinjection may expose. */
+export async function readReviewRecoveryContext(descriptor: ReviewToolDescriptor): Promise<ReviewRecoveryContext> {
+  const context = await contextFor(descriptor)
+  if (!context.recovery) throw new Error('Review recovery is not enabled for this session')
+  const records = await readReviewToolRecords(descriptor)
+  const entries = [...context.transcript, ...records.map(record => record.entry)]
+  const calculations = auditedCalculations(context.input, entries)
+  return { workId: context.recovery.workId, prompt: context.recovery.prompt,
+    calculations: calculations.map((calculation, index) => ({ ...calculation, receipt: index + 1 })) }
+}
+
+type ProgressRecord = { version: 1; sequence: number; sessionId: string; inputDigest: string;
+  informationDigest: string; streak: number; toolUseId: string; previousDigest: string; digest: string }
+const progressRecordSchema = z.object({ version: z.literal(1), sequence: z.number().int().positive().safe(),
+  sessionId: identifier, inputDigest: digest, informationDigest: digest, streak: z.number().int().positive().safe(),
+  toolUseId: identifier,
+  previousDigest: digest, digest }).strict()
+function progressAnchor(descriptor: ReviewToolDescriptor) {
+  return reviewDigest({ kind: 'review-progress', sessionId: descriptor.sessionId, inputDigest: descriptor.inputDigest })
+}
+async function readProgress(descriptor: ReviewToolDescriptor): Promise<ProgressRecord[]> {
+  const directory = join(descriptor.directory, 'progress')
+  try { await files.assertDirectories(directory) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+  const names = (await readdir(directory)).filter(name => /^\d{6}\.json$/.test(name)).sort()
+  const records: ProgressRecord[] = []
+  let previousDigest = progressAnchor(descriptor)
+  for (const [index, name] of names.entries()) {
+    if (name !== `${String(index + 1).padStart(6, '0')}.json`) throw new Error('Review progress log is not contiguous')
+    const parsed = progressRecordSchema.parse(await files.readJson(join(directory, name)))
+    const { digest, ...payload } = parsed
+    if (parsed.sequence !== index + 1 || parsed.sessionId !== descriptor.sessionId || parsed.inputDigest !== descriptor.inputDigest ||
+      parsed.previousDigest !== previousDigest || reviewDigest(payload) !== digest) throw new Error('Review progress binding mismatch')
+    previousDigest = digest
+    records.push(parsed)
+  }
+  return records
+}
+async function appendProgress(descriptor: ReviewToolDescriptor, informationDigest: string, streak: number, toolUseId: string) {
+  const records = await readProgress(descriptor)
+  const payload = { version: 1 as const, sequence: records.length + 1, sessionId: descriptor.sessionId,
+    inputDigest: descriptor.inputDigest, informationDigest, streak, toolUseId,
+    previousDigest: records.at(-1)?.digest ?? progressAnchor(descriptor) }
+  // Keep predecessor in the digest payload while retaining a compact public
+  // record.  This makes sidecar tampering fail closed without storing content.
+  const record = { ...payload, digest: reviewDigest(payload) }
+  await files.publishJson(join(descriptor.directory, 'progress', `${String(record.sequence).padStart(6, '0')}.json`), record)
+  return record
+}
+
+function progressStreak(progress: readonly ProgressRecord[], digest: string): number {
+  const previous = progress.at(-1)
+  // A digest seen earlier is not new information merely because another
+  // digest appeared in between.  Keep the consecutive no-progress streak
+  // across alternating known tool results, while genuinely new information
+  // starts a fresh streak.
+  return progress.some(record => record.informationDigest === digest)
+    ? (previous?.streak ?? 0) + 1 : 1
+}
+
+function semanticFeedback(value: unknown): unknown {
+  if (!Array.isArray(value)) return value
+  return value.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item
+    const copy = { ...(item as Record<string, unknown>) }
+    delete copy.receipt; delete copy.cached; delete copy.warning
+    return copy
+  })
+}
+function informationDigest(name: string, args: unknown, value: unknown) {
+  return reviewDigest({ name, arguments: args, feedback: semanticFeedback(value) })
+}
+const NEW_MODE_STALL_WARNING = 12
+const NEW_MODE_STALL_LIMIT = 13
+
+function addProgressWarning(value: unknown, warning: string | undefined): unknown {
+  if (!warning) return structuredClone(value)
+  if (Array.isArray(value)) return value.map(item => item && typeof item === 'object' && !Array.isArray(item)
+    ? { ...(item as Record<string, unknown>), warning } : item)
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...(value as Record<string, unknown>), warning } : { value, warning }
+}
+
+const queues = new Map<string, Promise<unknown>>()
+export async function executeNativeReviewTool(descriptor: ReviewToolDescriptor, name: string, input: unknown, toolUseId: string) {
+  descriptorSchema.parse(descriptor); identifier.parse(toolUseId)
+  const previous = queues.get(descriptor.directory) ?? Promise.resolve()
+  const run = previous.catch(() => {}).then(async () => {
+    const context = await contextFor(descriptor)
+    const definition = definitionFor(name, Boolean(context.recovery))
+    if (!definition || (definition.legacyOnly && Boolean(context.recovery)) ||
+      (definition.recoveryOnly && !context.recovery)) throw new Error('Tool is not in the reviewer allowlist')
+    const args = definition.schema.parse(input)
+    const records = await readReviewToolRecords(descriptor)
+    const argumentDigest = reviewDigest({ name, arguments: args })
+    const existing = records.find(record => record.toolUseId === toolUseId)
+    if (existing) {
+      if (existing.argumentDigest !== argumentDigest) throw new Error('Review tool ID reused with different arguments')
+      return structuredClone(existing.entry.feedback)
+    }
+    const stopped = await readReviewToolStop(descriptor)
+    if (stopped) throw new ReviewToolLimitError(stopped)
+    async function stop(code: ReviewToolLimitError['code']): Promise<never> {
+      await files.publishJson(join(descriptor.directory, 'STOP.json'), { sessionId: descriptor.sessionId, inputDigest: descriptor.inputDigest, code })
+      throw new ReviewToolLimitError(code)
+    }
+    if (definition.name === 'review_recover_context') {
+      const recovery = await readReviewRecoveryContext(descriptor)
+      const digest = informationDigest(name, args, recovery)
+      const progress = await readProgress(descriptor)
+      // Recovery is intentionally a read-only tool and therefore has no call
+      // record to serve as its idempotency key.  Retrying the same provider
+      // tool-use ID must return the same host-verified context without
+      // advancing the no-progress streak; only a new ID is a new attempt.
+      const existingProgress = progress.findLast(record => record.toolUseId === toolUseId)
+      if (existingProgress) {
+        if (existingProgress.informationDigest !== digest) throw new Error('Review recovery tool ID reused with different context')
+        const warning = existingProgress.streak >= NEW_MODE_STALL_WARNING
+          ? 'Repeated recovery produced no new information; continue with a different audit action.' : undefined
+        return addProgressWarning(recovery, warning)
+      }
+      const streak = progressStreak(progress, digest)
+      const warning = streak >= NEW_MODE_STALL_WARNING ? 'Repeated recovery produced no new information; continue with a different audit action.' : undefined
+      if (streak >= NEW_MODE_STALL_LIMIT) { await appendProgress(descriptor, digest, streak, toolUseId); return stop('audit_progress_stalled') }
+      await appendProgress(descriptor, digest, streak, toolUseId)
+      return addProgressWarning(recovery, warning)
+    }
+    const evaluation = evaluate(context, records, definition, args)
+    if (!evaluation.entry) throw new Error('Reviewer tool evaluation did not produce a durable entry')
+    if (!context.recovery && (reviewProgressStalled([...context.transcript, ...records.map(record => record.entry)], evaluation.entry.action) ||
+      records.length >= 2 && records.slice(-2).every(record => record.argumentDigest === argumentDigest)))
+      return stop('audit_progress_stalled')
+    const persist = async () => {
+      const payload = { version: 2 as const, sequence: records.length + 1, sessionId: descriptor.sessionId,
+        inputDigest: descriptor.inputDigest, toolUseId, name, arguments: args, argumentDigest,
+        previousDigest: records.at(-1)?.digest ?? reviewDigest({ sessionId: descriptor.sessionId, inputDigest: descriptor.inputDigest }), entry: evaluation.entry! }
+      await files.publishJson(join(descriptor.directory, 'calls', `${String(payload.sequence).padStart(6, '0')}.json`),
+        { ...payload, digest: reviewDigest(payload) })
+    }
+    if (!context.recovery) { await persist(); return structuredClone(evaluation.feedback) }
+    const digest = informationDigest(name, args, evaluation.feedback)
+    const progress = await readProgress(descriptor)
+    // A repeated bounded failure is also no progress: the same provider
+    // error cannot be retried forever under a fresh tool-use ID.
+    const streak = progressStreak(progress, digest)
+    const warning = streak >= NEW_MODE_STALL_WARNING ? 'Repeated tool output produced no new information; continue with a different audit action.' : undefined
+    if (streak >= NEW_MODE_STALL_LIMIT) { await appendProgress(descriptor, digest, streak, toolUseId); return stop('audit_progress_stalled') }
+    await persist()
+    await appendProgress(descriptor, digest, streak, toolUseId)
+    return addProgressWarning(evaluation.feedback, warning)
+  })
+  queues.set(descriptor.directory, run)
+  try { return await run } finally { if (queues.get(descriptor.directory) === run) queues.delete(descriptor.directory) }
+}
+
+/** A reviewer-scoped CLI extension. Ordinary sessions register no tools from this module. */
+export function createNativeReviewTools(buildTool: (definition: any) => any, env: Record<string, string | undefined> = process.env): any[] {
+  if (env.BEEGAME_WORKFLOW_WORKER_TYPE !== REVIEW_TOOL_PROTOCOL) return []
+  const descriptor = descriptorSchema.parse(JSON.parse(env.BEEGAME_REVIEW_TOOL_SESSION ?? ''))
+  return definitionsFor(Boolean(descriptor.recovery)).map(definition => buildTool({
+    name: definition.name, inputSchema: definition.schema,
+    inputJSONSchema: z.toJSONSchema(definition.schema, { target: 'draft-7' }), alwaysLoad: true,
+    isEnabled: () => true, isReadOnly: () => true, isConcurrencySafe: () => false,
+    isOpenWorld: () => false, isMcp: false,
+    description: async () => definition.description, prompt: async () => definition.description,
+    checkPermissions: async (input: unknown) => ({ behavior: 'allow', updatedInput: input }),
+    call: async (input: unknown, context: { toolUseId?: string; abortController?: AbortController }) => {
+      if (context.abortController?.signal.aborted) throw new Error('Reviewer tool invocation cancelled')
+      if (!context.toolUseId) throw new Error('Missing native tool invocation identity')
+      try { return { data: await executeNativeReviewTool(descriptor, definition.name, input, context.toolUseId) } }
+      catch (error) {
+        // Stop the local agent loop before it spends another request on a durable limit.
+        if (error instanceof ReviewToolLimitError) context.abortController?.abort(error.code)
+        throw error
+      }
+    },
+    renderToolUseMessage: () => definition.name,
+    mapToolResultToToolResultBlockParam: (output: unknown, toolUseID: string) =>
+      ({ type: 'tool_result', tool_use_id: toolUseID, content: JSON.stringify(output) }),
+  }))
+}

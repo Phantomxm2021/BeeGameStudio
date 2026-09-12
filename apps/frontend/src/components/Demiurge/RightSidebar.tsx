@@ -11,7 +11,7 @@ import type { WaitingPermissionState } from '../../utils/waitingPermission';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, PermissionDisplayModel } from '../../viewModels/displayModels';
 import { useChatStore } from '../../store/chatStore';
 import { normalizeChatHistory } from '../../utils/chatHistory';
-import type { WorkflowCardAction } from '../../types/message';
+import type { FoundationDecisionInput, WorkflowCardAction } from '../../types/message';
 
 // Modular Panels
 import { ChatPanel } from './Sidebar/ChatPanel';
@@ -44,6 +44,7 @@ interface RightSidebarProps {
     isLoading: boolean;
     onStopTask?: () => void | Promise<void>;
     onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
+    onFoundationDecision?: (decision: FoundationDecisionInput) => Promise<void> | void;
     isStopping?: boolean;
     isRuntimeBusy?: boolean;
     onResolveToolPermission?: (
@@ -77,6 +78,7 @@ export function RightSidebar({
     isLoading,
     onStopTask,
     onWorkflowAction,
+    onFoundationDecision,
     isStopping = false,
     isRuntimeBusy = false,
     onResolveToolPermission,
@@ -399,6 +401,7 @@ export function RightSidebar({
                                 isLoading={isLoading}
                                 onStop={onStopTask}
                                 onWorkflowAction={onWorkflowAction}
+                                onFoundationDecision={onFoundationDecision}
                                 isStopping={isStopping}
                                 isComposerLocked={isComposerLocked}
                                 chatInput={chatInput}

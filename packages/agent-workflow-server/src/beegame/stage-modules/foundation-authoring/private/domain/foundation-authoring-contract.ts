@@ -185,6 +185,9 @@ const INPUTS: Record<FoundationDocumentPath, readonly FoundationAuthoringSource[
     source('docs/UI_UX_SPEC.md',
       ...FOUNDATION_AUTHORING_SOURCE_GROUPS.interaction.blocks,
     ),
+    source('docs/TECHNICAL_DESIGN.md',
+      block('data_content', 'Committed audioDeliveryMode and explicit runtime audio capability evidence; Audio consumes this selection without imposing obligations from another mode.'),
+    ),
   ],
   'docs/ASSET_PLAN.md': [
     source('docs/GDD.md', block('scope_risks', 'Confirmed production scope and risk constraints for asset delivery.')),
@@ -227,17 +230,21 @@ export function foundationAuthoringMarker(blockId: string): string {
     : `<!-- beegame-section:${blockId} -->`
 }
 
-export const FOUNDATION_AUTHORING_INSTRUCTION = [
-  'Write one complete raw Markdown document from the confirmed brief and supplied upstream blocks.',
+export const FOUNDATION_AUTHORING_CONTENT_INSTRUCTION = [
   'Confirmed product constraints remain binding. Treat each section as the final decision record: complete every required section and material, using the minimum sufficient content for distinct implementable decisions and traceability, not document length. Keep rationale to the minimum needed for a production decision.',
   'Represent each decision once in its owner section or material; elsewhere reference that owner. Do not narrate tables or diagrams, repeat state transitions, or expand a contract purpose phrase by phrase into H3 headings.',
   'Choose production scope appropriate to this actual game. Do not invent staffing, approval procedures, optional variants or elaborate subsystems merely to fill a heading.',
-  'Keep every required heading. Explain N/A once in its owner block with its consequence; retain only a reference in another required block if necessary.',
+  'Complete every required block. Explain N/A once in its owner block with its consequence; retain only a reference in another required block if necessary.',
   'Collect materially distinct acceptance scenarios in their declared acceptance sections or materials. Other sections state decisions without repeating equivalent test cases.',
   'Distinguish design targets, calculated results and observed test results. Never describe an unexecuted test or unobserved asset/license as verified.',
   'Omit generic best-practice essays, tutorials, speculative alternatives, boilerplate and repeated derivations. Preserve required parameters, formulas, geometry, interfaces and materially distinct boundary examples under their authority rules; reference existing owner inputs and results instead of deriving them again. Do not impose fixed token, word, time or example caps or targets.',
   'Use the supplied evidence while authoring; leave cross-section consistency, format and quality review to Reviewer and Revision. Do not output a self-review report, call tools or launch a separate review.',
-  'Use the existing canonical headings and material formats. Return Markdown, without a wrapper fence, JSON output or completion prose.',
+].join(' ')
+
+export const FOUNDATION_AUTHORING_INSTRUCTION = [
+  'Write one complete raw Markdown document from the confirmed brief and supplied upstream blocks.',
+  FOUNDATION_AUTHORING_CONTENT_INSTRUCTION,
+  'Keep every required heading. Use the existing canonical headings and material formats. Return Markdown, without a wrapper fence, JSON output or completion prose.',
 ].join(' ')
 
 const GUIDANCE: Record<FoundationDocumentPath, string> = {
@@ -341,6 +348,19 @@ const PRIVATE_SECTION_PURPOSES: Readonly<Partial<Record<FoundationDocumentPath, 
     production: 'Define implementation acceptance and handoff evidence; reference event-cue-matrix, music-state-diagram and loudness-delivery-table instead of reproducing their mappings or delivery rows.',
   }),
 })
+
+/** Historical receipts are read, never upgraded into new dispatch authority. */
+export function foundationAuthoringRecordedSourcesMatch(
+  path: FoundationDocumentPath,
+  actual: readonly FoundationDocumentPath[] | undefined,
+  authorBodyVersion?: unknown,
+): boolean {
+  if (authorBodyVersion !== undefined && authorBodyVersion !== 'foundation-author-body.v2') return false
+  const current = foundationAuthoringSources(path).map(source => source.path)
+  const exact = (expected: readonly FoundationDocumentPath[]) => !!actual && actual.length === expected.length && actual.every((value, index) => value === expected[index])
+  return exact(current) || (authorBodyVersion === undefined && path === 'docs/AUDIO_DESIGN.md' &&
+    exact(current.filter(source => source !== 'docs/TECHNICAL_DESIGN.md')))
+}
 
 // This is a model-facing Stage 2 view, never a replacement for the audit
 // contract. Preserve heading identities and serialization for downstream readers.

@@ -1,0 +1,41 @@
+import { reviewJson } from './single-agent-contract'
+import type { SingleReviewState } from './single-agent-journal'
+import type { SingleReviewAction, SingleReviewTranscriptEntry } from './single-agent-report'
+
+// No implicit cumulative time, token, turn or tool-call budget. An explicit
+// tokenBudget supplied by a caller remains bound to its immutable request.
+export const consumedReviewTime = (state: Pick<SingleReviewState, 'attempts'>) =>
+  state.attempts.reduce((total, attempt) => total + (attempt.closed?.elapsedMs ?? 0), 0)
+export const consumedReviewTokens = (state: Pick<SingleReviewState, 'attempts'>) =>
+  state.attempts.reduce((total, attempt) => total + (attempt.closed?.usage.total_tokens ?? attempt.usage?.total_tokens ?? 0), 0)
+
+/** Forecast one request, never the aggregate input of a multi-request native round. */
+export function nextReviewTokenReserve(state: Pick<SingleReviewState, 'attempts'> & Partial<Pick<SingleReviewState, 'transcript'>>): number {
+  const latest = state.attempts.findLast(attempt => attempt.closed?.usageObserved)?.closed
+  const request = latest?.summary?.requests?.at(-1)
+  const feedback = state.transcript?.at(-1)?.feedback
+  // Explicit heuristic for newly appended feedback, not a tokenizer or an absolute cap.
+  const growth = feedback === undefined ? 0 : Math.ceil(Buffer.byteLength(reviewJson(feedback), 'utf8') / 2)
+  if (request) return request.inputTokens === null ? 0 : request.inputTokens + growth + 4096
+  // Old multi-message records lack request boundaries. Do not invent a per-request estimate.
+  if (latest?.summary?.modelMessages !== 1) return 0
+  const usage = latest.usage
+  return usage.prompt_tokens + usage.cache_read_tokens + usage.cache_creation_tokens + growth + 4096
+}
+
+/** Planning hint only: a completed audit can submit final directly. */
+export function reviewCompletionForecast(state: Pick<SingleReviewState, 'attempts' | 'transcript'>) {
+  const nextRequest = nextReviewTokenReserve(state)
+  const minimumRequests = 1
+  return { nextRequest, minimumRequests, completion: nextRequest * minimumRequests,
+    withOneCorrection: nextRequest * (minimumRequests + 1) }
+}
+
+/** Two consecutive tool rounds with no new request after an earlier identical verification. */
+export function reviewProgressStalled(transcript: readonly SingleReviewTranscriptEntry[], next: SingleReviewAction): boolean {
+  const previous = transcript.at(-1)?.action
+  if (next.action !== 'tools' || previous?.action !== 'tools') return false
+  const earlier = new Set(transcript.slice(0, -1).flatMap(entry =>
+    entry.action.action === 'tools' ? entry.action.calls.map(reviewJson) : []))
+  return [...previous.calls, ...next.calls].every(call => earlier.has(reviewJson(call)))
+}

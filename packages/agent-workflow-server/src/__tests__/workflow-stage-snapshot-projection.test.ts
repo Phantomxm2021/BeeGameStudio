@@ -35,6 +35,30 @@ function stageSnapshot(stageId: 'DOCUMENT_DRAFTING' | 'DOCUMENT_REVIEW' | 'FOUND
 }
 
 describe('workflow stage snapshot display projection', () => {
+  test('live decision handoff replaces legacy retryable failure metadata', () => {
+    const result = workflowStageSnapshotsForDisplay({ phase: 'FOUNDATION_REVISION', status: 'needs_action',
+      foundationReviewStage: { convergenceStop: 'repair_budget_exhausted', invocation: { outcome: { status: 'completed' } },
+        candidate: { repairClaims: [{}], unresolvedIssues: [{ reason: 'needs_decision: choose A or B' }] } },
+      stageSnapshots: [{ ...stageSnapshot('FOUNDATION_REVISION', 4, {}),
+        block: { message: 'old failure', nextAction: 'retry', retryable: true } }] },
+      [{ id: 'foundation-public-stage', title: 'Foundation Revision', status: 'completed', operation: 'revise' }])
+    expect(result?.[0]?.block).toMatchObject({ code: 'foundation_adjudication', retryable: false })
+    expect((result?.[0]?.block as Record<string, unknown>).nextAction).not.toBe('retry')
+    expect((result?.[0]?.block as Record<string, unknown>).message).toContain('候选稿已保留')
+    expect(result?.[0]?.completedTaskCount).toBe(1)
+  })
+  test('revision API preserves current native progress but never stale or raw worker prose', () => {
+    for (const status of ['running', 'needs_action']) {
+      for (const currentMessage of ['模型响应 27 · Read docs/GDD.md', '模型响应 27 · 正在接收模型响应（流事件 123）', 'raw worker prose']) {
+        const result = workflowStageSnapshotsForDisplay({ phase:'FOUNDATION_REVISION', documentStep:'FOUNDATION_REVISION', status,
+          currentMessage, stageSnapshots:[{ ...stageSnapshot('FOUNDATION_REVISION',4,{}), message:'stale prose', thinking:'idle' }] }, [])
+        expect(result?.[0]).toMatchObject({ currentPhase:'FOUNDATION_REVISION', documentStep:'FOUNDATION_REVISION' })
+        if (status === 'running' && currentMessage.startsWith('模型响应')) expect(result?.[0]?.message).toBe(currentMessage)
+        else expect(result?.[0]).not.toHaveProperty('message')
+        expect(result?.[0]).not.toHaveProperty('thinking')
+      }
+    }
+  })
   test('keeps live Round3 evidence metadata while rejecting invalid historical metadata', () => {
     const result = workflowStageSnapshotsForDisplay(
       {

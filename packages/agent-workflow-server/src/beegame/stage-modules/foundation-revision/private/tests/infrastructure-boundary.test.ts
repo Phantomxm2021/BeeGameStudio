@@ -52,6 +52,7 @@ function resolver() {
 test('fixed-input public lifecycle acceptance has no static dependency on Reviewer or legacy stage execution', async () => {
   const resolveImport = resolver()
   const approved = new Set(['auth', 'billing', 'runtime-configuration'].map(name => resolve(moduleRoot, '../../../', name, 'public.ts')))
+  approved.add(resolve(repository, 'packages/agent-workflow/src/native-file-agent.ts'))
   const entries = ['lifecycle.test.ts', 'lifecycle-infrastructure.test.ts', 'lifecycle-followup.test.ts',
     'lifecycle-next-round.test.ts', 'detached-public-process.test.ts']
   const pending = entries.map(name => join(import.meta.dir, name))
@@ -91,6 +92,7 @@ test('fixed-input public lifecycle acceptance has no static dependency on Review
 test('Revision source dependencies, including erased type imports, use only private code and approved public infrastructure', async () => {
   const resolveImport = resolver()
   const approved = new Set(['billing', 'runtime-configuration'].map(name => resolve(moduleRoot, '../../../', name, 'public.ts')))
+  approved.add(resolve(repository, 'packages/agent-workflow/src/native-file-agent.ts'))
   const violations: string[] = []
   const paths = await sources(moduleRoot)
   for (const path of paths) {

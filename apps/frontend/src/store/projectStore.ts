@@ -178,7 +178,7 @@ interface ProjectState {
   deleteProject: (projectId: string) => Promise<void>;
 
   /** Create a source-preserving current-schema copy ready for document review. */
-  createReviewCopy: (projectId: string) => Promise<Project>;
+  createReviewCopy: (projectId: string, options?: { stopAfterReview?: boolean }) => Promise<Project>;
 
   /**
    * Rename a project locally (usually triggered by WebSocket event)
@@ -476,8 +476,8 @@ export const useProjectStore = create<ProjectState>()(
         }
       },
 
-      createReviewCopy: async (projectId) => {
-        const response = await api.createReviewCopy(projectId);
+      createReviewCopy: async (projectId, options) => {
+        const response = await api.createReviewCopy(projectId, options);
         set(state => ({
           projects: [
             response.project,

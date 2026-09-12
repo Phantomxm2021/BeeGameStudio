@@ -43,14 +43,20 @@ export function projectWorkflowCurrentMessage(input: {
       input.documentStep === 'FOUNDATION_REVIEW') ||
     (input.phase === 'FOUNDATION_REVISION' &&
       input.documentStep === 'FOUNDATION_REVISION')
-  )
-    return ''
+  ) {
+    // Admit the native runner's bounded progress vocabulary, never worker prose.
+    const value = typeof input.value === 'string' ? input.value : ''
+    return /^模型响应 \d+ · (?:正在接收模型响应(?:（流事件 \d+）)?|(?:Read|Glob|Grep|Edit|Write|StructuredOutput|Bash|Agent|TaskOutput|TodoWrite)(?: [a-zA-Z0-9_./-]+)?)$/.test(value)
+      && !value.includes('..') && !/ · \w+ \/| · \w+ [A-Za-z]:/.test(value)
+      ? value : ''
+  }
   return typeof input.value === 'string'
     ? sanitizeWorkflowDisplayMessage(input.value)
     : ''
 }
 
 export type WorkflowDisplayReasonCode =
+  | 'foundation_adjudication'
   | 'user_stopped'
   | 'document_contract_failed'
   | 'revision_validation_failed'
@@ -104,6 +110,7 @@ export type WorkflowDisplayReasonContext = {
 }
 
 const workflowDisplayReasonCodes = new Set<WorkflowDisplayReasonCode>([
+  'foundation_adjudication',
   'user_stopped',
   'document_contract_failed',
   'revision_validation_failed',

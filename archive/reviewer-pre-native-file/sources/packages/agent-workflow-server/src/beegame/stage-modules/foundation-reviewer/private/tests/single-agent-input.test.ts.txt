@@ -1,0 +1,74 @@
+import { expect, test } from 'bun:test'
+import { captureSingleReviewInput, reviewHash, REVIEW_DOCUMENT_PATHS, type SingleReviewInput, type SingleReviewReport } from '../single-agent-contract'
+import { presentReviewInput, unreadReviewSource } from '../single-agent-input'
+import { buildSingleReviewPrompt } from '../single-agent-prompt'
+import { createContinuingSingleReviewTask, type SingleReviewTranscriptEntry } from '../single-agent-task'
+import { executeSingleReviewTool } from '../single-agent-tools'
+
+function input(large = false): SingleReviewInput {
+  return { subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) },
+    requirements: { status: 'unavailable', reason: 'Not supplied' },
+    documents: REVIEW_DOCUMENT_PATHS.map((path, index) => ({ path,
+      content: large ? Array.from({ length: 80 }, (_, line) => index + ':' + line + ' source '.repeat(100)).join('\n') : '# Original\nExact original text' })) }
+}
+function report(): SingleReviewReport {
+  return { status: 'completed', summary: 'Reviewed', reviewedDocuments: [...REVIEW_DOCUMENT_PATHS],
+    requirementsAssessment: 'unavailable', findings: [], omissionCheck: 'Checked', limitations: ['No original requirements'] }
+}
+function read(source: SingleReviewInput, path: string, startLine: number, endLine: number): SingleReviewTranscriptEntry {
+  const call = { tool: 'read' as const, path, startLine, endLine }
+  return { action: { action: 'tools', rationale: 'Read original source', calls: [call] },
+    feedback: [{ call, result: executeSingleReviewTool(source, call) }] }
+}
+test('small input is fully delivered; large input has a directory and exact bounded original reads', () => {
+  expect(presentReviewInput(input()).paged).toBe(false)
+  expect(unreadReviewSource(input(), [])).toEqual([])
+  const large = input(true)
+  const presented = presentReviewInput(large)
+  expect(presented.paged).toBe(true)
+  expect(presented.source.documents[0]).toEqual({ path: 'docs/GDD.md', totalLines: 80 })
+  expect(buildSingleReviewPrompt(large, [])).toContain('PAGED INPUT')
+  expect(buildSingleReviewPrompt(large, [])).not.toContain(large.documents[0]!.content.split('\n')[0]!)
+  expect(executeSingleReviewTool(large, { tool: 'read', path: 'docs/GDD.md', startLine: 12, endLine: 14 }))
+    .toMatchObject({ content: large.documents[0]!.content.split('\n').slice(11, 14).join('\n') })
+})
+test('actual overlapping reads merge; failures, pending calls and wrong source bytes do not count', () => {
+  const large = input(true)
+  const transcript = [read(large, 'docs/GDD.md', 1, 30), read(large, 'docs/GDD.md', 20, 50)]
+  expect(unreadReviewSource(large, transcript)[0]).toEqual({ path: 'docs/GDD.md', startLine: 51, endLine: 80 })
+  const pending = read(large, 'docs/GDD.md', 51, 80)
+  pending.feedback = []
+  expect(unreadReviewSource(large, [...transcript, pending])[0]!.startLine).toBe(51)
+  const failed = read(large, 'docs/GDD.md', 51, 80)
+  ;(failed.feedback as any[])[0].error = 'read failed'
+  expect(unreadReviewSource(large, [...transcript, failed])[0]!.startLine).toBe(51)
+  const fake = read(large, 'docs/GDD.md', 51, 80)
+  ;(fake.feedback as any[])[0].result.content = 'invented'
+  expect(unreadReviewSource(large, [...transcript, fake])[0]!.startLine).toBe(51)
+})
+test('paged final cannot bypass unread source; completed reads allow normal final without a ledger', () => {
+  const large = input(true)
+  const rejected = createContinuingSingleReviewTask(large, []).admit({ action: 'final', report: report() })
+  expect(rejected.kind).toBe('rejected')
+  expect(createContinuingSingleReviewTask(large, []).replay(rejected.action)).toEqual(rejected)
+  const transcript = large.documents.map(doc => read(large, doc.path, 1, 80))
+  expect(unreadReviewSource(large, transcript)).toEqual([])
+  expect(createContinuingSingleReviewTask(large, transcript).admit({ action: 'final', report: report() }))
+    .toEqual({ kind: 'accepted', action: { action: 'final', report: report() } })
+})
+test('larger documents use paging rather than the former 2 MiB context rejection', () => {
+  const large = input(true)
+  for (const doc of large.documents) doc.content = Array(8).fill(doc.content).join('\n')
+  expect(large.documents.reduce((sum, doc) => sum + Buffer.byteLength(doc.content), 0)).toBeGreaterThan(2 * 1024 * 1024)
+  expect(presentReviewInput(captureSingleReviewInput(large)).paged).toBe(true)
+})
+
+test('available original requirements are also read in paged mode', () => {
+  const large = input(true)
+  const content = 'Original confirmed requirement'
+  large.requirements = { status: 'available', content, digest: reviewHash(content) }
+  const transcript = large.documents.map(doc => read(large, doc.path, 1, 80))
+  expect(unreadReviewSource(large, transcript)).toEqual([{ path: 'requirements', startLine: 1, endLine: 1 }])
+  transcript.push(read(large, 'requirements', 1, 1))
+  expect(unreadReviewSource(large, transcript)).toEqual([])
+})

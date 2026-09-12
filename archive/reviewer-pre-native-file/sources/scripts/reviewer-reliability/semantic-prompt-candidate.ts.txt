@@ -1,0 +1,44 @@
+/** Offline, opt-in proposal. Not imported by the production reviewer or live runner.
+ * Only the host instruction prefix may change; source and transcript are opaque data.
+ * This module contains no evaluation fixtures, answer key, model client or new review phase.
+ */
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import type { SingleReviewInput } from '../../packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-contract'
+import type { SingleReviewTranscriptEntry } from '../../packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-report'
+import { createNativeToolReviewTask } from '../../packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-tool-task'
+
+export const SEMANTIC_PROMPT_CANDIDATE_ID = 'semantic-instructions-r1'
+const INPUT_BOUNDARY = '\nINPUT (each text field is one exact original line, excluding its newline; line is its one-based source position):\n'
+export const SEMANTIC_PROMPT_EDITS = [
+  {
+    anchor: 'Distinguish an actual contradiction or delivery gap from reasonable divisions of responsibility, different scopes, explicit exceptions and design preferences.',
+    addition: 'Compare repeated claims about the same entity and property in the same scope and time; independence between different properties does not reconcile conflicting values of one property.',
+  },
+  {
+    anchor: 'The host copies exact original lines and checks positions, not the correctness of your interpretation.',
+    addition: "Choose lines that support this finding's actual claim and the requirement or conflicting statement it relies on; nearby or similar passages are not substitutes.",
+  },
+] as const
+const sha = (text: string) => createHash('sha256').update(text).digest('hex')
+
+export function createSemanticPromptCandidate(input: SingleReviewInput, transcript: readonly SingleReviewTranscriptEntry[]) {
+  const baseline = createNativeToolReviewTask(input, transcript)
+  const boundary = baseline.prompt.indexOf(INPUT_BOUNDARY)
+  assert(boundary >= 0, 'Review instruction/source boundary changed; re-review the candidate')
+  let instructions = baseline.prompt.slice(0, boundary)
+  const data = baseline.prompt.slice(boundary)
+  for (const edit of SEMANTIC_PROMPT_EDITS) {
+    assert.equal(instructions.split(edit.anchor).length, 2, 'Expected one instruction anchor; do not silently rebase')
+    instructions = instructions.replace(edit.anchor, `${edit.anchor} ${edit.addition}`)
+  }
+  const task = { ...baseline, prompt: instructions + data }
+  return {
+    id: SEMANTIC_PROMPT_CANDIDATE_ID,
+    baselinePromptSha256: sha(baseline.prompt), candidatePromptSha256: sha(task.prompt),
+    addedBytes: Buffer.byteLength(task.prompt) - Buffer.byteLength(baseline.prompt),
+    // All validation/admission functions, tool descriptors and schema are baseline objects.
+    // Candidate identity belongs to experiment metadata, never to the model report schema.
+    task,
+  }
+}

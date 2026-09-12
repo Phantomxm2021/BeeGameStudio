@@ -84,7 +84,8 @@ test('all author production dependencies stay private or use an approved foundat
     }
     visit(source)
     for (const specifier of imports) {
-      if (specifier.startsWith('node:') || specifier === 'zod' || specifier === 'zod/v4') continue
+      if (specifier.startsWith('node:') || specifier === 'zod' || specifier === 'zod/v4' ||
+          specifier === '@bee-game-studio/agent-workflow/native-task-access') continue
       expect(specifier.startsWith('.')).toBe(true)
       const destination = resolve(path, '..', specifier).replace(/\.ts$/, '')
       expect(destination.startsWith(`${resolve(root)}${sep}`) || allowedPublicEntries.has(destination)).toBe(true)
@@ -98,7 +99,8 @@ test('isolated Author tests and protocol fixtures do not load old workflow or do
   for (const path of await productionSources(root, true)) {
     const tree = ts.createSourceFile(path, await readFile(path, 'utf8'), ts.ScriptTarget.Latest, true)
     function check(specifier: string) {
-      if (specifier.startsWith('node:') || ['bun:test', 'zod', 'zod/v4', 'typescript'].includes(specifier)) return
+      if (specifier.startsWith('node:') || ['bun:test', 'zod', 'zod/v4', 'typescript',
+        '@bee-game-studio/agent-workflow/native-task-access'].includes(specifier)) return
       const destination = resolve(path, '..', specifier).replace(/\.ts$/, '')
       if (!specifier.startsWith('.') || (!destination.startsWith(resolve(root) + sep) && !foundations.has(destination)))
         violations.push(path + ' -> ' + specifier)

@@ -53,8 +53,8 @@ describe('real Stage 2 upstream coverage', () => {
     expect(source.content.split('| W4 | G4-4 | 光甲萤火虫 | 3 |')).toHaveLength(2)
   })
 
-  test('projection changes do not add serial dependencies on Balance or later-stage authors', () => {
+  test('Audio waits for committed Technical delivery mode while UI remains independent of Balance', () => {
     expect(foundationAuthoringSources('docs/UI_UX_SPEC.md').map(source => source.path)).toEqual(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'])
-    expect(foundationAuthoringSources('docs/AUDIO_DESIGN.md').map(source => source.path)).toEqual(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/UI_UX_SPEC.md'])
+    expect(foundationAuthoringSources('docs/AUDIO_DESIGN.md').map(source => source.path)).toEqual(['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/UI_UX_SPEC.md', 'docs/TECHNICAL_DESIGN.md'])
   })
 })

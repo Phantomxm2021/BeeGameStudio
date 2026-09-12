@@ -45,7 +45,7 @@ test('all eight authors receive one decision-focused instruction without droppin
   for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
     const prompt = foundationAuthorPrompt(path)
     expect(prompt.split(FOUNDATION_AUTHORING_INSTRUCTION)).toHaveLength(2)
-    expect(prompt).toContain('The dedicated Reviewer owns format, content and quality audit')
+    expect(prompt).not.toContain('The dedicated Reviewer owns format, content and quality audit')
     const contract = foundationAuthorPromptContract(path).mechanicalMarkdownProtocol
     expect(contract.sections.map(section => section.sectionId)).toEqual(
       getGameDocumentContract(path).sections.map(section => section.sectionId),
@@ -539,10 +539,9 @@ describe('Stage 2 authoring cost contract (offline only)', () => {
         }
       }
     }
-    // Technical→Audio is intentionally not an authoring edge: no concrete
-    // Technical-owned block is required by the Audio contract in this pass.
+    // Audio consumes the committed Technical delivery-mode decision.
     expect(foundationAuthoringSources('docs/AUDIO_DESIGN.md').map(source => source.path))
-      .not.toContain('docs/TECHNICAL_DESIGN.md')
+      .toContain('docs/TECHNICAL_DESIGN.md')
   })
 
   test('offline arithmetic and duplicate fixtures retain realistic boundary distinctions', () => {

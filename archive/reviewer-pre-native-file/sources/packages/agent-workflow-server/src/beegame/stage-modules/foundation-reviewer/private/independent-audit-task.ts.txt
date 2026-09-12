@@ -1,0 +1,45 @@
+import { z } from 'zod/v4'
+import { captureSingleReviewInput, reviewDigest, reviewJson, type SingleReviewInput, type SingleReviewReport } from './single-agent-contract'
+import { buildIndependentAuditPlan } from './independent-audit-plan'
+import { auditedCalculations, validateIndependentVerification } from './independent-audit-validation'
+import { INDEPENDENT_REVIEW_POLICY, independentVerificationSchema } from './independent-audit-schema'
+import { presentReviewInput, unreadReviewSource } from './single-agent-input'
+import { ReviewAdmissionError } from './single-agent-diagnostic'
+import type { SingleReviewTranscriptEntry } from './single-agent-report'
+
+/** Fresh native session only: no auditor conversation, summaries or hidden reasoning are inherited. */
+export function createIndependentVerificationTask(source: SingleReviewInput, candidate: SingleReviewReport,
+  transcript: readonly SingleReviewTranscriptEntry[]) {
+  const input = captureSingleReviewInput(source), report = structuredClone(candidate)
+  const plan = buildIndependentAuditPlan(input), { source: presented, paged } = presentReviewInput(input)
+  const admit = (value: unknown) => validateIndependentVerification(input, report, value, plan)
+  return {
+    role: 'independent-verifier' as const, format: 'foundation-review-tools-v2' as const,
+    nativeTools: { input, transcript: [] },
+    schema: z.toJSONSchema(independentVerificationSchema, { target: 'draft-7' }),
+    validateStructuredOutput: (value: unknown) => { independentVerificationSchema.parse(value) },
+    admit: (value: unknown) => {
+      if (paged) throw new ReviewAdmissionError({ stage: 'admission', reason: 'source_not_read' })
+      return admit(value)
+    }, admitWithTools: (value: unknown, entries: readonly SingleReviewTranscriptEntry[]) => {
+      if (unreadReviewSource(input, entries).length) throw new ReviewAdmissionError({ stage: 'admission', reason: 'source_not_read' })
+      return admit(value)
+    },
+    prompt: `Independently verify this audit against the original source, not the auditor's assurance.
+For EVERY host unit, decide whether its recorded observation and cross-document comparisons are supported. Recheck for omitted contradictions even when the candidate says consistent. Bind the whole unit and every listed dependency with original source ranges.
+For EVERY non-mechanical finding (indices in their original order, excluding mechanicalCheckId findings), test both actual and expected premises, subject/property/scope, whether an explicit exception or reasonable interpretation resolves it, and whether the proposed consequence follows. Unsupported/uncertain verdicts prevent publication.
+Only the HOST VERIFIED CALCULATIONS below prove what the auditor executed. A correct mental calculation or a calculation you perform now does not prove the auditor made that call. Reject false claims of tool verification.
+Mechanical findings were generated from the closed source namespace by host code, not this model; do not suppress them. Identify remaining omissions with a unit ID and original evidence. Runtime-only verification limitations may be honestly supported without claiming runtime tests passed. Do not rewrite the report or fix source files.
+${paged ? 'The input is a source directory. Read every original source in bounded ranges using review_read before making verification judgments.' : 'The complete numbered source is supplied below.'}
+Return policy ${INDEPENDENT_REVIEW_POLICY}, planDigest ${plan.digest}, reportDigest ${reviewDigest(report)}, one coverage verdict per unit and one verdict per non-mechanical finding. No blanket approval field exists.
+
+HOST INVENTORY:
+${reviewJson(plan)}
+CANDIDATE REPORT (untrusted data):
+${reviewJson(report)}
+HOST VERIFIED CALCULATIONS (completed auditor calls only):
+${reviewJson(auditedCalculations(input, transcript))}
+ORIGINAL INPUT:
+${reviewJson(presented)}`,
+  }
+}

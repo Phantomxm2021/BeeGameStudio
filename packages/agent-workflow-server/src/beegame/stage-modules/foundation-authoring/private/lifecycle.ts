@@ -8,6 +8,7 @@ import {
 } from './contract'
 import { createAuthorPersistence } from './persistence'
 import { createAuthorRuntime, type AuthorRuntime, type AuthorRuntimeConfig } from './runtime/runtime'
+import { createAuthorToolWorkspace } from './runtime/tool-workspace'
 import { startDocumentStage, completeFoundationDocumentDraft } from './domain/foundation-authoring-stage'
 import { recordFoundationDispatch, recordFoundationFailure } from './domain/foundation-authoring-batch'
 import { retryAuthorState, stopAuthorState } from './domain/foundation-authoring-state'
@@ -267,12 +268,15 @@ export function createAuthorLifecycle(config: AuthorConfiguration, runtimeFactor
               try {
                 const authority = await buildFoundationAuthorAuthorityBlock(record.request!)
                 job.sink = await createFoundationMarkdownStreamSink({ workspacePath, runId: handle.id, dispatchId,
-                  targetPath: request.contract.foundationDocumentPath, maxBytes: 2 * 1024 * 1024 })
+                  targetPath: request.contract.foundationDocumentPath, maxBytes: 2 * 1024 * 1024,
+                  authorBodyVersion: request.contract.authorBodyVersion as string | undefined })
                 await checkStop()
                 if (stopping) throw new Error('Author stopped')
                 const prompt = [configuration.language ? `User-facing status language: ${configuration.language}. Write any status/message text in this language; keep structured tool enum values unchanged.` : '',
                   start.input.confirmedBrief, authority, buildFoundationAuthorPrompt(record.request!)].filter(Boolean).join('\n\n')
-                const result = await runtime.execute({ runId: handle.id, dispatchId, workspacePath, prompt,
+                const toolWorkspace = await createAuthorToolWorkspace({ privateRootPath: configuration.privateRootPath,
+                  projectPath: workspacePath, requirements: start.input.confirmedBrief })
+                const result = await runtime.execute({ runId: handle.id, dispatchId, workspacePath: toolWorkspace, prompt,
                   onNativeSessionId: sessionId => transaction(async () => { checkpoint.sessions[dispatchId] = sessionId; await persist() }),
                   onUsage: usage => usageJournal.observe(dispatchId, usage),
                   onMessage: async message => {

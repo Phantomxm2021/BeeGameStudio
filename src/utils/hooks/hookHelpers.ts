@@ -9,6 +9,7 @@ import { lazySchema } from '../lazySchema.js'
 import type { SetAppState } from '../messageQueueManager.js'
 import { hasSuccessfulToolCall } from '../messages.js'
 import { addFunctionHook } from './sessionHooks.js'
+import { STRUCTURED_OUTPUT_ENFORCEMENT_HOOK_ID } from './structuredOutputPolicy.js'
 
 /**
  * Schema for hook responses (shared by prompt and agent hooks)
@@ -78,6 +79,6 @@ export function registerStructuredOutputEnforcement(
     '', // No matcher - applies to all stops
     messages => hasSuccessfulToolCall(messages, SYNTHETIC_OUTPUT_TOOL_NAME),
     `You MUST call the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool to complete this request. Call this tool now.`,
-    { timeout: 5000 },
+    { timeout: 5000, id: STRUCTURED_OUTPUT_ENFORCEMENT_HOOK_ID },
   )
 }

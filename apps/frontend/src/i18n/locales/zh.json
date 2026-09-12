@@ -1,6 +1,7 @@
 {
   "landing": {
     "intake": {
+      "devProjectPurge": {"button":"开发测试：清空全部项目","confirm":"将永久删除当前账号的 {{count}} 个项目及可清理的工作区，无法恢复。不会删除账号或资源库。","delete":"永久删除全部项目","cancel":"取消","pending":"正在处理，请勿重复提交…","result":"已删除 {{deleted}} 个项目，失败 {{failed}} 个。请检查剩余列表。","changed":"项目列表已变化，请重新查看清单后确认。","failed":"未能确认清理结果。请刷新项目列表后检查；不要直接重复提交。"},
       "modal": {
         "chooseOption": "选择方案",
         "productionSettings": "制作设置",
@@ -55,6 +56,8 @@
       "errors": {
         "missingPlatformModel": "平台尚未配置默认模型。请联系管理员在系统设置的平台页配置后再生成。",
         "projectStartFailed": "项目启动失败，请检查服务后重试。",
+        "projectQuotaExceeded": "项目数量已达上限：当前 {{projectCount}} 个，上限 {{limit}} 个。请在“历史项目”中删除不再需要的项目后重试，或联系管理员调整配额。这不是 Credit 余额不足。",
+        "projectQuotaExceededUnknown": "项目数量已达上限，无法创建新项目。请在“历史项目”中删除不再需要的项目后重试，或联系管理员调整配额。这不是 Credit 余额不足。",
         "authNotConfigured": "Supabase Auth 尚未配置。",
         "missingEmailPassword": "请输入邮箱和密码。",
         "missingDisplayName": "请设置昵称。",
@@ -802,6 +805,7 @@
     "confirmDelete": "确认删除",
     "deletingProject": "正在删除项目",
     "createReviewCopy": "创建审查副本",
+    "stopAfterReview": "审查完成后停止（不修订）",
     "creatingReviewCopy": "正在创建审查副本",
     "artifactDownloadFailed": "下载失败，请稍后重试。",
     "artifactPreviewFailed": "无法读取交付物内容，请尝试下载。",

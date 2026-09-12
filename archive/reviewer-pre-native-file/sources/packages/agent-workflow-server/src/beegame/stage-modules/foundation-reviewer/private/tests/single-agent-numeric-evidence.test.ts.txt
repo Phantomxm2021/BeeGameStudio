@@ -1,0 +1,225 @@
+import { expect, test } from 'bun:test'
+import { REVIEW_DOCUMENT_PATHS, reviewDigest, type SingleReviewInput, type SingleReviewReport } from '../single-agent-contract'
+import { createContinuingSingleReviewTask, createSingleReviewTask, type SingleReviewTranscriptEntry } from '../single-agent-task'
+import { executeSingleReviewTool, type ReviewToolCall } from '../single-agent-tools'
+import { findReviewNumericMismatches } from '../single-agent-numeric-evidence'
+
+const input: SingleReviewInput = { subject: { kind: 'initial', sourceResultId: 'fixture', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) },
+  requirements: { status: 'unavailable', reason: 'Offline fixture' },
+  documents: REVIEW_DOCUMENT_PATHS.map(path => ({ path, content: 'range = 110\nbp_03\nvalue = 123\nscale = +3\nplatform = 2D\noffset = -110\nlarge = 1,234' })) }
+const coverage = (distance: number) => ({ op: 'multiply' as const, args: [2, { op: 'power' as const, args: [
+  { op: 'subtract' as const, args: [{ op: 'power' as const, args: [110, 2] }, { op: 'power' as const, args: [distance, 2] }] }, 0.5,
+] }] })
+const call: ReviewToolCall = { tool: 'calculate', expression: { op: 'subtract', args: [coverage(60), coverage(70)] } }
+const computed = executeSingleReviewTool(input, call) as { value: number; calculationId: string }
+const transcript: SingleReviewTranscriptEntry[] = [{ action: { action: 'tools', rationale: 'Verify coverage', calls: [call] },
+  feedback: [{ call, result: computed }] }]
+const binding = { id: 'coverage_delta', kind: 'calculation' as const, calculationId: computed.calculationId, decimals: 2 }
+function report(reasoning = 'Coverage changes by {{q:coverage_delta}}px'): SingleReviewReport {
+  return { status: 'completed', summary: 'Whole set reviewed', reviewedDocuments: [...REVIEW_DOCUMENT_PATHS],
+    requirementsAssessment: 'unavailable', findings: [{ severity: 'HIGH', title: 'Geometry inconsistency', actual: 'Inconsistent geometry',
+      expected: 'Consistent geometry', reasoning, impact: 'Coverage assumptions change',
+      evidence: [{ path: 'docs/BALANCE_DESIGN.md', startLine: 1, endLine: 1, quote: 'range = 110' }],
+      repair: { documentPath: 'docs/LEVEL_SCENE_DESIGN.md', instruction: 'Align the geometry' } }],
+    omissionCheck: 'Checked omissions and false positives', limitations: ['Static audit only'] }
+}
+function draft() {
+  return createSingleReviewTask(input, transcript).admit({ action: 'draft', report: { ...report(), numericBindings: [binding] } })
+}
+function historicalRepair(value: SingleReviewReport) {
+  const finding = value.findings[0]!
+  if (!('repair' in finding)) throw new Error('Expected historical repair fixture')
+  return finding.repair
+}
+
+test('inline calculation and source references render, correct and confirm without a binding table', () => {
+  const reference = (executeSingleReviewTool(input, call) as { reportReference: string }).reportReference
+  const task = createContinuingSingleReviewTask(input, transcript)
+  const accepted = task.admit({ action: 'draft', report: report('Delta ' + reference + 'px from {{source:docs/BALANCE_DESIGN.md:1:110}}') })
+  expect(accepted.kind).toBe('accepted')
+  if (accepted.action.action !== 'draft') throw new Error('draft')
+  expect(accepted.action.report.findings[0]!.reasoning).toBe('Delta 14.69px from 110')
+  expect(accepted.action.report.numericEvidence?.bindings).toEqual([])
+  expect(task.replay(accepted.action)).toEqual(accepted)
+  const continuation = createContinuingSingleReviewTask(input, [...transcript, { action: accepted.action, feedback: 'Accepted' }])
+  const corrected = continuation.admit({ action: 'correct_draft', draftDigest: reviewDigest(accepted.action.report),
+    fields: [{ path: 'findings.0.reasoning', text: 'Rechecked ' + reference.replace(':2}}', ':3}}') }] })
+  expect(corrected.kind).toBe('accepted')
+  if (corrected.action.action !== 'draft') throw new Error('draft')
+  expect(corrected.action.report.findings[0]!.reasoning).toBe('Rechecked 14.685')
+  expect(continuation.replay(corrected.action)).toEqual(corrected)
+  const final = continuation.admit({ action: 'confirm_draft', draftDigest: reviewDigest(accepted.action.report), omissionCheck: 'Verified ' + reference })
+  expect(final.kind).toBe('accepted')
+  expect(continuation.replay(final.action)).toEqual(final)
+  const tampered = structuredClone(accepted.action)
+  tampered.report.findings[0]!.reasoning = 'Delta 23px'
+  expect(task.replay(tampered).kind).toBe('rejected')
+})
+
+test('inline references cannot bypass successful calculation provenance or source membership', () => {
+  const reference = '{{calc:' + computed.calculationId + ':2}}'
+  for (const history of [[], [{ ...transcript[0]!, feedback: [{ call, error: 'failed' }] }],
+    [{ ...transcript[0]!, feedback: [{ call, result: { ...computed, value: 23 } }] }]])
+    expect(createContinuingSingleReviewTask(input, history).admit({ action: 'draft', report: report(reference) }).kind).toBe('rejected')
+  const other = structuredClone(input); other.documents[0]!.content += '\nchanged'
+  expect(createContinuingSingleReviewTask(other, transcript).admit({ action: 'draft', report: report(reference) }).kind).toBe('rejected')
+  for (const text of [reference.replace(':2}}', ':9}}'), '{{calc:invented:2}}',
+    '{{source:docs/BALANCE_DESIGN.md:3:23}}', '{{source:docs/BALANCE_DESIGN.md:0:110}}',
+    '{{source:/etc/passwd:1:110}}', '{{source:requirements:1:110}}', reference + ' versus 23px'])
+    expect(createContinuingSingleReviewTask(input, transcript).admit({ action: 'draft', report: report(text) }).kind).toBe('rejected')
+  expect(JSON.stringify(createSingleReviewTask(input, transcript).schema)).not.toContain('numericBindings')
+})
+
+test('reproduces the real error and inserts the computed value, not a model-written result', () => {
+  expect(computed.value).toBeCloseTo(14.685261661086344, 10)
+  const rejected = createContinuingSingleReviewTask(input, transcript).admit({ action: 'draft',
+    report: { ...report('Coverage changes by 23px'), numericEvidence: { bindings: [], templates: {} } } })
+  expect(rejected.kind).toBe('rejected')
+  if (rejected.kind !== 'rejected') throw new Error('Expected numeric rejection')
+  expect(rejected.diagnostic.reason).toBe('numeric_evidence_invalid')
+  expect(createContinuingSingleReviewTask(input, transcript).replay(rejected.action)).toEqual(rejected)
+  const accepted = draft()
+  if (accepted.action !== 'draft') throw new Error('Expected draft')
+  expect(accepted.report.findings[0]!.reasoning).toBe('Coverage changes by 14.69px')
+  expect(accepted.report.numericEvidence?.templates['findings.0.reasoning']).toBe('Coverage changes by {{q:coverage_delta}}px')
+  expect(createSingleReviewTask(input, transcript).replay(accepted)).toEqual(accepted)
+})
+
+test('a real calculation elsewhere does not authorize free-typed numbers in any prose field', () => {
+  for (const mutate of [
+    (value: SingleReviewReport) => { value.summary = 'Change is 23px' },
+    (value: SingleReviewReport) => { value.omissionCheck = 'Verified 23px' },
+    (value: SingleReviewReport) => { value.limitations = ['Only 23px'] },
+    (value: SingleReviewReport) => { value.findings[0]!.title = 'Change is 23px' },
+    (value: SingleReviewReport) => { value.findings[0]!.actual = 'Change is 23px' },
+    (value: SingleReviewReport) => { value.findings[0]!.expected = 'Change is 23px' },
+    (value: SingleReviewReport) => { value.findings[0]!.impact = 'Change is 23px' },
+    (value: SingleReviewReport) => { historicalRepair(value).instruction = 'Move by 23px' },
+  ]) {
+    const value = report(); mutate(value)
+    expect(createContinuingSingleReviewTask(input, transcript).admit({ action: 'draft', report: { ...value, numericBindings: [binding] } }).kind).toBe('rejected')
+  }
+})
+
+test('requested, failed, fabricated and foreign-input calculations cannot be cited', () => {
+  const failed = [{ ...transcript[0]!, feedback: [{ call, error: 'Failed' }] }]
+  for (const history of [[], failed, [{ ...transcript[0]!, feedback: [{ call, result: { ...computed, value: 23 } }] }]]) {
+    expect(createContinuingSingleReviewTask(input, history).admit({ action: 'draft', report: { ...report(), numericBindings: [binding] } }).kind).toBe('rejected')
+  }
+  const other = structuredClone(input); other.documents[0]!.content += '\nchanged'
+  expect(createContinuingSingleReviewTask(other, transcript).admit({ action: 'draft', report: { ...report(), numericBindings: [binding] } }).kind).toBe('rejected')
+  expect(createContinuingSingleReviewTask(input, transcript).admit({ action: 'draft', report: { ...report(),
+    numericBindings: [{ ...binding, calculationId: 'calc-' + 'f'.repeat(64) }] } }).kind).toBe('rejected')
+})
+
+test('source tokens require exact line membership and cannot match a substring of another number', () => {
+  const source = { id: 'source', kind: 'source' as const, path: 'docs/BALANCE_DESIGN.md', line: 1, value: '110' }
+  const task = createContinuingSingleReviewTask(input, [])
+  for (const [line, value] of [[1, '110'], [2, 'bp_03'], [4, '+3'], [5, '2D']] as const)
+    expect(task.admit({ action: 'draft', report: { ...report('Source says {{q:source}}'), numericBindings: [{ ...source, line, value }] } }).kind).toBe('accepted')
+  for (const change of [{ line: 3, value: '23' }, { line: 999 }, { path: '/etc/passwd' }, { value: '23' }, { line: 6, value: '110' }, { line: 7, value: '234' }])
+    expect(task.admit({ action: 'draft', report: { ...report('Source says {{q:source}}'), numericBindings: [{ ...source, ...change }] } }).kind).toBe('rejected')
+})
+
+test('saved rendered numbers cannot be tampered with and final confirmation cannot bypass validation', () => {
+  const accepted = draft()
+  if (accepted.action !== 'draft') throw new Error('Expected draft')
+  const modified = structuredClone(accepted)
+  modified.report.findings[0]!.reasoning = 'Coverage changes by 23px'
+  expect(createContinuingSingleReviewTask(input, transcript).replay(modified).kind).toBe('rejected')
+  const task = createContinuingSingleReviewTask(input, [...transcript, { action: accepted, feedback: 'Accepted' }])
+  const confirmation = { action: 'confirm_draft', draftDigest: reviewDigest(accepted.report), omissionCheck: 'Checked {{q:coverage_delta}}px' }
+  const final = task.admit(confirmation)
+  expect(final.kind).toBe('accepted')
+  if (final.action.action !== 'final') throw new Error('Expected final')
+  expect(final.action.report.omissionCheck).toBe('Checked 14.69px')
+  expect(task.replay(final.action)).toEqual(final)
+  expect(task.admit({ ...confirmation, omissionCheck: 'Checked 23px' }).kind).toBe('rejected')
+})
+
+test('plain numeric prose remains replayable and is accepted without a proof claim', () => {
+  const legacy = { action: 'draft', report: report('Old recorded 23px') }
+  expect(createContinuingSingleReviewTask(input, []).replay(legacy).kind).toBe('accepted')
+  expect(createContinuingSingleReviewTask(input, []).admit(legacy).kind).toBe('accepted')
+})
+
+test('unknown placeholders, Unicode numerals, duplicate bindings and model-supplied results fail closed', () => {
+  const task = createContinuingSingleReviewTask(input, transcript)
+  expect(task.admit({ action: 'draft', report: { ...report('Unknown {{q:missing}}'), numericBindings: [binding] } }).kind).toBe('rejected')
+  expect(task.admit({ action: 'draft', report: { ...report('Coverage changes by ２３px'),
+    numericEvidence: { bindings: [], templates: {} } } }).kind).toBe('rejected')
+  expect(task.admit({ action: 'draft', report: { ...report(), numericBindings: [binding, binding] } }).kind).toBe('rejected')
+  expect(() => task.admit({ action: 'draft', report: { ...report(), numericBindings: [{ ...binding, value: 23 }] } })).toThrow()
+})
+
+test('a failed calculation does not poison a different valid calculation record', () => {
+  const invalidCall: ReviewToolCall = { tool: 'calculate', expression: { op: 'divide', args: [1, 0] } }
+  const history: SingleReviewTranscriptEntry[] = [...transcript, { action: { action: 'tools', rationale: 'Failed check', calls: [invalidCall] },
+    feedback: [{ call: invalidCall, error: 'No finite result' }] }]
+  expect(createContinuingSingleReviewTask(input, history).admit({ action: 'draft', report: { ...report(), numericBindings: [binding] } }).kind).toBe('accepted')
+})
+
+test('verified locations render as qualified references, not unrestricted numeric prose', () => {
+  const task = createContinuingSingleReviewTask(input, [])
+  const accepted = task.admit({ action: 'draft', report: report('Inspect {{ref:docs/BALANCE_DESIGN.md:1:2}}') })
+  expect(accepted.kind).toBe('accepted')
+  if (accepted.action.action !== 'draft') throw new Error('draft')
+  expect(accepted.action.report.findings[0]!.reasoning).toBe('Inspect docs/BALANCE_DESIGN.md:L1-L2')
+  expect(task.replay(accepted.action)).toEqual(accepted)
+  for (const location of ['{{ref:/etc/passwd:1:1}}', '{{ref:docs/BALANCE_DESIGN.md:0:1}}', '{{ref:docs/BALANCE_DESIGN.md:2:1}}',
+    '{{ref:docs/BALANCE_DESIGN.md:1:999}}', '{{ref:requirements:1:1}}', '{{ref:docs/BALANCE_DESIGN.md:1:1}} changes by 23px'])
+    expect(task.admit({ action: 'draft', report: report(location) }).kind).toBe('rejected')
+})
+
+test('one diagnostic batch identifies invalid source binding and every unbound field', () => {
+  const value = report('Count {{q:rows}}')
+  historicalRepair(value).instruction = 'Fix line 3'
+  value.omissionCheck = 'Checked 23px'
+  const rejected = createContinuingSingleReviewTask(input, []).admit({ action: 'draft', report: { ...value,
+    numericBindings: [{ id: 'rows', kind: 'source', path: 'docs/BALANCE_DESIGN.md', line: 2, value: '12' }] } })
+  if (rejected.action.action !== 'draft') throw new Error('draft')
+  const issues = findReviewNumericMismatches(input, rejected.action.report, [])
+  expect(issues).toContainEqual({ bindingIndex: 0, code: 'invalid_source' })
+  expect(issues).toContainEqual({ field: 'findings.0.repair.instruction', code: 'unbound_number' })
+  expect(issues).toContainEqual({ field: 'omissionCheck', code: 'unbound_number' })
+  expect(JSON.stringify(issues)).not.toContain('Fix line')
+})
+
+test('partial correction preserves findings, replaces bindings, validates replay and cannot publish directly', () => {
+  const value = report()
+  historicalRepair(value).instruction = 'Fix line 1'
+  const bad = { ...binding, calculationId: 'calc-' + 'f'.repeat(64) }
+  const rejected = createContinuingSingleReviewTask(input, transcript).admit({ action: 'draft', report: { ...value, numericBindings: [bad] } })
+  if (rejected.action.action !== 'draft') throw new Error('draft')
+  const history = [...transcript, { action: rejected.action, admitted: false, feedback: 'Rejected' }]
+  const task = createContinuingSingleReviewTask(input, history)
+  const patch = { action: 'correct_draft', draftDigest: reviewDigest(rejected.action.report),
+    fields: [{ path: 'findings.0.repair.instruction', text: 'Fix {{ref:docs/BALANCE_DESIGN.md:1:1}}' }], numericBindings: [binding] }
+  const corrected = task.admit(patch)
+  expect(corrected.kind).toBe('accepted')
+  if (corrected.action.action !== 'draft') throw new Error('draft')
+  expect(corrected.action.report.findings[0]!.reasoning).toBe('Coverage changes by 14.69px')
+  expect(corrected.action.report.findings[0]!.evidence).toEqual(value.findings[0]!.evidence)
+  expect(corrected.action.report.summary).toBe(value.summary)
+  expect(task.replay(corrected.action)).toEqual(corrected)
+  expect(() => task.admit({ ...patch, draftDigest: 'f'.repeat(64) })).toThrow()
+  expect(() => task.admit({ ...patch, fields: [...patch.fields, ...patch.fields] })).toThrow()
+  expect(() => task.admit({ ...patch, fields: [{ path: 'findings.99.actual', text: 'foreign' }] })).toThrow()
+  expect(() => task.admit({ ...patch, fields: [{ path: '__proto__.polluted', text: 'foreign' }] })).toThrow()
+  expect(task.admit({ ...patch, fields: [{ path: 'findings.0.repair.instruction', text: 'Move by 23px' }] }).kind).toBe('rejected')
+  const finalTask = createContinuingSingleReviewTask(input, [...history, { action: corrected.action, feedback: 'Accepted' }])
+  expect(finalTask.admit({ action: 'confirm_draft', draftDigest: reviewDigest(corrected.action.report), omissionCheck: 'Verified {{q:coverage_delta}}px' }).kind).toBe('accepted')
+})
+
+test('removing an unsupported claim prunes its invalid binding without changing other prose', () => {
+  const task = createContinuingSingleReviewTask(input, [])
+  const rejected = task.admit({ action: 'draft', report: { ...report('Count {{q:rows}}'),
+    numericBindings: [{ id: 'rows', kind: 'source', path: 'docs/BALANCE_DESIGN.md', line: 2, value: '12' }] } })
+  if (rejected.action.action !== 'draft') throw new Error('draft')
+  const corrected = createContinuingSingleReviewTask(input, [{ action: rejected.action, admitted: false, feedback: 'Rejected' }]).admit({
+    action: 'correct_draft', draftDigest: reviewDigest(rejected.action.report),
+    fields: [{ path: 'findings.0.reasoning', text: 'See the cue matrix' }], numericBindings: [] })
+  expect(corrected.kind).toBe('accepted')
+  if (corrected.action.action !== 'draft') throw new Error('draft')
+  expect(corrected.action.report.numericEvidence?.bindings).toEqual([])
+})

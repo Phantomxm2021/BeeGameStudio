@@ -1,0 +1,535 @@
+import { createHash } from 'node:crypto'
+import { readFile, readdir, mkdir, open, writeFile, realpath } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
+import assert from 'node:assert/strict'
+import { createEvaluationCredential, authenticatedEvaluationRead } from './evaluation-credential'
+import { observeEvaluation, verifyEvaluationTerminal, verifyEvaluationConfiguration } from './evaluation-finalization'
+import type { SupabaseDashboardStore } from '../../packages/agent-workflow-server/src/supabase-dashboard-store'
+
+/**
+ * Registered semantic-review runner.
+ *
+ * The default invocation is a local preflight.  A paid run is possible only
+ * with an explicit, one-shot case selector.  The runner deliberately owns
+ * the case claim and evidence boundaries; it never retries a paid case or
+ * deletes a claim/evidence file.
+ */
+const repo = resolve(import.meta.dir, '../..')
+const sourceRepo = '/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio'
+let batchRoot = process.env.BEEGAME_REVIEW_BATCH_ROOT ? resolve(process.env.BEEGAME_REVIEW_BATCH_ROOT) : ''
+let registration: { batchId: string; candidateId: string; candidatePromptSha256: string; baselinePromptSha256: string } | undefined
+const freezePath = join(batchRoot, 'freeze.ts')
+const capturePath = join(batchRoot, 'capture.ts')
+const cliPath = '/private/tmp/reviewer-decouple-v2-FEXBpv/dist/cli-bun.js'
+const ownerId = '30fb0202-1f77-414f-82da-f92936e7bba3'
+const projectId = '5fe49a21-5a7f-4cd2-9c1b-3960ea79690f'
+const modelConfigId = 'llm_ac40e5d1be394ffe925e3f2532dedd34'
+const model = 'glm-5.3'
+const batchReserveCredits = 24
+const observedCaseGuardCredits = 12
+const maxWaitMs = 15 * 60 * 1000
+const originalArkBaseUrl = 'https://ark.cn-beijing.volces.com/api/coding'
+const originalModel = 'ark-code-latest'
+const modelEnvKeys = [
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+] as const
+
+type Usage = {
+  prompt_tokens: number
+  completion_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  total_tokens: number
+}
+
+type ModelConfigSummary = {
+  id: string
+  ownerId: string
+  name: string
+  provider: string
+  baseUrl?: string
+  models: Record<string, string>
+  isDefault: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+const emptyUsage = (): Usage => ({ prompt_tokens: 0, completion_tokens: 0,
+  cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 0 })
+
+function addUsage(target: Usage, value: Usage): void {
+  for (const key of Object.keys(target) as (keyof Usage)[]) target[key] += value[key]
+}
+
+function sha(value: string | Buffer): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function jsonClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+async function readJson<T>(path: string): Promise<T> {
+  return JSON.parse(await readFile(path, 'utf8')) as T
+}
+
+async function writeSnapshot(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
+}
+
+async function writeImmutable(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  try {
+    const file = await open(path, 'wx', 0o600)
+    try { await file.writeFile(`${JSON.stringify(value, null, 2)}\n`); await file.sync() }
+    finally { await file.close() }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    assert.deepEqual(await readJson(path), value, `immutable evidence conflict: ${path}`)
+  }
+}
+
+async function runFreeze(): Promise<Record<string, unknown>> {
+  const child = Bun.spawn([process.execPath, freezePath], { stdout: 'pipe', stderr: 'pipe' })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  if (exitCode !== 0) {
+    const detail = `${stdout}\n${stderr}`.trim().replace(/\s+/g, ' ').slice(0, 500)
+    throw new Error(`Frozen input/source verification failed${detail ? `: ${detail}` : ''}`)
+  }
+  const line = stdout.trim().split(/\r?\n/).at(-1) ?? ''
+  return JSON.parse(line) as Record<string, unknown>
+}
+
+function parseMode(): { kind: 'preflight' } | { kind: 'execute'; caseId: 'case-1' | 'case-2' } {
+  const args = process.argv.slice(2)
+  if (args.length === 0 || (args.length === 1 && args[0] === '--preflight')) return { kind: 'preflight' }
+  let selected: string | undefined
+  if (args.length === 2 && args[0] === '--execute-once') selected = args[1]
+  else if (args.length === 1 && args[0]?.startsWith('--execute-once=')) selected = args[0].slice('--execute-once='.length)
+  else throw new Error('Use no arguments for preflight, or --execute-once case-1|case-2')
+  const caseId = selected === 'case1' || selected === 'case-1' ? 'case-1'
+    : selected === 'case2' || selected === 'case-2' ? 'case-2' : undefined
+  if (!caseId) throw new Error('Paid execution requires case-1 or case-2')
+  return { kind: 'execute', caseId }
+}
+
+function normalizeUsage(value: Usage): Usage {
+  const usage = jsonClone(value)
+  for (const key of Object.keys(emptyUsage()) as (keyof Usage)[]) {
+    assert(Number.isSafeInteger(usage[key]) && usage[key] >= 0, `invalid usage ${key}`)
+  }
+  assert.equal(usage.total_tokens, usage.prompt_tokens + usage.completion_tokens + usage.cache_read_tokens + usage.cache_creation_tokens)
+  return usage
+}
+
+/** Same weighted-v1 estimate used by the previous live runner. */
+function weightedV1Credits(usage: Usage): number {
+  const weighted = 100 * usage.prompt_tokens + 10 * usage.cache_read_tokens +
+    125 * usage.cache_creation_tokens + 500 * usage.completion_tokens
+  return Math.ceil(weighted / 100) / 10_000
+}
+
+function summarizeModelConfigs(configs: readonly any[]): { configs: ModelConfigSummary[]; digest: string } {
+  const safe = configs.map(config => ({
+    id: String(config.id), ownerId: String(config.ownerId), name: String(config.name),
+    provider: String(config.provider), ...(config.baseUrl ? { baseUrl: String(config.baseUrl) } : {}),
+    models: Object.fromEntries(Object.entries(config.models ?? {}).filter(([key, value]) =>
+      ['fast', 'balanced', 'strong'].includes(key) && typeof value === 'string')) as Record<string, string>,
+    isDefault: Boolean(config.isDefault),
+    createdAt: new Date(config.createdAt).toISOString(), updatedAt: new Date(config.updatedAt).toISOString(),
+  })).sort((a, b) => a.id.localeCompare(b.id))
+  return { configs: safe, digest: sha(JSON.stringify(safe)) }
+}
+
+function assertOriginalRuntimeEnv(selected: Record<string, string>): void {
+  assert.equal(selected.ANTHROPIC_BASE_URL?.replace(/\/$/u, ''), originalArkBaseUrl)
+  for (const key of modelEnvKeys) assert.equal(selected[key], originalModel, `unexpected stored model for ${key}`)
+}
+
+function safeSelectedConfiguration(configuration: { command: readonly string[]; env: Record<string, string> }) {
+  return {
+    command: [...configuration.command],
+    model: configuration.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+    baseUrl: configuration.env.ANTHROPIC_BASE_URL,
+    modelType: configuration.env.BEEGAME_MODEL_TYPE,
+    hasAnthropicCredential: Boolean(configuration.env.ANTHROPIC_API_KEY || configuration.env.ANTHROPIC_AUTH_TOKEN),
+  }
+}
+
+async function makeInfrastructure(caseRoot: string) {
+  const { loadEnvFile } = await import(repo + '/scripts/beegame-migration-cli.ts')
+  const dev = await import(repo + '/scripts/beegame-dev-lib.ts')
+  const environment: Record<string, string | undefined> = { ...process.env }
+  loadEnvFile(join(sourceRepo, '.env.local'), environment)
+  const plan = dev.buildBeeGameDevPlan([], { cwd: repo, env: environment, bunExecutable: process.execPath,
+    ports: { runtime: dev.DEFAULT_BEEGAME_RUNTIME_PORT, frontend: dev.DEFAULT_BEEGAME_FRONTEND_PORT,
+      billing: dev.DEFAULT_BEEGAME_BILLING_PORT, skills: dev.DEFAULT_BEEGAME_SKILLS_PORT, resources: dev.DEFAULT_BEEGAME_RESOURCE_PORT } })
+  const runtimeEnv = plan.processes.find((item: any) => item.name === 'runtime')?.env as Record<string, string> | undefined
+  if (!runtimeEnv) throw new Error('BeeGame runtime environment unavailable')
+  // Runtime imports and the authentication decryptor use the same resolved
+  // process environment as the existing live runner.  Nothing from it is
+  // written to the case directory or emitted in evidence.
+  Object.assign(process.env, runtimeEnv)
+
+  const { decryptSecret } = await import(repo + '/packages/agent-workflow-server/src/security/secret-crypto.ts')
+  const credential = createEvaluationCredential({
+    ownerId, runtimeOrigin: 'http://127.0.0.1:62174', frontendOrigin: 'http://127.0.0.1:62173', fetchImpl: fetch,
+    async loadSessions() {
+      const stored = JSON.parse(await readFile('/Users/nswell/.beegame/dashboard/auth-sessions.json', 'utf8'))
+      return Object.entries(stored).flatMap(([id, value]) => {
+        try {
+          const record = JSON.parse(decryptSecret(String(value), 'auth:session'))
+          return [{ id, ownerId: record.user?.id, accessToken: record.accessToken, expiresAt: record.expiresAt,
+            sessionExpiresAt: record.sessionExpiresAt ?? record.expiresAt + 30 * 24 * 60 * 60 * 1000 }]
+        } catch { return [] }
+      })
+    },
+  })
+  const { createTLSAwareFetch } = await import(repo + '/packages/beegame-security-core/src/tls-aware-fetch.ts')
+  const serviceFetch = createTLSAwareFetch()
+  const configurationFetch = (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => serviceFetch(url, { ...init,
+    signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000) })
+  const { createSupabaseRuntimeEnvClientFromEnv } = await import(repo + '/packages/agent-workflow-server/src/supabase-runtime-env-client.ts')
+  const { createSupabaseDashboardStoreFromEnv } = await import(repo + '/packages/agent-workflow-server/src/supabase-dashboard-store.ts')
+  const client = createSupabaseRuntimeEnvClientFromEnv(configurationFetch)
+  const store: SupabaseDashboardStore | undefined = createSupabaseDashboardStoreFromEnv(runtimeEnv, configurationFetch)
+  if (!client || !store) throw new Error('Runtime configuration unavailable')
+  const { mapRuntimeSettingsToEnv } = await import(repo + '/packages/agent-workflow-server/src/runtime-settings-store.ts')
+  const { createAuthenticationClient } = await import(repo + '/packages/agent-workflow-server/src/auth/public.ts')
+  const { createRuntimeConfigurationClient } = await import(repo + '/packages/agent-workflow-server/src/runtime-configuration/public.ts')
+  const configuration = createRuntimeConfigurationClient({
+    ownerId, dataDir: caseRoot, modelConfigId,
+    authentication: createAuthenticationClient({ ownerId, credential }),
+    command: [process.execPath, '--preload', capturePath, cliPath, '--model', model],
+    // This is an in-process test override.  The repository remains the
+    // authority and is checked below before this environment is merged.
+    runtime: { modelType: 'anthropic', env: Object.fromEntries(modelEnvKeys.map(key => [key, model])) },
+    repository: { async getRuntimeEnv(dataDir: string, requestedOwnerId: string, authToken: string, selectedId: string) {
+      if (requestedOwnerId !== ownerId || selectedId !== modelConfigId) throw new Error('Unexpected owner/model selection')
+      const rpc = await client.loadRuntimeEnv({ userId: requestedOwnerId, dataDir, authToken, modelConfigId: selectedId })
+      const selectedModel = await authenticatedEvaluationRead(credential,
+        token => store.withAuthToken(token).loadRlsVisibleModelRuntimeEnv(selectedId))
+      const isolation = mapRuntimeSettingsToEnv({}, { dataDir })
+      const selected = { ...rpc, ...selectedModel, ...Object.fromEntries(
+        ['BEEGAME_CONFIG_DIR', 'NPM_CONFIG_CACHE', 'npm_config_cache', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig']
+          .map(key => [key, isolation[key]])) }
+      assertOriginalRuntimeEnv(selected)
+      await writeImmutable(join(caseRoot, 'original-runtime.json'), {
+        baseUrl: selected.ANTHROPIC_BASE_URL?.replace(/\/$/u, ''),
+        models: Object.fromEntries(modelEnvKeys.map(key => [key, selected[key]])),
+        modelConfigId, ownerId,
+      })
+      return selected
+    } },
+  })
+
+  const { resolveBeeGameBillingConfig } = await import(repo + '/packages/beegame-billing-core/src/billing-config.ts')
+  const { createRemoteUsageBillingClient } = await import(repo + '/packages/beegame-billing-core/src/usage-control-client.ts')
+  const { createUsageBillingClient } = await import(repo + '/packages/agent-workflow-server/src/billing/public.ts')
+  const billingConfig = resolveBeeGameBillingConfig(runtimeEnv)
+  const billingClient = createRemoteUsageBillingClient(billingConfig, serviceFetch)
+  if (!billingClient) throw new Error('Remote usage billing unavailable')
+  const rawBilling = createUsageBillingClient({ ownerId, billingClient })
+  const billing = Object.freeze({
+    protocolVersion: rawBilling.protocolVersion,
+    ownerId: rawBilling.ownerId,
+    async submitUsage(input: any) {
+      if (input.ownerId !== ownerId) throw new Error('Usage owner mismatch')
+      const usage = normalizeUsage(input.usage)
+      const receipt = await rawBilling.submitUsage({ ...input, usage })
+      // Persist the authority response before validating its shape.  A remote
+      // debit may already have happened when a malformed response is seen;
+      // losing that receipt would make the durable usage fact unrecoverable.
+      await writeImmutable(join(caseRoot, 'billing', `${input.eventId}.json`), {
+        ownerId, projectId: input.projectId, sessionId: input.sessionId, turnId: input.turnId,
+        eventId: input.eventId, usage, receipt,
+      })
+      assert.equal(receipt.protocolVersion, 1)
+      assert.equal(receipt.ownerId, ownerId)
+      assert.equal(receipt.eventId, input.eventId)
+      assert.equal(receipt.idempotencyKey, input.eventId)
+      assert.equal(receipt.pricingVersion, 'weighted-v1')
+      assert.equal(receipt.usageSource, 'runtime_snapshot')
+      assert.deepEqual(receipt.usage, usage)
+      if ('skipped' in receipt) assert.equal(usage.total_tokens, 0)
+      else {
+        assert(typeof receipt.recorded.eventId === 'string' && receipt.recorded.eventId.length > 0)
+        assert(typeof receipt.debited.eventId === 'string' && receipt.debited.eventId.length > 0)
+        assert.equal(receipt.recorded.eventId, receipt.debited.eventId)
+        assert.equal(receipt.recorded.creditsMicro, receipt.debited.creditsMicro)
+        assert(Number.isSafeInteger(receipt.recorded.creditsMicro) && receipt.recorded.creditsMicro >= 0)
+      }
+      return receipt
+    },
+  })
+  return { configuration, billing, store, credential,
+    readModelConfigs: () => authenticatedEvaluationRead(credential, token => store.withAuthToken(token).listRlsVisiblePublicModelConfigs()),
+    readWallet: () => authenticatedEvaluationRead(credential, async token => {
+      assert(billingConfig.remoteApiBaseUrl)
+      const url = new URL('/api/usage-wallet', billingConfig.remoteApiBaseUrl)
+      assert.equal(url.hostname, '127.0.0.1')
+      const response = await fetch(url, { headers: { authorization: 'Bearer ' + token, origin: 'http://127.0.0.1:62173' },
+        redirect: 'error', signal: AbortSignal.timeout(20_000) })
+      if (!response.ok) throw { status: response.status }
+      const wallet = await response.json() as { userId: string; balanceCreditsMicro: number }
+      assert.equal(wallet.userId, ownerId)
+      return wallet
+    }),
+  }
+}
+
+function stateUsage(state: any): Usage {
+  const total = emptyUsage()
+  for (const attempt of state.attempts ?? []) {
+    const usage = attempt.closed?.usage ?? attempt.usage
+    if (usage) addUsage(total, normalizeUsage(usage))
+  }
+  return total
+}
+
+function receiptCreditsMicro(state: any): number {
+  let creditsMicro = 0
+  for (const attempt of state.attempts ?? []) {
+    const receipt = attempt.receipt
+    if (!receipt || receipt.skipped) continue
+    assert.equal(receipt.recorded.eventId, receipt.debited.eventId)
+    assert.equal(receipt.recorded.creditsMicro, receipt.debited.creditsMicro)
+    creditsMicro += receipt.recorded.creditsMicro
+  }
+  return creditsMicro
+}
+
+const evidenceSkipDirectories = new Set(['config', 'node_modules', 'npm-cache', '.npm'])
+
+async function evidenceFiles(directory: string): Promise<string[]> {
+  const files: string[] = []
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory() && evidenceSkipDirectories.has(entry.name)) continue
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) files.push(...await evidenceFiles(path))
+    else if (entry.isFile()) files.push(path)
+  }
+  return files
+}
+
+async function scanEvidence(caseRoot: string, selectedEnv: Record<string, string>): Promise<{
+  requestCount: number; credentialLeak: boolean; rawFiles: number; captureLimitHit: boolean
+}> {
+  const files = await evidenceFiles(caseRoot)
+  const requestPaths = files.filter(path => /\/http-\d+\.request\.raw\.json$/u.test(path))
+  const rawPaths = files.filter(path => /\.raw\.(?:json|sse)$/u.test(path))
+  const captureLimitHit = files.some(path => path.endsWith('/capture-http-limit.json'))
+  const credentialValues = Object.entries(selectedEnv)
+    .filter(([key, value]) => /API_KEY|AUTH_TOKEN/u.test(key) && value.length > 8)
+    .map(([, value]) => Buffer.from(value))
+  let credentialLeak = false
+  for (const path of rawPaths) {
+    const bytes = await readFile(path)
+    if (credentialValues.some(value => bytes.includes(value))) credentialLeak = true
+  }
+  return { requestCount: requestPaths.length, credentialLeak, rawFiles: rawPaths.length, captureLimitHit }
+}
+
+async function runCase(caseId: 'case-1' | 'case-2', input: any, base: any): Promise<void> {
+  assert(registration && batchRoot, 'A new paid registration is required')
+  const { createNativeToolReviewTask } = await import(repo + '/packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-tool-task.ts')
+  const { reviewNativeToolSchemas } = await import(repo + '/packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-native-tools.ts')
+  const { createSemanticPromptCandidate } = await import('./semantic-prompt-candidate')
+  const candidate = createSemanticPromptCandidate(input, [])
+  assert.equal(candidate.id, registration.candidateId)
+  assert.equal(candidate.candidatePromptSha256, registration.candidatePromptSha256)
+  assert.equal(candidate.baselinePromptSha256, registration.baselinePromptSha256)
+  assert.equal(sha(createNativeToolReviewTask(input, []).prompt), registration.baselinePromptSha256)
+  const expectedTask = candidate.task
+  assert.equal(expectedTask.prompt, base.prompt, 'Frozen prompt mismatch')
+  assert.deepEqual(expectedTask.schema, base.schema, 'Frozen report schema mismatch')
+  assert.deepEqual(reviewNativeToolSchemas(), base.tools, 'Frozen tool schema mismatch')
+  const caseRoot = join(batchRoot, caseId)
+  await mkdir(caseRoot, { recursive: true })
+  if ((await readdir(caseRoot)).includes('execute.claimed')) throw new Error(`${caseId} was already claimed; refusing retry`)
+  if (caseId === 'case-2') {
+    const first = await readJson<any>(join(batchRoot, 'case-1', 'completed.json')).catch(() => undefined)
+    if (!first || first.status !== 'completed' || first.billingStatus !== 'settled' || first.unsettled || first.configUnchanged !== true ||
+      first.integrityOk !== true || first.credentialLeak === true || first.captureLimitHit === true ||
+      first.runtimeGuardHit === true || first.stopRequested === true || Number(first.requestCount) > 24)
+      throw new Error('case-2 requires a settled, configuration-stable, integrity-safe case-1')
+    if (batchReserveCredits - Number(first.creditsMicro ?? 0) / 1e6 < observedCaseGuardCredits)
+      throw new Error('case-2 batch reserve is unavailable')
+  }
+
+  const manifest = await readJson<any>(join(batchRoot, 'frozen-manifest.json'))
+  const lifecyclePath = repo + '/packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-lifecycle.ts'
+  const { installSemanticCandidateRuntime } = await import('./semantic-candidate-runtime')
+  const candidateBinding = installSemanticCandidateRuntime(manifest.sourceHashes[lifecyclePath])
+  const { createFoundationReviewer, foundationReviewerInputDigest } = await import(repo + '/packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/public.ts')
+  candidateBinding.assertBound()
+  await writeImmutable(join(caseRoot, 'candidate-binding.json'), { id: candidate.id,
+    candidatePromptSha256: candidate.candidatePromptSha256, baselinePromptSha256: candidate.baselinePromptSha256,
+    lifecycleSourceSha256: manifest.sourceHashes[lifecyclePath], processOnly: true })
+  const { openSingleReviewJournal } = await import(repo + '/packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-journal.ts')
+  const start: any = { protocolVersion: 1, ownerId, projectId,
+    requestId: `${registration.batchId}-${caseId}`, input }
+  start.inputDigest = foundationReviewerInputDigest(start)
+  await writeImmutable(join(caseRoot, 'start.json'), start)
+  const infrastructure = await makeInfrastructure(caseRoot)
+  const wallet = await infrastructure.readWallet()
+  assert(wallet && Number.isSafeInteger(wallet.balanceCreditsMicro) && wallet.balanceCreditsMicro >= (caseId === 'case-1' ? batchReserveCredits : observedCaseGuardCredits) * 1e6,
+    'Account balance cannot cover the registered reserve')
+  await writeImmutable(join(caseRoot, 'balance-preflight.json'), { sufficientForRegisteredReserve: true, modelCalls: 0 })
+  const before = summarizeModelConfigs(await infrastructure.readModelConfigs())
+  await writeImmutable(join(caseRoot, 'model-config-before.json'), before)
+  const resolved = await infrastructure.configuration.resolve({ ownerId })
+  assert.equal(resolved.env.ANTHROPIC_BASE_URL?.replace(/\/$/u, ''), originalArkBaseUrl)
+  for (const key of modelEnvKeys) assert.equal(resolved.env[key], model)
+  assert(resolved.command.includes('--model') && resolved.command.includes(model))
+  await writeImmutable(join(caseRoot, 'selected-runtime.json'), safeSelectedConfiguration(resolved))
+
+  if (process.env.BEEGAME_REVIEWER_PROTOCOL === 'legacy-v1')
+    throw new Error('Refusing paid run with legacy reviewer protocol')
+  process.env.BEEGAME_REVIEWER_PROTOCOL = 'v2'
+
+  // This is the only execution claim.  It is intentionally created after all
+  // zero-model configuration checks, and is never removed on any outcome.
+  const claim = await open(join(caseRoot, 'execute.claimed'), 'wx', 0o600)
+  try { await claim.writeFile(JSON.stringify({ case: caseId, model, claimedAt: new Date().toISOString() })); await claim.sync() }
+  finally { await claim.close() }
+
+  const stage = createFoundationReviewer({ workspacePath: caseRoot }, {
+    runtimeConfiguration: infrastructure.configuration, billing: infrastructure.billing,
+  })
+  let handle: any
+  let terminal: any
+  let observation: Awaited<ReturnType<typeof observeEvaluation>> | undefined
+  let lifecycleVerified = false
+  let lifecycleError: string | undefined
+  try {
+    handle = await stage.start(start)
+    let initialEvidenceFailed = false
+    try { await writeImmutable(join(caseRoot, 'handle.json'), handle) }
+    catch { initialEvidenceFailed = true }
+    observation = await observeEvaluation({
+      async read() {
+        const result = await stage.getResult(handle)
+        const journal = await openSingleReviewJournal(caseRoot, handle.id, start, true)
+        return { result, state: await journal.read(), leaseStatus: await journal.leaseStatus() }
+      },
+      stop: reason => stage.stop({ handle, requestId: `runner-stop-${start.requestId}`, reason }),
+      async save(snapshot) {
+        if (initialEvidenceFailed) throw new Error('initial_evidence_write_failed')
+        await writeSnapshot(join(caseRoot, 'state.json'), snapshot.state)
+        await writeSnapshot(join(caseRoot, 'result.json'), snapshot.result)
+        await writeSnapshot(join(caseRoot, 'guard.json'), {
+          status: snapshot.result.status, billingStatus: snapshot.result.billingStatus,
+          leaseStatus: snapshot.leaseStatus, usage: stateUsage(snapshot.state),
+          estimatedCredits: weightedV1Credits(stateUsage(snapshot.state)), at: new Date().toISOString(),
+        })
+      },
+      creditLimit: observedCaseGuardCredits, runTimeoutMs: maxWaitMs, drainTimeoutMs: 120_000,
+    })
+    terminal = observation.snapshot?.result
+    assert(observation.snapshot, 'No lifecycle evidence')
+    assert.deepEqual(observation.snapshot.result.handle, handle, 'Terminal handle mismatch')
+    const verified = verifyEvaluationTerminal(start, observation.snapshot)
+    await writeImmutable(join(caseRoot, 'terminal-verification.json'), verified)
+    lifecycleVerified = true
+  } catch {
+    lifecycleError = 'lifecycle_finalization_unverified'
+    // observeEvaluation already owns stop/drain. This is only for errors before observation.
+    if (handle && !observation) {
+      try { await stage.stop({ handle, requestId: `runner-stop-${start.requestId}`, reason: 'runner_error' }) } catch {}
+    }
+    await writeSnapshot(join(caseRoot, 'runner-error.json'), { code: lifecycleError })
+  }
+  const stopRequested = observation?.stopRequested ?? Boolean(lifecycleError)
+  const stopReason = observation?.stopReason
+  const stopError = observation?.stopFailed ? 'public_stop_failed' : undefined
+
+  let state: any = { attempts: [] }
+  let postflightError: string | undefined
+  try { state = await readJson<any>(join(caseRoot, 'state.json')) }
+  catch (error) { postflightError = error instanceof Error ? error.message : 'final state unavailable' }
+  const configCheck = await verifyEvaluationConfiguration(before,
+    async () => summarizeModelConfigs(await infrastructure.readModelConfigs()))
+  // Persist unchanged / changed / unknown independently of report status.
+  await writeImmutable(join(caseRoot, 'configuration-verification.json'), configCheck)
+  if (configCheck.status !== 'unknown') await writeImmutable(join(caseRoot, 'model-config-after.json'), configCheck.after)
+  else postflightError = configCheck.error
+  const configUnchanged = configCheck.status === 'unknown' ? null : configCheck.status === 'unchanged'
+  let creditsMicro = 0
+  try { creditsMicro = receiptCreditsMicro(state) }
+  catch (error) { postflightError ??= error instanceof Error ? error.message : 'receipt verification failed' }
+  let evidence = { requestCount: 0, credentialLeak: true, rawFiles: 0, captureLimitHit: true }
+  try { evidence = await scanEvidence(caseRoot, resolved.env) }
+  catch (error) { postflightError ??= error instanceof Error ? error.message : 'evidence scan failed' }
+  const terminalText = JSON.stringify({ code: terminal?.code, reason: terminal?.reason, status: terminal?.status }).toLowerCase()
+  const runtimeGuardHit = evidence.captureLimitHit || /budget|timeout|turn_limit|request.?limit|messages request|protocol_error|usage_unavailable|model_error|process_exit|execution_failed|billing_failed/u.test(terminalText)
+  try { await runFreeze() } catch { postflightError ??= 'frozen_source_drift' }
+  const integrityOk = lifecycleVerified && !lifecycleError && !observation?.observationFailed && !observation?.drainTimedOut &&
+    !postflightError && configUnchanged === true && !evidence.credentialLeak &&
+    evidence.requestCount > 0 && evidence.requestCount <= 24 && !stopError && !stopRequested && !runtimeGuardHit
+  const completed = {
+    case: caseId, model, candidateId: candidate.id, candidatePromptSha256: candidate.candidatePromptSha256,
+    status: terminal?.status ?? 'unknown', billingStatus: terminal?.billingStatus ?? 'unknown',
+    unsettled: !lifecycleVerified, lifecycleVerified, lifecycleError, configStatus: configCheck.status, configUnchanged,
+    creditsMicro: lifecycleVerified ? creditsMicro : null, knownReceiptedCreditsMicro: creditsMicro,
+    requestCount: evidence.requestCount, rawFiles: evidence.rawFiles,
+    credentialLeak: evidence.credentialLeak, captureLimitHit: evidence.captureLimitHit,
+    runtimeGuardHit, integrityOk,
+    ...(postflightError ? { postflightError } : {}),
+    estimatedCredits: weightedV1Credits(stateUsage(state)), stopRequested, ...(stopReason ? { stopReason } : {}), ...(stopError ? { stopError } : {}),
+    handle, at: new Date().toISOString(),
+  }
+  await writeImmutable(join(caseRoot, 'completed.json'), completed)
+  console.log(JSON.stringify({ kind: 'completed', ...completed }))
+  if (completed.unsettled) throw new Error('Review usage remains unsettled; no retry is permitted')
+  if (!completed.integrityOk) throw new Error('Review evidence/configuration integrity check failed; no follow-up case is permitted')
+}
+
+if (import.meta.main) {
+const mode = parseMode()
+if (!batchRoot) {
+  if (mode.kind === 'execute') throw new Error('No new paid batch registered; old batch remains stopped')
+  console.log(JSON.stringify({ kind: 'preflight', inferenceCalls: 0, networkCalls: 0,
+    status: 'offline_successor_ready_requires_new_registration' }))
+  process.exit(0)
+}
+batchRoot = await realpath(batchRoot)
+assert(batchRoot !== '/private/tmp/reviewer-v2-semantic-XUjCjN' &&
+  !batchRoot.includes('/output/reviewer-v2-semantic-glm53'), 'Historical batch is read-only')
+if (mode.kind === 'execute') {
+  const value = await readJson<any>(join(batchRoot, 'registration.json'))
+  assert(value.allowPaidExecution === true && value.fixtureId === 'B24' && value.model === model && value.cases === 2 &&
+    value.batchReserveCredits === batchReserveCredits && value.observedCaseGuardCredits === observedCaseGuardCredits,
+    'A separately approved model/count/budget registration is required')
+  assert(typeof value.userApprovalReference === 'string' && value.userApprovalReference.trim().length > 0)
+  assert(value.candidateId === 'semantic-instructions-r1' &&
+    value.candidatePromptSha256 === 'dcef20f3f9fa9efe20e423c208fa9115aa9d501557b56499086c5b62a648c993' &&
+    value.baselinePromptSha256 === 'c25fd60daf34caf4eee0589577ad539c6a8063b6dfc793f75184749d96c29b09', 'Unregistered candidate')
+  assert(typeof value.batchId === 'string' && /^[a-zA-Z0-9_-]{1,120}$/.test(value.batchId) &&
+    value.batchId !== 'reviewer-v2-semantic-20260911', 'A new batch identity is required')
+  registration = value
+}
+const freezeSummary = await runFreeze()
+const frozenInput = await readJson<any>(join(batchRoot, 'frozen-input.json'))
+const frozenManifest = await readJson<any>(join(batchRoot, 'frozen-manifest.json'))
+assert.equal(sha(JSON.stringify(frozenInput)), frozenManifest.inputSha256)
+assert.equal(frozenManifest.inputSha256, '0400917b5c06036cf1aef67902bd0b850727ba056c199795cbc7fe8aad98f7e1', 'Only the registered B24 fixture is in scope')
+if (mode.kind === 'preflight') {
+  const base = await readJson<any>(join(batchRoot, 'base-task.json'))
+  console.log(JSON.stringify({ kind: 'preflight', inferenceCalls: 0, networkCalls: 0,
+    model, cases: 2, batchReserveCredits, observedCaseGuardCredits,
+    inputSha256: sha(JSON.stringify(frozenInput)), basePromptSha256: sha(base.prompt),
+    finalSchemaSha256: sha(JSON.stringify(base.schema)), freeze: freezeSummary }))
+} else {
+  const base = await readJson<any>(join(batchRoot, 'base-task.json'))
+  await runCase(mode.caseId, frozenInput, base)
+}
+
+}

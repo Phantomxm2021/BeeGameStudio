@@ -1,6 +1,6 @@
 {
   "provenance": {
-    "generatedFrom": "foundation-reviewer/private/test-fixtures/review-fixture",
+    "generatedFrom": "foundation-revision/private/tests/single-review-fixture",
     "sourceDocumentPath": "docs/GDD.md",
     "sourceMutation": "# incomplete",
     "inputDigestExcludes": [
@@ -13,11 +13,10 @@
       "requestId": "lifecycle-request",
       "ownerId": "owner",
       "projectId": "project",
-      "inputDigest": "a8548aa9864477ad92b6cdb6fd5d3787a5dddacb0dc2a0a31077fb78792e4961",
+      "inputDigest": "2a4d1e7ca17d1252270b9b7919bdf286d1b2876bab1c80d214e2e607128b0747",
       "input": {
-        "kind": "initial",
         "sourceResult": {
-          "protocolVersion": 1,
+          "protocolVersion": 3,
           "producer": "foundation-reviewer",
           "ownerId": "owner",
           "projectId": "project",
@@ -28,7 +27,10 @@
             "sourceDocumentRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "confirmedBriefDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
-          "inputDigest": "30afd5e3cb00942c5a626348d0bc105a7a5447c5264c95b68d396583772b2ff2",
+          "requirements": {
+            "status": "unavailable",
+            "reason": "Offline protocol fixture"
+          },
           "kind": "issues_found",
           "documentSetDigest": "e30f35e45651275ccaf8d123860066a57893c149e08bdc519af9f5632aa98043",
           "documents": [
@@ -81,46 +83,39 @@
               "byteLength": 3521
             }
           ],
-          "policyDigest": "dc093f92aac81ef7f2e23e7ea8beb70675c4c7e1a0f202425a072904e2cb35e8",
-          "issueRegistryDigest": "d188ca40147ad74d61b38aef76dcef4dbbe4d01d667203824081e5606da1ba87",
-          "evidenceDigest": "1debce9dc16d9312b0da190d82e660b498b258134a286ddce73e06f7a190ad28",
+          "inputDigest": "80c1cbf86519d4b1dc444526361d16d8183b134d7a9fd7a201c3682df201cc51",
+          "policyDigest": "48a321a4524576b4d6b88af1fe7fa851b9a77ce1d42daca344a842f72efada1b",
+          "issueRegistryDigest": "1487961b0dba903df83960266e2d61162897732b5fe03839a3efa010e7ad0e88",
+          "evidenceDigest": "507254520e9a09dc8f93bb8f2afb2467b3f3219ba4490dba283cd30b82c383df",
           "issues": [
             {
               "issue": {
-                "id": "AUD-698CC48B4D7EA8BD69D99F2F",
-                "severity": "BLOCKER",
-                "type": "contract",
+                "id": "308df0d00e85a10338cb1f3557158b6e89799d657a12b48d736fac8e6223f673",
+                "type": "semantic",
+                "reasonCode": "SINGLE_AGENT_FINDING",
+                "severity": "HIGH",
+                "title": "Complete the assigned document",
+                "actual": "Fixture document requires a repair",
+                "expected": "Complete production document",
                 "source": {
                   "scope": "document",
                   "documentPath": "docs/GDD.md",
                   "digest": "a22b15fde755e6a4e216d9e2cc2eaeb008414a82cef78196ad1cf0ef0f6d78fe"
-                },
-                "expected": "canonical Foundation Markdown must satisfy its document contract, including protocol markers, heading order, Markdown integrity, and each declared production-material serialization",
-                "actual": "[MARKDOWN_FORMAT_INVALID] complete game document production materials core-loop-diagram marker is missing",
-                "remediation": {
-                  "kind": "patch",
-                  "scope": "document",
-                  "documentPath": "docs/GDD.md"
-                },
-                "reasonCode": "DOCUMENT_FORMAT_INVALID"
-              },
-              "sections": [
-                {
-                  "path": "docs/GDD.md",
-                  "content": "# incomplete",
-                  "digest": "a22b15fde755e6a4e216d9e2cc2eaeb008414a82cef78196ad1cf0ef0f6d78fe"
                 }
-              ],
-              "facts": []
+              }
             }
           ],
-          "resultId": "2e438776410b540d73c666faf596bdb92d5d68052f715dbe75162dd70c5def1d"
+          "audit": {
+            "policy": "native-file-audit.v1",
+            "summary": "Offline full-review fixture"
+          },
+          "resultId": "01b3b23e0dab7d10177b94201bc038b90ce662166ece0b58d9dcc33924aae466"
         },
         "sourceBinding": {
           "ownerId": "owner",
           "projectId": "project",
-          "resultId": "2e438776410b540d73c666faf596bdb92d5d68052f715dbe75162dd70c5def1d",
-          "resultDigest": "694ccbed25b591df24ea79cd928a6c8d5895fea8d8be8ed67886de52e73e4d09"
+          "resultId": "01b3b23e0dab7d10177b94201bc038b90ce662166ece0b58d9dcc33924aae466",
+          "resultDigest": "a9a62457f30cae6763dcd64709ad7b7398e8272e0510a3d3769c1e52afadd0ef"
         }
       }
     },
@@ -132,11 +127,10 @@
       "requestId": "p3-6-request",
       "ownerId": "p3-6-owner",
       "projectId": "p3-6-project",
-      "inputDigest": "942874cb9b2843b77f72656e61be3adcbc51e7276ab03243b1b4d9ad60d7bdf7",
+      "inputDigest": "3bc56de4c4750fa9859b7846ec9200cbff5b779e77165a32a29757efcf1679cd",
       "input": {
-        "kind": "initial",
         "sourceResult": {
-          "protocolVersion": 1,
+          "protocolVersion": 3,
           "producer": "foundation-reviewer",
           "ownerId": "p3-6-owner",
           "projectId": "p3-6-project",
@@ -147,7 +141,10 @@
             "sourceDocumentRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "confirmedBriefDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
-          "inputDigest": "b0d05fbd4fd83d6fc24a74c54622d27557c9705f0c79706afa8f230b14f07d7a",
+          "requirements": {
+            "status": "unavailable",
+            "reason": "Offline protocol fixture"
+          },
           "kind": "issues_found",
           "documentSetDigest": "e30f35e45651275ccaf8d123860066a57893c149e08bdc519af9f5632aa98043",
           "documents": [
@@ -200,46 +197,39 @@
               "byteLength": 3521
             }
           ],
-          "policyDigest": "dc093f92aac81ef7f2e23e7ea8beb70675c4c7e1a0f202425a072904e2cb35e8",
-          "issueRegistryDigest": "d188ca40147ad74d61b38aef76dcef4dbbe4d01d667203824081e5606da1ba87",
-          "evidenceDigest": "1debce9dc16d9312b0da190d82e660b498b258134a286ddce73e06f7a190ad28",
+          "inputDigest": "7e00dc2ca89820dd84f2c6f58ea1930610348afe969ffb53e254f784927a1d45",
+          "policyDigest": "48a321a4524576b4d6b88af1fe7fa851b9a77ce1d42daca344a842f72efada1b",
+          "issueRegistryDigest": "1487961b0dba903df83960266e2d61162897732b5fe03839a3efa010e7ad0e88",
+          "evidenceDigest": "507254520e9a09dc8f93bb8f2afb2467b3f3219ba4490dba283cd30b82c383df",
           "issues": [
             {
               "issue": {
-                "id": "AUD-698CC48B4D7EA8BD69D99F2F",
-                "severity": "BLOCKER",
-                "type": "contract",
+                "id": "308df0d00e85a10338cb1f3557158b6e89799d657a12b48d736fac8e6223f673",
+                "type": "semantic",
+                "reasonCode": "SINGLE_AGENT_FINDING",
+                "severity": "HIGH",
+                "title": "Complete the assigned document",
+                "actual": "Fixture document requires a repair",
+                "expected": "Complete production document",
                 "source": {
                   "scope": "document",
                   "documentPath": "docs/GDD.md",
                   "digest": "a22b15fde755e6a4e216d9e2cc2eaeb008414a82cef78196ad1cf0ef0f6d78fe"
-                },
-                "expected": "canonical Foundation Markdown must satisfy its document contract, including protocol markers, heading order, Markdown integrity, and each declared production-material serialization",
-                "actual": "[MARKDOWN_FORMAT_INVALID] complete game document production materials core-loop-diagram marker is missing",
-                "remediation": {
-                  "kind": "patch",
-                  "scope": "document",
-                  "documentPath": "docs/GDD.md"
-                },
-                "reasonCode": "DOCUMENT_FORMAT_INVALID"
-              },
-              "sections": [
-                {
-                  "path": "docs/GDD.md",
-                  "content": "# incomplete",
-                  "digest": "a22b15fde755e6a4e216d9e2cc2eaeb008414a82cef78196ad1cf0ef0f6d78fe"
                 }
-              ],
-              "facts": []
+              }
             }
           ],
-          "resultId": "a45c7dd8b8aab29d5cb23c24f7536779876daaf6410e2bf264bed76f8df7fb64"
+          "audit": {
+            "policy": "native-file-audit.v1",
+            "summary": "Offline full-review fixture"
+          },
+          "resultId": "9895edd3367053cee4b4cd8464d6f1db54f8abb972b65543508737eba4f62305"
         },
         "sourceBinding": {
           "ownerId": "p3-6-owner",
           "projectId": "p3-6-project",
-          "resultId": "a45c7dd8b8aab29d5cb23c24f7536779876daaf6410e2bf264bed76f8df7fb64",
-          "resultDigest": "3f0117365a5caf6c37c33c44580be4d705797411c77b0006326afc06773ff06d"
+          "resultId": "9895edd3367053cee4b4cd8464d6f1db54f8abb972b65543508737eba4f62305",
+          "resultDigest": "8a949426dc0e887c7fa8ab5dcfb23b4113fa1adc241dccdfb5d6055a1c2be81c"
         }
       }
     },

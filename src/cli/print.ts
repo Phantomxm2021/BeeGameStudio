@@ -1,5 +1,7 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle'
+import { emitNativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
+import { setNativeEvidenceTurn } from '@bee-game-studio/agent-workflow/native-evidence'
 import { readFile, stat } from 'fs/promises'
 import { dirname } from 'path'
 import {
@@ -598,6 +600,7 @@ export async function runHeadless(
   }
 
   const structuredIO = getStructuredIO(inputPrompt, options)
+  emitNativeDiagnostic({ event: 'cli_ready' })
 
   // When emitting NDJSON for SDK clients, any stray write to stdout (debug
   // prints, dependency console.log, library banners) breaks the client's
@@ -2017,6 +2020,7 @@ function runHeadlessStreaming(
             }
           }
           const batchUuids = batch.map(c => c.uuid).filter(u => u !== undefined)
+          setNativeEvidenceTurn(command.uuid)
 
           // QueryEngine will emit a replay for command.uuid (the last uuid in
           // the batch) via its messagesToAck path. Emit replays here for the

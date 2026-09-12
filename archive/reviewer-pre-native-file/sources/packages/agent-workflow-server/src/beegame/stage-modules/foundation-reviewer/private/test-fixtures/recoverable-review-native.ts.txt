@@ -1,0 +1,244 @@
+import { createInterface } from 'node:readline'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { dirname, join, basename } from 'node:path'
+import { executeNativeReviewTool, type ReviewToolDescriptor } from '../single-agent-native-tools'
+import { auditSources, buildIndependentAuditPlan, type AuditUnit } from '../independent-audit-plan'
+import { captureSingleReviewInput, type SingleReviewInput } from '../single-agent-contract'
+
+/**
+ * A deterministic native process used by the recoverable-review tests.
+ *
+ * It speaks the same stream-json boundary as the real CLI, but all source
+ * reads are mediated by the review capability descriptor.  The fixture is
+ * intentionally boring: every successful work item returns a range-only
+ * object, while its modes inject one narrowly-scoped failure or opposition so
+ * lifecycle tests can assert recovery semantics without a model or network.
+ */
+
+type WorkKind = 'audit' | 'global-audit' | 'verify' | 'global-verify'
+type Source = { path: string; content: string }
+
+const mode = process.argv[2] ?? 'repair-flow'
+const reader = createInterface({ input: process.stdin })
+
+function emit(value: unknown) {
+  process.stdout.write(JSON.stringify(value) + '\n')
+}
+
+function sourceLines(source: Source): number {
+  return source.content.split('\n').length
+}
+
+function workKind(prompt: string): WorkKind {
+  const match = /Work kind:\s*(audit|global-audit|verify|global-verify)\b/.exec(prompt)
+  if (!match) throw new Error('Recoverable fixture could not identify work kind')
+  return match[1] as WorkKind
+}
+
+function assignedUnits(prompt: string): { id?: string; path: string; startLine: number; endLine: number; dependencies?: { index: number; path: string; totalLines?: number }[] }[] {
+  const match = /ASSIGNED UNITS(?: AND FINDING SLOTS)?:\n([^\n]+)\n(?:SOURCE BLOCKS|FULL SOURCE INDEX|CANDIDATE REPORT)/.exec(prompt)
+  if (!match) return []
+  const value = JSON.parse(match[1]!) as unknown
+  if (!Array.isArray(value)) throw new Error('Recoverable fixture assigned units are malformed')
+  return value as ReturnType<typeof assignedUnits>
+}
+
+function resolveAssignedUnits(input: SingleReviewInput, assigned: readonly ReturnType<typeof assignedUnits>[number][]): AuditUnit[] {
+  const plan = buildIndependentAuditPlan(input)
+  return assigned.map(value => plan.units.find(unit => unit.id === value.id ||
+    (unit.path === value.path && unit.startLine === value.startLine && unit.endLine === value.endLine)))
+    .filter((unit): unit is AuditUnit => Boolean(unit))
+}
+
+async function context(): Promise<{ descriptor: ReviewToolDescriptor; input: SingleReviewInput }> {
+  const descriptor = JSON.parse(process.env.BEEGAME_REVIEW_TOOL_SESSION ?? '') as ReviewToolDescriptor
+  const stored = JSON.parse(await readFile(join(descriptor.directory, 'context.json'), 'utf8')) as { input: unknown }
+  return { descriptor, input: captureSingleReviewInput(stored.input) }
+}
+
+async function priorAttempts(signature: string): Promise<number> {
+  const attemptDirectory = process.cwd()
+  const nativeDirectory = dirname(attemptDirectory)
+  let names: string[]
+  try { names = await readdir(nativeDirectory) } catch { return 0 }
+  let count = 0
+  for (const name of names) {
+    if (name === basename(attemptDirectory)) continue
+    try {
+      const observation = JSON.parse(await readFile(join(nativeDirectory, name, 'recoverable-native-observation.json'), 'utf8')) as { signature?: string }
+      if (observation.signature === signature) count++
+    } catch { /* A sibling may be an unrelated host directory or an unfinished spawn. */ }
+  }
+  return count
+}
+
+async function invokeTool(descriptor: ReviewToolDescriptor, name: string, args: unknown, sequence: number): Promise<unknown> {
+  const toolUseId = `recoverable-${process.pid}-${sequence}`
+  emit({ type: 'assistant', message: { id: `tool-request-${sequence}`, content: [{ type: 'tool_use', id: toolUseId, name, input: args }] } })
+  try {
+    const result = await executeNativeReviewTool(descriptor, name, args, toolUseId)
+    emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: JSON.stringify(result) }] } })
+    return result
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Recoverable fixture tool failed'
+    emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: message, is_error: true }] } })
+    throw error
+  }
+}
+
+async function readUnitSources(descriptor: ReviewToolDescriptor, input: SingleReviewInput, units: readonly AuditUnit[]) {
+  let sequence = 0
+  const plan = buildIndependentAuditPlan(input)
+  const seen = new Set<string>()
+  for (const assigned of units) {
+    const unit = plan.units.find(candidate => candidate.id === assigned.id)
+    if (!unit || seen.has(unit.id)) continue
+    seen.add(unit.id)
+    const source = auditSources(input).find(candidate => candidate.path === unit.path)
+    if (!source) continue
+    await invokeTool(descriptor, 'review_read', { path: unit.path, startLine: unit.startLine, endLine: unit.endLine }, ++sequence)
+    for (const dependency of unit.dependencies) {
+      const dependencySource = auditSources(input).find(candidate => candidate.path === dependency)
+      if (!dependencySource) continue
+      await invokeTool(descriptor, 'review_read', { path: dependency, startLine: 1, endLine: sourceLines(dependencySource) }, ++sequence)
+    }
+  }
+}
+
+async function readAllSources(descriptor: ReviewToolDescriptor, input: SingleReviewInput) {
+  let sequence = 0
+  for (const source of input.documents) {
+    await invokeTool(descriptor, 'review_read', { path: source.path, startLine: 1, endLine: sourceLines(source) }, ++sequence)
+  }
+  if (input.requirements.status === 'available') {
+    await invokeTool(descriptor, 'review_read', { path: 'requirements', startLine: 1, endLine: input.requirements.content.split('\n').length }, ++sequence)
+  }
+}
+
+function auditOutput(input: SingleReviewInput, units: readonly AuditUnit[]) {
+  const plan = buildIndependentAuditPlan(input)
+  return {
+    checks: units.map(assigned => {
+      const unit = plan.units.find(candidate => candidate.id === assigned.id)
+      if (!unit) throw new Error('Recoverable fixture unit is not in the host plan')
+      return {
+        assessment: 'consistent' as const,
+        observation: 'The copied source range and every listed dependency were checked.',
+        source: { startLine: unit.startLine, endLine: unit.endLine },
+        dependencies: unit.dependencies.map(path => {
+          const dependency = auditSources(input).find(document => document.path === path)
+          return { startLine: 1, endLine: dependency ? sourceLines(dependency) : 1 }
+        }),
+        findings: [],
+        limitations: [],
+      }
+    }),
+    summary: 'Bounded audit batch completed.',
+  }
+}
+
+function verificationOutput(input: SingleReviewInput, units: readonly AuditUnit[], opposed: boolean) {
+  const plan = buildIndependentAuditPlan(input)
+  return {
+    checks: units.map((assigned, index) => {
+      const unit = plan.units.find(candidate => candidate.id === assigned.id)
+      if (!unit) throw new Error('Recoverable fixture unit is not in the host plan')
+      return {
+        verdict: opposed && index === 0 ? 'unsupported' as const : 'supported' as const,
+        reason: opposed && index === 0 ? 'The verifier deliberately records an opposing terminal verdict.' : 'The copied source range was independently checked.',
+        source: { startLine: unit.startLine, endLine: unit.endLine },
+        dependencies: unit.dependencies.map(path => {
+          const dependency = auditSources(input).find(document => document.path === path)
+          return { startLine: 1, endLine: dependency ? sourceLines(dependency) : 1 }
+        }),
+        findings: [],
+      }
+    }),
+    summary: 'Bounded verification batch completed.',
+  }
+}
+
+function globalAuditChecks(input: SingleReviewInput) {
+  return auditSources(input).map(source => ({
+    assessment: 'consistent' as const,
+    complete: true,
+    observation: 'Every copied source was checked for cross-batch omissions.',
+    source: { startLine: 1, endLine: sourceLines(source) },
+    dependencies: [],
+    limitations: [],
+  }))
+}
+
+function globalVerificationChecks(input: SingleReviewInput) {
+  return auditSources(input).map(source => ({
+    verdict: 'supported' as const,
+    complete: true,
+    reason: 'Every copied source was independently checked.',
+    source: { startLine: 1, endLine: sourceLines(source) },
+    dependencies: [],
+  }))
+}
+
+function globalOppositionOutput(input: SingleReviewInput) {
+  return {
+    checks: globalVerificationChecks(input),
+    findings: [{ verdict: 'unsupported' as const, reason: 'The global verifier deliberately records an opposing terminal verdict.', evidence: [{ sourceIndex: 0, startLine: 1, endLine: 1 }] }],
+    omissions: [],
+    summary: 'Global verification completed with an opposing terminal verdict.',
+  }
+}
+
+async function handle(prompt: string) {
+  const { descriptor, input } = await context()
+  const kind = workKind(prompt)
+  const units = resolveAssignedUnits(input, assignedUnits(prompt))
+  const signature = JSON.stringify({ kind, units: units.map(unit => unit.id) })
+  const previous = await priorAttempts(signature)
+  await writeFile(join(process.cwd(), 'recoverable-native-observation.json'), JSON.stringify({
+    pid: process.pid, mode, kind, signature, previousAttempts: previous,
+    unitIds: units.map(unit => unit.id),
+  }) + '\n', 'utf8')
+
+  const shouldReject = kind === 'audit' && units.length > 0 && units[0]!.id === buildIndependentAuditPlan(input).units[0]?.id &&
+    ((mode === 'fail-batch-once' && previous === 0) || mode === 'same-work-invalid' || mode === 'same-hash')
+  const shouldOmitGlobal = kind === 'global-audit' && (mode === 'no-global-record' || mode === 'missing-global')
+
+  const usage = { input_tokens: 20, output_tokens: 10 }
+  if (mode !== 'incomplete-metering') emit({ type: 'assistant', message: { id: 'recoverable-usage', usage, content: [] } })
+  // Hold only the first bounded batch open long enough for the host stop
+  // barrier to observe and terminate it.  Delaying every first-attempt work
+  // slot would make a successful resume look hung while later slots run.
+  const firstWorkUnit = buildIndependentAuditPlan(input).units[0]?.id
+  if (mode === 'stop-resume' && kind === 'audit' && units[0]?.id === firstWorkUnit && previous === 0)
+    await new Promise(resolve => setTimeout(resolve, 10_000))
+
+  if (shouldReject || shouldOmitGlobal) {
+    emit({ type: 'result', subtype: 'success', structured_output: { invalid: true }, modelUsage: { fixture: usage } })
+    return
+  }
+
+  if (kind === 'audit' || kind === 'verify') await readUnitSources(descriptor, input, units)
+  else if (kind === 'global-verify' && mode === 'global-verifier-opposition') await invokeTool(descriptor, 'review_read', { path: input.documents[0]!.path, startLine: 1, endLine: 1 }, 1)
+  else if (kind === 'global-audit' || kind === 'global-verify') await readAllSources(descriptor, input)
+
+  let output: unknown
+  if (kind === 'audit') output = auditOutput(input, units)
+  else if (kind === 'global-audit') output = { checks: globalAuditChecks(input), findings: [], limitations: [], summary: 'Global audit completed.' }
+  else if (kind === 'verify') output = verificationOutput(input, units, mode === 'verifier-opposition')
+  else output = mode === 'global-verifier-opposition' ? globalOppositionOutput(input) : { checks: globalVerificationChecks(input), findings: [], omissions: [], summary: 'Global verification completed.' }
+
+  // Keep this mode genuinely unmetered.  A terminal `modelUsage` snapshot is
+  // authoritative even when no streaming usage frame was emitted, so do not
+  // smuggle the fixture counters through the result envelope here.
+  emit({ type: 'result', subtype: 'success', structured_output: output,
+    ...(mode === 'incomplete-metering' ? {} : { modelUsage: { fixture: usage } }) })
+}
+
+for await (const line of reader) {
+  if (!line.trim()) continue
+  const message = JSON.parse(line) as { type?: string; message?: { content?: { text?: string }[] } }
+  if (message.type !== 'user') continue
+  const prompt = message.message?.content?.[0]?.text
+  if (typeof prompt !== 'string') throw new Error('Recoverable fixture received a non-text task')
+  await handle(prompt)
+}

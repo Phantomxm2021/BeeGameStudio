@@ -22,9 +22,7 @@ import { openRevisionExecutionLease } from '../execution-lease'
 import { openRevisionAttemptStore } from '../attempt-store'
 import { revisionDigest } from '../json-digest'
 import publicInitialInputs from './fixtures/public-initial-inputs.json'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 type PublicInitialInputsFixture = {
   lifecycle: { start: RevisionStartInput; validMarkdown: string }
@@ -43,7 +41,7 @@ afterEach(async () => {
       const leases = await openRevisionExecutionLease(root, registration.prepared.request, { readOnlyHandle: handle.id })
       const attempts = await openRevisionAttemptStore(root, registration.prepared.request, { readOnlyHandle: handle.id })
       const state = await attempts.readRequest()
-      if (state.activeAttemptIds.length === 0 && await leases.status() === 'free') { closed = true; break }
+      if (state.activeAttemptId === null && await leases.status() === 'free') { closed = true; break }
       await new Promise(resolve => setTimeout(resolve, 20))
     }
     expect(closed).toBe(true)
@@ -80,7 +78,7 @@ function runtime(body: string): RuntimeConfigurationClient & { calls: () => numb
     async resolve() {
       calls += 1
       return {
-        command: [process.execPath, join(import.meta.dir, 'owned-attempt-fixture.ts'), 'valid', Buffer.from(body).toString('base64')],
+        command: [process.execPath, join(import.meta.dir, 'native-file-revision.ts'), 'valid', Buffer.from(body).toString('base64')],
         env: { OPENAI_API_KEY: 'offline-unused-secret-sentinel' },
       }
     },
@@ -91,6 +89,7 @@ function runtime(body: string): RuntimeConfigurationClient & { calls: () => numb
 function requestInput(requestId: string): { start: RevisionStartInput; validMarkdown: string } {
   const fixture = structuredClone(initialInputs.lifecycle)
   fixture.start.requestId = requestId
+  fixture.start.inputDigest = foundationRevisionInputDigest({ ownerId: fixture.start.ownerId, projectId: fixture.start.projectId, input: fixture.start.input })
   return fixture
 }
 
@@ -105,15 +104,14 @@ async function waitFor(stage: ReturnType<typeof createFoundationRevision>, handl
   throw new Error(`lifecycle did not reach expected state: ${latest?.status ?? 'unknown'}`)
 }
 
-test('public lifecycle advances document metadata and replays the exact completed candidate', async () => {
+test('public lifecycle preserves native document metadata and replays exact bytes', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'revision-lifecycle-metadata-')))
   roots.push(root)
   const documents = reviewFixtureDocuments()
   const sourceUpdatedAt = '2026-08-13T01:00:00.000Z'
   documents[0]!.content = `---\ndocument_id: GDD\nversion: 1.0.0\nupdated_at: ${sourceUpdatedAt}\n---\n# incomplete`
-  const sourceResult = buildReviewerPublishedResult({
+  const sourceResult = buildSingleReviewFixture({
     documents,
-    state: initialReviewerFactState(documents),
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'metadata-review' },
     subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) },
   })
@@ -138,12 +136,7 @@ test('public lifecycle advances document metadata and replays the exact complete
   const completed = await waitFor(first, handle)
   expect(completed.status).toBe('completed')
   if (completed.status !== 'completed') return
-  expect(completed.result.documents[0]!.content).toContain('version: 1.0.1')
-  expect(completed.result.documents[0]!.content).not.toContain(`updated_at: ${sourceUpdatedAt}`)
-  const startedAt = JSON.parse(await readFile(join(root, '.beegame/workflow/foundation-revision/requests',
-    revisionDigest({ ownerId: requests.start.ownerId, projectId: requests.start.projectId, requestId: requests.start.requestId }),
-    'execution-events', '0000000000000001.json'), 'utf8')) as { startedAt: number }
-  expect(completed.result.documents[0]!.content).toContain(`updated_at: ${new Date(startedAt.startedAt).toISOString()}`)
+  expect(completed.result.documents[0]!.content).toBe(validMarkdown)
   expect(await first.start(requests.start)).toEqual(handle)
   expect(await first.getResult(handle)).toEqual(completed)
   expect(configured.calls()).toBe(1)

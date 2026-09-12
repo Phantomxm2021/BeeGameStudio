@@ -12,6 +12,7 @@ import { createUsageBillingClient } from '../../../../../billing/public'
 import { createRuntimeConfigurationClient } from '../../../../../runtime-configuration/public'
 import {
   createFoundationRevision,
+  foundationRevisionInputDigest,
   type RevisionHandle,
   type RevisionResult,
   type RevisionStartInput,
@@ -57,7 +58,7 @@ afterEach(async () => {
         { readOnlyHandle: handle.id },
       )
       const state = await store.readRequest()
-      if (state.activeAttemptIds.length === 0 && await lease.status() === 'free') {
+      if (state.activeAttemptId === null && await lease.status() === 'free') {
         free = true
         break
       }
@@ -71,6 +72,7 @@ afterEach(async () => {
 function requestInput(requestId: string): RevisionStartInput {
   const fixture = structuredClone(initialInputs.infrastructure)
   fixture.start.requestId = requestId
+  fixture.start.inputDigest = foundationRevisionInputDigest({ ownerId: fixture.start.ownerId, projectId: fixture.start.projectId, input: fixture.start.input })
   return fixture.start
 }
 
@@ -145,7 +147,7 @@ test('real public auth and runtime configuration gate dispatch, then explicit re
   const nativeBody = initialInputs.infrastructure.validMarkdown
   const command = [
     process.execPath,
-    join(import.meta.dir, 'owned-attempt-fixture.ts'),
+    join(import.meta.dir, 'native-file-revision.ts'),
     'valid',
     Buffer.from(nativeBody).toString('base64'),
   ]
@@ -214,8 +216,8 @@ test('real public auth and runtime configuration gate dispatch, then explicit re
     registration.prepared.request,
     { readOnlyHandle: handle.id },
   )
-  expect((await attempts.readRequest()).activeAttemptIds).toEqual([])
-  const gdd = await attempts.read('docs/GDD.md')
+  expect((await attempts.readRequest()).activeAttemptId).toBeNull()
+  const gdd = await attempts.read()
   expect(gdd.active).toBeNull()
   expect(gdd.attempt).toBe(0)
   expect(gdd.lastReceipt).toBeNull()

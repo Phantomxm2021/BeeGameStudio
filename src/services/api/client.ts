@@ -1,4 +1,5 @@
 import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk'
+import { observeEvidenceFetch, recordEvidenceTransport } from '@bee-game-studio/agent-workflow/native-evidence'
 import { randomUUID } from 'crypto'
 import type { GoogleAuth } from 'google-auth-library'
 import {
@@ -384,6 +385,7 @@ function buildFetch(
     } catch {
       // never let logging crash the fetch
     }
-    return inner(input, { ...init, headers })
+    recordEvidenceTransport(init)
+    return observeEvidenceFetch(() => inner(input, { ...init, headers }))
   }
 }

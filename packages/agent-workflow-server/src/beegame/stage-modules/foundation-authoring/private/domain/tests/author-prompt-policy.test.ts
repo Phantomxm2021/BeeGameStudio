@@ -6,6 +6,37 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from '../types'
 import { foundationAuthoringDocumentContract, FOUNDATION_AUTHORING_INSTRUCTION } from '../foundation-authoring-contract'
 function countOccurrences(value: string, needle: string) { return value.split(needle).length - 1 }
 
+test('all documents and drafting modes request raw Markdown even with legacy v2 metadata', () => {
+  for (const authoringMode of ['initial', 'parallel-draft'] as const) {
+    for (const path of CANONICAL_FOUNDATION_DOCUMENTS) {
+      const before = JSON.stringify(getGameDocumentContract(path))
+      const prompt = buildWorkerPrompt({
+        runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+        workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', revision: 'revision', allowedPaths: [path],
+        contract: { documentSet: 'foundation', authoringMode, foundationDocumentPath: path,
+          authorBodyVersion: 'foundation-author-body.v2', confirmedBriefDigest: 'a'.repeat(64) },
+      })
+      const contexts = prompt.split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line))
+      expect(contexts).toHaveLength(1)
+      const context = contexts[0]
+      expect(context.authorBodyVersion).toBeUndefined()
+      expect(prompt).toContain('raw Markdown')
+      expect(prompt).toContain('Return Markdown')
+      expect(prompt).not.toContain('structured JSON')
+      expect(prompt).not.toContain('sections[id].body')
+      expect(prompt).not.toContain('The dedicated Reviewer owns format, content and quality audit.')
+      const view = context.completeDocumentContract
+      const canonical = foundationAuthoringDocumentContract(path)
+      expect(view.mechanicalMarkdownProtocol.sections.map(({ heading: _heading, ...section }: any) => section)).toEqual(canonical.sections)
+      expect(view.mechanicalMarkdownProtocol.productionMaterials.entries.map(({ heading: _heading, serializationRule: _rule, ...material }: any) => material)).toEqual(canonical.productionMaterials)
+      expect(view.documentAuthorityRule).toBe(canonical.documentAuthorityRule)
+      expect(view.outputPolicy).toEqual(canonical.outputPolicy)
+      expect(view.mergeReferenceRule).toBe(canonical.mergeReferenceRule)
+      expect(JSON.stringify(getGameDocumentContract(path))).toBe(before)
+    }
+  }
+})
+
 test('declares a closed H2 heading protocol for initial and parallel foundation authors', () => {
     for (const authoringMode of ['initial', 'parallel-draft'] as const) {
       const prompt = buildWorkerPrompt({
@@ -115,8 +146,8 @@ test('keeps author configuration isolated while preserving Markdown output ident
         expect(countOccurrences(prompt, view.documentAuthorityRule)).toBe(1)
         expect(countOccurrences(prompt, view.mergeReferenceRule)).toBe(1)
         expect(prompt).toContain('one complete raw Markdown')
-        expect(prompt).toContain('Reviewer owns format, content and quality audit')
-        expect(prompt).toContain('Do not call tools')
+        expect(prompt).not.toContain('Reviewer owns format, content and quality audit')
+        expect(prompt).not.toContain('Do not call tools')
         expect(prompt).not.toContain('DUPLICATE_BRIEF_SENTINEL')
         expect(prompt).not.toContain('availableUpstreamPaths')
         expect(prompt).not.toContain('Workspace root:')

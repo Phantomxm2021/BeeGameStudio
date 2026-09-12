@@ -5,13 +5,10 @@ import { lstat, mkdir, open, link, unlink } from 'node:fs/promises'
 import { z } from 'zod/v4'
 import { prepareRevisionRequest } from './request-preparation'
 import { revisionCanonicalJson, revisionDigest } from './json-digest'
-import { constructRevisionCandidate } from './candidate-construction'
-import { verifyRevisionCandidateAuthority } from './candidate-authority'
-import { bindRevisionDocuments, type RevisionDocumentInput } from './document-snapshot'
 
 const MAX_REQUEST_BYTES = 32 * 1024 * 1024
-const relativeRequestsRoot = '.beegame/workflow/foundation-revision/requests'
-const relativeHandlesRoot = '.beegame/workflow/foundation-revision/handles'
+const relativeRequestsRoot = '.beegame/workflow/foundation-revision/native-file-v1/requests'
+const relativeHandlesRoot = '.beegame/workflow/foundation-revision/native-file-v1/handles'
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
 const recordSchema = z.object({
@@ -204,62 +201,4 @@ export async function readRevisionRequestByHandle(
   if (revisionCanonicalJson(canonicalRecord) !== revisionCanonicalJson(handleRecord))
     throw new Error('Revision request handle does not match canonical request record')
   return { record: structuredClone(canonicalRecord), prepared: structuredClone(prepared), artifactPath }
-}
-
-const candidateInputSchema = z.object({ request: z.unknown(), candidateDocuments: z.unknown(),
-  unresolvedIssues: z.array(z.object({ issueId: z.string().min(1).max(200), reason: z.string().min(1) }).strict()),
-  updatedAtByPath: z.record(z.string(), z.string()).optional() }).strict()
-
-/** Owner-only final snapshot, before publication. No worker or audit verdict is manufactured here. */
-export async function commitRevisionRequestCandidate(workspacePath: string, input: {
-  request: unknown
-  candidateDocuments: readonly RevisionDocumentInput[]
-  unresolvedIssues: readonly { issueId: string; reason: string }[]
-}) {
-  const captured = candidateInputSchema.parse(JSON.parse(revisionCanonicalJson(input)))
-  const accepted = await acceptRevisionRequest(workspacePath, captured.request)
-  const { prepared, record } = accepted
-  if (prepared.request.kind === 'retry_same_round' &&
-    revisionCanonicalJson(captured.unresolvedIssues) !== revisionCanonicalJson(prepared.unresolvedIssues))
-    throw new Error('Revision retry unresolved issue authority mismatch')
-  const documents = bindRevisionDocuments(captured.candidateDocuments as RevisionDocumentInput[])
-  for (const path of prepared.retainedDocumentPaths) {
-    if (documents.documents.find(doc => doc.path === path)?.content !== prepared.staging.documents.find(doc => doc.path === path)?.content)
-      throw new Error('Revision retry changed retained document bytes')
-  }
-  const candidate = constructRevisionCandidate({ source: prepared.source, requestId: prepared.request.requestId,
-    candidateDocuments: captured.candidateDocuments as RevisionDocumentInput[], unresolvedIssues: captured.unresolvedIssues,
-    round: prepared.round, candidateId: record.candidateId, ...(prepared.previous ? { previous: prepared.previous } : {}),
-    ...(prepared.previousCandidateDocuments ? { previousCandidateDocuments: prepared.previousCandidateDocuments } : {}),
-    ...(captured.updatedAtByPath ? { updatedAtByPath: captured.updatedAtByPath } : {}),
-    allowAlreadyAdvanced: !captured.updatedAtByPath })
-  verifyRevisionCandidateAuthority(prepared.source, candidate)
-  if (candidate.candidateId === prepared.previous?.candidateId) throw new Error('Revision retry candidate identity was reused')
-  const body = revisionCanonicalJson(candidate) + '\n'
-  if (Buffer.byteLength(body) > MAX_REQUEST_BYTES) throw new Error('Revision candidate snapshot is too large')
-  const workspace = await workspaceRoot(workspacePath)
-  const root = join(workspace, relativeRequestsRoot, requestKey(prepared.request))
-  await assertDirectories(root)
-  const path = join(root, 'candidate.json')
-  const temporary = join(root, `.pending-${randomUUID()}`)
-  const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-  try {
-    try { await file.writeFile(body); await file.sync() } finally { await file.close() }
-    await assertDirectories(root)
-    try { await link(temporary, path) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      const existing = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-      try {
-        const metadata = await existing.stat()
-        if (!metadata.isFile() || metadata.size > MAX_REQUEST_BYTES) throw new Error('Revision candidate snapshot has invalid size or kind')
-        if (await existing.readFile('utf8') !== body) throw new Error('Revision candidate immutable snapshot conflict')
-      } finally { await existing.close() }
-    }
-    const directory = await open(root, constants.O_RDONLY | constants.O_NOFOLLOW)
-    try { await directory.sync() } finally { await directory.close() }
-  } finally {
-    try { await unlink(temporary) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  }
-  return { record: structuredClone(record), candidate: structuredClone(candidate),
-    artifactPath: `${relativeRequestsRoot}/${requestKey(prepared.request)}/candidate.json` }
 }

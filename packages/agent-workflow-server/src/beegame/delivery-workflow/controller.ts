@@ -29,6 +29,7 @@ startChecklistDraftStage,
 import { assertNoRetiredFoundationReviewRun, assertNoRetiredFoundationWorker } from './retired-foundation-review'
 import { createFoundationAuthoringLink } from './foundation-authoring-link'
 import { createFoundationReviewLink } from './foundation-review-link'
+import type { FoundationPolicyAuthorization, FoundationRiskDecision } from './foundation-acceptance-policy'
 import {
 completeImplementationTask,
 implementationCompletionIssue,
@@ -94,6 +95,19 @@ export function createDeliveryWorkflowController(input: {
     if ((current.foundationReviewStage || current.authorStage?.status === 'completed') && reviewLink) return reviewLink.stop(current, reason)
     const stopped = await requireAuthorLink().stop(current, reason)
     return stopped.authorStage?.status === 'completed' && reviewLink ? reviewLink.stop(stopped, reason) : stopped
+  }
+  async function applyFoundationPolicyDecision(run: DeliveryRun, decision: {
+    riskDecisions?: FoundationRiskDecision[]
+    riskDecisionRequestId?: string
+    authorization?: FoundationPolicyAuthorization
+    precondition?: { runId: string; controlSequence: number; policyVersion?: string; automaticRepairLimit?: number; completedRepairCount?: number }
+  }) {
+    if (!reviewLink) throw new Error('Foundation public review is unavailable')
+    return serialize(async () => {
+      const latest = await store.load()
+      if (!latest || latest.runId !== run.runId) throw new Error('Foundation policy decision run changed')
+      return reviewLink.applyPolicyDecision(latest, decision)
+    })
   }
   function requireAuthorLink() {
     if (!authorLink) throw new Error('Foundation author public module is required; legacy author execution is retired')
@@ -1130,6 +1144,7 @@ export function createDeliveryWorkflowController(input: {
     start: (run: DeliveryRun) => serialize(() => requireAuthorLink().start(run)),
     stopAuthor: stopFoundation,
     stopFoundation,
+    applyFoundationPolicyDecision,
     async dispose(): Promise<void> {
       try {
         await serialize(async () => {

@@ -19,7 +19,7 @@ for await (const chunk of Bun.stdin.stream()) {
     if (message.type !== 'user') continue
     const prompt = message.message.content.map((block: { text: string }) => block.text).join('')
     const path = prompt.match(/Author exactly one complete raw Markdown body for (docs\/[^.]+\.md)\./)?.[1] as FoundationDocumentPath
-    if (!path || !process.argv.includes('--tools') || process.argv[process.argv.indexOf('--tools') + 1] !== '') {
+    if (!path || process.argv.includes('--tools')) {
       output({ type: 'result', subtype: 'error', is_error: true })
       continue
     }

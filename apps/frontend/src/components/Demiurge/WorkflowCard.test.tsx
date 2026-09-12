@@ -13,6 +13,21 @@ vi.mock('../../contexts/ToastContext', () => ({
 }));
 
 describe('WorkflowCard', () => {
+  it.each(['retry', 'resume'] as const)('shows agent followup with a safe %s action and no design selection', nextAction => {
+    render(<WorkflowCard workflow={{ runId: 'decision-handoff', status: 'blocked', currentPhase: 'FOUNDATION_REVISION',
+      nextAction, stageSnapshots: [{ stageId: 'FOUNDATION_REVISION', status: 'blocked',
+        currentPhase: 'FOUNDATION_REVISION', phaseIndex: 4, phaseCount: 10,
+        tasks: [{ id: 'revision', title: 'Foundation Revision', status: 'completed', operation: 'revise' }],
+        completedTaskCount: 1, totalTaskCount: 1,
+        block: { code: 'foundation_adjudication', message: '修订执行已完成，候选稿已保留；尚未发布。',
+          detail: '由 Agent 处理内部设计取舍', retryable: false, nextAction: '检查运行诊断' } }] }} onAction={vi.fn()} />)
+    expect(screen.getByTestId('foundation-adjudication')).toHaveTextContent('由 Agent 处理内部设计取舍')
+    expect(screen.getByText('自动处理已暂停')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+    if (nextAction === 'resume') expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
+    expect(screen.queryByText('等待人工确认')).not.toBeInTheDocument()
+    expect(screen.queryByText('修订失败')).not.toBeInTheDocument()
+  })
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();

@@ -183,6 +183,44 @@ afterEach(async () => {
 })
 
 describe('POST /api/projects/:projectId/review-copy', () => {
+  test('Reviewer-only is an opt-in persisted policy, not a model request field', async () => {
+    const f = await fixture()
+    try {
+      const response = await f.app.request(`/api/projects/${f.projectId}/review-copy`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stopAfterReview: true }),
+      })
+      expect(response.status).toBe(201)
+      const payload = await response.json() as { project: { root_path: string } }
+      const copied = await createRunStore(payload.project.root_path, f.ownerId).load()
+      expect(copied!.foundationReviewStage!.stopAfterReview).toBe(true)
+      expect(copied!.foundationReviewStage!.reviewOnlyComplete).toBeUndefined()
+      expect(f.reviewerStarts).toHaveLength(1)
+      expect(f.reviewerStarts[0]).not.toHaveProperty('stopAfterReview')
+    } finally { await Promise.all(f.cleanups.map(cleanup => cleanup())) }
+  })
+  test('invalid Reviewer-only policy is rejected before starting work', async () => {
+    const f = await fixture()
+    try {
+      const response = await f.app.request(`/api/projects/${f.projectId}/review-copy`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stopAfterReview: 'true' }),
+      })
+      expect(response.status).toBe(400)
+      expect(f.reviewerStarts).toHaveLength(0)
+    } finally { await Promise.all(f.cleanups.map(cleanup => cleanup())) }
+  })
+  test('explicit no-token-cap reaches the persisted public Reviewer request', async () => {
+    const f = await fixture()
+    try {
+      const response = await f.app.request(`/api/projects/${f.projectId}/review-copy`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tokenBudget: null }),
+      })
+      expect(response.status).toBe(201)
+      const payload = await response.json() as { project: { root_path: string } }
+      const copied = await createRunStore(payload.project.root_path, f.ownerId).load()
+      expect(copied!.foundationReviewStage!.reviewTokenBudget).toBeNull()
+      expect(f.reviewerStarts[0]).toMatchObject({ tokenBudget: null })
+    } finally { await Promise.all(f.cleanups.map(cleanup => cleanup())) }
+  })
   test('copies the accepted public Author export into a fresh public Reviewer run', async () => {
     const f = await fixture()
     const sourceBefore = await readFile(join(f.sourceWorkspace, '.beegame/workflow/run.json'), 'utf8')
@@ -198,6 +236,7 @@ describe('POST /api/projects/:projectId/review-copy', () => {
     expect(copied!.projectId).toBe(payload.project.id)
     expect(copied!.ownerId).toBe(f.ownerId)
     expect(copied!.authorStage).toBeUndefined()
+    expect(copied!.foundationReviewStage!.stopAfterReview).toBeUndefined()
     expect(copied!.activeDispatch).toBeUndefined()
     expect(copied!.foundationReviewStage?.importedAuthorResult).toEqual(f.sourceResult)
     expect(f.authorStarts()).toBe(0)

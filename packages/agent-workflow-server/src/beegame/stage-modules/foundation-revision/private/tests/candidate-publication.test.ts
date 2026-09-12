@@ -2,28 +2,28 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, realpath, readdir, unlink } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildRevisionInitialCandidate } from '../initial-candidate'
+import { prepareRevisionRequest } from '../request-preparation'
+import { constructRevisionCandidate } from '../candidate-construction'
 import { parseRevisionCandidateResult } from '../candidate-result'
 import { publishRevisionDerivedCandidate, readRevisionPublishedCandidate } from '../candidate-publication'
 import { revisionCanonicalJson, revisionDigest } from '../json-digest'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 function fixture() {
   const documents = reviewFixtureDocuments()
   documents[0]!.content = '# incomplete'
-  const source = buildReviewerPublishedResult({ identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
+  const source = buildSingleReviewFixture({ identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) },
-    documents, state: initialReviewerFactState(documents) })
-  const candidate = buildRevisionInitialCandidate({ sourceResult: source,
-    sourceBinding: binding(source), requestId: 'revise', candidateDocuments: reviewFixtureDocuments(), unresolvedIssues: [] })
+    documents })
+  const prepared = prepareRevisionRequest({ ownerId: source.ownerId, projectId: source.projectId,
+    requestId: 'revise', sourceResult: source, sourceBinding: binding(source) })
+  const candidate = constructRevisionCandidate(prepared, crypto.randomUUID(), { summary: 'Revised files', documents: reviewFixtureDocuments() })
   return parseRevisionCandidateResult(candidate, binding(candidate))
 }
 function binding(result: { ownerId: string; projectId: string; resultId: string }) {
   return { ownerId: result.ownerId, projectId: result.projectId, resultId: result.resultId, resultDigest: revisionDigest(result) }
 }
-const resultDirectory = (workspace: string, resultId: string) => join(workspace, '.beegame/workflow/foundation-revision/results', resultId)
+const resultDirectory = (workspace: string, resultId: string) => join(workspace, '.beegame/workflow/foundation-revision/native-file-v1/results', resultId)
 async function temporary(run: (workspace: string) => Promise<void>) {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), 'revision-publication-')))
   try { await run(workspace) } finally { await rm(workspace, { recursive: true, force: true }) }
@@ -42,7 +42,7 @@ test('publishes complete candidate atomically and replay/concurrency preserve ca
   expect(await readRevisionPublishedCandidate(workspace, candidate)).toEqual(candidate)
   expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe(original)
   expect((await readdir(resultDirectory(workspace, candidate.resultId))).sort()).toEqual(['COMMITTED.json', 'result.json'])
-  expect(first.artifactPath).toStartWith('.beegame/workflow/foundation-revision/results/')
+  expect(first.artifactPath).toStartWith('.beegame/workflow/foundation-revision/native-file-v1/results/')
   expect(JSON.parse(await readFile(join(workspace, first.artifactPath), 'utf8'))).toEqual(candidate)
 }))
 

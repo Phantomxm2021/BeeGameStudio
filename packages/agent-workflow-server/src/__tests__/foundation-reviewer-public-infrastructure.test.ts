@@ -16,9 +16,8 @@ import {
   foundationReviewerInputDigest,
   type ReviewerHandle,
 } from '../beegame/stage-modules/foundation-reviewer/public'
-import { openReviewerFactJournal } from '../beegame/stage-modules/foundation-reviewer/private/fact-journal'
-import { reviewerUsageEventId } from '../beegame/stage-modules/foundation-reviewer/private/usage-state'
-import { reviewFixtureDocuments } from '../beegame/stage-modules/foundation-reviewer/private/test-fixtures/review-fixture'
+const CANONICAL_FOUNDATION_DOCUMENTS = ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/BALANCE_DESIGN.md',
+  'docs/TECHNICAL_DESIGN.md', 'docs/ART_DIRECTION.md', 'docs/UI_UX_SPEC.md', 'docs/AUDIO_DESIGN.md', 'docs/ASSET_PLAN.md'] as const
 
 const ownerId = 'reviewer-public-infrastructure-owner'
 const projectId = 'reviewer-public-infrastructure-project'
@@ -30,7 +29,6 @@ const subject = {
   confirmedBriefDigest: 'b'.repeat(64),
 }
 
-type ReviewerInput = ReturnType<typeof makeInput>
 type RuntimeCall = {
   dataDir: string
   ownerId: string
@@ -43,8 +41,10 @@ type BillingCall = {
   input: BeeGameUsageBillingRecordInput
 }
 
-function makeInput(requestId: string, documents = reviewFixtureDocuments()) {
-  const input = { subject, documents }
+function makeInput(requestId: string, documents = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path,
+  content: '# Offline source\nREPAIR_REQUIRED: This offline fixture contains an incomplete rule.',
+}))) {
+  const input = { subject, documents, requirements: { status: 'unavailable' as const, reason: 'Offline fixture' } }
   return {
     protocolVersion: 1 as const,
     requestId,
@@ -136,19 +136,6 @@ async function waitFor<T>(
   throw new Error(`${label} did not settle: ${JSON.stringify(latest)}`)
 }
 
-function journalInput(workspacePath: string, input: ReviewerInput) {
-  return {
-    workspacePath,
-    identity: { ownerId: input.ownerId, projectId: input.projectId, requestId: input.requestId },
-    documents: input.input.documents,
-    binding: { inputDigest: input.inputDigest, subject: input.input.subject },
-  }
-}
-
-async function openReadonlyJournal(workspacePath: string, input: ReviewerInput) {
-  return openReviewerFactJournal({ ...journalInput(workspacePath, input), readOnly: true })
-}
-
 async function makeFixture(requestId: string) {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'reviewer-public-infrastructure-')))
   const input = makeInput(requestId)
@@ -181,7 +168,7 @@ async function makeFixture(requestId: string) {
         return { BEEGAME_REVIEWER_REPOSITORY: 'offline-fixture' }
       },
     },
-    command: [process.execPath, join(import.meta.dir, '../beegame/stage-modules/foundation-reviewer/private/test-fixtures/native-reviewer.ts'), '--fixture-mode=success'],
+    command: [process.execPath, join(import.meta.dir, '../beegame/stage-modules/foundation-reviewer/private/test-fixtures/native-file-review.ts'), 'repair-flow'],
     runtime: {
       modelType: 'openai',
       env: {
@@ -199,11 +186,7 @@ async function makeFixture(requestId: string) {
   async function cleanup() {
     if (handle) {
       await reviewer.stop({ handle, requestId: `cleanup-${randomUUID()}`, reason: 'offline Reviewer fixture cleanup' })
-      const journal = await openReadonlyJournal(workspacePath, input)
-      await waitFor(async () => ({ state: await journal.read(), lease: await journal.leaseStatus() }), value => {
-        const tasks = [...value.state.collection.tasks, ...(value.state.semantic?.collection.tasks ?? [])]
-        return value.lease === 'free' && tasks.every(task => task.status !== 'running')
-      }, 'Reviewer cleanup')
+      await waitFor(() => reviewer.getResult(handle!), result => result.status !== 'running', 'Reviewer cleanup')
     }
     await rm(workspacePath, { recursive: true, force: true })
   }
@@ -239,18 +222,12 @@ test('public Reviewer has no native claim or usage without authentication', asyn
     expect(fixture.runtimeCalls).toEqual([])
     expect(fixture.billingAuthority.calls).toEqual([])
 
-    const journal = await openReadonlyJournal(fixture.workspacePath, fixture.input)
-    const state = await journal.read()
-    expect(state.collection.tasks.every(task => task.dispatch === undefined && task.status !== 'running')).toBe(true)
-    expect(Object.keys(state.usageByDispatch)).toHaveLength(0)
-    expect(state.semantic === undefined || state.semantic.collection.tasks.every(task => task.dispatch === undefined && task.status !== 'running')).toBe(true)
-    expect(Object.keys(state.semantic?.usageByDispatch ?? {})).toHaveLength(0)
   } finally {
     await fixture.cleanup()
   }
 }, 35_000)
 
-test('public Reviewer resumes through facts, semantics, publication and idempotent billing offline', async () => {
+test('public Reviewer resumes native-file audit and publishes with idempotent billing offline', async () => {
   const fixture = await makeFixture('reviewer-public-resume')
   const before = new Map<string, string>()
   for (const document of fixture.input.input.documents) {
@@ -273,13 +250,19 @@ test('public Reviewer resumes through facts, semantics, publication and idempote
     expect(['running', 'completed']).toContain(resumed.status)
     const completed = await waitFor(
       () => fixture.reviewer.getResult(handle),
-      result => result.status === 'completed' && result.billingStatus === 'settled',
+      result => {
+        if (result.status === 'failed' || (result.status === 'needs_action' && !result.resumable))
+          throw new Error(`Native-file Reviewer cannot complete: ${JSON.stringify(result)}`)
+        return result.status === 'completed' && result.billingStatus === 'settled'
+      },
       'public Reviewer completion',
-      120_000,
+      30_000,
     )
     expect(completed.status).toBe('completed')
     if (completed.status !== 'completed') throw new Error('expected a completed Reviewer result')
     expect(completed.result.kind).toBe('issues_found')
+    expect(completed.result.audit.policy).toBe('native-file-audit.v1')
+    expect(completed.result.audit).not.toHaveProperty('validation')
     expect(completed.result.documents.map(document => document.path)).toEqual(fixture.input.input.documents.map(document => document.path))
     expect(completed.result.issues.length).toBeGreaterThan(0)
 
@@ -292,20 +275,9 @@ test('public Reviewer resumes through facts, semantics, publication and idempote
     expect(fixture.billingAuthority.calls.every(call => call.ownerId === ownerId)).toBe(true)
     expect(fixture.billingAuthority.calls.every(call => call.input.projectId === projectId)).toBe(true)
 
-    const journal = await openReadonlyJournal(fixture.workspacePath, fixture.input)
-    const state = await waitFor(
-      () => journal.read(),
-      value => value.semantic?.phase === 'semantic_staged' && value.collection.tasks.every(task => task.status === 'completed'),
-      'Reviewer journal terminal state',
-    )
-    const allTasks = [...state.collection.tasks, ...(state.semantic?.collection.tasks ?? [])]
-    expect(allTasks.every(task => task.status !== 'running')).toBe(true)
-    expect(state.billing?.entries.every(entry => entry.receipt)).toBe(true)
-
-    const firstEntry = state.billing!.entries[0]!
-    const eventId = reviewerUsageEventId(journal.runId, firstEntry.dispatchId, firstEntry.usage)
-    const firstAuthorityInput = fixture.billingAuthority.inputs.get(`record:${eventId}`)
+    const firstAuthorityInput = [...fixture.billingAuthority.records.keys()].map(key => fixture.billingAuthority.inputs.get(`record:${key}`))[0]
     if (!firstAuthorityInput) throw new Error('completed Reviewer event was not recorded by fake authority')
+    const eventId = firstAuthorityInput.idempotencyKey
     const accountCount = fixture.billingAuthority.records.size + fixture.billingAuthority.debits.size
     const replay = await fixture.billing.submitUsage({
       ownerId,

@@ -368,6 +368,7 @@
   },
   "landing": {
     "intake": {
+      "devProjectPurge": {"button":"Desarrollo/pruebas: eliminar todos los proyectos","confirm":"Eliminar permanentemente los {{count}} proyectos de esta cuenta y los espacios de trabajo que se puedan limpiar. No se puede deshacer. La cuenta y la biblioteca de recursos se conservarán.","delete":"Eliminar permanentemente todos los proyectos","cancel":"Cancelar","pending":"Procesando. No vuelvas a enviar la solicitud…","result":"{{deleted}} proyectos eliminados; {{failed}} fallidos. Revisa la lista restante.","changed":"La lista de proyectos ha cambiado. Revísala antes de confirmar.","failed":"No se pudo confirmar el resultado. Actualiza y revisa la lista antes de enviar otra solicitud."},
       "modal": {
         "chooseOption": "Choose a direction",
         "productionSettings": "Build settings",
@@ -418,6 +419,8 @@
       "errors": {
         "missingPlatformModel": "The platform default model is not configured. Contact an administrator to configure it in platform settings before generating.",
         "projectStartFailed": "Unable to start the project. Check the service and try again.",
+        "projectQuotaExceeded": "Límite de proyectos alcanzado: {{projectCount}} proyectos, límite de {{limit}}. Elimina los proyectos que no necesites en el historial y vuelve a intentarlo, o pide a un administrador que ajuste el límite. No es un problema de saldo de Credit.",
+        "projectQuotaExceededUnknown": "Límite de proyectos alcanzado. Elimina los proyectos que no necesites en el historial y vuelve a intentarlo, o pide a un administrador que ajuste el límite. No es un problema de saldo de Credit.",
         "authNotConfigured": "Supabase Auth is not configured.",
         "missingEmailPassword": "Enter your email and password.",
         "missingDisplayName": "Set a display name.",

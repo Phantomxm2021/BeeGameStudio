@@ -99,7 +99,8 @@ describe('private Author-domain behavior', () => {
     const expectedBatches: FoundationDocumentPath[][] = [
       ['docs/LEVEL_SCENE_DESIGN.md'],
       ['docs/BALANCE_DESIGN.md', 'docs/UI_UX_SPEC.md'],
-      ['docs/TECHNICAL_DESIGN.md', 'docs/ART_DIRECTION.md', 'docs/AUDIO_DESIGN.md'],
+      ['docs/TECHNICAL_DESIGN.md', 'docs/ART_DIRECTION.md'],
+      ['docs/AUDIO_DESIGN.md'],
       ['docs/ASSET_PLAN.md'],
     ]
     for (const expected of expectedBatches) {

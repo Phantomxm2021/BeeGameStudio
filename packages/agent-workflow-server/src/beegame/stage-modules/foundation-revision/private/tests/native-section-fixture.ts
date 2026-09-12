@@ -23,7 +23,7 @@ for await (const chunk of Bun.stdin.stream()) {
     const packet = JSON.parse(evidence.slice('Revision evidence: '.length))
     if (packet.documentPath !== 'docs/TECHNICAL_DESIGN.md' || JSON.stringify(packet.sectionIds) !== '["input_interaction"]')
       throw new Error('unexpected repair scope')
-    const section = packet.sections.find((value: { documentPath: string; sectionId: string }) =>
+    const section = packet.writeTargets.find((value: { documentPath: string; sectionId: string }) =>
       value.documentPath === packet.documentPath && value.sectionId === 'input_interaction')
     const broken = 'technical.supported_actions: ["move","attack"]'
     const fixed = 'technical.supported_actions: ["move","attack","dash"]'

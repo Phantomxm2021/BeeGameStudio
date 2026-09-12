@@ -1,0 +1,42 @@
+/** Offline single-agent fixture refuses missing whole-document or requirements evidence. */
+import { createInterface } from 'node:readline'
+import { emitNativeToolsFixture } from '../../stage-modules/foundation-reviewer/private/test-fixtures/native-tools-v2'
+let input: any
+let turns = 0
+let hasDraft = false
+for await (const line of createInterface({ input: process.stdin })) {
+  const message = JSON.parse(line)
+  if (message.type !== 'user') continue
+  const prompt = message.message.content.map((block: { text: string }) => block.text).join('')
+  const gddAudit = prompt.includes('INPUT (numbered original lines or source directory):\n')
+  const marker = gddAudit ? 'INPUT (numbered original lines or source directory):\n'
+    : 'INPUT (each text field is one exact original line, excluding its newline; line is its one-based source position):\n'
+  if (prompt.includes(marker)) {
+    input = JSON.parse(prompt.slice(prompt.indexOf(marker) + marker.length).split('\n')[0]!)
+    for (const source of [...input.documents, input.requirements]) source.content = source.lines.map((line: { text: string }) => line.text).join('\n')
+    hasDraft = prompt.includes('"action":"draft"')
+  }
+  turns++
+  if (input.documents.length !== 8 || input.requirements.status !== 'available' || input.requirements.content !== 'multi-source evidence fixture')
+    throw new Error('Full audit input lost documents or original requirements')
+  const gdd = input.documents.find((doc: { path: string }) => doc.path === 'docs/GDD.md')
+  const level = input.documents.find((doc: { path: string }) => doc.path === 'docs/LEVEL_SCENE_DESIGN.md')
+  const cite = (document: { path: string; content: string }, text: string) => {
+    const line = document.content.split('\n').findIndex(value => value.includes(text))
+    if (line < 0) throw new Error('Missing evidence: ' + text)
+    return { path: document.path, startLine: line + 1, endLine: line + 1, quote: document.content.split('\n')[line] }
+  }
+  const evidence = [cite(gdd, 'beegame-section:player_actions'), cite(gdd, 'beegame-section:rules_systems')]
+  const broken = level.content.includes('route_choice_contract: missing')
+  if (!broken && !level.content.includes('route_choice_contract: readable')) throw new Error('Missing route contract')
+  const report = { status: 'completed', summary: 'Full input inspected', reviewedDocuments: input.documents.map((doc: { path: string }) => doc.path),
+    requirementsAssessment: 'reviewed', omissionCheck: 'Revisited all eight documents and original requirements', limitations: [],
+    findings: broken ? [{ severity: 'HIGH', title: 'Route feedback is missing', actual: 'route_choice_contract: missing',
+      expected: 'route_choice_contract: readable', reasoning: 'Route contract conflicts with the cited player-action and rules context',
+      impact: 'Players cannot understand route choices', evidence: [...evidence, cite(level, 'route_choice_contract: missing'),
+        { path: 'requirements', startLine: 1, endLine: 1, quote: input.requirements.content }],
+      repair: { documentPath: level.path, instruction: 'Make route feedback readable in the Level document' } }] : [] }
+  await emitNativeToolsFixture({ input, report, transcript: [], mode: 'multisource', turns,
+    usage: { input_tokens: turns, output_tokens: turns }, gddAudit })
+  hasDraft = true
+}

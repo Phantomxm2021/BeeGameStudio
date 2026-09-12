@@ -7,7 +7,6 @@ import { acceptRevisionRequest, readRevisionRequestByHandle } from './request-st
 import { prepareRevisionRequest } from './request-preparation'
 import { revisionCanonicalJson, revisionDigest } from './json-digest'
 import { getLatestRevisionRuntimeUsage, type RevisionUsageEvent } from './native-usage'
-import type { AcceptedRevisionWorkerOutput } from './worker-output'
 import { compatibleRevisionBillingReceipts, revisionBillingReceiptSchema } from './usage-billing'
 import { createRevisionExecutionReducer, revisionExecutionEventSchema as eventSchema, revisionObservationSchema,
   revisionSettlementSchema, revisionStopSchema, revisionResumeSchema, revisionLifecycleFailureSchema, type RevisionExecutionEvent as Event,
@@ -107,12 +106,6 @@ export async function openRevisionAttemptStore(workspacePath: string, requestVal
     : await acceptRevisionRequest(workspacePath, request)
   if (accepted.record.requestDigest !== revisionDigest(request)) throw new Error('Revision read-only request binding mismatch')
   const requestRoot = dirname(join(resolve(workspacePath), accepted.artifactPath))
-  // This private, unshipped layout is intentionally not auto-migrated. Never
-  // mistake an old per-document active attempt for a fresh empty request.
-  try {
-    await lstat(join(requestRoot, 'attempts'))
-    throw new Error('Revision legacy per-document execution requires explicit migration')
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   const root = readOnlyHandle ? join(requestRoot, 'execution-events') : await ensureChild(requestRoot, 'execution-events')
   if (readOnlyHandle) await assertDirectories(root)
   const reducer = createRevisionExecutionReducer(request, accepted.record)
@@ -126,7 +119,7 @@ export async function openRevisionAttemptStore(workspacePath: string, requestVal
     return state
   }
   function header(state: State) {
-    return { protocolVersion: 1 as const, producer: 'foundation-revision' as const,
+    return { protocolVersion: 2 as const, producer: 'foundation-revision' as const,
       requestDigest: accepted.record.requestDigest, handle: accepted.record.handle,
       sequence: state.events.length + 1, previousDigest: state.events.length ? revisionDigest(state.events.at(-1)) : null }
   }
@@ -138,21 +131,21 @@ export async function openRevisionAttemptStore(workspacePath: string, requestVal
   }
   function requestSnapshot(state: State) {
     return { stopped: state.stopped, failure: state.failure,
+      progress: state.progress,
       phase: state.published ? 'published' as const : state.publication ? 'publishing' as const : state.stopped ? 'stopped' as const : 'running' as const,
-      activeAttemptIds: [...state.workers.values()].flatMap(worker => worker.active ? [worker.active.attemptId] : []),
+      activeAttemptId: state.active?.attemptId ?? null,
       eventCount: state.events.length }
   }
-  function workerSnapshot(state: State, documentValue: unknown) {
-    const binding = reducer.authority(documentValue)
-    const current = state.workers.get(binding.documentPath)!
-    const last = current.events.at(-1)
+  function executionSnapshot(state: State) {
+    const current = state
+    const last = current.attemptEvents.at(-1)
     return structuredClone({ status: current.active ? 'running' as const : current.completed ? 'completed' as const
       : last?.kind === 'attempt_settled' ? last.settlement.status : 'pending' as const,
       attempt: current.attempt, active: current.active, completed: current.completed,
       lastSettlement: last?.kind === 'attempt_settled' ? last.settlement : null,
       lastReceipt: last?.kind === 'attempt_settled' ? last : null,
       observedUsageEvents: current.usageEvents, observedUsage: getLatestRevisionRuntimeUsage(current.usageEvents),
-      output: (current.completed?.output ?? null) as AcceptedRevisionWorkerOutput | null, eventCount: current.events.length })
+      snapshot: current.completed?.settlement.status === 'completed' ? current.completed.settlement.snapshot : null, eventCount: current.attemptEvents.length })
   }
   async function control(kind: 'stop_requested' | 'resumed', value: unknown) {
     const captured = kind === 'stop_requested' ? revisionStopSchema.parse(JSON.parse(revisionCanonicalJson(value)))
@@ -170,7 +163,14 @@ export async function openRevisionAttemptStore(workspacePath: string, requestVal
     }
   }
   return {
-    async read(documentPath: unknown) { return workerSnapshot(await load(), documentPath) },
+    async observeProgress(attemptId: string, progress: { modelResponses: number; message: string }) {
+      for (;;) {
+        const state = await load()
+        const event = eventSchema.parse({ ...header(state), kind: 'attempt_progress', attemptId, progress })
+        if (await commit(state, event)) return
+      }
+    },
+    async read() { return executionSnapshot(await load()) },
     async readRequest() { const state = await load(); await syncDirectory(root); return requestSnapshot(state) },
     async readAuthorizedCandidate() {
       const state = await load()
@@ -186,7 +186,7 @@ export async function openRevisionAttemptStore(workspacePath: string, requestVal
       // Observing a linked terminal before its writer's fsync is insufficient
       // authority to make an external billing call. Resync before returning it.
       await syncDirectory(root)
-      return structuredClone({ entries, activeAttemptIds: requestSnapshot(state).activeAttemptIds })
+      return structuredClone({ entries, activeAttemptId: requestSnapshot(state).activeAttemptId })
     },
     async acknowledgeUsage(value: unknown) {
       const captured = z.object({ attemptId: z.uuid(), receipt: revisionBillingReceiptSchema }).strict()
@@ -221,47 +221,44 @@ export async function openRevisionAttemptStore(workspacePath: string, requestVal
         if (await commit(state, { ...header(state), kind: 'lifecycle_failed', code })) return requestSnapshot(state)
       }
     },
-    async observeUsage(documentPath: unknown, value: unknown) {
+    async observeUsage(value: unknown) {
       const captured = revisionObservationSchema.parse(JSON.parse(revisionCanonicalJson(value)))
       getLatestRevisionRuntimeUsage([captured.event as RevisionUsageEvent])
-      const binding = reducer.authority(documentPath)
       for (;;) {
         const state = await load()
-        const current = state.workers.get(binding.documentPath)!
-        const previous = current.events.find(event => event.kind === 'attempt_usage_observed' &&
+        const current = state
+        const previous = current.attemptEvents.find(event => event.kind === 'attempt_usage_observed' &&
           event.observation.attemptId === captured.attemptId && event.observation.observationIndex === captured.observationIndex)
         if (previous?.kind === 'attempt_usage_observed') {
           if (!same(previous.observation, captured)) throw new Error('Revision conflicting usage observation replay')
           await syncDirectory(root)
           return structuredClone(previous)
         }
-        const event: Event = { ...header(state), ...binding, kind: 'attempt_usage_observed', observation: captured }
+        const event: Event = { ...header(state), kind: 'attempt_usage_observed', observation: captured }
         const committed = await commit(state, event)
         if (committed) return structuredClone(committed)
       }
     },
-    async begin(documentPath: unknown) {
-      const binding = reducer.authority(documentPath)
+    async begin() {
       const attemptId = randomUUID()
       const startedAt = Date.now()
       for (;;) {
         const state = await load()
-        const current = state.workers.get(binding.documentPath)!
+        const current = state
         if (current.completed) throw new Error('Revision attempt already completed; replay receipt instead of dispatch')
         if (current.active) throw new Error('Revision attempt still running; explicit recovery required')
-        const event = eventSchema.parse({ ...header(state), ...binding, kind: 'attempt_started',
+        const event = eventSchema.parse({ ...header(state), kind: 'attempt_started',
           attemptId, startedAt, attempt: current.attempt + 1 }) as RevisionStarted
         const committed = await commit(state, event)
         if (committed) return structuredClone(committed as RevisionStarted)
       }
     },
-    async settle(documentPath: unknown, value: unknown) {
+    async settle(value: unknown) {
       const captured = revisionSettlementSchema.parse(JSON.parse(revisionCanonicalJson(value)))
-      const binding = reducer.authority(documentPath)
       for (;;) {
         const state = await load()
-        const current = state.workers.get(binding.documentPath)!
-        const previous = current.events.find(event => event.kind === 'attempt_settled' && event.settlement.attemptId === captured.attemptId)
+        const current = state
+        const previous = current.attemptEvents.find(event => event.kind === 'attempt_settled' && event.settlement.attemptId === captured.attemptId)
         if (previous?.kind === 'attempt_settled') {
           if (!same(previous.submittedSettlement, captured) && !same(previous.settlement, captured))
             throw new Error('Revision attempt conflicting terminal replay')
@@ -270,11 +267,10 @@ export async function openRevisionAttemptStore(workspacePath: string, requestVal
         }
         if (!current.active || current.active.attemptId !== captured.attemptId) throw new Error('Revision attempt stale settlement')
         const settlement = reducer.effectiveSettlement(state, captured)
-        const derived = reducer.deriveSettlement(binding.documentPath, settlement,
-          new Date(current.active.startedAt).toISOString())
+        const derived = reducer.deriveSettlement(settlement)
         const finishedAt = Date.now()
         const startedAt = current.active.startedAt
-        const event: RevisionSettled = { ...header(state), ...binding, kind: 'attempt_settled', submittedSettlement: captured,
+        const event: RevisionSettled = { ...header(state), kind: 'attempt_settled', submittedSettlement: captured,
           settlement, ...derived, finishedAt, durationMs: Math.max(0, finishedAt - startedAt) }
         const committed = await commit(state, event)
         if (committed) {
@@ -293,7 +289,7 @@ export async function openRevisionAttemptStore(workspacePath: string, requestVal
           return { ...structuredClone(prepared), authorizationDigest: revisionDigest(state.publication) }
         }
         const event: Event = { ...header(state), kind: 'candidate_authorized', candidateResultId: prepared.candidate.resultId,
-          candidateResultDigest: revisionDigest(prepared.candidate), receiptDigests: prepared.receipts.map(revisionDigest) }
+          candidateResultDigest: revisionDigest(prepared.candidate), receiptDigest: revisionDigest(prepared.receipt) }
         const committed = await commit(state, event)
         if (committed) return { ...structuredClone(prepared), authorizationDigest: revisionDigest(committed) }
       }

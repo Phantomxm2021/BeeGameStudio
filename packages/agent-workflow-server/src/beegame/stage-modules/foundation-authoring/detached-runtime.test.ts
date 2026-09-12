@@ -15,7 +15,8 @@ test('bundled public author completes outside the source tree without legacy run
     plugins: [{ name: 'author-runtime-boundary', setup(builder) {
       builder.onLoad({ filter: /.*/ }, args => {
         loaded.add(args.path)
-        if (!args.path.startsWith(moduleRoot + sep) && !args.path.includes('/node_modules/zod/'))
+        if (!args.path.startsWith(moduleRoot + sep) && !args.path.includes('/node_modules/zod/') &&
+            args.path !== resolve(moduleRoot, '../../../../../../packages/agent-workflow/src/native-task-access.ts'))
           throw new Error('Unexpected transitive Author runtime dependency: ' + args.path)
       })
     } }],

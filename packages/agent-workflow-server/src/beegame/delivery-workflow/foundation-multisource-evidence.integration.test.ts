@@ -12,7 +12,7 @@ import {
   createFoundationRevision,
   foundationRevisionInputDigest,
 } from '../stage-modules/foundation-revision/public'
-import { reviewFixtureDocuments } from '../stage-modules/foundation-reviewer/private/test-fixtures/review-fixture'
+import { reviewFixtureDocuments } from '../stage-modules/foundation-revision/private/tests/single-review-fixture'
 import { offlineReviewerBilling } from '../stage-modules/foundation-reviewer/private/test-fixtures/offline-billing'
 
 const digest = (value: unknown) => {
@@ -57,7 +57,7 @@ async function waitRevision(api: ReturnType<typeof createFoundationRevision>, ha
   throw new Error('Revision fixture did not settle')
 }
 
-test('multi-source semantic evidence crosses public Reviewer → Revision → targeted Reviewer boundaries', async () => {
+test('multi-source semantic evidence crosses public Reviewer → Revision → full Reviewer boundaries', async () => {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'multisource-evidence-')))
   const ownerId = 'multisource-owner'
   const projectId = 'multisource-project'
@@ -72,18 +72,14 @@ test('multi-source semantic evidence crosses public Reviewer → Revision → ta
       OPENAI_DEFAULT_SONNET_MODEL: 'fixture-fast', OPENAI_DEFAULT_OPUS_MODEL: 'fixture-strong',
     }),
   })
-  const documents = reviewFixtureDocuments(true).map(document => {
-    if (document.path !== 'docs/LEVEL_SCENE_DESIGN.md') return document
-    const marker = '<!-- beegame-material:route-choice-diagram -->'
-    const start = document.content.indexOf(marker)
-    const next = document.content.indexOf('<!-- beegame-material:pacing-beat-table -->', start)
-    if (start < 0 || next < 0) throw new Error('route-choice fixture markers are missing')
-    const section = document.content.slice(start, next).replace('A --> B\n```', 'A --> B\n```\n\nroute_choice_contract: missing')
-    return { ...document, content: document.content.slice(0, start) + section + document.content.slice(next) }
-  })
+  const documents = reviewFixtureDocuments().map(document => ({
+    ...document, content: document.content + (document.path === 'docs/LEVEL_SCENE_DESIGN.md' ? '\\nroute_choice_contract: missing\\n'
+      : document.path === 'docs/GDD.md' ? '\\nPlayer actions: choose a route.\\nRules: route choices must be readable.\\n' : ''),
+  }))
+  const requirements = { status: 'available' as const, content: brief, digest: createHash('sha256').update(brief).digest('hex') }
   const initialInput = { ownerId, projectId, requestId: 'multisource-review', protocolVersion: 1 as const,
-    input: { documents, subject: { kind: 'initial' as const, sourceResultId: 'author-fixture',
-      sourceDocumentRevision: digest('author-fixture'), confirmedBriefDigest: digest(brief) } } }
+    input: { documents, requirements, subject: { kind: 'initial' as const, sourceResultId: 'author-fixture',
+      sourceDocumentRevision: digest('author-fixture'), confirmedBriefDigest: requirements.digest } } }
   const initial = { ...initialInput, inputDigest: foundationReviewerInputDigest(initialInput) }
   try {
     const reviewHandle = await reviewer.start(initial)
@@ -92,31 +88,21 @@ test('multi-source semantic evidence crosses public Reviewer → Revision → ta
     expect(review.result.kind).toBe('issues_found')
     expect(review.result.issues).toHaveLength(1)
     const sourceIssue = review.result.issues[0]!
-    expect(sourceIssue.issue.source.documentPath).toBe('docs/GDD.md')
-    expect('sectionId' in sourceIssue.issue.source && sourceIssue.issue.source.sectionId).toBe('player_actions')
-    expect(sourceIssue.issue.remediation).toEqual({ kind: 'patch', scope: 'section', documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionIds: ['material.route-choice-diagram'] })
-    expect(sourceIssue.issue).toHaveProperty('supportingSections')
-    expect(sourceIssue.sections.map(section => `${section.path}#${section.sectionId ?? ''}`)).toEqual([
-      'docs/GDD.md#player_actions', 'docs/GDD.md#rules_systems',
-    ])
+    expect(sourceIssue.issue.source.documentPath).toBe('docs/LEVEL_SCENE_DESIGN.md')
+    expect(sourceIssue.issue).not.toHaveProperty('remediation')
+    expect(sourceIssue.issue).not.toHaveProperty('evidence')
+    expect(review.result.requirements).toEqual(requirements)
+    expect(review.result.documents).toHaveLength(8)
 
     const sourceResult = review.result
     const sourceBinding = { ownerId, projectId, resultId: sourceResult.resultId, resultDigest: digest(sourceResult) }
-    const levelDocument = sourceResult.documents.find(document => document.path === 'docs/LEVEL_SCENE_DESIGN.md')!.content
-    const materialMarker = '<!-- beegame-material:route-choice-diagram -->'
-    const materialHeading = '### Route and Choice Diagram'
-    const materialEnd = '<!-- beegame-material:pacing-beat-table -->'
-    const materialStart = levelDocument.indexOf(materialHeading, levelDocument.indexOf(materialMarker))
-    const materialStop = levelDocument.indexOf(materialEnd, materialStart)
-    if (materialStart < 0 || materialStop < 0) throw new Error('route-choice fixture section is missing')
-    const brokenSection = levelDocument.slice(materialStart, materialStop)
-    const revisionCommand = [process.execPath, fileURLToPath(new URL('./test-fixtures/foundation-multisource-evidence-revision.ts', import.meta.url)), Buffer.from(brokenSection).toString('base64')]
+    const revisionCommand = [process.execPath, fileURLToPath(new URL('./test-fixtures/foundation-multisource-evidence-revision.ts', import.meta.url))]
     const revision = createFoundationRevision({ workspacePath }, {
       billing: revisionBilling.client,
       runtimeConfiguration: runtime(revisionCommand, { OPENAI_API_KEY: 'offline-fixture' }),
     })
     const revisionInput = { ownerId, projectId, requestId: 'multisource-revision', input: {
-      kind: 'initial' as const, sourceResult, sourceBinding,
+      sourceResult, sourceBinding,
     } }
     const revisionStart = { ...revisionInput, protocolVersion: 1 as const, inputDigest: foundationRevisionInputDigest({
       ownerId, projectId, input: revisionInput.input,
@@ -125,16 +111,17 @@ test('multi-source semantic evidence crosses public Reviewer → Revision → ta
     const revised = await waitRevision(revision, revisionHandle)
     if (revised.status !== 'completed' || !revised.result) throw new Error('public Revision result missing')
     const candidate = revised.result
-    expect(candidate.changes).toHaveLength(1)
-    expect(candidate.changes[0]).toMatchObject({ scope: 'section', documentPath: 'docs/LEVEL_SCENE_DESIGN.md', sectionId: 'material.route-choice-diagram' })
+    expect(candidate.revisionSummary).toContain('multi-source')
     expect(candidate.documents.find(document => document.path === 'docs/LEVEL_SCENE_DESIGN.md')!.content).toContain('route_choice_contract: readable')
     for (const document of sourceResult.documents.filter(document => document.path !== 'docs/LEVEL_SCENE_DESIGN.md'))
       expect(candidate.documents.find(item => item.path === document.path)!.digest).toBe(document.digest)
     expect(sourceResult.documents.find(document => document.path === 'docs/LEVEL_SCENE_DESIGN.md')!.content).toContain('route_choice_contract: missing')
 
-    const candidateInput = { ownerId, projectId, requestId: 'multisource-targeted-review', input: {
-      kind: 'first' as const, sourceResult, sourceBinding,
-      candidateResult: candidate, candidateBinding: { ownerId, projectId, resultId: candidate.resultId, resultDigest: digest(candidate) },
+    const candidateInput = { ownerId, projectId, requestId: 'multisource-full-review', input: {
+      documents: candidate.documents.map(({ path, content }) => ({ path, content })), requirements,
+      subject: { kind: 'candidate' as const, candidateId: candidate.candidateId, candidateResultId: candidate.resultId,
+        sourceReviewResultId: sourceResult.resultId, sourceReviewResultDigest: digest(sourceResult),
+        baseDocumentSetDigest: sourceResult.documentSetDigest, round: candidate.round },
     } }
     const targetedReviewer = createFoundationReviewer({ workspacePath }, {
       billing: reviewerBilling.client,
@@ -148,11 +135,9 @@ test('multi-source semantic evidence crosses public Reviewer → Revision → ta
     const targetedHandle = await targetedReviewer.start(candidateStart)
     const targeted = await waitReviewer(targetedReviewer, targetedHandle)
     if (targeted.status !== 'completed' || !targeted.result) throw new Error('targeted Reviewer result missing')
-    const targetedRecheck = targeted.result.recheck
-    expect(targetedRecheck?.kind).toBe('targeted')
-    if (!targetedRecheck || targetedRecheck.kind !== 'targeted') throw new Error('targeted Reviewer recheck missing')
-    expect(targetedRecheck.decision).toBe('round_complete')
-    expect(targetedRecheck.issueVerdicts).toEqual([{ issueId: sourceIssue.issue.id, kind: 'semantic', status: 'PASS' }])
+    expect(targeted.result.kind).toBe('passed')
+    expect(targeted.result.documents).toHaveLength(8)
+    expect(targeted.result.requirements).toEqual(requirements)
     expect(targeted.result.issues).toEqual([])
   } finally {
     await rm(workspacePath, { recursive: true, force: true })

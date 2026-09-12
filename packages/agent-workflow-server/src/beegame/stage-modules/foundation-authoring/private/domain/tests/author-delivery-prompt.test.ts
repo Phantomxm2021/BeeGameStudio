@@ -4,6 +4,9 @@ import { buildFoundationAuthorPrompt as buildWorkerPrompt } from '../foundation-
 
 test('gives Technical and Asset authors the actual private delivery contract', () => {
     const contract = buildFoundationAuthoringDeliveryContract()
+    expect(contract.programmaticAudio.manifestRule).toContain('For managed programmatic audio resources only')
+    expect(contract.programmaticAudio.manifestRule).toContain('no managed JSON audio resource is required')
+    expect(contract.placeholderRule).toContain('Code-only runtime synthesis needs no audio-container or managed JSON handoff')
     expect(contract.canonicalAssetManifest.moduleLayout).toMatchObject({
       requirements: {
         root: 'assets/manifest/requirements',

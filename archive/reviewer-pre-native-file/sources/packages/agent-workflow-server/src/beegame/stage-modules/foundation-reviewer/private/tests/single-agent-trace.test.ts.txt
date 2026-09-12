@@ -1,0 +1,52 @@
+import { expect, test } from 'bun:test'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createReviewTrace } from '../single-agent-trace'
+import { NATIVE_DIAGNOSTIC_PREFIX as prefix, parseNativeDiagnostic, nativeErrorCategory } from '@bee-game-studio/agent-workflow/native-diagnostics'
+import { parseNativeDiagnostic as parseHostDiagnostic } from '../single-agent-trace-protocol'
+
+test('independent host decoder agrees with the CLI wire on metadata and rejects untrusted fields', () => {
+  for (const value of [null, {}, { event: 'SECRET' }, { event: 'api_error', category: 'SECRET' },
+    { event: 'request_start', request: 2, prompt: 'SECRET' }, { event: 'api_error', attempt: 2, category: 'timeout' },
+    { event: 'process_exit', exitCode: 0 }, { event: 'process_exit', signal: 'SIGKILL' }, { event: 'evidence_incomplete', secret: 'SECRET' }])
+    expect(parseHostDiagnostic(value)).toEqual(parseNativeDiagnostic(value))
+})
+
+test('diagnostic metadata rebuilds an allowlist and never retains error or credential fields', () => {
+  expect(parseNativeDiagnostic({ event: 'request_start', request: 1, url: 'https://secret', headers: { authorization: 'secret' }, prompt: 'secret' }))
+    .toEqual({ event: 'request_start', request: 1 })
+  expect(parseNativeDiagnostic({ event: 'secret' })).toBeUndefined()
+  expect(parseNativeDiagnostic({ event: 'api_error', category: 'SECRET' })).toBeUndefined()
+  expect(parseNativeDiagnostic({ event: 'api_error', attempt: NaN })).toBeUndefined()
+  expect(nativeErrorCategory({ status: 429, message: 'SECRET' })).toBe('rate_limit')
+  expect(nativeErrorCategory('ECONNREFUSED https://secret')).toBe('connection_refused')
+})
+
+test('split stderr, invalid frames and long secret-bearing lines produce only metadata', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'review-trace-'))
+  try {
+    const trace = createReviewTrace(root)
+    trace.record({ event: 'process_spawn', pid: 123 })
+    const frame = prefix + JSON.stringify({ event: 'request_start', request: 1, secret: 'TOKEN_SECRET' }) + '\n'
+    trace.stderr(Buffer.from(frame.slice(0, 7)))
+    trace.stderr(Buffer.from(frame.slice(7)))
+    trace.stderr(Buffer.from('ECONNREFUSED Authorization: TOKEN_SECRET https://private/path\n'))
+    trace.stderr(Buffer.from('TOKEN_SECRET'.repeat(2000)))
+    trace.stderr(Buffer.from('\n' + prefix + '{invalid TOKEN_SECRET}\n'))
+    trace.stdout(Buffer.from('MODEL_SECRET'))
+    trace.stdout(Buffer.from('MODEL_SECRET'))
+    trace.close(); trace.close()
+    const bytes = await readFile(trace.path, 'utf8')
+    expect(bytes).not.toContain('SECRET')
+    expect(bytes).not.toContain('Authorization')
+    expect(bytes).not.toContain('private/path')
+    const events = bytes.trim().split('\n').map(line => JSON.parse(line))
+    expect(events.filter(event => event.event === 'request_start')).toHaveLength(1)
+    expect(events.filter(event => event.event === 'stdout_first')).toHaveLength(1)
+    expect(events.some(event => event.event === 'diagnostic_invalid')).toBe(true)
+    expect(events.some(event => event.category === 'connection_refused')).toBe(true)
+    expect((await stat(trace.path)).mode & 0o777).toBe(0o600)
+    expect(events.every(event => Number.isFinite(event.elapsedMs))).toBe(true)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

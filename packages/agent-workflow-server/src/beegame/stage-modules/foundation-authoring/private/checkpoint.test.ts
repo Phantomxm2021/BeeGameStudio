@@ -110,6 +110,27 @@ async function acceptanceJournalFor(checkpoint: AuthorCheckpoint): Promise<Retur
 }
 
 describe('strict author checkpoint parser', () => {
+  test('reads a legacy running Audio dispatch without granting the same upstream exception to v2', async () => {
+    const f = await rootFixture()
+    try {
+      const checkpoint = baseCheckpoint(f.registration)
+      const audio = 'docs/AUDIO_DESIGN.md' as const
+      const dispatchId = 'legacy-audio'
+      checkpoint.context.foundationDraftState.documents = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, status: 'pending' }))
+      const document = checkpoint.context.foundationDraftState.documents.find(document => document.path === audio)!
+      document.status = 'drafting'
+      document.dispatch = { dispatchId, workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', taskId: audio,
+        revision: checkpoint.context.revision.document, status: 'running', startedAt: '2026-09-05T00:00:00.000Z',
+        request: { runId: handle.id, dispatchId, ownerId: 'owner', projectId: 'project', workspacePath: f.workspace,
+          workerType: 'document-author', phase: 'DOCUMENT_DRAFTING', taskId: audio, revision: checkpoint.context.revision.document,
+          allowedPaths: [audio], contract: { confirmedBriefDigest: digest(brief), confirmedBriefContext: brief, documentSet: 'foundation',
+            authoringMode: 'parallel-draft', foundationDocumentPath: audio,
+            availableUpstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/UI_UX_SPEC.md'] } } }
+      await expect(parseAuthorCheckpoint(checkpoint, { handle, workspacePath: f.workspace })).resolves.toEqual(checkpoint)
+      document.dispatch.request!.contract.authorBodyVersion = 'foundation-author-body.v2'
+      await expect(parseAuthorCheckpoint(checkpoint, { handle, workspacePath: f.workspace })).rejects.toThrow('upstream source set')
+    } finally { await rm(f.workspace, { recursive: true, force: true }) }
+  })
   test('preserves out-of-order parallel commits beyond the canonical completed prefix', async () => {
     const fixture = await rootFixture()
     try {

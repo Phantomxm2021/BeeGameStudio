@@ -17,7 +17,7 @@ import type { WaitingPermissionState } from '../../../utils/waitingPermission';
 import { type ChatDisplayMessage, type ProjectRuntimeDisplayModel, type PermissionDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
-import type { WorkflowCardAction } from '../../../types/message';
+import type { FoundationDecisionInput, WorkflowCardAction } from '../../../types/message';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
@@ -30,6 +30,7 @@ interface ChatPanelProps {
     onSendMessage?: (message: string) => void;
     onEditMessage?: (message: ChatDisplayMessage) => void;
     onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
+    onFoundationDecision?: (decision: FoundationDecisionInput) => Promise<void> | void;
     editingMessageId?: string | null;
     onCancelEdit?: () => void;
     attachments?: ChatAttachmentPayload[];
@@ -229,6 +230,7 @@ export const ChatPanel = memo(({
     isLoading,
     onStop,
     onWorkflowAction,
+    onFoundationDecision,
     isStopping = false,
     chatInput,
     onChatInputChange,
@@ -347,6 +349,7 @@ export const ChatPanel = memo(({
                                     currentUserAvatarUrl={currentUserAvatarUrl}
                                     onEditMessage={onEditMessage}
                                     onWorkflowAction={onWorkflowAction}
+                                    onFoundationDecision={onFoundationDecision}
                                 />
                             </MessageScrollerContent>
                         </MessageScrollerViewport>

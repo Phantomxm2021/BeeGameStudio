@@ -13,21 +13,7 @@ const binding = z
     resultDigest: digest,
   })
   .strict()
-const source = { sourceResult: z.unknown(), sourceBinding: binding }
-const inputSchema = z.discriminatedUnion('kind', [
-  z.object({ ...source, kind: z.literal('initial') }).strict(),
-  z.object({ ...source, kind: z.literal('next_round') }).strict(),
-  z
-    .object({
-      ...source,
-      kind: z.literal('retry_same_round'),
-      previousCandidateResult: z.unknown(),
-      previousCandidateBinding: binding,
-      previousRecheckResult: z.unknown(),
-      previousRecheckBinding: binding,
-    })
-    .strict(),
-])
+const inputSchema = z.object({ sourceResult: z.unknown(), sourceBinding: binding }).strict()
 const digestInputSchema = z
   .object({ ownerId: id, projectId: id, input: inputSchema })
   .strict()
@@ -55,6 +41,7 @@ export type RevisionResult = {
   handle: RevisionHandle
   inputDigest: string
   billingStatus: 'pending' | 'settled'
+  progress?: { modelResponses: number; message: string }
 } & (
   | { status: 'running' }
   | { status: 'stopped' }

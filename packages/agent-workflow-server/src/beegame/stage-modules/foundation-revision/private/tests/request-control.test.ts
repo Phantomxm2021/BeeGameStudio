@@ -4,9 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openRevisionAttemptStore } from '../attempt-store'
 import { revisionDigest } from '../json-digest'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 const documents = ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md'] as const
 const roots: string[] = []
@@ -30,9 +28,8 @@ function requestFixture(count: 1 | 2 = 1) {
     sourceDocuments.find(document => document.path === documentPath)!.content =
       `# incomplete ${documentPath}`
   }
-  const sourceResult = buildReviewerPublishedResult({
+  const sourceResult = buildSingleReviewFixture({
     documents: sourceDocuments,
-    state: initialReviewerFactState(sourceDocuments),
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: {
       kind: 'initial',
@@ -42,7 +39,6 @@ function requestFixture(count: 1 | 2 = 1) {
     },
   })
   return {
-    kind: 'initial' as const,
     ownerId: 'owner',
     projectId: 'project',
     requestId: `request-control-${count}`,
@@ -59,7 +55,7 @@ function requestFixture(count: 1 | 2 = 1) {
 function requestRoot(root: string, request: ReturnType<typeof requestFixture>) {
   return join(
     root,
-    '.beegame/workflow/foundation-revision/requests',
+    '.beegame/workflow/foundation-revision/native-file-v1/requests',
     revisionDigest({
       ownerId: request.ownerId,
       projectId: request.projectId,
@@ -68,17 +64,15 @@ function requestRoot(root: string, request: ReturnType<typeof requestFixture>) {
   )
 }
 
-test('legacy per-document journals require explicit migration without modifying evidence', async () => {
-  const root = await workspace()
-  const request = requestFixture()
-  await openRevisionAttemptStore(root, request)
-  const legacy = join(requestRoot(root, request), 'attempts')
-  await mkdir(legacy)
+test('new execution leaves historical storage untouched and does not replay it', async () => {
+  const root = await workspace(), request = requestFixture()
+  const legacy = join(root, '.beegame/workflow/foundation-revision/requests', revisionDigest({ ownerId: request.ownerId, projectId: request.projectId, requestId: request.requestId }), 'attempts')
+  await mkdir(legacy, { recursive: true })
   const evidence = join(legacy, 'receipt.json')
-  await writeFile(evidence, 'legacy evidence', { flag: 'wx' })
-  await expect(openRevisionAttemptStore(root, request)).rejects.toThrow('explicit migration')
-  expect(await readFile(evidence, 'utf8')).toBe('legacy evidence')
-  expect(await readdir(join(requestRoot(root, request), 'execution-events'))).toEqual([])
+  await writeFile(evidence, 'historic evidence')
+  const store = await openRevisionAttemptStore(root, request)
+  expect((await store.readRequest()).eventCount).toBe(0)
+  expect(await readFile(evidence, 'utf8')).toBe('historic evidence')
 })
 
 function completion() {
@@ -96,27 +90,27 @@ test('idle continuation records its command without manufacturing a failure, and
   const root = await workspace()
   const store = await openRevisionAttemptStore(root, requestFixture())
   expect(await store.resume({ requestId: 'continue-idle' })).toMatchObject({ phase: 'running', failure: null, eventCount: 1 })
-  const started = await store.begin(documents[0])
-  expect(await store.resume({ requestId: 'continue-idle' })).toMatchObject({ activeAttemptIds: [started.attemptId], eventCount: 2 })
+  const started = await store.begin()
+  expect(await store.resume({ requestId: 'continue-idle' })).toMatchObject({ activeAttemptId: started.attemptId, eventCount: 2 })
   await expect(store.resume({ requestId: 'new-continue-while-active' })).rejects.toThrow('active attempt')
   expect((await store.readRequest()).eventCount).toBe(2)
 })
 
-test('the shared journal itself limits concurrent document claims to four', async () => {
+test('the shared journal allows exactly one execution for the entire document set', async () => {
   const root = await workspace()
   const sourceDocuments = reviewFixtureDocuments()
   const paths = sourceDocuments.slice(0, 5).map(document => document.path)
   for (const document of sourceDocuments.slice(0, 5)) document.content = '# incomplete'
-  const sourceResult = buildReviewerPublishedResult({ documents: sourceDocuments, state: initialReviewerFactState(sourceDocuments),
+  const sourceResult = buildSingleReviewFixture({ documents: sourceDocuments,
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) } })
   const request = { ...requestFixture(), sourceResult,
     sourceBinding: { ownerId: 'owner', projectId: 'project', resultId: sourceResult.resultId, resultDigest: revisionDigest(sourceResult) } }
   const stores = await Promise.all(paths.map(() => openRevisionAttemptStore(root, request)))
-  const outcomes = await Promise.allSettled(paths.map((path, index) => stores[index]!.begin(path)))
-  expect(outcomes.filter(outcome => outcome.status === 'fulfilled')).toHaveLength(4)
-  expect(outcomes.filter(outcome => outcome.status === 'rejected')).toHaveLength(1)
-  expect((await stores[0]!.readRequest()).activeAttemptIds).toHaveLength(4)
+  const outcomes = await Promise.allSettled(paths.map((path, index) => stores[index]!.begin()))
+  expect(outcomes.filter(outcome => outcome.status === 'fulfilled')).toHaveLength(1)
+  expect(outcomes.filter(outcome => outcome.status === 'rejected')).toHaveLength(4)
+  expect((await stores[0]!.readRequest()).activeAttemptId).toBeString()
 })
 
 function repairedMarkdown(documentPath: string) {
@@ -125,11 +119,11 @@ function repairedMarkdown(documentPath: string) {
   )!.content
 }
 
-function completed(attemptId: string, documentPath: string) {
+function completed(attemptId: string) {
   return {
     status: 'completed' as const,
     attemptId,
-    markdown: repairedMarkdown(documentPath),
+    snapshot: { summary: 'Updated files', documents: reviewFixtureDocuments() },
     usageEvents: [],
     completion: completion(),
   }
@@ -157,14 +151,14 @@ test('stop-before-begin is durable, rejects dispatch, and resume admits a fresh 
   expect(stopped).toMatchObject({
     stopped: true,
     phase: 'stopped',
-    activeAttemptIds: [],
+    activeAttemptId: null,
     eventCount: 1,
   })
-  await expect(store.begin(documents[0])).rejects.toThrow()
+  await expect(store.begin()).rejects.toThrow()
   expect(await store.readRequest()).toMatchObject({
     stopped: true,
     phase: 'stopped',
-    activeAttemptIds: [],
+    activeAttemptId: null,
     eventCount: 1,
   })
 
@@ -172,10 +166,10 @@ test('stop-before-begin is durable, rejects dispatch, and resume admits a fresh 
   expect(resumed).toMatchObject({
     stopped: false,
     phase: 'running',
-    activeAttemptIds: [],
+    activeAttemptId: null,
     eventCount: 2,
   })
-  const started = await store.begin(documents[0])
+  const started = await store.begin()
   expect(started.attemptId).toBeString()
 })
 
@@ -183,7 +177,7 @@ test('begin-before-stop leaves the attempt active; resume rejects until settleme
   const root = await workspace()
   const request = requestFixture()
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documents[0])
+  const started = await store.begin()
 
   const stopped = await store.requestStop({
     requestId: 'stop-running',
@@ -192,55 +186,25 @@ test('begin-before-stop leaves the attempt active; resume rejects until settleme
   expect(stopped).toMatchObject({
     stopped: true,
     phase: 'stopped',
-    activeAttemptIds: [started.attemptId],
+    activeAttemptId: started.attemptId,
     eventCount: 2,
   })
-  await expect(store.begin(documents[0])).rejects.toThrow()
+  await expect(store.begin()).rejects.toThrow()
   await expect(
     store.resume({ requestId: 'resume-while-active' }),
   ).rejects.toThrow()
 
   const submitted = retryable(started.attemptId)
-  const receipt = await store.settle(documents[0], submitted)
+  const receipt = await store.settle(submitted)
   expect(receipt.settlement.status).toBe('stopped')
   if (receipt.settlement.status !== 'stopped')
     throw new Error('expected stopped settlement')
   expect(receipt.settlement.failureCode).toBe('cancelled')
   expect(receipt.settlement.attemptId).toBe(started.attemptId)
   expect(receipt.settlement.completion).toEqual(submitted.completion)
-  expect(await store.settle(documents[0], submitted)).toEqual(receipt)
+  expect(await store.settle(submitted)).toEqual(receipt)
 })
 
-test('two active documents share stop linearization and resume rejects any active attempt', async () => {
-  const root = await workspace()
-  const request = requestFixture(2)
-  const store = await openRevisionAttemptStore(root, request)
-  const first = await store.begin(documents[0])
-  const second = await store.begin(documents[1])
-  const stopped = await store.requestStop({
-    requestId: 'stop-two-documents',
-    reason: 'user_requested',
-  })
-
-  expect(stopped).toMatchObject({
-    stopped: true,
-    phase: 'stopped',
-    activeAttemptIds: [first.attemptId, second.attemptId],
-    eventCount: 3,
-  })
-  await expect(
-    store.resume({ requestId: 'resume-too-early' }),
-  ).rejects.toThrow()
-  await store.settle(documents[0], retryable(first.attemptId))
-  await store.settle(documents[1], retryable(second.attemptId))
-  const resumed = await store.resume({ requestId: 'resume-two-documents' })
-  expect(resumed).toMatchObject({
-    stopped: false,
-    phase: 'running',
-    activeAttemptIds: [],
-    eventCount: 6,
-  })
-})
 
 test('stop and resume command IDs are global, idempotent for the same payload, and conflict on reuse', async () => {
   const root = await workspace()
@@ -271,7 +235,7 @@ test('stop and resume command IDs are global, idempotent for the same payload, a
   )
 })
 
-test('concurrent begins on different documents and stop produce one valid request-wide CAS journal', async () => {
+test('concurrent whole-set begins and stop produce one valid request-wide CAS journal', async () => {
   const root = await workspace()
   const request = requestFixture(2)
   const [left, right] = await Promise.all([
@@ -279,8 +243,8 @@ test('concurrent begins on different documents and stop produce one valid reques
     openRevisionAttemptStore(root, request),
   ])
   const results = await Promise.allSettled([
-    left.begin(documents[0]),
-    right.begin(documents[1]),
+    left.begin(),
+    right.begin(),
     left.requestStop({ requestId: 'concurrent-stop', reason: 'shutdown' }),
   ])
   const starts = results
@@ -292,7 +256,7 @@ test('concurrent begins on different documents and stop produce one valid reques
   expect(snapshot.phase).toBe('stopped')
   expect(snapshot.stopped).toBe(true)
   expect(snapshot.eventCount).toBe(starts.length + 1)
-  expect(new Set(snapshot.activeAttemptIds)).toEqual(
+  expect(new Set(snapshot.activeAttemptId ? [snapshot.activeAttemptId] : [])).toEqual(
     new Set(
       starts
         .filter(
@@ -319,9 +283,9 @@ test('a completed receipt wins a later stop and exact late terminal replay remai
   const root = await workspace()
   const request = requestFixture()
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documents[0])
-  const terminal = completed(started.attemptId, documents[0])
-  const receipt = await store.settle(documents[0], terminal)
+  const started = await store.begin()
+  const terminal = completed(started.attemptId)
+  const receipt = await store.settle(terminal)
   const stopped = await store.requestStop({
     requestId: 'stop-after-completion',
     reason: 'user_requested',
@@ -330,11 +294,11 @@ test('a completed receipt wins a later stop and exact late terminal replay remai
   expect(stopped).toMatchObject({
     stopped: true,
     phase: 'stopped',
-    activeAttemptIds: [],
+    activeAttemptId: null,
     eventCount: 3,
   })
-  expect(await store.settle(documents[0], terminal)).toEqual(receipt)
-  expect((await store.read(documents[0])).status).toBe('completed')
+  expect(await store.settle(terminal)).toEqual(receipt)
+  expect((await store.read()).status).toBe('completed')
 })
 
 test('stop-vs-settle races linearize globally without leaving an invalid closed history', async () => {
@@ -344,10 +308,10 @@ test('stop-vs-settle races linearize globally without leaving an invalid closed 
     openRevisionAttemptStore(root, request),
     openRevisionAttemptStore(root, request),
   ])
-  const started = await settler.begin(documents[0])
-  const terminal = completed(started.attemptId, documents[0])
+  const started = await settler.begin()
+  const terminal = completed(started.attemptId)
   const results = await Promise.allSettled([
-    settler.settle(documents[0], terminal),
+    settler.settle(terminal),
     stopper.requestStop({ requestId: 'race-stop', reason: 'user_requested' }),
   ])
   expect(results[0]!.status).toBe('fulfilled')
@@ -356,7 +320,7 @@ test('stop-vs-settle races linearize globally without leaving an invalid closed 
     throw new Error('stop and settle must both produce durable outcomes')
 
   const receipt = results[0]!.value
-  const finalReceipt = await settler.read(documents[0])
+  const finalReceipt = await settler.read()
   expect(finalReceipt.active).toBeNull()
   if (finalReceipt.status === 'completed') {
     expect(receipt.settlement.status).toBe('completed')
@@ -368,29 +332,27 @@ test('stop-vs-settle races linearize globally without leaving an invalid closed 
     expect(receipt.settlement.failureCode).toBe('cancelled')
     expect(receipt.settlement.completion).toEqual(terminal.completion)
   }
-  expect((await settler.readRequest()).activeAttemptIds).toEqual([])
+  expect((await settler.readRequest()).activeAttemptId).toBeNull()
 })
 
 test('publication authorization seals the request; a stop after authorization is ignored', async () => {
   const root = await workspace()
   const request = requestFixture(2)
   const store = await openRevisionAttemptStore(root, request)
-  for (const documentPath of documents) {
-    const started = await store.begin(documentPath)
-    await store.settle(documentPath, completed(started.attemptId, documentPath))
-  }
+  const started = await store.begin()
+  await store.settle(completed(started.attemptId))
 
   const prepared = await store.preparePublication()
   expect(prepared.candidate).toBeDefined()
-  expect(prepared.receipts).toHaveLength(2)
+  expect(prepared.receipt.settlement.status).toBe('completed')
   expect(prepared.authorizationDigest).toMatch(/^[a-f0-9]{64}$/)
   const publishing = await store.readRequest()
   expect(publishing).toMatchObject({
     stopped: false,
     phase: 'publishing',
-    activeAttemptIds: [],
+    activeAttemptId: null,
   })
-  expect(publishing.eventCount).toBeGreaterThan(4)
+  expect(publishing.eventCount).toBe(3)
   const stopAfterAuthorization = await store.requestStop({
     requestId: 'stop-after-authorization',
     reason: 'shutdown',
@@ -411,7 +373,7 @@ test('publication authorization seals the request; a stop after authorization is
   expect(await store.readRequest()).toMatchObject({
     stopped: false,
     phase: 'published',
-    activeAttemptIds: [],
+    activeAttemptId: null,
   })
   await expect(store.markPublished('0'.repeat(64))).rejects.toThrow()
 })
@@ -423,10 +385,9 @@ test('publication requires every document completed and a request that has not s
     incompleteRoot,
     incompleteRequest,
   )
-  const started = await incompleteStore.begin(documents[0])
+  const started = await incompleteStore.begin()
   await incompleteStore.settle(
-    documents[0],
-    completed(started.attemptId, documents[0]),
+    retryable(started.attemptId),
   )
   await expect(incompleteStore.preparePublication()).rejects.toThrow()
 
@@ -447,12 +408,12 @@ test('resume after a closed stopped attempt refunds attempt count and uses a fre
   const root = await workspace()
   const request = requestFixture()
   const store = await openRevisionAttemptStore(root, request)
-  const first = await store.begin(documents[0])
+  const first = await store.begin()
   await store.requestStop({ requestId: 'stop-refund', reason: 'shutdown' })
-  await store.settle(documents[0], retryable(first.attemptId))
+  await store.settle(retryable(first.attemptId))
   await store.resume({ requestId: 'resume-refund' })
 
-  const second = await store.begin(documents[0])
+  const second = await store.begin()
   expect(second.attemptId).not.toBe(first.attemptId)
   expect(second.attempt).toBe(first.attempt)
 })

@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { afterAll, describe, expect, test } from 'bun:test'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -36,7 +36,8 @@ type Spawn = (command: string[], options: {
   stderr: 'pipe'
 }) => FakeProcess
 
-const workspacePath = '/tmp/foundation-authoring-runtime-test'
+const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'foundation-authoring-runtime-test-')))
+afterAll(() => rm(workspacePath, { recursive: true, force: true }))
 
 function config(command = ['native-model']): AuthorRuntimeConfig {
   return {
@@ -135,7 +136,7 @@ describe('foundation author private native runtime', () => {
     expect(command).toEqual([
       'native-model', '--print', '--verbose', '--input-format=stream-json',
       '--output-format=stream-json', '--include-partial-messages',
-      '--replay-user-messages', '--permission-prompt-tool=stdio', '--tools', '',
+      '--replay-user-messages', '--permission-prompt-tool=stdio',
     ])
     const env = authorRuntimeEnvironment(config().env)
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('secret-token')
@@ -297,7 +298,7 @@ describe('foundation author private native runtime', () => {
     }
   })
 
-  test('always denies native permission requests without an external decision callback', async () => {
+  test('denies malformed permission requests rather than blanket-denying author tools', async () => {
     const decisions: AuthorNativeMessage[] = []
     const fake = makeSpawn((message, emit) => {
       if (message.type === 'user') {
@@ -542,12 +543,22 @@ describe('foundation author private native runtime', () => {
     const first = createAuthorRuntimeForTest(config(), firstFake.spawn as Parameters<typeof createAuthorRuntimeForTest>[1])
     const second = createAuthorRuntimeForTest(config(), secondFake.spawn as Parameters<typeof createAuthorRuntimeForTest>[1])
     const pending = first.execute({ runId: 'r1', dispatchId: 'd1', workspacePath, prompt: 'wait' })
-    await Promise.resolve()
+    while (!firstEmit) await new Promise(resolve => setTimeout(resolve, 1))
     first.stop()
     await expect(pending).rejects.toThrow('cancelled')
     await expect(second.execute({ runId: 'r2', dispatchId: 'd2', workspacePath, prompt: 'go' })).resolves.toMatchObject({ markdown: '# Other runtime' })
     expect(firstEmit).toBeDefined()
     first.dispose()
     second.dispose()
+  })
+
+  test('stop during permission initialization prevents spawning a native process', async () => {
+    const fake = makeSpawn(() => {})
+    const runtime = createAuthorRuntimeForTest(config(), fake.spawn as Parameters<typeof createAuthorRuntimeForTest>[1])
+    const pending = runtime.execute({ runId: 'r1', dispatchId: 'd1', workspacePath, prompt: 'wait' })
+    runtime.stop()
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' })
+    expect(fake.commands).toHaveLength(0)
+    runtime.dispose()
   })
 })

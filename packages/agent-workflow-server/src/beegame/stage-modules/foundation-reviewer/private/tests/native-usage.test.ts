@@ -4,6 +4,21 @@ import { getLatestRuntimeUsage, type ReviewUsageEvent } from '../native-usage'
 const result = (inputTokens: number, outputTokens: number): ReviewUsageEvent => ({ type: 'result', payload: { modelUsage: { model: { inputTokens, outputTokens } } } })
 const stream = (usage: Record<string, number>): ReviewUsageEvent => ({ type: 'usage', payload: { usage } })
 
+test('per-message counters sum across turns and deduplicate replayed assistant snapshots', () => {
+  const frame = (messageId: string, usage: Record<string, number>): ReviewUsageEvent => ({ ...stream(usage), messageId })
+  const events = [frame('a', { input_tokens: 100, output_tokens: 1 }), frame('a', { output_tokens: 20 }),
+    frame('a', { input_tokens: 100, output_tokens: 20 }), frame('b', { input_tokens: 150, output_tokens: 1 }),
+    frame('b', { output_tokens: 30 }), frame('b', { input_tokens: 150, output_tokens: 30 })]
+  expect(getLatestRuntimeUsage(events)).toMatchObject({ prompt_tokens: 250, completion_tokens: 50, total_tokens: 300 })
+  expect(getLatestRuntimeUsage([...events, result(250, 50), result(250, 50)]).total_tokens).toBe(300)
+  expect(getLatestRuntimeUsage([...events, result(250, 50), frame('c', { input_tokens: 5, output_tokens: 3 })]).total_tokens).toBe(308)
+})
+
+test('equal counters from different messages are not treated as replay', () => {
+  expect(getLatestRuntimeUsage([{ ...stream({ input_tokens: 10, output_tokens: 5 }), messageId: 'a' },
+    { ...stream({ input_tokens: 10, output_tokens: 5 }), messageId: 'b' }]).total_tokens).toBe(30)
+})
+
 test('partial streaming counters compose by maximum, not repeated summation', () => {
   const events = [stream({ input_tokens: 9, cache_read_input_tokens: 2 }), stream({ output_tokens: 4 }), stream({ output_tokens: 4 }), stream({ output_tokens: 7 })]
   expect(getLatestRuntimeUsage(events)).toEqual({ prompt_tokens: 9, completion_tokens: 7, cache_read_tokens: 2, cache_creation_tokens: 0, total_tokens: 18 })

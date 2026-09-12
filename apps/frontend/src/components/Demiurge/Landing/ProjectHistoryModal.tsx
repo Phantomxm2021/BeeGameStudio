@@ -6,6 +6,7 @@ import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslati
 import { useProjectStore } from '../../../store/projectStore';
 import { getCreditSummary, type BeeGameUsageSummary } from '../../../services/creditsApi';
 import { Skeleton } from '../../ui/skeleton';
+import { DevProjectPurgePanel } from './DevProjectPurgePanel';
 
 interface ProjectHistoryModalProps {
   isOpen: boolean;
@@ -35,12 +36,13 @@ const MENU_MARGIN = 12;
 const MENU_OFFSET = 8;
 
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
-  const { projects, isLoading, deleteProject, createReviewCopy } = useProjectStore();
+  const { projects, isLoading, deleteProject, createReviewCopy, loadProjects } = useProjectStore();
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [creatingReviewCopyId, setCreatingReviewCopyId] = useState<string | null>(null);
+  const [stopAfterReview, setStopAfterReview] = useState(false);
   const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameUsageSummary>>({});
   const t = useCommonText(lang);
   const text = useBeeGameText(lang);
@@ -79,7 +81,9 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
     setCreatingReviewCopyId(id);
     closeMenu();
     try {
-      const project = await createReviewCopy(id);
+      const project = stopAfterReview
+        ? await createReviewCopy(id, { stopAfterReview: true })
+        : await createReviewCopy(id);
       onSelectProject(project.id);
       onClose();
     } catch {
@@ -275,6 +279,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
             })
           )}
         </div>
+        {import.meta.env.DEV ? <DevProjectPurgePanel lang={lang} onDeleted={loadProjects} /> : null}
       </div>
       {activeProject && menuPosition
         ? createPortal(
@@ -284,6 +289,14 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               onPointerDown={event => event.stopPropagation()}
               className="input-surface glass-panel fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl p-1.5 text-zinc-100 shadow-xl"
             >
+              <label className="type-footnote flex items-center gap-3 rounded-2xl px-4 py-3 text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={stopAfterReview}
+                  onChange={event => setStopAfterReview(event.target.checked)}
+                />
+                {text.stopAfterReview}
+              </label>
               <button
                 type="button"
                 onClick={event => handleCreateReviewCopy(event, activeProject.id)}

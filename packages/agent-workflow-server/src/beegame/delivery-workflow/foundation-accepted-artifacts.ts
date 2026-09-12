@@ -4,21 +4,32 @@ import type { AuthorDocumentsResult } from '../stage-modules/foundation-authorin
 import type { ReviewerReviewResult } from '../stage-modules/foundation-reviewer/public'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 import { foundationResultBinding, type FoundationHandoffIdentity } from './foundation-public-handoff'
+import { assertFoundationAcceptanceDecision, type FoundationAcceptanceDecision } from './foundation-acceptance-policy'
 
 /** Application mapping of an accepted public decision, not a stage execution
  * or business validator. The caller must obtain this result from its bound port. */
 export async function publishFoundationAcceptedArtifacts(input: FoundationHandoffIdentity & {
   workspacePath: string
   review: ReviewerReviewResult
+  acceptanceDecision?: FoundationAcceptanceDecision
+  riskDecisions?: readonly import('./foundation-acceptance-policy').FoundationRiskDecision[]
   expectedDocuments: readonly { path: string; content: string }[]
   expectedWorkspaceDigests?: readonly ProjectWorkspaceDigest[]
 }): Promise<string> {
   const { review, expectedDocuments } = structuredClone(input)
   foundationResultBinding(input, review)
-  if (review.producer !== 'foundation-reviewer' || review.kind !== 'passed' || review.issues.length !== 0 ||
+  if (review.producer !== 'foundation-reviewer' ||
+      (review.kind !== 'passed' && !input.acceptanceDecision) ||
+      (review.kind === 'passed' && review.issues.length !== 0 && !input.acceptanceDecision) ||
       review.documents.length !== CANONICAL_FOUNDATION_DOCUMENTS.length ||
       expectedDocuments.length !== review.documents.length)
-    throw new Error('Current foundation artifacts require a passed public review')
+    throw new Error('Current foundation artifacts require a valid acceptance decision')
+  if (input.acceptanceDecision) {
+    const decision = assertFoundationAcceptanceDecision({ ownerId: input.ownerId, projectId: input.projectId,
+      review, decision: input.acceptanceDecision, riskDecisions: input.riskDecisions ?? [] })
+    if (!['accepted', 'accepted_with_advisories'].includes(decision.disposition))
+      throw new Error('Foundation acceptance decision does not authorize publication')
+  }
   for (const [index, document] of review.documents.entries()) {
     const expected = expectedDocuments[index]!
     if (document.path !== CANONICAL_FOUNDATION_DOCUMENTS[index] || document.path !== expected.path ||

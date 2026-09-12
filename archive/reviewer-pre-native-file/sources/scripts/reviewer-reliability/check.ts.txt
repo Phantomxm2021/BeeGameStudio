@@ -1,0 +1,56 @@
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { fixtureInputs, minimalCases, pairs } from './fixtures'
+import { createSingleReviewTask } from '../../packages/agent-workflow-server/src/beegame/stage-modules/foundation-reviewer/private/single-agent-task'
+
+const rubric = await Bun.file(new URL('./rubric.json', import.meta.url)).json()
+const fixtures = fixtureInputs()
+const sha = (value: string) => createHash('sha256').update(value).digest('hex')
+const argument = process.argv.slice(2)
+// Early return: model input serialization does not include the rubric or historical reports.
+if (argument[0] === '--input') {
+  const input = fixtures[argument[1] as keyof typeof fixtures]
+  assert(input, 'Use B24, R41 or R86')
+  console.log(JSON.stringify(input))
+} else {
+  assert.equal(argument.length, 0, 'No network or model-run option is provided')
+  const cases = minimalCases()
+  assert.equal(cases.length, 16)
+  assert.equal(new Set(cases.map(c => c.id)).size, 16)
+  for (const [index, pair] of pairs.entries()) {
+    const changed = pair.documents.filter(d => d.path === pair.change.path)
+    assert.equal(changed.length, 1)
+    assert.equal(changed[0]!.text.split(pair.change.from).length, 2, 'Exactly one replacement')
+    const [a,b] = pair.ids.map(id => cases.find(c => c.id === id)!)
+    assert.equal(a!.documents.filter((d,i) => d.text !== b!.documents[i]!.text).length, 1)
+    assert.equal(rubric.pairs[index].normal, pair.ids[0])
+    assert.equal(rubric.pairs[index].defect, pair.ids[1])
+  }
+  assert.equal(18 - 11, 7)
+  assert.equal(520 - 40 - 10, 50 + 420)
+  assert.equal(170 - 70, 270 - 170)
+  assert.equal(3 * 4, 12)
+  const summary = []
+  for (const [id,input] of Object.entries(fixtures)) {
+    assert.equal(sha(JSON.stringify(input)), rubric.fixtures[id], 'Frozen fixture changed: '+id)
+    assert.equal(input.documents.length, 8)
+    const task = createSingleReviewTask(input, [])
+    const source = JSON.parse(task.prompt.split('INPUT (each text field is one exact original line, excluding its newline; line is its one-based source position):\n')[1]!.split('\n')[0]!)
+    assert.deepEqual(source.documents.map((d:any) => d.lines.map((l:any) => l.text).join('\n')), input.documents.map(d=>d.content))
+    assert(!task.prompt.includes(rubric.scoring))
+    assert(!JSON.stringify(source).includes('"expected"')) // No oracle metadata in delivered source.
+    summary.push({id,sha256:rubric.fixtures[id],bytes:Buffer.byteLength(JSON.stringify(input))})
+  }
+  const changedPaths = fixtures.R41.documents.filter((d,i) => d.content !== fixtures.R86.documents[i]!.content).map(d=>d.path)
+  assert.deepEqual(changedPaths, ['docs/GDD.md','docs/LEVEL_SCENE_DESIGN.md','docs/BALANCE_DESIGN.md'])
+  for (const archive of rubric.history) {
+    assert.equal(sha(await Bun.file(archive.path).text()), archive.sha256, 'Historical report changed: '+archive.id)
+  }
+  console.log('# Reviewer P0 离线核验')
+  console.log('\n16 个正反例、3 套八文档输入与 5 份历史报告摘要通过完整性核验。语义标签仍由人工对照原文；此命令不证明模型质量。')
+  console.log('\n|输入|字节|SHA-256|\n|---|---:|---|')
+  for (const f of summary) console.log('|'+f.id+'|'+f.bytes+'|'+f.sha256+'|')
+  console.log('\n|历史运行|适用锚点命中|三项子集|credits|备注|\n|---|---|---|---:|---|')
+  for (const h of rubric.history) console.log('|'+h.id+'|'+h.hits+'/'+h.applicable+'|'+h.selectedThree+'/3|'+h.credits+'|'+h.notes+'|')
+  console.log('\n历史费用合计：'+rubric.history.reduce((n:number,h:any)=>n+h.credits,0).toFixed(4)+' credits。本命令新增模型费用：0。')
+}

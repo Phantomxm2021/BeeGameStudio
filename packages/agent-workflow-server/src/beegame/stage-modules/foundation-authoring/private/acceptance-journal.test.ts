@@ -46,6 +46,23 @@ async function fixture(runId = '550e8400-e29b-41d4-a716-446655440000') {
 }
 
 describe('immutable author acceptance journal', () => {
+  test('legacy Audio proofs retain their exact old upstream set; v2 cannot reuse that narrower contract', async () => {
+    const f = await fixture()
+    try {
+      const audio = 'docs/AUDIO_DESIGN.md' as const
+      f.record.taskId = audio
+      f.record.request!.taskId = audio
+      f.record.request!.allowedPaths = [audio]
+      Object.assign(f.record.request!.contract, { foundationDocumentPath: audio, authoringMode: 'parallel-draft',
+        availableUpstreamPaths: ['docs/GDD.md', 'docs/LEVEL_SCENE_DESIGN.md', 'docs/UI_UX_SPEC.md'] })
+      f.receipt.targetPath = audio; f.receipt.documentId = 'AUDIO_DESIGN'
+      const journal = createAuthorAcceptanceJournal(createAuthorPersistence({ rootPath: join(f.workspacePath, 'journal') }), f.binding)
+      await journal.accept(f.record, f.receipt)
+      await journal.validate(audio, f.record.dispatchId, f.receipt)
+      f.record.request!.contract.authorBodyVersion = 'foundation-author-body.v2'
+      await expect(journal.accept(f.record, f.receipt)).rejects.toThrow('upstream source set')
+    } finally { await rm(f.workspacePath, { recursive: true, force: true }) }
+  })
   test('accepts and validates an exact committed dispatch proof, including replay', async () => {
     const fixtureValue = await fixture()
     try {

@@ -17,6 +17,7 @@ export type FoundationMarkdownStreamContract = {
   targetPath: FoundationDocumentPath
   maxBytes: number
   updatedAt?: string
+  authorBodyVersion?: string
 }
 
 export type FoundationMarkdownStreamSink = {
@@ -165,7 +166,9 @@ export async function createFoundationMarkdownStreamSink(
         const block = objectField(event, 'content_block')
         const blockType = block ? stringField(block, 'type') : ''
         if (blockType === 'tool_use' || blockType === 'server_tool_use') {
-          fail('foundation Markdown stream cannot contain tool use')
+          // Tool calls are part of authoring, not Markdown content. A later
+          // assistant message supplies the final document; tool inputs/results
+          // must never be appended to it.
           return
         }
         if (blockType !== 'text') return
@@ -286,6 +289,8 @@ export function foundationMarkdownPendingPath(
 }
 
 function validateContract(contract: FoundationMarkdownStreamContract): void {
+  if (contract.authorBodyVersion !== undefined && contract.authorBodyVersion !== 'foundation-author-body.v2')
+    throw new Error('unsupported Author body version')
   validateIdentity(contract.runId, 'run')
   validateIdentity(contract.dispatchId, 'dispatch')
   if (!CANONICAL_FOUNDATION_DOCUMENTS.includes(contract.targetPath))

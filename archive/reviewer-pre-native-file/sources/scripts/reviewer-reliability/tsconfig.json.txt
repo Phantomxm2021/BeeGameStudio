@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [
+    "../../src/**/*.ts",
+    "../../src/**/*.tsx",
+    "../../packages/**/*.ts",
+    "../../packages/**/*.tsx",
+    "evaluation-credential.ts",
+    "evaluation-finalization.ts",
+    "evaluation-runner.test.ts",
+    "semantic-runner.ts",
+    "reproduce-semantic-report.ts",
+    "semantic-prompt-candidate.ts",
+    "semantic-prompt-candidate.test.ts",
+    "semantic-candidate-runtime.ts",
+    "semantic-candidate-runtime.test.ts",
+    "semantic-candidate-probe.ts"
+  ],
+  "exclude": ["../../node_modules", "../../packages/remote-control-server/web"]
+}

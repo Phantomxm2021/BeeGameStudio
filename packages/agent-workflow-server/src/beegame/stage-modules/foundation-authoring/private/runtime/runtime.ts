@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { createNativeTaskAccess } from '@bee-game-studio/agent-workflow/native-task-access'
 
 export type AuthorPromptBlock = { type: 'text'; text: string }
 export type AuthorPromptInput = string | readonly AuthorPromptBlock[]
@@ -112,7 +113,7 @@ type SpawnOptions = {
 type Spawn = (command: string[], options: SpawnOptions) => RuntimeProcess
 
 const MARKDOWN_PROTOCOL_RESTART_PROMPT =
-  'No visible Markdown was emitted. Return the complete raw Markdown document from the beginning now; do not explain or summarize.'
+  'No visible document body was emitted. Return the complete document body from the beginning in the output format required by the original request; do not explain or summarize.'
 
 const AUTHOR_ENV_KEYS = new Set([
   'BEEGAME_MODEL',
@@ -233,10 +234,6 @@ export function authorRuntimeCommand(
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool=stdio',
-    // Author Markdown is a protocol stream. Native tools are intentionally
-    // unavailable; the author sink owns the only document write authority.
-    '--tools',
-    '',
     ...(resumeSessionId ? [`--resume=${resumeSessionId}`] : []),
   ]
 }
@@ -246,6 +243,9 @@ class AuthorRuntimeImpl implements AuthorRuntime {
   private workspacePath: string | undefined
   private nativeSessionId: string | undefined
   private disposed = false
+  private initializing = false
+  private stopGeneration = 0
+  private access?: Awaited<ReturnType<typeof createNativeTaskAccess>>
   private active: ActiveTurn | null = null
   private modelEpochTotal = emptyAuthorUsage()
   private latestModelUsage: AuthorUsage | null = null
@@ -261,8 +261,9 @@ class AuthorRuntimeImpl implements AuthorRuntime {
   ) {}
 
   async execute(input: AuthorRuntimeExecuteInput): Promise<AuthorRuntimeResult> {
+    const stopGeneration = this.stopGeneration
     if (this.disposed) throw new Error('Author native runtime is closed')
-    if (this.active) throw new Error('Author native runtime already has an active turn')
+    if (this.active || this.initializing) throw new Error('Author native runtime already has an active turn')
     if (!isAbsoluteWorkspace(input.workspacePath)) {
       throw new Error('Author workspace path must be absolute')
     }
@@ -272,8 +273,15 @@ class AuthorRuntimeImpl implements AuthorRuntime {
     }
     this.workspacePath = input.workspacePath
     if (!this.process) {
-      this.nativeSessionId = input.resumeSessionId
-      this.process = this.startProcess(input.workspacePath, input.resumeSessionId)
+      this.initializing = true
+      try {
+        this.access = await createNativeTaskAccess({ workspacePath: input.workspacePath,
+          allowWorkingFiles: true, readOnlyPaths: ['requirements.md'] })
+        if (this.disposed) throw new Error('Author native runtime is closed')
+        if (input.signal?.aborted || stopGeneration !== this.stopGeneration) throw cancelledError()
+        this.nativeSessionId = input.resumeSessionId
+        this.process = this.startProcess(this.access.root, input.resumeSessionId)
+      } finally { this.initializing = false }
     } else if (input.resumeSessionId && input.resumeSessionId !== this.nativeSessionId) {
       throw new Error('Author runtime resume identity conflicts with active process')
     }
@@ -323,6 +331,7 @@ class AuthorRuntimeImpl implements AuthorRuntime {
   }
 
   stop(): void {
+    this.stopGeneration++
     const active = this.active
     if (!active) return
     this.process?.kill('SIGTERM')
@@ -350,9 +359,9 @@ class AuthorRuntimeImpl implements AuthorRuntime {
   private startProcess(workspacePath: string, resumeSessionId?: string): RuntimeProcess {
     let process: RuntimeProcess
     try {
-      process = this.spawn(authorRuntimeCommand(this.command, resumeSessionId), {
+      process = this.spawn([...authorRuntimeCommand(this.command, resumeSessionId), ...this.access!.flags], {
         cwd: workspacePath,
-        env: { ...this.env },
+        env: { ...this.env, ...this.access!.environment },
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -446,15 +455,33 @@ class AuthorRuntimeImpl implements AuthorRuntime {
     this.observeUsage(message)
     await turn.input.onUsage?.(this.currentUsage())
     if (this.active !== turn) return
+    const event = objectField(message, 'event')
+    if (message.type === 'stream_event' && event?.type === 'message_start') {
+      if (turn.lastStopReason !== 'max_tokens') {
+        turn.markdown = ''
+        turn.markdownContinued = false
+      } else turn.markdownContinued = true
+      turn.markdownStreamDeltaSeen = false
+      turn.lastStopReason = undefined
+    }
+    if (message.type === 'stream_event' && event?.type === 'message_delta') {
+      const reason = stringField(objectField(event, 'delta'), 'stop_reason')
+      if (reason) turn.lastStopReason = reason
+      if (reason === 'tool_use') {
+        turn.markdown = ''
+        turn.markdownContinued = false
+      }
+    }
     const streamed = streamedMarkdownText(message)
     if (message.type === 'stream_event') {
-      turn.markdownStreamDeltaSeen = true
+      if (streamed) turn.markdownStreamDeltaSeen = true
       turn.markdown += streamed
     } else if (message.type === 'assistant' &&
-      (!turn.markdownStreamDeltaSeen || !turn.markdown)) {
+      !assistantUsesTools(message) && (!turn.markdownStreamDeltaSeen || !turn.markdown)) {
       turn.markdown += assistantMarkdownText(message)
-    } else if (message.type === 'result' && !turn.markdown) {
-      turn.markdown = stringField(message, 'result')
+    } else if (message.type === 'result') {
+      const finalText = stringField(message, 'result')
+      if (finalText && (!turn.markdownContinued || !turn.markdown)) turn.markdown = finalText
     }
 
     const retryableEmptyResult =
@@ -470,7 +497,7 @@ class AuthorRuntimeImpl implements AuthorRuntime {
     }
 
     if (message.type === 'control_request') {
-      await this.denyPermission(message, turn)
+      await this.resolvePermission(message, turn)
       return
     }
 
@@ -500,7 +527,7 @@ class AuthorRuntimeImpl implements AuthorRuntime {
     this.completeActive(turn, message)
   }
 
-  private async denyPermission(
+  private async resolvePermission(
     message: AuthorNativeMessage,
     turn: ActiveTurn,
   ): Promise<void> {
@@ -508,17 +535,15 @@ class AuthorRuntimeImpl implements AuthorRuntime {
     const request = objectField(message, 'request')
     if (!requestId || stringField(request, 'subtype') !== 'can_use_tool') return
     if (this.active !== turn) return
+    const updatedInput = await this.access?.permission(request!)
+    if (this.active !== turn) return
     await this.write({
       type: 'control_response',
       response: {
         subtype: 'success',
         request_id: requestId,
-        response: {
-          behavior: 'deny',
-          message: 'Foundation author Markdown mode does not permit native tools.',
-          toolUseID: stringField(request, 'tool_use_id'),
-          decisionClassification: 'user_reject',
-        },
+        response: updatedInput ? { behavior: 'allow', updatedInput }
+          : { behavior: 'deny', message: 'This action is outside the task execution permissions; additional authorization is required.' },
       },
     }, turn)
   }
@@ -637,6 +662,8 @@ type ActiveTurn = {
   requestId: string
   markdown: string
   markdownStreamDeltaSeen: boolean
+  lastStopReason?: string
+  markdownContinued?: boolean
   markdownEmptyRetryIssued: boolean
   resolve(result: AuthorRuntimeResult): void
   reject(error: Error): void
@@ -663,6 +690,11 @@ function isAbsoluteWorkspace(path: string): boolean {
 
 function isNativeSessionId(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+function assistantUsesTools(message: AuthorNativeMessage): boolean {
+  const content = objectField(message, 'message')?.content
+  return Array.isArray(content) && content.some(block => block?.type === 'tool_use' || block?.type === 'server_tool_use')
 }
 
 function streamedMarkdownText(message: AuthorNativeMessage): string {

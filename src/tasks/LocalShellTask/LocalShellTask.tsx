@@ -225,6 +225,7 @@ export async function spawnShellTask(
 
   const unregisterCleanup = registerCleanup(async () => {
     killTask(taskId, setAppState);
+    await shellCommand.waitForTermination?.();
   });
 
   const taskState: LocalShellTaskState = {
@@ -308,6 +309,7 @@ export function registerForeground(
 
   const unregisterCleanup = registerCleanup(async () => {
     killTask(taskId, setAppState);
+    await shellCommand.waitForTermination?.();
   });
 
   const taskState: LocalShellTaskState = {

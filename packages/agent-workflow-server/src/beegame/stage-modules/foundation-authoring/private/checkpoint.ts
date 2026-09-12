@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { authorDigest, authorHandleSchema, authorStartSchema, parseAuthorStart, type AuthorHandle, type AuthorStartInput, type AuthorDocumentsResult } from './contract'
 import { readAuthoredDocumentReceipt, type AuthoredDocumentReceipt } from './domain/authored-document-receipt'
 import { CANONICAL_FOUNDATION_DOCUMENTS, type DispatchRecord, type FoundationAuthoringContext, type FoundationDocumentPath, type FoundationDraftState } from './domain/types'
-import { foundationAuthoringSources } from './domain/foundation-authoring-contract'
+import { foundationAuthoringRecordedSourcesMatch } from './domain/foundation-authoring-contract'
 import type { AuthorAcceptanceJournal } from './acceptance-journal'
 
 export type Registration = {
@@ -40,6 +40,7 @@ const authoringContractSchema = z.strictObject({
   confirmedBriefContext: z.string().min(1).optional(),
   documentSet: z.literal('foundation'),
   authoringMode: z.enum(['initial', 'parallel-draft']),
+  authorBodyVersion: z.literal('foundation-author-body.v2').optional(),
   foundationDocumentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
   availableUpstreamPaths: z.array(z.enum(CANONICAL_FOUNDATION_DOCUMENTS)).optional(),
   completeDocumentContract: jsonValue.optional(),
@@ -183,9 +184,7 @@ function assertDispatchBinding(record: DispatchRecord, context: FoundationAuthor
       throw new Error('author checkpoint dispatch contract does not authorize its document')
     if (request.contract.confirmedBriefDigest !== context.confirmedBriefDigest || request.contract.confirmedBriefContext !== context.confirmedBriefContext)
       throw new Error('author checkpoint dispatch brief binding mismatch')
-    const expectedUpstreamPaths = foundationAuthoringSources(request.contract.foundationDocumentPath).map(source => source.path)
-    if (!request.contract.availableUpstreamPaths || request.contract.availableUpstreamPaths.length !== expectedUpstreamPaths.length ||
-        request.contract.availableUpstreamPaths.some((path, index) => path !== expectedUpstreamPaths[index]))
+    if (!foundationAuthoringRecordedSourcesMatch(request.contract.foundationDocumentPath, request.contract.availableUpstreamPaths, request.contract.authorBodyVersion))
       throw new Error('author checkpoint dispatch upstream source set mismatch')
     if (request.contract.authoringMode === 'initial' && record.taskId !== CANONICAL_FOUNDATION_DOCUMENTS[0]) throw new Error('author checkpoint initial dispatch path is invalid')
     if (request.contract.authoringMode === 'parallel-draft' && record.taskId === CANONICAL_FOUNDATION_DOCUMENTS[0]) throw new Error('author checkpoint parallel dispatch path is invalid')

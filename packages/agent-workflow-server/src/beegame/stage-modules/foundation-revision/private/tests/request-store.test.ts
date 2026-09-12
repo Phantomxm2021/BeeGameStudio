@@ -2,12 +2,9 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdtemp, realpath, rm, readFile, writeFile, mkdir, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { acceptRevisionRequest, commitRevisionRequestCandidate } from '../request-store'
-import { publishRevisionDerivedCandidate, readRevisionPublishedCandidate } from '../candidate-publication'
+import { acceptRevisionRequest } from '../request-store'
 import { revisionCanonicalJson, revisionDigest } from '../json-digest'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 const roots: string[] = []
 async function workspace() {
@@ -19,10 +16,10 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 function fixture() {
   const documents = reviewFixtureDocuments()
   documents[0]!.content = '# incomplete'
-  const sourceResult = buildReviewerPublishedResult({ documents, state: initialReviewerFactState(documents),
+  const sourceResult = buildSingleReviewFixture({ documents,
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) } })
-  return { kind: 'initial', ownerId: 'owner', projectId: 'project', requestId: '../request', sourceResult,
+  return { ownerId: 'owner', projectId: 'project', requestId: '../request', sourceResult,
     sourceBinding: { ownerId: 'owner', projectId: 'project', resultId: sourceResult.resultId, resultDigest: revisionDigest(sourceResult) } }
 }
 
@@ -34,7 +31,7 @@ test('concurrent acceptance and disk replay keep one private handle and candidat
   expect(new Set(accepted.map(value => value.record.candidateId)).size).toBe(1)
   expect(await acceptRevisionRequest(root, structuredClone(request))).toEqual(accepted[0])
   const key = revisionDigest({ ownerId: request.ownerId, projectId: request.projectId, requestId: request.requestId })
-  expect(accepted[0]!.artifactPath).toBe(`.beegame/workflow/foundation-revision/requests/${key}/request.json`)
+  expect(accepted[0]!.artifactPath).toBe(`.beegame/workflow/foundation-revision/native-file-v1/requests/${key}/request.json`)
   expect(JSON.parse(await readFile(join(root, accepted[0]!.artifactPath), 'utf8'))).toEqual(accepted[0]!.record)
   const other = await acceptRevisionRequest(root, { ...request, requestId: 'other' })
   expect(other.record.handle).not.toBe(accepted[0]!.record.handle)
@@ -81,33 +78,11 @@ test('rejects symlink namespace and file targets without changing the target', a
   const other = await workspace()
   const request = fixture()
   const key = revisionDigest({ ownerId: request.ownerId, projectId: request.projectId, requestId: request.requestId })
-  const directory = join(other, '.beegame/workflow/foundation-revision/requests', key)
+  const directory = join(other, '.beegame/workflow/foundation-revision/native-file-v1/requests', key)
   await mkdir(directory, { recursive: true })
   const targetFile = join(target, 'sentinel.json')
   await writeFile(targetFile, '{}')
   await symlink(targetFile, join(directory, 'request.json'))
   await expect(acceptRevisionRequest(other, request)).rejects.toThrow()
   expect(await readFile(targetFile, 'utf8')).toBe('{}')
-})
-
-test('candidate materialization reuses the admitted identity and commits one immutable snapshot before publication', async () => {
-  const root = await workspace()
-  const request = fixture()
-  const accepted = await acceptRevisionRequest(root, request)
-  const input = { request, candidateDocuments: reviewFixtureDocuments(), unresolvedIssues: [] }
-  const attempts = await Promise.all(Array.from({ length: 4 }, () => commitRevisionRequestCandidate(root, input)))
-  const first = attempts[0]!
-  expect(attempts.every(value => revisionCanonicalJson(value) === revisionCanonicalJson(first))).toBe(true)
-  expect(first.candidate.candidateId).toBe(accepted.record.candidateId)
-  expect(first.record.handle).toBe(accepted.record.handle)
-  expect(await commitRevisionRequestCandidate(root, structuredClone(input))).toEqual(first)
-  expect(JSON.parse(await readFile(join(root, first.artifactPath), 'utf8'))).toEqual(first.candidate)
-  const published = await publishRevisionDerivedCandidate(root, first.candidate)
-  expect(await readRevisionPublishedCandidate(root, first.candidate)).toEqual(published.result)
-  const changed = input.candidateDocuments.map(doc => ({ ...doc, content: doc.path === 'docs/GDD.md' ? doc.content + '\n' : doc.content }))
-  await expect(commitRevisionRequestCandidate(root, { ...input, candidateDocuments: changed })).rejects.toThrow('conflict')
-  expect(JSON.parse(await readFile(join(root, first.artifactPath), 'utf8'))).toEqual(first.candidate)
-  await writeFile(join(root, first.artifactPath), '{}')
-  await expect(commitRevisionRequestCandidate(root, input)).rejects.toThrow('conflict')
-  expect(await readFile(join(root, first.artifactPath), 'utf8')).toBe('{}')
 })

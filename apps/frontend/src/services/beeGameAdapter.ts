@@ -14,7 +14,9 @@ import type {
 } from './api'
 import type { Project } from '../types/project'
 import type { ProjectEventMessage } from '../types/message'
+import type { FoundationDecisionInput } from '../types/message'
 import { authenticatedFetch } from './apiClient'
+import { projectQuotaErrorMessage } from './projectQuotaError'
 import {
   normalizeAttachmentBuildAnalysis,
   type AttachmentBuildAnalysis,
@@ -365,14 +367,14 @@ export const beeGameAdapter = {
     return { ok: true }
   },
 
-  async createReviewCopy(projectId: string): Promise<{
+  async createReviewCopy(projectId: string, options: { stopAfterReview?: boolean } = {}): Promise<{
     project: Project
     runId: string
     phase: string
   }> {
     return postJson(
       `/api/projects/${encodeURIComponent(projectId)}/review-copy`,
-      {},
+      options,
     )
   },
 
@@ -433,6 +435,20 @@ export const beeGameAdapter = {
     return postJson<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow/retry`,
       { language: getCurrentUiLanguage() },
+    )
+  },
+
+  async submitFoundationDecision(
+    projectId: string,
+    decision: FoundationDecisionInput,
+  ): Promise<Record<string, unknown>> {
+    const payload = {
+      ...decision,
+      ...(decision.runId ? { runId: decision.runId } : {}),
+    }
+    return postJson<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflow/foundation-decision`,
+      payload,
     )
   },
 
@@ -2430,6 +2446,8 @@ async function readResponse<T>(response: Response): Promise<T> {
 }
 
 function getJsonErrorMessage(body: unknown): string | null {
+  const quotaMessage = projectQuotaErrorMessage(body)
+  if (quotaMessage) return quotaMessage
   if (typeof body !== 'object' || body === null) return null
   const payload = body as { message?: unknown; error?: unknown }
   if (typeof payload.message === 'string' && payload.message.trim())

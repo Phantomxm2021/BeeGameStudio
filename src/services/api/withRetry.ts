@@ -1,4 +1,5 @@
 import { feature } from 'bun:bundle'
+import { emitNativeDiagnostic, nativeErrorCategory } from '@bee-game-studio/agent-workflow/native-diagnostics'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
   APIConnectionError,
@@ -247,12 +248,16 @@ export async function* withRetry<T>(
             await handleOAuth401Error(failedAccessToken)
           }
         }
+        emitNativeDiagnostic({ event: 'client_start', attempt })
         client = await getClient()
+        emitNativeDiagnostic({ event: 'client_ready', attempt })
       }
 
       return await operation(client, attempt, retryContext)
     } catch (error) {
       lastError = error
+      emitNativeDiagnostic({ event: 'api_error', attempt, category: nativeErrorCategory(error),
+        ...(error instanceof APIError && error.status !== undefined ? { status: error.status } : {}) })
       logForDebugging(
         `API error (attempt ${attempt}/${maxRetries + 1}): ${error instanceof APIError ? `${error.status} ${error.message}` : errorMessage(error)}`,
         { level: 'error' },
@@ -508,6 +513,7 @@ export async function* withRetry<T>(
         if (error instanceof APIError) {
           yield createSystemAPIErrorMessage(error, delayMs, attempt, maxRetries)
         }
+        emitNativeDiagnostic({ event: 'retry_wait', attempt, delayMs: Math.ceil(delayMs) })
         await sleep(delayMs, options.signal, { abortError })
       }
     }

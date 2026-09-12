@@ -12,6 +12,10 @@ import type {
   WorkflowCardStatus,
   WorkflowCardSubstage,
   WorkflowCardTask,
+  FoundationAcceptanceDecision,
+  FoundationReviewFinding,
+  FoundationReviewReport,
+  FoundationDecisionContext,
   WorkflowRecoveryUnitKind,
 } from '../types/message'
 
@@ -155,7 +159,7 @@ const WORKFLOW_TASK_OPERATIONS: readonly NonNullable<
   WorkflowCardTask['operation']
 >[] = ['write', 'review', 'revise', 'produce', 'assemble']
 
-const WORKFLOW_EXECUTION_STATUSES = ['working', 'waiting', 'idle'] as const
+const WORKFLOW_EXECUTION_STATUSES = ['working', 'waiting', 'idle', 'waiting_for_subagent', 'waiting_for_child', 'preparing'] as const
 
 type WorkflowCardFieldProjection = Omit<
   WorkflowCardStageSnapshot,
@@ -289,6 +293,98 @@ const normalizeWorkflowBlock = (
   }
 }
 
+const normalizeFoundationFinding = (value: unknown): FoundationReviewFinding | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const id = trimString(source.id)
+  const severity = trimString(source.severity).toUpperCase()
+  if (!id || !severity) return undefined
+  const text = (key: string, alternate?: string): string | undefined => {
+    const result = trimString(source[key] ?? (alternate ? source[alternate] : undefined))
+    return result || undefined
+  }
+  return {
+    id,
+    severity,
+    ...(text('title') ? { title: text('title') } : {}),
+    ...(text('summary') ? { summary: text('summary') } : {}),
+    ...(text('actual') ? { actual: text('actual') } : {}),
+    ...(text('expected') ? { expected: text('expected') } : {}),
+    ...(text('detail') ? { detail: text('detail') } : {}),
+    ...(text('recommendation') ? { recommendation: text('recommendation') } : {}),
+    ...(text('documentPath') ? { documentPath: text('documentPath') } : {}),
+  }
+}
+
+const normalizeFoundationReviewReport = (value: unknown): FoundationReviewReport | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const rawFindings = source.findings
+  if (!Array.isArray(rawFindings)) return undefined
+  const findings = rawFindings.flatMap(value => {
+    const finding = normalizeFoundationFinding(value)
+    return finding ? [finding] : []
+  })
+  const resultId = trimString(source.resultId)
+  const resultDigest = trimString(source.resultDigest)
+  const documentSetDigest = trimString(source.documentSetDigest)
+  const summary = trimString(source.summary)
+  return {
+    ...(resultId ? { resultId } : {}),
+    ...(resultDigest ? { resultDigest } : {}),
+    ...(documentSetDigest ? { documentSetDigest } : {}),
+    ...(summary ? { summary } : {}),
+    findings,
+  }
+}
+
+const normalizeFoundationAcceptanceDecision = (value: unknown): FoundationAcceptanceDecision | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const disposition = trimString(source.disposition)
+  if (!disposition) return undefined
+  const ids = (key: string): string[] =>
+    Array.isArray(source[key])
+      ? (source[key] as unknown[]).map(item => trimString(item)).filter(Boolean)
+      : []
+  return {
+    controlSequence: finiteNumber(source.controlSequence),
+    policyVersion: trimString(source.policyVersion) || undefined,
+    reviewResultId: trimString(source.reviewResultId) || undefined,
+    reviewResultDigest: trimString(source.reviewResultDigest) || undefined,
+    documentSetDigest: trimString(source.documentSetDigest) || undefined,
+    disposition,
+    advisoryFindingIds: ids('advisoryFindingIds'),
+    blockingFindingIds: ids('blockingFindingIds'),
+    waivedFindingIds: ids('waivedFindingIds'),
+    automaticRepairLimit: finiteNumber(source.automaticRepairLimit),
+    completedRepairCount: finiteNumber(source.completedRepairCount),
+    reason: trimString(source.reason) || undefined,
+    overrideReferences: ids('overrideReferences'),
+  }
+}
+
+const normalizeFoundationDecisionContext = (value: unknown): FoundationDecisionContext | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  const runId = trimString(source.runId)
+  const controlSequence = finiteNumber(source.controlSequence)
+  const availableActions = Array.isArray(source.availableActions)
+    ? source.availableActions.filter((action): action is FoundationDecisionContext['availableActions'][number] =>
+        action === 'accept_risk' || action === 'grant_repair_budget' || action === 'switch_policy',
+      )
+    : []
+  if (!runId || controlSequence === undefined || !Number.isSafeInteger(controlSequence)) return undefined
+  return {
+    runId,
+    controlSequence,
+    policyVersion: typeof source.policyVersion === 'string' ? source.policyVersion : null,
+    automaticRepairLimit: finiteNumber(source.automaticRepairLimit) ?? null,
+    completedRepairCount: finiteNumber(source.completedRepairCount) ?? null,
+    availableActions,
+  }
+}
+
 const normalizeWorkflowCardFields = (
   source: Record<string, unknown>,
 ): WorkflowCardFieldProjection | undefined => {
@@ -314,7 +410,7 @@ const normalizeWorkflowCardFields = (
       ? convergencePassValue
       : undefined
   const substage = trimString(source.substage)
-  const executionStatus = WORKFLOW_EXECUTION_STATUSES.includes(
+  const rawExecutionStatus = WORKFLOW_EXECUTION_STATUSES.includes(
     rawThinking as (typeof WORKFLOW_EXECUTION_STATUSES)[number],
   )
     ? rawThinking
@@ -323,6 +419,12 @@ const normalizeWorkflowCardFields = (
           source.execution_status ??
           activeDispatch?.status,
       ) || undefined
+  const executionStatusCandidate = rawExecutionStatus ?? (trimString(
+    source.executionStatus ?? source.execution_status ?? activeDispatch?.status,
+  ) || undefined)
+  const executionStatus = executionStatusCandidate === 'waiting_for_subagent' || executionStatusCandidate === 'waiting_for_child'
+    ? 'waiting'
+    : executionStatusCandidate
 
   return {
     status,
@@ -386,7 +488,22 @@ const normalizeWorkflowCardFields = (
         : undefined,
     activeSince:
       trimString(source.activeSince ?? source.active_since) || undefined,
+    currentCallElapsedMs:
+      finiteNumber(source.currentCallElapsedMs),
+    historicalElapsedMs:
+      finiteNumber(source.historicalElapsedMs),
     block: normalizeWorkflowBlock(source.block),
+    acceptanceDecision: normalizeFoundationAcceptanceDecision(
+      source.acceptanceDecision ?? source.acceptance_decision,
+    ),
+    foundationReviewReport: normalizeFoundationReviewReport(
+      source.foundationReviewReport ?? source.foundation_review_report ?? source.reviewReport ?? source.review_report,
+    ),
+    controlSequence: finiteNumber(source.controlSequence),
+    policyVersion: typeof source.policyVersion === 'string' ? source.policyVersion : null,
+    automaticRepairLimit: finiteNumber(source.automaticRepairLimit) ?? null,
+    completedRepairCount: finiteNumber(source.completedRepairCount) ?? null,
+    foundationDecisionContext: normalizeFoundationDecisionContext(source.foundationDecisionContext),
   }
 }
 
@@ -437,6 +554,16 @@ const normalizeWorkflowDisplay = (
         return snapshot ? [snapshot] : []
       })
     : undefined
+  const rootAcceptanceDecision = normalizeFoundationAcceptanceDecision(
+    source.acceptanceDecision,
+  )
+  const rootReviewReport = normalizeFoundationReviewReport(
+    source.reviewReport,
+  )
+  const rootDecisionContext = normalizeFoundationDecisionContext(source.foundationDecisionContext)
+  const rootControlSequence = finiteNumber(source.controlSequence) ?? rootDecisionContext?.controlSequence
+  const rootCurrentCallElapsedMs = finiteNumber(source.currentCallElapsedMs)
+  const rootHistoricalElapsedMs = finiteNumber(source.historicalElapsedMs)
 
   return {
     runId,
@@ -478,11 +605,37 @@ const normalizeWorkflowDisplay = (
         ? trimString(source.lastProvenItemId ?? source.last_proven_item_id)
         : undefined,
     block: fields.block,
+    acceptanceDecision: normalizeFoundationAcceptanceDecision(
+      source.acceptanceDecision,
+    ),
+    foundationReviewReport: normalizeFoundationReviewReport(
+      source.reviewReport,
+    ),
+    controlSequence: rootControlSequence,
+    policyVersion: typeof source.policyVersion === 'string' ? source.policyVersion : rootDecisionContext?.policyVersion ?? null,
+    automaticRepairLimit: finiteNumber(source.automaticRepairLimit) ?? rootDecisionContext?.automaticRepairLimit ?? null,
+    completedRepairCount: finiteNumber(source.completedRepairCount) ?? rootDecisionContext?.completedRepairCount ?? null,
+    foundationDecisionContext: rootDecisionContext,
     usage:
       source.usage && typeof source.usage === 'object'
         ? (source.usage as WorkflowCardPayload['usage'])
         : undefined,
-    ...(stageSnapshots ? { stageSnapshots } : {}),
+    ...(stageSnapshots ? {
+      stageSnapshots: stageSnapshots.map((snapshot, index) => index === stageSnapshots.length - 1
+        ? {
+            ...snapshot,
+            acceptanceDecision: snapshot.acceptanceDecision ?? rootAcceptanceDecision,
+            foundationReviewReport: snapshot.foundationReviewReport ?? rootReviewReport,
+            controlSequence: snapshot.controlSequence ?? rootControlSequence,
+            policyVersion: snapshot.policyVersion ?? fields.policyVersion ?? rootDecisionContext?.policyVersion,
+            automaticRepairLimit: snapshot.automaticRepairLimit ?? fields.automaticRepairLimit ?? rootDecisionContext?.automaticRepairLimit,
+            completedRepairCount: snapshot.completedRepairCount ?? fields.completedRepairCount ?? rootDecisionContext?.completedRepairCount,
+            foundationDecisionContext: snapshot.foundationDecisionContext ?? rootDecisionContext,
+            currentCallElapsedMs: snapshot.currentCallElapsedMs ?? rootCurrentCallElapsedMs,
+            historicalElapsedMs: snapshot.historicalElapsedMs ?? rootHistoricalElapsedMs,
+          }
+        : snapshot),
+    } : {}),
   }
 }
 

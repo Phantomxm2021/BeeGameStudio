@@ -1,6 +1,7 @@
 import { CANONICAL_FOUNDATION_DOCUMENTS, type FoundationDocumentPath, type WorkerDispatchRequest } from './types'
 import { foundationAuthoringDocumentContract, FOUNDATION_AUTHORING_INSTRUCTION } from './foundation-authoring-contract'
 import { buildFoundationAuthoringDeliveryContract } from './foundation-authoring-delivery-contract'
+import { foundationAuthoringFactContract } from './foundation-authoring-fact-contract'
 
 export function isFoundationAuthor(request: WorkerDispatchRequest): boolean {
   return request.workerType === 'document-author' && request.contract.documentSet === 'foundation' && ['initial', 'parallel-draft'].includes(String(request.contract.authoringMode))
@@ -18,8 +19,9 @@ export function buildFoundationAuthorPrompt(request: WorkerDispatchRequest): str
       `Canonical Foundation documents: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}`,
       'Markdown cross-document references may use only these exact canonical Foundation paths.',
       'Confirmed Brief settings are higher authority than free-form idea text.',
-      'Use the confirmed brief and committed upstream projection as authority. The dedicated Reviewer owns format, content and quality audit.',
-      'Do not write frontmatter or beegame protocol comments; the service owns their injection. Do not call tools or create other documents.',
+      'Use the confirmed brief and committed upstream projection as authority.',
+      'The tool workspace contains copies of existing documents and requirements.md for reference. Working files are private; the final response is the complete Markdown deliverable.',
+      'Do not write frontmatter or beegame protocol comments in the deliverable; the service owns their injection.',
       ...(path === 'docs/TECHNICAL_DESIGN.md' || path === 'docs/ASSET_PLAN.md'
         ? [
             'The read-only authoringDeliveryContract is the actual parser-backed delivery boundary for manifest and content decisions; do not invent manifest fields or unsupported content kinds.',
@@ -31,6 +33,7 @@ export function buildFoundationAuthorPrompt(request: WorkerDispatchRequest): str
         contract: {
           ...request.contract,
           completeDocumentContract: foundationAuthoringDocumentContract(path),
+          factIdentityContract: foundationAuthoringFactContract(path),
         },
       }),
     ].join('\n')
@@ -49,6 +52,9 @@ function formatContract(request: WorkerDispatchRequest): string {
       String(request.contract.authoringMode),
     )
   if (initialFoundationAuthor) {
+    // Persisted legacy requests may carry this field; it must never instruct
+    // a new author invocation to wrap the Markdown body in JSON.
+    delete contractWithoutDuplicatedBrief.authorBodyVersion
     delete contractWithoutDuplicatedBrief.availableUpstreamPaths
     // The old systemDeliveryContract was an incomplete, Technical-only view
     // of the runtime contract. Keep it out of every model prompt and provide
@@ -102,15 +108,7 @@ function formatContract(request: WorkerDispatchRequest): string {
             entries: Array.isArray(productionMaterials)
               ? productionMaterials.map(value => {
                   const material = value as Record<string, unknown>
-                  const serialization = material.serialization
-                  const serializationRule =
-                    serialization === 'markdown_table'
-                      ? 'Markdown table only: include a header row, a separator row, and data rows; do not use a fenced code block, YAML, JSON, or a key-value list.'
-                      : serialization === 'mermaid'
-                        ? 'Mermaid only: use one fenced ```mermaid block; do not replace it with prose, JSON, YAML, or a key-value list.'
-                        : serialization === 'inline_svg'
-                          ? 'Inline SVG only: use one inline <svg>...</svg> block; do not replace it with a fenced code block, JSON, YAML, or a key-value list.'
-                          : undefined
+                  const serializationRule = materialSerializationRule(material.serialization)
                   return {
                     ...material,
                     heading: `### ${material.title}`,
@@ -133,4 +131,14 @@ function formatContract(request: WorkerDispatchRequest): string {
     }
   }
   return JSON.stringify(contractWithoutDuplicatedBrief)
+}
+
+function materialSerializationRule(serialization: unknown): string | undefined {
+  return serialization === 'markdown_table'
+    ? 'Markdown table only: include a header row, a separator row, and data rows; do not use a fenced code block, YAML, JSON, or a key-value list.'
+    : serialization === 'mermaid'
+      ? 'Mermaid only: use one fenced ```mermaid block; do not replace it with prose, JSON, YAML, or a key-value list.'
+      : serialization === 'inline_svg'
+        ? 'Inline SVG only: use one inline <svg>...</svg> block; do not replace it with a fenced code block, JSON, YAML, or a key-value list.'
+        : undefined
 }

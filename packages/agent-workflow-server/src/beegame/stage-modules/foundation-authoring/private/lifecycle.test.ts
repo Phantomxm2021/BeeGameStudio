@@ -26,7 +26,7 @@ function request(requestId = 'start-1') {
   return { protocolVersion: 1 as const, requestId, ownerId: 'owner', projectId: 'project', input,
     inputDigest: authorDigest({ ownerId: 'owner', projectId: 'project', input }) }
 }
-function nativeFixture() {
+function nativeFixture(documents: Readonly<Record<FoundationDocumentPath, string>> = FROZEN_DOCUMENTS) {
   const calls: FoundationDocumentPath[] = []
   const executions: Array<{ path: FoundationDocumentPath; dispatchId: string; resumeSessionId?: string }> = []
   let active = 0
@@ -51,7 +51,8 @@ function nativeFixture() {
           if (hold) await new Promise<void>((resolve, reject) => { held.push(resolve); rejectHeld = reject })
           else await pause(15)
           if ((stopped && !lateAfterStop) || failure === path) throw new Error('fixture failure containing SECRET must not escape')
-          const body = FROZEN_DOCUMENTS[path]
+          const frozen = documents[path]
+          const body = frozen
           for (const message of [
             { type: 'stream_event', event: { type: 'message_start', message: { id: randomUUID() } } },
             { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } },
@@ -75,6 +76,26 @@ function nativeFixture() {
 const terminal = (value: AuthorResult) => value.status !== 'running'
 
 describe('independent author lifecycle, offline native fixture', () => {
+  test('publishes eight imperfect Markdown documents without quality blocking or extra author calls', async () => {
+    const documents = Object.fromEntries(CANONICAL_FOUNDATION_DOCUMENTS.map(path => [
+      path, `# ${path}\n\n## 非标准标题\n\n缺失章节留给 Reviewer。\n\n## 非标准标题\n\n重复标题，不自动修补。\n`,
+    ])) as Record<FoundationDocumentPath, string>
+    const fixture = nativeFixture(documents)
+    const configuration = await config()
+    const stage = createAuthorLifecycle(configuration, fixture.factory)
+    const handle = await stage.start(request())
+    const result = await until(() => stage.getResult(handle), terminal)
+    expect(result.status).toBe('completed')
+    if (result.status !== 'completed') throw new Error('imperfect Markdown did not reach publication')
+    expect(fixture.calls).toHaveLength(8)
+    expect(new Set(fixture.calls).size).toBe(8)
+    expect(result.result.documents).toHaveLength(8)
+    for (const artifact of result.result.documents) {
+      expect(await readFile(join(configuration.workspacePath, artifact.artifactPath), 'utf8')).toContain(documents[artifact.path as FoundationDocumentPath])
+    }
+    await stage.stop({ handle, requestId: 'quiesce-imperfect', reason: 'Offline fixture completed' })
+  })
+
   for (const phase of ['initial', 'parallel'] as const) {
     test(`lost ${phase} native processes require explicit retry and never resume historical sessions`, async () => {
       const fixture = nativeFixture(); fixture.hold = true

@@ -5,9 +5,7 @@ import { join, dirname } from 'node:path'
 import { acceptRevisionRequest } from '../request-store'
 import { revisionCanonicalJson, revisionDigest } from '../json-digest'
 import { openRevisionExecutionLease } from '../execution-lease'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 const roots: string[] = []
 
@@ -24,9 +22,8 @@ afterEach(async () => {
 function request() {
   const documents = reviewFixtureDocuments()
   documents[0]!.content = '# execution lease fixture'
-  const sourceResult = buildReviewerPublishedResult({
+  const sourceResult = buildSingleReviewFixture({
     documents,
-    state: initialReviewerFactState(documents),
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: {
       kind: 'initial',
@@ -36,7 +33,6 @@ function request() {
     },
   })
   return {
-    kind: 'initial' as const,
     ownerId: 'owner',
     projectId: 'project',
     requestId: 'execution-lease',

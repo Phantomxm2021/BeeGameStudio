@@ -6,9 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { openRevisionAttemptStore } from '../attempt-store'
 import { getLatestRevisionRuntimeUsage, type RevisionUsageEvent } from '../native-usage'
 import { revisionCanonicalJson, revisionDigest } from '../json-digest'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 const roots: string[] = []
 const documentPath = 'docs/GDD.md'
@@ -26,10 +24,10 @@ afterEach(async () => {
 function fixture() {
   const documents = reviewFixtureDocuments()
   documents[0]!.content = '# incomplete'
-  const sourceResult = buildReviewerPublishedResult({ documents, state: initialReviewerFactState(documents),
+  const sourceResult = buildSingleReviewFixture({ documents,
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) } })
-  return { kind: 'initial', ownerId: 'owner', projectId: 'project', requestId: 'repair', sourceResult,
+  return { ownerId: 'owner', projectId: 'project', requestId: 'repair', sourceResult,
     sourceBinding: { ownerId: 'owner', projectId: 'project', resultId: sourceResult.resultId, resultDigest: revisionDigest(sourceResult) } }
 }
 
@@ -44,12 +42,12 @@ function completion(pid: number | null = 12345) {
 }
 
 function completed(attemptId: string, usageEvents: RevisionUsageEvent[]) {
-  return { status: 'completed' as const, attemptId, markdown: reviewFixtureDocuments()[0]!.content,
+  return { status: 'completed' as const, attemptId, snapshot: { summary: 'Updated files', documents: reviewFixtureDocuments() },
     usageEvents, completion: completion() }
 }
 
 function journal(root: string, request: ReturnType<typeof fixture>) {
-  return join(root, '.beegame/workflow/foundation-revision/requests',
+  return join(root, '.beegame/workflow/foundation-revision/native-file-v1/requests',
     revisionDigest({ ownerId: request.ownerId, projectId: request.projectId, requestId: request.requestId }),
     'execution-events')
 }
@@ -62,92 +60,87 @@ test('durably appends normalized usage, replays it, and keeps a reopened running
   const root = await workspace()
   const request = fixture()
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documentPath)
+  const started = await store.begin()
   const first = usage('result', 3, 2)
-  await store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 1, event: first })
+  await store.observeUsage({ attemptId: started.attemptId, observationIndex: 1, event: first })
 
   const reopened = await openRevisionAttemptStore(root, request)
-  const state = await reopened.read(documentPath)
+  const state = await reopened.read()
   expect(state.status).toBe('running')
   expect(state.active?.attemptId).toBe(started.attemptId)
   expect(state.observedUsageEvents).toEqual([first])
   expect(state.observedUsage).toEqual(getLatestRevisionRuntimeUsage([first]))
-  await expect(reopened.begin(documentPath)).rejects.toThrow('explicit recovery')
+  await expect(reopened.begin()).rejects.toThrow('explicit recovery')
 
   const captured = usage('usage', 7, 1)
   const expected = structuredClone(captured)
-  const pending = reopened.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 2, event: captured })
+  const pending = reopened.observeUsage({ attemptId: started.attemptId, observationIndex: 2, event: captured })
   captured.usage.total_tokens = 999
   await pending
-  expect((await reopened.read(documentPath)).observedUsageEvents).toEqual([first, expected])
+  expect((await reopened.read()).observedUsageEvents).toEqual([first, expected])
 })
 
 test('same observation index is idempotent concurrently, while different payloads conflict', async () => {
   const root = await workspace()
   const request = fixture()
   const stores = await Promise.all([openRevisionAttemptStore(root, request), openRevisionAttemptStore(root, request)])
-  const started = await stores[0]!.begin(documentPath)
+  const started = await stores[0]!.begin()
   const event = usage('usage', 4, 1)
-  const results = await Promise.allSettled(stores.map(store => store.observeUsage(documentPath,
-    { attemptId: started.attemptId, observationIndex: 1, event })))
+  const results = await Promise.allSettled(stores.map(store => store.observeUsage({ attemptId: started.attemptId, observationIndex: 1, event })))
   expect(results.every(result => result.status === 'fulfilled')).toBe(true)
-  expect((await stores[0]!.read(documentPath)).observedUsageEvents).toEqual([event])
+  expect((await stores[0]!.read()).observedUsageEvents).toEqual([event])
   expect((await eventFiles(root, request))).toHaveLength(2)
 
   const conflict = usage('usage', 4, 2)
-  await expect(stores[1]!.observeUsage(documentPath,
-    { attemptId: started.attemptId, observationIndex: 1, event: conflict })).rejects.toThrow()
-  expect((await stores[0]!.read(documentPath)).observedUsageEvents).toEqual([event])
+  await expect(stores[1]!.observeUsage({ attemptId: started.attemptId, observationIndex: 1, event: conflict })).rejects.toThrow()
+  expect((await stores[0]!.read()).observedUsageEvents).toEqual([event])
 
   const conflictRoot = await workspace()
   const conflictRequest = fixture()
   const [left, right] = await Promise.all([openRevisionAttemptStore(conflictRoot, conflictRequest), openRevisionAttemptStore(conflictRoot, conflictRequest)])
-  const conflictStarted = await left.begin(documentPath)
+  const conflictStarted = await left.begin()
   const concurrent = await Promise.allSettled([
-    left.observeUsage(documentPath, { attemptId: conflictStarted.attemptId, observationIndex: 1, event: usage('usage', 1, 1) }),
-    right.observeUsage(documentPath, { attemptId: conflictStarted.attemptId, observationIndex: 1, event: usage('usage', 1, 2) }),
+    left.observeUsage({ attemptId: conflictStarted.attemptId, observationIndex: 1, event: usage('usage', 1, 1) }),
+    right.observeUsage({ attemptId: conflictStarted.attemptId, observationIndex: 1, event: usage('usage', 1, 2) }),
   ])
   expect(concurrent.filter(result => result.status === 'fulfilled')).toHaveLength(1)
   expect(concurrent.filter(result => result.status === 'rejected')).toHaveLength(1)
-  expect((await left.read(documentPath)).observedUsageEvents).toHaveLength(1)
+  expect((await left.read()).observedUsageEvents).toHaveLength(1)
 })
 
 test('rejects usage gaps, stale attempt identities, and observations after settlement', async () => {
   const root = await workspace()
   const request = fixture()
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documentPath)
+  const started = await store.begin()
   const first = usage('usage', 1, 1)
   const second = usage('usage', 2, 1)
-  await expect(store.observeUsage(documentPath,
-    { attemptId: started.attemptId, observationIndex: 2, event: second })).rejects.toThrow()
-  await expect(store.observeUsage(documentPath,
-    { attemptId: randomUUID(), observationIndex: 1, event: first })).rejects.toThrow()
-  await store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 1, event: first })
-  await store.settle(documentPath, completed(started.attemptId, [first]))
-  await expect(store.observeUsage(documentPath,
-    { attemptId: started.attemptId, observationIndex: 2, event: second })).rejects.toThrow()
+  await expect(store.observeUsage({ attemptId: started.attemptId, observationIndex: 2, event: second })).rejects.toThrow()
+  await expect(store.observeUsage({ attemptId: randomUUID(), observationIndex: 1, event: first })).rejects.toThrow()
+  await store.observeUsage({ attemptId: started.attemptId, observationIndex: 1, event: first })
+  await store.settle(completed(started.attemptId, [first]))
+  await expect(store.observeUsage({ attemptId: started.attemptId, observationIndex: 2, event: second })).rejects.toThrow()
 })
 
 test('settlement must equal persisted observations; terminal-only usage is never trusted', async () => {
   const root = await workspace()
   const request = fixture()
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documentPath)
+  const started = await store.begin()
   const persisted = usage('result', 3, 2)
   const fabricated = usage('result', 9, 9)
-  await expect(store.settle(documentPath, completed(started.attemptId, [fabricated]))).rejects.toThrow()
-  await store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 1, event: persisted })
-  await expect(store.settle(documentPath, completed(started.attemptId, [fabricated]))).rejects.toThrow()
-  expect((await store.read(documentPath)).status).toBe('running')
-  const receipt = await store.settle(documentPath, completed(started.attemptId, [persisted]))
+  await expect(store.settle(completed(started.attemptId, [fabricated]))).rejects.toThrow()
+  await store.observeUsage({ attemptId: started.attemptId, observationIndex: 1, event: persisted })
+  await expect(store.settle(completed(started.attemptId, [fabricated]))).rejects.toThrow()
+  expect((await store.read()).status).toBe('running')
+  const receipt = await store.settle(completed(started.attemptId, [persisted]))
   expect(receipt.usage).toEqual(getLatestRevisionRuntimeUsage([persisted]))
 })
 
 test('empty pre-spawn cancellation has no fabricated usage observation', async () => {
   const store = await openRevisionAttemptStore(await workspace(), fixture())
-  const started = await store.begin(documentPath)
-  const receipt = await store.settle(documentPath, { status: 'stopped', attemptId: started.attemptId, failureCode: 'cancelled', usageEvents: [] })
+  const started = await store.begin()
+  const receipt = await store.settle({ status: 'stopped', attemptId: started.attemptId, failureCode: 'cancelled', usageEvents: [] })
   expect(receipt.usage).toEqual(getLatestRevisionRuntimeUsage([]))
 })
 
@@ -155,18 +148,18 @@ test('persists cumulative-result and wire-reset semantics without retaining raw 
   const root = await workspace()
   const request = fixture()
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documentPath)
+  const started = await store.begin()
   const events = [
     usage('result', 5, 3),
     usage('usage', 2, 1),
     usage('result', 1, 1),
     usage('usage', 4, 2),
   ]
-  await expect(store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 1,
+  await expect(store.observeUsage({ attemptId: started.attemptId, observationIndex: 1,
     event: { ...events[0], rawMessage: 'raw native message', OPENAI_API_KEY: 'credential-sentinel' } })).rejects.toThrow()
   for (const [index, event] of events.entries())
-    await store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: index + 1, event })
-  const state = await store.read(documentPath)
+    await store.observeUsage({ attemptId: started.attemptId, observationIndex: index + 1, event })
+  const state = await store.read()
   expect(state.observedUsage).toEqual(getLatestRevisionRuntimeUsage(events))
   for (const name of await eventFiles(root, request)) {
     const bytes = await readFile(join(journal(root, request), name), 'utf8')
@@ -178,21 +171,21 @@ test('persists cumulative-result and wire-reset semantics without retaining raw 
 
 test('aggregate overflow rejects the new observation before poisoning the durable journal', async () => {
   const store = await openRevisionAttemptStore(await workspace(), fixture())
-  const started = await store.begin(documentPath)
+  const started = await store.begin()
   const first = usage('result', Number.MAX_VALUE, 0)
-  await store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 1, event: first })
-  await expect(store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 2,
+  await store.observeUsage({ attemptId: started.attemptId, observationIndex: 1, event: first })
+  await expect(store.observeUsage({ attemptId: started.attemptId, observationIndex: 2,
     event: usage('result', Number.MAX_VALUE / 2, 0) })).rejects.toThrow('overflow')
-  expect((await store.read(documentPath)).observedUsageEvents).toEqual([first])
+  expect((await store.read()).observedUsageEvents).toEqual([first])
 })
 
 test('rejects tampered usage records and missing journal links without self-healing', async () => {
   const root = await workspace()
   const request = fixture()
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documentPath)
-  await store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 1, event: usage('usage', 3, 2) })
-  await store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 2, event: usage('usage', 4, 2) })
+  const started = await store.begin()
+  await store.observeUsage({ attemptId: started.attemptId, observationIndex: 1, event: usage('usage', 3, 2) })
+  await store.observeUsage({ attemptId: started.attemptId, observationIndex: 2, event: usage('usage', 4, 2) })
   const directory = journal(root, request)
   const names = await eventFiles(root, request)
   const usagePath = join(directory, names[1]!)
@@ -201,10 +194,10 @@ test('rejects tampered usage records and missing journal links without self-heal
   tampered.observation.event.usage.total_tokens += 1
   const tamperedBytes = `${revisionCanonicalJson(tampered)}\n`
   await writeFile(usagePath, tamperedBytes)
-  await expect(store.read(documentPath)).rejects.toThrow()
+  await expect(store.read()).rejects.toThrow()
   expect(await readFile(usagePath, 'utf8')).toBe(tamperedBytes)
 
   await writeFile(usagePath, original)
   await unlink(join(directory, names[0]!))
-  await expect(store.read(documentPath)).rejects.toThrow(/gap|unexpected|contiguous/i)
+  await expect(store.read()).rejects.toThrow(/gap|unexpected|contiguous/i)
 })

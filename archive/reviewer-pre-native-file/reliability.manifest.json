@@ -1,0 +1,107 @@
+{
+  "status": "retired-source-reference-only",
+  "entries": [
+    {
+      "source": "scripts/reviewer-reliability/README.md",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/README.md.txt",
+      "sha256": "609712d0a11585b7cf68d69bd0fb530447e80ce20da04974253ba7ea5528dc2b",
+      "bytes": 8530
+    },
+    {
+      "source": "scripts/reviewer-reliability/check.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/check.ts.txt",
+      "sha256": "532e9b8a1172c2050141dfeaec40fe6a27d1eb65127b2793f214ff5ae97435e6",
+      "bytes": 3663
+    },
+    {
+      "source": "scripts/reviewer-reliability/evaluation-credential.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/evaluation-credential.ts.txt",
+      "sha256": "7658c53e5522358dc603eb52765d9c62043d953930c32322926f68512bf01cd9",
+      "bytes": 4806
+    },
+    {
+      "source": "scripts/reviewer-reliability/evaluation-finalization.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/evaluation-finalization.ts.txt",
+      "sha256": "fd25437dbb4bdebeaaeb8caf6ae2be3e082d3fcb46a46f236e00aa157dd45538",
+      "bytes": 7946
+    },
+    {
+      "source": "scripts/reviewer-reliability/evaluation-runner.test.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/evaluation-runner.test.ts.txt",
+      "sha256": "7f7ddbc9675356bbe5be264e857592922473445c043322b69102e8f906801dea",
+      "bytes": 23161
+    },
+    {
+      "source": "scripts/reviewer-reliability/fixtures.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/fixtures.ts.txt",
+      "sha256": "d2d9a1acc0ec3ce474593da58a6d6f8cbb169efe5e573968e3d10aa87da6ea71",
+      "bytes": 12387
+    },
+    {
+      "source": "scripts/reviewer-reliability/native-v2-check.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/native-v2-check.ts.txt",
+      "sha256": "ffc01ed91df275cc3a08de18457fa4485ac01cda512fd522d6536a1c16a9376a",
+      "bytes": 5447
+    },
+    {
+      "source": "scripts/reviewer-reliability/native-v2.test.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/native-v2.test.ts.txt",
+      "sha256": "5bfdea4a401840f32e0981331112fd98df82c8b7ed98e122f8b4e6dd5400ed67",
+      "bytes": 1077
+    },
+    {
+      "source": "scripts/reviewer-reliability/reproduce-semantic-report.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/reproduce-semantic-report.ts.txt",
+      "sha256": "9a20fe54dd2943a7d59549a1f5711d8885d927ee9a174b8f66d7b9c5ad340168",
+      "bytes": 6501
+    },
+    {
+      "source": "scripts/reviewer-reliability/rubric.json",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/rubric.json.txt",
+      "sha256": "ae1a5a263b2bbf0b125fb7ee4a735406ed3b2c4227cda9af340326ab620b9254",
+      "bytes": 7243
+    },
+    {
+      "source": "scripts/reviewer-reliability/semantic-candidate-probe.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/semantic-candidate-probe.ts.txt",
+      "sha256": "01b81ce1366b08cc58f31ed1781dccdd3674dead1f1304763f87ef27480f0db9",
+      "bytes": 5186
+    },
+    {
+      "source": "scripts/reviewer-reliability/semantic-candidate-runtime.test.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/semantic-candidate-runtime.test.ts.txt",
+      "sha256": "a3438a77eab9c6a6b52df92b1d091bdafc6ea8fd92f49dc09f2d93e8c3ea6e26",
+      "bytes": 2134
+    },
+    {
+      "source": "scripts/reviewer-reliability/semantic-candidate-runtime.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/semantic-candidate-runtime.ts.txt",
+      "sha256": "4e1651fc10d8de5034920839d59fc5157a103b514e34d648c2cb616bd3e7f469",
+      "bytes": 1959
+    },
+    {
+      "source": "scripts/reviewer-reliability/semantic-prompt-candidate.test.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/semantic-prompt-candidate.test.ts.txt",
+      "sha256": "f3a747bae6ed7a2d666178728051926f5d5eeb1be8c435f295750b43dd40dcf4",
+      "bytes": 6441
+    },
+    {
+      "source": "scripts/reviewer-reliability/semantic-prompt-candidate.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/semantic-prompt-candidate.ts.txt",
+      "sha256": "ddb31293e37c27ae03dd51fe4edc757581a55e966283fafa00256fa95ebdb02e",
+      "bytes": 3049
+    },
+    {
+      "source": "scripts/reviewer-reliability/semantic-runner.ts",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/semantic-runner.ts.txt",
+      "sha256": "7bcff94f6ad3ab399a319870a05c41a51a82f46bc594bad7e40f5a5ef5641aa7",
+      "bytes": 31570
+    },
+    {
+      "source": "scripts/reviewer-reliability/tsconfig.json",
+      "archive": "archive/reviewer-pre-native-file/sources/scripts/reviewer-reliability/tsconfig.json.txt",
+      "sha256": "67dba82df2d84d7fd387c40f122ad4861833af0649d6c8a13a9b2b454a805ad5",
+      "bytes": 603
+    }
+  ]
+}

@@ -13,7 +13,7 @@ import type { WorkflowUsage } from './types'
 export type DocumentDisplayTask = {
   id: string
   title: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped' | 'blocked'
   attempt: number
   operation: 'write' | 'review' | 'revise' | 'produce'
   round?: number

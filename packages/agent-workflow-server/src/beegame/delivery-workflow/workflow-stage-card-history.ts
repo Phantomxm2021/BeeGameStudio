@@ -15,6 +15,7 @@ import {
   projectWorkflowDisplayReason,
 } from './workflow-display-message'
 import { projectPublicAuthorDisplay } from './public-author-display'
+import { projectFoundationReviewDisplay } from './foundation-review-display'
 import type {
   DeliveryRun,
   DeliveryRunStatus,
@@ -359,7 +360,7 @@ function documentTasks(
 ): DocumentDisplayTask[] {
   if (run.foundationReviewStage) return [{ id: 'foundation-public-stage',
     title: run.phase === 'FOUNDATION_REVISION' ? 'Foundation Revision' : 'Foundation Reviewer',
-    status: run.foundationReviewStage.acceptedReview ? 'completed' : run.status === 'running' ? 'running' : run.status === 'stopped' ? 'stopped' : 'failed',
+    status: projectFoundationReviewDisplay(run.foundationReviewStage, run.status)!.taskStatus,
     attempt: 0, operation: run.phase === 'FOUNDATION_REVISION' ? 'revise' : 'review' }]
   const publicAuthorDisplay = projectPublicAuthorDisplay(run.authorStage)
   if (publicAuthorDisplay) return publicAuthorDisplay.tasks
@@ -537,12 +538,13 @@ export function projectCurrentStageCard(input: {
     : run.currentItemId?.startsWith('docs/')
       ? run.currentItemId
       : undefined
-  const nextAction = blockedReason
+  const foundationDisplay = projectFoundationReviewDisplay(run.foundationReviewStage, run.status)
+  const nextAction = foundationDisplay?.resumeAvailable ? 'resume' : blockedReason && !foundationDisplay?.terminal
     ? run.status === 'stopped'
       ? 'resume'
       : 'retry'
     : undefined
-  const blockReason = projectWorkflowDisplayReason(blockedReason, {
+  const blockReason = foundationDisplay?.block ?? projectWorkflowDisplayReason(blockedReason, {
     stage: run.phase,
     taskId: failedTask?.id ?? run.activeDispatch?.taskId,
     documentPath: failedDocumentPath,

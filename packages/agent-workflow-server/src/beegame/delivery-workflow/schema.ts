@@ -776,7 +776,31 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
   })
 
 export const parseDeliveryRun = (value: unknown): DeliveryRun =>
-  deliveryRunSchema.parse(value)
+  deliveryRunSchema.parse(migrateLegacyFoundationSnapshot(value))
+
+/** Version 52 was the first public Foundation link schema. Keep only that
+ * narrow, already-isolated shape loadable in memory; older/legacy worker
+ * snapshots remain obsolete and cannot be silently upgraded. */
+export function isCompatibleLegacyFoundationSnapshot(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  const link = record.foundationReviewStage
+  if (record.schemaVersion !== 52 || !link || typeof link !== 'object' || Array.isArray(link) || record.foundationAuditState !== undefined)
+    return false
+  const linkRecord = link as Record<string, unknown>
+  if (['policyVersion', 'automaticRepairLimit', 'completedRepairCount', 'acceptanceDecision', 'riskDecisions',
+    'policyAuthorizations', 'latestReview', 'repairSourceReview', 'allowNoDocumentChangeOnce'].some(key => linkRecord[key] !== undefined)) return false
+  const stage = record.phase === 'DOCUMENT_REVIEW' || record.phase === 'FOUNDATION_REVISION'
+  const invocation = linkRecord.invocation
+  return stage && invocation !== null && typeof invocation === 'object' &&
+    ((invocation as Record<string, unknown>).stage === 'reviewer' || (invocation as Record<string, unknown>).stage === 'revision')
+}
+
+export function migrateLegacyFoundationSnapshot(value: unknown): unknown {
+  return isCompatibleLegacyFoundationSnapshot(value)
+    ? { ...(value as Record<string, unknown>), schemaVersion: DELIVERY_RUN_SCHEMA_VERSION }
+    : value
+}
 export const parseAtomicTask = (value: unknown): AtomicTask =>
   atomicTaskSchema.parse(value)
 export const parseDispatchRecord = (value: unknown): DispatchRecord =>

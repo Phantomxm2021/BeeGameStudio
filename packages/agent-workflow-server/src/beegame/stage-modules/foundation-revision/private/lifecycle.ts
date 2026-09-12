@@ -104,7 +104,7 @@ export function createRevisionLifecycle(
     try {
       await lease.assertOwned()
       const initial = await store.readRequest()
-      if (initial.activeAttemptIds.length)
+      if (initial.activeAttemptId)
         throw new Error('Revision prior attempt closure is unknown')
       // Reconcile already-terminal facts before considering new workers. A
       // transient billing outage remains visible as pending with the same key.
@@ -112,71 +112,24 @@ export function createRevisionLifecycle(
       await flushRevisionUsage(workspacePath, request, billing)
       if (!initial.stopped && !initial.failure && initial.phase === 'running') {
         operation = 'execution_failed'
-        const pending = [
-          ...registration.prepared.batches.map(batch => batch.documentPath),
-        ]
-        const lanes = Array.from(
-          { length: Math.min(4, pending.length) },
-          async () => {
-            for (
-              let documentPath = pending.shift();
-              documentPath;
-              documentPath = pending.shift()
-            ) {
-              // Frozen document repair is an open loop, not a fact/review retry
-              // lane. Only stop or an infrastructure fault interrupts retries.
-              for (;;) {
-                await lease.assertOwned()
-                const state = await store.readRequest()
-                if (state.stopped || state.failure) return
-                const worker = await store.read(documentPath)
-                if (worker.completed) break
-                let configuration
-                try {
-                  configuration = await runtimeConfiguration.resolve({
-                    ownerId,
-                  })
-                } catch {
-                  await fail('configuration_failed')
-                  return
-                }
-                await lease.assertOwned()
-                try {
-                  const receipt = await runRevisionOwnedAttempt(workspacePath, {
-                    request,
-                    documentPath,
-                    configuration,
-                  })
-                  await lease.assertOwned()
-                  try {
-                    await flushRevisionUsage(workspacePath, request, billing)
-                  } catch {
-                    await fail('billing_failed')
-                    return
-                  }
-                  if (receipt.settlement.status === 'completed') break
-                  if (receipt.settlement.status === 'stopped') return
-                } catch {
-                  if (!(await store.readRequest()).stopped)
-                    await fail('execution_failed')
-                  return
-                }
-              }
-            }
-          },
-        )
-        const outcomes = await Promise.allSettled(lanes)
-        if (outcomes.some(outcome => outcome.status === 'rejected'))
-          throw new Error('Revision execution infrastructure failed')
+        const worker = await store.read()
+        if (!worker.completed) {
+          operation = 'configuration_failed'
+          const configuration = await runtimeConfiguration.resolve({ ownerId })
+          await lease.assertOwned()
+          operation = 'execution_failed'
+          const receipt = await runRevisionOwnedAttempt(workspacePath, { request, configuration })
+          await lease.assertOwned()
+          operation = 'billing_failed'
+          await flushRevisionUsage(workspacePath, request, billing)
+          if (receipt.settlement.status !== 'completed' && receipt.settlement.status !== 'stopped')
+            await fail('execution_failed')
+        }
       }
       await lease.assertOwned()
       const state = await store.readRequest()
-      const completed = await Promise.all(
-        registration.prepared.batches.map(batch =>
-          store.read(batch.documentPath),
-        ),
-      )
-      if (!state.stopped && completed.every(worker => worker.completed)) {
+      const completed = await store.read()
+      if (!state.stopped && completed.completed) {
         operation = 'publication_failed'
         await publishRevisionCompletedCandidate(workspacePath, request)
       }
@@ -237,10 +190,11 @@ export function createRevisionLifecycle(
     const state = await store.readRequest()
     const outbox = await store.readUsageOutbox()
     const base = {
+      ...(state.progress ? { progress: state.progress } : {}),
       handle: handleFor(registration),
       inputDigest: revisionRequestInputDigest(request),
       billingStatus:
-        outbox.activeAttemptIds.length ||
+        outbox.activeAttemptId ||
         outbox.entries.some(entry => !entry.receipt)
           ? ('pending' as const)
           : ('settled' as const),
@@ -263,10 +217,10 @@ export function createRevisionLifecycle(
         reason:
           'The previous execution owner was lost; explicit closure evidence is required.',
       }
+    if (state.stopped && (execution === 'busy' || active.has(registration.record.handle)))
+      return { ...base, status: 'running' }
     if (state.stopped)
-      return state.activeAttemptIds.length ||
-        execution !== 'free' ||
-        active.has(registration.record.handle)
+      return state.activeAttemptId
         ? {
             ...base,
             status: 'needs_action',
@@ -276,7 +230,7 @@ export function createRevisionLifecycle(
         : { ...base, status: 'stopped' }
     if (
       state.failure &&
-      !state.activeAttemptIds.length &&
+      !state.activeAttemptId &&
       execution === 'busy' &&
       !active.has(registration.record.handle)
     )
@@ -289,7 +243,7 @@ export function createRevisionLifecycle(
       }
     if (execution === 'busy' || active.has(registration.record.handle))
       return { ...base, status: 'running' }
-    if (state.activeAttemptIds.length)
+    if (state.activeAttemptId)
       return {
         ...base,
         status: 'needs_action',
@@ -328,7 +282,7 @@ export function createRevisionLifecycle(
     async getResult(value: RevisionHandle) {
       return structuredClone(await view(await load(value)))
     },
-    async resume(value: RevisionResumeInput) {
+    async resume(value: RevisionResumeInput): Promise<RevisionResult> {
       const input = revisionResumeInputSchema.parse(
         captureRevisionPublicInput(value),
       )

@@ -9,7 +9,7 @@ import {
   type DispatchRecord,
   type FoundationDocumentPath,
 } from './domain/types'
-import { foundationAuthoringSources } from './domain/foundation-authoring-contract'
+import { foundationAuthoringRecordedSourcesMatch } from './domain/foundation-authoring-contract'
 
 export type AuthorAcceptanceJournalBinding = {
   runId: string
@@ -172,10 +172,7 @@ function assertRequest(
       createHash('sha256').update(request.contract.confirmedBriefContext).digest('hex') !== binding.confirmedBriefDigest) {
     throw new Error('author acceptance dispatch request binding mismatch')
   }
-  const expectedUpstreamPaths = foundationAuthoringSources(entry.path).map(source => source.path)
-  if (!request.contract.availableUpstreamPaths ||
-      request.contract.availableUpstreamPaths.length !== expectedUpstreamPaths.length ||
-      request.contract.availableUpstreamPaths.some((path, index) => path !== expectedUpstreamPaths[index])) {
+  if (!foundationAuthoringRecordedSourcesMatch(entry.path, request.contract.availableUpstreamPaths, request.contract.authorBodyVersion)) {
     throw new Error('author acceptance dispatch upstream source set mismatch')
   }
   if (request.contract.authoringMode === 'initial' && entry.path !== CANONICAL_FOUNDATION_DOCUMENTS[0]) {

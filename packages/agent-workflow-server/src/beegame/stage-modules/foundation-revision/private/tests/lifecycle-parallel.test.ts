@@ -22,11 +22,8 @@ import {
   type RevisionResult,
   type RevisionStartInput,
 } from '../../public'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 import type { RuntimeConfigurationClient } from '../../../../../runtime-configuration/public'
-import type { UsageBillingClient } from '../../../../../billing/public'
 import { revisionDigest } from '../json-digest'
 import { readRevisionRequestByHandle } from '../request-store'
 import { openRevisionExecutionLease } from '../execution-lease'
@@ -94,9 +91,8 @@ function requestInput(requestId = 'parallel-request') {
   for (const documentPath of parallelDocuments)
     documents.find(document => document.path === documentPath)!.content =
       `# incomplete ${documentPath}`
-  const sourceResult = buildReviewerPublishedResult({
+  const sourceResult = buildSingleReviewFixture({
     documents,
-    state: initialReviewerFactState(documents),
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: {
       kind: 'initial',
@@ -106,7 +102,6 @@ function requestInput(requestId = 'parallel-request') {
     },
   })
   const input = {
-    kind: 'initial' as const,
     sourceResult,
     sourceBinding: {
       ownerId: 'owner',
@@ -198,22 +193,14 @@ function runtime(controlDirectory: string) {
       return {
         command: [
           process.execPath,
-          join(import.meta.dir, 'lifecycle-parallel-fixture.ts'),
-          Buffer.from(JSON.stringify(Object.fromEntries(reviewFixtureDocuments().map(document => [document.path, document.content])))).toString('base64'),
+          join(import.meta.dir, 'native-file-revision.ts'), 'valid',
+          Buffer.from(JSON.stringify({documents:Object.fromEntries(reviewFixtureDocuments().slice(0,5).map(document => [document.path, document.content]))})).toString('base64'),
         ],
         env: { BEEGAME_CONFIG_DIR: controlDirectory },
       }
     },
   }
   return { client, calls: () => calls }
-}
-
-function readyPath(controlDirectory: string, documentPath: string) {
-  return join(
-    controlDirectory,
-    'ready',
-    `${documentPath.replaceAll('/', '_')}.ready`,
-  )
 }
 
 async function waitFor(
@@ -234,7 +221,7 @@ async function waitFor(
   )
 }
 
-test('runs five document repairs with four native workers, then dispatches the fifth after release', async () => {
+test('repairs five documents in one native task without overwriting canonical files', async () => {
   const root = await workspace()
   const controlDirectory = join(root, 'parallel-control')
   await mkdir(join(root, 'docs'), { recursive: true })
@@ -256,36 +243,6 @@ test('runs five document repairs with four native workers, then dispatches the f
   const handle = await stage.start(requests.start)
   live.push({ root, stage, handle })
 
-  const deadline = Date.now() + 10_000
-  let readyCount = 0
-  while (Date.now() < deadline) {
-    readyCount = 0
-    for (const documentPath of parallelDocuments) {
-      try {
-        if (
-          (await readFile(
-            readyPath(controlDirectory, documentPath),
-            'utf8',
-          )) === documentPath
-        )
-          readyCount += 1
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-    }
-    if (readyCount >= 4) break
-    await new Promise(resolve => setTimeout(resolve, 20))
-  }
-  expect(readyCount).toBe(4)
-  expect(
-    await readFile(
-      readyPath(controlDirectory, parallelDocuments[4]!),
-      'utf8',
-    ).catch(() => null),
-  ).toBeNull()
-  expect(configured.calls()).toBe(4)
-
-  await writeFile(join(controlDirectory, 'release'), 'release')
   const completed = await waitFor(
     stage,
     handle,
@@ -293,15 +250,16 @@ test('runs five document repairs with four native workers, then dispatches the f
       result.status === 'completed' && result.billingStatus === 'settled',
   )
   expect(completed.status).toBe('completed')
-  expect(configured.calls()).toBe(parallelDocuments.length)
-  expect(charged.calls).toEqual([])
+  expect(configured.calls()).toBe(1)
+  expect(charged.calls.filter(call=>call.startsWith('record:'))).toHaveLength(1)
+  expect(charged.calls.filter(call=>call.startsWith('debit:'))).toHaveLength(1)
   if (completed.status === 'completed') {
     for (const documentPath of parallelDocuments)
       expect(
         completed.result.documents.find(
           document => document.path === documentPath,
         )?.content,
-      ).toBe(requests.validDocuments.get(documentPath)?.trim())
+      ).toBe(requests.validDocuments.get(documentPath))
   }
   for (const [path, bytes] of canonical)
     expect(await readFile(path, 'utf8')).toBe(bytes)

@@ -1,19 +1,19 @@
 import { expect, test } from 'bun:test'
-import { buildRevisionInitialCandidate } from '../initial-candidate'
+import { prepareRevisionRequest } from '../request-preparation'
+import { constructRevisionCandidate } from '../candidate-construction'
 import { parseRevisionCandidateResult } from '../candidate-result'
 import { revisionDigest } from '../json-digest'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 function fixture() {
   const documents = reviewFixtureDocuments()
   documents[0]!.content = '# incomplete'
-  const source = buildReviewerPublishedResult({ identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
+  const source = buildSingleReviewFixture({ identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) },
-    documents, state: initialReviewerFactState(documents) })
-  const candidate = buildRevisionInitialCandidate({ sourceResult: source,
-    sourceBinding: binding(source), requestId: 'revise', candidateDocuments: reviewFixtureDocuments(), unresolvedIssues: [] })
+    documents })
+  const prepared = prepareRevisionRequest({ ownerId: source.ownerId, projectId: source.projectId,
+    requestId: 'revise', sourceResult: source, sourceBinding: binding(source) })
+  const candidate = constructRevisionCandidate(prepared, crypto.randomUUID(), { summary: 'Revised files', documents: reviewFixtureDocuments() })
   return structuredClone(candidate)
 }
 function binding(result: { ownerId: string; projectId: string; resultId: string }) {
@@ -36,18 +36,18 @@ test('candidate schema recaptures owner-produced bytes and rejects an independen
   expect(() => parseRevisionCandidateResult(candidate, { ...accepted, projectId: 'foreign' })).toThrow('binding')
 })
 
-test('candidate schema rejects forged byte descriptors, claims, duplicate or mixed operations', () => {
+test('candidate schema rejects forged byte descriptors, incomplete sets and old candidate fields', () => {
   const candidate = fixture()
   const invalid = [
     { ...candidate, documents: candidate.documents.map((doc, index) => index ? doc : { ...doc, byteLength: doc.byteLength + 1 }) },
-    { ...candidate, repairClaims: [...candidate.repairClaims, candidate.repairClaims[0]!] },
-    { ...candidate, unresolvedIssues: [{ issueId: candidate.repairClaims[0]!.issueId, reason: 'unresolved' }] },
-    { ...candidate, changes: [...candidate.changes, candidate.changes[0]!] },
-    { ...candidate, changes: candidate.changes.map(change => ({ ...change, issueIds: ['foreign'] })) },
-    { ...candidate, changes: candidate.changes.map(change => ({ ...change, issueIds: [...change.issueIds, change.issueIds[0]!] })) },
-    { ...candidate, repairClaims: [...candidate.repairClaims, { issueId: 'uncovered', status: 'APPLIED' }] },
-    { ...candidate, changes: [...candidate.changes, { scope: 'section', kind: 'INSERT', documentPath: candidate.documents[0]!.path,
-      sectionId: 'player_actions', issueIds: [candidate.repairClaims[0]!.issueId], afterDigest: 'c'.repeat(64) }] },
+    { ...candidate, documents: candidate.documents.slice(1) },
+    { ...candidate, documents: candidate.documents.map(() => candidate.documents[0]) },
+    { ...candidate, revisionSummary: '' },
+    { ...candidate, repairClaims: [] },
+    { ...candidate, unresolvedIssues: [] },
+    { ...candidate, changes: [] },
+    { ...candidate, issueAssessments: [] },
+    { ...candidate, protocolVersion: 1 },
   ]
   for (const value of invalid) {
     const result = resign(value)

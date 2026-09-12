@@ -28,7 +28,7 @@ import { openRevisionAttemptStore } from '../attempt-store'
 import { openRevisionExecutionLease } from '../execution-lease'
 import { readRevisionRequestByHandle } from '../request-store'
 import type { RuntimeConfigurationClient } from '../../../../../runtime-configuration/public'
-import publicFollowupInputs from './fixtures/public-followup-inputs.json'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 const roots: string[] = []
 const live: Array<{
@@ -36,43 +36,6 @@ const live: Array<{
   stage: ReturnType<typeof createFoundationRevision>
   handle: RevisionHandle
 }> = []
-type PublicDocumentPath = 'docs/GDD.md' | 'docs/LEVEL_SCENE_DESIGN.md' | 'docs/BALANCE_DESIGN.md' | 'docs/TECHNICAL_DESIGN.md' |
-  'docs/ART_DIRECTION.md' | 'docs/UI_UX_SPEC.md' | 'docs/AUDIO_DESIGN.md' | 'docs/ASSET_PLAN.md'
-type PublicDocument = { path: PublicDocumentPath; content: string; digest: string; byteLength: number }
-type PublicSourceResult = {
-  resultId: string
-  documentSetDigest: string
-  documents: PublicDocument[]
-  issues: Array<{ issue: { id: string; remediation: { documentPath: string } } }>
-}
-type PublicBinding = { ownerId: string; projectId: string; resultId: string; resultDigest: string }
-type PublicNextRoundInput = {
-  kind: 'next_round'
-  sourceResult: PublicSourceResult
-  sourceBinding: PublicBinding
-}
-type PublicFollowupInputs = {
-  retry: {
-    input: {
-      kind: 'retry_same_round'
-      sourceResult: PublicSourceResult
-      sourceBinding: PublicBinding
-      previousCandidateResult: { candidateId: string; documents: PublicDocument[] }
-      previousCandidateBinding: PublicBinding
-      previousRecheckResult: unknown
-      previousRecheckBinding: PublicBinding
-    }
-    sectionText: string
-  }
-  nextRound: {
-    input: PublicNextRoundInput
-    previousCandidateId: string
-    previousIssueIds: string[]
-    sectionText: string
-  }
-}
-const followupInputs = publicFollowupInputs as unknown as PublicFollowupInputs
-
 afterEach(async () => {
   for (const { root, stage, handle } of live.splice(0)) {
     await stage.stop({
@@ -107,7 +70,7 @@ afterEach(async () => {
         // needs_action is not closure evidence; both the durable active set and
         // the private execution lease must be closed before removing this root.
         if (
-          state.activeAttemptIds.length === 0 &&
+          state.activeAttemptId === null &&
           (await lease.status()) === 'free'
         ) {
           closed = true
@@ -125,48 +88,19 @@ afterEach(async () => {
 })
 
 function nextRoundFixture() {
-  const fixture = structuredClone(followupInputs.nextRound)
-  const input = fixture.input
-  const sourceResult = input.sourceResult
-  const request = {
-    ...input,
-    ownerId: 'owner',
-    projectId: 'project',
-    requestId: 'public-next-round',
-  }
-  const plan = prepareRevisionRequest(request)
-  if (plan.round !== 2 || plan.batches.length !== 1)
-    throw new Error('next-round request did not plan one round-two repair')
-  const batch = plan.batches[0]
-  if (
-    !batch ||
-    batch.scope !== 'section' ||
-    batch.documentPath !== 'docs/TECHNICAL_DESIGN.md'
-  )
-    throw new Error(
-      'next-round fixture did not produce the expected Technical section batch',
-    )
-
-  const start: RevisionStartInput = {
-    protocolVersion: 1,
-    requestId: request.requestId,
-    ownerId: request.ownerId,
-    projectId: request.projectId,
-    inputDigest: foundationRevisionInputDigest({
-      ownerId: request.ownerId,
-      projectId: request.projectId,
-      input,
-    }),
-    input,
-  }
-  return {
-    sourceResult,
-    start,
-    plan,
-    previousCandidateId: fixture.previousCandidateId,
-    previousIssueIds: fixture.previousIssueIds,
-    sectionText: fixture.sectionText,
-  }
+  const documents = reviewFixtureDocuments()
+  documents[3]!.content = '# incomplete'
+  const sourceResult = buildSingleReviewFixture({ documents,
+    identity: { ownerId: 'owner', projectId: 'project', requestId: 'latest-full-review' },
+    subject: { kind: 'candidate', candidateId: 'previous-candidate', candidateResultId: 'a'.repeat(64),
+      sourceReviewResultId: 'b'.repeat(64), sourceReviewResultDigest: 'c'.repeat(64), baseDocumentSetDigest: 'd'.repeat(64), round: 1 } })
+  const input = { sourceResult,
+    sourceBinding: { ownerId: 'owner', projectId: 'project', resultId: sourceResult.resultId, resultDigest: revisionDigest(sourceResult) } }
+  const request = { ...input, ownerId: 'owner', projectId: 'project', requestId: 'public-next-round' }
+  const start: RevisionStartInput = { protocolVersion: 1, requestId: request.requestId, ownerId: 'owner', projectId: 'project',
+    input, inputDigest: foundationRevisionInputDigest({ ownerId: 'owner', projectId: 'project', input }) }
+  return { sourceResult, start, plan: prepareRevisionRequest(request), previousCandidateId: 'previous-candidate',
+    previousIssueIds: ['previous-issue'], sectionText: reviewFixtureDocuments()[3]!.content }
 }
 
 function backendResult(
@@ -211,7 +145,7 @@ function infrastructure(body: string) {
         // is involved in this public lifecycle test.
         command: [
           process.execPath,
-          join(import.meta.dir, 'lifecycle-followup-fixture.ts'),
+          join(import.meta.dir, 'native-file-revision.ts'),
           'valid',
           Buffer.from(body).toString('base64'),
         ],
@@ -271,7 +205,7 @@ test('public next-round continues from new review issues, retains the prior cand
   }
 
   expect(fixture.sourceResult.issues).toHaveLength(1)
-  expect(fixture.sourceResult.issues[0]!.issue.remediation.documentPath).toBe(
+  expect(fixture.sourceResult.issues[0]!.issue.source.documentPath).toBe(
     'docs/TECHNICAL_DESIGN.md',
   )
   expect(
@@ -279,9 +213,9 @@ test('public next-round continues from new review issues, retains the prior cand
       fixture.sourceResult.issues[0]!.issue.id,
     ),
   ).toBe(false)
-  expect(fixture.plan.retainedDocumentPaths).toEqual([])
+  expect(fixture.plan).not.toHaveProperty('retainedDocumentPaths')
   expect(
-    fixture.plan.staging.documents.find(
+    fixture.plan.source.documents.find(
       document => document.path === 'docs/GDD.md',
     )?.content,
   ).toBe(
@@ -325,11 +259,10 @@ test('public next-round continues from new review issues, retains the prior cand
   expect(completed.result.baseDocumentSetDigest).toBe(
     fixture.sourceResult.documentSetDigest,
   )
-  expect(completed.result.previous).toBeUndefined()
-  expect(completed.result.repairClaims.map(claim => claim.issueId)).toEqual(
-    fixture.plan.repairIssueIds,
-  )
-  expect(completed.result.unresolvedIssues).toEqual([])
+  expect(completed.result).not.toHaveProperty('previous')
+  expect(completed.result).not.toHaveProperty('repairClaims')
+  expect(completed.result.revisionSummary).toBeTruthy()
+  expect(completed.result).not.toHaveProperty('unresolvedIssues')
 
   const retainedPath = 'docs/GDD.md'
   expect(
@@ -344,7 +277,7 @@ test('public next-round continues from new review issues, retains the prior cand
     completed.result.documents.find(
       document => document.path === 'docs/TECHNICAL_DESIGN.md',
     )?.content,
-  ).toContain('technical.supported_actions: ["move","attack","dash","parry"]')
+  ).toBe(fixture.sectionText)
   for (const sourceDocument of fixture.sourceResult.documents) {
     if (sourceDocument.path === 'docs/TECHNICAL_DESIGN.md') continue
     expect(

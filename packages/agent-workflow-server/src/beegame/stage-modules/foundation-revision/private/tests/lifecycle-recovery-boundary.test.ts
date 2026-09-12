@@ -7,9 +7,7 @@ import { acceptRevisionRequest } from '../request-store'
 import { openRevisionAttemptStore } from '../attempt-store'
 import { openRevisionExecutionLease } from '../execution-lease'
 import { revisionCanonicalJson, revisionDigest } from '../json-digest'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -18,10 +16,10 @@ async function fixture() {
   roots.push(root)
   const documents = reviewFixtureDocuments()
   documents[0]!.content = '# incomplete'
-  const sourceResult = buildReviewerPublishedResult({ documents, state: initialReviewerFactState(documents),
+  const sourceResult = buildSingleReviewFixture({ documents,
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) } })
-  const request = { kind: 'initial', ownerId: 'owner', projectId: 'project', requestId: 'recovery-boundary', sourceResult,
+  const request = { ownerId: 'owner', projectId: 'project', requestId: 'recovery-boundary', sourceResult,
     sourceBinding: { ownerId: 'owner', projectId: 'project', resultId: sourceResult.resultId, resultDigest: revisionDigest(sourceResult) } }
   const accepted = await acceptRevisionRequest(root, request)
   const store = await openRevisionAttemptStore(root, request)
@@ -44,7 +42,7 @@ async function bytes(root: string): Promise<Record<string, string>> {
 
 test('public reads and resume cannot turn a lost owner and unclosed attempt into retry authority', async () => {
   const { root, request, accepted, store, stage, handle, calls } = await fixture()
-  const attempt = await store.begin('docs/GDD.md')
+  const attempt = await store.begin()
   const leases = await openRevisionExecutionLease(root, request)
   const acquired = await leases.acquire()
   if (acquired.kind !== 'owned') throw new Error('fixture owner missing')
@@ -59,8 +57,8 @@ test('public reads and resume cannot turn a lost owner and unclosed attempt into
   expect(await stage.resume({ handle, requestId: 'cannot-adopt' })).toMatchObject({ status: 'needs_action', resumable: false })
   expect(await stage.stop({ handle, requestId: 'stop-lost', reason: 'user_requested' })).toMatchObject({ status: 'needs_action', resumable: false })
   await expect(stage.resume({ handle, requestId: 'stop-lost' })).rejects.toThrow('could not be accepted')
-  expect((await store.read('docs/GDD.md')).active?.attemptId).toBe(attempt.attemptId)
-  expect((await store.read('docs/GDD.md')).lastReceipt).toBeNull()
+  expect((await store.read()).active?.attemptId).toBe(attempt.attemptId)
+  expect((await store.read()).lastReceipt).toBeNull()
   expect(await readFile(ownerPath, 'utf8')).toBe(staleBytes)
   expect(calls()).toBe(0)
 })

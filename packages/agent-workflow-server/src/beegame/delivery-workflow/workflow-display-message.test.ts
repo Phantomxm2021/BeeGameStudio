@@ -35,6 +35,14 @@ describe('sanitizeWorkflowDisplayMessage', () => {
 })
 
 describe('projectWorkflowCurrentMessage', () => {
+  test('projects native progress for both review and revision without exposing payloads', () => {
+    for (const [phase, documentStep] of [['DOCUMENT_REVIEW', 'FOUNDATION_REVIEW'], ['FOUNDATION_REVISION', 'FOUNDATION_REVISION']]) {
+      for (const value of ['模型响应 6 · Read docs/GDD.md', '模型响应 6 · 正在接收模型响应（流事件 123）', '模型响应 7 · StructuredOutput'])
+        expect(projectWorkflowCurrentMessage({ value, phase, documentStep })).toBe(value)
+      for (const value of ['模型响应 6 · Read /Users/private/file', '模型响应 6 · Read ../secret', '模型响应 6 · arbitrary prose', '模型响应 6 · Read docs/GDD.md\nsecret'])
+        expect(projectWorkflowCurrentMessage({ value, phase, documentStep })).toBe('')
+    }
+  })
   test('hides raw reviewer and reviser prose from the foundation review card', () => {
     expect(projectWorkflowCurrentMessage({ value: 'I have what I need. Now I will rewrite it.', phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe('')
   })

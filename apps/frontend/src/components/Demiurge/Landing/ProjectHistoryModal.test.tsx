@@ -104,6 +104,20 @@ describe('ProjectHistoryModal permissions', () => {
     });
   });
 
+  it('passes the explicit stop-after-review choice when creating a copy', async () => {
+    createReviewCopy = vi.fn().mockResolvedValue({ id: 'copy-only', name: 'Review only', created_at: 2 });
+    const onSelectProject = vi.fn();
+    render(<ProjectHistoryModal isOpen lang="en" onClose={vi.fn()} onSelectProject={onSelectProject} />);
+    fireEvent.click(screen.getByLabelText('More actions Snake Game'));
+    const checkbox = screen.getByRole('checkbox', { name: 'Stop after review (no revision)' });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Review Copy' }));
+    await waitFor(() => expect(onSelectProject).toHaveBeenCalledWith('copy-only'));
+    expect(createReviewCopy).toHaveBeenCalledTimes(1);
+    expect(createReviewCopy).toHaveBeenCalledWith('project-1', { stopAfterReview: true });
+  });
+
   it('does not hide delete action behind administrator permissions', () => {
     getCreditSummary.mockReturnValue(new Promise(() => {}));
 

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { createAuthenticationClient } from '../../auth/public'
 import { createRuntimeConfigurationClient } from '../../runtime-configuration/public'
 import { createFoundationAuthoring } from '../stage-modules/foundation-authoring/public'
-import { reviewFixtureDocuments } from '../stage-modules/foundation-reviewer/private/test-fixtures/review-fixture'
+import { reviewFixtureDocuments } from '../stage-modules/foundation-revision/private/tests/single-review-fixture'
 import { offlineReviewerBilling } from '../stage-modules/foundation-reviewer/private/test-fixtures/offline-billing'
 import { createFoundationReviewer } from '../stage-modules/foundation-reviewer/public'
 import { createFoundationRevision } from '../stage-modules/foundation-revision/public'
@@ -55,26 +55,21 @@ async function waitForAccepted(controller: ReturnType<typeof createDeliveryWorkf
   throw new Error('Author → Reviewer → Revision → Reviewer fixture did not settle')
 }
 
-test('independent public Author → Reviewer → Revision → Reviewer chain repairs only the authorized Technical section', async () => {
+for (const rounds of [1, 2])
+test(`independent public chain converges across ${rounds} repair round(s), including later-discovered issues`, async () => {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'public-foundation-chain-')))
   const ownerId = 'public-chain-owner'
   const projectId = 'public-chain-project'
   const brief = 'Offline public foundation chain fixture'
   const confirmedBriefDigest = digest(brief)
-  const normalized = reviewFixtureDocuments(true)
+  const normalized = reviewFixtureDocuments()
   const malformed = normalized.map(document => document.path === 'docs/TECHNICAL_DESIGN.md'
-    ? { ...document, content: document.content.replace('technical.supported_actions: ["move","attack","dash"]', 'technical.supported_actions: ["move","attack"]') }
+    ? { ...document, content: document.content + '\nREPAIR_REQUIRED\n' }
+    : rounds === 2 && document.path === 'docs/GDD.md' ? { ...document, content: document.content + '\nREPAIR_REQUIRED\n' }
     : document)
   const immutableAuthorDocuments = Object.fromEntries(malformed.map(document => [document.path, document.content]))
   const malformedTechnical = malformed.find(document => document.path === 'docs/TECHNICAL_DESIGN.md')!.content
   const repairedTechnical = normalized.find(document => document.path === 'docs/TECHNICAL_DESIGN.md')!.content
-  const sectionStart = malformedTechnical.indexOf('## Input and Interaction Boundary')
-  const malformedSectionEnd = malformedTechnical.indexOf('<!-- beegame-section:performance -->', sectionStart)
-  const repairedSectionEnd = repairedTechnical.indexOf('<!-- beegame-section:performance -->', sectionStart)
-  const repairedSection = repairedTechnical.slice(sectionStart, repairedSectionEnd)
-  expect(sectionStart).toBeGreaterThan(0)
-  expect(malformedSectionEnd).toBeGreaterThan(sectionStart)
-  expect(repairedSection).toContain('technical.supported_actions: ["move","attack","dash"]')
   const authorRuntimeCalls = { count: 0 }
   const authorBillingCalls = { count: 0 }
   const author = createFoundationAuthoring({ workspacePath,
@@ -90,7 +85,7 @@ test('independent public Author → Reviewer → Revision → Reviewer chain rep
   const reviewerBilling = billingWithCallCount(ownerId, reviewerBillingCalls)
   const reviewer = createFoundationReviewer({ workspacePath }, {
     runtimeConfiguration: runtimeConfiguration({ ownerId, dataDir: workspacePath,
-      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-reviewer/private/test-fixtures/native-reviewer.ts', import.meta.url)), '--fixture-mode=success'],
+      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-reviewer/private/test-fixtures/native-file-review.ts', import.meta.url)), 'repair-flow-one-at-a-time'],
       env: { BEEGAME_MODEL_TYPE: 'openai', OPENAI_DEFAULT_HAIKU_MODEL: 'fixture-fast',
         OPENAI_DEFAULT_SONNET_MODEL: 'fixture-balanced', OPENAI_DEFAULT_OPUS_MODEL: 'fixture-strong' }, calls: reviewerRuntimeCalls }),
     billing: reviewerBilling.client,
@@ -101,8 +96,8 @@ test('independent public Author → Reviewer → Revision → Reviewer chain rep
   const revisionBilling = billingWithCallCount(ownerId, revisionBillingCalls)
   const revision = createFoundationRevision({ workspacePath }, {
     runtimeConfiguration: runtimeConfiguration({ ownerId, dataDir: workspacePath,
-      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-revision/private/tests/native-section-fixture.ts', import.meta.url)),
-        Buffer.from(repairedSection).toString('base64')], env: { OPENAI_API_KEY: 'offline-unused' }, calls: revisionRuntimeCalls }),
+      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-revision/private/tests/native-file-revision.ts', import.meta.url)),
+        'repair-marker'], env: { OPENAI_API_KEY: 'offline-unused' }, calls: revisionRuntimeCalls }),
     billing: revisionBilling.client,
   })
 
@@ -132,31 +127,34 @@ test('independent public Author → Reviewer → Revision → Reviewer chain rep
     expect(current.authorStage?.status).toBe('completed')
     const authorResult = current.authorStage!.result!
     const originalTechnical = await readFile(join(workspacePath, authorResult.documents.find(document => document.path === 'docs/TECHNICAL_DESIGN.md')!.artifactPath), 'utf8')
-    expect(originalTechnical).toContain('technical.supported_actions: ["move","attack"]')
-    expect(originalTechnical).not.toContain('technical.supported_actions: ["move","attack","dash"]')
+    expect(originalTechnical).toContain('REPAIR_REQUIRED')
+    expect(originalTechnical).not.toBe(repairedTechnical)
 
     current = await waitForAccepted(controller, store, run)
     const link = current.foundationReviewStage!
-    expect(link.sequence).toBe(2)
+    expect(link.sequence).toBe(rounds * 2)
+    expect(link.candidate?.round).toBe(rounds)
     expect(link.acceptedReview?.kind).toBe('passed')
     expect(link.sourceReview?.kind).toBe('issues_found')
     expect(link.sourceReview?.issues).toHaveLength(1)
     const issue = link.sourceReview!.issues[0]!.issue
-    expect(issue.type).toBe('contract')
+    expect(issue.type).toBe('semantic')
     expect(issue.source.documentPath).toBe('docs/TECHNICAL_DESIGN.md')
-    if (!('sectionId' in issue.source) || !('target' in issue)) throw new Error('Expected one section contract issue')
-    expect(issue.source.sectionId).toBe('input_interaction')
-    expect(issue.target?.documentPath).toBe('docs/GDD.md')
-    expect(issue.target?.sectionId).toBe('player_actions')
+    expect(issue).not.toHaveProperty('remediation')
+    expect(link.sourceReview!.requirements).toMatchObject({ status: 'available', content: brief })
+    expect(link.acceptedReview!.documents).toHaveLength(8)
+    expect(link.acceptedReview!.audit).not.toHaveProperty('reviewedDocuments')
+    expect(link.candidate!.revisionSummary).toBeTruthy()
+    expect(link.candidate!).not.toHaveProperty('repairClaims')
     expect(link.candidate?.documents.find(document => document.path === 'docs/TECHNICAL_DESIGN.md')!.content)
-      .toContain('technical.supported_actions: ["move","attack","dash"]')
+      .not.toContain('REPAIR_REQUIRED')
     expect(link.candidate?.documents.filter(document => document.path !== 'docs/TECHNICAL_DESIGN.md')
       .map(document => document.digest)).toEqual(link.sourceReview?.documents.filter(document => document.path !== 'docs/TECHNICAL_DESIGN.md')
       .map(document => document.digest))
     expect(await readFile(join(workspacePath, 'docs/TECHNICAL_DESIGN.md'), 'utf8'))
-      .toContain('technical.supported_actions: ["move","attack","dash"]')
+      .not.toContain('REPAIR_REQUIRED')
     expect(await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8'))
-      .toContain('game.mechanics: ["move","attack","dash"]')
+      .toContain(immutableAuthorDocuments['docs/GDD.md']!.replace('REPAIR_REQUIRED', 'Repair completed').trim())
     for (const artifact of authorResult.documents) {
       expect(digest(await readFile(join(workspacePath, artifact.artifactPath), 'utf8'))).toBe(artifact.digest)
     }
@@ -189,10 +187,10 @@ test('independent public Author → Reviewer → Revision → Reviewer chain rep
     } finally { await recovered.dispose() }
     expect(authorRuntimeCalls.count).toBe(8)
     expect(authorBillingCalls.count).toBe(8)
-    expect(reviewerRuntimeCalls.count).toBeGreaterThanOrEqual(2)
-    expect(reviewerBillingCalls.count).toBeGreaterThanOrEqual(2)
-    expect(revisionRuntimeCalls.count).toBe(1)
-    expect(revisionBillingCalls.count).toBe(1)
+    expect(reviewerRuntimeCalls.count).toBeGreaterThanOrEqual(rounds + 1)
+    expect(reviewerBillingCalls.count).toBeGreaterThanOrEqual(rounds + 1)
+    expect(revisionRuntimeCalls.count).toBe(rounds)
+    expect(revisionBillingCalls.count).toBe(rounds)
   } finally {
     await controller.dispose()
   }

@@ -37,7 +37,6 @@ export async function flushRevisionUsage(
           producer: 'foundation-revision',
           requestId: request.requestId,
           attemptId: entry.attemptId,
-          documentPath: entry.documentPath,
           receiptDigest: entry.receiptDigest,
         },
       })
@@ -51,9 +50,9 @@ export async function flushRevisionUsage(
   const current = await store.readUsageOutbox()
   const pending = current.entries.filter(entry => !entry.receipt).length
   return {
-    settled: current.activeAttemptIds.length === 0 && pending === 0,
+    settled: current.activeAttemptId === null && pending === 0,
     pending,
     acknowledged: current.entries.length - pending,
-    active: current.activeAttemptIds.length,
+    active: current.activeAttemptId ? 1 : 0,
   }
 }

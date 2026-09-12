@@ -6,7 +6,7 @@ import { parseRevisionCandidateResult, type RevisionCandidateResult } from './ca
 import { revisionCanonicalJson, revisionDigest } from './json-digest'
 
 const MAX_RESULT_BYTES = 32 * 1024 * 1024
-const relativeResultsRoot = '.beegame/workflow/foundation-revision/results'
+const relativeResultsRoot = '.beegame/workflow/foundation-revision/native-file-v1/results'
 
 async function assertDirectories(path: string): Promise<void> {
   let cursor = path

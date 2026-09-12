@@ -11,10 +11,10 @@ test('diagnostics are a closed, bounded native/output vocabulary', () => {
   expect(revisionFailureDiagnosticSchema.parse({ stage: 'native', reasonCode: 'revision_native_result_failed' })).toEqual({
     stage: 'native', reasonCode: 'revision_native_result_failed',
   })
-  expect(revisionFailureDiagnosticSchema.parse({ stage: 'output_validation', reasonCode: 'validation_marker_order' })).toEqual({
-    stage: 'output_validation', reasonCode: 'validation_marker_order',
+  expect(revisionFailureDiagnosticSchema.parse({ stage: 'output_validation', reasonCode: 'validation_unknown' })).toEqual({
+    stage: 'output_validation', reasonCode: 'validation_unknown',
   })
-  expect(() => revisionFailureDiagnosticSchema.parse({ stage: 'native', reasonCode: 'validation_title' })).toThrow()
+  expect(() => revisionFailureDiagnosticSchema.parse({ stage: 'native', reasonCode: 'validation_unknown' })).toThrow()
   expect(() => revisionFailureDiagnosticSchema.parse({ stage: 'output_validation', reasonCode: 'revision_native_result_failed' })).toThrow()
   expect(() => revisionFailureDiagnosticSchema.parse({ stage: 'native', reasonCode: 'revision_native_aborted' })).toThrow()
   expect(() => revisionFailureDiagnosticSchema.parse({ stage: 'native', reasonCode: 'native_unknown', extra: true })).toThrow()
@@ -44,15 +44,15 @@ test('native classification uses the explicit code allowlist and never reads hos
   })
 })
 
-test('output validators map only trusted static prefixes and exact text', () => {
+test('output diagnostics do not interpret old validator text or leak unknown exception messages', () => {
   expect(classifyRevisionOutputFailure(new Error('complete game document requires one document title'))).toEqual({
-    stage: 'output_validation', reasonCode: 'validation_title',
+    stage: 'output_validation', reasonCode: 'validation_unknown',
   })
   expect(classifyRevisionOutputFailure(new Error('complete game document production materials must exactly match the canonical order for docs/GDD.md'))).toEqual({
-    stage: 'output_validation', reasonCode: 'validation_marker_order',
+    stage: 'output_validation', reasonCode: 'validation_unknown',
   })
   expect(classifyRevisionOutputFailure(new Error('production material format is invalid: risky-material:mermaid:line 4'))).toEqual({
-    stage: 'output_validation', reasonCode: 'validation_material_format',
+    stage: 'output_validation', reasonCode: 'validation_unknown',
   })
   expect(classifyRevisionOutputFailure(new Error('secret output bytes that are not a trusted validator prefix'))).toEqual({
     stage: 'output_validation', reasonCode: 'validation_unknown',

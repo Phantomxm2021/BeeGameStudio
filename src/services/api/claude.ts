@@ -1,3 +1,5 @@
+import { emitNativeDiagnostic, nextNativeDiagnosticRequest } from '@bee-game-studio/agent-workflow/native-diagnostics'
+import { createEvidenceResponseRecorder, recordContextChange, recordNativeEvidence, withEvidenceRequest } from '@bee-game-studio/agent-workflow/native-evidence'
 import type {
   BetaContentBlock,
   BetaContentBlockParam,
@@ -886,19 +888,23 @@ export async function* executeNonStreamingRequest(
         retryParams,
         MAX_NON_STREAMING_TOKENS,
       )
+      const evidenceRequest = nextNativeDiagnosticRequest()
+      const evidenceIds = { requestId: evidenceRequest, requestAttempt: attempt }
+      const body = { ...adjustedParams, model: normalizeModelStringForAPI(adjustedParams.model) }
+      recordNativeEvidence('sdk_request', { mode: 'non_streaming_fallback', originatingRequestId, body }, evidenceIds)
 
       try {
-        return await anthropic.beta.messages.create(
-          {
-            ...adjustedParams,
-            model: normalizeModelStringForAPI(adjustedParams.model),
-          },
+        const response = await withEvidenceRequest(evidenceIds, () => anthropic.beta.messages.create(
+          body,
           {
             signal: retryOptions.signal,
             timeout: fallbackTimeoutMs,
           },
-        )
+        ))
+        recordNativeEvidence('api_response', response, evidenceIds)
+        return response
       } catch (err) {
+        recordNativeEvidence('request_failed', { mode: 'non_streaming_fallback' }, evidenceIds)
         // User aborts are not errors — re-throw immediately without logging
         if (err instanceof APIUserAbortError) throw err
 
@@ -1874,6 +1880,8 @@ async function* queryModel(
   let research: unknown
   let isFastModeRequest = isFastMode // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false
+  let diagnosticRequest = 0
+  const responseEvidence = createEvidenceResponseRecorder(() => diagnosticRequest)
 
   try {
     queryCheckpoint('query_client_creation_start')
@@ -1905,6 +1913,12 @@ async function* queryModel(
         // awaits until response headers arrive, so this MUST be before the await
         // or the "Network TTFB" phase measurement is wrong.
         queryCheckpoint('query_api_request_sent')
+        diagnosticRequest = nextNativeDiagnosticRequest()
+        emitNativeDiagnostic({ event: 'request_start', request: diagnosticRequest, attempt })
+        recordContextChange('api_message_preparation', messages, params.messages, { requestId: diagnosticRequest })
+        recordNativeEvidence('sdk_request', { mode: 'streaming', querySource: options.querySource, requestedModel: options.model,
+          runtime: { version: MACRO.VERSION, buildTime: MACRO.BUILD_TIME },
+          body: { ...params, stream: true } }, { requestId: diagnosticRequest, requestAttempt: attempt })
         if (!options.agentId) {
           headlessProfilerCheckpoint('api_request_sent')
         }
@@ -1920,7 +1934,7 @@ async function* queryModel(
         // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
         // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need
         // since we handle tool input accumulation ourselves
-        const result = await anthropic.beta.messages
+        const result = await withEvidenceRequest({ requestId: diagnosticRequest, requestAttempt: attempt }, () => anthropic.beta.messages
           .create(
             { ...params, stream: true },
             {
@@ -1930,9 +1944,11 @@ async function* queryModel(
               }),
             },
           )
-          .withResponse()
+          .withResponse())
         queryCheckpoint('query_response_headers_received')
+        emitNativeDiagnostic({ event: 'response_headers', request: diagnosticRequest, status: result.response.status })
         streamRequestId = result.request_id
+        recordNativeEvidence('api_response_metadata', { providerRequestId: result.request_id, status: result.response.status }, { requestId: diagnosticRequest })
         streamResponse = result.response
         return result.data
       },
@@ -2020,6 +2036,8 @@ async function* queryModel(
       let stallCount = 0
 
       for await (const part of providerStream) {
+        responseEvidence.consume(part)
+        if (isFirstChunk) emitNativeDiagnostic({ event: 'first_stream_event', request: diagnosticRequest })
         const now = Date.now()
 
         // Detect and log streaming stalls (only after first event to avoid counting TTFB)
@@ -2877,6 +2895,8 @@ async function* queryModel(
     }
   } finally {
     stopSessionActivity('api_call')
+    emitNativeDiagnostic({ event: 'stream_end', request: diagnosticRequest })
+    responseEvidence.finish({ stopReason, usage, didFallBackToNonStreaming })
     // Must be in the finally block: if the generator is terminated early
     // via .return() (e.g. consumer breaks out of for-await-of, or query.ts
     // encounters an abort), code after the try/finally never executes.

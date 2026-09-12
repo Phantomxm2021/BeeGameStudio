@@ -368,6 +368,7 @@
   },
   "landing": {
     "intake": {
+      "devProjectPurge": {"button":"開発・テスト：全プロジェクトを削除","confirm":"このアカウントの {{count}} 件のプロジェクトと削除可能なワークスペースを完全に削除します。元に戻せません。アカウントとリソースライブラリは削除されません。","delete":"全プロジェクトを完全に削除","cancel":"キャンセル","pending":"処理中です。再送信しないでください…","result":"{{deleted}} 件を削除、{{failed}} 件が失敗しました。残りの一覧を確認してください。","changed":"プロジェクト一覧が変更されました。再確認してください。","failed":"削除結果を確認できません。一覧を更新して確認してから再送信してください。"},
       "modal": {
         "chooseOption": "Choose a direction",
         "productionSettings": "Build settings",
@@ -418,6 +419,8 @@
       "errors": {
         "missingPlatformModel": "The platform default model is not configured. Contact an administrator to configure it in platform settings before generating.",
         "projectStartFailed": "Unable to start the project. Check the service and try again.",
+        "projectQuotaExceeded": "プロジェクト数が上限に達しています：現在 {{projectCount}} 件、上限 {{limit}} 件。「プロジェクト履歴」で不要なプロジェクトを削除して再試行するか、管理者に上限の変更を依頼してください。Credit 残高不足ではありません。",
+        "projectQuotaExceededUnknown": "プロジェクト数が上限に達しています。「プロジェクト履歴」で不要なプロジェクトを削除して再試行するか、管理者に上限の変更を依頼してください。Credit 残高不足ではありません。",
         "authNotConfigured": "Supabase Auth is not configured.",
         "missingEmailPassword": "Enter your email and password.",
         "missingDisplayName": "Set a display name.",

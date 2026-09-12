@@ -7,6 +7,10 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./native-diagnostics": "./src/native-diagnostics.ts",
+    "./native-evidence": "./src/native-evidence.ts",
+    "./native-file-agent": "./src/native-file-agent.ts",
+    "./native-task-access": "./src/native-task-access.ts",
     "./package.json": "./package.json"
   },
   "scripts": {

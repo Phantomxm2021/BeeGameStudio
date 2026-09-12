@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { RevisionHandle, RevisionResult } from '../../public'
+import { foundationRevisionInputDigest, type RevisionHandle, type RevisionResult, type RevisionStartInput } from '../../public'
 import { openRevisionAttemptStore } from '../attempt-store'
 import { openRevisionExecutionLease } from '../execution-lease'
 import { readRevisionRequestByHandle } from '../request-store'
@@ -12,13 +12,14 @@ import fixtures from './fixtures/public-initial-inputs.json'
 test('Revision public lifecycle executes in a detached process using only frozen input data and its own runtime', async () => {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'revision-public-process-')))
   const moduleRoot = resolve(import.meta.dir, '../..')
-  const input = structuredClone(fixtures.lifecycle)
+  const input = structuredClone(fixtures.lifecycle) as { start: RevisionStartInput; validMarkdown: string }
   input.start.requestId = 'detached-public-process'
+  input.start.inputDigest = foundationRevisionInputDigest({ownerId:input.start.ownerId,projectId:input.start.projectId,input:input.start.input})
   let executionStarted = false
   let executionExited = false
   let handle: RevisionHandle | undefined
   try {
-    const config = { entrypoints: [join(moduleRoot, 'public.ts'), join(import.meta.dir, 'owned-attempt-fixture.ts')],
+    const config = { entrypoints: [join(moduleRoot, 'public.ts'), join(import.meta.dir, 'native-file-revision.ts')],
       target: 'bun', outdir: workspacePath, naming: '[name].js' }
     const buildScript = [
       "const { readFile, realpath } = await import('node:fs/promises');",
@@ -27,7 +28,7 @@ test('Revision public lifecycle executes in a detached process using only frozen
       "config.plugins = [{ name: 'revision-closed-runtime', setup(build) {",
       '  build.onLoad({ filter: /.*/ }, async args => {',
       '    const path = await realpath(args.path);',
-      '    if (!path.startsWith(' + JSON.stringify(moduleRoot + '/') + ") && !path.includes('/node_modules/zod/'))",
+      '    if (!path.startsWith(' + JSON.stringify(moduleRoot + '/') + ") && !path.includes('/node_modules/zod/') && !" + JSON.stringify(['native-file-agent.ts', 'native-task-access.ts'].map(file => resolve(moduleRoot, '../../../../../../packages/agent-workflow/src', file))) + '.includes(path))',
       "      throw new Error('Unexpected Revision runtime dependency: ' + path);",
       '    loaded.add(path);',
       "    return { contents: await readFile(path, 'utf8'), loader: path.endsWith('.ts') ? 'ts' : 'js' };",
@@ -58,7 +59,7 @@ test('Revision public lifecycle executes in a detached process using only frozen
       'const ledger = new Map();',
       'const runtimeConfiguration = { protocolVersion: 1, ownerId, async resolve() {',
       '  calls++;',
-      '  return { command: [process.execPath, ' + JSON.stringify(join(workspacePath, 'owned-attempt-fixture.js')) +
+      '  return { command: [process.execPath, ' + JSON.stringify(join(workspacePath, 'native-file-revision.js')) +
         ", 'valid', Buffer.from(input.validMarkdown).toString('base64')], env: { OPENAI_API_KEY: 'offline-unused-sentinel' } };",
       '} };',
       'const billing = { protocolVersion: 1, ownerId, async submitUsage(value) {',
@@ -114,11 +115,11 @@ test('Revision public lifecycle executes in a detached process using only frozen
     expect(output.completed.billingStatus).toBe('settled')
     expect(output.completed.result.kind).toBe('candidate_ready')
     expect('verdict' in output.completed.result).toBe(false)
-    const source = input.start.input.sourceResult
+    const source = fixtures.lifecycle.start.input.sourceResult
     for (const document of output.completed.result.documents) {
       // The frozen native Markdown admission trims the repaired response;
       // untouched documents must still retain their exact original bytes.
-      const expected = document.path === 'docs/GDD.md' ? input.validMarkdown.trim()
+      const expected = document.path === 'docs/GDD.md' ? input.validMarkdown
         : source.documents.find(item => item.path === document.path)!.content
       expect(document.content).toBe(expected)
     }
@@ -130,7 +131,7 @@ test('Revision public lifecycle executes in a detached process using only frozen
       if (!handle) throw new Error('Detached handle unavailable; temporary evidence retained')
       const registration = await readRevisionRequestByHandle(workspacePath, handle.id, input.start.ownerId)
       const store = await openRevisionAttemptStore(workspacePath, registration.prepared.request, { readOnlyHandle: handle.id })
-      expect((await store.readRequest()).activeAttemptIds).toEqual([])
+      expect((await store.readRequest()).activeAttemptId).toBeNull()
       const lease = await openRevisionExecutionLease(workspacePath, registration.prepared.request, { readOnlyHandle: handle.id })
       expect(await lease.status()).toBe('free')
     }

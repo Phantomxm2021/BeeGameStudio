@@ -14,9 +14,7 @@ import { flushRevisionUsage } from '../usage-outbox'
 import type { RevisionBillingUsage } from '../usage-billing'
 import { revisionCanonicalJson, revisionDigest } from '../json-digest'
 import { type RevisionUsageEvent } from '../native-usage'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 const documentPath = 'docs/GDD.md' as const
 const roots: string[] = []
@@ -28,14 +26,12 @@ afterEach(async () => {
 function fixture() {
   const documents = reviewFixtureDocuments()
   documents[0]!.content = '# incomplete'
-  const sourceResult = buildReviewerPublishedResult({
+  const sourceResult = buildSingleReviewFixture({
     documents,
-    state: initialReviewerFactState(documents),
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: { kind: 'initial', sourceResultId: 'author', sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) },
   })
   return {
-    kind: 'initial' as const,
     ownerId: 'owner',
     projectId: 'project',
     requestId: 'usage-outbox',
@@ -73,13 +69,13 @@ function validMarkdown() {
 
 async function terminal(root: string, request: ReturnType<typeof fixture>, status: 'retryable' | 'stopped' | 'completed', event?: RevisionUsageEvent) {
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documentPath)
+  const started = await store.begin()
   const usageEvents = event ? [event] : []
-  if (event) await store.observeUsage(documentPath, { attemptId: started.attemptId, observationIndex: 1, event })
+  if (event) await store.observeUsage({ attemptId: started.attemptId, observationIndex: 1, event })
   const settlement = status === 'completed'
-    ? { status, attemptId: started.attemptId, markdown: validMarkdown(), usageEvents, completion: completion() }
+    ? { status, attemptId: started.attemptId, snapshot: { summary: 'Updated files', documents: reviewFixtureDocuments() }, usageEvents, completion: completion() }
     : { status, attemptId: started.attemptId, failureCode: status === 'stopped' ? 'cancelled' as const : 'native_failed' as const, usageEvents }
-  await store.settle(documentPath, settlement)
+  await store.settle(settlement)
   return { attemptId: started.attemptId, usage: event?.usage ?? { prompt_tokens: 0, completion_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 0 } }
 }
 
@@ -141,7 +137,7 @@ function requestKey(request: ReturnType<typeof fixture>) {
 }
 
 function executionJournal(root: string, request: ReturnType<typeof fixture>) {
-  return join(root, '.beegame/workflow/foundation-revision/requests', requestKey(request), 'execution-events')
+  return join(root, '.beegame/workflow/foundation-revision/native-file-v1/requests', requestKey(request), 'execution-events')
 }
 
 test('outbox contains exact terminal usage for retryable, stopped, and completed attempts, excluding active work', async () => {
@@ -152,17 +148,17 @@ test('outbox contains exact terminal usage for retryable, stopped, and completed
     await terminal(root, request, status, expected)
     const store = await openRevisionAttemptStore(root, request)
     const outbox = await store.readUsageOutbox()
-    expect(outbox.activeAttemptIds).toEqual([])
+    expect(outbox.activeAttemptId).toBeNull()
     expect(outbox.entries).toHaveLength(1)
-    expect(outbox.entries[0]).toMatchObject({ documentPath, usage: expected.usage, receipt: null })
+    expect(outbox.entries[0]).toMatchObject({ usage: expected.usage, receipt: null })
     expect(outbox.entries[0]!.eventId).toContain(outbox.entries[0]!.attemptId)
   }
 
   const root = await workspace()
   const request = fixture()
   const store = await openRevisionAttemptStore(root, request)
-  const started = await store.begin(documentPath)
-  expect(await store.readUsageOutbox()).toEqual({ entries: [], activeAttemptIds: [started.attemptId] })
+  const started = await store.begin()
+  expect(await store.readUsageOutbox()).toEqual({ entries: [], activeAttemptId: started.attemptId })
   const calls: Call[] = []
   expect(await flushRevisionUsage(root, request, client(calls))).toEqual({ settled: false, pending: 0, acknowledged: 0, active: 1 })
   expect(calls).toHaveLength(0)
@@ -191,7 +187,7 @@ test('zero usage is acknowledged as skipped, while positive debit failure retrie
   expect(await flushRevisionUsage(root, request, billing)).toEqual({ settled: true, pending: 0, acknowledged: 1, active: 0 })
   expect(calls.map(call => call.method)).toEqual(['record', 'debit', 'record', 'debit'])
   expect(new Set(calls.map(call => call.input.idempotencyKey)).size).toBe(1)
-  await expect((await openRevisionAttemptStore(root, request)).begin(documentPath)).rejects.toThrow('already completed')
+  await expect((await openRevisionAttemptStore(root, request)).begin()).rejects.toThrow('already completed')
 })
 
 test('concurrent flushes accept duplicate billing flags but commit one durable acknowledgement', async () => {
@@ -285,7 +281,7 @@ test('successful authority submission followed by failed local acknowledgement r
   finally { await rmdir(blocker) }
   const store = await openRevisionAttemptStore(root, request)
   expect((await store.readUsageOutbox()).entries[0]!.receipt).toBeNull()
-  expect((await store.read(documentPath)).status).toBe('completed')
+  expect((await store.read()).status).toBe('completed')
   expect(await flushRevisionUsage(root, request, authority)).toMatchObject({ settled: true, acknowledged: 1 })
   expect(new Set(calls.map(call => call.input.idempotencyKey)).size).toBe(1)
   const acknowledged = (await store.readUsageOutbox()).entries[0]!

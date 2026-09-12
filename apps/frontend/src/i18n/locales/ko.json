@@ -368,6 +368,7 @@
   },
   "landing": {
     "intake": {
+      "devProjectPurge": {"button":"개발/테스트: 모든 프로젝트 삭제","confirm":"이 계정의 프로젝트 {{count}}개와 삭제 가능한 작업 공간을 영구 삭제합니다. 복구할 수 없습니다. 계정과 리소스 라이브러리는 삭제하지 않습니다.","delete":"모든 프로젝트 영구 삭제","cancel":"취소","pending":"처리 중입니다. 다시 제출하지 마세요…","result":"{{deleted}}개 삭제, {{failed}}개 실패. 남은 목록을 확인하세요.","changed":"프로젝트 목록이 변경되었습니다. 목록을 다시 확인하세요.","failed":"삭제 결과를 확인하지 못했습니다. 다시 제출하기 전에 목록을 새로 고침하여 확인하세요."},
       "modal": {
         "chooseOption": "Choose a direction",
         "productionSettings": "Build settings",
@@ -418,6 +419,8 @@
       "errors": {
         "missingPlatformModel": "The platform default model is not configured. Contact an administrator to configure it in platform settings before generating.",
         "projectStartFailed": "Unable to start the project. Check the service and try again.",
+        "projectQuotaExceeded": "프로젝트 수가 한도에 도달했습니다: 현재 {{projectCount}}개, 한도 {{limit}}개. 프로젝트 기록에서 불필요한 프로젝트를 삭제하고 다시 시도하거나 관리자에게 한도 조정을 요청하세요. Credit 잔액 부족 문제가 아닙니다.",
+        "projectQuotaExceededUnknown": "프로젝트 수가 한도에 도달했습니다. 프로젝트 기록에서 불필요한 프로젝트를 삭제하고 다시 시도하거나 관리자에게 한도 조정을 요청하세요. Credit 잔액 부족 문제가 아닙니다.",
         "authNotConfigured": "Supabase Auth is not configured.",
         "missingEmailPassword": "Enter your email and password.",
         "missingDisplayName": "Set a display name.",

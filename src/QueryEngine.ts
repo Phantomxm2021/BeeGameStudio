@@ -41,7 +41,7 @@ import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
 import type { AgentDefinition } from '@bee-game-studio/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import type { APIError } from '@anthropic-ai/sdk'
-import type { Message, SystemCompactBoundaryMessage } from './types/message.js'
+import type { Message, AssistantMessage, UserMessage, SystemCompactBoundaryMessage } from './types/message.js'
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
 import type { AttributionState } from './utils/commitAttribution.js'
@@ -61,7 +61,7 @@ import {
 import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
 import { registerStructuredOutputEnforcement } from './utils/hooks/hookHelpers.js'
 import { getInMemoryErrors } from './utils/log.js'
-import { countToolCalls, SYNTHETIC_MESSAGES } from './utils/messages.js'
+import { SYNTHETIC_MESSAGES } from './utils/messages.js'
 import {
   getMainLoopModel,
   parseUserSpecifiedModel,
@@ -673,6 +673,11 @@ export class QueryEngine {
     let hasAcknowledgedInitialMessages = false
     // Track structured output from StructuredOutput tool calls
     let structuredOutputFromTool: unknown
+    const structuredOutputCallIds = new Set<string>()
+    const failedStructuredOutputCallIds = new Set<string>()
+    let structuredOutputCount = 0
+    const singleOutputToolMode = Boolean(jsonSchema && hasStructuredOutputTool && (tools.length === 1 ||
+      process.env.BEEGAME_WORKFLOW_WORKER_TYPE === 'foundation-reviewer-tools-v2'))
     // Track the last stop_reason from assistant messages
     let lastStopReason: string | null = null
     // Reference-based watermark so error_during_execution's errors[] is
@@ -680,11 +685,6 @@ export class QueryEngine {
     // shift()s during the turn — the index slides. If this entry is rotated
     // out, lastIndexOf returns -1 and we include everything (safe fallback).
     const errorLogWatermark = getInMemoryErrors().at(-1)
-    // Snapshot count before this query for delta-based retry limiting
-    const initialStructuredOutputCalls = jsonSchema
-      ? countToolCalls(this.mutableMessages, SYNTHETIC_OUTPUT_TOOL_NAME)
-      : 0
-
     for await (const message of query({
       messages,
       systemPrompt,
@@ -695,6 +695,8 @@ export class QueryEngine {
       fallbackModel,
       querySource: 'sdk',
       maxTurns,
+      maxModelIterations: jsonSchema ? maxTurns : undefined,
+      stopAfterStructuredOutput: singleOutputToolMode,
       taskBudget,
     })) {
       // Record assistant, user, and compact boundary messages
@@ -774,10 +776,13 @@ export class QueryEngine {
           // Tombstone messages are control signals for removing messages, skip them
           break
         case 'assistant': {
+          const msg = message as AssistantMessage
+          if (Array.isArray(msg.message.content)) for (const block of msg.message.content) {
+            if (block.type === 'tool_use' && block.name === SYNTHETIC_OUTPUT_TOOL_NAME) structuredOutputCallIds.add(block.id)
+          }
           // Capture stop_reason if already set (synthetic messages). For
           // streamed responses, this is null at content_block_stop time;
           // the real value arrives via message_delta (handled below).
-          const msg = message as Message
           const stopReason = msg.message?.stop_reason as
             | string
             | null
@@ -805,7 +810,11 @@ export class QueryEngine {
           break
         }
         case 'user': {
-          const msg = message as Message
+          const msg = message as UserMessage
+          if (Array.isArray(msg.message.content)) for (const block of msg.message.content) {
+            if (block.type === 'tool_result' && block.is_error === true && structuredOutputCallIds.has(block.tool_use_id))
+              failedStructuredOutputCallIds.add(block.tool_use_id)
+          }
           this.mutableMessages.push(msg)
           yield* normalizeMessage(msg)
           break
@@ -881,6 +890,7 @@ export class QueryEngine {
           // Extract structured output from StructuredOutput tool calls
           if (attachment.type === 'structured_output') {
             structuredOutputFromTool = attachment.data
+            structuredOutputCount++
           }
           // Handle max turns reached signal from query.ts
           else if (attachment.type === 'max_turns_reached') {
@@ -1054,18 +1064,14 @@ export class QueryEngine {
         return
       }
 
-      // Check if structured output retry limit exceeded (only on user messages)
+      // Count failed tool results only. A successful submission is not a
+      // retry and must not be discarded just because it was the fifth call.
       if (message.type === 'user' && jsonSchema) {
-        const currentCalls = countToolCalls(
-          this.mutableMessages,
-          SYNTHETIC_OUTPUT_TOOL_NAME,
-        )
-        const callsThisQuery = currentCalls - initialStructuredOutputCalls
         const maxRetries = parseInt(
           process.env.MAX_STRUCTURED_OUTPUT_RETRIES || '5',
           10,
         )
-        if (callsThisQuery >= maxRetries) {
+        if (failedStructuredOutputCallIds.size >= maxRetries) {
           if (persistSession) {
             if (
               isEnvTruthy(process.env.CLAUDE_CODE_EAGER_FLUSH) ||
@@ -1135,7 +1141,7 @@ export class QueryEngine {
       }
     }
 
-    if (!isResultSuccessful(result, lastStopReason)) {
+    if ((singleOutputToolMode && structuredOutputCount > 1) || !isResultSuccessful(result, lastStopReason)) {
       yield {
         type: 'result',
         subtype: 'error_during_execution',
@@ -1165,6 +1171,7 @@ export class QueryEngine {
             ? all.lastIndexOf(errorLogWatermark) + 1
             : 0
           return [
+            ...(singleOutputToolMode && structuredOutputCount > 1 ? ['Multiple successful structured outputs in a single-action response'] : []),
             `[ede_diagnostic] result_type=${edeResultType} last_content_type=${edeLastContentType} stop_reason=${lastStopReason}`,
             ...all.slice(start).map(_ => _.error),
           ]

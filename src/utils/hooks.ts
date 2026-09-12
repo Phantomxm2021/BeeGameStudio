@@ -149,6 +149,7 @@ import { findToolByName, type Tools, type ToolUseContext } from '../Tool.js'
 import { execPromptHook } from './hooks/execPromptHook.js'
 import type { Message, AssistantMessage } from '../types/message.js'
 import { execAgentHook } from './hooks/execAgentHook.js'
+import { isStructuredOutputProtocolHook } from './hooks/structuredOutputPolicy.js'
 import { execHttpHook } from './hooks/execHttpHook.js'
 import type { ShellCommand } from './ShellCommand.js'
 import {
@@ -1667,7 +1668,7 @@ function getHooksConfig(
   // Merge session hooks for the current session only
   // Function hooks (like structured output enforcement) must be scoped to their session
   // to prevent hooks from one agent leaking to another (e.g., verification agent to main agent)
-  // Skip session hooks entirely when allowManagedHooksOnly is set —
+  // Skip external session hooks when allowManagedHooksOnly is set —
   // this prevents frontmatter hooks from agents/skills from bypassing the policy.
   // strictPluginOnlyCustomization does NOT block here — it gates at the
   // REGISTRATION sites (runAgent.ts:526 for agent frontmatter hooks) where
@@ -1684,8 +1685,12 @@ function getHooksConfig(
         hooks.push(matcher)
       }
     }
+  }
 
-    // Merge session function hooks separately (can't be persisted to HookMatcher format)
+  if (appState !== undefined) {
+    // Keep the built-in structured-output protocol check even when external
+    // hooks are disabled. Do not re-enable other session functions or any
+    // command, prompt, agent, plugin or frontmatter hook.
     const sessionFunctionHooks = getSessionFunctionHooks(
       appState,
       sessionId,
@@ -1693,7 +1698,10 @@ function getHooksConfig(
     ).get(hookEvent)
     if (sessionFunctionHooks) {
       for (const matcher of sessionFunctionHooks) {
-        hooks.push(matcher)
+        const permitted = managedOnly
+          ? { ...matcher, hooks: matcher.hooks.filter(isStructuredOutputProtocolHook) }
+          : matcher
+        if (permitted.hooks.length) hooks.push(permitted)
       }
     }
   }

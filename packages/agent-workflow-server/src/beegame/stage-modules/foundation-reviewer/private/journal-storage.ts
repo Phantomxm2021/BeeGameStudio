@@ -34,7 +34,7 @@ export type JournalStorageOptions<State, Event, Record extends JournalRecord<Eve
   eventSchema: JournalRecordSchema<Record>
   parseEvent(value: unknown): Event
   initialState(): State
-  /** Owner policy: true only when no worker has ever been claimed. */
+  /** Recovery requires proof that execution never started. */
   canRecoverUnstartedExecution?(state: State): boolean
   reduce(state: State, event: Event, at: string, evidence: JournalEventMetadata): State
   messages?: Partial<{

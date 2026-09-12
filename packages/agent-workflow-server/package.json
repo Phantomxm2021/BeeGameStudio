@@ -25,6 +25,7 @@
     "@bee-game-studio/workflow-engine": "workspace:*",
     "@xmldom/xmldom": "^0.8.11",
     "assimpjs": "^0.0.10",
+    "diff": "^8.0.4",
     "fonteditor-core": "^2.6.2",
     "hono": "^4.12.15",
     "mdast-util-from-markdown": "^2.0.3",

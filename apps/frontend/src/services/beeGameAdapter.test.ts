@@ -5,6 +5,7 @@ import {
   getBeeGameWorkspaceSettings,
 } from './beeGameAdapter';
 import { clearSupabaseSession, hydrateSupabaseSessionUser } from './supabaseAuthApi';
+import i18n from '../i18n';
 
 const makeLlmOption = (overrides: Record<string, unknown> = {}) => ({
   id: 'mode_from_llm',
@@ -159,6 +160,21 @@ describe('beeGameAdapter prompt rules', () => {
     clearSupabaseSession();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it('localizes quota failures through the API adapter while preserving error identity', async () => {
+    await i18n.changeLanguage('zh');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      code: 'PROJECT_QUOTA_EXCEEDED', error: 'Project quota exceeded', projectCount: 100, limit: 100,
+    }, 429)));
+    try {
+      await expect(beeGameAdapter.updateProject('quota-project', { name: 'Example' })).rejects.toMatchObject({
+        status: 429, code: 'PROJECT_QUOTA_EXCEEDED',
+        message: expect.stringContaining('当前 100 个，上限 100 个'),
+      });
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('analyzes uploaded attachments without converting them into intake options', async () => {
@@ -3089,6 +3105,11 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/projects/source-1/review-copy',
       expect.objectContaining({ method: 'POST' }),
+    );
+    await expect(beeGameAdapter.createReviewCopy('source-1', { stopAfterReview: true })).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/projects/source-1/review-copy',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ stopAfterReview: true }) }),
     );
   });
 

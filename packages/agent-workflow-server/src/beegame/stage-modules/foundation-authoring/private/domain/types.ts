@@ -20,8 +20,9 @@ export type FoundationDraftState = { completedPaths: FoundationDocumentPath[]; d
 export type AuthoringContract = {
   confirmedBriefDigest: string; confirmedBriefContext?: string; documentSet: 'foundation'
   authoringMode: 'initial' | 'parallel-draft'; foundationDocumentPath: FoundationDocumentPath
+  authorBodyVersion?: 'foundation-author-body.v2'
   availableUpstreamPaths?: FoundationDocumentPath[]; completeDocumentContract?: unknown
-  systemDeliveryContract?: unknown; authoringDeliveryContract?: unknown
+  systemDeliveryContract?: unknown; authoringDeliveryContract?: unknown; factIdentityContract?: unknown
   previousDocumentMetadata?: Record<string, unknown>; changeRequest?: unknown; priorFailureReason?: string
 }
 export type WorkerDispatchRequest = {

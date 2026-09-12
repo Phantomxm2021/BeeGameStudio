@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { revisionCanonicalJson, revisionDigest } from '../json-digest'
 // Test-only interoperability oracle, never part of the Revision dependency graph.
-import { reviewerCanonicalJson, reviewerDigest } from '../../../foundation-reviewer/private/review-summary'
+import { reviewJson as reviewerCanonicalJson, reviewDigest as reviewerDigest } from '../../../foundation-reviewer/private/single-agent-contract'
 
 test('finite JSON preserves the existing public digest contract', () => {
   const shared = { x: '中文 😀', values: [1, null, false] }

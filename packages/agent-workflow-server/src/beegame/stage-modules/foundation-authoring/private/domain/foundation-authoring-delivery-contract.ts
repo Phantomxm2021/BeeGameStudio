@@ -29,6 +29,12 @@ import { beeGameProgrammaticAudioResourceSchema } from './programmatic-audio-res
  */
 export type FoundationAuthoringDeliveryContract = Readonly<{
   formatRule: string
+  audioDeliveryModes: Readonly<{
+    field: 'audioDeliveryMode'
+    values: readonly ['codeSynth', 'managedProgrammatic', 'fileAudio']
+    ownership: string
+    conditions: Readonly<Record<'codeSynth' | 'managedProgrammatic' | 'fileAudio', string>>
+  }>
   programmaticAudio: Readonly<{
     schema: Record<string, unknown>
     manifestRule: string
@@ -189,12 +195,21 @@ export type FoundationAuthoringDeliveryContract = Readonly<{
 export function buildFoundationAuthoringDeliveryContract(): FoundationAuthoringDeliveryContract {
   return {
     formatRule: 'project_target.asset_format_capabilities contains lowercase ASCII alphanumeric file extensions without dots (e.g. json, wav), not semantic capability labels. Put supported semantic capabilities in acquisition_profile.capabilities or resource capabilities.',
+    audioDeliveryModes: {
+      field: 'audioDeliveryMode', values: ['codeSynth', 'managedProgrammatic', 'fileAudio'],
+      ownership: 'In Technical data_content, declare `audioDeliveryMode: codeSynth|managedProgrammatic|fileAudio` (exactly one value) and the corresponding `audioCapability.runtime_synthesis|programmatic_audio_adapter|audio_file_decode: supported — <concrete runtime evidence>` line. Select only an evidenced capability; do not label an unverified hypothesis supported. Audio owns cue/mix behavior, and Asset Plan follows the selected mode. A silent game declares audio events not_applicable, not an invented delivery obligation. Do not infer capability from a file extension or generic platform name.',
+      conditions: {
+        codeSynth: 'Use only with an explicitly supported runtime synthesis API and authored source-code ownership. Deliver source modules and their runtime integration; no managed JSON audio manifest or audio-file row is required solely for synthesis.',
+        managedProgrammatic: 'Use only when the runtime explicitly consumes the parser-backed programmaticAudio schema below. Apply its JSON, manifest, provisional and registration requirements; code synthesis support alone does not establish this adapter capability.',
+        fileAudio: 'Use only with explicit runtime decoding support and supported declared container formats. Deliver actual files and applicable resource/manifest records; do not substitute a programmatic JSON descriptor for a playable container.',
+      },
+    },
     programmaticAudio: {
       // Export the real closed field/enum/range schema, not a parallel validator.
       // JSON Schema cannot represent the existing superRefine relationships;
       // those remain descriptive below and are tested via the real parser.
       schema: z.toJSONSchema(beeGameProgrammaticAudioResourceSchema),
-      manifestRule: 'Programmatic audio requires provisional=true, asset_kind audio-cue or audio-bank, and a single JSON root under assets/runtime: file_paths=[root_path]. It is not an arbitrary patch/node graph or a playable audio container.',
+      manifestRule: 'For managed programmatic audio resources only: require provisional=true, asset_kind audio-cue or audio-bank, and a single JSON root under assets/runtime: file_paths=[root_path]. It is not an arbitrary patch/node graph or a playable audio container. Code-only runtime synthesis is a separate delivery mode: when Technical and Audio explicitly own synthesis in source code, no managed JSON audio resource is required. File audio uses its declared supported container. State the selected delivery mode and keep Asset Plan consistent with its owners.',
       cueRule: 'audio-cue must define exactly one cue; audio-bank may define 1–32 cues. Do not label a multi-cue bank as audio-cue.',
       relationalRules: [
         'Cue IDs must be unique within the resource.',
@@ -207,7 +222,7 @@ export function buildFoundationAuthoringDeliveryContract(): FoundationAuthoringD
     placeholderAdapters: CONFIGURED_PROVISIONAL_RESOURCE_ADAPTERS.map(adapter => ({
       format: adapter.format, assetKinds: [...adapter.assetKinds],
     })),
-    placeholderRule: 'Schema acceptance does not imply configured placeholder-generation support. CommitResourceInventory provisional generation requires both format and asset kind in the configured adapter table. Zero-audio-container designs require a confirmed authored programmatic JSON handoff; otherwise record the integration dependency. Do not request JSON audio from an unsupported placeholder adapter or silently substitute WAV.',
+    placeholderRule: 'Schema acceptance does not imply configured placeholder-generation support. CommitResourceInventory provisional generation requires both format and asset kind in the configured adapter table. Managed programmatic JSON audio requires a confirmed authored handoff; otherwise record the integration dependency. Code-only runtime synthesis needs no audio-container or managed JSON handoff, but its runtime implementation and event coverage must be assigned. Do not request JSON audio from an unsupported placeholder adapter or silently substitute WAV.',
     canonicalAssetManifest: {
       path: CANONICAL_ASSET_MANIFEST,
       version: CURRENT_ASSET_MANIFEST_VERSION,

@@ -5,6 +5,9 @@
 import '../utils/performanceShim.js';
 import { feature } from 'bun:bundle';
 import { isEnvTruthy } from '../utils/envUtils.js';
+import { emitNativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics';
+
+emitNativeDiagnostic({ event: 'cli_entry' });
 
 // Runtime fallback for MACRO.* when not injected by build/dev defines.
 // This happens when running cli.tsx directly (not via `bun run dev` or built dist/).

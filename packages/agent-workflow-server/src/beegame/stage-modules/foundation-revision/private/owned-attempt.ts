@@ -1,15 +1,17 @@
 import { z } from 'zod/v4'
+import { writeFile } from 'node:fs/promises'
 import { revisionCanonicalJson } from './json-digest'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from './domain/types'
 import { openRevisionAttemptStore } from './attempt-store'
-import { createRevisionNativeAssignment } from './native-assignment'
+import { prepareRevisionFiles, revisionFileReportSchema } from './native-files'
+import { acceptRevisionRequest } from './request-store'
+import { dirname, join } from 'node:path'
 import { buildRevisionNativeEnvironment } from './native-environment'
 import { executeRevisionNativeProcess, RevisionNativeProcessError, type RevisionNativeProcessResult } from './native-process'
 import { captureRevisionUsageEvent, type RevisionUsageEvent } from './native-usage'
-import { acceptRevisionWorkerOutput } from './worker-output'
+import type { RevisionSnapshot } from './revision-snapshot'
 import { classifyRevisionNativeFailure, classifyRevisionOutputFailure } from './failure-diagnostic'
 
-const inputSchema = z.object({ request: z.unknown(), documentPath: z.enum(CANONICAL_FOUNDATION_DOCUMENTS),
+const inputSchema = z.object({ request: z.unknown(),
   configuration: z.object({ command: z.array(z.string().min(1).refine(value => !value.includes('\0'))).min(1),
     env: z.record(z.string(), z.string().refine(value => !value.includes('\0'))) }).strict() }).strict()
 type Store = Awaited<ReturnType<typeof openRevisionAttemptStore>>
@@ -28,15 +30,15 @@ export async function runRevisionOwnedAttempt(workspacePath: string, value: unkn
   const externalSignal = controls.signal
   const onCompleted = controls.onCompleted
   const store = await openRevisionAttemptStore(workspacePath, input.request)
-  const previous = await store.read(input.documentPath)
+  const previous = await store.read()
   if (previous.completed) {
     // A failed downstream callback is replayed against the immutable receipt;
     // neither new native configuration nor callback failure triggers a worker.
-    const receipt = await store.settle(input.documentPath, previous.completed.settlement)
+    const receipt = await store.settle(previous.completed.settlement)
     await onCompleted?.(structuredClone(receipt))
     return receipt
   }
-  const started = await store.begin(input.documentPath)
+  const started = await store.begin()
   const controller = new AbortController()
   const signal = controller.signal
   let stopTail: Promise<void> = Promise.resolve()
@@ -62,15 +64,15 @@ export async function runRevisionOwnedAttempt(workspacePath: string, value: unkn
   await stopTail
   pollTail = poll()
   await pollTail
-  let assignment: Awaited<ReturnType<typeof createRevisionNativeAssignment>>
+  let assignment: Awaited<ReturnType<typeof prepareRevisionFiles>>
   try {
-    assignment = await createRevisionNativeAssignment({ request: input.request, documentPath: input.documentPath,
-      attemptId: started.attemptId,
-      ...(previous.lastSettlement?.status === 'retryable' ? { priorFailureReason: previous.lastSettlement.failureCode } : {}) })
+    const registration = await acceptRevisionRequest(workspacePath, input.request)
+    assignment = await prepareRevisionFiles(join(dirname(join(workspacePath, registration.artifactPath)),
+      'native-' + started.attemptId), input.request)
   } catch {
     await stopTail
     if (stopControlFailed) throw new Error('Revision stop persistence failed; explicit recovery required')
-    return store.settle(input.documentPath, { status: signal?.aborted ? 'stopped' : 'retryable',
+    return store.settle({ status: signal?.aborted ? 'stopped' : 'retryable',
       attemptId: started.attemptId, failureCode: signal?.aborted ? 'cancelled' : 'owner_failed', usageEvents: [] })
   }
 
@@ -83,18 +85,23 @@ export async function runRevisionOwnedAttempt(workspacePath: string, value: unkn
   let receipt: Receipt
   try {
     try {
-      const env = buildRevisionNativeEnvironment(input.configuration.env, assignment.bridgeEnvironment)
+      const env = buildRevisionNativeEnvironment(input.configuration.env, {
+        workspacePath: assignment.cwd, writablePaths: assignment.writablePaths,
+      })
       await stopTail
       if ((await store.readRequest()).stopped) controller.abort()
       if (stopControlFailed) throw new Error('Revision stop persistence failed')
       beforeSpawn = false
       native = await executeRevisionNativeProcess({ configuration: { command: input.configuration.command, env },
-        cwd: assignment.cwd, scope: assignment.scope, prompt: assignment.prompt, ...(signal ? { signal } : {}),
+        cwd: assignment.cwd, prompt: assignment.prompt, signal, logPath: assignment.logPath,
+        writablePaths: assignment.writablePaths,
+        outputSchema: z.toJSONSchema(revisionFileReportSchema, { target: 'draft-7' }),
+        onProgress: progress => store.observeProgress(started.attemptId, progress),
         async onMessage(message: Record<string, unknown>) {
           const event = captureRevisionUsageEvent(message)
           if (!event) return
           usageEvents.push(event)
-          try { await store.observeUsage(input.documentPath, { attemptId: started.attemptId, observationIndex: usageEvents.length, event }) }
+          try { await store.observeUsage({ attemptId: started.attemptId, observationIndex: usageEvents.length, event }) }
           catch {
             usagePersistenceFailed = true
             throw new Error('Revision usage observation could not be persisted')
@@ -119,25 +126,29 @@ export async function runRevisionOwnedAttempt(workspacePath: string, value: unkn
       const diagnostic = !stopped && !beforeSpawn && nativeError
         ? classifyRevisionNativeFailure(nativeError)
         : undefined
-      receipt = await store.settle(input.documentPath, { status: stopped ? 'stopped' : 'retryable', attemptId: started.attemptId,
+      receipt = await store.settle({ status: stopped ? 'stopped' : 'retryable', attemptId: started.attemptId,
         failureCode: stopped ? 'cancelled' : beforeSpawn ? 'owner_failed' : 'native_failed', usageEvents,
         ...(!stopped && !beforeSpawn && diagnostic ? { diagnostic } : {}),
         ...(nativeError?.completion ? { completion: nativeError.completion } : {}) })
     } else {
+      await writeFile(join(dirname(assignment.logPath), 'native-result.json'),
+        JSON.stringify({ submission: native.submission ?? null }, null, 2), { flag: 'wx', mode: 0o600 })
       let valid = true
       let diagnostic
-      try { acceptRevisionWorkerOutput({ request: input.request, documentPath: input.documentPath, markdown: native.markdown },
-        { updatedAt: new Date(started.startedAt).toISOString() }) }
+      let snapshot: RevisionSnapshot | undefined
+      try {
+        snapshot = await assignment.snapshot(native.submission)
+      }
       catch (error) { valid = false; diagnostic = classifyRevisionOutputFailure(error) }
       // Keep IO/commit failure outside output-validation catch. The immutable
       // link may already exist even if directory sync or a later callback fails.
-      receipt = await store.settle(input.documentPath, valid
-        ? { status: 'completed', attemptId: started.attemptId, markdown: native.markdown, usageEvents, completion: native.completion }
+      receipt = await store.settle(valid
+        ? { status: 'completed', attemptId: started.attemptId, snapshot: snapshot!, usageEvents, completion: native.completion }
         : { status: 'retryable', attemptId: started.attemptId, failureCode: 'output_invalid', usageEvents, diagnostic,
           completion: native.completion })
     }
   } finally {
-    if (closureKnown) await assignment.dispose()
+    // Keep the isolated files and native event log for inspection, including failures.
   }
   // Completion is durable before any downstream effect. Its failure is not
   // caught by native/output failure handling and cannot demote the receipt.

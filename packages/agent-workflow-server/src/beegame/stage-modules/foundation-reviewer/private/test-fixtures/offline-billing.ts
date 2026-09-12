@@ -1,4 +1,4 @@
-import type { ReviewerInfrastructure } from '../initial-lifecycle'
+import type { ReviewerInfrastructure } from '../../public'
 type Input = Parameters<ReviewerInfrastructure['billing']['submitUsage']>[0]
 export function offlineReviewerBilling(ownerId: string) {
   const recorded = new Map<string, Input>()

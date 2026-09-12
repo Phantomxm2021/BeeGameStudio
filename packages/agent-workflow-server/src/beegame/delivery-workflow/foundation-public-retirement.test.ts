@@ -7,16 +7,6 @@ import { createInitialDeliveryRun, createRunStore } from './run-store'
 import { createDeliveryWorkflowController } from './controller'
 import { CANONICAL_FOUNDATION_DOCUMENTS, type DeliveryRun } from './types'
 import { transitionDeliveryRun } from './transition'
-import { createFoundationRepairRequest, createFoundationCandidateReviewRequest, type FoundationCandidateResult } from './foundation-public-handoff'
-import type { ReviewerReviewResult } from '../stage-modules/foundation-reviewer/public'
-import { firstCandidateFixture } from '../stage-modules/foundation-reviewer/private/test-fixtures/candidate-fixture'
-import { buildReviewerTargetedResult } from '../stage-modules/foundation-reviewer/private/targeted-publication'
-import { parseReviewerCandidateStart, type ReviewerCandidateInput } from '../stage-modules/foundation-reviewer/private/candidate-contract'
-import { prepareReviewerRetryCandidate } from '../stage-modules/foundation-reviewer/private/candidate-handoff'
-import { validateReviewerTargetedFacts } from '../stage-modules/foundation-reviewer/private/targeted-preparation'
-import { reviewerDigest } from '../stage-modules/foundation-reviewer/private/review-summary'
-import followup from '../stage-modules/foundation-revision/private/tests/fixtures/public-followup-inputs.json'
-
 test('unsupported historical review is rejected without rewriting it or contacting workers', async () => {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'foundation-retirement-')))
   const store = createRunStore(workspacePath, 'owner')
@@ -58,58 +48,4 @@ test('production orchestration no longer imports old reviewer or revision execut
     expect(text).not.toContain('mutateFoundationReviewTask(')
     expect(text).not.toContain('materializeFoundationRevisionPlanning(')
   }
-})
-
-test('public repair mapping retains exact same-round predecessors and new-round source authority', () => {
-  const retry = followup.retry.input
-  const source = retry.sourceResult as ReviewerReviewResult
-  const identity = { ownerId: source.ownerId, projectId: source.projectId }
-  const previous = { candidate: retry.previousCandidateResult as FoundationCandidateResult,
-    recheck: retry.previousRecheckResult as ReviewerReviewResult }
-  const mapped = createFoundationRepairRequest({ ...identity, requestId: 'retry', source, previous })
-  expect<unknown>(mapped.input).toEqual(retry)
-
-  // Build a current-policy same-round retry fixture for the consumer-boundary
-  // assertion below. The historical JSON above remains a byte-mapping oracle,
-  // but its policy digest is intentionally frozen and is not a valid current
-  // Reviewer input.
-  const first = firstCandidateFixture()
-  const validation = validateReviewerTargetedFacts(first.prepared, [])
-  const recheck = buildReviewerTargetedResult({ requestId: 'public-retirement-recheck', candidate: first.prepared,
-    facts: [], semantic: validation.semantic.map(({ issue, packet }) => ({ issueId: issue.id, output: {
-      status: 'FAIL' as const,
-      diagnostic: { observedActual: 'still missing', failureReasonCode: 'expected_not_met' as const,
-        evidence: packet.sections.map(({ ref }) => ({ documentPath: ref.documentPath, sectionId: ref.sectionId, digest: ref.digest })) },
-    } })) })
-  const binding = (value: { ownerId: string; projectId: string; resultId: string }) => ({
-    ownerId: value.ownerId, projectId: value.projectId, resultId: value.resultId, resultDigest: reviewerDigest(value) })
-  const previousCandidate = first.input.candidateResult
-  const currentPrevious = { candidateId: previousCandidate.candidateId, candidateResultId: previousCandidate.resultId,
-    candidateResultDigest: reviewerDigest(previousCandidate), recheckResultId: recheck.resultId, recheckResultDigest: reviewerDigest(recheck) }
-  const candidate = { ...first.input.candidateResult, requestId: 'public-retirement-retry', candidateId: 'public-retirement-candidate-two', previous: currentPrevious }
-  const { resultId: _ignoredResultId, ...candidateBody } = candidate
-  candidate.resultId = reviewerDigest(candidateBody)
-  const currentMapped = createFoundationCandidateReviewRequest({ ownerId: candidate.ownerId, projectId: candidate.projectId,
-    requestId: 'public-retirement-recheck', source: first.input.sourceResult, candidate: candidate as FoundationCandidateResult,
-    previous: { candidate: previousCandidate as FoundationCandidateResult, recheck: recheck as ReviewerReviewResult } })
-  type CurrentReviewerRetryStart = {
-    protocolVersion: 1
-    requestId: string
-    ownerId: string
-    projectId: string
-    inputDigest: string
-    input: Extract<ReviewerCandidateInput, { kind: 'retry' }>
-  }
-  const currentStart = currentMapped as unknown as CurrentReviewerRetryStart
-  expect(() => parseReviewerCandidateStart(currentStart)).not.toThrow()
-
-  // Substituting the new candidate as its previous candidate must fail at the
-  // consumer's public input boundary; orchestration cannot silently bless it.
-  const corrupted = structuredClone(currentStart.input)
-  corrupted.previousCandidateResult = corrupted.candidateResult
-  corrupted.previousCandidateBinding = corrupted.candidateBinding
-  expect(() => prepareReviewerRetryCandidate(corrupted)).toThrow('retry candidate predecessor authority mismatch')
-  const next = followup.nextRound.input.sourceResult as ReviewerReviewResult
-  expect<unknown>(createFoundationRepairRequest({ ownerId: next.ownerId, projectId: next.projectId,
-    requestId: 'next', source: next }).input).toEqual(followup.nextRound.input)
 })

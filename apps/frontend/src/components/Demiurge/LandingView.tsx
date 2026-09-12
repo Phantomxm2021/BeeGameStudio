@@ -2083,7 +2083,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       ) : null}
 
       {intakeError ? (
-        <div className="type-footnote relative z-20 mt-4 max-w-xl rounded-xl border border-red-400/30 bg-red-950/60 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
+        <div role="alert" className="type-footnote relative z-20 mt-4 max-w-xl rounded-xl border border-red-400/30 bg-red-950/60 px-4 py-3 text-red-100 shadow-lg backdrop-blur">
           {intakeError}
         </div>
       ) : null}

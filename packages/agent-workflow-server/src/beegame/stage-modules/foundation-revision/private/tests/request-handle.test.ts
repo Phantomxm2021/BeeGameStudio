@@ -17,9 +17,7 @@ import {
   readRevisionRequestByHandle,
 } from '../request-store'
 import { revisionCanonicalJson, revisionDigest } from '../json-digest'
-import { buildReviewerPublishedResult } from '../../../foundation-reviewer/private/review-publication'
-import { initialReviewerFactState } from '../../../foundation-reviewer/private/fact-state'
-import { reviewFixtureDocuments } from '../../../foundation-reviewer/private/test-fixtures/review-fixture'
+import { buildSingleReviewFixture, reviewFixtureDocuments } from './single-review-fixture'
 
 const roots: string[] = []
 
@@ -39,9 +37,8 @@ afterEach(async () => {
 function fixture() {
   const documents = reviewFixtureDocuments()
   documents[0]!.content = '# incomplete handle fixture'
-  const sourceResult = buildReviewerPublishedResult({
+  const sourceResult = buildSingleReviewFixture({
     documents,
-    state: initialReviewerFactState(documents),
     identity: { ownerId: 'owner', projectId: 'project', requestId: 'review' },
     subject: {
       kind: 'initial',
@@ -51,7 +48,6 @@ function fixture() {
     },
   })
   return {
-    kind: 'initial' as const,
     ownerId: 'owner',
     projectId: 'project',
     requestId: 'request-handle',
@@ -68,7 +64,7 @@ function fixture() {
 function requestPath(root: string, request: ReturnType<typeof fixture>) {
   return join(
     root,
-    '.beegame/workflow/foundation-revision/requests',
+    '.beegame/workflow/foundation-revision/native-file-v1/requests',
     revisionDigest({
       ownerId: request.ownerId,
       projectId: request.projectId,
@@ -81,7 +77,7 @@ function requestPath(root: string, request: ReturnType<typeof fixture>) {
 function handlePath(root: string, handle: string) {
   return join(
     root,
-    '.beegame/workflow/foundation-revision/handles',
+    '.beegame/workflow/foundation-revision/native-file-v1/handles',
     `${handle}.json`,
   )
 }
