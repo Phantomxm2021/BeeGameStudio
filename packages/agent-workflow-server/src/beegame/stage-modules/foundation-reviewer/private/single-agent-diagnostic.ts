@@ -1,7 +1,7 @@
 import { z } from 'zod/v4'
 
 const counter = z.number().int().nonnegative().safe()
-const safePath = z.string().max(300).regex(/^(?:\/(?:status|summary|findings|severity|title|actual|expected|documentPath|\d+))*$/)
+const safePath = z.string().max(300).regex(/^(?:\/summary)?$/)
 export const reviewSchemaIssueSchema = z.object({
   path: safePath, keyword: z.enum(['type', 'required', 'additionalProperties', 'const', 'enum', 'oneOf', 'anyOf',
     'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minItems', 'maxItems', 'minLength', 'maxLength', 'pattern', 'other']),
@@ -32,17 +32,13 @@ export type ReviewNativeSummary = z.infer<typeof reviewNativeSummarySchema>
 
 export const reviewOutputDiagnosticSchema = z.object({
   stage: z.enum(['missing_structured_output', 'payload_schema', 'admission']),
-  reason: z.enum(['audit_incomplete', 'unknown']).optional(),
+  reason: z.literal('unknown').optional(),
   schemaCodes: z.array(z.enum(['invalid_type', 'invalid_value', 'too_big', 'too_small', 'unrecognized_keys', 'invalid_union', 'custom', 'other'])).max(16).optional(),
 }).strict()
 export type ReviewOutputDiagnostic = z.infer<typeof reviewOutputDiagnosticSchema>
-export class ReviewAdmissionError extends Error {
-  constructor(readonly diagnostic: ReviewOutputDiagnostic) { super('Review output admission rejected') }
-}
 // Persist closed classifications and numeric locations only, never model values,
 // provider messages, unrecognized keys, or arbitrary exception text.
 export function diagnoseReviewOutput(error: unknown): ReviewOutputDiagnostic {
-  if (error instanceof ReviewAdmissionError) return reviewOutputDiagnosticSchema.parse(error.diagnostic)
   if (error instanceof z.ZodError) {
     const allowed = ['invalid_type', 'invalid_value', 'too_big', 'too_small', 'unrecognized_keys', 'invalid_union', 'custom']
     return reviewOutputDiagnosticSchema.parse({ stage: 'payload_schema', schemaCodes: [...new Set(error.issues.map(issue => allowed.includes(issue.code) ? issue.code : 'other'))].slice(0, 16) })

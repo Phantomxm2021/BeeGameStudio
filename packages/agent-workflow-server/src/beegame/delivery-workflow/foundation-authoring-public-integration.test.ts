@@ -99,14 +99,14 @@ test('real public author plus foundation clients publishes eight documents throu
       expect(bytes.byteLength).toBe(document.byteLength)
       expect(createHash('sha256').update(bytes).digest('hex')).toBe(document.digest)
     }
-    expect(f.authCalls).toBe(8)
-    expect(f.configurationCalls).toBe(8)
-    expect(f.usageCalls.filter(call => call.method === 'record')).toHaveLength(8)
-    expect(f.usageCalls.filter(call => call.method === 'debit')).toHaveLength(8)
+    expect(f.authCalls).toBe(1)
+    expect(f.configurationCalls).toBe(1)
+    expect(f.usageCalls.filter(call => call.method === 'record')).toHaveLength(1)
+    expect(f.usageCalls.filter(call => call.method === 'debit')).toHaveLength(1)
     for (const record of f.usageCalls.filter(call => call.method === 'record')) {
       expect(record.ownerId).toBe(f.ownerId)
       expect(record.input.projectId).toBe(f.run.projectId)
-      expect(record.input.usage.total_tokens).toBe(2)
+      expect(record.input.usage.total_tokens).toBe(16)
       const debit = f.usageCalls.find(call => call.method === 'debit' && call.input.idempotencyKey === record.input.idempotencyKey)
       expect(debit?.input).toEqual(record.input)
     }
@@ -116,7 +116,7 @@ test('real public author plus foundation clients publishes eight documents throu
     try {
       expect((await recovered.ensureProgress(f.run)).authorStage!.result).toEqual(result)
       await recovered.resume(f.run)
-      expect(f.authCalls).toBe(8)
+      expect(f.authCalls).toBe(1)
       expect(f.usageCalls).toHaveLength(calls)
       expect((await f.store.load())!.foundationAuditState).toBeUndefined()
     } finally { recovered.dispose() }
@@ -142,7 +142,7 @@ test('missing authentication pauses the real author without loading configuratio
     expect(completed.authorStage!.handle).toEqual(failed.authorStage!.handle)
     expect(completed.authorStage!.status).toBe('completed')
     expect(completed.foundationAuditState).toBeUndefined()
-    expect(f.configurationCalls).toBe(8)
+    expect(f.configurationCalls).toBe(1)
   } finally { await f.cleanup() }
 }, 15_000)
 
@@ -168,7 +168,7 @@ test('production controller drives the real public author through the authentica
     expect(current.foundationDraftState).toEqual({ completedPaths: [] })
     await controller.resume(f.run)
     expect((await f.store.load())!.status).toBe('needs_action')
-    expect(f.authCalls).toBe(8)
+    expect(f.authCalls).toBe(1)
     expect(legacyCalls).toBe(0)
   } finally { await controller.dispose(); await f.cleanup() }
 }, 15_000)

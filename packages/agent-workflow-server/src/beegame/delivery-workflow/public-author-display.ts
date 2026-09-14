@@ -7,6 +7,15 @@ export type PublicAuthorDisplay = {
 }
 
 const DIGEST = /^[a-f0-9]{64}$/u
+
+export function projectPublicAuthorTiming(value: unknown):
+  { currentCallElapsedMs: number; historicalElapsedMs: number } | undefined {
+  if (!validAuthorLink(value) || !record(value.timing)) return undefined
+  const { currentCallElapsedMs, historicalElapsedMs } = value.timing
+  if (typeof currentCallElapsedMs !== 'number' || !Number.isFinite(currentCallElapsedMs) || currentCallElapsedMs < 0 ||
+      typeof historicalElapsedMs !== 'number' || !Number.isFinite(historicalElapsedMs) || historicalElapsedMs < 0) return undefined
+  return { currentCallElapsedMs, historicalElapsedMs }
+}
 const AUTHOR_STATUSES = [
   'starting',
   'running',
@@ -90,7 +99,8 @@ function validAuthorLink(value: unknown): value is Record<string, unknown> {
 
 function aggregateStatus(status: (typeof AUTHOR_STATUSES)[number]): DocumentDisplayTask['status'] {
   if (status === 'stopped') return 'stopped'
-  if (status === 'failed' || status === 'needs_action') return 'failed'
+  if (status === 'needs_action') return 'blocked'
+  if (status === 'failed') return 'failed'
   return 'running'
 }
 

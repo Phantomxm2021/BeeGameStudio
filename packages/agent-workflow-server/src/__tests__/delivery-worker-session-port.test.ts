@@ -19,37 +19,6 @@ import {
 } from '../beegame/delivery-workflow/revision'
 
 describe('delivery worker session credentials', () => {
-  test('rejects retired Foundation workers before starting a session', async () => {
-    const starts: Array<Record<string, unknown>> = []
-    const sessions = {
-      start(input: Record<string, unknown>) {
-        starts.push(input)
-        return { id: 'unexpected-session' }
-      },
-    } as unknown as BeeGameSessionManager
-    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
-    for (const workerType of [
-      'foundation-fact-extractor',
-      'foundation-semantic-reviewer',
-      'foundation-document-reviser',
-    ] as const) {
-      await expect(port.start({
-        dispatchId: 'dispatch-' + workerType,
-        runId: 'run-retired',
-        ownerId: 'user-1',
-        projectId: 'project-retired',
-        workspacePath: '/tmp/retired-foundation',
-        workerType,
-        phase: workerType === 'foundation-document-reviser' ? 'FOUNDATION_REVISION' : 'DOCUMENT_REVIEW',
-        taskId: 'task-' + workerType,
-        revision: 'revision-retired',
-        allowedPaths: [],
-        contract: { workerType },
-      } as unknown as WorkerDispatchRequest)).rejects.toThrow('Legacy Foundation workers are retired')
-    }
-    expect(starts).toHaveLength(0)
-  })
-
   test('accepts only the planner resource-plan terminal contract', async () => {
     const workspacePath = await createResourceWorkspace()
     try {

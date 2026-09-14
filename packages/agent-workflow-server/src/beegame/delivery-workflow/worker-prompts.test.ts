@@ -6,26 +6,6 @@ function countOccurrences(value: string, needle: string): number {
 }
 
 describe('worker prompts', () => {
-  test('rejects retired Foundation review workers before building a model prompt', () => {
-    for (const workerType of [
-      'foundation-fact-extractor',
-      'foundation-semantic-reviewer',
-      'foundation-document-reviser',
-    ] as const) {
-      expect(() => buildWorkerPrompt({
-        runId: 'run',
-        ownerId: 'owner',
-        projectId: 'project',
-        workspacePath: '/workspace',
-        workerType,
-        phase: 'DOCUMENT_REVIEW',
-        revision: 'revision',
-        allowedPaths: [],
-        contract: { workerType },
-      })).toThrow('Legacy Foundation review/revision is retired')
-    }
-  })
-
   test('derives checklist cardinality from observable scenarios without fixed business caps', () => {
     const prompt = buildWorkerPrompt({
       runId: 'run',

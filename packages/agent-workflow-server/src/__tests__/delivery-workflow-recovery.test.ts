@@ -180,11 +180,6 @@ function legacyAuthorHistoricalSnapshot(
 function exactResumeCheckpointsForWorker(
   workerType: DispatchWorkerType,
 ): ExactResumeWorkerCheckpoint[] {
-  if (
-    workerType === 'foundation-fact-extractor' ||
-    workerType === 'foundation-semantic-reviewer' ||
-    workerType === 'foundation-document-reviser'
-  ) return []
   return EXACT_RESUME_WORKER_CHECKPOINTS.filter(
     checkpoint =>
       checkpoint !== 'canonical-receipt' ||

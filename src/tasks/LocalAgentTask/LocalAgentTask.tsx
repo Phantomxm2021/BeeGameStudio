@@ -1,5 +1,5 @@
 import type { BetaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs';
-import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js';
+import { getSdkAgentProgressSummariesEnabled, isSessionPersistenceDisabled } from '../../bootstrap/state.js';
 import {
   OUTPUT_FILE_TAG,
   STATUS_TAG,
@@ -27,7 +27,10 @@ import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { getSearchExtraToolsOrReadInfo } from '../../utils/collapseReadSearch.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
 import { getAgentTranscriptPath } from '../../utils/sessionStorage.js';
-import { evictTaskOutput, getTaskOutputPath, initTaskOutputAsSymlink } from '../../utils/task/diskOutput.js';
+import { evictTaskOutput, getTaskOutputDir, getTaskOutputPath, initTaskOutputAsSymlink } from '../../utils/task/diskOutput.js';
+import { flushAgentResultReceipts, writeAgentResultReceipt } from '../../utils/task/agentResultReceipt.js';
+import { extractTextContent } from '../../utils/messages.js';
+import { logError } from '../../utils/log.js';
 import { PANEL_GRACE_MS, registerTask, updateTaskState } from '../../utils/task/framework.js';
 import { emitTaskProgress } from '../../utils/task/sdkProgress.js';
 import type { TaskState } from '../types.js';
@@ -332,11 +335,37 @@ export const LocalAgentTask: Task = {
   },
 };
 
+function initializeAgentOutput(taskId: string, description: string): void {
+  if (!isSessionPersistenceDisabled()) {
+    void initTaskOutputAsSymlink(taskId, getAgentTranscriptPath(asAgentId(taskId)));
+    return;
+  }
+  void writeAgentResultReceipt(getTaskOutputDir(), { version: 1, task_id: taskId,
+    task_type: 'local_agent', status: 'running', description, output: '' }, true).catch(logError);
+}
+
+function preserveTerminalResult(task: LocalAgentTaskState | undefined, setAppState: SetAppState): Promise<void> {
+  if (!task || !['completed', 'failed', 'killed'].includes(task.status)) return Promise.resolve();
+  return writeAgentResultReceipt(getTaskOutputDir(), { version: 1, task_id: task.id,
+    task_type: 'local_agent', status: task.status as 'completed' | 'failed' | 'killed',
+    description: task.description, output: task.result ? extractTextContent(task.result.content, '\n') : '',
+    ...(task.error ? { error: task.error } : {}) }, isSessionPersistenceDisabled()).then(() => {
+      updateTaskState<LocalAgentTaskState>(task.id, setAppState, current =>
+        current.status === task.status && current.endTime === task.endTime && current.result === task.result
+          ? { ...current, evictAfter: current.retain ? undefined : Date.now() + PANEL_GRACE_MS }
+          : current);
+    }).catch(error => {
+      // A failed disk write must not make the only remaining result evictable.
+      logError(error);
+    });
+}
+
 /**
  * Kill an agent task. No-op if already killed/completed.
  */
 export function killAsyncAgent(taskId: string, setAppState: SetAppState): void {
   let killed = false;
+  let terminal: LocalAgentTaskState | undefined;
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running') {
       return task;
@@ -344,17 +373,18 @@ export function killAsyncAgent(taskId: string, setAppState: SetAppState): void {
     killed = true;
     task.abortController?.abort();
     task.unregisterCleanup?.();
-    return {
+    return terminal = {
       ...task,
       status: 'killed',
       endTime: Date.now(),
-      evictAfter: task.retain ? undefined : Date.now() + PANEL_GRACE_MS,
+      evictAfter: undefined,
       abortController: undefined,
       unregisterCleanup: undefined,
       selectedAgent: undefined,
     };
   });
   if (killed) {
+    preserveTerminalResult(terminal, setAppState);
     void evictTaskOutput(taskId);
   }
 }
@@ -462,8 +492,9 @@ export function updateAgentSummary(taskId: string, summary: string, setAppState:
 /**
  * Complete an agent task with result.
  */
-export function completeAgentTask(result: AgentToolResult, setAppState: SetAppState): void {
+export function completeAgentTask(result: AgentToolResult, setAppState: SetAppState): Promise<void> {
   const taskId = result.agentId;
+  let terminal: LocalAgentTaskState | undefined;
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running') {
       return task;
@@ -471,25 +502,28 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
 
     task.unregisterCleanup?.();
 
-    return {
+    return terminal = {
       ...task,
       status: 'completed',
       result,
       endTime: Date.now(),
-      evictAfter: task.retain ? undefined : Date.now() + PANEL_GRACE_MS,
+      evictAfter: undefined,
       abortController: undefined,
       unregisterCleanup: undefined,
       selectedAgent: undefined,
     };
   });
+  const persisted = preserveTerminalResult(terminal, setAppState);
   void evictTaskOutput(taskId);
+  return persisted;
   // Note: Notification is sent by AgentTool via enqueueAgentNotification
 }
 
 /**
  * Fail an agent task with error.
  */
-export function failAgentTask(taskId: string, error: string, setAppState: SetAppState): void {
+export function failAgentTask(taskId: string, error: string, setAppState: SetAppState): Promise<void> {
+  let terminal: LocalAgentTaskState | undefined;
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     if (task.status !== 'running') {
       return task;
@@ -497,18 +531,20 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
 
     task.unregisterCleanup?.();
 
-    return {
+    return terminal = {
       ...task,
       status: 'failed',
       error,
       endTime: Date.now(),
-      evictAfter: task.retain ? undefined : Date.now() + PANEL_GRACE_MS,
+      evictAfter: undefined,
       abortController: undefined,
       unregisterCleanup: undefined,
       selectedAgent: undefined,
     };
   });
+  const persisted = preserveTerminalResult(terminal, setAppState);
   void evictTaskOutput(taskId);
+  return persisted;
   // Note: Notification is sent by AgentTool via enqueueAgentNotification
 }
 
@@ -537,7 +573,7 @@ export function registerAsyncAgent({
   parentAbortController?: AbortController;
   toolUseId?: string;
 }): LocalAgentTaskState {
-  void initTaskOutputAsSymlink(agentId, getAgentTranscriptPath(asAgentId(agentId)));
+  initializeAgentOutput(agentId, description);
 
   // Create abort controller - if parent provided, create child that auto-aborts with parent
   const abortController = parentAbortController
@@ -565,6 +601,7 @@ export function registerAsyncAgent({
   // Register cleanup handler
   const unregisterCleanup = registerCleanup(async () => {
     killAsyncAgent(agentId, setAppState);
+    await flushAgentResultReceipts();
   });
 
   taskState.unregisterCleanup = unregisterCleanup;
@@ -603,14 +640,16 @@ export function registerAgentForeground({
 }): {
   taskId: string;
   backgroundSignal: Promise<void>;
+  abortController: AbortController;
   cancelAutoBackground?: () => void;
 } {
-  void initTaskOutputAsSymlink(agentId, getAgentTranscriptPath(asAgentId(agentId)));
+  initializeAgentOutput(agentId, description);
 
   const abortController = createAbortController();
 
   const unregisterCleanup = registerCleanup(async () => {
     killAsyncAgent(agentId, setAppState);
+    await flushAgentResultReceipts();
   });
 
   const taskState: LocalAgentTaskState = {
@@ -673,7 +712,7 @@ export function registerAgentForeground({
     cancelAutoBackground = () => clearTimeout(timer);
   }
 
-  return { taskId: agentId, backgroundSignal, cancelAutoBackground };
+  return { taskId: agentId, backgroundSignal, abortController, cancelAutoBackground };
 }
 
 /**

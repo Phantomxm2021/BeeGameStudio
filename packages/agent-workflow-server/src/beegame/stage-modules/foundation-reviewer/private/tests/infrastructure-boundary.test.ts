@@ -60,7 +60,7 @@ test('Reviewer source dependencies, including erased type imports, use only priv
     if (found.dynamic) violations.push(path + ' -> nonliteral module load')
     for (const specifier of found.specifiers) {
       // Declared pure data libraries; neither grants another stage's private API.
-      if (specifier.startsWith('node:') || specifier === 'zod/v4' || specifier === 'diff') continue
+      if (specifier.startsWith('node:') || ['zod/v4', 'diff', 'mdast-util-from-markdown'].includes(specifier)) continue
       const destination = resolveImport(specifier, path)
       if (!destination || (!destination.startsWith(moduleRoot + sep) && !approved.has(destination))) violations.push(path + ' -> ' + specifier)
     }

@@ -19,7 +19,8 @@ import { semanticBoolean } from 'src/utils/semanticBoolean.js';
 import { sleep } from 'src/utils/sleep.js';
 import { jsonParse } from 'src/utils/slowOperations.js';
 import { countCharInString } from 'src/utils/stringUtils.js';
-import { getTaskOutput } from 'src/utils/task/diskOutput.js';
+import { getTaskOutput, getTaskOutputDir } from 'src/utils/task/diskOutput.js';
+import { readAgentResultReceipt } from 'src/utils/task/agentResultReceipt.js';
 import { updateTaskState } from 'src/utils/task/framework.js';
 import { formatTaskOutput } from 'src/utils/task/outputFormatting.js';
 import type { ThemeName } from 'src/utils/theme.js';
@@ -54,8 +55,16 @@ type TaskOutput = {
 
 type TaskOutputToolOutput = {
   retrieval_status: 'success' | 'timeout' | 'not_ready';
+  retrieval_source?: 'receipt';
   task: TaskOutput | null;
 };
+
+async function recoveredTaskOutput(taskId: string): Promise<TaskOutput | undefined> {
+  const receipt = await readAgentResultReceipt(getTaskOutputDir(), taskId);
+  if (!receipt) return undefined;
+  const { version: _, ...task } = receipt;
+  return { ...task, result: task.output };
+}
 
 // Re-export Progress from centralized types to break import cycles
 export type { TaskOutputProgress as Progress } from 'src/types/tools.js';
@@ -216,10 +225,10 @@ export const TaskOutputTool: Tool<InputSchema, TaskOutputToolOutput> = buildTool
     const appState = getAppState();
     const task = appState.tasks?.[task_id] as TaskState | undefined;
 
-    if (!task) {
+    if (!task && !await recoveredTaskOutput(task_id)) {
       return {
         result: false,
-        message: `No task found with ID: ${task_id}`,
+        message: `TASK_RESULT_NOT_FOUND: No task found with ID: ${task_id}; no durable result receipt is available.`,
         errorCode: 2,
       };
     }
@@ -234,7 +243,9 @@ export const TaskOutputTool: Tool<InputSchema, TaskOutputToolOutput> = buildTool
     const task = appState.tasks?.[task_id] as TaskState | undefined;
 
     if (!task) {
-      throw new Error(`No task found with ID: ${task_id}`);
+      const recovered = await recoveredTaskOutput(task_id);
+      if (recovered) return { data: { retrieval_status: 'success' as const, retrieval_source: 'receipt' as const, task: recovered } };
+      throw new Error(`TASK_RESULT_NOT_FOUND: No task found with ID: ${task_id}; no durable result receipt is available.`);
     }
 
     if (!block) {
@@ -280,6 +291,8 @@ export const TaskOutputTool: Tool<InputSchema, TaskOutputToolOutput> = buildTool
     );
 
     if (!completedTask) {
+      const recovered = await recoveredTaskOutput(task_id);
+      if (recovered) return { data: { retrieval_status: 'success' as const, retrieval_source: 'receipt' as const, task: recovered } };
       return {
         data: {
           retrieval_status: 'timeout' as const,
@@ -315,6 +328,7 @@ export const TaskOutputTool: Tool<InputSchema, TaskOutputToolOutput> = buildTool
     const parts: string[] = [];
 
     parts.push(`<retrieval_status>${data.retrieval_status}</retrieval_status>`);
+    if (data.retrieval_source) parts.push(`<retrieval_source>${data.retrieval_source}</retrieval_source>`);
 
     if (data.task) {
       parts.push(`<task_id>${data.task.task_id}</task_id>`);

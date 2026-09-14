@@ -31,7 +31,6 @@ export const DELIVERY_PHASES = [
   'BRIEF_CONFIRMED',
   'DOCUMENT_DRAFTING',
   'DOCUMENT_REVIEW',
-  'FOUNDATION_REVISION',
   'RESOURCE_PREPARATION',
   'ATOMIC_TASK_PLANNING',
   'IMPLEMENTATION',
@@ -65,9 +64,6 @@ export const DISPATCH_STATUSES = [
 ] as const
 export const WORKER_TYPES = [
   'document-author',
-  'foundation-fact-extractor',
-  'foundation-semantic-reviewer',
-  'foundation-document-reviser',
   'resource-planner',
   'resource-curator',
   'resource-content-author',
@@ -114,30 +110,6 @@ const workerDispatchRequestSchema: z.ZodType<WorkerDispatchRequest> = z
     contract: z.record(z.string(), z.unknown()),
   })
   .strict()
-  .superRefine((request, context) => {
-    if (
-      request.workerType === 'foundation-document-reviser' &&
-      request.phase !== 'FOUNDATION_REVISION'
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['phase'],
-        message: 'foundation document reviser can only run in FOUNDATION_REVISION',
-      })
-    if (
-      request.phase === 'FOUNDATION_REVISION' &&
-      ![
-        'foundation-document-reviser',
-        'foundation-fact-extractor',
-        'foundation-semantic-reviewer',
-      ].includes(request.workerType)
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['workerType'],
-        message: 'FOUNDATION_REVISION rejects non-revision workers',
-      })
-  })
 
 export const atomicTaskSchema: z.ZodType<AtomicTask> = z
   .object({
@@ -215,17 +187,6 @@ export const dispatchRecordSchema: z.ZodType<DispatchRecord> = z
     finishedAt: z.string().datetime().optional(),
   })
   .strict()
-  .superRefine((record, context) => {
-    if (
-      record.workerType === 'foundation-document-reviser' &&
-      record.phase !== 'FOUNDATION_REVISION'
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['phase'],
-        message: 'foundation document reviser can only run in FOUNDATION_REVISION',
-      })
-  })
 
 export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
   .object({
@@ -349,6 +310,7 @@ const authorDocumentsResultSchema: z.ZodType<AuthorDocumentsResult> = z
 
 export const authorStageLinkSchema: z.ZodType<AuthorStageLink> = z
   .strictObject({
+    timing: z.strictObject({ currentCallElapsedMs: z.number().nonnegative(), historicalElapsedMs: z.number().nonnegative() }).optional(),
     protocolVersion: z.literal(1),
     requestId: z.string().min(1).max(256),
     inputDigest: sha256DigestSchema,
@@ -427,7 +389,6 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
       .enum([
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
-        'FOUNDATION_REVISION',
         'CHECKLIST_DRAFTING',
       ])
       .optional(),
@@ -563,7 +524,6 @@ export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEven
         .enum([
           'FOUNDATION_DRAFTING',
           'FOUNDATION_REVIEW',
-          'FOUNDATION_REVISION',
           'CHECKLIST_DRAFTING',
         ])
         .optional(),
@@ -632,7 +592,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       .enum([
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
-        'FOUNDATION_REVISION',
         'CHECKLIST_DRAFTING',
       ])
       .optional(),
@@ -674,7 +633,6 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
         message: 'Legacy Reviewer projects are unsupported; review requires a public stage invocation or completed public Author handoff' })
     const requiresCompletedFoundation =
       run.phase === 'DOCUMENT_REVIEW' ||
-      run.phase === 'FOUNDATION_REVISION' ||
       run.phase === 'RESOURCE_PREPARATION' ||
       run.phase === 'ATOMIC_TASK_PLANNING' ||
       run.phase === 'IMPLEMENTATION' ||
@@ -749,58 +707,16 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       if ((!imported && (run.authorStage?.status !== 'completed' || link.authorResultId !== run.authorStage.result?.resultId)) ||
           link.invocation.request.ownerId !== run.ownerId || link.invocation.request.projectId !== run.projectId ||
           run.activeDispatch || run.foundationAuditState ||
-          (run.phase !== 'DOCUMENT_REVIEW' && run.phase !== 'FOUNDATION_REVISION'))
+          run.phase !== 'DOCUMENT_REVIEW')
         context.addIssue({ code: 'custom', path: ['foundationReviewStage'],
-          message: 'Public foundation chain must bind its author and cannot coexist with legacy execution or downstream phases' })
-      const revision = link.invocation.stage === 'revision' && !link.acceptedReview
-      if (run.phase !== (revision ? 'FOUNDATION_REVISION' : 'DOCUMENT_REVIEW') ||
-          run.documentStep !== (revision ? 'FOUNDATION_REVISION' : 'FOUNDATION_REVIEW'))
-        context.addIssue({ code: 'custom', path: ['documentStep'], message: 'Public foundation phase must match its active public module' })
+          message: 'Public foundation review must bind its author and cannot coexist with retired execution or downstream phases' })
+      if (run.documentStep !== 'FOUNDATION_REVIEW')
+        context.addIssue({ code: 'custom', path: ['documentStep'], message: 'Public foundation phase must use the document review step' })
     }
-
-    const publicRevision = run.foundationReviewStage?.invocation.stage === 'revision' &&
-      !run.foundationReviewStage.acceptedReview
-    if (run.phase === 'FOUNDATION_REVISION' && (!publicRevision || run.documentStep !== 'FOUNDATION_REVISION'))
-      context.addIssue({
-        code: 'custom',
-        path: ['foundationReviewStage'],
-        message: 'FOUNDATION_REVISION requires an active public revision invocation',
-      })
-    if (run.documentStep === 'FOUNDATION_REVISION' && run.phase !== 'FOUNDATION_REVISION')
-      context.addIssue({
-        code: 'custom',
-        path: ['documentStep'],
-        message: 'foundation revision document step cannot run outside FOUNDATION_REVISION',
-      })
 
   })
 
-export const parseDeliveryRun = (value: unknown): DeliveryRun =>
-  deliveryRunSchema.parse(migrateLegacyFoundationSnapshot(value))
-
-/** Version 52 was the first public Foundation link schema. Keep only that
- * narrow, already-isolated shape loadable in memory; older/legacy worker
- * snapshots remain obsolete and cannot be silently upgraded. */
-export function isCompatibleLegacyFoundationSnapshot(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const record = value as Record<string, unknown>
-  const link = record.foundationReviewStage
-  if (record.schemaVersion !== 52 || !link || typeof link !== 'object' || Array.isArray(link) || record.foundationAuditState !== undefined)
-    return false
-  const linkRecord = link as Record<string, unknown>
-  if (['policyVersion', 'automaticRepairLimit', 'completedRepairCount', 'acceptanceDecision', 'riskDecisions',
-    'policyAuthorizations', 'latestReview', 'repairSourceReview', 'allowNoDocumentChangeOnce'].some(key => linkRecord[key] !== undefined)) return false
-  const stage = record.phase === 'DOCUMENT_REVIEW' || record.phase === 'FOUNDATION_REVISION'
-  const invocation = linkRecord.invocation
-  return stage && invocation !== null && typeof invocation === 'object' &&
-    ((invocation as Record<string, unknown>).stage === 'reviewer' || (invocation as Record<string, unknown>).stage === 'revision')
-}
-
-export function migrateLegacyFoundationSnapshot(value: unknown): unknown {
-  return isCompatibleLegacyFoundationSnapshot(value)
-    ? { ...(value as Record<string, unknown>), schemaVersion: DELIVERY_RUN_SCHEMA_VERSION }
-    : value
-}
+export const parseDeliveryRun = (value: unknown): DeliveryRun => deliveryRunSchema.parse(value)
 export const parseAtomicTask = (value: unknown): AtomicTask =>
   atomicTaskSchema.parse(value)
 export const parseDispatchRecord = (value: unknown): DispatchRecord =>

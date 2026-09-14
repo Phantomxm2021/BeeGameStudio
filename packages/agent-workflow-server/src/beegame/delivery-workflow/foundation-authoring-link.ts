@@ -4,7 +4,7 @@ import type { DeliveryRun, AuthorStageLink } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
 
 type AuthorPort = ReturnType<typeof createFoundationAuthoring>
-const HANDOFF_REASON = 'Foundation documents are complete. Reviewer handoff is awaiting stage acceptance.'
+const HANDOFF_REASON = 'Foundation documents are complete. Document review handoff is awaiting stage acceptance.'
 
 function controlCommandId(link: AuthorStageLink): string {
   return `${link.requestId}:${link.control.action}:${link.control.sequence}`
@@ -71,7 +71,7 @@ export function createFoundationAuthoringLink(input: { store: RunStore; author: 
     return link
   }
   function project(run: DeliveryRun, outcome: AuthorResult): DeliveryRun {
-    const link = assertInvocation(run)
+    const link = { ...assertInvocation(run), ...(outcome.timing ? { timing: { ...outcome.timing } } : {}) }
     if (!link.handle || outcome.handle.id !== link.handle.id || outcome.handle.producer !== 'foundation-authoring' || outcome.handle.protocolVersion !== 1)
       throw new Error('Author result handle does not match invocation')
     const stopped = link.control.action === 'stop'
@@ -88,7 +88,8 @@ export function createFoundationAuthoringLink(input: { store: RunStore; author: 
     const status = outcome.status === 'running' ? (stopped ? 'needs_action' : 'running') : outcome.status
     return { ...run, authorStage: { ...link, status: outcome.status }, status,
       thinking: status === 'running' ? 'working' : 'idle',
-      currentMessage: status === 'running' ? 'Authoring foundation documents.' : undefined,
+      currentMessage: status === 'running' ? (outcome.progress
+        ? `模型响应 ${outcome.progress.modelResponses} · ${outcome.progress.message}` : 'Authoring foundation documents.') : undefined,
       blockedReason: outcome.status === 'needs_action' ? outcome.reason : outcome.status === 'failed' ? outcome.reason
         : stopped ? link.control.reason ?? 'Author stop is awaiting acknowledgment.' : undefined }
   }

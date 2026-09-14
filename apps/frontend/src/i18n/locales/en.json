@@ -805,7 +805,6 @@
     "confirmDelete": "Confirm Delete",
     "deletingProject": "Deleting project",
     "createReviewCopy": "Create Review Copy",
-    "stopAfterReview": "Stop after review (no revision)",
     "creatingReviewCopy": "Creating review copy",
     "artifactDownloadFailed": "Download failed. Please try again later.",
     "artifactPreviewFailed": "Failed to load artifact content. Please try downloading instead.",

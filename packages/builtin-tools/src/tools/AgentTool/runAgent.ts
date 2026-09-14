@@ -260,6 +260,7 @@ export async function* runAgent({
   toolUseContext,
   canUseTool,
   isAsync,
+  isBackgrounded,
   canShowPermissionPrompts,
   forkContextMessages,
   querySource,
@@ -282,6 +283,8 @@ export async function* runAgent({
   toolUseContext: ToolUseContext
   canUseTool: CanUseToolFn
   isAsync: boolean
+  /** Dynamic foreground→background transition, without restarting this query. */
+  isBackgrounded?: () => boolean
   /** Whether this agent can show permission prompts. Defaults to !isAsync.
    * Set to true for in-process teammates that run async but share the terminal. */
   canShowPermissionPrompts?: boolean
@@ -449,9 +452,9 @@ export async function* runAgent({
     const shouldAvoidPrompts =
       canShowPermissionPrompts !== undefined
         ? !canShowPermissionPrompts
-        : agentPermissionMode === 'bubble'
+        : agentPermissionMode === 'bubble' || canUseTool.supportsBackgroundPermissionRequests === true
           ? false
-          : isAsync
+          : isAsync || isBackgrounded?.() === true
     if (shouldAvoidPrompts) {
       toolPermissionContext = {
         ...toolPermissionContext,
@@ -464,7 +467,7 @@ export async function* runAgent({
     // Since these are background agents, waiting is fine — the user should
     // only be interrupted when automated checks can't resolve the permission.
     // This applies to bubble mode (always) and explicit canShowPermissionPrompts.
-    if (isAsync && !shouldAvoidPrompts) {
+    if ((isAsync || isBackgrounded?.()) && !shouldAvoidPrompts) {
       toolPermissionContext = {
         ...toolPermissionContext,
         awaitAutomatedChecksBeforeDialog: true,
@@ -674,11 +677,11 @@ export async function* runAgent({
 
   // Build agent-specific options
   const agentOptions: ToolUseContext['options'] = {
-    isNonInteractiveSession: useExactTools
+    get isNonInteractiveSession() { return useExactTools
       ? toolUseContext.options.isNonInteractiveSession
-      : isAsync
+      : isAsync || isBackgrounded?.()
         ? true
-        : (toolUseContext.options.isNonInteractiveSession ?? false),
+        : (toolUseContext.options.isNonInteractiveSession ?? false) },
     appendSystemPrompt: toolUseContext.options.appendSystemPrompt,
     tools: allTools,
     commands: [],
@@ -721,6 +724,12 @@ export async function* runAgent({
       agentDefinition.criticalSystemReminder_EXPERIMENTAL,
     contentReplacementState,
   })
+  if (isBackgrounded) {
+    const setForegroundState = agentToolUseContext.setAppState
+    agentToolUseContext.setAppState = update => {
+      if (!isBackgrounded()) setForegroundState(update)
+    }
+  }
 
   // Preserve tool use results for subagents with viewable transcripts (in-process teammates)
   if (preserveToolUseResults) {

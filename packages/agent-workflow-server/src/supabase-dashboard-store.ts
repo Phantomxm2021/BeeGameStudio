@@ -1281,9 +1281,9 @@ export class SupabaseDashboardStore {
     })
     if (!response.ok) {
       const text = await response.text().catch(() => '')
-      throw new Error(
+      throw Object.assign(new Error(
         `Supabase request failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
-      )
+      ), { status: response.status })
     }
     if (response.status === 204) return undefined as T
     return (await response.json()) as T

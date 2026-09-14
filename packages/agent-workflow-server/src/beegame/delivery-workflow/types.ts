@@ -40,6 +40,7 @@ export type FoundationDocumentPath =
   (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
 
 export type AuthorStageLink = {
+  timing?: { currentCallElapsedMs: number; historicalElapsedMs: number }
   protocolVersion: 1
   requestId: string
   inputDigest: string
@@ -77,7 +78,6 @@ export type DeliveryPhase =
   | 'BRIEF_CONFIRMED'
   | 'DOCUMENT_DRAFTING'
   | 'DOCUMENT_REVIEW'
-  | 'FOUNDATION_REVISION'
   | 'RESOURCE_PREPARATION'
   | 'ATOMIC_TASK_PLANNING'
   | 'IMPLEMENTATION'
@@ -88,7 +88,6 @@ export type DeliveryPhase =
 export type DocumentWorkflowStep =
   | 'FOUNDATION_DRAFTING'
   | 'FOUNDATION_REVIEW'
-  | 'FOUNDATION_REVISION'
   | 'CHECKLIST_DRAFTING'
 
 /**
@@ -114,9 +113,6 @@ export type AtomicTaskStatus =
 
 export type DispatchWorkerType =
   | 'document-author'
-  | 'foundation-fact-extractor'
-  | 'foundation-semantic-reviewer'
-  | 'foundation-document-reviser'
   | 'resource-planner'
   | 'resource-curator'
   | 'resource-content-author'
@@ -142,7 +138,7 @@ export type EvidenceKind =
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 53 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 57 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_PLAN',

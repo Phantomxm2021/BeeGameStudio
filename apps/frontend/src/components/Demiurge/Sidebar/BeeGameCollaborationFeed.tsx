@@ -12,7 +12,7 @@ import { useBeeGameText, type BeeGameText } from '../../../i18n/useBeeGameTransl
 import { MessageScrollerItem } from '../../ui/message-scroller';
 import { Marker, MarkerContent, MarkerIcon } from '../../ui/marker';
 import { WorkflowCard } from '../WorkflowCard';
-import type { FoundationDecisionInput, WorkflowCardAction, WorkflowCardPayload } from '../../../types/message';
+import type { WorkflowCardAction, WorkflowCardPayload } from '../../../types/message';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -24,7 +24,6 @@ type BeeGameCollaborationFeedProps = {
     currentUserAvatarUrl?: string;
     onEditMessage?: (message: ChatDisplayMessage) => void;
     onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
-    onFoundationDecision?: (decision: FoundationDecisionInput) => Promise<void> | void;
 };
 
 type ToolFeedMessage = ChatDisplayMessage & {
@@ -261,7 +260,6 @@ export const BeeGameCollaborationFeed = memo(({
     lang = 'en',
     onEditMessage,
     onWorkflowAction,
-    onFoundationDecision,
 }: BeeGameCollaborationFeedProps) => {
     const text = useBeeGameText(lang);
     const workflow = getWorkflowControlState(projectStatus);
@@ -283,7 +281,7 @@ export const BeeGameCollaborationFeed = memo(({
                         messageId={`beegame-workflow-${entry.workflow.runId || 'current'}`}
                         className={FEED_ITEM_CLASS_NAME}
                     >
-                        <WorkflowCard workflow={entry.workflow} onAction={onWorkflowAction} onFoundationDecision={onFoundationDecision} />
+                        <WorkflowCard workflow={entry.workflow} onAction={onWorkflowAction} />
                     </MessageScrollerItem>
                 ) : entry.kind === 'user' ? (
                     <MessageScrollerItem

@@ -261,6 +261,12 @@ describe('beeGameAdapter prompt rules', () => {
     );
   });
 
+  it('does not convert pending workflow cleanup into a stopped confirmation', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ id: 'workflow_1', status: 'needs_action' })));
+    await expect(beeGameAdapter.stopTask({ task_id: 'workflow_1', project_id: 'project_local' }))
+      .resolves.toMatchObject({ state: 'stop_requested' });
+  });
+
   it('continues and retries a recoverable workflow with the current UI language', async () => {
     localStorage.setItem('i18nextLng', 'zh-TW');
     const fetchMock = vi.fn(async () => jsonResponse({ status: 'running' }));
@@ -3105,11 +3111,6 @@ describe('beeGameAdapter prompt rules', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/projects/source-1/review-copy',
       expect.objectContaining({ method: 'POST' }),
-    );
-    await expect(beeGameAdapter.createReviewCopy('source-1', { stopAfterReview: true })).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      '/api/projects/source-1/review-copy',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ stopAfterReview: true }) }),
     );
   });
 

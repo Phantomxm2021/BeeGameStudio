@@ -5,7 +5,7 @@ import {
 } from './display-progress'
 
 describe('delivery progress projection', () => {
-  test('projects public Reviewer and Revision links as their display stages', () => {
+  test('projects the public Reviewer link as the document review stage', () => {
     expect(
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
@@ -13,14 +13,6 @@ describe('delivery progress projection', () => {
         foundationReviewStage: { invocation: { stage: 'reviewer' } },
       }),
     ).toMatchObject({ stageId: 'DOCUMENT_REVIEW', substage: 'INITIAL_REVIEW' })
-
-    expect(
-      projectDeliveryProgress({
-        phase: 'FOUNDATION_REVISION',
-        documentStep: 'FOUNDATION_REVISION',
-        foundationReviewStage: { invocation: { stage: 'revision' } },
-      }),
-    ).toMatchObject({ stageId: 'FOUNDATION_REVISION', substage: 'REPAIRING' })
   })
 
   test('projects the document audit boundary directly from the workflow phase', () => {
@@ -83,35 +75,7 @@ describe('delivery progress projection', () => {
     ).toMatchObject({ substage: 'CHECKLIST_DRAFTING' })
   })
 
-  test('projects an active foundation revision as a repairing substage', () => {
-    expect(
-      projectDeliveryProgress({
-        phase: 'FOUNDATION_REVISION',
-        documentStep: 'FOUNDATION_REVISION',
-        foundationReviewStage: { invocation: { stage: 'revision' } },
-      }),
-    ).toMatchObject({
-      stageId: 'FOUNDATION_REVISION',
-      phaseIndex: 4,
-      phaseCount: 11,
-      substage: 'REPAIRING',
-    })
-
-    expect(
-      projectDeliveryProgress({
-        phase: 'FOUNDATION_REVISION',
-        documentStep: 'FOUNDATION_REVISION',
-        foundationReviewStage: { invocation: { stage: 'revision' } },
-      }),
-    ).toMatchObject({
-      stageId: 'FOUNDATION_REVISION',
-      phaseIndex: 4,
-      phaseCount: 11,
-      substage: 'REPAIRING',
-    })
-  })
-
-  test('projects checklist authoring as its own stage after Foundation revision', () => {
+  test('projects checklist authoring as its own stage after Foundation review', () => {
     expect(
       projectDeliveryProgress({
         phase: 'DOCUMENT_REVIEW',
@@ -119,8 +83,8 @@ describe('delivery progress projection', () => {
       }),
     ).toMatchObject({
       stageId: 'CHECKLIST_AUTHORING',
-      phaseIndex: 5,
-      phaseCount: 11,
+      phaseIndex: 4,
+      phaseCount: 10,
       substage: 'CHECKLIST_DRAFTING',
     })
   })

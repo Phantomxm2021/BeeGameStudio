@@ -1,5 +1,7 @@
 /** Deterministic public Author child: emits exactly one supplied document body. */
 import { randomUUID } from 'node:crypto'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 const documents = JSON.parse(Buffer.from(process.argv[2] ?? '', 'base64').toString('utf8')) as Record<string, string>
 const output = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`)
@@ -16,6 +18,13 @@ for await (const chunk of Bun.stdin.stream()) {
     const message = JSON.parse(line)
     if (message.type !== 'user') continue
     const prompt = message.message.content.map((block: { text: string }) => block.text).join('')
+    if (prompt.includes('Create a complete, mutually consistent set of eight game design documents')) {
+      for (const [path, content] of Object.entries(documents)) await writeFile(join(process.cwd(), path), content)
+      output({ type: 'result', session_id: sessionId, subtype: 'success', is_error: false,
+        structured_output: { status: 'completed', summary: 'Offline autonomous bundle completed.' },
+        modelUsage: { fixture: { inputTokens: 8, outputTokens: 8 } } })
+      continue
+    }
     const match = prompt.match(/Author exactly one complete raw Markdown body for (docs\/[^.]+\.md)\./)
     const path = match?.[1]
     if (!path || typeof documents[path] !== 'string') throw new Error(`missing fixture document: ${path}`)

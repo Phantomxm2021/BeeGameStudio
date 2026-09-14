@@ -16,7 +16,7 @@ export type ReviewerConfiguration = Readonly<{ workspacePath: string }>
 export type ReviewerInfrastructure = Readonly<{ runtimeConfiguration: RuntimeConfigurationClient; billing: UsageBillingClient }>
 
 /** Only copied public input is accepted; no worker, journal, or admission callback escapes. */
-export function foundationReviewerInputDigest(value: Pick<SingleReviewStart, 'ownerId' | 'projectId' | 'input' | 'tokenBudget'>): string {
+export function foundationReviewerInputDigest(value: Pick<SingleReviewStart, 'ownerId' | 'projectId' | 'input'>): string {
   return singleReviewInputDigest(structuredClone(value))
 }
 

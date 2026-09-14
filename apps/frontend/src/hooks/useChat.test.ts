@@ -136,7 +136,7 @@ describe('useChat clarification gate handling', () => {
   it('coalesces duplicate stop requests while waiting for backend confirmation', async () => {
     let resolveStop: (() => void) | undefined;
     vi.mocked(api.stopTask).mockImplementationOnce(() => new Promise(resolve => {
-      resolveStop = () => resolve({} as any);
+      resolveStop = () => resolve({ state: 'stopped' } as any);
     }));
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
@@ -156,6 +156,17 @@ describe('useChat clarification gate handling', () => {
     });
 
     expect(result.current.isStopping).toBe(false);
+  });
+
+  it('reports pending stop honestly and refreshes the authoritative state', async () => {
+    vi.mocked(api.stopTask).mockResolvedValueOnce({ state: 'stop_requested' } as any);
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+    await act(async () => { await result.current.stopTask(); });
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      content: '停止请求已提交，正在等待执行退出或清理确认。',
+    }));
+    expect(chatStoreState.addMessage).not.toHaveBeenCalledWith(expect.objectContaining({ taskKind: 'task_stopped' }));
+    expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
   });
 
   it('refreshes project state when a permission gate event arrives', async () => {

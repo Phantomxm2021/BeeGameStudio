@@ -7,16 +7,14 @@ import {
 } from './documentProgress';
 
 describe('documentProgress', () => {
-  it('retains completed author artifacts while reviewer or revision owns the active task', () => {
-    for (const currentPhase of ['DOCUMENT_REVIEW', 'FOUNDATION_REVISION']) {
-      const workflow = {
-        status: 'running', currentPhase,
-        tasks: [{ id: 'foundation-public-stage', title: 'Foundation Reviewer', status: 'running' }],
-        foundationDocuments: BEEGAME_DOCUMENT_BASELINE.map(document => ({ path: document.path, status: 'ready' })),
-      };
-      expect(deriveDocumentProgress([], [], workflow).every(document => document.status === 'ready')).toBe(true);
-      expect(isCompletedFoundationAuthoringPause([], workflow)).toBe(false);
-    }
+  it('retains completed author artifacts while the document agent owns the active task', () => {
+    const workflow = {
+      status: 'running', currentPhase: 'DOCUMENT_REVIEW',
+      tasks: [{ id: 'foundation-public-stage', title: 'Foundation Reviewer', status: 'running' }],
+      foundationDocuments: BEEGAME_DOCUMENT_BASELINE.map(document => ({ path: document.path, status: 'ready' })),
+    };
+    expect(deriveDocumentProgress([], [], workflow).every(document => document.status === 'ready')).toBe(true);
+    expect(isCompletedFoundationAuthoringPause([], workflow)).toBe(false);
     expect(deriveDocumentProgress([], [], { foundationDocuments: [{ path: 'docs/GDD.md', status: 'pending' }] })
       .every(document => document.status === 'pending')).toBe(true);
   });

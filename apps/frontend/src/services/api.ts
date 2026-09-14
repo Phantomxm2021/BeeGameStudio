@@ -5,7 +5,6 @@ import apiClient, {
   setToastErrorCallback,
 } from './apiClient'
 import { beeGameAdapter } from './beeGameAdapter'
-import type { FoundationDecisionInput } from '../types/message'
 import {
   getCurrentUser as getBeeGameCurrentUser,
   type BeeGameCurrentUser,
@@ -37,7 +36,7 @@ export interface ContinueTaskResponse {
 export interface StopTaskResponse {
   command_id: string
   task_id: string
-  state: 'stopped'
+  state: 'stopped' | 'stop_requested'
   trace_id: string
 }
 
@@ -460,9 +459,6 @@ export const api = {
     beeGameAdapter.resumeWorkflow(projectId),
 
   retryWorkflow: (projectId: string) => beeGameAdapter.retryWorkflow(projectId),
-  submitFoundationDecision: (projectId: string, decision: FoundationDecisionInput) =>
-    beeGameAdapter.submitFoundationDecision(projectId, decision),
-
   requestProjectAction: (data: {
     project_id: string
     kind: 'build_error_repair' | 'deployment_failure_repair'
@@ -547,8 +543,7 @@ export const api = {
    */
   deleteProject: (projectId: string) => beeGameAdapter.deleteProject(projectId),
 
-  createReviewCopy: (projectId: string, options?: { stopAfterReview?: boolean }) =>
-    beeGameAdapter.createReviewCopy(projectId, options),
+  createReviewCopy: (projectId: string) => beeGameAdapter.createReviewCopy(projectId),
 
   getCurrentUser: (): Promise<BeeGameCurrentUser> => getBeeGameCurrentUser(),
 

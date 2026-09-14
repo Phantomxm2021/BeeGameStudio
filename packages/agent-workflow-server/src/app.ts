@@ -1,7 +1,5 @@
 import { Hono, type Context } from 'hono'
 import { projectFoundationReviewDisplay } from './beegame/delivery-workflow/foundation-review-display'
-import { createFoundationRiskDecision, FOUNDATION_ACCEPTANCE_POLICY_VERSION,
-  type FoundationPolicyAuthorization } from './beegame/delivery-workflow/foundation-acceptance-policy'
 import { foundationResultBinding, foundationPublicDigest } from './beegame/delivery-workflow/foundation-public-handoff'
 import { z } from 'zod/v4'
 import { registerDevProjectPurgeRoutes } from './dev-project-purge'
@@ -207,7 +205,6 @@ import {
   type FoundationAuthoringHostOptions,
 } from './beegame/foundation-authoring-host'
 import { createFoundationReviewerHost, type FoundationReviewerHostOptions, type FoundationReviewerHost } from './beegame/foundation-reviewer-host'
-import { createFoundationRevisionHost, type FoundationRevisionHostOptions, type FoundationRevisionHost } from './beegame/foundation-revision-host'
 import { resolveNativeRuntimeCommand } from './beegame/native-runtime-process-path'
 import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delivery-gate'
 import type {
@@ -216,10 +213,7 @@ import type {
   ResourceProductionTask,
   WorkflowEvent,
 } from './beegame/delivery-workflow/types'
-import {
-  FOUNDATION_REVISION_STAGE,
-  projectDeliveryProgress,
-} from './beegame/delivery-workflow/display-progress'
+import { projectDeliveryProgress } from './beegame/delivery-workflow/display-progress'
 import {
   isWorkflowStageCardSnapshot,
   projectWorkflowStageCardHistory,
@@ -229,7 +223,7 @@ import {
   projectAssetDisplayTasks,
   projectDocumentDisplayTasks,
 } from './beegame/delivery-workflow/document-display-tasks'
-import { projectPublicAuthorDisplay, projectPublicAuthorResultDisplay } from './beegame/delivery-workflow/public-author-display'
+import { projectPublicAuthorDisplay, projectPublicAuthorResultDisplay, projectPublicAuthorTiming } from './beegame/delivery-workflow/public-author-display'
 import {
   projectWorkflowCurrentMessage,
   projectWorkflowDisplayReason,
@@ -427,7 +421,6 @@ export type AgentWorkflowAppOptions = {
     options: FoundationAuthoringHostOptions,
   ) => FoundationAuthoringHost
   foundationReviewerHostFactory?: (options: FoundationReviewerHostOptions) => FoundationReviewerHost
-  foundationRevisionHostFactory?: (options: FoundationRevisionHostOptions) => FoundationRevisionHost
 }
 
 export const ROUTE_PERMISSION = {
@@ -788,14 +781,12 @@ export function createAgentWorkflowApp(
     )(authoringHostOptions)
     const { language: _authorLanguage, ...reviewHostOptions } = authoringHostOptions
     const reviewer = (options.foundationReviewerHostFactory ?? createFoundationReviewerHost)(reviewHostOptions)
-    const revision = (options.foundationRevisionHostFactory ?? createFoundationRevisionHost)(reviewHostOptions)
     const controller = createDeliveryWorkflowController({
       workspacePath: workspaceKey,
       ownerId: input.user.id,
       workerPort,
       author,
       reviewer,
-      revision,
     })
     deliveryControllers.set(key, {
       controller,
@@ -2377,8 +2368,7 @@ export function createAgentWorkflowApp(
     let executionRequested = false
     try {
       const body = await c.req.text()
-      const reviewOptions = z.object({ tokenBudget: z.number().int().positive().safe().nullable().optional(),
-        stopAfterReview: z.boolean().optional() }).strict()
+      const reviewOptions = z.object({}).strict()
         .parse(body.trim() ? JSON.parse(body) : {})
       const sourceProject = await getOwnedProjectMetadata(
         c.req.raw,
@@ -2976,7 +2966,7 @@ export function createAgentWorkflowApp(
         return c.json({
           id: sessionRef.sessionId,
           cwd: sessionRef.workspacePath,
-          status: 'stopped',
+          status: workflowStopResult?.status ?? 'stopped',
           turnStatus: 'idle',
         })
       }
@@ -2986,7 +2976,7 @@ export function createAgentWorkflowApp(
         user,
         beeGameSessions.metadata(session.id),
       )
-      return c.json(session)
+      return c.json(workflowStopResult ? { ...session, status: workflowStopResult.status } : session)
     } catch (err) {
       return tracedRouteError(c, 'project.stop', err, 404)
     }
@@ -3155,100 +3145,6 @@ export function createAgentWorkflowApp(
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
-  })
-
-  /** Explicit, auditable Foundation acceptance adjudication. Ordinary resume
-   * never waives findings, increases budget, or changes policy. */
-  app.post('/api/projects/:id/workflow/foundation-decision', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'agent.send_message')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project?.root_path) return c.json({ error: 'Project not found' }, 404)
-      const body = await readJson(c.req.raw)
-      const action = typeof body.action === 'string' ? body.action : undefined
-      const reason = typeof body.reason === 'string' ? body.reason : undefined
-      const decisionId = typeof body.decisionId === 'string' ? body.decisionId : undefined
-      const authorizationId = typeof body.authorizationId === 'string' ? body.authorizationId : undefined
-      const findingIds = Array.isArray(body.findingIds) ? body.findingIds : undefined
-      const reportResultId = typeof body.reportResultId === 'string' ? body.reportResultId : undefined
-      const reportResultDigest = typeof body.reportResultDigest === 'string' ? body.reportResultDigest : undefined
-      const documentSetDigest = typeof body.documentSetDigest === 'string' ? body.documentSetDigest : undefined
-      const controlSequence = typeof body.controlSequence === 'number' ? body.controlSequence : undefined
-      const expectedPolicyVersion = typeof body.policyVersion === 'string' ? body.policyVersion : body.policyVersion === null ? undefined : '__missing__'
-      const expectedAutomaticRepairLimit = typeof body.automaticRepairLimit === 'number' ? body.automaticRepairLimit : body.automaticRepairLimit === null ? undefined : '__missing__'
-      const expectedCompletedRepairCount = typeof body.completedRepairCount === 'number' ? body.completedRepairCount : body.completedRepairCount === null ? undefined : '__missing__'
-      const additionalRepairRounds = typeof body.additionalRepairRounds === 'number' ? body.additionalRepairRounds : undefined
-      if (!action || !['accept_risk', 'grant_repair_budget', 'switch_policy'].includes(action) || !reason?.trim())
-        return c.json({ error: 'Explicit Foundation decision action and reason are required' }, 400)
-      const run = await createRunStore(project.root_path, user.id).load()
-      if (!run) return c.json({ error: 'document_review_not_started' }, 409)
-      const link = run.foundationReviewStage
-      if (!link) return c.json({ error: 'foundation_review_not_started' }, 409)
-      if (body.runId !== run.runId || !Number.isSafeInteger(controlSequence) || expectedPolicyVersion === '__missing__' ||
-          expectedAutomaticRepairLimit === '__missing__' || expectedCompletedRepairCount === '__missing__')
-        return c.json({ error: 'Foundation decision precondition is missing or stale' }, 409)
-      const precondition = { runId: run.runId, controlSequence: controlSequence!, policyVersion: expectedPolicyVersion as string | undefined,
-        automaticRepairLimit: expectedAutomaticRepairLimit as number | undefined, completedRepairCount: expectedCompletedRepairCount as number | undefined }
-      const now = new Date().toISOString()
-      if (action === 'accept_risk') {
-        if (!decisionId?.trim() || !findingIds || findingIds.length < 1 || !findingIds.every((id: unknown) => typeof id === 'string' && id.trim()))
-          return c.json({ error: 'Risk decisions require a stable decisionId and findingIds' }, 400)
-        const review = link.latestReview ?? link.sourceReview ?? (link.invocation.stage === 'reviewer' && link.invocation.outcome?.status === 'completed'
-          ? link.invocation.outcome.result : undefined)
-        if (!review || review.producer !== 'foundation-reviewer') return c.json({ error: 'No settled Foundation report is available for adjudication' }, 409)
-        const binding = foundationResultBinding({ ownerId: run.ownerId, projectId: run.projectId }, review)
-        if (reportResultId !== review.resultId || reportResultDigest !== binding.resultDigest || documentSetDigest !== review.documentSetDigest)
-          return c.json({ error: 'Foundation decision report binding is stale or incomplete' }, 409)
-        const riskDecisions = findingIds.map((findingId: string) => {
-          const stableId = `${decisionId}:${findingId}`
-          const prior = link.riskDecisions?.find(item => item.decisionId === stableId)
-          if (prior) {
-            if (prior.actorId !== user.id || prior.reason !== reason.trim() || prior.findingId !== findingId)
-              throw new Error('Foundation risk decision ID payload conflict')
-            return prior
-          }
-          return createFoundationRiskDecision({ ownerId: run.ownerId,
-            projectId: run.projectId, review, findingId, actorId: user.id, reason: reason.trim(),
-            decisionId: stableId, recordedAt: now })
-        })
-        const updated = await getDeliveryController({ request: c.req.raw, user, projectId: run.projectId, workspacePath: project.root_path })
-          .applyFoundationPolicyDecision(run, { riskDecisions, riskDecisionRequestId: decisionId, precondition })
-        return c.json(updated)
-      }
-      if (!authorizationId?.trim())
-        return c.json({ error: 'Budget or policy changes require a stable authorizationId' }, 400)
-      const authorization: FoundationPolicyAuthorization = action === 'grant_repair_budget'
-        ? { authorizationId, action: 'grant_repair_budget', actorId: user.id, reason: reason.trim(), recordedAt: now,
-            fromPolicyVersion: link.policyVersion, toPolicyVersion: FOUNDATION_ACCEPTANCE_POLICY_VERSION,
-            // Build the durable authorization against the request's snapshot,
-            // not the post-mutation state. This keeps a replay's payload
-            // stable after the first grant has advanced the live limit.
-            previousAutomaticRepairLimit: expectedAutomaticRepairLimit as number | undefined,
-            newAutomaticRepairLimit: (expectedAutomaticRepairLimit ?? link.automaticRepairLimit ?? 0) +
-              (typeof additionalRepairRounds === 'number' && Number.isSafeInteger(additionalRepairRounds) && additionalRepairRounds > 0 ? additionalRepairRounds : 0) }
-        : { authorizationId, action: 'switch_policy', actorId: user.id, reason: reason.trim(), recordedAt: now,
-            // A replay carries the legacy precondition (null on the wire),
-            // while the live link is already upgraded. Preserve the original
-            // authorization's source policy rather than comparing to v1.
-            fromPolicyVersion: expectedPolicyVersion, toPolicyVersion: FOUNDATION_ACCEPTANCE_POLICY_VERSION,
-            newAutomaticRepairLimit: (expectedCompletedRepairCount ?? link.completedRepairCount ?? Math.floor(link.sequence / 2)) + 2 }
-      const priorAuthorization = link.policyAuthorizations?.find(item => item.authorizationId === authorizationId)
-      if (priorAuthorization) {
-        if (priorAuthorization.actorId !== user.id || priorAuthorization.reason !== reason.trim() || priorAuthorization.action !== authorization.action ||
-            priorAuthorization.newAutomaticRepairLimit !== authorization.newAutomaticRepairLimit ||
-            priorAuthorization.previousAutomaticRepairLimit !== authorization.previousAutomaticRepairLimit ||
-            priorAuthorization.fromPolicyVersion !== authorization.fromPolicyVersion || priorAuthorization.toPolicyVersion !== authorization.toPolicyVersion)
-          return c.json({ error: 'Foundation authorization ID payload conflict' }, 409)
-      }
-      const durableAuthorization = priorAuthorization ?? authorization
-      if (action === 'grant_repair_budget' && (durableAuthorization.newAutomaticRepairLimit ?? 0) <= (link.automaticRepairLimit ?? 0) && !priorAuthorization)
-        return c.json({ error: 'additionalRepairRounds must be a positive integer' }, 400)
-      const updated = await getDeliveryController({ request: c.req.raw, user, projectId: run.projectId, workspacePath: project.root_path })
-        .applyFoundationPolicyDecision(run, { authorization: durableAuthorization, precondition })
-      return c.json(updated)
-    } catch (err) { return c.json({ error: toErrorMessage(err) }, 409) }
   })
 
   app.post('/api/projects/:id/workflow/retry', async c => {
@@ -6412,6 +6308,7 @@ function workflowThinkingStatus(
   workflow: JsonObject,
 ): 'working' | 'waiting' | 'idle' {
   if (workflowStatus(workflow) !== 'running') return 'idle'
+  if (isObject(workflow.authorStage) && ['starting', 'running'].includes(String(workflow.authorStage.status))) return 'working'
   if (isObject(workflow.foundationReviewStage)) {
     const invocation = isObject(workflow.foundationReviewStage.invocation)
       ? workflow.foundationReviewStage.invocation : undefined
@@ -6441,8 +6338,6 @@ function workflowMessageKey(workflow: JsonObject): string {
       return 'workflow.documentDrafting'
     case 'DOCUMENT_REVIEW':
       return 'workflow.documentReview'
-    case 'FOUNDATION_REVISION':
-      return 'workflow.foundationRevision'
     case 'RESOURCE_PREPARATION':
       return 'workflow.resourcePreparation'
     case 'ATOMIC_TASK_PLANNING':
@@ -6490,56 +6385,21 @@ function workflowViewForDisplay(
     isObject(workflow.foundationReviewStage)
       ? projectPublicAuthorResultDisplay(workflow.foundationReviewStage.importedAuthorResult) : undefined
   const tasks = Array.isArray(workflow.tasks) ? workflow.tasks : []
-  const activeFoundationRepair =
-    workflow.phase === 'FOUNDATION_REVISION'
   const displayDocumentStep =
     typeof workflow.documentStep === 'string'
       ? workflow.documentStep
-      : activeFoundationRepair
-        ? 'FOUNDATION_REVIEW'
-        : undefined
+      : undefined
   const currentMessage = projectWorkflowCurrentMessage({
     value: workflow.currentMessage,
     phase: workflow.phase,
     documentStep: displayDocumentStep,
   })
   const foundationDisplay = projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status)
-  const acceptanceDecision = isObject(workflow.foundationReviewStage)
-    ? displayFoundationAcceptanceDecision(workflow.foundationReviewStage.acceptanceDecision)
-    : undefined
   const reviewReport = isObject(workflow.foundationReviewStage)
-    ? displayFoundationReviewReport(workflow.foundationReviewStage.acceptedReview ?? workflow.foundationReviewStage.latestReview ?? workflow.foundationReviewStage.sourceReview)
+    ? displayFoundationReviewReport(workflow.foundationReviewStage.acceptedReview)
     : undefined
-  const foundationInvocation = isObject(workflow.foundationReviewStage)
-    && isObject(workflow.foundationReviewStage.invocation)
-    ? workflow.foundationReviewStage.invocation
-    : undefined
-  const foundationLink = isObject(workflow.foundationReviewStage)
-    ? workflow.foundationReviewStage
-    : undefined
-  const foundationOutcome = isObject(foundationInvocation?.outcome)
-    ? foundationInvocation.outcome
-    : undefined
-  const foundationControl = isObject(foundationLink?.control)
-    ? foundationLink.control
-    : undefined
-  const stoppedLegacyFoundationSwitchAvailable = isObject(workflow.foundationReviewStage) &&
-    workflow.foundationReviewStage.policyVersion === undefined &&
-    workflow.status === 'stopped' &&
-    foundationControl?.action === 'stop' &&
-    foundationOutcome?.status === 'stopped' &&
-    foundationOutcome.billingStatus === 'settled'
-  const foundationDecisionContext = isObject(workflow.foundationReviewStage) && typeof workflow.runId === 'string' &&
-    isObject(workflow.foundationReviewStage.control)
-    ? { runId: workflow.runId, controlSequence: workflow.foundationReviewStage.control.sequence,
-        policyVersion: typeof workflow.foundationReviewStage.policyVersion === 'string' ? workflow.foundationReviewStage.policyVersion : null,
-        automaticRepairLimit: Number.isSafeInteger(workflow.foundationReviewStage.automaticRepairLimit) ? workflow.foundationReviewStage.automaticRepairLimit : null,
-        completedRepairCount: Number.isSafeInteger(workflow.foundationReviewStage.completedRepairCount) ? workflow.foundationReviewStage.completedRepairCount : null,
-        availableActions: workflow.foundationReviewStage.acceptedReview ? [] : workflow.foundationReviewStage.convergenceStop
-          ? (workflow.foundationReviewStage.control.action === 'stop' ? [] : workflow.foundationReviewStage.policyVersion
-            ? ['accept_risk', 'grant_repair_budget'] : ['switch_policy'])
-          : stoppedLegacyFoundationSwitchAvailable ? ['switch_policy'] : [] }
-    : undefined
+  const authorTiming = !workflow.foundationReviewStage && projectDeliveryProgress(workflow)?.stageId === 'DOCUMENT_DRAFTING'
+    ? projectPublicAuthorTiming(workflow.authorStage) : undefined
   const foundationTiming = isObject(workflow.foundationReviewStage) &&
     Number.isFinite(Number(workflow.elapsedMs)) && Number(workflow.elapsedMs) >= 0
     ? { elapsedMs: Number(workflow.elapsedMs), scope: 'merged_foundation_stage_elapsed',
@@ -6584,9 +6444,9 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
   const displayTaskSource = isObject(workflow.foundationReviewStage)
-    ? [{ id: 'foundation-public-stage', title: workflow.phase === 'FOUNDATION_REVISION' ? 'Foundation Revision' : 'Foundation Reviewer',
+    ? [{ id: 'foundation-public-stage', title: 'Foundation Reviewer',
         status: foundationDisplay!.taskStatus,
-        attempt: 0, operation: workflow.phase === 'FOUNDATION_REVISION' ? 'revise' : 'review' }]
+        attempt: 0, operation: 'review' }]
     : publicAuthor
     ? publicAuthor.tasks
     : documentPhase && workspacePath
@@ -6714,9 +6574,7 @@ function workflowViewForDisplay(
     ...(blockedReason
       ? { block: { ...blockedReason, ...(nextAction ? { nextAction } : {}) } }
       : {}),
-    ...(acceptanceDecision ? { acceptanceDecision } : {}),
     ...(reviewReport ? { reviewReport } : {}),
-    ...(foundationDecisionContext ? { foundationDecisionContext } : {}),
     ...(foundationTiming ? { foundationTiming } : {}),
     ...(typeof workflow.workflowStateError === 'boolean'
       ? { workflowStateError: workflow.workflowStateError }
@@ -6749,6 +6607,7 @@ function workflowViewForDisplay(
     ...(typeof workflow.activeSince === 'string'
       ? { activeSince: workflow.activeSince }
       : {}),
+    ...(authorTiming ?? {}),
     ...(isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.currentCallElapsedMs)) && Number(workflow.foundationReviewStage.currentCallElapsedMs) >= 0
       ? { currentCallElapsedMs: Number(workflow.foundationReviewStage.currentCallElapsedMs) }
       : {}),
@@ -6789,35 +6648,11 @@ function displayIssueSummary(value: unknown): JsonObject | undefined {
   return { total, blocker, high, medium, low }
 }
 
-function displayFoundationAcceptanceDecision(value: unknown): JsonObject | undefined {
-  if (!isObject(value) || typeof value.policyVersion !== 'string' || typeof value.reviewResultId !== 'string' ||
-      typeof value.reviewResultDigest !== 'string' || typeof value.documentSetDigest !== 'string' ||
-      typeof value.disposition !== 'string' || typeof value.reason !== 'string' ||
-      !['accepted', 'accepted_with_advisories', 'repair_required', 'needs_action'].includes(value.disposition) ||
-      !Array.isArray(value.advisoryFindingIds) || !Array.isArray(value.blockingFindingIds) || !Array.isArray(value.waivedFindingIds) ||
-      !value.advisoryFindingIds.every(id => typeof id === 'string') || !value.blockingFindingIds.every(id => typeof id === 'string') ||
-      !value.waivedFindingIds.every(id => typeof id === 'string') || !Number.isSafeInteger(value.automaticRepairLimit) ||
-      !Number.isSafeInteger(value.completedRepairCount)) return undefined
-  return { policyVersion: value.policyVersion, reviewResultId: value.reviewResultId, reviewResultDigest: value.reviewResultDigest,
-    documentSetDigest: value.documentSetDigest, disposition: value.disposition, advisoryFindingIds: value.advisoryFindingIds,
-    blockingFindingIds: value.blockingFindingIds, waivedFindingIds: value.waivedFindingIds,
-    automaticRepairLimit: value.automaticRepairLimit, completedRepairCount: value.completedRepairCount, reason: value.reason }
-}
-
 function displayFoundationReviewReport(value: unknown): JsonObject | undefined {
   if (!isObject(value) || value.producer !== 'foundation-reviewer' || typeof value.resultId !== 'string' ||
-      !['passed', 'issues_found'].includes(String(value.kind)) || typeof value.documentSetDigest !== 'string' ||
-      !Array.isArray(value.issues)) return undefined
-  const findings = value.issues.flatMap(entry => {
-    if (!isObject(entry) || !isObject(entry.issue)) return []
-    const issue = entry.issue
-    if (typeof issue.id !== 'string' || typeof issue.severity !== 'string' || typeof issue.title !== 'string' ||
-        typeof issue.actual !== 'string' || typeof issue.expected !== 'string') return []
-    return [{ id: issue.id, severity: issue.severity, title: issue.title, actual: issue.actual, expected: issue.expected,
-      ...(isObject(issue.source) && typeof issue.source.documentPath === 'string' ? { documentPath: issue.source.documentPath } : {}) }]
-  })
+      value.protocolVersion !== 6 || typeof value.documentSetDigest !== 'string') return undefined
   return { resultId: value.resultId, resultDigest: foundationPublicDigest(value), documentSetDigest: value.documentSetDigest,
-    kind: value.kind, ...(isObject(value.audit) && typeof value.audit.summary === 'string' ? { summary: value.audit.summary } : {}), findings }
+    ...(isObject(value.audit) && typeof value.audit.summary === 'string' ? { summary: value.audit.summary } : {}) }
 }
 
 function displayUsage(value: unknown): JsonObject | undefined {
@@ -6879,58 +6714,6 @@ export function workflowStageSnapshotsForDisplay(
       value.phaseIndex <= currentProgress.phaseIndex,
   )
   if (reached.length === 0) return undefined
-  const activeFoundationRepair =
-    workflow.phase === 'FOUNDATION_REVISION'
-  if (
-    activeFoundationRepair &&
-    currentProgress?.stageId === FOUNDATION_REVISION_STAGE
-  ) {
-    const liveIndex = reached.findIndex(
-      snapshot =>
-        snapshot.stageId === currentProgress.stageId &&
-        snapshot.phaseIndex === currentProgress.phaseIndex,
-    )
-    const staleStage4Index = reached.findIndex(
-      snapshot => snapshot.phaseIndex === currentProgress.phaseIndex,
-    )
-    const index = liveIndex >= 0 ? liveIndex : staleStage4Index
-    const timestamp =
-      typeof workflow.updatedAt === 'string'
-        ? workflow.updatedAt
-        : new Date().toISOString()
-    const liveSnapshot = {
-      ...(index >= 0 ? reached[index] : {}),
-      stageId: FOUNDATION_REVISION_STAGE,
-      phaseIndex: currentProgress.phaseIndex,
-      phaseCount: currentProgress.phaseCount,
-      status: (workflowStatus(workflow) || 'failed') as WorkflowStageCardSnapshot['status'],
-      currentPhase: 'FOUNDATION_REVISION' as const,
-      substage: 'REPAIRING' as const,
-      documentStep: 'FOUNDATION_REVISION' as const,
-      tasks: liveTasks as WorkflowStageCardSnapshot['tasks'],
-      completedTaskCount: liveTasks.filter(task => task.status === 'completed').length,
-      totalTaskCount: liveTasks.length,
-      createdAt:
-        index >= 0 && typeof reached[index]?.createdAt === 'string'
-          ? reached[index].createdAt
-          : timestamp,
-      updatedAt: timestamp,
-      elapsedMs:
-        index >= 0 && nonnegativeFiniteNumber(reached[index]?.elapsedMs)
-          ? reached[index].elapsedMs
-          : 0,
-    }
-    // Drop stale copy, then project only the trusted native progress vocabulary.
-    delete liveSnapshot.message
-    delete liveSnapshot.thinking
-    if (workflow.status === 'running') {
-      const message = projectWorkflowCurrentMessage({ value: workflow.currentMessage,
-        phase: workflow.phase, documentStep: workflow.documentStep })
-      if (message) liveSnapshot.message = message
-    }
-    if (index >= 0) reached[index] = liveSnapshot
-    else reached = [...reached, liveSnapshot]
-  }
   return reached.map((snapshot, index) => {
     const isLive =
       currentProgress !== undefined &&
@@ -6986,6 +6769,7 @@ export function workflowStageSnapshotsForDisplay(
       updatedAt: snapshot.updatedAt,
       ...(snapshot.completedAt ? { completedAt: snapshot.completedAt } : {}),
       elapsedMs: snapshot.elapsedMs,
+      ...(snapshot.stageId === 'DOCUMENT_DRAFTING' ? projectPublicAuthorTiming(workflow.authorStage) ?? {} : {}),
       ...(snapshot.activeSince ? { activeSince: snapshot.activeSince } : {}),
       ...(block ? { block } : {}),
     }

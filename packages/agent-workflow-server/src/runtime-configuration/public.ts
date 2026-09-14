@@ -1,4 +1,6 @@
 import type { RuntimeModelConfig } from '@bee-game-studio/agent-workflow'
+import { randomUUID } from 'node:crypto'
+import { safeErrorFacts } from '../security/safe-error-facts'
 import type { DashboardRepository } from '../dashboard-repository'
 import type { AuthenticationClient } from '../auth/public'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
@@ -64,41 +66,75 @@ export function createRuntimeConfigurationClient(
         throw new Error('runtime configuration ownerId does not match the bound owner')
       }
 
-      const token = await getRequiredToken(authentication, ownerId)
-      let additionalEnv: Record<string, string>
+      const traceId = randomUUID()
+      const startedAt = Date.now()
+      let step = 'authentication'
+      let failureFacts: ReturnType<typeof safeErrorFacts> = {}
+      let repositoryUnauthorized = false
       try {
-        additionalEnv = await repository.getRuntimeEnv(
-          dataDir,
-          ownerId,
-          token,
-          modelConfigId,
-        )
-      } catch (error) {
-        if (!isRuntimeAuthError(error)) {
-          throw new Error('runtime configuration repository unavailable')
-        }
-        const refreshedToken = await getRequiredToken(authentication, ownerId, true)
-        // The refresh is deliberately the only retry. A second 401/403 is
-        // returned to the caller and cannot trigger an unbounded refresh loop.
+        const token = await getRequiredToken(authentication, ownerId)
+        let additionalEnv: Record<string, string>
+        step = 'runtime_environment'
         try {
           additionalEnv = await repository.getRuntimeEnv(
             dataDir,
             ownerId,
-            refreshedToken,
+            token,
             modelConfigId,
           )
-        } catch (retryError) {
-          if (isRuntimeAuthError(retryError)) {
-            throw new Error('runtime configuration authorization failed')
+        } catch (error) {
+          failureFacts = safeErrorFacts(error)
+          repositoryUnauthorized = isRuntimeAuthError(error)
+          if (!repositoryUnauthorized) {
+            throw new Error('runtime configuration repository unavailable')
           }
-          throw new Error('runtime configuration repository unavailable')
+          console.warn('[BeeGame runtime configuration]', JSON.stringify({
+            timestamp: new Date().toISOString(), traceId, step,
+            code: 'authorization_refresh_requested', ...failureFacts,
+          }))
+          step = 'authentication_refresh'
+          failureFacts = {}
+          const refreshedToken = await getRequiredToken(authentication, ownerId, true)
+          // Keep the existing single auth refresh; logging adds no retries.
+          try {
+            step = 'runtime_environment_retry'
+            additionalEnv = await repository.getRuntimeEnv(
+              dataDir,
+              ownerId,
+              refreshedToken,
+              modelConfigId,
+            )
+          } catch (retryError) {
+            failureFacts = safeErrorFacts(retryError)
+            repositoryUnauthorized = isRuntimeAuthError(retryError)
+            if (repositoryUnauthorized) {
+              throw new Error('runtime configuration authorization failed')
+            }
+            throw new Error('runtime configuration repository unavailable')
+          }
         }
-      }
 
-      assertRuntimeEnvironment(additionalEnv)
-      return {
-        command: [...boundCommand],
-        env: mergeRuntimeEnvironment(boundRuntime, additionalEnv),
+        step = 'environment_validation'
+        failureFacts = {}
+        assertRuntimeEnvironment(additionalEnv)
+        return {
+          command: [...boundCommand],
+          env: mergeRuntimeEnvironment(boundRuntime, additionalEnv),
+        }
+      } catch (error) {
+        const code = step === 'authentication' || step === 'authentication_refresh'
+          ? (error instanceof Error && error.message === 'runtime configuration authentication token unavailable'
+              ? 'token_unavailable' : 'authentication_unavailable')
+          : step === 'environment_validation' ? 'invalid_environment'
+          : repositoryUnauthorized
+            ? 'authorization_failed' : 'repository_unavailable'
+        const diagnostic = {
+          traceId, timestamp: new Date().toISOString(), step, code,
+          elapsedMs: Math.max(0, Date.now() - startedAt), ...failureFacts,
+        }
+        console.error('[BeeGame runtime configuration]', JSON.stringify(diagnostic))
+        // Only safe fields cross the stage boundary; never attach a raw cause.
+        throw Object.assign(new Error(error instanceof Error ? error.message : 'runtime configuration unavailable'), { diagnostic })
       }
     },
   }

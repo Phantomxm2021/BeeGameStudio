@@ -23,6 +23,7 @@ import {
 } from '../tmuxSocket.js'
 import { windowsPathToPosixPath } from '../windowsPaths.js'
 import type { ShellProvider } from './shellProvider.js'
+import { encodeSandboxShellCommand, quoteSandboxCommandForEval } from './sandboxCommand.js'
 
 /**
  * Returns a shell command to disable extended glob patterns for security.
@@ -126,7 +127,9 @@ export async function createBashShellProvider(
       // See anthropics/claude-code#4928.
       const normalizedCommand = rewriteWindowsNullRedirect(command)
       const addStdinRedirect = shouldAddStdinRedirect(normalizedCommand)
-      let quotedCommand = quoteShellCommand(normalizedCommand, addStdinRedirect)
+      let quotedCommand = opts.useSandbox
+        ? quoteSandboxCommandForEval(normalizedCommand, addStdinRedirect)
+        : quoteShellCommand(normalizedCommand, addStdinRedirect)
 
       // Debug logging for heredoc/multiline commands to trace trailer handling
       // Only log when commit attribution is enabled to avoid noise
@@ -147,9 +150,9 @@ export async function createBashShellProvider(
       // Without this, `eval 'rg foo | wc -l' \< /dev/null` becomes
       // `rg foo | wc -l < /dev/null` — wc reads /dev/null and outputs 0, and
       // rg (with no path arg) waits on the open spawn stdin pipe forever.
-      // Applies to sandbox mode too: sandbox wraps the assembled commandString,
-      // not the raw command (since PR #9189).
-      if (normalizedCommand.includes('|') && addStdinRedirect) {
+      // Sandboxed eval uses a real stdin redirect instead, preserving the
+      // original script bytes without tokenizing/reconstructing the pipeline.
+      if (!opts.useSandbox && normalizedCommand.includes('|') && addStdinRedirect) {
         quotedCommand = rearrangePipeCommand(normalizedCommand)
       }
 
@@ -194,6 +197,7 @@ export async function createBashShellProvider(
         )
       }
 
+      if (opts.useSandbox) commandString = encodeSandboxShellCommand(commandString)
       return { commandString, cwdFilePath }
     },
 

@@ -14,7 +14,6 @@ import type {
 } from './api'
 import type { Project } from '../types/project'
 import type { ProjectEventMessage } from '../types/message'
-import type { FoundationDecisionInput } from '../types/message'
 import { authenticatedFetch } from './apiClient'
 import { projectQuotaErrorMessage } from './projectQuotaError'
 import {
@@ -367,14 +366,14 @@ export const beeGameAdapter = {
     return { ok: true }
   },
 
-  async createReviewCopy(projectId: string, options: { stopAfterReview?: boolean } = {}): Promise<{
+  async createReviewCopy(projectId: string): Promise<{
     project: Project
     runId: string
     phase: string
   }> {
     return postJson(
       `/api/projects/${encodeURIComponent(projectId)}/review-copy`,
-      options,
+      {},
     )
   },
 
@@ -438,20 +437,6 @@ export const beeGameAdapter = {
     )
   },
 
-  async submitFoundationDecision(
-    projectId: string,
-    decision: FoundationDecisionInput,
-  ): Promise<Record<string, unknown>> {
-    const payload = {
-      ...decision,
-      ...(decision.runId ? { runId: decision.runId } : {}),
-    }
-    return postJson<Record<string, unknown>>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflow/foundation-decision`,
-      payload,
-    )
-  },
-
   async requestProjectAction(data: {
     project_id: string
     kind: 'build_error_repair' | 'deployment_failure_repair'
@@ -491,7 +476,7 @@ export const beeGameAdapter = {
     return {
       command_id: stopped.id || sessionId,
       task_id: stopped.id || sessionId,
-      state: 'stopped',
+      state: stopped.status === 'stopped' ? 'stopped' : 'stop_requested',
       trace_id: stopped.id || sessionId,
     }
   },

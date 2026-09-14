@@ -19,8 +19,19 @@ mock.module('src/utils/sessionStorage.js', () => ({
 mock.module('src/utils/task/diskOutput.js', () => ({
   evictTaskOutput: noop,
   getTaskOutputPath: (id: string) => `/tmp/output/${id}`,
+  getTaskOutputDir: () => '/tmp/output',
   initTaskOutputAsSymlink: async () => {},
   getTaskOutputDelta: async () => null,
+}))
+
+let receiptWrite: () => Promise<void> = async () => {}
+const savedReceipts: any[] = []
+mock.module('src/utils/task/agentResultReceipt.js', () => ({
+  writeAgentResultReceipt: (_directory: string, receipt: any) => { savedReceipts.push(receipt); return receiptWrite() },
+  flushAgentResultReceipts: async () => {},
+}))
+mock.module('src/utils/messages.js', () => ({
+  extractTextContent: (content: any[], separator = '\n') => content.filter(block => block.type === 'text').map(block => block.text).join(separator),
 }))
 
 // Capture enqueuePendingNotification calls for verification
@@ -33,6 +44,7 @@ mock.module('src/utils/messageQueueManager.js', () => ({
 
 mock.module('src/bootstrap/state.js', () => ({
   getSdkAgentProgressSummariesEnabled: () => false,
+  isSessionPersistenceDisabled: () => false,
   getSessionId: () => 'test-session-001',
   getProjectRoot: () => '/test/project',
   getIsNonInteractiveSession: () => false,
@@ -161,6 +173,8 @@ function makeAssistantMessage(usage: any, content: any[] = []): any {
 
 afterEach(() => {
   enqueuedNotifications.length = 0
+  savedReceipts.length = 0
+  receiptWrite = async () => {}
 })
 
 // ─── Tests ───
@@ -252,7 +266,9 @@ describe('getProgressUpdate', () => {
 })
 
 describe('completeAgentTask', () => {
-  test('transitions running task to completed', () => {
+  test('transitions immediately but allows eviction only after its receipt is durable', async () => {
+    let finishWrite!: () => void
+    receiptWrite = () => new Promise(resolve => { finishWrite = resolve })
     const { setAppState, getState } = createSetAppState({
       tasks: { 'test-agent-001': makeRunningTask() },
     })
@@ -270,7 +286,20 @@ describe('completeAgentTask', () => {
     const task = getState().tasks['test-agent-001']
     expect(task.status).toBe('completed')
     expect(task.endTime).toBeDefined()
-    expect(task.evictAfter).toBeDefined()
+    expect(task.evictAfter).toBeUndefined()
+    expect(savedReceipts[0]).toMatchObject({ task_id: 'test-agent-001', status: 'completed' })
+    finishWrite()
+    await Promise.resolve()
+    expect(getState().tasks['test-agent-001'].evictAfter).toBeDefined()
+  })
+
+  test('preserves the in-memory result when receipt persistence fails', async () => {
+    receiptWrite = async () => { throw new Error('disk full') }
+    const { setAppState, getState } = createSetAppState({ tasks: { 'test-agent-001': makeRunningTask() } })
+    completeAgentTask({ agentId: 'test-agent-001', content: [{ type: 'text', text: 'Preserved answer' }] } as any, setAppState as any)
+    await Promise.resolve(); await Promise.resolve()
+    expect(getState().tasks['test-agent-001'].evictAfter).toBeUndefined()
+    expect(getState().tasks['test-agent-001'].result.content[0].text).toBe('Preserved answer')
   })
 
   test('no-op if task not running', () => {

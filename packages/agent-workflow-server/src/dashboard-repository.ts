@@ -7,6 +7,7 @@ import {
 } from '@bee-game-studio/agent-workflow'
 import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { safeErrorFacts } from './security/safe-error-facts'
 import {
   appendAuditEvent,
   listAuditEvents,
@@ -768,11 +769,21 @@ export class DashboardRepository {
         dataDir,
         authToken: this.requireAuthToken(authToken),
         ...(modelConfigId ? { modelConfigId } : {}),
+      }).catch(error => {
+        console.error('[BeeGame runtime dependency]', JSON.stringify({
+          timestamp: new Date().toISOString(), step: 'runtime_env_rpc', ...safeErrorFacts(error),
+        }))
+        throw error
       })
       const modelEnv = modelConfigId
         ? await this.supabaseForAuthToken(
             authToken,
-          ).loadRlsVisibleModelRuntimeEnv(modelConfigId)
+          ).loadRlsVisibleModelRuntimeEnv(modelConfigId).catch(error => {
+            console.error('[BeeGame runtime dependency]', JSON.stringify({
+              timestamp: new Date().toISOString(), step: 'selected_model_config', ...safeErrorFacts(error),
+            }))
+            throw error
+          })
         : {}
       this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
       await this.materializeRemoteUserSkillsSafely(userId, dataDir)

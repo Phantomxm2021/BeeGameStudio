@@ -42,7 +42,6 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [creatingReviewCopyId, setCreatingReviewCopyId] = useState<string | null>(null);
-  const [stopAfterReview, setStopAfterReview] = useState(false);
   const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameUsageSummary>>({});
   const t = useCommonText(lang);
   const text = useBeeGameText(lang);
@@ -81,9 +80,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
     setCreatingReviewCopyId(id);
     closeMenu();
     try {
-      const project = stopAfterReview
-        ? await createReviewCopy(id, { stopAfterReview: true })
-        : await createReviewCopy(id);
+      const project = await createReviewCopy(id);
       onSelectProject(project.id);
       onClose();
     } catch {
@@ -289,14 +286,6 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               onPointerDown={event => event.stopPropagation()}
               className="input-surface glass-panel fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl p-1.5 text-zinc-100 shadow-xl"
             >
-              <label className="type-footnote flex items-center gap-3 rounded-2xl px-4 py-3 text-zinc-300">
-                <input
-                  type="checkbox"
-                  checked={stopAfterReview}
-                  onChange={event => setStopAfterReview(event.target.checked)}
-                />
-                {text.stopAfterReview}
-              </label>
               <button
                 type="button"
                 onClick={event => handleCreateReviewCopy(event, activeProject.id)}

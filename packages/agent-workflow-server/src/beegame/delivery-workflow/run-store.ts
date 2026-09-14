@@ -9,7 +9,7 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises'
-import { parseDeliveryRun, parseWorkflowEvent, isCompatibleLegacyFoundationSnapshot, migrateLegacyFoundationSnapshot } from './schema'
+import { parseDeliveryRun, parseWorkflowEvent } from './schema'
 import { assertDeliveryRunInvariants } from './transition'
 import {
   activeElapsedWithinStage,
@@ -117,7 +117,6 @@ export async function inspectWorkflowSnapshot(input: {
       ),
     }
   }
-  if (isCompatibleLegacyFoundationSnapshot(parsedValue)) parsedValue = migrateLegacyFoundationSnapshot(parsedValue)
   const snapshotVersion =
     parsedValue &&
     typeof parsedValue === 'object' &&
@@ -127,7 +126,7 @@ export async function inspectWorkflowSnapshot(input: {
   if (
     typeof snapshotVersion === 'number' &&
     Number.isInteger(snapshotVersion) &&
-    snapshotVersion < DELIVERY_RUN_SCHEMA_VERSION && !isCompatibleLegacyFoundationSnapshot(parsedValue)
+    snapshotVersion < DELIVERY_RUN_SCHEMA_VERSION
   )
     return {
       rawText,
@@ -597,7 +596,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
     if (
       typeof snapshotVersion === 'number' &&
       Number.isInteger(snapshotVersion) &&
-    snapshotVersion < DELIVERY_RUN_SCHEMA_VERSION && !isCompatibleLegacyFoundationSnapshot(value)
+    snapshotVersion < DELIVERY_RUN_SCHEMA_VERSION
     ) {
       throw new WorkflowStoreError(
         `workflow snapshot schema version ${snapshotVersion} is obsolete; start a new workflow with schema version ${DELIVERY_RUN_SCHEMA_VERSION}`,

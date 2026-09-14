@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./native-diagnostics": "./src/native-diagnostics.ts",
+    "./native-response-trace": "./src/native-response-trace.ts",
     "./native-evidence": "./src/native-evidence.ts",
     "./native-file-agent": "./src/native-file-agent.ts",
     "./native-task-access": "./src/native-task-access.ts",

@@ -70,6 +70,17 @@ test('orchestration owns only a public invocation and pauses at the public compl
   } finally { f.bridge.dispose() }
 })
 
+test('orchestration persists public Author timing without reading its private attempts', async () => {
+  const f = await fixture()
+  try {
+    await f.bridge.start(f.run)
+    f.outcome = { status: 'running', handle: f.handle, timing: { currentCallElapsedMs: 123, historicalElapsedMs: 456 } }
+    const projected = await f.bridge.ensureProgress(f.run)
+    expect(projected.authorStage?.timing).toEqual({ currentCallElapsedMs: 123, historicalElapsedMs: 456 })
+    expect((await f.store.load())?.authorStage?.timing).toEqual(projected.authorStage?.timing)
+  } finally { f.bridge.dispose() }
+})
+
 test('stop intent is durable before the public stop and a racing completed result cannot start review', async () => {
   const f = await fixture()
   try {
@@ -108,6 +119,20 @@ test('observing a failed author is not an implicit retry', async () => {
     const resumed = await f.bridge.resume(f.run)
     expect(f.resumes).toEqual([`${resumed.authorStage!.requestId}:run:1`])
     expect(resumed.authorStage!.control.requestId).toBe(resumed.authorStage!.requestId)
+  } finally { f.bridge.dispose() }
+})
+
+test('running autonomous Author projects public progress without exposing private execution state', async () => {
+  const f = await fixture()
+  try {
+    await f.bridge.start(f.run)
+    f.outcome = { status: 'running', handle: f.handle, progress: { modelResponses: 4, message: 'Working on document files' } }
+    const current = await f.bridge.ensureProgress(f.run)
+    expect(current.currentMessage).toContain('Working on document files')
+    expect(current.currentMessage).toContain('4')
+    expect(current.authorStage!.status).toBe('running')
+    expect(current.foundationDraftState).toEqual({ completedPaths: [] })
+    expect(current.activeDispatch).toBeUndefined()
   } finally { f.bridge.dispose() }
 })
 

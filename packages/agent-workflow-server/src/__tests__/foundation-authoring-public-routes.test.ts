@@ -48,7 +48,7 @@ function fakeAuthor(calls: AuthorCalls): FoundationAuthoringHost {
   }
 }
 
-async function fixture(stageOptions: Partial<Pick<NonNullable<Parameters<typeof createAgentWorkflowApp>[0]>, 'foundationReviewerHostFactory' | 'foundationRevisionHostFactory'>> = {}) {
+async function fixture(stageOptions: Partial<Pick<NonNullable<Parameters<typeof createAgentWorkflowApp>[0]>, 'foundationReviewerHostFactory'>> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'beegame-public-author-routes-'))
   roots.push(root)
   const ownerId = 'public-author-owner'
@@ -107,8 +107,6 @@ describe('public foundation authoring app routes', () => {
     const f = await fixture({
       foundationReviewerHostFactory: () => ({ async start() { starts++; return handle }, async getResult() { return outcome() },
         async stop() { stops++; state = 'stopped'; return outcome() }, async resume() { resumes++; state = 'running'; return outcome() } }),
-      foundationRevisionHostFactory: () => ({ async start() { throw new Error('unexpected revision') }, async getResult() { throw new Error('unexpected revision') },
-        async stop() { throw new Error('unexpected revision') }, async resume() { throw new Error('unexpected revision') } }),
     })
     try {
       const projectId = 'public-review-route'

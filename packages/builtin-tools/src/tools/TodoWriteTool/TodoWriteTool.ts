@@ -75,6 +75,7 @@ export const TodoWriteTool = buildTool({
     // happen ("when the last task closed, the loop exited").
     let verificationNudgeNeeded = false
     if (
+      process.env.BEEGAME_EXTERNAL_REVIEW !== '1' &&
       feature('VERIFICATION_AGENT') &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false) &&
       !context.agentId &&

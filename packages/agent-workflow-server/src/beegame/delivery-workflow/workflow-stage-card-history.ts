@@ -352,6 +352,7 @@ function workflowStatus(run: DeliveryRun): DeliveryRunStatus {
 
 function workflowThinking(run: DeliveryRun): 'working' | 'waiting' | 'idle' {
   if (run.status !== 'running') return 'idle'
+  if (run.authorStage && ['starting', 'running'].includes(run.authorStage.status)) return 'working'
   return run.activeDispatch?.status === 'running' ? 'working' : 'waiting'
 }
 function documentTasks(
@@ -359,9 +360,9 @@ function documentTasks(
   workspacePath: string,
 ): DocumentDisplayTask[] {
   if (run.foundationReviewStage) return [{ id: 'foundation-public-stage',
-    title: run.phase === 'FOUNDATION_REVISION' ? 'Foundation Revision' : 'Foundation Reviewer',
+    title: 'Foundation Document Review',
     status: projectFoundationReviewDisplay(run.foundationReviewStage, run.status)!.taskStatus,
-    attempt: 0, operation: run.phase === 'FOUNDATION_REVISION' ? 'revise' : 'review' }]
+    attempt: 0, operation: 'review' }]
   const publicAuthorDisplay = projectPublicAuthorDisplay(run.authorStage)
   if (publicAuthorDisplay) return publicAuthorDisplay.tasks
   const documentStep = run.documentStep
@@ -515,8 +516,7 @@ export function projectCurrentStageCard(input: {
   const run = input.run
   const documentPhase =
     run.phase === 'DOCUMENT_DRAFTING' ||
-    run.phase === 'DOCUMENT_REVIEW' ||
-    run.phase === 'FOUNDATION_REVISION'
+    run.phase === 'DOCUMENT_REVIEW'
   const tasks = documentPhase
     ? normalizeDisplayTasks(documentTasks(run, input.workspacePath))
     : run.phase === 'RESOURCE_PREPARATION'

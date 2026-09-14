@@ -13,6 +13,9 @@ test('native Bash and delegated tools run without tool filtering while retaining
   const workspace = join(root, 'workspace')
   await mkdir(join(workspace, 'docs'), { recursive: true })
   await writeFile(join(workspace, 'docs/GDD.md'), 'Confirmed document')
+  await writeFile(join(workspace, 'reference.txt'), Array.from({ length: 1000 }, (_, index) =>
+    'REFERENCE_LINE_' + index + ' ' + 'complete-reference-content-'.repeat(2)).join('\n'))
+  let cachedResultPath = ''
   const outside = join(root, 'outside.txt')
   await writeFile(outside, 'OUTSIDE_SECRET')
   const checkScript = `const fs=require('fs');const result={frequency:880*Math.pow(2,5/12),scrubbed:[process.env.ANTHROPIC_API_KEY,process.env.OPENAI_API_KEY,process.env.GEMINI_API_KEY].every(value=>value===undefined)};
@@ -21,6 +24,12 @@ test('native Bash and delegated tools run without tool filtering while retaining
     try{fs.writeFileSync('docs/GDD.md','BAD')}catch{result.evidenceProtected=true}
     fs.writeFileSync('check.json',JSON.stringify(result));console.log('CHECK_COMPLETE')`
   const calls = [
+    { name: 'Bash', input: { command: "python3 - <<'PY'\nassert 1 != 2\nprint('HEREDOC_BANG!_OK')\nPY" } },
+    { name: 'Read', input: { file_path: 'reference.txt' } },
+    { name: 'Read', input: { file_path: 'CACHED_RESULT', offset: 900, limit: 10 } },
+    { name: 'Write', input: { file_path: 'CACHED_RESULT', content: 'BAD' } },
+    { name: 'Edit', input: { file_path: 'CACHED_RESULT', old_string: 'REFERENCE_LINE_0', new_string: 'BAD' } },
+    { name: 'Bash', input: { command: 'CACHE_WRITE_CHECK' } },
     { name: 'Bash', input: { command: quote(process.execPath) + ' -e ' + quote(checkScript), dangerouslyDisableSandbox: true } },
     { name: 'Agent', input: { description: 'Check task-local documents', subagent_type: 'general-purpose',
       prompt: 'NATIVE_CHILD_CHECK: inspect the task-local files.', mode: 'bypassPermissions' } },
@@ -28,6 +37,7 @@ test('native Bash and delegated tools run without tool filtering while retaining
     { name: 'StructuredOutput', input: { ok: true } },
   ]
   const childCalls = [
+    { name: 'Read', input: { file_path: 'CACHED_RESULT', offset: 900, limit: 10 } },
     { name: 'Read', input: { file_path: 'docs/GDD.md' } },
     { name: 'Write', input: { file_path: 'child-note.md', content: 'Child tools executed' } },
     { name: 'Write', input: { file_path: outside, content: 'BAD' } },
@@ -41,11 +51,22 @@ test('native Bash and delegated tools run without tool filtering while retaining
     if (!path.endsWith('/messages')) return new Response('', { status: 404 })
     const body = await request.json() as any
     requests.push(body)
-    if (requests.length > 20) { abort.abort(); return new Response('', { status: 500 }) }
+    const resultTexts = body.messages.flatMap((message: any) => Array.isArray(message.content)
+      ? message.content.filter((block: any) => block.type === 'tool_result').flatMap((block: any) =>
+        typeof block.content === 'string' ? [block.content] : (block.content ?? []).map((part: any) => part.text ?? '')) : [])
+    const saved = resultTexts.join('\n').match(/Full output saved to: (.+)/)
+    if (saved) cachedResultPath = saved[1]!.trim()
+    if (requests.length > 30) { abort.abort(); return new Response('', { status: 500 }) }
     const child = body.messages.some((message: any) => message.role === 'user' &&
       (Array.isArray(message.content) ? message.content : [{ type: 'text', text: message.content }])
         .some((block: any) => block.type === 'text' && block.text.includes('NATIVE_CHILD_CHECK')))
     const call = child ? childCalls[childCount++] : calls[mainCount++]
+    if (call?.input && 'file_path' in call.input && call.input.file_path === 'CACHED_RESULT') {
+      if (!cachedResultPath) { abort.abort(); return new Response('Missing cached result', { status: 500 }) }
+      call.input.file_path = cachedResultPath
+    }
+    if (call?.name === 'Bash' && 'command' in call.input && call.input.command === 'CACHE_WRITE_CHECK')
+      call.input.command = "if printf BAD > " + quote(cachedResultPath) + "; then exit 9; else printf CACHE_WRITE_BLOCKED; fi"
     if (!child && call?.name === 'StructuredOutput') {
       for (let attempt = 0; attempt < 100; attempt++) {
         const pid = await readFile(join(workspace, 'background.pid'), 'utf8').catch(() => '')
@@ -71,7 +92,7 @@ test('native Bash and delegated tools run without tool filtering while retaining
         ANTHROPIC_BASE_URL: 'http://127.0.0.1:' + server.port, ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6',
         ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-4-6',
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' }),
-      workspacePath: workspace, writablePaths: [], allowWorkingFiles: true, readOnlyPaths: ['docs'],
+      workspacePath: workspace, writablePaths: [], allowWorkingFiles: true, readOnlyPaths: ['docs', 'reference.txt'],
       prompt: 'Run the offline native tools fixture.', schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false },
       logPath: join(root, 'events.jsonl'), signal: abort.signal,
     })
@@ -86,7 +107,16 @@ test('native Bash and delegated tools run without tool filtering while retaining
       frequency: 1174.6590716696303, scrubbed: true, readBlocked: true, writeBlocked: true, evidenceProtected: true,
     })
     expect(await readFile(join(workspace, 'child-note.md'), 'utf8')).toBe('Child tools executed')
-    expect(childCount).toBe(4)
+    expect(childCount).toBe(5)
+    expect(cachedResultPath).toStartWith(join(workspace, '.native-tool-results') + '/')
+    expect(await readFile(cachedResultPath, 'utf8')).toContain('REFERENCE_LINE_999')
+    const toolResults = requests.flatMap(request => request.messages.flatMap((message: any) =>
+      Array.isArray(message.content) ? message.content.filter((block: any) => block.type === 'tool_result') : []))
+    const resultsText = JSON.stringify(toolResults)
+    expect(resultsText).toContain('HEREDOC_BANG!_OK')
+    expect(resultsText).toContain('CACHE_WRITE_BLOCKED')
+    expect(resultsText).toContain('REFERENCE_LINE_900')
+    expect(toolResults.filter((block: any) => JSON.stringify(block.content).includes('HEREDOC_BANG!_OK')).every((block: any) => !block.is_error)).toBe(true)
     expect(backgroundPid).toBeDefined()
     const alive = () => { try { process.kill(backgroundPid!, 0); return true } catch { return false } }
     for (let attempt = 0; attempt < 100 && alive(); attempt++) await new Promise(resolve => setTimeout(resolve, 10))
@@ -95,7 +125,11 @@ test('native Bash and delegated tools run without tool filtering while retaining
     expect(await readFile(outside, 'utf8')).toBe('OUTSIDE_SECRET')
     expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe('Confirmed document')
     expect(JSON.stringify(requests.map(request => request.messages))).not.toContain('OUTSIDE_SECRET')
-    const log = (await readFile(join(root, 'events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse)
+    const log = (await readFile(join(root, 'events.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    expect(log.filter(entry => entry.event === 'permission' && entry.data.tool === 'Read' &&
+      entry.data.path === cachedResultPath && entry.data.allowed)).toHaveLength(2)
+    expect(log.some(entry => entry.event === 'permission' && entry.data.tool === 'Write' && !entry.data.allowed)).toBe(true)
+    expect(log.some(entry => entry.event === 'permission' && entry.data.tool === 'Edit' && !entry.data.allowed)).toBe(true)
     expect(log.some(entry => entry.event === 'permission' && entry.data.tool === 'Agent' && entry.data.allowed)).toBe(true)
     const totals = Object.values(result.result!.modelUsage as Record<string, { inputTokens: number; outputTokens: number }>)
     expect(totals.reduce((sum, usage) => sum + usage.inputTokens, 0)).toBe(requests.length * 10)

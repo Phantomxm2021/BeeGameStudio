@@ -24,17 +24,19 @@ test('retired Revision execution stays absent from the production tree and app b
   expect([...loaded].filter(path => /(?:\/tests\/|\/test-fixtures\/|\.test\.[cm]?[jt]sx?$)/.test(path))).toEqual([])
   for (const path of ['foundation-revision-host.ts', 'stage-modules/foundation-revision/public.ts',
     'stage-modules/foundation-revision/private/lifecycle.ts', 'stage-modules/foundation-revision/private/native-process.ts'])
-    expect(loaded.has(resolve(import.meta.dir, path))).toBe(true)
+    expect(loaded.has(resolve(import.meta.dir, path))).toBe(false)
 })
 
-test('Revision impact analysis has no delivery-workflow compatibility copy', () => {
-  const retiredPath = resolve(import.meta.dir, 'delivery-workflow/foundation-impact-analysis.ts')
-  const reviewerPath = resolve(import.meta.dir, 'stage-modules/foundation-reviewer/private/domain/foundation-impact-analysis.ts')
-  expect(existsSync(retiredPath)).toBe(false)
-  expect(existsSync(reviewerPath)).toBe(true)
-  expect(readFileSync(reviewerPath, 'utf8')).toContain('export function analyzeFoundationImpact')
-  for (const path of ['controller.ts', 'dispatch.ts', 'recovery.ts', 'run-store.ts', 'transition.ts']) {
-    const source = readFileSync(resolve(import.meta.dir, 'delivery-workflow', path), 'utf8')
-    expect(source).not.toContain('foundation-impact-analysis')
+test('production orchestration has no standalone Revision dependency', () => {
+  const sources = [
+    resolve(import.meta.dir, '../app.ts'),
+    resolve(import.meta.dir, 'delivery-workflow/controller.ts'),
+    resolve(import.meta.dir, 'delivery-workflow/foundation-review-link.ts'),
+    resolve(import.meta.dir, 'delivery-workflow/foundation-public-handoff.ts'),
+  ].map(path => readFileSync(path, 'utf8'))
+  for (const source of sources) {
+    expect(source).not.toContain('createFoundationRevision')
+    expect(source).not.toContain('foundation-revision-host')
+    expect(source).not.toContain('stage-modules/foundation-revision')
   }
 })

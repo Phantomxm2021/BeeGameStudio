@@ -60,6 +60,9 @@ describe('workflow stage card history', () => {
     expect(card?.substage).toBe('INITIAL_DRAFTING')
     expect(card?.tasks).toHaveLength(8)
     expect(card?.tasks.every(task => task.status === 'completed')).toBe(true)
+    const running: DeliveryRun = { ...run, status: 'running', phase: 'DOCUMENT_DRAFTING',
+      authorStage: { ...run.authorStage!, status: 'running', result: undefined } }
+    expect(projectCurrentStageCard({ run: running, workspacePath })?.thinking).toBe('working')
   })
   test('freezes the previous display stage when the next stage is entered', () => {
     const base = createTestDeliveryRun({
@@ -107,70 +110,6 @@ describe('workflow stage card history', () => {
         elapsedMs: 0,
       }),
     ).toBeUndefined()
-  })
-
-  test('freezes public Reviewer stage 3 before entering public Revision stage 4', () => {
-    const base = createTestDeliveryRun({
-      projectId: 'project-audit-revision-stages',
-      ownerId: 'owner-audit-revision-stages',
-    })
-    const previous: DeliveryRun = {
-      ...base,
-      phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
-      foundationReviewStage: { invocation: { stage: 'reviewer' } } as never,
-    }
-    const next: DeliveryRun = {
-      ...previous,
-      phase: 'FOUNDATION_REVISION',
-      documentStep: 'FOUNDATION_REVISION',
-      foundationReviewStage: { invocation: { stage: 'revision' } } as never,
-      updatedAt: '2026-08-06T00:00:02.000Z',
-    }
-    const frozen = freezePreviousStageCard({
-      previous,
-      next,
-      workspacePath,
-      stageStartedAt: previous.createdAt,
-      stageEndedAt: next.updatedAt,
-      elapsedMs: 250,
-    })
-
-    expect(frozen).toMatchObject({
-      stageId: 'DOCUMENT_REVIEW',
-      phaseIndex: 3,
-      phaseCount: DELIVERY_PROGRESS_STAGES.length,
-      substage: 'INITIAL_REVIEW',
-      status: 'completed',
-    })
-    if (!frozen) return
-    expect(
-      projectCurrentStageCard({ run: next, workspacePath })
-    ).toMatchObject({
-      stageId: 'FOUNDATION_REVISION',
-      phaseIndex: 4,
-      phaseCount: DELIVERY_PROGRESS_STAGES.length,
-      substage: 'REPAIRING',
-    })
-    const history = projectWorkflowStageCardHistory({
-      run: next,
-      workspacePath,
-      events: [{
-        eventId: 'audit-stage-frozen',
-        runId: next.runId,
-        type: 'phase.entered',
-        phase: 'DOCUMENT_REVIEW',
-        status: 'running',
-        revision: next.revision,
-        createdAt: next.updatedAt,
-        stageSnapshot: frozen,
-      }],
-      now: next.updatedAt,
-    })
-    expect(history.map(card => card.stageId)).toEqual([
-      'DOCUMENT_REVIEW',
-      'FOUNDATION_REVISION',
-    ])
   })
 
   test('keeps the latest frozen value per stage and omits stages after current', () => {
@@ -278,33 +217,6 @@ describe('workflow stage card history', () => {
       code: 'user_stopped',
       diagnosticId: expect.stringMatching(/^workflow-[0-9a-f]{12}$/),
     })
-  })
-
-  test('projects one public Revision task for an active repair stage', () => {
-    const base = createTestDeliveryRun({
-      projectId: 'project-revision-cursor',
-      ownerId: 'owner-revision-cursor',
-    })
-    const card = projectCurrentStageCard({
-      run: {
-        ...base,
-        phase: 'FOUNDATION_REVISION',
-        documentStep: 'FOUNDATION_REVISION',
-        currentMessage: 'The active reviser says this is worker prose.',
-        status: 'running',
-        foundationReviewStage: { invocation: { stage: 'revision' } },
-      } as never,
-      workspacePath,
-    })
-
-    expect(card).toMatchObject({
-      stageId: 'FOUNDATION_REVISION',
-      phaseIndex: 4,
-      substage: 'REPAIRING',
-      documentStep: 'FOUNDATION_REVISION',
-      tasks: [expect.objectContaining({ id: 'foundation-public-stage', operation: 'revise' })],
-    })
-    expect(card?.message).toBeUndefined()
   })
 
   test('keeps an open running interval out of durable elapsed time', () => {

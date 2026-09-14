@@ -19,9 +19,13 @@ test('stream activity is observable without leaking payloads', async () => {
   expect(events.filter(e=>e.event==='stream_event'&&e.data.deltaType==='text_delta')).toHaveLength(5)
   expect(events.some(e=>e.event==='stdout_activity')).toBe(true)
   expect(events.some(e=>e.event==='stderr_activity')).toBe(true)
+  expect(events.filter(e=>e.event==='upstream_wait_started')).toHaveLength(1)
+  expect(events.filter(e=>e.event==='upstream_first_stream')).toHaveLength(1)
+  expect(events.find(e=>e.event==='upstream_first_stream').data.waitMs).toBeGreaterThanOrEqual(0)
   expect(events.at(-1).data).toMatchObject({streamEvents:6,stdoutDrained:true})
   expect(events.at(-1).data.lastStdoutAt).toBeTruthy()
   expect(progress.some(p=>p.message.includes('流事件'))).toBe(true)
+  expect(progress.some(p=>p.message==='等待上游模型响应')).toBe(true)
  } finally {await rm(dir,{recursive:true,force:true})}
 })
 for(const mode of ['files','working-files','retry-limit'] as const)test('real native CLI: '+mode,async()=>{
@@ -62,10 +66,12 @@ for(const mode of ['files','working-files','retry-limit'] as const)test('real na
  const messages:any[]=[];const progress:any[]=[]
  try {
   const result=await runNativeFileAgent({command:[process.execPath,cli],
-   env:nativeFileAgentEnvironment({BEEGAME_CONFIG_DIR:join(dir,'config'),BEEGAME_MODEL_TYPE:'anthropic',ANTHROPIC_API_KEY:'offline',ANTHROPIC_BASE_URL:'http://127.0.0.1:'+server.port,
+   env:{...nativeFileAgentEnvironment({BEEGAME_CONFIG_DIR:join(dir,'config'),BEEGAME_MODEL_TYPE:'anthropic',ANTHROPIC_API_KEY:'offline',ANTHROPIC_BASE_URL:'http://127.0.0.1:'+server.port,
     ANTHROPIC_DEFAULT_SONNET_MODEL:'claude-sonnet-4-6',CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1',DISABLE_TELEMETRY:'1',DISABLE_ERROR_REPORTING:'1'}),
+    },
    workspacePath:workspace,writablePaths:['target.md'],allowWorkingFiles:mode==='working-files',readOnlyPaths:['docs'],
-   prompt:'Test native files only.',schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false},
+   prompt:'Test native files only.',
+   schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false},
    logPath:join(dir,'events.jsonl'),signal:abort.signal,onMessage:m=>{messages.push(m)},onProgress:p=>{progress.push(p)}})
   expect(result.completion.stdoutDrained).toBe(true)
   if(mode==='retry-limit'){expect(result.failure).toBe('model_failed');expect(n).toBe(5)}

@@ -42,7 +42,9 @@ type BillingCall = {
 }
 
 function makeInput(requestId: string, documents = CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path,
-  content: '# Offline source\nREPAIR_REQUIRED: This offline fixture contains an incomplete rule.',
+  content: ['---', `document_id: ${path.slice(5, -3)}`, 'version: 1.0.0',
+    'updated_at: 2026-09-01T00:00:00.000Z', '---', '# Offline source',
+    'REPAIR_REQUIRED: This offline fixture contains an incomplete rule.'].join('\n'),
 }))) {
   const input = { subject, documents, requirements: { status: 'unavailable' as const, reason: 'Offline fixture' } }
   return {
@@ -260,11 +262,12 @@ test('public Reviewer resumes native-file audit and publishes with idempotent bi
     )
     expect(completed.status).toBe('completed')
     if (completed.status !== 'completed') throw new Error('expected a completed Reviewer result')
-    expect(completed.result.kind).toBe('issues_found')
-    expect(completed.result.audit.policy).toBe('native-file-audit.v1')
+    expect(completed.result.protocolVersion).toBe(6)
+    expect(completed.result.audit.policy).toBe('native-file-audit-and-correct.v5')
     expect(completed.result.audit).not.toHaveProperty('validation')
     expect(completed.result.documents.map(document => document.path)).toEqual(fixture.input.input.documents.map(document => document.path))
-    expect(completed.result.issues.length).toBeGreaterThan(0)
+    expect(completed.result).not.toHaveProperty('issues')
+    expect(completed.result.documents.every(document => document.content.includes('Repair completed'))).toBe(true)
 
     expect(fixture.runtimeCalls.length).toBeGreaterThan(0)
     expect(fixture.runtimeCalls.every(call => call.dataDir === fixture.workspacePath)).toBe(true)

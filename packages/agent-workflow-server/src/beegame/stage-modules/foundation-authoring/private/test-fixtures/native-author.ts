@@ -1,5 +1,7 @@
 /** Offline executable protocol fixture. Never contacts a model or a network. */
 import { randomUUID } from 'node:crypto'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { FROZEN_DOCUMENTS } from './frozen-documents'
 import type { FoundationDocumentPath } from '../domain/types'
 
@@ -18,6 +20,13 @@ for await (const chunk of Bun.stdin.stream()) {
     const message = JSON.parse(line)
     if (message.type !== 'user') continue
     const prompt = message.message.content.map((block: { text: string }) => block.text).join('')
+    if (prompt.includes('Read the finalized requirements in requirements.md')) {
+      for (const [path, content] of Object.entries(FROZEN_DOCUMENTS)) await writeFile(join(process.cwd(), path), content)
+      output({ type: 'result', session_id: sessionId, subtype: 'success', is_error: false,
+        structured_output: { status: 'completed', summary: 'Offline autonomous eight-document bundle.' },
+        modelUsage: { fixture: { inputTokens: 8, outputTokens: 8 } } })
+      continue
+    }
     const path = prompt.match(/Author exactly one complete raw Markdown body for (docs\/[^.]+\.md)\./)?.[1] as FoundationDocumentPath
     if (!path || process.argv.includes('--tools')) {
       output({ type: 'result', subtype: 'error', is_error: true })

@@ -13,21 +13,22 @@ vi.mock('../../contexts/ToastContext', () => ({
 }));
 
 describe('WorkflowCard', () => {
-  it.each(['retry', 'resume'] as const)('shows agent followup with a safe %s action and no design selection', nextAction => {
-    render(<WorkflowCard workflow={{ runId: 'decision-handoff', status: 'blocked', currentPhase: 'FOUNDATION_REVISION',
-      nextAction, stageSnapshots: [{ stageId: 'FOUNDATION_REVISION', status: 'blocked',
-        currentPhase: 'FOUNDATION_REVISION', phaseIndex: 4, phaseCount: 10,
-        tasks: [{ id: 'revision', title: 'Foundation Revision', status: 'completed', operation: 'revise' }],
-        completedTaskCount: 1, totalTaskCount: 1,
-        block: { code: 'foundation_adjudication', message: '修订执行已完成，候选稿已保留；尚未发布。',
-          detail: '由 Agent 处理内部设计取舍', retryable: false, nextAction: '检查运行诊断' } }] }} onAction={vi.fn()} />)
-    expect(screen.getByTestId('foundation-adjudication')).toHaveTextContent('由 Agent 处理内部设计取舍')
-    expect(screen.getByText('自动处理已暂停')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
-    if (nextAction === 'resume') expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
-    expect(screen.queryByText('等待人工确认')).not.toBeInTheDocument()
-    expect(screen.queryByText('修订失败')).not.toBeInTheDocument()
-  })
+  it('shows a paused Author as awaiting action, preserves drafts and requires explicit resume', async () => {
+    const onAction = vi.fn().mockResolvedValue(undefined);
+    render(<WorkflowCard workflow={{ runId: 'author-budget-pause', status: 'blocked', currentPhase: 'DOCUMENT_DRAFTING',
+      nextAction: 'resume', stageSnapshots: [{ stageId: 'DOCUMENT_DRAFTING', status: 'blocked',
+        currentPhase: 'DOCUMENT_DRAFTING', phaseIndex: 1, phaseCount: 10,
+        tasks: [{ id: 'author:foundation', title: 'Foundation documents', status: 'blocked', operation: 'write' }],
+        completedTaskCount: 0, totalTaskCount: 1,
+        block: { code: 'workflow_blocked', message: '本次编写已达到运行时间上限。草稿和用量已保留，等待手动继续；不会自动重试。' } }] }} onAction={onAction} />);
+    expect(screen.getByTestId('foundation-author-paused')).toHaveTextContent('草稿和用量已保留');
+    expect(screen.getByTestId('foundation-author-paused')).toHaveTextContent('受限收尾');
+    expect(screen.getByText('等待处理')).toBeInTheDocument();
+    expect(screen.queryByText('编写失败')).not.toBeInTheDocument();
+    expect(onAction).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '继续' })); });
+    expect(onAction).toHaveBeenCalledWith('resume');
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -157,33 +158,6 @@ describe('WorkflowCard', () => {
     expect(screen.queryByText(/verdict|revision|currentMessage/i)).not.toBeInTheDocument();
   });
 
-  it('renders completed document revisions as ordinary checked tasks', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'run_revision',
-          status: 'running',
-          currentPhase: 'DOCUMENT_REVIEW',
-          documentStep: 'FOUNDATION_REVIEW',
-          tasks: [
-            {
-              id: 'revision:gdd',
-              title: 'docs/GDD.md',
-              status: 'completed',
-              operation: 'revise',
-            },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('修订：游戏设计文档 GDD')).toBeInTheDocument();
-    expect(screen.getByLabelText('任务状态：已修订')).toHaveAttribute(
-      'data-task-icon',
-      'write-completed',
-    );
-  });
-
   it('renders the explicit complete-authoring pause as waiting for review', () => {
     render(
       <WorkflowCard
@@ -214,74 +188,14 @@ describe('WorkflowCard', () => {
     expect(screen.getByText('任务 8 / 8')).toBeInTheDocument();
   });
 
-  it('labels the revision substage separately from the audit substage', () => {
+  it('labels validation tasks as validation instead of audit', () => {
     render(
       <WorkflowCard
         workflow={{
-          runId: 'run_revision_substage',
+          runId: 'run_validation_labels',
           status: 'running',
           currentPhase: 'DOCUMENT_REVIEW',
-          phaseIndex: 4,
-          phaseCount: 10,
-          substage: 'REPAIRING',
-          tasks: [{ id: 'revision:gdd', title: 'docs/GDD.md', status: 'running', operation: 'revise' }],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('基础文档修订')).toBeInTheDocument();
-    expect(screen.queryByText('基础文档审计')).not.toBeInTheDocument();
-    expect(screen.queryByText('修订审计影响路径')).not.toBeInTheDocument();
-  });
-
-  it('keeps frozen audit stage 3 separate from live revision stage 4', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'run_audit_revision_deck',
-          status: 'running',
-          currentPhase: 'DOCUMENT_REVIEW',
-          stageSnapshots: [
-            {
-              stageId: 'DOCUMENT_REVIEW',
-              status: 'completed',
-              currentPhase: 'DOCUMENT_REVIEW',
-              phaseIndex: 3,
-              phaseCount: 10,
-              substage: 'INITIAL_REVIEW',
-              documentStep: 'FOUNDATION_REVIEW',
-              tasks: [],
-            },
-            {
-              stageId: 'FOUNDATION_REVISION',
-              status: 'running',
-              currentPhase: 'DOCUMENT_REVIEW',
-              phaseIndex: 4,
-              phaseCount: 10,
-              substage: 'REPAIRING',
-              documentStep: 'FOUNDATION_REVIEW',
-              tasks: [],
-            },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.getByText('4 / 10')).toBeInTheDocument();
-    expect(screen.getByText('基础文档修订')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '查看上一阶段' }));
-    expect(screen.getByText('3 / 10')).toBeInTheDocument();
-    expect(screen.getByText('基础文档审计')).toBeInTheDocument();
-  });
-
-  it('labels revision patch validations as validation instead of audit', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'run_revision_validation_labels',
-          status: 'running',
-          currentPhase: 'DOCUMENT_REVIEW',
-          substage: 'REPAIRING',
+          substage: 'INITIAL_REVIEW',
           tasks: [
             {
               id: 'impacted-facts:unknown',
@@ -333,44 +247,6 @@ describe('WorkflowCard', () => {
     expect(screen.queryByText('审计中')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('任务状态：已审计')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('任务状态：审计中')).not.toBeInTheDocument();
-  });
-
-  it('shows the current repair round once when all repair tasks agree', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'run_revision_round',
-          status: 'running',
-          currentPhase: 'DOCUMENT_REVIEW',
-          substage: 'REPAIRING',
-          tasks: [
-            { id: 'revision:gdd', title: 'docs/GDD.md', status: 'running', operation: 'revise', round: 2 },
-            { id: 'impacted-facts:gdd', title: '影响事实验证', status: 'pending', operation: 'review', round: 2 },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.getAllByText('第 2 轮')).toHaveLength(1);
-  });
-
-  it('does not display a repair round when task rounds disagree', () => {
-    render(
-      <WorkflowCard
-        workflow={{
-          runId: 'run_revision_round_mismatch',
-          status: 'running',
-          currentPhase: 'DOCUMENT_REVIEW',
-          substage: 'REPAIRING',
-          tasks: [
-            { id: 'revision:gdd', title: 'docs/GDD.md', status: 'running', operation: 'revise', round: 2 },
-            { id: 'impacted-facts:gdd', title: '影响事实验证', status: 'pending', operation: 'review', round: 3 },
-          ],
-        }}
-      />,
-    );
-
-    expect(screen.queryByText(/^第 \d+ 轮$/)).not.toBeInTheDocument();
   });
 
   it('renders compact audit feedback without raw issue registry content', () => {

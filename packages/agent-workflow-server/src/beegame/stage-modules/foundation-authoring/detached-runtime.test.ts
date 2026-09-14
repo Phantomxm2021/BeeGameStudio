@@ -16,15 +16,16 @@ test('bundled public author completes outside the source tree without legacy run
       builder.onLoad({ filter: /.*/ }, args => {
         loaded.add(args.path)
         if (!args.path.startsWith(moduleRoot + sep) && !args.path.includes('/node_modules/zod/') &&
-            args.path !== resolve(moduleRoot, '../../../../../../packages/agent-workflow/src/native-task-access.ts'))
+            !['native-task-access.ts', 'native-file-agent.ts', 'native-tool-diagnostics.ts', 'native-response-trace.ts', 'native-diagnostics.ts'].some(name => args.path === resolve(moduleRoot, '../../../../../../packages/agent-workflow/src', name)))
           throw new Error('Unexpected transitive Author runtime dependency: ' + args.path)
       })
     } }],
   })
   expect(build.success).toBe(true)
   expect(build.logs).toEqual([])
-  expect(loaded.has(join(moduleRoot, 'private/lifecycle.ts'))).toBe(true)
-  expect(loaded.has(join(moduleRoot, 'private/runtime/runtime.ts'))).toBe(true)
+  expect(loaded.has(join(moduleRoot, 'private/autonomous-lifecycle.ts'))).toBe(true)
+  expect(loaded.has(join(moduleRoot, 'private/lifecycle.ts'))).toBe(false)
+  expect(loaded.has(join(moduleRoot, 'private/runtime/runtime.ts'))).toBe(false)
   const isolated = await realpath(await mkdtemp(join(tmpdir(), 'author-detached-')))
   let child: ReturnType<typeof Bun.spawn> | undefined
   try {
@@ -82,8 +83,8 @@ test('bundled public author completes outside the source tree without legacy run
     expect(exit).toBe(0)
     const actual = JSON.parse(stdout)
     expect(actual.exports).toEqual(['getResult', 'resume', 'start', 'stop'])
-    expect(actual.resolutions).toBe(8)
-    expect(actual.events).toBe(8)
+    expect(actual.resolutions).toBe(1)
+    expect(actual.events).toBe(1)
     expect(actual.result.status).toBe('completed')
     expect(actual.result.result.documents).toHaveLength(8)
     for (const [path, bytes] of Object.entries(FROZEN_DOCUMENTS)) {

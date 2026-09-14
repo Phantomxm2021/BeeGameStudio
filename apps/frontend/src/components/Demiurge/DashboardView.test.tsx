@@ -360,7 +360,7 @@ describe('DashboardView runtime loading', () => {
     expect(loadAgents).not.toHaveBeenCalled();
   });
 
-  it('resumes a durable foundation revision boundary once when reconnecting', async () => {
+  it('resumes a durable foundation review boundary once when reconnecting', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'running' }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -377,8 +377,7 @@ describe('DashboardView runtime loading', () => {
         documentStep: 'FOUNDATION_REVIEW',
         resumeOnReconnect: true,
         tasks: [
-          { id: 'revision:brief.md', title: 'brief.md', status: 'running' },
-          { id: 'revision:design.md', title: 'design.md', status: 'pending' },
+          { id: 'foundation-public-stage', title: 'Foundation Reviewer', status: 'running' },
         ],
       },
     };
@@ -410,7 +409,7 @@ describe('DashboardView runtime loading', () => {
         status: 'completed',
         phase: 'DOCUMENT_REVIEW',
         documentStep: 'FOUNDATION_REVIEW',
-        tasks: [{ id: 'revision:brief.md', title: 'brief.md', status: 'completed' }],
+        tasks: [{ id: 'foundation-public-stage', title: 'Foundation Reviewer', status: 'completed' }],
       },
     };
 
@@ -423,7 +422,7 @@ describe('DashboardView runtime loading', () => {
       workflow: {
         ...mockedProjectStatus.workflow as Record<string, unknown>,
         status: 'running',
-        worker: 'foundation-revision-worker',
+        worker: 'foundation-reviewer-worker',
         resumeOnReconnect: true,
       },
     };

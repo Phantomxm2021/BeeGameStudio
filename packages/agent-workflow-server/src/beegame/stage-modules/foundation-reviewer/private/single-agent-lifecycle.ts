@@ -9,7 +9,6 @@ import { reviewDigest, reviewJson, admitSingleReviewReport } from './single-agen
 import { openSingleReviewJournal, singleReviewRoot, type SingleReviewEvent, type SingleReviewState } from './single-agent-journal'
 import { buildSingleReviewResult, parseSingleReviewStart, singleReviewHandleSchema, singleReviewResumeSchema, singleReviewStopSchema,
   type SingleReviewStart, type SingleReviewHandle, type SingleReviewResult, type SingleReviewResume, type SingleReviewStop } from './single-agent-publication'
-import { consumedReviewTokens as consumedTokens } from './single-agent-budget'
 
 type Infrastructure = { runtimeConfiguration: RuntimeConfigurationClient; billing: UsageBillingClient }
 type Journal = Awaited<ReturnType<typeof openSingleReviewJournal>>
@@ -26,9 +25,7 @@ const evidenceIdentity = (start: SingleReviewStart, handle: SingleReviewHandle, 
   runId: /^foundation:([^:]+):\d+$/.exec(start.requestId)?.[1] ?? handle.id,
   reviewerHandleId: handle.id, hostRequestId: start.requestId, attemptId,
 })
-const tokenLimit = (start: SingleReviewStart) => start.tokenBudget ?? Infinity
-const canResume = (state: SingleReviewState, limit: number) => state.attempts.every(attempt => attempt.closed?.usageObserved) &&
-  (Boolean(state.report) || state.attempts.some(attempt => !attempt.receipt) || consumedTokens(state) < limit)
+const canResume = (state: SingleReviewState) => state.attempts.every(attempt => attempt.closed?.usageObserved)
 
 /** One native auditor; no strategy selection or historical protocol replay. */
 export function createSingleReviewerLifecycle(workspacePath: string, infrastructure: Infrastructure): SingleReviewerOperations {
@@ -106,7 +103,8 @@ export function createSingleReviewerLifecycle(workspacePath: string, infrastruct
     const state = await journal.read()
     if (!state.report || state.stopped || state.failure || billingStatus(state) !== 'settled') return
     admitSingleReviewReport(start.input, state.report)
-    const result = buildSingleReviewResult(start, state.report)
+    if (!state.documents) throw new Error('Review document snapshot is missing')
+    const result = buildSingleReviewResult(start, state.report, state.documents)
     const destination = join(root(handle), 'result')
     await assertOwned(); await files.ensureDirectories(destination)
     await files.publishJson(join(destination, 'result.json'), result)
@@ -133,9 +131,6 @@ export function createSingleReviewerLifecycle(workspacePath: string, infrastruct
       let state = await journal.read()
       if (state.stopped || state.failure) return
       if (state.report) { failureCode = 'publication_failed'; await publish(journal, start, handle, lease.assertOwned); return }
-      if (consumedTokens(state) >= tokenLimit(start)) {
-        await append(journal, { kind: 'failure', code: 'audit_budget_exhausted' }); return
-      }
       const configuration = await resolveConfiguration(journal)
       state = await journal.read()
       if (state.stopped || state.failure) return
@@ -157,7 +152,6 @@ export function createSingleReviewerLifecycle(workspacePath: string, infrastruct
         const completion = await runFileReview({ source: start.input, directory, configuration, signal: abort.signal,
           onUsage: async usage => {
             await lease.assertOwned(); await append(journal, { kind: 'usage', attemptId, usage })
-            if (consumedTokens(state) + usage.total_tokens >= tokenLimit(start)) abort.abort('token_budget')
           },
           onProgress: async progress => {
             await lease.assertOwned(); await append(journal, { kind: 'progress', attemptId, progress })
@@ -166,8 +160,8 @@ export function createSingleReviewerLifecycle(workspacePath: string, infrastruct
         await lease.assertOwned()
         await append(journal, { kind: 'closed', attemptId, usage: completion.usage, usageObserved: completion.usageObserved,
           sealScope: 'direct-child', elapsedMs: Math.ceil(performance.now() - started), summary: completion.summary,
-          outcome: completion.report && !completion.failure
-            ? { kind: 'accepted', report: completion.report }
+          outcome: completion.report && completion.documents && !completion.failure
+            ? { kind: 'accepted', report: completion.report, documents: completion.documents }
             : { kind: 'failed', code: completion.failure ?? 'invalid_output',
               ...(completion.diagnostic ? { diagnostic: completion.diagnostic } : {}) } }, `closed:${attemptId}`)
         failureCode = 'billing_failed'
@@ -192,11 +186,16 @@ export function createSingleReviewerLifecycle(workspacePath: string, infrastruct
   }
   async function view(start: SingleReviewStart, handle: SingleReviewHandle): Promise<SingleReviewResult> {
     const journal = await openSingleReviewJournal(workspacePath, handle.id, start, true)
+    // Observe ownership before reading terminal facts. Otherwise publication
+    // can finish and release its lease between read() and leaseStatus(), leaving
+    // an old unpublished snapshot incorrectly projected as needs_action.
+    const execution = await journal.leaseStatus()
     const state = await journal.read()
     const base = { handle: structuredClone(handle), billingStatus: billingStatus(state), ...(state.progress ? { progress: state.progress } : {}) }
     if (state.published && state.report) {
       admitSingleReviewReport(start.input, state.report)
-      const expected = buildSingleReviewResult(start, state.report)
+      if (!state.documents) throw new Error('Review document snapshot is missing')
+      const expected = buildSingleReviewResult(start, state.report, state.documents)
       const destination = join(root(handle), 'result')
       await files.assertDirectories(destination)
       const result = await files.readJson(join(destination, 'result.json'))
@@ -206,18 +205,17 @@ export function createSingleReviewerLifecycle(workspacePath: string, infrastruct
         throw new Error('Published review binding mismatch')
       return { ...base, status: 'completed', result: expected }
     }
-    const execution = await journal.leaseStatus()
     if (execution === 'stale') return { ...base, status: 'needs_action', reason: 'Review execution owner was lost; worker cleanup and metering cannot be inferred.',
       resumable: await journal.canRecoverUnstartedExecution() }
     if (execution === 'busy' || active.has(handle.id)) return { ...base, status: 'running' }
-    if (state.stopped && canResume(state, tokenLimit(start))) return { ...base, status: 'stopped' }
+    if (state.stopped) return { ...base, status: 'stopped' }
     const lastOutcome = state.attempts.at(-1)?.closed?.outcome
     const diagnostic = lastOutcome?.kind === 'failed' ? lastOutcome.diagnostic : undefined
     const failureCode = lastOutcome?.kind === 'failed' ? ` [${lastOutcome.code}]` : ''
     const detail = failureCode + (diagnostic ? ` (${diagnostic.stage}${diagnostic.reason ? ':' + diagnostic.reason : ''})` : '')
     return { ...base, status: 'needs_action', reason: state.failure
       ? `Single-agent review requires attention: ${state.failure}${detail}. No pass has been published.`
-      : 'Review awaits explicit continuation. No pass has been published.', resumable: canResume(state, tokenLimit(start)) }
+      : 'Review awaits explicit continuation. No pass has been published.', resumable: canResume(state) }
   }
   return Object.freeze({
     async start(value: SingleReviewStart) {

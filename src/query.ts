@@ -1,4 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
+import { traceNativeQuery } from '@bee-game-studio/agent-workflow/native-response-trace'
 import type {
   ToolResultBlockParam,
   ToolUseBlock,
@@ -323,11 +324,12 @@ export async function* query(
   let didThrow = false
   let thrownError: unknown
   try {
-    terminal = yield* queryLoop(
+    terminal = yield* traceNativeQuery(queryLoop(
       paramsWithTrace,
       consumedCommandUuids,
       consumedAutonomyCommands,
-    )
+    ), { agentId: params.toolUseContext.agentId, parentToolUseId: params.toolUseContext.toolUseId,
+      signal: params.toolUseContext.abortController.signal })
   } catch (error) {
     didThrow = true
     thrownError = error

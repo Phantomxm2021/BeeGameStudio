@@ -4,7 +4,7 @@ export type ReviewUsageEvent = { type: 'result' | 'usage'; payload: Record<strin
 export function getLatestRuntimeUsage(
   events: ReviewUsageEvent[],
 ): ReviewNativeUsage {
-  // Claude SDK result.modelUsage is cumulative while one native accounting
+  // The native SDK result.modelUsage is cumulative while one accounting
   // epoch remains active. A resumed/compacted native session may start a new
   // epoch whose counters are lower than the previous terminal snapshot. Keep
   // only the latest snapshot inside each monotonic epoch, then add the epochs;

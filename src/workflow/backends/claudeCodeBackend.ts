@@ -352,7 +352,7 @@ export const claudeCodeBackend: AgentAdapter = {
       }
     }
 
-    const finalized = finalizeAgentTool(messages, coreAgentId, {
+    const finalized = await finalizeAgentTool(messages, coreAgentId, {
       prompt: params.prompt,
       resolvedAgentModel: toolUseContext.options.mainLoopModel,
       isBuiltInAgent: isBuiltInAgent(agentDef),

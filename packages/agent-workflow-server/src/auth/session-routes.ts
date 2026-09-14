@@ -15,6 +15,7 @@ import {
   type BeeGameUserContext,
 } from './user-context'
 import { decryptSecret, encryptSecret } from '../security/secret-crypto'
+import { safeErrorFacts } from '../security/safe-error-facts'
 
 export const SESSION_COOKIE_NAME = 'beegame_session'
 const SESSION_RECORD_TYPE = 'auth:session'
@@ -157,6 +158,13 @@ export function registerBeeGameSessionRoutes(
     const pending = pendingRefreshes.get(current.id)
     if (pending) return pending
     const refresh = (async (): Promise<SessionRefreshOutcome> => {
+      const startedAt = Date.now()
+      const logFailure = (code: string, facts: ReturnType<typeof safeErrorFacts> = {}) => {
+        console.error('[BeeGame session refresh]', JSON.stringify({
+          timestamp: new Date().toISOString(), code,
+          elapsedMs: Math.max(0, Date.now() - startedAt), ...facts,
+        }))
+      }
       try {
         const response = await fetchImpl(`${supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
           method: 'POST',
@@ -167,6 +175,8 @@ export function registerBeeGameSessionRoutes(
           body: JSON.stringify({ refresh_token: current.record.refreshToken }),
         })
         if (!response.ok) {
+          logFailure([400, 401, 403].includes(response.status)
+            ? 'refresh_rejected' : 'refresh_service_unavailable', { httpStatus: response.status })
           if ([400, 401, 403].includes(response.status)) {
             deleteRecord(sessionStorePath, current.id)
             return { status: 'invalid' }
@@ -176,6 +186,7 @@ export function registerBeeGameSessionRoutes(
         const value = await response.json() as Record<string, unknown>
         const accessToken = readString(value, 'access_token')
         if (!accessToken) {
+          logFailure('refresh_response_missing_token')
           deleteRecord(sessionStorePath, current.id)
           return { status: 'invalid' }
         }
@@ -189,7 +200,8 @@ export function registerBeeGameSessionRoutes(
         }
         saveRecord(record, current.id)
         return { status: 'ok', record }
-      } catch {
+      } catch (error) {
+        logFailure('refresh_request_failed', safeErrorFacts(error))
         return { status: 'unavailable' }
       }
     })().finally(() => {

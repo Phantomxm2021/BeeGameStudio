@@ -567,63 +567,6 @@ function isResourceProductionWorker(workerType?: string): boolean {
   )
 }
 
-export function selectFoundationFactFastRuntime(
-  runtime: RuntimeModelConfig | undefined,
-  environment: Record<string, string>,
-): Record<string, string> {
-  const provider = foundationRuntimeProvider(runtime, environment)
-  if (!provider) throw new Error('foundation fact extractor fast model is not configured')
-  const fastEnvKey = `${foundationRuntimeProviderPrefix(provider)}_DEFAULT_HAIKU_MODEL`
-  const fastModel = environment[fastEnvKey]
-  if (!fastModel) throw new Error('foundation fact extractor fast model is not configured')
-  // The native runtime selects its primary turn model through the provider's
-  // sonnet/default alias. Route this worker's isolated process to the
-  // configured fast model using a recognized provider key; arbitrary MODEL
-  // environment variables are ignored by the runtime.
-  return { ...environment, [`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_SONNET_MODEL`]: fastModel }
-}
-
-export function selectFoundationSemanticRuntime(
-  runtime: RuntimeModelConfig | undefined,
-  environment: Record<string, string>,
-  tier: 'fast' | 'balanced' | 'strong',
-): Record<string, string> {
-  const suffix = tier === 'fast' ? 'HAIKU' : tier === 'balanced' ? 'SONNET' : 'OPUS'
-  const provider = foundationRuntimeProvider(runtime, environment)
-  if (!provider) throw new Error(`foundation semantic ${tier} model is not configured`)
-  const key = `${foundationRuntimeProviderPrefix(provider)}_DEFAULT_${suffix}_MODEL`
-  if (!key || !environment[key]) throw new Error(`foundation semantic ${tier} model is not configured`)
-  return { ...environment, [`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_SONNET_MODEL`]: environment[key] }
-}
-
-const FOUNDATION_RUNTIME_PROVIDERS: RuntimeModelConfig['modelType'][] = [
-  'anthropic',
-  'openai',
-  'gemini',
-  'grok',
-]
-
-function foundationRuntimeProvider(
-  runtime: RuntimeModelConfig | undefined,
-  environment: Record<string, string>,
-): RuntimeModelConfig['modelType'] | undefined {
-  if (runtime?.modelType) return runtime.modelType
-  const providers = FOUNDATION_RUNTIME_PROVIDERS.filter(provider =>
-    ['HAIKU', 'SONNET', 'OPUS'].some(tier =>
-      Boolean(environment[`${foundationRuntimeProviderPrefix(provider)}_DEFAULT_${tier}_MODEL`]),
-    ),
-  )
-  if (providers.length > 1) throw new Error('Selected model environment contains multiple providers')
-  if (providers.length === 0) return undefined
-  return providers[0]!
-}
-
-function foundationRuntimeProviderPrefix(
-  provider: RuntimeModelConfig['modelType'],
-): string {
-  return provider.toUpperCase()
-}
-
 export type StartBeeGameSessionInput = {
   workspacePath: string
   projectId?: string
@@ -1470,12 +1413,6 @@ export class BeeGameSessionManager {
         record.runtime,
         await this.loadAdditionalRuntimeEnv(record),
       )
-      if (record.workflowWorkerType === 'foundation-fact-extractor') {
-        selectedEnvironment = selectFoundationFactFastRuntime(record.runtime, selectedEnvironment)
-      } else if (record.workflowWorkerType === 'foundation-semantic-reviewer') {
-        if (!record.workflowModelTier) throw new Error('foundation semantic model tier is missing')
-        selectedEnvironment = selectFoundationSemanticRuntime(record.runtime, selectedEnvironment, record.workflowModelTier)
-      }
       const env = buildRuntimeEnv(selectedEnvironment)
       const runner =
         record.runner ??

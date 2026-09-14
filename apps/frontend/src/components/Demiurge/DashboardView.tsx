@@ -8,7 +8,6 @@ import { useChat } from '../../hooks/useChat';
 import { useToast } from '../../hooks/useToast';
 import { isAuthenticationServiceUnavailable } from '../../services/apiClient';
 import type { Language } from './AgentsConfig';
-import type { FoundationDecisionInput } from '../../types/message';
 
 import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
@@ -64,7 +63,7 @@ const logDashboardReadError = (label: string, error: unknown): void => {
   }
 };
 
-const shouldResumeFoundationRevisionOnReconnect = (
+const shouldResumeFoundationReviewOnReconnect = (
   workflow: ProjectRuntimeDisplayModel['workflow'],
 ): boolean => {
   if (
@@ -420,7 +419,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
       authenticationStatus !== 'authenticated' ||
       !hasCurrentRuntimeSnapshot ||
       reconnectResumeProjectRef.current === projectId ||
-      !shouldResumeFoundationRevisionOnReconnect(projectRuntimeDisplay?.workflow)
+      !shouldResumeFoundationReviewOnReconnect(projectRuntimeDisplay?.workflow)
     ) {
       return;
     }
@@ -598,14 +597,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
             ? async action => {
                 if (action === 'resume') await api.resumeWorkflow(projectId);
                 else await api.retryWorkflow(projectId);
-                await loadProjectRuntimeState(projectId);
-              }
-            : undefined
-        }
-        onFoundationDecision={
-          canSendMessage
-            ? async (decision: FoundationDecisionInput) => {
-                await api.submitFoundationDecision(projectId, decision);
                 await loadProjectRuntimeState(projectId);
               }
             : undefined

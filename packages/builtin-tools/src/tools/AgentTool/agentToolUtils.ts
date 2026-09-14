@@ -274,7 +274,7 @@ export function countToolUses(messages: MessageType[]): number {
   return count
 }
 
-export function finalizeAgentTool(
+export async function finalizeAgentTool(
   agentMessages: MessageType[],
   agentId: string,
   metadata: {
@@ -285,7 +285,7 @@ export function finalizeAgentTool(
     agentType: string
     isAsync: boolean
   },
-): AgentToolResult {
+): Promise<AgentToolResult> {
   const {
     prompt,
     resolvedAgentModel,
@@ -606,13 +606,13 @@ export async function runAsyncAgentLifecycle({
 
     stopSummarization?.()
 
-    const agentResult = finalizeAgentTool(agentMessages, taskId, metadata)
+    const agentResult = await finalizeAgentTool(agentMessages, taskId, metadata)
 
     // Mark task completed FIRST so TaskOutput(block=true) unblocks
     // immediately. classifyHandoffIfNeeded (API call) and getWorktreeResult
     // (git exec) are notification embellishments that can hang — they must
     // not gate the status transition (gh-20236).
-    completeAsyncAgent(agentResult, rootSetAppState)
+    await completeAsyncAgent(agentResult, rootSetAppState)
 
     let finalMessage = extractTextContent(agentResult.content, '\n')
 
@@ -680,7 +680,7 @@ export async function runAsyncAgentLifecycle({
       return
     }
     const msg = errorMessage(error)
-    failAsyncAgent(taskId, msg, rootSetAppState)
+    await failAsyncAgent(taskId, msg, rootSetAppState)
     const worktreeResult = await getWorktreeResult()
     enqueueAgentNotification({
       taskId,

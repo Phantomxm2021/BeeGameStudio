@@ -39,10 +39,8 @@ export function projectWorkflowCurrentMessage(input: {
   documentStep: unknown
 }): string {
   if (
-    (input.phase === 'DOCUMENT_REVIEW' &&
-      input.documentStep === 'FOUNDATION_REVIEW') ||
-    (input.phase === 'FOUNDATION_REVISION' &&
-      input.documentStep === 'FOUNDATION_REVISION')
+    input.phase === 'DOCUMENT_REVIEW' &&
+      input.documentStep === 'FOUNDATION_REVIEW'
   ) {
     // Admit the native runner's bounded progress vocabulary, never worker prose.
     const value = typeof input.value === 'string' ? input.value : ''
@@ -56,7 +54,6 @@ export function projectWorkflowCurrentMessage(input: {
 }
 
 export type WorkflowDisplayReasonCode =
-  | 'foundation_adjudication'
   | 'user_stopped'
   | 'document_contract_failed'
   | 'revision_validation_failed'
@@ -110,7 +107,6 @@ export type WorkflowDisplayReasonContext = {
 }
 
 const workflowDisplayReasonCodes = new Set<WorkflowDisplayReasonCode>([
-  'foundation_adjudication',
   'user_stopped',
   'document_contract_failed',
   'revision_validation_failed',
@@ -170,7 +166,16 @@ export function projectWorkflowDisplayReason(
   let code: WorkflowDisplayReasonCode = 'workflow_blocked'
   let message = 'Workflow is blocked and needs attention.'
 
-  if (
+  // Match only the host-owned Author reason prefixes, not arbitrary worker
+  // prose mentioning a budget. Keep the stable workflow_blocked public code.
+  const authorBudget = [
+    ['Author reached its active-time limit.', '本次编写已达到运行时间上限'],
+    ['Author reached its no-document-progress limit.', '文档持续未发生内容变化，本次编写已暂停'],
+    ['Author reached its output-token limit.', '本次编写已达到输出 token 上限'],
+  ].find(([prefix]) => reason.startsWith(prefix!))
+  if (authorBudget) {
+    message = `${authorBudget[1]}。草稿和用量已保留，等待手动继续；不会自动重试。`
+  } else if (
     normalized.includes('user stopped') ||
     normalized.includes('operator stopped')
   ) {

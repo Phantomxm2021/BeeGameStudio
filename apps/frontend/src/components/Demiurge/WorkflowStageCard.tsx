@@ -29,8 +29,6 @@ import type {
   WorkflowCardStageSnapshot,
   WorkflowCardTask,
   WorkflowRecoveryUnitKind,
-  FoundationDecisionInput,
-  FoundationReviewFinding,
 } from '../../types/message';
 import {
   BEEGAME_DOCUMENT_BASELINE,
@@ -51,7 +49,6 @@ const statusLabel: Record<WorkflowCardStageSnapshot['status'], string> = {
 const stageLabel: Record<string, string> = {
   FOUNDATION_DRAFTING: '基础文档编写',
   FOUNDATION_REVIEW: '基础文档审计',
-  FOUNDATION_REVISION: '基础文档修订',
   CHECKLIST_DRAFTING: 'Gameplay Checklist 编写',
   BRIEF_CONFIRMED: '需求确认',
   DOCUMENT_DRAFTING: '基础文档编写',
@@ -226,7 +223,8 @@ const taskStatusText = (task: WorkflowCardTask): string => {
   }
   if (task.status === 'completed') return '已完成';
   if (task.status === 'running') return '编写中';
-  if (task.status === 'failed' || task.status === 'blocked') return '编写失败';
+  if (task.status === 'blocked') return '等待处理';
+  if (task.status === 'failed') return '编写失败';
   return '待编写';
 };
 
@@ -401,7 +399,6 @@ export interface WorkflowStageCardProps {
   recovery?: WorkflowStageCardRecovery;
   headerControls?: ReactNode;
   onAction?: (action: WorkflowCardAction) => Promise<void> | void;
-  onFoundationDecision?: (decision: FoundationDecisionInput) => Promise<void> | void;
 }
 
 export function WorkflowStageCard({
@@ -412,53 +409,13 @@ export function WorkflowStageCard({
   recovery,
   headerControls,
   onAction,
-  onFoundationDecision,
 }: WorkflowStageCardProps) {
   const { showSuccess, showError } = useToastContext();
   const [now, setNow] = useState(() => Date.now());
   const [actionState, setActionState] = useState<'idle' | 'pending'>('idle');
   const [actionError, setActionError] = useState('');
-  const [decisionReason, setDecisionReason] = useState('');
-  const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>([]);
-  const [additionalRepairRounds, setAdditionalRepairRounds] = useState('1');
-  const decisionIdsRef = useRef(new Map<string, string>());
   const isRecoverable = isLatest && recovery?.recoverable === true;
-  const isAdjudication = snapshot.block?.code === 'foundation_adjudication';
-  const acceptanceDecision = snapshot.acceptanceDecision;
   const reviewReport = snapshot.foundationReviewReport;
-  const reportFindings = reviewReport?.findings ?? [];
-  const reportId = acceptanceDecision?.reviewResultId || reviewReport?.resultId;
-  const reportDigest = acceptanceDecision?.reviewResultDigest || reviewReport?.resultDigest;
-  const documentSetDigest = acceptanceDecision?.documentSetDigest || reviewReport?.documentSetDigest;
-  const decisionContext = snapshot.foundationDecisionContext;
-  const availableDecisionActions = decisionContext?.availableActions ?? [];
-  const canDecisionAction = (action: FoundationDecisionInput['action']): boolean =>
-    availableDecisionActions.includes(action);
-  const controlSequence = decisionContext?.controlSequence ?? snapshot.controlSequence ?? acceptanceDecision?.controlSequence;
-  const isLegacyPolicySwitch =
-    isLatest &&
-    snapshot.status === 'cancelled' &&
-    decisionContext?.runId === runId &&
-    decisionContext.policyVersion === null &&
-    controlSequence !== undefined &&
-    canDecisionAction('switch_policy');
-  const acceptanceLabel = acceptanceDecision
-    ? acceptanceDecision.disposition === 'accepted'
-      ? '通过'
-      : acceptanceDecision.disposition === 'accepted_with_advisories'
-        ? `通过，附 ${acceptanceDecision.advisoryFindingIds.length} 项建议${acceptanceDecision.waivedFindingIds.length > 0 ? `；已接受 ${acceptanceDecision.waivedFindingIds.length} 项风险` : ''}`
-        : acceptanceDecision.disposition === 'repair_required'
-          ? `需修复 ${acceptanceDecision.blockingFindingIds.length} 项阻断问题`
-          : acceptanceDecision.disposition === 'needs_action'
-            ? '需要用户处理'
-            : acceptanceDecision.disposition
-    : undefined;
-
-  useEffect(() => {
-    setSelectedFindingIds([]);
-    setDecisionReason('');
-    setActionError('');
-  }, [documentSetDigest, reportDigest, reportId]);
   const isActive = ['draft', 'running', 'verifying'].includes(snapshot.status);
   const isBlocked = ['blocked', 'failed', 'cancelled', 'stale'].includes(snapshot.status);
   const hasFailureDetails = ['blocked', 'failed', 'stale'].includes(snapshot.status) && Boolean(snapshot.block);
@@ -509,15 +466,6 @@ export function WorkflowStageCard({
   const { elementRef: messageRegionRef, isOverflowing: isMessageOverflowing } = useVerticalOverflow<HTMLDivElement>(
     message || '',
   );
-  const repairTaskRounds = snapshot.substage === 'REPAIRING' ? tasks.map(task => task.round) : [];
-  const firstRepairRound = repairTaskRounds[0];
-  const repairRound =
-    typeof firstRepairRound === 'number' &&
-    Number.isSafeInteger(firstRepairRound) &&
-    firstRepairRound > 0 &&
-    repairTaskRounds.every(round => round === firstRepairRound)
-      ? firstRepairRound
-      : undefined;
   const hasPhaseProgress =
     Number.isInteger(snapshot.phaseIndex) &&
     Number.isInteger(snapshot.phaseCount) &&
@@ -530,14 +478,12 @@ export function WorkflowStageCard({
       ? '基础文档编写'
       : snapshot.substage === 'INITIAL_REVIEW'
         ? '基础文档审计'
-        : snapshot.substage === 'REPAIRING'
-          ? '基础文档修订'
-          : snapshot.substage === 'CHECKLIST_DRAFTING'
+        : snapshot.substage === 'CHECKLIST_DRAFTING'
             ? '编写验收清单'
             : undefined;
   const stageTitle = isRecoverable
     ? '工作流需要恢复'
-    : snapshot.substage && [4, 6].includes(Number(snapshot.phaseIndex)) && snapshot.substage !== 'REPAIRING'
+    : snapshot.substage && [4, 6].includes(Number(snapshot.phaseIndex))
       ? convergenceTitle
       : substageTitle ||
         stageLabel[snapshot.documentStep || ''] ||
@@ -546,12 +492,10 @@ export function WorkflowStageCard({
         '等待阶段';
   const convergencePosition =
     substageTitle &&
-    snapshot.substage !== 'REPAIRING' &&
     [4, 6].includes(Number(snapshot.phaseIndex)) &&
     snapshot.substage !== 'INITIAL_DRAFTING'
       ? [snapshot.convergencePass ? `第 ${snapshot.convergencePass} 轮` : '', substageTitle].filter(Boolean).join(' · ')
       : undefined;
-  const repairRoundTitle = repairRound ? `第 ${repairRound} 轮` : undefined;
   const startedAt = Date.parse(snapshot.createdAt || snapshot.stageStartedAt || '');
   const finishedAt = Date.parse(snapshot.completedAt || (!isActive ? snapshot.updatedAt || '' : ''));
   const activeSince = Date.parse(snapshot.activeSince || '');
@@ -599,61 +543,6 @@ export function WorkflowStageCard({
     }
   };
 
-  const stableDecisionId = (key: string): string => {
-    const existing = decisionIdsRef.current.get(key);
-    if (existing) return existing;
-    const generated = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${runId}:${key}`;
-    decisionIdsRef.current.set(key, generated);
-    return generated;
-  };
-
-  const submitDecision = async (input: Omit<FoundationDecisionInput, 'runId' | 'reason' | 'decisionId' | 'authorizationId'>, key: string) => {
-    if (!isLatest || !onFoundationDecision || !decisionReason.trim() || actionState === 'pending') return;
-    if (input.action === 'switch_policy' && !isLegacyPolicySwitch && !isAdjudication) return;
-    const reason = decisionReason.trim();
-    const policyVersion = decisionContext?.policyVersion ?? snapshot.policyVersion ?? acceptanceDecision?.policyVersion ?? null;
-    const automaticRepairLimit = decisionContext?.automaticRepairLimit ?? snapshot.automaticRepairLimit ?? acceptanceDecision?.automaticRepairLimit ?? null;
-    const completedRepairCount = decisionContext?.completedRepairCount ?? snapshot.completedRepairCount ?? acceptanceDecision?.completedRepairCount ?? null;
-    const requestKey = JSON.stringify({
-      runId,
-      controlSequence,
-      policyVersion,
-      automaticRepairLimit,
-      completedRepairCount,
-      reportResultId: reportId,
-      reportResultDigest: reportDigest,
-      documentSetDigest,
-      reason,
-      ...input,
-      selectedFindingIds,
-    });
-    setActionState('pending');
-    setActionError('');
-    try {
-      await onFoundationDecision({
-        ...input,
-        runId,
-        reason,
-        controlSequence,
-        policyVersion,
-        automaticRepairLimit,
-        completedRepairCount,
-        decisionId: input.action === 'accept_risk' ? stableDecisionId(requestKey || key) : undefined,
-        authorizationId: input.action !== 'accept_risk' ? stableDecisionId(requestKey || key) : undefined,
-      });
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : '操作失败，请稍后重试');
-    } finally {
-      setActionState('idle');
-    }
-  };
-
-  const toggleFinding = (finding: FoundationReviewFinding) => {
-    setSelectedFindingIds(current => current.includes(finding.id) ? current.filter(id => id !== finding.id) : [...current, finding.id]);
-  };
-
   const handleCopyFailure = async () => {
     const message = failureDetails;
     if (!message) return;
@@ -683,7 +572,6 @@ export function WorkflowStageCard({
                     </span>
                   ) : null}
                 </div>
-                {repairRoundTitle ? <p className="mt-1 text-xs text-zinc-400">{repairRoundTitle}</p> : null}
                 {convergencePosition ? <p className="mt-1 text-xs text-zinc-400">{convergencePosition}</p> : null}
                 {isRecoverable && (recoveryPhaseTitle || recoveryUnitTitle) ? (
                   <p className="mt-1 text-xs text-zinc-400">
@@ -693,7 +581,7 @@ export function WorkflowStageCard({
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-xs text-zinc-400">
-                  {acceptanceLabel || (isAdjudication ? '自动处理已暂停' : isFoundationAuthoringHandoff ? '等待审查' : statusLabel[snapshot.status])}
+                  {isFoundationAuthoringHandoff ? '等待审查' : statusLabel[snapshot.status]}
                 </span>
                 {hasFailureDetails && snapshot.block ? (
                   <div className="group relative">
@@ -701,8 +589,8 @@ export function WorkflowStageCard({
                       type="button"
                       onClick={() => void handleCopyFailure()}
                       className="rounded-full text-rose-400 outline-none transition-colors hover:text-rose-300 focus-visible:ring-2 focus-visible:ring-rose-400/40"
-                      aria-label={isAdjudication ? '复制处理状态' : '复制错误信息'}
-                      title={isAdjudication ? '点击复制处理状态' : '点击复制错误信息'}
+                      aria-label="复制错误信息"
+                      title="点击复制错误信息"
                     >
                       <AlertCircle className="h-4 w-4" />
                     </button>
@@ -720,118 +608,22 @@ export function WorkflowStageCard({
               </div>
             </div>
 
-            {isAdjudication && snapshot.block ? (
-              <div className="mt-2 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs leading-5 text-amber-100" data-testid="foundation-adjudication">
-                <p>{snapshot.block.message}</p>
-                <p className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap">{snapshot.block.detail}</p>
-                <p className="mt-1">{snapshot.block.nextAction === 'resume' ? '继续后由 Agent 自主处理并复审，无需选择设计方案。' : snapshot.block.nextAction}</p>
+            {snapshot.status === 'blocked' && tasks.some(task => task.id === 'author:foundation' && task.status === 'blocked') ? (
+              <div className="mt-2 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs leading-5 text-amber-100" data-testid="foundation-author-paused">
+                <p>{snapshot.block?.message || '文档编写已暂停，等待手动处理。'}</p>
+                {nextAction === 'resume' ? <p className="mt-1">继续将从保留的工作恢复；可进入受限收尾的任务只做必要检查和修正，不重新生成整套文档。</p> : null}
               </div>
             ) : null}
-            {(reviewReport || acceptanceDecision || (decisionContext && availableDecisionActions.length > 0 && (isAdjudication || isLegacyPolicySwitch))) ? (
+            {reviewReport ? (
               <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] p-3" data-testid="foundation-review-report">
                 <details>
                   <summary className="cursor-pointer text-xs font-medium text-zinc-200">
-                    查看原始审查报告{reportFindings.length ? `（${reportFindings.length} 项发现）` : ''}
+                    查看审修摘要
                   </summary>
                   <div className="mt-3 space-y-3">
-                    {reviewReport?.summary ? <p className="whitespace-pre-wrap text-xs leading-5 text-zinc-400">{reviewReport.summary}</p> : !reviewReport ? <p className="text-xs leading-5 text-zinc-500">原始报告暂不可用；此旧任务仅显示可用的明确授权动作。</p> : null}
-                    {reportFindings.map(finding => {
-                      const checked = selectedFindingIds.includes(finding.id);
-                      return (
-                        <label key={finding.id} className="block rounded-lg border border-white/10 bg-black/10 p-2.5 text-xs text-zinc-300">
-                          <span className="flex items-start gap-2">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleFinding(finding)}
-                              className="mt-0.5 accent-amber-400"
-                              aria-label={`选择发现 ${finding.id}`}
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="flex flex-wrap items-center gap-2">
-                                <strong className="text-zinc-100">{finding.title || finding.summary || finding.id}</strong>
-                                <span className="rounded border border-amber-400/20 px-1.5 py-0.5 text-[10px] text-amber-200">{finding.severity}</span>
-                                <span className="font-mono text-[10px] text-zinc-600">{finding.id}</span>
-                              </span>
-                              {finding.summary && finding.title ? <span className="mt-1 block whitespace-pre-wrap leading-5 text-zinc-400">{finding.summary}</span> : null}
-                              {finding.actual ? <span className="mt-1 block whitespace-pre-wrap leading-5 text-zinc-500">实际：{finding.actual}</span> : null}
-                              {finding.expected ? <span className="mt-1 block whitespace-pre-wrap leading-5 text-zinc-500">预期：{finding.expected}</span> : null}
-                              {finding.detail ? <span className="mt-1 block whitespace-pre-wrap leading-5 text-zinc-500">说明：{finding.detail}</span> : null}
-                              {finding.documentPath ? <span className="mt-1 block font-mono text-[10px] text-zinc-600">文档：{finding.documentPath}</span> : null}
-                              {finding.recommendation ? <span className="mt-1 block whitespace-pre-wrap leading-5 text-zinc-500">建议：{finding.recommendation}</span> : null}
-                            </span>
-                          </span>
-                        </label>
-                      );
-                    })}
+                    {reviewReport.summary ? <p className="whitespace-pre-wrap text-xs leading-5 text-zinc-400">{reviewReport.summary}</p> : null}
                   </div>
                 </details>
-                    {onFoundationDecision && isLatest && (isAdjudication || isLegacyPolicySwitch) && controlSequence !== undefined && availableDecisionActions.length > 0 ? (
-                      <div className="space-y-2 border-t border-white/10 pt-3">
-                        <label className="block text-[11px] text-zinc-400">
-                          裁决理由（必填）
-                          <textarea
-                            value={decisionReason}
-                            onChange={event => setDecisionReason(event.target.value)}
-                            rows={2}
-                            className="mt-1 block w-full resize-y rounded-md border border-white/10 bg-black/20 px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-amber-300/50"
-                            placeholder="说明为什么接受风险、追加预算或采用新政策"
-                          />
-                        </label>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {canDecisionAction('accept_risk') ? <button
-                            type="button"
-                            disabled={actionState === 'pending' || !canDecisionAction('accept_risk') || !decisionReason.trim() || selectedFindingIds.length === 0 || !reportId || !reportDigest || !documentSetDigest || controlSequence === undefined}
-                            onClick={() => void submitDecision({
-                              action: 'accept_risk',
-                              findingIds: selectedFindingIds,
-                              reportResultId: reportId,
-                              reportResultDigest: reportDigest,
-                              documentSetDigest,
-                            }, 'accept-risk')}
-                            className="rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1.5 text-xs text-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            接受所选风险
-                          </button> : null}
-                          {canDecisionAction('grant_repair_budget') ? <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400">
-                            <span>追加修订轮次</span>
-                            <input
-                              value={additionalRepairRounds}
-                              onChange={event => setAdditionalRepairRounds(event.target.value.replace(/[^0-9]/g, ''))}
-                              type="number"
-                              min="1"
-                              inputMode="numeric"
-                              className="w-12 rounded border border-white/10 bg-black/20 px-1.5 py-1 text-center text-xs text-zinc-200"
-                              aria-label="追加修订轮次"
-                            />
-                          </label> : null}
-                          {canDecisionAction('grant_repair_budget') ? <button
-                            type="button"
-                            disabled={actionState === 'pending' || !canDecisionAction('grant_repair_budget') || !decisionReason.trim() || !reportId || !reportDigest || !documentSetDigest || controlSequence === undefined || Number(additionalRepairRounds) < 1}
-                            onClick={() => void submitDecision({
-                              action: 'grant_repair_budget',
-                              additionalRepairRounds: Number(additionalRepairRounds),
-                              reportResultId: reportId,
-                              reportResultDigest: reportDigest,
-                              documentSetDigest,
-                            }, 'grant-repair-budget')}
-                            className="rounded-full border border-sky-300/30 bg-sky-300/10 px-3 py-1.5 text-xs text-sky-100 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            追加预算并修订
-                          </button> : null}
-                          {canDecisionAction('switch_policy') ? <button
-                            type="button"
-                            disabled={actionState === 'pending' || !canDecisionAction('switch_policy') || !decisionReason.trim() || controlSequence === undefined}
-                            onClick={() => void submitDecision({
-                              action: 'switch_policy',
-                            }, 'switch-policy')}
-                            className="rounded-full border border-white/15 bg-white/[0.06] px-3 py-1.5 text-xs text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            对旧任务采用新政策
-                          </button> : null}
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
                 ) : null}
             <div
@@ -957,7 +749,7 @@ export function WorkflowStageCard({
                 <span title="后端未提供可信分项时显示不可用">本次调用 {formatTrustedDuration(Number.isFinite(currentCallElapsed) ? currentCallElapsed : undefined)}</span>
                 <span title="后端未提供可信分项时显示不可用">历史累计 {formatTrustedDuration(Number.isFinite(historicalElapsed) ? historicalElapsed : undefined)}</span>
               </span>
-              {isLatest && nextAction && onAction && (!isAdjudication || nextAction === 'resume') ? (
+              {isLatest && nextAction && onAction ? (
                 <button
                   type="button"
                   onClick={() => void handleAction()}

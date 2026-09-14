@@ -537,6 +537,34 @@ describe('HttpOnly session routes', () => {
     ).toBe(200)
   })
 
+  it('logs refresh rejection, service and transport failures without session secrets', async () => {
+    const log = spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      for (const status of [401, 503, 0]) {
+        const app = createApp(async input => {
+          if (String(input).includes('/token?grant_type=refresh_token')) {
+            if (status === 0) throw new Error('secret-response', { cause: { code: 'ECONNRESET' } })
+            return new Response('secret-response', { status })
+          }
+          return Response.json({ id: 'user-1', email: 'user@example.com' })
+        })
+        const session = await app.request('/api/auth/session', {
+          method: 'POST', headers: { origin: 'http://localhost', 'content-type': 'application/json' },
+          body: JSON.stringify({ access_token: 'secret-access-token', refresh_token: 'secret-refresh-token' }),
+        })
+        const cookie = (session.headers.get('set-cookie') ?? '').split(';', 1)[0]
+        const response = await app.request('/api/auth/session/refresh', {
+          method: 'POST', headers: { origin: 'http://localhost', cookie },
+        })
+        expect(response.status).toBe(status === 401 ? 401 : 503)
+        expect(JSON.parse(log.mock.calls.at(-1)![1] as string)).toMatchObject(status === 0
+          ? { code: 'refresh_request_failed', networkCode: 'ECONNRESET' }
+          : { code: status === 401 ? 'refresh_rejected' : 'refresh_service_unavailable', httpStatus: status })
+      }
+      expect(JSON.stringify(log.mock.calls)).not.toContain('secret')
+    } finally { log.mockRestore() }
+  })
+
   it('coalesces concurrent refreshes so a rotated refresh token is consumed once', async () => {
     let refreshCalls = 0
     let releaseRefresh: (() => void) | undefined

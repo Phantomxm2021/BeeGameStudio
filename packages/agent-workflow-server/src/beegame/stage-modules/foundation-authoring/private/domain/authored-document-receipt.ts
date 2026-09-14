@@ -508,7 +508,7 @@ export function normalizeServiceOwnedDocumentMetadata(markdown: string): string 
   return lines.join('\n')
 }
 
-function canonicalizeAuthoredDocument(
+export function canonicalizeAuthoredDocument(
   path: FoundationDocumentPath,
   markdown: string,
   updatedAt: string,

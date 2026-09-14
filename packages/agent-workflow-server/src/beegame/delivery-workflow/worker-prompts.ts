@@ -3,17 +3,11 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   type WorkerDispatchRequest,
 } from './types'
-import { RETIRED_FOUNDATION_REVIEW } from './retired-foundation-review'
 import { assertSharedDocumentWorker } from './retired-foundation-author'
 
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   assertSharedDocumentWorker(request)
-  const packetWorker =
-    request.workerType === 'foundation-fact-extractor' ||
-    request.workerType === 'foundation-semantic-reviewer' ||
-    request.workerType === 'foundation-document-reviser'
-  if (packetWorker) throw new Error(RETIRED_FOUNDATION_REVIEW)
   const resourceContentReadPaths =
     request.workerType === 'resource-content-author'
       ? [
@@ -97,10 +91,6 @@ function formatResourceContentContract(
 
 function workerInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
-    case 'foundation-fact-extractor':
-    case 'foundation-semantic-reviewer':
-    case 'foundation-document-reviser':
-      throw new Error(RETIRED_FOUNDATION_REVIEW)
     case 'document-author':
       if (request.contract.documentSet !== 'checklist')
         throw new Error('Foundation author must use the dedicated authoring prompt')
@@ -165,10 +155,6 @@ function workerInstruction(request: WorkerDispatchRequest): string {
 
 function terminalInstruction(request: WorkerDispatchRequest): string {
   switch (request.workerType) {
-    case 'foundation-fact-extractor':
-    case 'foundation-semantic-reviewer':
-    case 'foundation-document-reviser':
-      throw new Error(RETIRED_FOUNDATION_REVIEW)
     case 'document-author':
       return request.contract.documentSet === 'foundation' &&
         (request.contract.authoringMode === 'initial' ||

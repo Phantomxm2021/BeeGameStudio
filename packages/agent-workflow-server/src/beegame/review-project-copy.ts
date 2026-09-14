@@ -32,7 +32,6 @@ import {
 import { parseDeliveryRun } from './delivery-workflow/schema'
 import type { DeliveryRun } from './delivery-workflow/types'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
-import { DEFAULT_AUTOMATIC_REPAIR_LIMIT, FOUNDATION_ACCEPTANCE_POLICY_VERSION } from './delivery-workflow/foundation-acceptance-policy'
 
 type PublicSourceRun = Pick<
   DeliveryRun,
@@ -167,8 +166,6 @@ export async function createReviewProjectCopy(input: {
   projectId: string
   confirmedBriefContext: string
   sourceRun: PublicSourceRun
-  tokenBudget?: number | null
-  stopAfterReview?: boolean
 }): Promise<ReviewProjectCopyResult> {
   if (!input.confirmedBriefContext.trim())
     throw new Error('confirmed brief context is required')
@@ -247,14 +244,12 @@ export async function createReviewProjectCopy(input: {
     })
     const request = {
       ...sourceRequest,
-      ...(input.tokenBudget === undefined ? {} : { tokenBudget: input.tokenBudget }),
       projectId: input.projectId,
       requestId: `foundation:${initial.runId}:0`,
       inputDigest: foundationReviewerInputDigest({
         ownerId: input.ownerId,
         projectId: input.projectId,
         input: sourceRequest.input,
-        ...(input.tokenBudget === undefined ? {} : { tokenBudget: input.tokenBudget }),
       }),
     }
     const run = parseDeliveryRun({
@@ -264,14 +259,8 @@ export async function createReviewProjectCopy(input: {
       status: 'running',
       foundationReviewStage: {
         protocolVersion: 1,
-        ...(input.tokenBudget === undefined ? {} : { reviewTokenBudget: input.tokenBudget }),
-        ...(input.stopAfterReview === undefined ? {} : { stopAfterReview: input.stopAfterReview }),
         authorResultId: sourceResult.resultId,
-        policyVersion: FOUNDATION_ACCEPTANCE_POLICY_VERSION,
-        automaticRepairLimit: DEFAULT_AUTOMATIC_REPAIR_LIMIT,
-        completedRepairCount: 0,
         importedAuthorResult: structuredClone(sourceResult),
-        sequence: 0,
         control: { sequence: 0, appliedSequence: 0, action: 'run' },
         invocation: { stage: 'reviewer', request },
       },

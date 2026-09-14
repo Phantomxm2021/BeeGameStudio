@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test, spyOn } from 'bun:test'
 import type { RuntimeModelConfig } from '@bee-game-studio/agent-workflow'
 import type { AuthenticationClient } from '../auth/public'
 import { SupabaseRuntimeEnvRequestError } from '../supabase-runtime-env-client'
@@ -49,6 +49,41 @@ function options(overrides: Partial<RuntimeConfigurationClientFactoryOptions> = 
 }
 
 describe('public runtime configuration client', () => {
+  test('diagnostics distinguish auth, refresh, HTTP, network and validation failures without secrets', async () => {
+    const log = spyOn(console, 'error').mockImplementation(() => {})
+    const warning = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const cases = [
+        { tokens: [undefined], repository: async () => ({}), expected: { step: 'authentication', code: 'token_unavailable' } },
+        { tokens: ['secret-token', undefined], repository: async () => { throw new SupabaseRuntimeEnvRequestError(401, 'secret-body') },
+          expected: { step: 'authentication_refresh', code: 'token_unavailable' } },
+        { tokens: ['secret-token', 'secret-refreshed'], repository: async () => { throw new SupabaseRuntimeEnvRequestError(403, 'secret-body') },
+          expected: { step: 'runtime_environment_retry', code: 'authorization_failed', httpStatus: 403 } },
+        { tokens: ['secret-token'], repository: async () => { throw new SupabaseRuntimeEnvRequestError(503, 'secret-body') },
+          expected: { step: 'runtime_environment', code: 'repository_unavailable', httpStatus: 503 } },
+        { tokens: ['secret-token'], repository: async () => { throw new Error('https://secret-host', { cause: { code: 'ECONNRESET' } }) },
+          expected: { step: 'runtime_environment', code: 'repository_unavailable', networkCode: 'ECONNRESET' } },
+        { tokens: ['secret-token'], repository: async () => ({ OPENAI_API_KEY: 'secret-openai', GEMINI_API_KEY: 'secret-gemini' }),
+          expected: { step: 'environment_validation', code: 'invalid_environment' } },
+      ]
+      for (const item of cases) {
+        const client = createRuntimeConfigurationClient(options({
+          authentication: authFixture(item.tokens).authentication,
+          repository: { getRuntimeEnv: item.repository },
+        }))
+        let failure: unknown
+        try { await client.resolve({ ownerId: 'owner-1' }) } catch (error) { failure = error }
+        expect(failure).toMatchObject({ diagnostic: item.expected })
+        const diagnostic = (failure as { diagnostic: { traceId: string; elapsedMs: number; httpStatus?: number } }).diagnostic
+        expect(diagnostic.traceId).toMatch(/^[0-9a-f-]{36}$/)
+        expect(diagnostic.elapsedMs).toBeGreaterThanOrEqual(0)
+        if (item.expected.step === 'authentication_refresh') expect(diagnostic.httpStatus).toBeUndefined()
+        expect(JSON.parse(log.mock.calls.at(-1)![1] as string)).toEqual(diagnostic)
+      }
+      expect(JSON.stringify([log.mock.calls, warning.mock.calls])).not.toContain('secret')
+    } finally { log.mockRestore(); warning.mockRestore() }
+  })
+
   test('resolves an owner-bound command and infers the single provider', async () => {
     const fixture = options()
     const client = createRuntimeConfigurationClient(fixture)

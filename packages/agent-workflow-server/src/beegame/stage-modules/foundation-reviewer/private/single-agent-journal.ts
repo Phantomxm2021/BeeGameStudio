@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { z } from 'zod/v4'
 import { openJournalStorage, type JournalRecord } from './journal-storage'
-import { reviewDigest, singleReviewReportSchema, type SingleReviewReport } from './single-agent-contract'
+import { reviewDigest, reviewDocumentSchema, singleReviewReportSchema, type SingleReviewReport } from './single-agent-contract'
 import type { SingleReviewStart } from './single-agent-publication'
 import type { ReviewNativeUsage } from './native-usage'
 import { reviewOutputDiagnosticSchema, reviewNativeSummarySchema } from './single-agent-diagnostic'
@@ -19,7 +19,8 @@ export const singleReviewEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('closed'), attemptId: id, usage, usageObserved: z.boolean(),
     sealScope: z.literal('direct-child'), elapsedMs: count, summary: reviewNativeSummarySchema,
     outcome: z.discriminatedUnion('kind', [
-      z.object({ kind: z.literal('accepted'), report: singleReviewReportSchema }).strict(),
+      z.object({ kind: z.literal('accepted'), report: singleReviewReportSchema,
+        documents: z.array(reviewDocumentSchema).length(8) }).strict(),
       z.object({ kind: z.literal('failed'), code: id, diagnostic: reviewOutputDiagnosticSchema.optional() }).strict(),
     ]) }).strict(),
   z.object({ kind: z.literal('settled'), attemptId: id, receipt: z.json() }).strict(),
@@ -33,7 +34,8 @@ type Closed = Extract<SingleReviewEvent, { kind: 'closed' }>
 export type SingleReviewAttempt = { id: string; usage?: ReviewNativeUsage; closed?: Closed; receipt?: unknown }
 export type SingleReviewState = {
   attempts: SingleReviewAttempt[]; stopped: boolean; failure?: string;
-  report?: SingleReviewReport; published?: string; progress?: { modelResponses: number; message: string };
+  report?: SingleReviewReport; documents?: z.infer<typeof reviewDocumentSchema>[];
+  published?: string; progress?: { modelResponses: number; message: string };
 }
 function reduce(prior: SingleReviewState, event: SingleReviewEvent): SingleReviewState {
   const state = structuredClone(prior)
@@ -51,15 +53,16 @@ function reduce(prior: SingleReviewState, event: SingleReviewEvent): SingleRevie
     attempt.usage = event.usage
   } else if (event.kind === 'closed') {
     if (!attempt || attempt.closed) throw new Error('Completion does not belong to an open attempt')
-    if (event.outcome.kind === 'accepted' && event.outcome.report.status !== 'completed')
-      throw new Error('Incomplete audit cannot be accepted')
     attempt.closed = event; attempt.usage = event.usage
     if (event.outcome.kind === 'failed') state.failure = event.outcome.code
     if (!event.usageObserved) state.failure = 'usage_unavailable'
   } else if (event.kind === 'settled') {
     if (!attempt?.closed || attempt.receipt || !attempt.closed.usageObserved) throw new Error('Unsealed usage cannot settle')
     attempt.receipt = event.receipt
-    if (attempt.closed.outcome.kind === 'accepted') state.report = attempt.closed.outcome.report
+    if (attempt.closed.outcome.kind === 'accepted') {
+      state.report = attempt.closed.outcome.report
+      state.documents = attempt.closed.outcome.documents
+    }
   } else if (event.kind === 'stop') {
     if (!state.published) state.stopped = true
   } else if (event.kind === 'resume') {

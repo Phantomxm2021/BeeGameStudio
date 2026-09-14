@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { z } from 'zod/v4'
-import { diagnoseReviewOutput, ReviewAdmissionError, reviewOutputDiagnosticSchema, reviewNativeSummarySchema } from '../single-agent-diagnostic'
+import { diagnoseReviewOutput, reviewOutputDiagnosticSchema, reviewNativeSummarySchema } from '../single-agent-diagnostic'
 
 test('native summary allows only bounded classifications and counts', () => {
   const summary = { modelMessages: 2, structuredOutputCalls: 1, structuredOutputSuccesses: 1,
@@ -12,8 +12,6 @@ test('native summary allows only bounded classifications and counts', () => {
 import { singleReviewEventSchema } from '../single-agent-journal'
 
 test('diagnostics retain precise safe admission locations, not exception or model text', () => {
-  expect(diagnoseReviewOutput(new ReviewAdmissionError({ stage: 'admission', reason: 'audit_incomplete' })))
-    .toEqual({ stage: 'admission', reason: 'audit_incomplete' })
   expect(diagnoseReviewOutput(new Error('PRIVATE_PROVIDER_SECRET'))).toEqual({ stage: 'admission', reason: 'unknown' })
   const result = z.object({ action: z.literal('draft') }).strict().safeParse({ action: 'PRIVATE_VALUE', PRIVATE_FIELD: 'secret' })
   if (result.success) throw new Error('Expected schema failure')

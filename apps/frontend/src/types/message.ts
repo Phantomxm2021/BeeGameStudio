@@ -72,69 +72,11 @@ export type WorkflowCardSubstage =
   | 'REPAIRING'
   | 'CHECKLIST_DRAFTING'
 
-export type FoundationFindingSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'BLOCKER' | string
-
-/** Immutable review evidence shown before a user adjudicates a finding. */
-export interface FoundationReviewFinding {
-  id: string
-  severity: FoundationFindingSeverity
-  title?: string
-  summary?: string
-  actual?: string
-  expected?: string
-  detail?: string
-  recommendation?: string
-  documentPath?: string
-}
-
-export interface FoundationAcceptanceDecision {
-  controlSequence?: number
-  policyVersion?: string
-  reviewResultId?: string
-  reviewResultDigest?: string
-  documentSetDigest?: string
-  disposition: 'accepted' | 'accepted_with_advisories' | 'repair_required' | 'needs_action' | string
-  advisoryFindingIds: string[]
-  blockingFindingIds: string[]
-  waivedFindingIds: string[]
-  automaticRepairLimit?: number
-  completedRepairCount?: number
-  reason?: string
-  overrideReferences?: string[]
-}
-
 export interface FoundationReviewReport {
   resultId?: string
   resultDigest?: string
   documentSetDigest?: string
   summary?: string
-  findings: FoundationReviewFinding[]
-}
-
-export interface FoundationDecisionContext {
-  runId: string
-  controlSequence: number
-  policyVersion: string | null
-  automaticRepairLimit: number | null
-  completedRepairCount: number | null
-  availableActions: Array<'accept_risk' | 'grant_repair_budget' | 'switch_policy'>
-}
-
-export interface FoundationDecisionInput {
-  action: 'accept_risk' | 'grant_repair_budget' | 'switch_policy'
-  runId?: string
-  controlSequence?: number
-  policyVersion?: string | null
-  automaticRepairLimit?: number | null
-  completedRepairCount?: number | null
-  decisionId?: string
-  authorizationId?: string
-  findingIds?: string[]
-  reason: string
-  reportResultId?: string
-  reportResultDigest?: string
-  documentSetDigest?: string
-  additionalRepairRounds?: number
 }
 
 export interface WorkflowCardStageSnapshot {
@@ -177,13 +119,7 @@ export interface WorkflowCardStageSnapshot {
     retryable?: boolean
     nextAction?: string
   }
-  acceptanceDecision?: FoundationAcceptanceDecision
   foundationReviewReport?: FoundationReviewReport
-  controlSequence?: number
-  policyVersion?: string | null
-  automaticRepairLimit?: number | null
-  completedRepairCount?: number | null
-  foundationDecisionContext?: FoundationDecisionContext
 }
 
 export type WorkflowCardAction = 'resume' | 'retry'
@@ -248,13 +184,7 @@ export interface WorkflowCardPayload {
     diagnosticId?: string
     nextAction?: string
   }
-  acceptanceDecision?: FoundationAcceptanceDecision
   foundationReviewReport?: FoundationReviewReport
-  controlSequence?: number
-  policyVersion?: string | null
-  automaticRepairLimit?: number | null
-  completedRepairCount?: number | null
-  foundationDecisionContext?: FoundationDecisionContext
   usage?: TokenUsage
 }
 

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { z } from 'zod'
+import { authorExecutionLimitsSchema } from './execution-budget'
 
 const identity = z.string().min(1).max(256)
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
@@ -35,6 +36,7 @@ export type AuthorConfiguration = {
   workspacePath: string
   privateRootPath: string
   language?: string
+  executionLimits?: import('./execution-budget').AuthorExecutionLimits
   model: { command: string[]; env: Record<string, string> }
 }
 export type AuthorDocumentArtifact = {
@@ -63,7 +65,21 @@ export type AuthorResult = (
   | { status: 'needs_action'; handle: AuthorHandle; reason: string; resumable: boolean }
   | { status: 'failed'; handle: AuthorHandle; code: string; reason: string }
   | { status: 'completed'; handle: AuthorHandle; result: AuthorDocumentsResult }
-) & { billingStatus?: 'pending' | 'settled' }
+) & { billingStatus?: 'pending' | 'settled'; progress?: { modelResponses: number; message: string };
+  timing?: { currentCallElapsedMs: number; historicalElapsedMs: number } }
+export type AuthorOperations = {
+  start(input: AuthorStartInput): Promise<AuthorHandle>
+  resume(input: AuthorResumeInput): Promise<AuthorHandle>
+  stop(input: AuthorStopInput): Promise<AuthorResult>
+  getResult(handle: AuthorHandle): Promise<AuthorResult>
+}
+export type AuthorUsage = {
+  prompt_tokens: number
+  completion_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  total_tokens: number
+}
 
 /** Canonical encoding: sorted object keys, array order preserved, UTF-8 JSON. */
 export function canonicalAuthorJson(value: unknown): string {
@@ -91,6 +107,7 @@ export function parseAuthorConfiguration(value: unknown): AuthorConfiguration {
     workspacePath: z.string().refine(isAbsolute, 'workspacePath must be absolute'),
     privateRootPath: z.string().refine(isAbsolute, 'privateRootPath must be absolute'),
     language: z.string().min(1).optional(),
+    executionLimits: authorExecutionLimitsSchema.optional(),
     model: z.strictObject({
       command: z.array(z.string().min(1)).min(1),
       env: z.record(z.string(), z.string()),

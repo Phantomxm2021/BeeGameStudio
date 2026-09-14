@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
-import { projectPublicAuthorDisplay } from './public-author-display'
+import { projectPublicAuthorDisplay, projectPublicAuthorTiming } from './public-author-display'
 
 const digest = 'a'.repeat(64)
 const handle = {
@@ -44,6 +44,13 @@ function completedResult() {
 }
 
 describe('public author display projection', () => {
+  test('projects only valid public timing and leaves old tasks unavailable', () => {
+    expect(projectPublicAuthorTiming(link('running'))).toBeUndefined()
+    expect(projectPublicAuthorTiming({ ...link('running'), timing: { currentCallElapsedMs: 123, historicalElapsedMs: 456 } }))
+      .toEqual({ currentCallElapsedMs: 123, historicalElapsedMs: 456 })
+    expect(projectPublicAuthorTiming({ ...link('running'), timing: { currentCallElapsedMs: -1, historicalElapsedMs: 0 } })).toBeUndefined()
+    expect(projectPublicAuthorTiming({ status: 'running', timing: { currentCallElapsedMs: 1, historicalElapsedMs: 2 } })).toBeUndefined()
+  })
   test('does not project absent or malformed author links', () => {
     expect(projectPublicAuthorDisplay(undefined)).toBeUndefined()
     expect(projectPublicAuthorDisplay({ protocolVersion: 1, status: 'completed' })).toBeUndefined()
@@ -72,7 +79,8 @@ describe('public author display projection', () => {
     const malformed = completedResult()
     malformed.documents = malformed.documents.slice(0, 7)
     expect(projectPublicAuthorDisplay(link('completed', malformed))).toBeUndefined()
-    expect(projectPublicAuthorDisplay(link('needs_action'))?.tasks[0]?.status).toBe('failed')
+    expect(projectPublicAuthorDisplay(link('needs_action'))?.tasks[0]?.status).toBe('blocked')
+    expect(projectPublicAuthorDisplay(link('failed'))?.tasks[0]?.status).toBe('failed')
     expect(projectPublicAuthorDisplay(link('stopped'))?.tasks[0]?.status).toBe('stopped')
   })
 

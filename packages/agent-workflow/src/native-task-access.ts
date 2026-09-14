@@ -21,7 +21,10 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
   const temporaryPath = resolve(root, '.native-tmp')
   await mkdir(temporaryPath, { recursive: true, mode: 0o700 })
   if (await realpath(temporaryPath) !== temporaryPath) throw new Error('Invalid native task temporary directory')
-  const protectedPaths = [...(input.readOnlyPaths ?? []), '.claude', '.git']
+  const toolResultsPath = resolve(root, '.native-tool-results')
+  await mkdir(toolResultsPath, { recursive: true, mode: 0o700 })
+  if (await realpath(toolResultsPath) !== toolResultsPath) throw new Error('Invalid native tool result directory')
+  const protectedPaths = [...(input.readOnlyPaths ?? []), '.claude', '.git', '.native-tool-results']
     .map(path => resolve(root, path))
   const writable = (input.writablePaths ?? []).map(path => resolve(root, path))
   if ([...protectedPaths, ...writable].some(path => !within(root, path)))
@@ -104,6 +107,9 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     flags: ['--permission-mode', 'default', '--setting-sources', '', '--strict-mcp-config',
       '--settings', JSON.stringify(settings)],
     // Shell/MCP/LSP children do not need the parent model's credentials.
-    environment: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', CLAUDE_CODE_TMPDIR: temporaryPath },
+    environment: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', CLAUDE_CODE_TMPDIR: temporaryPath,
+      BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
+      BEEGAME_NATIVE_TOOL_RESULTS_DIR: toolResultsPath,
+    },
   }
 }

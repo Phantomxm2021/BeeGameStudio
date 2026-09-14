@@ -35,13 +35,11 @@ describe('sanitizeWorkflowDisplayMessage', () => {
 })
 
 describe('projectWorkflowCurrentMessage', () => {
-  test('projects native progress for both review and revision without exposing payloads', () => {
-    for (const [phase, documentStep] of [['DOCUMENT_REVIEW', 'FOUNDATION_REVIEW'], ['FOUNDATION_REVISION', 'FOUNDATION_REVISION']]) {
-      for (const value of ['模型响应 6 · Read docs/GDD.md', '模型响应 6 · 正在接收模型响应（流事件 123）', '模型响应 7 · StructuredOutput'])
-        expect(projectWorkflowCurrentMessage({ value, phase, documentStep })).toBe(value)
-      for (const value of ['模型响应 6 · Read /Users/private/file', '模型响应 6 · Read ../secret', '模型响应 6 · arbitrary prose', '模型响应 6 · Read docs/GDD.md\nsecret'])
-        expect(projectWorkflowCurrentMessage({ value, phase, documentStep })).toBe('')
-    }
+  test('projects native review progress without exposing payloads', () => {
+    for (const value of ['模型响应 6 · Read docs/GDD.md', '模型响应 6 · 正在接收模型响应（流事件 123）', '模型响应 7 · StructuredOutput'])
+      expect(projectWorkflowCurrentMessage({ value, phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe(value)
+    for (const value of ['模型响应 6 · Read /Users/private/file', '模型响应 6 · Read ../secret', '模型响应 6 · arbitrary prose', '模型响应 6 · Read docs/GDD.md\nsecret'])
+      expect(projectWorkflowCurrentMessage({ value, phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe('')
   })
   test('hides raw reviewer and reviser prose from the foundation review card', () => {
     expect(projectWorkflowCurrentMessage({ value: 'I have what I need. Now I will rewrite it.', phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe('')
@@ -53,6 +51,22 @@ describe('projectWorkflowCurrentMessage', () => {
 })
 
 describe('projectWorkflowDisplayReason', () => {
+  test.each([
+    ['Author reached its active-time limit.', '运行时间上限'],
+    ['Author reached its no-document-progress limit.', '未发生内容变化'],
+    ['Author reached its output-token limit.', '输出 token 上限'],
+  ])('explains preserved Author budget pauses: %s', (reason, detail) => {
+    const projection = projectWorkflowDisplayReason(reason + ' Working files and usage are preserved.')!
+    expect(projection.code).toBe('workflow_blocked')
+    expect(projection.message).toContain(detail)
+    expect(projection.message).toContain('草稿和用量已保留')
+    expect(projection.message).toContain('不会自动重试')
+    expect(projectWorkflowDisplayReason(projection)).toEqual(projection)
+  })
+  test('does not treat arbitrary worker text as an Author budget pause', () => {
+    expect(projectWorkflowDisplayReason('worker says Author reached its active-time limit.')?.message)
+      .not.toContain('草稿和用量已保留')
+  })
   test.each([
     ['user stopped workflow', 'user_stopped'],
     [

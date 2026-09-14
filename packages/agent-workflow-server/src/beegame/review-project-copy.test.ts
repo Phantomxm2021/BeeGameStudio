@@ -145,7 +145,6 @@ describe('createReviewProjectCopy', () => {
     const link = result.run.foundationReviewStage!
     expect(link.importedAuthorResult).toEqual(fixture.result)
     expect(link.authorResultId).toBe(fixture.result.resultId)
-    expect(link.sequence).toBe(0)
     expect(link.control).toEqual({ sequence: 0, appliedSequence: 0, action: 'run' })
     expect(link.invocation.request.requestId).toBe(`foundation:${result.run.runId}:0`)
     expect(link.invocation.request.projectId).toBe('review-project')

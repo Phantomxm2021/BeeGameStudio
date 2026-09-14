@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import type { FoundationDecisionInput, WorkflowCardAction, WorkflowCardPayload, WorkflowCardStageSnapshot } from '../../types/message';
+import type { WorkflowCardAction, WorkflowCardPayload, WorkflowCardStageSnapshot } from '../../types/message';
 import { WorkflowStageCard } from './WorkflowStageCard';
 import { useWorkflowCardDeck } from './useWorkflowCardDeck';
 
@@ -31,23 +31,15 @@ const adaptLegacyWorkflow = (workflow: WorkflowCardPayload): WorkflowCardStageSn
   currentCallElapsedMs: workflow.currentCallElapsedMs,
   historicalElapsedMs: workflow.historicalElapsedMs,
   block: workflow.block,
-  acceptanceDecision: workflow.acceptanceDecision,
   foundationReviewReport: workflow.foundationReviewReport,
-  controlSequence: workflow.controlSequence,
-  policyVersion: workflow.policyVersion,
-  automaticRepairLimit: workflow.automaticRepairLimit,
-  completedRepairCount: workflow.completedRepairCount,
-  foundationDecisionContext: workflow.foundationDecisionContext,
 });
 
 export function WorkflowCard({
   workflow,
   onAction,
-  onFoundationDecision,
 }: {
   workflow: WorkflowCardPayload;
   onAction?: (action: WorkflowCardAction) => Promise<void> | void;
-  onFoundationDecision?: (decision: FoundationDecisionInput) => Promise<void> | void;
 }) {
   const stageSnapshots = useMemo<readonly WorkflowCardStageSnapshot[]>(
     () =>
@@ -202,7 +194,6 @@ export function WorkflowCard({
               recovery={selectedIndex === stageSnapshots.length - 1 ? recovery : undefined}
               headerControls={deckControls}
               onAction={onAction}
-              onFoundationDecision={onFoundationDecision}
             />
           </motion.div>
         </div>

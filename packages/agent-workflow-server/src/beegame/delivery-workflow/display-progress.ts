@@ -1,8 +1,8 @@
 import { DELIVERY_PHASES } from './schema'
 export const DELIVERY_PROGRESS_STAGES = [
-  ...DELIVERY_PHASES.slice(0, 4),
+  ...DELIVERY_PHASES.slice(0, 3),
   'CHECKLIST_AUTHORING',
-  ...DELIVERY_PHASES.slice(4),
+  ...DELIVERY_PHASES.slice(3),
 ] as const
 
 export const DELIVERY_PROGRESS_SUBSTAGES = [
@@ -17,7 +17,6 @@ export type DeliveryProgressSubstage =
 
 export type DeliveryProgressStage = (typeof DELIVERY_PROGRESS_STAGES)[number]
 
-export const FOUNDATION_REVISION_STAGE = 'FOUNDATION_REVISION' as const
 export const CHECKLIST_AUTHORING_STAGE = 'CHECKLIST_AUTHORING' as const
 
 export type DeliveryProgress = {
@@ -37,7 +36,7 @@ export function projectDeliveryProgress(
     typeof authorStage === 'object' &&
     !Array.isArray(authorStage)
   // A completed public author result still belongs to the drafting stage until
-  // Reviewer has durable audit state. This prevents the handoff gap from
+  // Document review has durable state. This prevents the handoff gap from
   // being rendered as a started review.
   const authorStillOwnsDisplay =
     authorLinkPresent &&
@@ -64,8 +63,6 @@ export function projectDeliveryProgress(
       ? 'INITIAL_DRAFTING'
       : workflow.documentStep === 'FOUNDATION_REVIEW'
         ? 'INITIAL_REVIEW'
-        : workflow.documentStep === 'FOUNDATION_REVISION'
-          ? 'REPAIRING'
         : workflow.documentStep === 'CHECKLIST_DRAFTING'
           ? 'CHECKLIST_DRAFTING'
           : undefined

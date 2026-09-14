@@ -372,6 +372,7 @@ function getSessionSpecificGuidanceSection(
       ? getDiscoverSkillsGuidance()
       : null,
     hasAgentTool &&
+    process.env.BEEGAME_EXTERNAL_REVIEW !== '1' &&
     feature('VERIFICATION_AGENT') &&
     // 3P default: false — verification agent is ant-only A/B
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false) &&

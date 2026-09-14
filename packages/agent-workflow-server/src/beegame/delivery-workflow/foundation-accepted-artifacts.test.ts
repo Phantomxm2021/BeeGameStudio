@@ -3,17 +3,22 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, realpath, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import fixtures from '../stage-modules/foundation-revision/private/tests/fixtures/public-initial-inputs.json'
 import type { ReviewerReviewResult } from '../stage-modules/foundation-reviewer/public'
+import { reviewFixtureDocuments } from '../stage-modules/foundation-reviewer/private/test-fixtures/review-documents'
+import { buildSingleReviewResult, singleReviewInputDigest } from '../stage-modules/foundation-reviewer/private/single-agent-publication'
 import { readCurrentProjectArtifact } from '../project-artifact-store'
 import { foundationPublicDigest } from './foundation-public-handoff'
 import { publishFoundationAcceptedArtifacts } from './foundation-accepted-artifacts'
 
 async function fixture() {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'accepted-artifacts-')))
-  const source = structuredClone(fixtures.infrastructure.start.input.sourceResult)
-  const { resultId: _, ...body } = { ...source, kind: 'passed' as const, issues: [] }
-  const review = { ...body, resultId: foundationPublicDigest(body) } as ReviewerReviewResult
+  const input = { subject: { kind: 'initial' as const, sourceResultId: 'author',
+    sourceDocumentRevision: 'a'.repeat(64), confirmedBriefDigest: 'b'.repeat(64) },
+    requirements: { status: 'unavailable' as const, reason: 'Offline protocol fixture' },
+    documents: reviewFixtureDocuments() }
+  const start = { protocolVersion: 1 as const, ownerId: 'owner', projectId: 'project',
+    requestId: 'review', input, inputDigest: singleReviewInputDigest({ ownerId: 'owner', projectId: 'project', input }) }
+  const review = buildSingleReviewResult(start, { summary: 'Accepted fixture' }) as ReviewerReviewResult
   return { workspacePath, ownerId: review.ownerId, projectId: review.projectId, review,
     expectedDocuments: structuredClone(review.documents) }
 }
@@ -33,7 +38,7 @@ test('application publishes exact reviewed bytes and returns the accepted revisi
 test('application rejects unrelated, unpassed, mutated or incomplete public results', async () => {
   for (const mutate of [
     (f: Awaited<ReturnType<typeof fixture>>) => { f.review.ownerId = 'foreign'; resign(f.review) },
-    (f: Awaited<ReturnType<typeof fixture>>) => { f.review.kind = 'issues_found'; resign(f.review) },
+    (f: Awaited<ReturnType<typeof fixture>>) => { (f.review as any).protocolVersion = 5; resign(f.review) },
     (f: Awaited<ReturnType<typeof fixture>>) => { f.review.documents[0]!.content += 'changed'; resign(f.review) },
     (f: Awaited<ReturnType<typeof fixture>>) => { f.review.documents.pop(); resign(f.review) },
     (f: Awaited<ReturnType<typeof fixture>>) => { f.review.documentSetDigest = '0'.repeat(64); resign(f.review) },

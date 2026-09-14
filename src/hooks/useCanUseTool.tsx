@@ -34,14 +34,18 @@ import { handleSwarmWorkerPermission } from './toolPermission/handlers/swarmWork
 import { createPermissionContext, createPermissionQueueOps } from './toolPermission/PermissionContext.js';
 import { logPermissionDecision } from './toolPermission/permissionLogging.js';
 
-export type CanUseToolFn<Input extends Record<string, unknown> = Record<string, unknown>> = (
+export type CanUseToolFn<Input extends Record<string, unknown> = Record<string, unknown>> = ((
   tool: ToolType,
   input: Input,
   toolUseContext: ToolUseContext,
   assistantMessage: AssistantMessage,
   toolUseID: string,
   forceDecision?: PermissionDecision<Input>,
-) => Promise<PermissionDecision<Input>>;
+) => Promise<PermissionDecision<Input>>) & {
+  /** A host-owned non-interactive broker can adjudicate background requests.
+   * This permits asking the broker, never auto-approves a tool effect. */
+  supportsBackgroundPermissionRequests?: boolean;
+};
 
 function useCanUseTool(
   setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>,

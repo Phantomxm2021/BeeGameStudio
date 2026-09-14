@@ -963,21 +963,25 @@ export const useChat = ({
       setIsStopping(true)
 
       // Send stop request to backend
-      await api.stopTask({ task_id: stopTargetId, project_id: projectId })
+      const response = await api.stopTask({ task_id: stopTargetId, project_id: projectId })
 
-      setIsLoading(false)
-      setCurrentTaskId(null)
-      setCurrentSender(null)
+      const stopped = response.state === 'stopped'
+      if (stopped) {
+        setIsLoading(false)
+        setCurrentTaskId(null)
+        setCurrentSender(null)
+      }
       setCanContinue(false)
+      void refreshProjectVisibility().catch(error => console.warn('[useChat] Stop state refresh failed:', error))
 
       // Add system message
       addMessage({
         id: `stop-${stopTargetId}-${Date.now()}`,
         sender: 'system',
-        content: '任务已停止',
+        content: stopped ? '任务已停止' : '停止请求已提交，正在等待执行退出或清理确认。',
         timestamp: Date.now(),
         type: 'system_status',
-        taskKind: 'task_stopped',
+        ...(stopped ? { taskKind: 'task_stopped' } : {}),
       })
     } catch (error) {
       console.error('[useChat] Failed to stop task:', error)
@@ -996,7 +1000,7 @@ export const useChat = ({
       isStoppingRef.current = false
       setIsStopping(false)
     }
-  }, [currentTaskId, projectId, addMessage, setCurrentSender, onError])
+  }, [currentTaskId, projectId, addMessage, setCurrentSender, onError, refreshProjectVisibility])
 
   const resolveToolPermission = useCallback(
     async (

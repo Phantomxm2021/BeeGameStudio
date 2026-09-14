@@ -9,12 +9,18 @@ test('public Reviewer bundles the whole lifecycle without another stage, old run
   const diffRoot = await realpath(dirname(fileURLToPath(import.meta.resolve('diff/package.json'))))
   const fileRunner = await realpath(fileURLToPath(import.meta.resolve('@bee-game-studio/agent-workflow/native-file-agent')))
   const taskAccess = await realpath(fileURLToPath(import.meta.resolve('@bee-game-studio/agent-workflow/native-task-access')))
+  const toolDiagnostics = await realpath(resolve(dirname(fileRunner), 'native-tool-diagnostics.ts'))
+  const diagnostics = await realpath(resolve(dirname(fileRunner), 'native-diagnostics.ts'))
+  const responseTrace = await realpath(resolve(dirname(fileRunner), 'native-response-trace.ts'))
   const loaded = new Set<string>()
   const allowedNode = new Set(['node:crypto', 'node:fs', 'node:fs/promises', 'node:path', 'node:os', 'node:child_process', 'node:string_decoder'])
   const built = await Bun.build({ entrypoints: [resolve(root, 'public.ts')], target: 'bun',
     plugins: [{ name: 'audit-public-reviewer', setup(build) {
       build.onResolve({ filter: /.*/ }, args => {
         if (args.path === '@bee-game-studio/agent-workflow/native-file-agent') return { path: fileRunner }
+        // Declared pure Markdown parser; actual standalone bundling is covered
+        // by detached-public-process.test.ts. No other package is exempted.
+        if (args.path === 'mdast-util-from-markdown') return { path: args.path, external: true }
         if (args.path.startsWith('node:')) {
           if (!allowedNode.has(args.path)) throw new Error(`Unexpected Reviewer builtin ${args.path}`)
           return { path: args.path, external: true }
@@ -24,7 +30,7 @@ test('public Reviewer bundles the whole lifecycle without another stage, old run
       })
       build.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async args => {
         const path = await realpath(args.path)
-        if ((!path.startsWith(root + sep) && !path.startsWith(zodRoot + sep) && !path.startsWith(diffRoot + sep) && ![fileRunner, taskAccess].includes(path)) || path.includes(`${sep}tests${sep}`))
+        if ((!path.startsWith(root + sep) && !path.startsWith(zodRoot + sep) && !path.startsWith(diffRoot + sep) && ![fileRunner, taskAccess, toolDiagnostics, diagnostics, responseTrace].includes(path)) || path.includes(`${sep}tests${sep}`))
           throw new Error(`Reviewer lifecycle dependency escaped ${path}`)
         loaded.add(path)
         return { contents: await readFile(path, 'utf8'), loader: path.endsWith('.ts') ? 'ts' : 'js' }

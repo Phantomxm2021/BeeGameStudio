@@ -114,8 +114,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
   }
   return {
     async start(request: WorkerDispatchRequest) {
-      if (['foundation-fact-extractor', 'foundation-semantic-reviewer', 'foundation-document-reviser'].includes(request.workerType))
-        throw new Error('Legacy Foundation workers are retired; use the stage public host')
       assertSharedDocumentWorker(request)
       const dispatchId = request.dispatchId ?? randomUUID()
       const requestedResumeSession = request.contract.resumeWorkerSessionId

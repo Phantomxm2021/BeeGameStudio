@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdtemp, realpath } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,7 +36,7 @@ test('production public API completes against an offline executable, with no inj
       expect(result.status).toBe('completed')
       expect(result.status === 'completed' && result.result.documents.length).toBe(8)
       expect(result.billingStatus).toBe('settled')
-      expect(tokenCalls).toBe(8)
+      expect(tokenCalls).toBe(1)
       return
     }
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -47,4 +47,13 @@ test('production public API completes against an offline executable, with no inj
 
 test('public author has no implicit unauthenticated or unmetered production path', () => {
   expect(() => createFoundationAuthoring({ workspacePath: '/unused', privateRootPath: '/unused' }, undefined as never)).toThrow('requires owner-bound')
+})
+
+test('public author rejects the removed execution-mode switch', () => {
+  const infrastructure = {
+    runtimeConfiguration: { protocolVersion: 1 as const, ownerId: 'owner', async resolve() { return { command: ['unused'], env: {} } } },
+    billing: { protocolVersion: 1 as const, ownerId: 'owner', async submitUsage() { throw new Error('unused') } },
+  }
+  expect(() => createFoundationAuthoring({ workspacePath: '/unused', privateRootPath: '/unused', mode: 'legacy' } as never, infrastructure))
+    .toThrow('Invalid author public configuration')
 })

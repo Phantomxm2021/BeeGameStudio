@@ -60,7 +60,7 @@ test('detached Reviewer bundle completes and reopens using only copied input and
     expect(output.calls).toBe(1)
     expect(output.charged).toBe(1)
     expect(output.completed.billingStatus).toBe('settled')
-    expect(output.completed.result.kind).toBe('passed')
+    expect(output.completed.result.protocolVersion).toBe(6)
     expect(output.completed.result.audit.policy).toBe(NATIVE_FILE_REVIEW_POLICY)
     expect(output.completed.result.audit).not.toHaveProperty('validation')
     expect(output.completed.result.documents.map(({ path, content }) => ({ path, content }))).toEqual(input.documents)

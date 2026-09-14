@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { UsageBillingClient, UsageBillingInput } from '../../../../billing/public'
 import { authorDigest } from './contract'
 import type { createAuthorPersistence } from './persistence'
-import type { AuthorUsage } from './runtime/runtime'
+import type { AuthorUsage } from './contract'
 
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const usageSchema = z.strictObject({ prompt_tokens: count, completion_tokens: count,

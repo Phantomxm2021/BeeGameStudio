@@ -332,6 +332,7 @@ export const TaskUpdateTool = buildTool({
     // does not touch the public SDK surface.
     let verificationNudgeNeeded = false
     if (
+      process.env.BEEGAME_EXTERNAL_REVIEW !== '1' &&
       feature('VERIFICATION_AGENT') &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false) &&
       !context.agentId &&

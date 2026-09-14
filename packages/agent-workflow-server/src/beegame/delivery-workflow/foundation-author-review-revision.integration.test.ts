@@ -7,16 +7,16 @@ import { join } from 'node:path'
 import { createAuthenticationClient } from '../../auth/public'
 import { createRuntimeConfigurationClient } from '../../runtime-configuration/public'
 import { createFoundationAuthoring } from '../stage-modules/foundation-authoring/public'
-import { reviewFixtureDocuments } from '../stage-modules/foundation-revision/private/tests/single-review-fixture'
+import { reviewFixtureDocuments } from '../stage-modules/foundation-reviewer/private/test-fixtures/review-documents'
 import { offlineReviewerBilling } from '../stage-modules/foundation-reviewer/private/test-fixtures/offline-billing'
 import { createFoundationReviewer } from '../stage-modules/foundation-reviewer/public'
-import { createFoundationRevision } from '../stage-modules/foundation-revision/public'
 import { createDeliveryWorkflowController } from './controller'
 import { createInitialDeliveryRun, createRunStore } from './run-store'
 import type { DeliveryRun } from './types'
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+const metadata = (content: string, field: string) => content.match(new RegExp(`^${field}: (.+)$`, 'm'))?.[1]
 
 function runtimeConfiguration(input: {
   ownerId: string
@@ -52,18 +52,18 @@ async function waitForAccepted(controller: ReturnType<typeof createDeliveryWorkf
       throw new Error(JSON.stringify({ reason: current.blockedReason, outcome: current.foundationReviewStage.invocation.outcome }))
     await pause(20)
   }
-  throw new Error('Author → Reviewer → Revision → Reviewer fixture did not settle')
+  throw new Error('Author → document review-and-correction passes did not settle')
 }
 
-for (const rounds of [1, 2])
-test(`independent public chain converges across ${rounds} repair round(s), including later-discovered issues`, async () => {
+for (const rounds of [0, 1, 2])
+test(`agentic document passes correct ${rounds} changed document(s) without a separate repair agent`, async () => {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'public-foundation-chain-')))
   const ownerId = 'public-chain-owner'
   const projectId = 'public-chain-project'
   const brief = 'Offline public foundation chain fixture'
   const confirmedBriefDigest = digest(brief)
   const normalized = reviewFixtureDocuments()
-  const malformed = normalized.map(document => document.path === 'docs/TECHNICAL_DESIGN.md'
+  const malformed = normalized.map(document => rounds >= 1 && document.path === 'docs/TECHNICAL_DESIGN.md'
     ? { ...document, content: document.content + '\nREPAIR_REQUIRED\n' }
     : rounds === 2 && document.path === 'docs/GDD.md' ? { ...document, content: document.content + '\nREPAIR_REQUIRED\n' }
     : document)
@@ -85,20 +85,10 @@ test(`independent public chain converges across ${rounds} repair round(s), inclu
   const reviewerBilling = billingWithCallCount(ownerId, reviewerBillingCalls)
   const reviewer = createFoundationReviewer({ workspacePath }, {
     runtimeConfiguration: runtimeConfiguration({ ownerId, dataDir: workspacePath,
-      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-reviewer/private/test-fixtures/native-file-review.ts', import.meta.url)), 'repair-flow-one-at-a-time'],
+      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-reviewer/private/test-fixtures/native-file-review.ts', import.meta.url)), 'repair-flow'],
       env: { BEEGAME_MODEL_TYPE: 'openai', OPENAI_DEFAULT_HAIKU_MODEL: 'fixture-fast',
         OPENAI_DEFAULT_SONNET_MODEL: 'fixture-balanced', OPENAI_DEFAULT_OPUS_MODEL: 'fixture-strong' }, calls: reviewerRuntimeCalls }),
     billing: reviewerBilling.client,
-  })
-
-  const revisionRuntimeCalls = { count: 0 }
-  const revisionBillingCalls = { count: 0 }
-  const revisionBilling = billingWithCallCount(ownerId, revisionBillingCalls)
-  const revision = createFoundationRevision({ workspacePath }, {
-    runtimeConfiguration: runtimeConfiguration({ ownerId, dataDir: workspacePath,
-      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-revision/private/tests/native-file-revision.ts', import.meta.url)),
-        'repair-marker'], env: { OPENAI_API_KEY: 'offline-unused' }, calls: revisionRuntimeCalls }),
-    billing: revisionBilling.client,
   })
 
   const initial = createInitialDeliveryRun({ ownerId, projectId,
@@ -112,7 +102,7 @@ test(`independent public chain converges across ${rounds} repair round(s), inclu
     async stop() { throw new Error('legacy worker must not execute foundation chain') },
     async status() { throw new Error('legacy worker must not execute foundation chain') },
   }
-  const ports = { workspacePath, ownerId, workerPort, author, reviewer, revision }
+  const ports = { workspacePath, ownerId, workerPort, author, reviewer }
   const controller = createDeliveryWorkflowController(ports)
   try {
     await controller.start(run)
@@ -127,34 +117,28 @@ test(`independent public chain converges across ${rounds} repair round(s), inclu
     expect(current.authorStage?.status).toBe('completed')
     const authorResult = current.authorStage!.result!
     const originalTechnical = await readFile(join(workspacePath, authorResult.documents.find(document => document.path === 'docs/TECHNICAL_DESIGN.md')!.artifactPath), 'utf8')
-    expect(originalTechnical).toContain('REPAIR_REQUIRED')
-    expect(originalTechnical).not.toBe(repairedTechnical)
+    if (rounds >= 1) {
+      expect(originalTechnical).toContain('REPAIR_REQUIRED')
+      expect(originalTechnical).not.toBe(repairedTechnical)
+    } else expect(originalTechnical).not.toContain('REPAIR_REQUIRED')
 
     current = await waitForAccepted(controller, store, run)
     const link = current.foundationReviewStage!
-    expect(link.sequence).toBe(rounds * 2)
-    expect(link.candidate?.round).toBe(rounds)
-    expect(link.acceptedReview?.kind).toBe('passed')
-    expect(link.sourceReview?.kind).toBe('issues_found')
-    expect(link.sourceReview?.issues).toHaveLength(1)
-    const issue = link.sourceReview!.issues[0]!.issue
-    expect(issue.type).toBe('semantic')
-    expect(issue.source.documentPath).toBe('docs/TECHNICAL_DESIGN.md')
-    expect(issue).not.toHaveProperty('remediation')
-    expect(link.sourceReview!.requirements).toMatchObject({ status: 'available', content: brief })
-    expect(link.acceptedReview!.documents).toHaveLength(8)
-    expect(link.acceptedReview!.audit).not.toHaveProperty('reviewedDocuments')
-    expect(link.candidate!.revisionSummary).toBeTruthy()
-    expect(link.candidate!).not.toHaveProperty('repairClaims')
-    expect(link.candidate?.documents.find(document => document.path === 'docs/TECHNICAL_DESIGN.md')!.content)
+    expect(link.acceptedReview?.protocolVersion).toBe(6)
+    expect(link.acceptedReview?.documents).toHaveLength(8)
+    expect(link.acceptedReview?.audit).not.toHaveProperty('reviewedDocuments')
+    expect(link.acceptedReview!.documents.find(document => document.path === 'docs/TECHNICAL_DESIGN.md')!.content)
       .not.toContain('REPAIR_REQUIRED')
-    expect(link.candidate?.documents.filter(document => document.path !== 'docs/TECHNICAL_DESIGN.md')
-      .map(document => document.digest)).toEqual(link.sourceReview?.documents.filter(document => document.path !== 'docs/TECHNICAL_DESIGN.md')
-      .map(document => document.digest))
-    expect(await readFile(join(workspacePath, 'docs/TECHNICAL_DESIGN.md'), 'utf8'))
-      .not.toContain('REPAIR_REQUIRED')
-    expect(await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8'))
-      .toContain(immutableAuthorDocuments['docs/GDD.md']!.replace('REPAIR_REQUIRED', 'Repair completed').trim())
+    const publishedTechnical = await readFile(join(workspacePath, 'docs/TECHNICAL_DESIGN.md'), 'utf8')
+    const publishedGdd = await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')
+    expect(publishedTechnical).not.toContain('REPAIR_REQUIRED')
+    expect(publishedGdd).toContain(immutableAuthorDocuments['docs/GDD.md']!.replace('REPAIR_REQUIRED', 'Repair completed').trim())
+    expect(metadata(publishedTechnical, 'version')).toBe(rounds >= 1 ? '1.0.1' : '1.0.0')
+    expect(metadata(publishedGdd, 'version')).toBe(rounds === 2 ? '1.0.1' : '1.0.0')
+    if (rounds >= 1)
+      expect(Date.parse(metadata(publishedTechnical, 'updated_at')!)).toBeGreaterThan(
+        Date.parse(metadata(originalTechnical, 'updated_at')!),
+      )
     for (const artifact of authorResult.documents) {
       expect(digest(await readFile(join(workspacePath, artifact.artifactPath), 'utf8'))).toBe(artifact.digest)
     }
@@ -166,14 +150,13 @@ test(`independent public chain converges across ${rounds} repair round(s), inclu
     const currentPointerPath = join(workspacePath, '.beegame/artifacts/current.json')
     const publicationPointer = await readFile(currentPointerPath, 'utf8')
     const counts = () => [authorRuntimeCalls.count, authorBillingCalls.count, reviewerRuntimeCalls.count,
-      reviewerBillingCalls.count, revisionRuntimeCalls.count, revisionBillingCalls.count]
+      reviewerBillingCalls.count]
     const settledCounts = counts()
     for (let i = 0; i < 3; i++) await controller.ensureProgress(run)
     await controller.resume(current)
     const repeated = (await store.load())!
     expect(counts()).toEqual(settledCounts)
     expect(repeated.foundationReviewStage?.acceptedReview?.resultId).toBe(snapshot.foundationReviewStage?.acceptedReview?.resultId)
-    expect(repeated.foundationReviewStage?.candidate?.documentSetDigest).toBe(snapshot.foundationReviewStage?.candidate?.documentSetDigest)
     expect(repeated.revision).toEqual(snapshot.revision)
     await controller.dispose()
     const recovered = createDeliveryWorkflowController(ports)
@@ -185,12 +168,10 @@ test(`independent public chain converges across ${rounds} repair round(s), inclu
       expect(counts()).toEqual(settledCounts)
       expect(await readFile(currentPointerPath, 'utf8')).toBe(publicationPointer)
     } finally { await recovered.dispose() }
-    expect(authorRuntimeCalls.count).toBe(8)
-    expect(authorBillingCalls.count).toBe(8)
-    expect(reviewerRuntimeCalls.count).toBeGreaterThanOrEqual(rounds + 1)
-    expect(reviewerBillingCalls.count).toBeGreaterThanOrEqual(rounds + 1)
-    expect(revisionRuntimeCalls.count).toBe(rounds)
-    expect(revisionBillingCalls.count).toBe(rounds)
+    expect(authorRuntimeCalls.count).toBe(1)
+    expect(authorBillingCalls.count).toBe(1)
+    expect(reviewerRuntimeCalls.count).toBe(1)
+    expect(reviewerBillingCalls.count).toBe(1)
   } finally {
     await controller.dispose()
   }
