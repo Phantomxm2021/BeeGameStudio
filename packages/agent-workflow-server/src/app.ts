@@ -2684,6 +2684,59 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/projects/:id/events/stream', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
+      if (sessionRef.live) {
+        beeGameSessions.updateAuthToken(
+          sessionRef.sessionId,
+          getRequestAuthToken(c.req.raw),
+        )
+      }
+
+      const queryAfter = parsePositiveInteger(c.req.query('after')) ?? 0
+      const headerAfter = parsePositiveInteger(c.req.header('last-event-id'))
+      const after = headerAfter ?? queryAfter
+      const stream = createProjectEventsSseStream({
+        request: c.req.raw,
+        sessionId: sessionRef.sessionId,
+        workspacePath: sessionRef.workspacePath,
+        after,
+        recoveredFromTranscript: !sessionRef.live,
+        dashboardDataRoot,
+        beeGameSessions,
+      })
+      return new Response(stream, {
+        headers: {
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive',
+          'content-type': 'text/event-stream; charset=utf-8',
+          'x-accel-buffering': 'no',
+        },
+      })
+    } catch (err) {
+      return tracedRouteError(c, 'project.events.stream', err, 404)
+    }
+  })
+
   app.get('/api/projects/:id/transcript', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.read')
@@ -6164,6 +6217,111 @@ async function getProjectRuntimeEvents(input: {
         }),
     )
   }
+}
+
+const PROJECT_EVENTS_SSE_POLL_INTERVAL_MS = 250
+const PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS = 15_000
+const PROJECT_EVENTS_SSE_MAX_CONNECTION_MS = 25_000
+
+function createProjectEventsSseStream(input: {
+  request: Request
+  sessionId: string
+  workspacePath: string
+  after: number
+  recoveredFromTranscript: boolean
+  dashboardDataRoot?: string
+  beeGameSessions: BeeGameSessionManager
+}): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder()
+  const signal = input.request.signal
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false
+      const close = () => {
+        if (closed) return
+        closed = true
+        try {
+          controller.close()
+        } catch {
+          // The client may have cancelled the stream concurrently.
+        }
+      }
+      const fail = (error: unknown) => {
+        if (closed) return
+        closed = true
+        try {
+          controller.error(error)
+        } catch {
+          // The client may have cancelled the stream concurrently.
+        }
+      }
+      const onAbort = () => close()
+      signal.addEventListener('abort', onAbort, { once: true })
+
+      void (async () => {
+        let after = input.after
+        let lastHeartbeatAt = Date.now()
+        const deadline = Date.now() + PROJECT_EVENTS_SSE_MAX_CONNECTION_MS
+        try {
+          while (!closed && !signal.aborted && Date.now() < deadline) {
+            const events = (await getProjectRuntimeEvents({
+              sessionId: input.sessionId,
+              workspacePath: input.workspacePath,
+              dashboardDataRoot: input.dashboardDataRoot,
+              beeGameSessions: input.beeGameSessions,
+            })).filter(event => event.id > after)
+
+            if (events.length > 0) {
+              after = events[events.length - 1]!.id
+              const payload = JSON.stringify({
+                sessionId: input.sessionId,
+                workspacePath: input.workspacePath,
+                events,
+                recoveredFromTranscript: input.recoveredFromTranscript,
+              })
+              controller.enqueue(
+                encoder.encode(
+                  `id: ${after}\nevent: project-events\ndata: ${payload}\n\n`,
+                ),
+              )
+              lastHeartbeatAt = Date.now()
+            } else if (
+              Date.now() - lastHeartbeatAt >=
+              PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS
+            ) {
+              controller.enqueue(encoder.encode(': heartbeat\n\n'))
+              lastHeartbeatAt = Date.now()
+            }
+
+            await waitForProjectEventsSseInterval(signal)
+          }
+          close()
+        } catch (error) {
+          fail(error)
+        } finally {
+          signal.removeEventListener('abort', onAbort)
+        }
+      })()
+    },
+  })
+}
+
+function waitForProjectEventsSseInterval(signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    let timer: ReturnType<typeof setTimeout>
+    const finish = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    const onAbort = () => {
+      finish()
+    }
+    timer = setTimeout(finish, PROJECT_EVENTS_SSE_POLL_INTERVAL_MS)
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) onAbort()
+  })
 }
 
 function getProjectRuntimeSnapshot(input: {

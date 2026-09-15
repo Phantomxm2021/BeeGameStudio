@@ -119,6 +119,12 @@ type BeeGameProjectEvents = {
   recoveredFromTranscript: boolean
 }
 
+type BeeGameEventStreamCallbacks = {
+  onOpen?: () => void
+  onMessage: (message: ProjectEventMessage) => void
+  onCursor?: (eventId: number) => void
+}
+
 type BeeGameProjectTranscriptPage = BeeGameTranscriptPage & {
   sessionId: string
   workspacePath: string
@@ -579,6 +585,55 @@ export const beeGameAdapter = {
     }
   },
 
+  async streamMessages(
+    projectId: string,
+    afterEventId: number,
+    callbacks: BeeGameEventStreamCallbacks,
+    signal: AbortSignal,
+  ): Promise<number> {
+    const historyCursor = chatHistoryCursorByProject.get(projectId)
+    const effectiveAfterEventId =
+      afterEventId === 0 ? (historyCursor?.latestEventId ?? 0) : afterEventId
+    const response = await authenticatedFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/events/stream?after=${encodeURIComponent(String(effectiveAfterEventId))}`,
+      {
+        headers: {
+          accept: 'text/event-stream',
+          'last-event-id': String(effectiveAfterEventId),
+        },
+        signal,
+      },
+    )
+    if (!response.ok) {
+      const error = new Error(await getResponseErrorMessage(response)) as Error & { status?: number }
+      error.status = response.status
+      throw error
+    }
+    if (!response.body) throw new Error('BeeGame event stream has no response body')
+    callbacks.onOpen?.()
+
+    let lastEventId = effectiveAfterEventId
+    const isInitialHistorySync = effectiveAfterEventId === 0
+    await readProjectEventStream(response.body, frame => {
+      if (!frame.data) return
+      const payload = JSON.parse(frame.data) as Partial<BeeGameProjectEvents> & { lastEventId?: number }
+      const events = Array.isArray(payload.events)
+        ? payload.events as BeeGameEvent[]
+        : []
+      if (events.length === 0) return
+      const eventId = typeof payload.lastEventId === 'number'
+        ? payload.lastEventId
+        : frame.id ?? events[events.length - 1]?.id ?? lastEventId
+      lastEventId = Math.max(lastEventId, eventId)
+      callbacks.onCursor?.(lastEventId)
+      normalizeLiveEvents(projectId, events)
+        .flatMap(event => eventToProjectEventMessages(projectId, event, payload.workspacePath || ''))
+        .filter(message => !(isInitialHistorySync && message.type === 'error'))
+        .forEach(message => callbacks.onMessage(message))
+    })
+    return lastEventId
+  },
+
   async getProjectStatus(
     projectId: string,
   ): Promise<ProjectBaselineStatusPayload> {
@@ -1027,6 +1082,50 @@ function fetchProjectEvents(
   return getJson(
     `/api/projects/${encodeURIComponent(projectId)}/events?after=${encodeURIComponent(String(after))}`,
   )
+}
+
+type ProjectEventStreamFrame = {
+  id?: number
+  data: string
+}
+
+async function readProjectEventStream(
+  body: ReadableStream<Uint8Array>,
+  onFrame: (frame: ProjectEventStreamFrame) => void,
+): Promise<void> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  const flush = (rawFrame: string) => {
+    let id: number | undefined
+    const data: string[] = []
+    for (const rawLine of rawFrame.split(/\r?\n/)) {
+      if (rawLine.startsWith(':')) continue
+      if (rawLine.startsWith('id:')) {
+        const parsed = Number(rawLine.slice(3).trim())
+        if (Number.isFinite(parsed) && parsed >= 0) id = parsed
+      } else if (rawLine.startsWith('data:')) {
+        data.push(rawLine.slice(5).trimStart())
+      }
+    }
+    if (data.length > 0) onFrame({ id, data: data.join('\n') })
+  }
+
+  try {
+    while (true) {
+      const result = await reader.read()
+      if (result.done) break
+      buffer += decoder.decode(result.value, { stream: true })
+      const frames = buffer.split(/\r?\n\r?\n/)
+      buffer = frames.pop() || ''
+      frames.forEach(flush)
+    }
+    buffer += decoder.decode()
+    if (buffer.trim()) flush(buffer)
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 async function fetchProjectTranscriptPage(

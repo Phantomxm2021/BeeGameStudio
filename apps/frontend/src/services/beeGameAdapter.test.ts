@@ -1676,6 +1676,56 @@ describe('beeGameAdapter prompt rules', () => {
     expect(JSON.parse(String(ensureCall?.[1]?.body || '{}'))).toMatchObject({ language: expect.any(String) });
   });
 
+  it('consumes authenticated project event SSE frames and resumes from their cursor', async () => {
+    const event = {
+      id: 4,
+      sessionId: 'beegame_sse',
+      turnId: 'turn_sse',
+      type: 'assistant.message',
+      text: '实时响应',
+      payload: {
+        message: {
+          id: 'assistant_sse',
+          content: [{ type: 'text', text: '实时响应' }],
+        },
+      },
+      createdAt: '2026-06-21T00:00:03.000Z',
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('/api/projects/project_sse/events/stream?after=0');
+      expect(new Headers(init?.headers).get('accept')).toBe('text/event-stream');
+      expect(new Headers(init?.headers).get('last-event-id')).toBe('0');
+      return new Response(
+        `id: 4\nevent: project-events\ndata: ${JSON.stringify({
+          sessionId: 'beegame_sse',
+          workspacePath: '/tmp/beegame-projects/sse',
+          events: [event],
+          recoveredFromTranscript: false,
+        })}\n\n`,
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onOpen = vi.fn();
+    const onMessage = vi.fn();
+    const onCursor = vi.fn();
+
+    await expect(beeGameAdapter.streamMessages(
+      'project_sse',
+      0,
+      { onOpen, onMessage, onCursor },
+      new AbortController().signal,
+    )).resolves.toBe(4);
+
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onCursor).toHaveBeenCalledWith(4);
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'agent_message',
+      content: '实时响应',
+      turnId: 'turn_sse',
+    }));
+  });
+
   it('ensures a stopped BeeGame session in the backend before sending a new chat message', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);

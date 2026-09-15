@@ -2,7 +2,7 @@
  * useChat Hook
  *
  * Manages chat functionality including:
- * - Runtime event polling and message routing
+ * - Runtime event streaming with polling fallback and message routing
  * - Message type handling (token, status, tool_start, tool_end, usage, error_paused)
  * - Chat operations (sendMessage, continueTask, stopTask)
  * - Loading state management
@@ -134,7 +134,7 @@ export interface UseChatReturn {
 /**
  * Custom hook for managing chat functionality
  *
- * This hook integrates WebSocket communication, message routing,
+ * This hook integrates runtime event streaming, message routing,
  * and chat operations (send, continue, stop) into a single interface.
  *
  * @param options - Configuration options for the chat
@@ -318,7 +318,7 @@ export const useChat = ({
     [addMessage, onError, showToastError],
   )
 
-  // Use refs to avoid handleProjectEventMessage dependency churn and event polling restarts
+  // Use refs to avoid handleProjectEventMessage dependency churn and transport restarts
   const latestRefs = useRef({
     projectId,
     onError,
@@ -842,7 +842,7 @@ export const useChat = ({
   )
 
   /**
-   * Synchronize all state with backend after polling reconnects
+   * Synchronize all state with backend after event transport reconnects
    * Requirements: 7.2
    */
   const syncAfterReconnect = useCallback(async () => {
@@ -884,9 +884,9 @@ export const useChat = ({
   ])
 
   /**
-   * Handle polling transport disconnect
+   * Handle runtime event transport disconnect
    */
-  const handleWebSocketClose = useCallback(() => {
+  const handleTransportClose = useCallback(() => {
     // A transport disconnect does not mean the server-owned BeeGame turn
     // stopped. Keep the runtime lock until the authoritative runtime snapshot
     // or a terminal status event says otherwise.
@@ -910,11 +910,11 @@ export const useChat = ({
     setCurrentTaskId(null)
   }, [projectId, projectStatus])
 
-  // Initialize the reconnect-safe runtime event poller
+  // Initialize the reconnect-safe runtime event transport
   const { state: wsState, reconnect } = useProjectEventPolling({
     projectId,
     onMessage: handleProjectEventMessage,
-    onClose: handleWebSocketClose,
+    onClose: handleTransportClose,
     onOpen: syncAfterReconnect, // Trigger sync on connect/reconnect
     showToastError,
   })

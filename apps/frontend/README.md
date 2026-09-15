@@ -6,7 +6,7 @@ The frontend is intentionally thin:
 
 - Supabase Auth owns user sessions.
 - Supabase RLS/RPC owns durable SaaS data, roles, credits, and permissions.
-- The BeeGame runtime host owns local execution only: agent sessions, filesystem access, previews, permissions, and transcript streaming.
+- The BeeGame runtime host owns local execution only: agent sessions, filesystem access, previews, permissions, and transcript streaming. Live project events use authenticated SSE with cursor-based polling fallback for older or unavailable hosts.
 - The frontend must not rely on a shared production auth token.
 
 ## Development
