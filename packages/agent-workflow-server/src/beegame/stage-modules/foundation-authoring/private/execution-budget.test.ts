@@ -79,7 +79,7 @@ test('model work survives time warnings and an explicit stop still aborts and dr
     async onUsage() {}, async onProgress(value) { progress.push(value.message) },
   }, async input => {
     expect(input.responseTrace).toBe(true)
-    expect(input.env.BEEGAME_EXTERNAL_REVIEW).toBeUndefined()
+    expect(input.env.BEEGAME_EXTERNAL_REVIEW).toBe('1')
     expect(input.prompt).not.toContain('Attempt policy')
     expect(input.prompt).not.toContain('attemptDeadlineAt')
     await pause(350)

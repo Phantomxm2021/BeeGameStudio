@@ -16,13 +16,11 @@ export type AutonomousAuthorReport = z.infer<typeof autonomousAuthorReportSchema
  * host only supplies the brief, file boundary and completion envelope. */
 export function autonomousAuthorPrompt(language?: string): string {
   return [
-    'Read the finalized requirements in requirements.md, then create and directly write a complete, implementation-ready and mutually consistent set of eight game design documents in docs/. Do not reopen or replace the confirmed brief.',
+    'requirements.md contains the confirmed game requirements. Read it, then create and directly write the complete set of eight game design documents in docs/.',
     `The deliverables are: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}.`,
-    'Write GDD.md first as the product and gameplay authority, then write the seven specialist documents from it. Each document owns only its discipline: level/scene, balance, technical, art, UI/UX, audio, or asset production. Refer to an owner instead of duplicating its specification.',
-    'Use your own judgment to write the documents. Preserve useful detail and stable IDs where they make the design implementable. On resume, continue from valid existing drafts instead of restarting.',
-    'Do not implement the game or access other projects. Write document bodies to the files rather than returning them in the response; the service owns frontmatter and protocol metadata.',
-    'When all eight files are complete, finish immediately. Do not audit or review the document package in this authoring stage; the next workflow stage owns that work.',
-    'Finish through StructuredOutput with status completed or blocked and a concise summary of the result or the specific unresolved blocker.',
+    'Use your own judgment to complete the documents from the confirmed requirements. Continue useful existing drafts instead of restarting them.',
+    'Write the document bodies to those files rather than returning them in the response. Do not implement the game.',
+    'When the task is complete, use StructuredOutput with status completed or blocked and a concise summary of the result or the specific unresolved blocker.',
     ...(language ? [`Use ${language} for the documents and summary.`] : []),
   ].join('\n')
 }
@@ -31,10 +29,10 @@ export function autonomousAuthorPrompt(language?: string): string {
  * permission to regenerate the bundle or fan out more work. */
 export function autonomousAuthorFinishPrompt(language?: string): string {
   return [
-    'Resume and finish the existing eight game design documents in docs/. Preserve valid work and do not restart the assignment.',
+    'Continue the existing task from requirements.md and finish the eight game design documents in docs/. Preserve useful completed work.',
     `The deliverables are: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}.`,
-    'Read requirements.md and the drafts. Complete only missing or unfinished authoring content; do not start an audit or review pass.',
-    'When the eight files are complete, finish immediately. Do not implement the game or access other projects. Finish through StructuredOutput with status completed or blocked and a concise summary. Independent review belongs to the next workflow stage.',
+    'Use your own judgment to complete the remaining work. Do not implement the game.',
+    'When the task is complete, use StructuredOutput with status completed or blocked and a concise summary.',
     ...(language ? [`Use ${language} for the documents and summary.`] : []),
   ].join('\n')
 }
@@ -161,7 +159,9 @@ export async function runAutonomousAuthor(input: AutonomousNativeInput,
   try {
     result = await execute({
     command: input.configuration.command,
-    env: nativeFileAgentEnvironment(input.configuration.env),
+    // This workflow has a dedicated external review stage. Suppress the
+    // generic CLI verification contract so it is not duplicated inside Author.
+    env: { ...nativeFileAgentEnvironment(input.configuration.env), BEEGAME_EXTERNAL_REVIEW: '1' },
     workspacePath: input.workspacePath, logPath: input.logPath,
     responseTrace: true,
     writablePaths: [...CANONICAL_FOUNDATION_DOCUMENTS], allowWorkingFiles: true,

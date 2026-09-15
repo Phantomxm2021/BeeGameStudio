@@ -117,12 +117,9 @@ test('native finish mode exceeds the retired output cap while preserving scope a
     logPath: join(root, 'unused.log'), finishOnly: true, executionLimits: defaultAuthorExecutionLimits, signal: new AbortController().signal,
     onUsage: async () => {}, onProgress: async () => {},
   }, async input => {
-    expect(input.prompt).toContain('Preserve valid work')
-    expect(input.env.BEEGAME_EXTERNAL_REVIEW).toBeUndefined()
-    expect(input.prompt).toContain('do not restart the assignment')
-    expect(input.prompt).toContain('Complete only missing or unfinished authoring content')
-    expect(input.prompt).toContain('do not start an audit or review pass')
-    expect(input.prompt).toContain('finish immediately')
+    expect(input.prompt).toContain('Preserve useful completed work')
+    expect(input.env.BEEGAME_EXTERNAL_REVIEW).toBe('1')
+    expect(input.prompt).not.toMatch(/audit|review|consistency|finish immediately/i)
     expect(input.prompt).not.toContain('"maxOutputTokens"')
     await input.onMessage?.({ type: 'result', modelUsage: { fixture: { inputTokens: 1, outputTokens: 90_000 } } })
     expect(input.signal?.aborted).toBe(false)

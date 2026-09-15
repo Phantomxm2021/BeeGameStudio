@@ -100,23 +100,18 @@ test('autonomous author invokes one complete file bundle and preserves the publi
   expect(calls).toBe(1); expect(f.submissions).toHaveLength(1)
 })
 
-test('the task prompt gives one author a natural-language assignment and leaves review to the next stage', () => {
+test('the task prompt is a natural document assignment without an audit policy', () => {
   const prompt = autonomousAuthorPrompt('zh')
-  expect(prompt).toContain('Read the finalized requirements in requirements.md')
-  expect(prompt).toContain('Write GDD.md first')
+  expect(prompt).toContain('requirements.md contains the confirmed game requirements')
   expect(prompt).toContain('Use your own judgment')
-  expect(prompt).toContain('finish immediately')
-  expect(prompt).toContain('Do not audit or review the document package in this authoring stage')
-  expect(prompt).not.toContain('cross-document consistency check')
-  expect(prompt).not.toMatch(/Agent tool|delegat|run_in_background|expected_output_files|\.reference|authoring-reference|deliveryInterfaces|Attempt policy/)
+  expect(prompt).not.toMatch(/audit|review|consistency check|finish immediately|GDD\.md first|Agent tool|delegat|run_in_background|expected_output_files|\.reference|authoring-reference|deliveryInterfaces|Attempt policy/i)
 })
 
-test('the finishing prompt completes unfinished authoring without starting a review pass', () => {
+test('the finishing prompt naturally continues useful existing work', () => {
   const prompt = autonomousAuthorFinishPrompt('zh')
-  expect(prompt).toContain('Complete only missing or unfinished authoring content')
-  expect(prompt).toContain('finish immediately')
-  expect(prompt).toContain('Independent review belongs to the next workflow stage')
-  expect(prompt).not.toMatch(/cross-document consistency|necessary edits for.*consistency|repeat the check/)
+  expect(prompt).toContain('Preserve useful completed work')
+  expect(prompt).toContain('Use your own judgment')
+  expect(prompt).not.toMatch(/audit|review|consistency|repeat the check|finish immediately/i)
 })
 
 test('native author submits one file-agent call without delegation policy', async () => {
@@ -138,7 +133,7 @@ test('native author submits one file-agent call without delegation policy', asyn
   expect(result.report?.status).toBe('completed')
   expect(captured.writablePaths).toEqual([...CANONICAL_FOUNDATION_DOCUMENTS])
   expect(captured.readOnlyPaths).toEqual(['requirements.md'])
-  expect(captured.env.BEEGAME_EXTERNAL_REVIEW).toBeUndefined()
+  expect(captured.env.BEEGAME_EXTERNAL_REVIEW).toBe('1')
   expect(captured).not.toHaveProperty('delegateOutputPaths')
   expect(captured).not.toHaveProperty('delegatePrerequisitePaths')
 })
