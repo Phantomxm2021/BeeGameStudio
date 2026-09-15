@@ -2,7 +2,8 @@
  * Project event transport.
  *
  * BeeGame has one canonical frontend transport: polling the server-persisted
- * project event stream.
+ * project event stream. Polling is deliberate here because it can resume from
+ * an event cursor after tab suspension, reconnects, or a runtime restart.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';

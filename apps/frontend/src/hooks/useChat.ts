@@ -2,7 +2,7 @@
  * useChat Hook
  *
  * Manages chat functionality including:
- * - WebSocket message routing and processing
+ * - Runtime event polling and message routing
  * - Message type handling (token, status, tool_start, tool_end, usage, error_paused)
  * - Chat operations (sendMessage, continueTask, stopTask)
  * - Loading state management
@@ -127,7 +127,7 @@ export interface UseChatReturn {
   /** Whether the task is paused and can be continued */
   canContinue: boolean
 
-  /** WebSocket connection state */
+  /** Runtime event transport state */
   wsState: ProjectEventPollingState
 }
 
@@ -345,7 +345,7 @@ export const useChat = ({
   }
 
   /**
-   * Handle incoming WebSocket messages
+   * Handle incoming runtime events
    * Routes messages to appropriate handlers based on type
    *
    * Requirements: 1.2, 7.1, 7.2
@@ -842,7 +842,7 @@ export const useChat = ({
   )
 
   /**
-   * Synchronize all state with backend after reconnection
+   * Synchronize all state with backend after polling reconnects
    * Requirements: 7.2
    */
   const syncAfterReconnect = useCallback(async () => {
@@ -884,7 +884,7 @@ export const useChat = ({
   ])
 
   /**
-   * Handle WebSocket close
+   * Handle polling transport disconnect
    */
   const handleWebSocketClose = useCallback(() => {
     // A transport disconnect does not mean the server-owned BeeGame turn
@@ -910,7 +910,7 @@ export const useChat = ({
     setCurrentTaskId(null)
   }, [projectId, projectStatus])
 
-  // Initialize WebSocket connection
+  // Initialize the reconnect-safe runtime event poller
   const { state: wsState, reconnect } = useProjectEventPolling({
     projectId,
     onMessage: handleProjectEventMessage,

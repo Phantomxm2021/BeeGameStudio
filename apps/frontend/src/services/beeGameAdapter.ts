@@ -346,8 +346,12 @@ export const beeGameAdapter = {
     }
   },
 
-  async openProject(_projectId: string): Promise<{ opened: boolean }> {
-    void _projectId
+  async openProject(projectId: string): Promise<{ opened: boolean }> {
+    // Opening a project must establish the server-owned session/workspace
+    // binding before the dashboard starts polling history and runtime state.
+    // Sending a message also calls this endpoint, but project navigation must
+    // recover a live session even when the user only inspects the project.
+    await ensureProjectSession(projectId)
     return { opened: true }
   },
 

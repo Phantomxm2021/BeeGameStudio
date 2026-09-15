@@ -1642,6 +1642,40 @@ describe('beeGameAdapter prompt rules', () => {
     )).toBe(false);
   });
 
+  it('ensures the project runtime session when opening a project', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (
+        String(input) === '/api/projects/project_open/session/ensure' &&
+        init?.method === 'POST'
+      ) {
+        return jsonResponse({
+          session: {
+            id: 'beegame_open',
+            cwd: '/tmp/beegame-projects/open-project',
+            status: 'running',
+            turnStatus: 'idle',
+            createdAt: '2026-06-21T00:00:03.000Z',
+            updatedAt: '2026-06-21T00:00:03.000Z',
+          },
+          binding: {
+            projectId: 'project_open',
+            sessionId: 'beegame_open',
+            workspacePath: '/tmp/beegame-projects/open-project',
+          },
+        });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(beeGameAdapter.openProject('project_open')).resolves.toEqual({ opened: true });
+    const ensureCall = fetchMock.mock.calls.find(([path, init]) =>
+      String(path) === '/api/projects/project_open/session/ensure' && init?.method === 'POST',
+    );
+    expect(ensureCall).toBeTruthy();
+    expect(JSON.parse(String(ensureCall?.[1]?.body || '{}'))).toMatchObject({ language: expect.any(String) });
+  });
+
   it('ensures a stopped BeeGame session in the backend before sending a new chat message', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
