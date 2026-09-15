@@ -3,9 +3,51 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ArtifactsPanel } from './ArtifactsPanel';
+import { BEEGAME_DOCUMENT_BASELINE } from '../../../utils/documentProgress';
 
 describe('ArtifactsPanel', () => {
-    it('uses shadcn skeletons while artifact data loads', () => {
+    it('shows the Scene & UI entries and routes both through one editor callback', async () => {
+        const user = userEvent.setup();
+        const onOpenEditor = vi.fn();
+        render(
+            <ArtifactsPanel
+                artifacts={[]}
+                isLoading={false}
+                documentProgress={BEEGAME_DOCUMENT_BASELINE.map(document => ({ ...document, status: 'pending' }))}
+                onPreview={vi.fn()}
+                onDownload={vi.fn()}
+                onOpenEditor={onOpenEditor}
+            />
+        );
+
+        expect(screen.getByRole('region', { name: 'Scene & UI' })).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Scene' }));
+        await user.click(screen.getByRole('button', { name: 'UI' }));
+        expect(onOpenEditor).toHaveBeenNthCalledWith(1, 'scene');
+        expect(onOpenEditor).toHaveBeenNthCalledWith(2, 'ui');
+    });
+
+    it('renders all eight canonical documents with pending rows disabled by status', () => {
+        render(
+            <ArtifactsPanel
+                artifacts={[]}
+                isLoading={false}
+                documentProgress={BEEGAME_DOCUMENT_BASELINE.map(document => ({ ...document, status: 'pending' }))}
+                onPreview={vi.fn()}
+                onDownload={vi.fn()}
+            />
+        );
+
+        const rows = screen.getByRole('region', { name: 'Project documents' }).querySelectorAll('[data-status="pending"]');
+        expect(rows).toHaveLength(8);
+        expect(screen.getByText('0/8')).toBeInTheDocument();
+        expect([...rows].map(row => row.querySelector('.type-footnote')?.textContent)).toEqual([
+            'GDD', 'Level / Scene Design', 'Balance Design', 'Technical Design',
+            'Art Direction', 'UI / UX', 'Audio Design', 'Asset Plan',
+        ]);
+    });
+
+    it('uses semantic skeletons while artifact data loads', () => {
         render(
             <ArtifactsPanel
                 artifacts={[]}
@@ -31,7 +73,7 @@ describe('ArtifactsPanel', () => {
                     {
                         id: 'legacy-id',
                         artifact_id: 'art_1',
-                        name: 'GDD.md',
+                        name: 'Review notes.md',
                         artifact_type: 'GDD',
                         author: 'metis',
                     },
@@ -61,15 +103,15 @@ describe('ArtifactsPanel', () => {
         expect(screen.queryByRole('columnheader', { name: 'Type' })).not.toBeInTheDocument();
         expect(screen.queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument();
         expect(screen.queryByText(/review: approved/i)).not.toBeInTheDocument();
-        const scrollRegion = screen.getByText('GDD.md').closest('.overflow-y-auto');
+        const scrollRegion = screen.getByText('Review notes.md').closest('.overflow-y-auto');
         expect(scrollRegion).toHaveClass('overflow-y-auto');
         expect(scrollRegion).not.toHaveClass('scrollbar-hide');
 
         await user.click(screen.getByTitle('Preview'));
         await user.click(screen.getByTitle('Download'));
 
-        expect(onPreview).toHaveBeenCalledWith('art_1', 'GDD.md');
-        expect(onDownload).toHaveBeenCalledWith('art_1', 'GDD.md');
+        expect(onPreview).toHaveBeenCalledWith('art_1', 'Review notes.md');
+        expect(onDownload).toHaveBeenCalledWith('art_1', 'Review notes.md');
     });
 
     it('shows dependency-ordered document progress before files are all available', () => {
@@ -89,7 +131,7 @@ describe('ArtifactsPanel', () => {
         );
 
         expect(screen.getByRole('region', { name: 'Project documents' })).toBeInTheDocument();
-        expect(screen.getByText('1/3')).toBeInTheDocument();
+        expect(screen.getByText('1/8')).toBeInTheDocument();
         expect(screen.getByText('Writing')).toBeInTheDocument();
         expect(screen.queryByText('No artifacts yet')).not.toBeInTheDocument();
     });

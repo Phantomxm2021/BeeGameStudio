@@ -91,6 +91,10 @@ export const useProjectEventPolling = ({
 
       try {
         const result = await beeGameAdapter.pollMessages(projectId, lastEventId);
+        // The request can resolve after a project switch, disconnect, or
+        // explicit reconnect. Return before touching polling state or reading
+        // callbacksRef so a stale response cannot notify the next project.
+        if (cancelled || disconnectedRef.current) return;
         const recovered = reconnectAttemptsRef.current > 0;
         reconnectAttemptsRef.current = 0;
         setReconnectAttempts(0);

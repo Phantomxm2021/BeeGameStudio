@@ -17,21 +17,36 @@ let mockedAuthenticationStatus: 'initializing' | 'authenticated' | 'anonymous' =
 const bootstrapProject = vi.fn().mockResolvedValue('proj_1');
 const setToastCallbacks = vi.fn();
 const loadHistory = vi.fn();
+const { getChatHistory } = vi.hoisted(() => ({
+  getChatHistory: vi.fn().mockResolvedValue([]),
+}));
 const showError = vi.fn();
 const showSuccess = vi.fn();
+let mockedActiveProjectId = 'proj_1';
+const mockedProjects = [
+  { id: 'proj_1', name: 'Project One', created_at: Date.now() },
+  { id: 'proj_2', name: 'Project Two', created_at: Date.now() },
+];
 
-vi.mock('./store/projectStore', () => ({
-  useProjectStore: () => ({
+vi.mock('./store/projectStore', () => {
+  const projectState = () => ({
     loadProjects,
-    projects: [{ id: 'proj_1', name: 'Project One', created_at: Date.now() }],
-    activeProjectId: 'proj_1',
+    projects: mockedProjects,
+    activeProjectId: mockedActiveProjectId,
     bootstrapProject,
     setToastCallbacks,
-  }),
-}));
+    clearActiveProject: vi.fn(),
+  });
+  const useProjectStore = Object.assign((selector?: (state: ReturnType<typeof projectState>) => unknown) => selector ? selector(projectState()) : projectState(), {
+    getState: () => ({ activeProjectId: mockedActiveProjectId }),
+  });
+  return { useProjectStore };
+});
 
 vi.mock('./store/systemStore', () => ({
-  useSystemStore: () => ({
+  applyThemeToDocument: vi.fn(),
+  useSystemStore: (selector?: (state: Record<string, unknown>) => unknown) => {
+    const state = {
     loadStatus,
     loadAgents,
     loadActivities,
@@ -44,14 +59,19 @@ vi.mock('./store/systemStore', () => ({
     isDark: false,
     toggleTheme: vi.fn(),
     status: { capabilities: {} },
-  }),
+    };
+    return selector ? selector(state) : state;
+  },
 }));
 
 vi.mock('./store/chatStore', () => ({
-  useChatStore: Object.assign(() => ({
+  useChatStore: Object.assign((selector?: (state: { loadHistory: typeof loadHistory; messages: never[] }) => unknown) => {
+    const state = {
     loadHistory,
     messages: [],
-  }), {
+    };
+    return selector ? selector(state) : state;
+  }, {
     getState: () => ({
       messages: [],
     }),
@@ -67,7 +87,7 @@ vi.mock('./contexts/ToastContext', () => ({
 
 vi.mock('./services/api', () => ({
   api: {
-    getChatHistory: vi.fn().mockResolvedValue([]),
+    getChatHistory,
   },
   setToastErrorCallback: vi.fn(),
 }));
@@ -105,6 +125,8 @@ describe('App view routing', () => {
       permissions: ['project.read'],
     });
     mockedAuthenticationStatus = 'authenticated';
+    mockedActiveProjectId = 'proj_1';
+    getChatHistory.mockReset().mockResolvedValue([]);
     window.history.pushState({}, '', '/');
   });
 
@@ -202,5 +224,29 @@ describe('App view routing', () => {
     expect(loadStatus).not.toHaveBeenCalled();
     expect(loadAgents).not.toHaveBeenCalled();
     expect(loadActivities).not.toHaveBeenCalled();
+  });
+
+  it('does not commit late chat history after switching projects', async () => {
+    let resolveFirstHistory: (value: unknown) => void = () => undefined;
+    getChatHistory.mockImplementation((projectId: string) => {
+      if (projectId === 'proj_1') {
+        return new Promise((resolve) => { resolveFirstHistory = resolve; });
+      }
+      return Promise.resolve([{ id: 'new-project-message' }]);
+    });
+
+    const { rerender } = render(<App />);
+    await waitFor(() => expect(getChatHistory).toHaveBeenCalledWith('proj_1'));
+
+    mockedActiveProjectId = 'proj_2';
+    rerender(<App />);
+    await waitFor(() => expect(loadHistory).toHaveBeenCalledWith([{ id: 'new-project-message' }]));
+
+    await act(async () => {
+      resolveFirstHistory([{ id: 'old-project-message' }]);
+      await Promise.resolve();
+    });
+
+    expect(loadHistory).not.toHaveBeenCalledWith([{ id: 'old-project-message' }]);
   });
 });

@@ -159,11 +159,11 @@ class MarkdownErrorBoundary extends Component<
 
       // Default fallback UI
       return (
-	        <div className="markdown-error-fallback rounded-2xl border border-red-400/20 bg-red-950/20 p-4">
+	        <div className="markdown-error-fallback rounded-2xl border border-destructive/20 bg-destructive/10 p-4">
           <div className="error-header flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <svg
-	                className="h-5 w-5 text-red-300"
+	                className="h-5 w-5 text-foreground"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -175,13 +175,13 @@ class MarkdownErrorBoundary extends Component<
                   d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                 />
               </svg>
-	              <span className="type-footnote text-red-200">
+	              <span className="type-footnote text-foreground">
                 Rendering Error
               </span>
             </div>
             <button
               onClick={this.handleRetry}
-	              className="type-button rounded-full border border-red-300/30 bg-white/10 px-3 py-1 text-red-100 transition-colors hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-red-300/40"
+	              className="type-button rounded-full border border-destructive/30 bg-secondary px-3 py-1 text-secondary-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-destructive/40"
             >
               Retry Render
             </button>
@@ -189,11 +189,11 @@ class MarkdownErrorBoundary extends Component<
 
           {/* Error details in development mode */}
           {import.meta.env.DEV && error && (
-	            <div className="mb-3 rounded-xl border border-red-400/20 bg-white/[0.04] p-2">
-	              <p className="type-footnote mb-1 text-red-200">
+	            <div className="mb-3 rounded-xl border border-destructive/20 bg-destructive/10 p-2">
+	              <p className="type-footnote mb-1 text-foreground">
                 Error Details:
               </p>
-	              <p className="type-code-sm break-all text-red-300">
+	              <p className="type-code-sm break-all text-foreground">
                 {error.toString()}
               </p>
             </div>
@@ -201,8 +201,8 @@ class MarkdownErrorBoundary extends Component<
 
           {/* Raw markdown content fallback */}
           <div className="raw-markdown-container">
-	            <p className="type-footnote mb-2 text-zinc-400">Raw Markdown:</p>
-	            <pre className="raw-markdown type-code-sm max-h-64 overflow-auto rounded-xl border border-white/10 bg-white/[0.04] p-3 whitespace-pre-wrap break-words text-zinc-300">
+	            <p className="type-footnote mb-2 text-muted-foreground">Raw Markdown:</p>
+	            <pre className="raw-markdown type-code-sm max-h-64 overflow-auto rounded-xl border border-border bg-muted p-3 whitespace-pre-wrap break-words text-muted-foreground">
               {rawContent}
             </pre>
           </div>

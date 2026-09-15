@@ -474,6 +474,7 @@
     "settings": "系統設定",
     "theme": "主題切換",
     "darkMode": "深色模式",
+    "lightMode": "淺色模式",
     "language": "語言選擇",
     "systemSettings": "系統設定",
     "offline": "無法連線伺服器",

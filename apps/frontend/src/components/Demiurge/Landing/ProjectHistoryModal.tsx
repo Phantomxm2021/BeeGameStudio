@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Clock, CopyPlus, LoaderCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../../store/projectStore';
 import { getCreditSummary, type BeeGameUsageSummary } from '../../../services/creditsApi';
 import { Skeleton } from '../../ui/skeleton';
+import { Button } from '../../beui/project-button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
 import { DevProjectPurgePanel } from './DevProjectPurgePanel';
 
 interface ProjectHistoryModalProps {
@@ -36,7 +39,15 @@ const MENU_MARGIN = 12;
 const MENU_OFFSET = 8;
 
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
-  const { projects, isLoading, deleteProject, createReviewCopy, loadProjects } = useProjectStore();
+  const { projects, isLoading, deleteProject, createReviewCopy, loadProjects } = useProjectStore(
+    useShallow(state => ({
+      projects: state.projects,
+      isLoading: state.isLoading,
+      deleteProject: state.deleteProject,
+      createReviewCopy: state.createReviewCopy,
+      loadProjects: state.loadProjects,
+    })),
+  );
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
@@ -129,6 +140,8 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
 
   useEffect(() => {
     if (!isOpen || projects.length === 0) {
+      // No visible project rows means no summaries should remain displayed.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCreditSummaries({});
       return;
     }
@@ -155,56 +168,43 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
 
   return (
     <>
-      <div
-        onClick={() => {
-          closeMenu();
-          onClose();
-        }}
-        className="fixed inset-0 z-[60] bg-zinc-950/45 backdrop-blur-sm"
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t.historyProjects}
-        data-surface="frosted-glass"
-        data-style-source="pixelfork"
-        data-glass-density="reinforced"
-        className="input-surface glass-panel fixed left-1/2 top-1/2 z-[70] flex max-h-[min(620px,calc(100vh-2rem))] w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[32px] p-5 text-zinc-100"
-      >
+      <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { closeMenu(); onClose(); } }}>
+        <DialogContent className="flex max-h-[min(620px,calc(100dvh-2rem))] max-w-xl flex-col overflow-hidden p-5">
         <div className="relative z-10 mb-5 flex items-center justify-between">
           <div>
-            <h2 className="type-title-3 text-white">{t.historyProjects}</h2>
-            <div className="type-footnote mt-2 text-zinc-400">
+            <DialogTitle className="type-title-3 text-foreground">{t.historyProjects}</DialogTitle>
+            <DialogDescription className="type-footnote mt-2 text-muted-foreground">
               {isProjectListLoading ? (
-                <Skeleton className="h-4 w-24 rounded-full bg-white/10" aria-hidden="true" />
+                <span className="block h-4 w-24 animate-pulse rounded-full bg-accent" aria-hidden="true" />
               ) : (
                 <>
                   {projects.length} {t.recentProjects}
                 </>
               )}
-            </div>
+            </DialogDescription>
           </div>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             aria-label={text.close}
             onClick={() => {
               closeMenu();
               onClose();
             }}
-            className="glass-icon-button flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
           >
             <X className="h-5 w-5" />
-          </button>
+          </Button>
         </div>
 
-        <div className="scroll-fade scroll-fade-8 relative z-10 min-h-48 flex-1 space-y-3 overflow-y-auto px-1 pt-3 scrollbar-premium">
+        <div className="relative z-10 min-h-48 flex-1 space-y-3 overflow-y-auto px-1 pt-3 scrollbar-premium">
           {isProjectListLoading ? (
             <ProjectHistoryListSkeleton />
           ) : projects.length === 0 ? (
-            <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-white/15 bg-white/[0.03] px-8 text-center text-zinc-400">
+            <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-muted/40 px-8 text-center text-muted-foreground">
               <Clock className="h-8 w-8 stroke-1" />
-              <span className="type-callout text-zinc-200">{text.noProjectsForAccount}</span>
-              <span className="type-footnote max-w-sm text-zinc-500">{text.localProjectsNeedMigration}</span>
+              <span className="type-callout text-foreground">{text.noProjectsForAccount}</span>
+              <span className="type-footnote max-w-sm text-muted-foreground">{text.localProjectsNeedMigration}</span>
             </div>
           ) : (
             projects.map(project => {
@@ -228,27 +228,27 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                         onSelectProject(project.id);
                       }
                     }}
-                    className={`flex w-full items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4 text-left outline-none transition-all focus-visible:ring-2 focus-visible:ring-white/35 ${
+                    className={`flex w-full items-center justify-between rounded-lg border border-border bg-muted/40 p-4 text-left outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring ${
                       isPending
                         ? 'cursor-wait opacity-70'
-                        : 'cursor-pointer hover:translate-x-1 hover:border-white/20 hover:bg-white/[0.075]'
+                        : 'cursor-pointer hover:translate-x-1 hover:border-border-strong hover:bg-surface-hover'
                     }`}
                   >
                     <div className="min-w-0 pr-4">
-                      <span className="type-callout block truncate text-white">{displayName}</span>
-                      <span className="type-caption-1 mt-2 flex items-center gap-1.5 text-zinc-400">
+                      <span className="type-callout block truncate text-foreground">{displayName}</span>
+                      <span className="type-caption-1 mt-2 flex items-center gap-1.5 text-muted-foreground">
                         <Clock className="h-3 w-3" />
                         {formatProjectDate(project.created_at)}
                       </span>
-                      <span className="type-caption-1 mt-2 flex min-h-[1rem] flex-wrap items-center gap-2 text-zinc-500">
+                      <span className="type-caption-1 mt-2 flex min-h-[1rem] flex-wrap items-center gap-2 text-muted-foreground">
                         {creditSummary ? (
                           <>
-                            <span className="text-zinc-300">
+                            <span className="text-foreground">
                               {formatCreditAmount(creditSummary.consumedCredits)} credits
                             </span>
                           </>
                         ) : (
-                          <Skeleton className="h-3 w-32 rounded-full bg-white/10" aria-hidden="true" />
+                          <Skeleton className="h-3 w-32 rounded-full bg-accent" aria-hidden="true" />
                         )}
                       </span>
                     </div>
@@ -256,19 +256,20 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                       <span
                         role="status"
                         aria-label={isDeleting ? text.deletingProject : text.creatingReviewCopy}
-                        className="flex h-9 w-9 shrink-0 items-center justify-center text-zinc-300"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center text-foreground"
                       >
                         <LoaderCircle className="h-4 w-4 animate-spin" />
                       </span>
                     ) : (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon"
                         aria-label={`${text.moreActionsFor} ${displayName}`}
                         onClick={event => toggleMenu(event, project.id)}
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
                       >
                         <MoreHorizontal className="h-4 w-4" />
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -277,19 +278,20 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
           )}
         </div>
         {import.meta.env.DEV ? <DevProjectPurgePanel lang={lang} onDeleted={loadProjects} /> : null}
-      </div>
-      {activeProject && menuPosition
+        </DialogContent>
+      </Dialog>
+      {isOpen && activeProject && menuPosition
         ? createPortal(
             <div
               style={{ left: menuPosition.left, top: menuPosition.top }}
-              data-surface="frosted-glass"
+
               onPointerDown={event => event.stopPropagation()}
-              className="input-surface glass-panel fixed z-[90] min-w-[150px] overflow-hidden rounded-3xl p-1.5 text-zinc-100 shadow-xl"
+              className="bg-background fixed z-[90] min-w-[150px] overflow-hidden rounded-lg p-1.5 text-foreground shadow-lg"
             >
               <button
                 type="button"
                 onClick={event => handleCreateReviewCopy(event, activeProject.id)}
-                className="type-footnote flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-zinc-300 transition-colors hover:bg-white/10 hover:text-white"
+                className="type-footnote flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <CopyPlus className="h-3.5 w-3.5" />
                 {text.createReviewCopy}
@@ -297,10 +299,10 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               <button
                 type="button"
                 onClick={event => handleDelete(event, activeProject.id)}
-                className={`type-footnote flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition-colors ${
+                className={`type-footnote flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors ${
                   confirmingDeleteId === activeProject.id
-                    ? 'bg-rose-500 text-white'
-                    : 'text-zinc-300 hover:bg-rose-500/10 hover:text-rose-200'
+                    ? 'bg-rose-500 text-foreground'
+                    : 'text-foreground hover:bg-rose-500/10 hover:text-rose-200'
                 }`}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -326,21 +328,21 @@ function ProjectHistoryListSkeleton() {
       {Array.from({ length: 3 }).map((_, index) => (
         <div
           key={index}
-          className="flex w-full items-center justify-between rounded-3xl border border-white/10 bg-white/[0.045] p-4"
+          className="flex w-full items-center justify-between rounded-lg border border-border bg-muted/40 p-4"
           aria-hidden="true"
         >
           <div className="min-w-0 flex-1 pr-4">
-            <Skeleton className="h-5 w-44 max-w-full rounded-full bg-white/10" />
+            <Skeleton className="h-5 w-44 max-w-full rounded-full bg-accent" />
             <div className="mt-3 flex items-center gap-2">
-              <Skeleton className="h-3 w-3 rounded-full bg-white/10" />
-              <Skeleton className="h-3 w-24 rounded-full bg-white/10" />
+              <Skeleton className="h-3 w-3 rounded-full bg-accent" />
+              <Skeleton className="h-3 w-24 rounded-full bg-accent" />
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Skeleton className="h-4 w-24 rounded-full bg-white/10" />
-              <Skeleton className="h-4 w-20 rounded-full bg-white/10" />
+              <Skeleton className="h-4 w-24 rounded-full bg-accent" />
+              <Skeleton className="h-4 w-20 rounded-full bg-accent" />
             </div>
           </div>
-          <Skeleton className="h-9 w-9 shrink-0 rounded-full bg-white/10" />
+          <Skeleton className="h-9 w-9 shrink-0 rounded-full bg-accent" />
         </div>
       ))}
     </>

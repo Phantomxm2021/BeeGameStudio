@@ -86,4 +86,40 @@ describe('useProjectEventPolling project event polling', () => {
     act(() => result.current.reconnect());
     await waitFor(() => expect(result.current.state).toBe('connected'));
   });
+
+  it('ignores a poll result that resolves after switching projects', async () => {
+    let resolveFirstPoll: (value: { lastEventId: number; messages: unknown[] }) => void = () => undefined;
+    const oldProjectCallback = vi.fn();
+    const newProjectCallback = vi.fn();
+    pollMessages.mockImplementation((projectId: string) => {
+      if (projectId === 'project-1') {
+        return new Promise((resolve) => { resolveFirstPoll = resolve; });
+      }
+      return Promise.resolve({
+        lastEventId: 2,
+        messages: [{ type: 'token', task_id: 'task-2', sender: 'agent', content: 'new-project' }],
+      });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ projectId, onMessage }: { projectId: string; onMessage: ReturnType<typeof vi.fn> }) => useProjectEventPolling({ projectId, onMessage }),
+      { initialProps: { projectId: 'project-1', onMessage: oldProjectCallback } },
+    );
+    await waitFor(() => expect(pollMessages).toHaveBeenCalledWith('project-1', 0));
+
+    rerender({ projectId: 'project-2', onMessage: newProjectCallback });
+    await waitFor(() => expect(result.current.state).toBe('connected'));
+    expect(newProjectCallback).toHaveBeenCalledWith(expect.objectContaining({ content: 'new-project' }));
+
+    await act(async () => {
+      resolveFirstPoll({
+        lastEventId: 1,
+        messages: [{ type: 'token', task_id: 'task-1', sender: 'agent', content: 'old-project' }],
+      });
+      await Promise.resolve();
+    });
+
+    expect(oldProjectCallback).not.toHaveBeenCalled();
+    expect(newProjectCallback).not.toHaveBeenCalledWith(expect.objectContaining({ content: 'old-project' }));
+  });
 });

@@ -17,6 +17,7 @@
     "settings": "Configurações",
     "theme": "Alternar tema",
     "darkMode": "Modo escuro",
+    "lightMode": "Modo claro",
     "language": "Idioma",
     "systemSettings": "Configurações do sistema",
     "offline": "Servidor inacessível",

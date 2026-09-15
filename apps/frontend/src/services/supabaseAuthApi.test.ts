@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   clearSupabaseSession,
+  consumeSupabaseOAuthCallback,
   consumeSupabaseRedirectSession,
   getSupabaseAccessToken,
   getValidSupabaseAccessToken,
@@ -20,6 +21,7 @@ describe('supabaseAuthApi', () => {
     vi.useRealTimers();
     localStorage.clear();
     clearSupabaseSession();
+    delete window.beeGameDesktop;
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -376,7 +378,9 @@ describe('supabaseAuthApi', () => {
     expect(githubUrl.origin).toBe('https://project.supabase.co');
     expect(githubUrl.pathname).toBe('/auth/v1/authorize');
     expect(githubUrl.searchParams.get('provider')).toBe('github');
-    expect(githubUrl.searchParams.get('redirect_to')).toBe('http://localhost:5173');
+    const githubRedirect = new URL(githubUrl.searchParams.get('redirect_to') || 'http://invalid');
+    expect(githubRedirect.origin).toBe('http://localhost:5173');
+    expect(githubRedirect.searchParams.get('oauth_state')).toBeTruthy();
     expect(githubUrl.searchParams.get('flow_type')).toBe('pkce');
     expect(githubUrl.searchParams.get('code_challenge_method')).toBe('S256');
     expect(githubUrl.searchParams.get('code_challenge')).toBeTruthy();
@@ -422,6 +426,46 @@ describe('supabaseAuthApi', () => {
       provider: 'github',
       invitationNonce: 'nonce-1',
     });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).redirectTo).toContain('oauth_state=');
+  });
+
+  it('opens OAuth in the system browser and consumes a validated desktop callback', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const openExternal = vi.fn(async () => undefined);
+    window.beeGameDesktop = {
+      isDesktop: true,
+      openExternal,
+      onOAuthCallback: vi.fn(() => () => undefined),
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      access_token: 'desktop-access-token',
+      refresh_token: 'desktop-refresh-token',
+      expires_in: 3600,
+      user: { id: 'desktop-user' },
+    })));
+    await signInWithSupabaseOAuth('github');
+    const browserUrl = new URL(openExternal.mock.calls[0][0]);
+    expect(new URL(browserUrl.searchParams.get('redirect_to') || '').searchParams.get('oauth_state')).toBeTruthy();
+    const { state } = JSON.parse(sessionStorage.getItem('beegame_supabase_oauth_pkce') || '{}');
+    await expect(consumeSupabaseOAuthCallback(`beegame://oauth/callback?code=desktop-code&state=supabase-flow-id&oauth_state=${encodeURIComponent(state)}`)).resolves.toBe(true);
+    expect(getSupabaseAccessToken()).toBe('desktop-access-token');
+  });
+
+  it('keeps the PKCE verifier after an invalid desktop callback state', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    sessionStorage.setItem('beegame_supabase_oauth_pkce', JSON.stringify({
+      provider: 'github',
+      codeVerifier: 'valid-verifier',
+      state: 'expected-state',
+      createdAt: Date.now(),
+    }));
+
+    const callbackError = await consumeSupabaseOAuthCallback('beegame://oauth/callback?code=late-code&oauth_state=wrong-state').catch((error: unknown) => error);
+    expect(callbackError).toBeInstanceOf(Error);
+    expect((callbackError as Error).message).toContain('state did not match');
+    expect(JSON.parse(sessionStorage.getItem('beegame_supabase_oauth_pkce') || '{}')).toMatchObject({ codeVerifier: 'valid-verifier' });
   });
 
   it('redeems an OAuth invitation nonce after consuming a PKCE callback', async () => {
@@ -587,7 +631,7 @@ describe('supabaseAuthApi', () => {
       hash: '#error=server_error&error_description=Discord%20email%20scope%20missing',
     });
 
-    await expect(consumeSupabaseRedirectSession()).rejects.toThrow('Discord email scope missing');
+    await expect(consumeSupabaseRedirectSession()).rejects.toMatchObject({ message: expect.stringContaining('Discord email scope missing') });
     expect(replaceState).toHaveBeenCalledWith({}, document.title, '/');
   });
 
@@ -607,9 +651,9 @@ describe('supabaseAuthApi', () => {
       createdAt: Date.now(),
     }));
 
-    await expect(consumeSupabaseRedirectSession()).rejects.toThrow(
-      'Discord sign-in reached BeeGame, but Supabase could not exchange the provider code.',
-    );
+    await expect(consumeSupabaseRedirectSession()).rejects.toMatchObject({
+      message: expect.stringContaining('Discord sign-in reached BeeGame, but Supabase could not exchange the provider code.'),
+    });
     expect(replaceState).toHaveBeenCalledWith({}, document.title, '/');
   });
 
@@ -636,9 +680,9 @@ describe('supabaseAuthApi', () => {
       createdAt: Date.now(),
     }));
 
-    await expect(consumeSupabaseRedirectSession()).rejects.toThrow(
-      'Discord sign-in reached BeeGame, but Supabase could not exchange the provider code.',
-    );
+    await expect(consumeSupabaseRedirectSession()).rejects.toMatchObject({
+      message: expect.stringContaining('Discord sign-in reached BeeGame, but Supabase could not exchange the provider code.'),
+    });
   });
 
   it('hydrates OAuth redirect sessions with provider nickname and avatar metadata', async () => {

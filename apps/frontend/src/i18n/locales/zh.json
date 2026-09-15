@@ -538,6 +538,7 @@
     "settings": "系统设置",
     "theme": "主题切换",
     "darkMode": "深色模式",
+    "lightMode": "浅色模式",
     "language": "语言选择",
     "systemSettings": "系统设置",
     "offline": "无法访问服务器",

@@ -164,8 +164,8 @@ describe('ProjectHistoryModal permissions', () => {
     const consumedCredits = await screen.findByText('7 credits');
     const creditRow = consumedCredits.closest('.type-caption-1');
     expect(consumedCredits).toBeInTheDocument();
-    expect(consumedCredits).toHaveClass('text-zinc-300');
-    expect(creditRow).toHaveClass('text-zinc-500');
+    expect(consumedCredits).toHaveClass('text-foreground');
+    expect(creditRow).toHaveClass('text-muted-foreground');
     expect(creditRow).not.toHaveClass('text-amber-200');
     expect(getCreditSummary).toHaveBeenCalledWith('project-1');
   });
@@ -261,7 +261,7 @@ describe('ProjectHistoryModal permissions', () => {
     expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThanOrEqual(10);
   });
 
-  it('uses the shadcn scroll-fade utility on the scrollable history list', () => {
+  it('uses the semantic premium scrollbar on the scrollable history list', () => {
     getCreditSummary.mockReturnValue(new Promise(() => {}));
     render(
       <ProjectHistoryModal
@@ -272,7 +272,7 @@ describe('ProjectHistoryModal permissions', () => {
       />,
     );
 
-    expect(screen.getByText('Snake Game').closest('.scroll-fade')).toHaveClass('scroll-fade', 'scroll-fade-8');
+    expect(screen.getByText('Snake Game').closest('.scrollbar-premium')).toHaveClass('scrollbar-premium');
   });
 
   it('explains empty history for the current account', () => {

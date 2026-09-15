@@ -39,10 +39,6 @@ export default defineConfig(({ mode }) => {
       dedupe: ['react', 'react-dom'],
     },
 
-    ssr: {
-      noExternal: ['@shadcn/react'],
-    },
-
     // Server configuration for development
     server: {
       port: BEEGAME_FIXED_SERVICE_PORTS.frontend,
@@ -100,8 +96,7 @@ export default defineConfig(({ mode }) => {
             'react-vendor': ['react', 'react-dom'],
             'state-management': ['zustand'],
             'markdown': ['react-markdown'],
-            'animation': ['framer-motion'],
-            'ui-components': ['@headlessui/react'],
+            'animation': ['motion'],
             // Feature chunks - group related components
           },
 
@@ -143,10 +138,8 @@ export default defineConfig(({ mode }) => {
         'react-dom',
         'zustand',
         'axios',
-        'framer-motion',
-        '@headlessui/react',
-        '@shadcn/react/message-scroller',
         'react-markdown',
+        'motion',
       ],
     },
 
@@ -156,12 +149,5 @@ export default defineConfig(({ mode }) => {
       __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     },
 
-    test: {
-      server: {
-        deps: {
-          inline: ['@shadcn/react'],
-        },
-      },
-    },
   }
 })

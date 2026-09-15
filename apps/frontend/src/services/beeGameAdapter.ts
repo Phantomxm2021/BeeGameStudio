@@ -13,7 +13,7 @@ import type {
   ChatAttachmentPayload,
 } from './api'
 import type { Project } from '../types/project'
-import type { ProjectEventMessage } from '../types/message'
+import type { AssistantContentBlock, ProjectEventMessage } from '../types/message'
 import { authenticatedFetch } from './apiClient'
 import { projectQuotaErrorMessage } from './projectQuotaError'
 import {
@@ -347,6 +347,7 @@ export const beeGameAdapter = {
   },
 
   async openProject(_projectId: string): Promise<{ opened: boolean }> {
+    void _projectId
     return { opened: true }
   },
 
@@ -1066,7 +1067,10 @@ function eventsToHistory(
     message_id: message.message_id,
     sender: message.sender || 'system',
     content: message.content || '',
+    contentBlocks: message.content_blocks,
     task_id: message.task_id,
+    turnId: message.turnId || message.turn_id,
+    turn_id: message.turn_id || message.turnId,
     timestamp: message.timestamp || Date.now(),
     type:
       message.type === 'agent_message'
@@ -1080,12 +1084,33 @@ function eventsToHistory(
     nextAction: message.next_action,
     requiresUserAction: message.requires_user_action,
     toolName: message.tool,
+    toolUseId: message.tool_use_id,
     toolStatus: message.tool_status,
     toolDetail: message.tool_detail,
     toolOutput: message.tool_output,
+    toolInput: message.tool_input,
+    toolDiff: message.tool_diff,
+    toolPatch: message.tool_patch,
+    toolBefore: message.tool_before,
+    toolAfter: message.tool_after,
+    toolStructuredPatch: message.structured_patch,
+    subagentPrompt: message.subagent_prompt,
+    subagentOutput: message.subagent_output,
+    subagentTrace: message.subagent_trace,
+    sources: message.sources,
+    citations: message.citations,
     artifactId: message.artifact_id,
     isSubagentTool: message.is_subagent_tool,
   }))
+}
+
+/** Adapter entry point used by dev/test transcript fixtures. */
+export function transcriptEventsToHistory(
+  projectId: string,
+  events: unknown[],
+  workspacePath = '',
+): unknown[] {
+  return eventsToHistory(projectId, events as BeeGameEvent[], workspacePath)
 }
 
 function eventToProjectEventMessages(
@@ -1110,6 +1135,8 @@ function eventToProjectEventMessages(
           type: 'status',
           task_id: taskId,
           project_id: projectId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           status: 'running',
         } as ProjectEventMessage,
       ]
@@ -1128,6 +1155,8 @@ function eventToProjectEventMessages(
             project_id: projectId,
             sender: 'beegame',
             message_id: thinkingMessageId,
+            turnId: event.turnId,
+            turn_id: event.turnId,
             timestamp: Date.parse(event.createdAt) || Date.now(),
           } as ProjectEventMessage,
         ]
@@ -1141,6 +1170,8 @@ function eventToProjectEventMessages(
           content: event.text || 'Thinking',
           task_kind: 'assistant_thinking',
           message_id: thinkingMessageId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           timestamp: Date.parse(event.createdAt) || Date.now(),
         } as ProjectEventMessage,
       ]
@@ -1155,6 +1186,8 @@ function eventToProjectEventMessages(
                 type: 'usage',
                 task_id: taskId,
                 project_id: projectId,
+                turnId: event.turnId,
+                turn_id: event.turnId,
                 usage,
                 timestamp: Date.parse(event.createdAt) || Date.now(),
               } as ProjectEventMessage,
@@ -1170,13 +1203,15 @@ function eventToProjectEventMessages(
               type: 'usage',
               task_id: taskId,
               project_id: projectId,
+              turnId: event.turnId,
+              turn_id: event.turnId,
               usage,
               timestamp: Date.parse(event.createdAt) || Date.now(),
             } as ProjectEventMessage,
           ]
         : []
     }
-    case 'tool.started':
+    case 'tool.started': {
       if (Object.keys(getPayloadRecord(event, 'input')).length === 0) return []
       const startedInput = getPayloadRecord(event, 'input')
       const startedTool = getPayloadString(event, 'toolName') || event.text
@@ -1192,12 +1227,16 @@ function eventToProjectEventMessages(
           type: 'tool_start',
           task_id: taskId,
           project_id: projectId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           message_id: getToolMessageId(event),
           tool_use_id: getPayloadString(event, 'toolUseID'),
           tool: startedTool,
           content: formatToolContent(startedInfo),
           tool_status: startedInfo.status,
           tool_detail: startedInfo.detail,
+          tool_input: startedInput,
+          ...getToolDiffFields(event, startedInput),
           artifact_id: startedArtifactPath
             ? encodeArtifactId(projectId, event.sessionId, startedArtifactPath)
             : undefined,
@@ -1205,9 +1244,13 @@ function eventToProjectEventMessages(
             ? toWorkspaceRelativePath(startedArtifactPath, workspacePath)
             : undefined,
           is_subagent_tool: startedInfo.isSubagent,
+          subagent_prompt: startedInfo.subagentPrompt,
+          subagent_output: startedInfo.subagentOutput,
+          subagent_trace: startedInfo.subagentTrace,
           timestamp: Date.parse(event.createdAt) || Date.now(),
         } as ProjectEventMessage,
       ]
+    }
     case 'tool.progress': {
       const progressInput = getPayloadRecord(event, 'input')
       const progressTool = getPayloadString(event, 'toolName') || event.text
@@ -1228,6 +1271,8 @@ function eventToProjectEventMessages(
           type: 'tool_start',
           task_id: taskId,
           project_id: projectId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           message_id: getToolMessageId(event),
           tool_use_id: getPayloadString(event, 'toolUseID'),
           tool: progressTool,
@@ -1235,6 +1280,8 @@ function eventToProjectEventMessages(
           tool_status: progressInfo.status,
           tool_detail: progressInfo.detail,
           tool_output: progressInfo.output,
+          tool_input: progressInput,
+          ...getToolDiffFields(event, progressInput),
           artifact_id: progressArtifactPath
             ? encodeArtifactId(projectId, event.sessionId, progressArtifactPath)
             : undefined,
@@ -1242,6 +1289,9 @@ function eventToProjectEventMessages(
             ? toWorkspaceRelativePath(progressArtifactPath, workspacePath)
             : undefined,
           is_subagent_tool: progressInfo.isSubagent,
+          subagent_prompt: progressInfo.subagentPrompt,
+          subagent_output: progressInfo.subagentOutput,
+          subagent_trace: progressInfo.subagentTrace,
           timestamp: Date.parse(event.createdAt) || Date.now(),
         } as ProjectEventMessage,
       ]
@@ -1267,6 +1317,8 @@ function eventToProjectEventMessages(
           type: 'tool_end',
           task_id: taskId,
           project_id: projectId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           message_id: getToolMessageId(event),
           tool_use_id: getPayloadString(event, 'toolUseID'),
           tool: finishedTool,
@@ -1275,6 +1327,8 @@ function eventToProjectEventMessages(
           tool_status: finishedInfo.status,
           tool_detail: finishedInfo.detail,
           tool_output: finishedInfo.output,
+          tool_input: finishedInput,
+          ...getToolDiffFields(event, finishedInput),
           artifact_id: finishedArtifactPath
             ? encodeArtifactId(projectId, event.sessionId, finishedArtifactPath)
             : undefined,
@@ -1282,6 +1336,9 @@ function eventToProjectEventMessages(
             ? toWorkspaceRelativePath(finishedArtifactPath, workspacePath)
             : undefined,
           is_subagent_tool: finishedInfo.isSubagent,
+          subagent_prompt: finishedInfo.subagentPrompt,
+          subagent_output: finishedInfo.subagentOutput,
+          subagent_trace: finishedInfo.subagentTrace,
           timestamp: Date.parse(event.createdAt) || Date.now(),
         } as ProjectEventMessage,
       ]
@@ -1296,6 +1353,8 @@ function eventToProjectEventMessages(
           content: event.text,
           sender: 'beegame',
           task_kind: 'permission_request',
+          turnId: event.turnId,
+          turn_id: event.turnId,
           requires_user_action: true,
           timestamp: Date.parse(event.createdAt) || Date.now(),
         } as ProjectEventMessage,
@@ -1321,6 +1380,8 @@ function eventToProjectEventMessages(
           type: 'status',
           task_id: taskId,
           project_id: projectId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           status: 'idle',
         } as ProjectEventMessage,
       ]
@@ -1332,6 +1393,8 @@ function eventToProjectEventMessages(
           type: 'status',
           task_id: taskId,
           project_id: projectId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           status: 'idle',
         } as ProjectEventMessage,
       ]
@@ -1341,6 +1404,8 @@ function eventToProjectEventMessages(
           type: 'status',
           task_id: taskId,
           project_id: projectId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           status: 'stopped',
         } as ProjectEventMessage,
       ]
@@ -1351,6 +1416,8 @@ function eventToProjectEventMessages(
           type: 'error',
           task_id: taskId,
           project_id: projectId,
+          turnId: event.turnId,
+          turn_id: event.turnId,
           content: event.text,
           error: event.text,
         } as ProjectEventMessage,
@@ -1495,6 +1562,7 @@ function coalesceLogicalAssistantMessages(
       event: BeeGameEvent
       payloadText: string
       longestVisibleText: string
+      contentBlocks: AssistantContentBlock[]
     }
   >()
   const suppressedEventIds = new Set<number>()
@@ -1511,6 +1579,7 @@ function coalesceLogicalAssistantMessages(
         event,
         payloadText,
         longestVisibleText: event.text,
+        contentBlocks: getAssistantContentBlocks(event) ?? [],
       })
       continue
     }
@@ -1518,6 +1587,10 @@ function coalesceLogicalAssistantMessages(
     if (event.text.length > existing.longestVisibleText.length) {
       existing.longestVisibleText = event.text
     }
+    existing.contentBlocks = mergeAssistantContentBlocks(
+      existing.contentBlocks,
+      getAssistantContentBlocks(event) ?? [],
+    )
     suppressedEventIds.add(event.id)
   }
 
@@ -1526,14 +1599,21 @@ function coalesceLogicalAssistantMessages(
     event,
     payloadText,
     longestVisibleText,
+    contentBlocks,
   } of representativeByMessage.values()) {
     const text =
       payloadText.length >= longestVisibleText.length
         ? payloadText
         : longestVisibleText
+    const payload =
+      contentBlocks.length > 0
+        ? { ...(event.payload ?? { type: 'assistant.message' }), contentBlocks }
+        : event.payload
     replacementByEventId.set(
       event.id,
-      text === event.text ? event : { ...event, text },
+      text === event.text && payload === event.payload
+        ? event
+        : { ...event, text, payload },
     )
   }
 
@@ -1568,6 +1648,85 @@ function getAssistantPayloadVisibleText(event: BeeGameEvent): string {
         : ''
     })
     .join('')
+}
+
+function getAssistantContentBlocks(event: BeeGameEvent): AssistantContentBlock[] | undefined {
+  if (!event.payload) return undefined
+  const payloadBlocks = event.payload.contentBlocks
+  if (Array.isArray(payloadBlocks)) {
+    return payloadBlocks.filter(isAssistantContentBlock)
+  }
+  const message = event.payload.message
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return undefined
+  const content = (message as Record<string, unknown>).content
+  if (!Array.isArray(content)) return undefined
+  const blocks = content.flatMap((block): AssistantContentBlock[] => {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) return []
+    const record = block as Record<string, unknown>
+    const type = record.type
+    if (type !== 'thinking' && type !== 'text' && type !== 'tool_use' && type !== 'tool_result') return []
+    return [{
+      type,
+      ...(typeof record.thinking === 'string' ? { text: record.thinking } : {}),
+      ...(typeof record.text === 'string' ? { text: record.text } : {}),
+      ...(typeof record.id === 'string' ? { toolUseId: record.id } : {}),
+      ...(typeof record.tool_use_id === 'string' ? { toolUseId: record.tool_use_id } : {}),
+      ...(typeof record.name === 'string' ? { toolName: record.name } : {}),
+      ...(record.input !== undefined ? { toolInput: record.input } : {}),
+      ...(typeof record.is_error === 'boolean' ? { isError: record.is_error } : {}),
+    }]
+  })
+  return blocks.length ? blocks : undefined
+}
+
+function isAssistantContentBlock(value: unknown): value is AssistantContentBlock {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const block = value as Partial<AssistantContentBlock>
+  return (
+    block.type === 'thinking' ||
+    block.type === 'text' ||
+    block.type === 'tool_use' ||
+    block.type === 'tool_result'
+  )
+}
+
+function mergeAssistantContentBlocks(
+  existing: AssistantContentBlock[],
+  incoming: AssistantContentBlock[],
+): AssistantContentBlock[] {
+  const merged = [...existing]
+  for (const block of incoming) {
+    const exactIndex = merged.findIndex(candidate =>
+      assistantContentBlockKey(candidate) === assistantContentBlockKey(block),
+    )
+    if (exactIndex >= 0) continue
+
+    const sameBlockIndex = merged.findIndex(candidate =>
+      candidate.type === block.type &&
+      candidate.toolUseId === block.toolUseId &&
+      candidate.toolName === block.toolName &&
+      typeof candidate.text === 'string' &&
+      typeof block.text === 'string' &&
+      (block.text.startsWith(candidate.text) || candidate.text.startsWith(block.text)),
+    )
+    if (sameBlockIndex >= 0 && (block.text?.length ?? 0) > (merged[sameBlockIndex].text?.length ?? 0)) {
+      merged[sameBlockIndex] = block
+      continue
+    }
+    merged.push(block)
+  }
+  return merged
+}
+
+function assistantContentBlockKey(block: AssistantContentBlock): string {
+  return [
+    block.type,
+    block.toolUseId ?? '',
+    block.toolName ?? '',
+    block.text ?? '',
+    JSON.stringify(block.toolInput ?? null),
+    block.isError ? 'error' : '',
+  ].join('\u0000')
 }
 
 function isTurnTerminalEvent(event: BeeGameEvent): boolean {
@@ -1637,13 +1796,41 @@ function baseMessage(
     project_id: projectId,
     sender,
     content: event.text,
+    content_blocks: getAssistantContentBlocks(event),
     message_id: messageId,
     ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
     ...(supersedesMessageId
       ? { supersedes_message_id: supersedesMessageId }
       : {}),
+    ...(getEventSources(event, 'sources') ? { sources: getEventSources(event, 'sources') } : {}),
+    ...(getEventSources(event, 'citations') ? { citations: getEventSources(event, 'citations') } : {}),
+    ...(event.turnId ? { turnId: event.turnId, turn_id: event.turnId } : {}),
     timestamp: Date.parse(event.createdAt) || Date.now(),
   } as ProjectEventMessage
+}
+
+type EventSource = { id?: string; title?: string; domain?: string; url?: string }
+
+function getEventSources(event: BeeGameEvent, key: 'sources' | 'citations'): EventSource[] | undefined {
+  const payload = event.payload
+  const nested = payload?.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
+    ? payload.message as Record<string, unknown>
+    : undefined
+  const value = payload?.[key] ?? nested?.[key]
+  if (!Array.isArray(value)) return undefined
+  const sources = value.flatMap((entry): EventSource[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const record = entry as Record<string, unknown>
+    const title = typeof record.title === 'string' ? record.title.trim() : ''
+    if (!title) return []
+    return [{
+      ...(typeof record.id === 'string' ? { id: record.id } : {}),
+      title,
+      ...(typeof record.domain === 'string' ? { domain: record.domain } : {}),
+      ...(typeof record.url === 'string' ? { url: record.url } : {}),
+    }]
+  })
+  return sources.length > 0 ? sources : undefined
 }
 
 function describePermissionResolution(event: BeeGameEvent): string {
@@ -1685,6 +1872,48 @@ type ToolDisplayInfo = {
   detail: string
   output: string
   isSubagent: boolean
+  subagentPrompt?: string
+  subagentOutput?: string
+  subagentTrace?: string
+}
+
+function getToolDiffFields(
+  event: BeeGameEvent,
+  input: Record<string, unknown>,
+): Pick<ProjectEventMessage, 'tool_diff' | 'tool_patch' | 'tool_before' | 'tool_after' | 'structured_patch'> {
+  const payload: Record<string, unknown> = event.payload || {}
+  const output = payload.output && typeof payload.output === 'object' && !Array.isArray(payload.output)
+    ? payload.output as Record<string, unknown>
+    : undefined
+  const result = payload.result && typeof payload.result === 'object' && !Array.isArray(payload.result)
+    ? payload.result as Record<string, unknown>
+    : undefined
+  const readString = (key: string): string | undefined => {
+    for (const source of [payload, input, output, result]) {
+      const value = source?.[key]
+      if (typeof value === 'string' && value.length > 0) return value
+    }
+    return undefined
+  }
+  const diff = readString('diff') || readString('gitDiff') || readString('git_diff')
+  const patch = readString('patch')
+  const before = readString('before') || readString('oldContent') || readString('old_content') || readString('originalFile') || readString('original_file')
+  const after = readString('after') || readString('newContent') || readString('new_content')
+  const readUnknown = (key: string): unknown => {
+    for (const source of [payload, input, output, result]) {
+      const value = source?.[key]
+      if (value !== undefined) return value
+    }
+    return undefined
+  }
+  const structuredPatch = readUnknown('structuredPatch') ?? readUnknown('structured_patch')
+  return {
+    ...(diff ? { tool_diff: diff } : {}),
+    ...(patch ? { tool_patch: patch } : {}),
+    ...(before !== undefined ? { tool_before: before } : {}),
+    ...(after !== undefined ? { tool_after: after } : {}),
+    ...(structuredPatch !== undefined ? { structured_patch: structuredPatch } : {}),
+  }
 }
 
 function getToolDisplayInfo(
@@ -1701,6 +1930,7 @@ function getToolDisplayInfo(
     input.subagent_type || input.agent_type || '',
   ).trim()
   const prompt = String(input.prompt || '').trim()
+  const trace = String(input.trace || input.trace_output || '').trim()
   const name = isSubagent ? description || toolName : toolName
   const details: string[] = []
   if (isSubagent && subagentType) {
@@ -1730,6 +1960,9 @@ function getToolDisplayInfo(
     detail: details.join(' · '),
     output: outputSummary,
     isSubagent,
+    ...(isSubagent && prompt ? { subagentPrompt: prompt } : {}),
+    ...(isSubagent && output ? { subagentOutput: output } : {}),
+    ...(isSubagent && trace ? { subagentTrace: trace } : {}),
   }
 }
 

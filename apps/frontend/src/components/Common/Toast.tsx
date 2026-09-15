@@ -10,7 +10,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, AlertCircle, AlertTriangle, X } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'warning';
@@ -26,22 +26,22 @@ export interface ToastProps {
 const getToastIcon = (type: ToastType) => {
   switch (type) {
     case 'success':
-      return <CheckCircle2 className="w-5 h-5 text-green-100" />;
+      return <CheckCircle2 className="w-5 h-5 text-success" />;
     case 'error':
-      return <AlertCircle className="w-5 h-5 text-red-100" />;
+      return <AlertCircle className="w-5 h-5 text-destructive" />;
     case 'warning':
-      return <AlertTriangle className="w-5 h-5 text-amber-100" />;
+      return <AlertTriangle className="w-5 h-5 text-warning" />;
   }
 };
 
 const getToastColors = (type: ToastType): string => {
   switch (type) {
     case 'success':
-      return 'bg-green-500 text-white';
+      return 'border border-success/30 bg-success/10 text-success';
     case 'error':
-      return 'bg-red-500 text-white';
+      return 'border border-destructive/30 bg-destructive/10 text-destructive';
     case 'warning':
-      return 'bg-yellow-500 text-white';
+      return 'border border-warning/30 bg-warning/10 text-warning';
   }
 };
 
@@ -68,7 +68,7 @@ export const Toast: React.FC<ToastProps> = ({
     <motion.div
       className={`
         ${getToastColors(type)}
-        rounded-full shadow-xl px-6 py-3
+        rounded-full shadow-lg px-6 py-3
         flex items-center gap-3
         min-w-[280px] max-w-md
       `}
@@ -101,7 +101,7 @@ export const Toast: React.FC<ToastProps> = ({
         type="button"
         aria-label="关闭通知"
         onClick={onDismiss}
-        className="flex h-6 w-6 items-center justify-center rounded-full text-white/90 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/70"
+        className="flex h-6 w-6 items-center justify-center rounded-full text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>

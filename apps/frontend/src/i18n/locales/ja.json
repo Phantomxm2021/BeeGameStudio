@@ -17,6 +17,7 @@
     "settings": "設定",
     "theme": "テーマ",
     "darkMode": "ダークモード",
+    "lightMode": "ライトモード",
     "language": "言語",
     "systemSettings": "システム設定",
     "offline": "サーバーアクセス不可",

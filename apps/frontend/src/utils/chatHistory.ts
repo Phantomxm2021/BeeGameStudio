@@ -1,4 +1,4 @@
-import type { Message, MessageType } from '../types/message';
+import type { AssistantContentBlock, Message, MessageType } from '../types/message';
 import { normalizeHistorySemanticType } from './messageSemantics';
 
 const toTimestampMs = (value: unknown): number => {
@@ -75,18 +75,58 @@ const resolveStableMessageId = (record: Record<string, unknown>): string => {
   return '';
 };
 
+const normalizeContentBlocks = (value: unknown): AssistantContentBlock[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const blocks = value.flatMap((block): AssistantContentBlock[] => {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) return [];
+    const record = block as Record<string, unknown>;
+    const type = record.type;
+    if (type !== 'thinking' && type !== 'text' && type !== 'tool_use' && type !== 'tool_result') return [];
+    return [{
+      type,
+      ...(typeof record.thinking === 'string' ? { text: record.thinking } : {}),
+      ...(typeof record.text === 'string' ? { text: record.text } : {}),
+      ...(typeof record.toolUseId === 'string'
+        ? { toolUseId: record.toolUseId }
+        : typeof record.tool_use_id === 'string'
+          ? { toolUseId: record.tool_use_id }
+          : typeof record.id === 'string'
+            ? { toolUseId: record.id }
+            : {}),
+      ...(typeof record.toolName === 'string'
+        ? { toolName: record.toolName }
+        : typeof record.name === 'string'
+          ? { toolName: record.name }
+          : {}),
+      ...(record.toolInput !== undefined
+        ? { toolInput: record.toolInput }
+        : record.input !== undefined
+          ? { toolInput: record.input }
+          : {}),
+      ...(typeof record.isError === 'boolean'
+        ? { isError: record.isError }
+        : typeof record.is_error === 'boolean'
+          ? { isError: record.is_error }
+          : {}),
+    }];
+  });
+  return blocks.length ? blocks : undefined;
+};
+
 export const normalizeChatHistory = (history: unknown): Message[] => {
   if (!Array.isArray(history)) return [];
 
   const normalized: Message[] = [];
   const seen = new Map<string, number>();
 
-  for (const item of history) {
+  for (const [sourceIndex, item] of history.entries()) {
     if (!item || typeof item !== 'object') continue;
     const record = item as Record<string, unknown>;
     const sender = normalizeSender(record.sender ?? record.role);
     const content = String(record.content ?? '').trim();
-    if (!content) continue;
+    const metadata = (record.metadata && typeof record.metadata === 'object') ? record.metadata as Record<string, unknown> : {};
+    const contentBlocks = normalizeContentBlocks(record.content_blocks ?? record.contentBlocks ?? metadata.content_blocks ?? metadata.contentBlocks);
+    if (!content && !contentBlocks?.length) continue;
 
     if (
       sender === 'system' &&
@@ -97,10 +137,10 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
     }
 
     const taskId = typeof record.task_id === 'string' ? record.task_id : typeof record.taskId === 'string' ? record.taskId : undefined;
+    const turnId = String(record.turn_id ?? record.turnId ?? metadata.turn_id ?? metadata.turnId ?? '').trim() || undefined;
     const timestamp = toTimestampMs(record.timestamp);
     const messageId = resolveStableMessageId(record);
     const clientMessageId = String(record.client_message_id ?? record.clientMessageId ?? '').trim() || undefined;
-    const metadata = (record.metadata && typeof record.metadata === 'object') ? record.metadata as Record<string, unknown> : {};
     const supersedesMessageId = String(
       record.supersedes_message_id ?? record.supersedesMessageId ?? metadata.supersedes_message_id ?? metadata.supersedesMessageId ?? '',
     ).trim() || undefined;
@@ -122,6 +162,15 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
     const isDocument = semanticType === 'artifact_card' || Boolean(record.is_document || record.isDocument || metadata.is_document || metadata.isDocument);
     const artifactId = record.artifact_id as string || record.artifactId as string || metadata.artifact_id as string;
     const documentTitle = record.document_title as string || record.documentTitle as string || metadata.document_title as string;
+    const readOptionalString = (...keys: string[]): string | undefined => {
+      for (const key of keys) {
+        const value = record[key] ?? metadata[key];
+        if (typeof value === 'string' && value.trim()) return value;
+      }
+      return undefined;
+    };
+    const structuredPatch = record.structured_patch ?? record.structuredPatch ?? metadata.structured_patch ?? metadata.structuredPatch;
+    const toolInput = record.tool_input ?? record.toolInput ?? metadata.tool_input ?? metadata.toolInput;
     const clientIdFromMetadata = String(metadata.client_message_id ?? '').trim() || undefined;
     const finalClientMessageId = clientMessageId || clientIdFromMetadata;
     const dedupeKey = buildMessageDedupeKey({
@@ -142,9 +191,12 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       dedupeKey,
       sender,
       content,
+      contentBlocks,
       timestamp,
       type: semanticType,
       taskId,
+      turnId,
+      sourceIndex,
       isDocument,
       artifactId,
       documentTitle,
@@ -153,6 +205,16 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       taskKind,
       nextAction,
       requiresUserAction: typeof requiresUserActionRaw === 'boolean' ? requiresUserActionRaw : undefined,
+      toolDiff: readOptionalString('tool_diff', 'toolDiff', 'diff', 'gitDiff', 'git_diff'),
+      toolUseId: readOptionalString('tool_use_id', 'toolUseId'),
+      toolPatch: readOptionalString('tool_patch', 'toolPatch', 'patch'),
+      toolBefore: readOptionalString('tool_before', 'toolBefore', 'before', 'originalFile', 'original_file'),
+      // `content` is the persisted display summary for tool events. It is not
+      // a file snapshot; real write content arrives as tool_after/after from
+      // the canonical adapter payload.
+      toolAfter: readOptionalString('tool_after', 'toolAfter', 'after'),
+      toolStructuredPatch: structuredPatch,
+      toolInput,
     };
 
     const existingIndex = seen.get(uniqueKey);
@@ -171,6 +233,7 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
   }
 
   return normalized.sort((a, b) => {
+    if (a.turnId && a.turnId === b.turnId) return (a.sourceIndex ?? 0) - (b.sourceIndex ?? 0);
     if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
     return a.id.localeCompare(b.id);
   });

@@ -33,6 +33,14 @@ export interface PhaseInfo {
   }>;
 }
 
+/** Keep the document theme class and native color-scheme in lockstep. */
+export function applyThemeToDocument(isDark: boolean): void {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  root.classList.toggle('dark', isDark);
+  root.style.colorScheme = isDark ? 'dark' : 'light';
+}
+
 export interface ProjectTask {
   id: string;
   status: string;
@@ -134,6 +142,9 @@ interface SystemState {
    * Toggle global theme
    */
   toggleTheme: () => void;
+
+  /** Set the persisted theme explicitly for deterministic bootstrap paths. */
+  setTheme: (isDark: boolean) => void;
 }
 
 
@@ -266,7 +277,11 @@ export const useSystemStore = create<SystemState>()(
 
       toggleTheme: () => {
         set((state) => ({ isDark: !state.isDark }));
-      }
+      },
+
+      setTheme: (isDark: boolean) => {
+        set({ isDark });
+      },
     }),
     {
       name: 'system-storage',

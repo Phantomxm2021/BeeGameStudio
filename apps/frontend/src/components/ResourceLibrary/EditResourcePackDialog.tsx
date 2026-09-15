@@ -9,9 +9,10 @@ type Props = {
   onClose: () => void
   onUploadCover: (file: File) => Promise<ResourcePackSummary>
   onSave: (input: UpdateResourcePackInput) => Promise<ResourcePackSummary>
+  finalFocus?: () => HTMLElement | null
 }
 
-export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onSave }: Props) {
+export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onSave, finalFocus }: Props) {
   const { t } = useTranslation()
   const copy = useMemo(() => ({
     title: translated(t, 'resourceLibrary.editPack', '编辑 Pack'),
@@ -42,6 +43,7 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
     submittingLabel={copy.updating}
     initialValues={initialValues}
     onClose={onClose}
+    finalFocus={finalFocus}
     allowCover
     formTestId="edit-pack-dialog"
     onSubmit={async (values, cover) => {

@@ -54,11 +54,11 @@ export function DevProjectPurgePanel({ lang, onDeleted }: { lang: Language; onDe
       await onDeleted().catch(() => {})
     } finally { setPending(false) }
   }
-  return <div className="relative z-10 mt-4 shrink-0 rounded-xl border border-red-400/30 p-3 text-red-100">
+  return <div className="relative z-10 mt-4 shrink-0 rounded-xl border border-destructive-400/30 p-3 text-foreground">
     <button type="button" disabled={pending} onClick={() => void prepare()} className="type-footnote disabled:opacity-50">{text('button')}</button>
     {plan ? <div className="mt-2 space-y-2">
       <p className="type-footnote">{text('confirm', { count: plan.projectCount })}</p>
-      <button type="button" disabled={pending || plan.projectCount === 0} onClick={() => void execute()} className="rounded-lg bg-red-600 px-3 py-2 disabled:opacity-50">{text('delete')}</button>
+      <button type="button" disabled={pending || plan.projectCount === 0} onClick={() => void execute()} className="rounded-lg bg-muted px-3 py-2 disabled:opacity-50">{text('delete')}</button>
       <button type="button" disabled={pending} onClick={() => setPlan(undefined)} className="ml-3">{text('cancel')}</button>
     </div> : null}
     {pending ? <p role="status" className="type-footnote mt-2">{text('pending')}</p> : null}

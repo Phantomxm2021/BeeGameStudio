@@ -576,7 +576,7 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdea('LLM generated idea');
 
-    expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '欢迎回来' })).toBeInTheDocument();
     expect(screen.getByText('你的灵感与项目，正在这里等待继续。')).toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
     expect(getCreditBalance).not.toHaveBeenCalled();
@@ -612,7 +612,7 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.change(textbox, { target: { value: 'LLM generated idea' } });
     fireEvent.submit(textbox.closest('form') as HTMLFormElement);
 
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
@@ -644,7 +644,7 @@ describe('LandingView bootstrap submission', () => {
     await renderLanding();
 
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'wrong-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
@@ -661,7 +661,7 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdea('OAuth generated idea');
 
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
 
     expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
@@ -702,7 +702,7 @@ describe('LandingView bootstrap submission', () => {
 
     await submitIdea('LLM generated idea');
 
-    expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: '欢迎回来' })).toBeInTheDocument();
     expect(runIdeaIntake).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
@@ -1113,7 +1113,7 @@ describe('LandingView bootstrap submission', () => {
 
     fireEvent.click(userButton);
 
-    expect(screen.getByRole('menu', { name: '用户菜单' })).toHaveAttribute('data-surface', 'frosted-glass');
+    expect(screen.getByRole('menu', { name: '用户菜单' })).toHaveClass('bg-popover', 'border-border');
   });
 
   it('opens the login and registration dialog from the anonymous user icon', async () => {
@@ -1123,11 +1123,8 @@ describe('LandingView bootstrap submission', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
 
-    expect(await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' })).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: '登录 / 注册 BeeGame' })).toHaveAttribute(
-      'data-surface',
-      'frosted-glass',
-    );
+    expect(await screen.findByRole('dialog', { name: '欢迎回来' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: '欢迎回来' })).toHaveClass('border-border', 'bg-popover');
     expect(screen.getByRole('button', { name: '注册账号' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'GitHub' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Google' })).toBeInTheDocument();
@@ -1143,21 +1140,21 @@ describe('LandingView bootstrap submission', () => {
     await renderLanding();
 
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-    const authDialog = await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    const authDialog = await screen.findByRole('dialog', { name: '欢迎回来' });
     const authPanel = authDialog.querySelector('form');
 
     expect(authPanel).toHaveClass('max-w-[520px]');
-    expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
+    expect(authPanel).toHaveClass('max-h-[calc(100dvh-2rem)]');
 
     fireEvent.click(screen.getByRole('button', { name: '注册账号' }));
 
     expect(authPanel).toHaveClass('max-w-[520px]');
-    expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
+    expect(authPanel).toHaveClass('max-h-[calc(100dvh-2rem)]');
 
     fireEvent.click(screen.getByRole('button', { name: '登录' }));
 
     expect(authPanel).toHaveClass('max-w-[520px]');
-    expect(authPanel).toHaveClass('h-[min(700px,calc(100vh-2rem))]');
+    expect(authPanel).toHaveClass('max-h-[calc(100dvh-2rem)]');
   });
 
   it('does not start generation after account-menu email login without an explicit generate click', async () => {
@@ -1176,7 +1173,7 @@ describe('LandingView bootstrap submission', () => {
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed but not submitted idea' } });
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'player@example.com' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'secret-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录并继续' }));
@@ -1193,7 +1190,7 @@ describe('LandingView bootstrap submission', () => {
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Typed but not submitted idea' } });
     fireEvent.click(screen.getByRole('button', { name: '用户菜单' }));
-    await screen.findByRole('dialog', { name: '登录 / 注册 BeeGame' });
+    await screen.findByRole('dialog', { name: '欢迎回来' });
     fireEvent.click(screen.getByRole('button', { name: 'GitHub' }));
 
     expect(signInWithSupabaseOAuth).toHaveBeenCalledWith('github');
@@ -1373,9 +1370,6 @@ describe('LandingView bootstrap submission', () => {
     expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('line-clamp-2', 'overflow-hidden');
     expect(within(cards[0]).getByTestId('intake-option-title')).toHaveClass('type-title-3');
     expect(within(cards[0]).getByTestId('intake-option-gameplay')).toHaveClass(
-      'scroll-fade',
-      'scroll-fade-y',
-      'scroll-fade-6',
       'scrollbar-premium',
       'type-body',
       'min-h-0',
@@ -1612,11 +1606,9 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '风格' }), { target: { value: 'Cartoon' } });
     fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));
     const inputListbox = screen.getByRole('listbox', { name: '输入方式' });
-    expect(inputListbox).toHaveAttribute('data-surface', 'frosted-glass');
-    expect(inputListbox).toHaveAttribute('data-glass-density', 'reinforced');
     expect(inputListbox).toHaveAttribute('data-floating-layer', 'true');
     expect(inputListbox).toHaveClass('fixed', 'z-[220]');
-    expect(inputListbox).toHaveClass('backdrop-blur-2xl');
+    expect(inputListbox).toHaveClass('bg-popover', 'border-border');
     fireEvent.change(screen.getByRole('textbox', { name: '补充说明' }), { target: { value: '优先验证关卡节奏。' } });
     fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
 
@@ -1695,24 +1687,19 @@ describe('LandingView bootstrap submission', () => {
     expect(await screen.findByText('game-design.md')).toBeInTheDocument();
   });
 
-  it('renders the video landing background', async () => {
+  it('keeps the landing page free of decorative video backgrounds', async () => {
     await renderLanding();
 
-    const background = screen.getByTestId('faulty-terminal-background');
-
-    expect(background).toHaveAttribute('data-background', 'video');
-    expect(screen.getByTestId('landing-background-video')).toBeInTheDocument();
-    expect(screen.getByTestId('landing-background-video')).not.toHaveAttribute('loop');
+    expect(screen.queryByTestId('faulty-terminal-background')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('landing-background-video')).not.toBeInTheDocument();
   });
 
-  it('keeps the video background stable while typing in the prompt', async () => {
+  it('keeps the prompt usable while typing', async () => {
     await renderLanding();
-
-    const video = screen.getByTestId('landing-background-video');
 
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '像素跑酷游戏' } });
 
-    expect(screen.getByTestId('landing-background-video')).toBe(video);
+    expect(screen.getByRole('textbox')).toHaveValue('像素跑酷游戏');
   });
 
   it('does not expose model thinking controls in the idea prompt', async () => {
@@ -1721,12 +1708,11 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.queryByRole('option', { name: '深度思考' })).not.toBeInTheDocument();
   });
 
-  it('renders the idea prompt as a frosted glass surface', async () => {
+  it('renders the idea prompt as a semantic surface', async () => {
     await renderLanding();
 
-    expect(screen.getByTestId('idea-prompt-surface')).toHaveAttribute('data-surface', 'frosted-glass');
-    expect(screen.getByTestId('idea-prompt-surface')).toHaveAttribute('data-style-source', 'pixelfork');
-    expect(screen.getByTestId('idea-prompt-surface')).toHaveAttribute('data-glass-density', 'reinforced');
+    expect(screen.getByTestId('idea-prompt-surface')).toHaveClass('bg-surface-2', 'border-border', 'rounded-xl');
+    expect(screen.getByTestId('idea-prompt-surface')).not.toHaveClass('backdrop-blur-2xl');
     expect(screen.queryByTestId('progressive-blur-layer')).not.toBeInTheDocument();
   });
 

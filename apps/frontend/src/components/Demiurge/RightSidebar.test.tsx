@@ -58,7 +58,7 @@ describe('RightSidebar tabs', () => {
         vi.useRealTimers();
     });
 
-    it('shows the canonical collaboration, deliverables, and assets tabs', () => {
+    it('shows the canonical chat and artifacts tabs', () => {
         render(
             <RightSidebar
                 projectId="proj_1"
@@ -77,11 +77,37 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        expect(screen.getByRole('button', { name: '协作流' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /^交付物/ })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '资源' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: /^Artifacts/ })).toBeInTheDocument();
+        expect(screen.queryByRole('tab', { name: '资源' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '运行时' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '任务看板' })).not.toBeInTheDocument();
+    });
+
+    it('opens an isolated unavailable editor dialog from the Scene entry', async () => {
+        const user = userEvent.setup();
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="en"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+
+        await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
+        await user.click(await screen.findByRole('button', { name: 'Scene' }));
+        expect(screen.getByRole('heading', { name: 'Scene Editor' })).toBeInTheDocument();
+        expect(screen.getByText(/not available yet/i)).toBeInTheDocument();
     });
 
     it('shows durable foundation completion in the deliverables tab count before opening it', () => {
@@ -118,7 +144,7 @@ describe('RightSidebar tabs', () => {
 
         // The fixture above intentionally uses non-canonical names to prove
         // that unrelated workflow tasks do not inflate the document counter.
-        expect(screen.getByRole('button', { name: /^交付物/ })).toHaveTextContent('0/8');
+        expect(screen.getByRole('tab', { name: /^Artifacts/ })).toHaveTextContent('10');
     });
 
     it('refreshes artifacts when a Level or Balance document event arrives', async () => {
@@ -146,7 +172,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        await userEvent.setup().click(screen.getByRole('button', { name: /^交付物/ }));
+        await userEvent.setup().click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(1));
 
         view.rerender(
@@ -196,7 +222,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        await userEvent.setup().click(screen.getByRole('button', { name: /^交付物/ }));
+        await userEvent.setup().click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('交付物'));
     });
 
@@ -224,7 +250,7 @@ describe('RightSidebar tabs', () => {
                 }}
             />
         );
-        await userEvent.setup().click(screen.getByRole('button', { name: /^交付物/ }));
+        await userEvent.setup().click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(1));
 
         view.rerender(
@@ -280,7 +306,7 @@ describe('RightSidebar tabs', () => {
                 }}
             />
         );
-        await userEvent.setup().click(screen.getByRole('button', { name: /^交付物/ }));
+        await userEvent.setup().click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(1));
         await act(async () => first.resolve([{ id: 'old', path: 'docs/old.md', name: 'old.md' }]));
         await waitFor(() => expect(screen.getByText('old.md')).toBeInTheDocument());
@@ -335,7 +361,7 @@ describe('RightSidebar tabs', () => {
         const input = screen.getByPlaceholderText(/AI 正在处理/i);
         expect(input).toBeDisabled();
 
-        await user.click(screen.getByRole('button', { name: '协作流' }));
+        await user.click(screen.getByRole('tab', { name: 'Chat' }));
         expect(onSendMessage).not.toHaveBeenCalled();
     });
 
@@ -392,7 +418,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        expect(screen.getByRole('button', { name: '协作流' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '最小化聊天' })).not.toBeInTheDocument();
     });
 
@@ -419,7 +445,12 @@ describe('RightSidebar tabs', () => {
         );
 
         const image = new File(['png-bytes'], 'screen.png', { type: 'image/png' });
-        await user.upload(screen.getByLabelText('上传附件'), image);
+        const attachButton = screen.getByRole('button', { name: '上传附件' });
+        const input = document.getElementById('beegame-chat-attachment-upload') as HTMLInputElement;
+        const inputClick = vi.spyOn(input, 'click').mockImplementation(() => undefined);
+        await user.click(attachButton);
+        expect(inputClick).toHaveBeenCalledTimes(1);
+        await user.upload(input, image);
 
         await waitFor(() => expect(screen.getByAltText('screen.png')).toBeInTheDocument());
         await user.click(screen.getByRole('button', { name: 'Send message' }));
@@ -741,6 +772,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
+        await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await user.click(screen.getByRole('button', { name: '资源' }));
         const file = new File(['audio'], 'game.mp3', { type: 'audio/mpeg' });
         await user.upload(await screen.findByLabelText('添加资源'), file);
@@ -777,6 +809,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
+        await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await user.click(screen.getByRole('button', { name: '资源' }));
 
         expect(await screen.findByText(/还没有资源合同/)).toBeInTheDocument();
@@ -809,6 +842,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
+        fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         fireEvent.click(screen.getByRole('button', { name: '资源' }));
         await act(async () => {
             await Promise.resolve();
@@ -874,6 +908,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
+        fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         fireEvent.click(screen.getByRole('button', { name: '资源' }));
         await act(async () => {
             await Promise.resolve();
@@ -932,6 +967,7 @@ describe('RightSidebar tabs', () => {
             />
         );
 
+        await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await user.click(screen.getByRole('button', { name: '资源' }));
         expect(await screen.findByText('Game BGM')).toBeInTheDocument();
 

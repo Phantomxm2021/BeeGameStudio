@@ -16,6 +16,13 @@ import type {
   WorkflowRecoveryUnitKind,
 } from '../types/message'
 
+export type ChatDisplaySource = {
+  id: string
+  title: string
+  domain?: string
+  url?: string
+}
+
 export type ChatDisplayMessage = Pick<
   Message,
   | 'id'
@@ -31,7 +38,10 @@ export type ChatDisplayMessage = Pick<
   | 'isDocument'
   | 'documentTitle'
   | 'thought'
+  | 'contentBlocks'
   | 'taskId'
+  | 'turnId'
+  | 'turn_id'
   | 'artifactId'
   | 'artifactPath'
   | 'renderHint'
@@ -41,11 +51,24 @@ export type ChatDisplayMessage = Pick<
   | 'requiresUserAction'
   | 'errorDetails'
   | 'toolName'
+  | 'toolUseId'
   | 'toolStatus'
   | 'toolDetail'
   | 'toolOutput'
+  | 'toolDiff'
+  | 'toolPatch'
+  | 'toolBefore'
+  | 'toolAfter'
+  | 'toolStructuredPatch'
+  | 'toolInput'
   | 'isSubagentTool'
->
+  | 'subagentPrompt'
+  | 'subagentOutput'
+  | 'subagentTrace'
+> & {
+  sources?: ChatDisplaySource[]
+  citations?: ChatDisplaySource[]
+}
 
 export interface PermissionDisplaySummary {
   block_reason?: string
@@ -601,7 +624,10 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   isDocument: message.isDocument,
   documentTitle: message.documentTitle,
   thought: message.thought,
+  contentBlocks: message.contentBlocks,
   taskId: message.taskId,
+  turnId: message.turnId || message.turn_id,
+  turn_id: message.turn_id || message.turnId,
   artifactId: message.artifactId,
   artifactPath: message.artifactPath,
   renderHint: message.renderHint,
@@ -611,11 +637,41 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   requiresUserAction: message.requiresUserAction,
   errorDetails: message.errorDetails,
   toolName: message.toolName,
+  toolUseId: message.toolUseId,
   toolStatus: message.toolStatus,
   toolDetail: message.toolDetail,
   toolOutput: message.toolOutput,
+  toolDiff: message.toolDiff,
+  toolPatch: message.toolPatch,
+  toolBefore: message.toolBefore,
+  toolAfter: message.toolAfter,
+  toolStructuredPatch: message.toolStructuredPatch,
+  toolInput: message.toolInput,
   isSubagentTool: message.isSubagentTool,
+  subagentPrompt: message.subagentPrompt,
+  subagentOutput: message.subagentOutput,
+  subagentTrace: message.subagentTrace,
+  sources: normalizeDisplaySources(message.sources),
+  citations: normalizeDisplaySources(message.citations),
 })
+
+const normalizeDisplaySources = (
+  value: Message['sources'] | Message['citations'],
+): ChatDisplaySource[] | undefined => {
+  if (!Array.isArray(value)) return undefined
+  const sources = value.flatMap((source, index) => {
+    if (!source || typeof source !== 'object') return []
+    const title = String(source.title || '').trim()
+    if (!title) return []
+    return [{
+      id: String(source.id || `source-${index + 1}`),
+      title,
+      ...(source.domain ? { domain: String(source.domain) } : {}),
+      ...(source.url ? { url: String(source.url) } : {}),
+    }]
+  })
+  return sources.length ? sources : undefined
+}
 
 export const toChatDisplayMessages = (
   messages: Message[],

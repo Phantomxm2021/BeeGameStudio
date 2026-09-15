@@ -18,11 +18,6 @@ export default defineConfig({
     // workers instead of letting Node probe an unset --localstorage-file.
     execArgv: ['--no-experimental-webstorage'],
     setupFiles: './src/test/setup.ts',
-    server: {
-      deps: {
-        inline: ['@shadcn/react'],
-      },
-    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -46,8 +41,5 @@ export default defineConfig({
       { find: 'react', replacement: frontendReactPath },
     ],
     dedupe: ['react', 'react-dom'],
-  },
-  ssr: {
-    noExternal: ['@shadcn/react'],
   },
 });

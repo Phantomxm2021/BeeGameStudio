@@ -324,7 +324,9 @@ describe('beeGameAdapter prompt rules', () => {
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'not found' }, 404));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.getProjects()).rejects.toThrow('not found');
+    const request = beeGameAdapter.getProjects();
+    await expect(request).rejects.toBeInstanceOf(Error);
+    await expect(request).rejects.toMatchObject({ message: expect.stringContaining('not found') });
   });
 
   it('does not fall back to local project storage for authenticated cloud sessions', async () => {
@@ -339,7 +341,9 @@ describe('beeGameAdapter prompt rules', () => {
     const fetchMock = vi.fn(async () => jsonResponse({ error: 'not found' }, 404));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.getProjects()).rejects.toThrow('not found');
+    const request = beeGameAdapter.getProjects();
+    await expect(request).rejects.toBeInstanceOf(Error);
+    await expect(request).rejects.toMatchObject({ message: expect.stringContaining('not found') });
   });
 
   it('preserves recoverable authentication outage metadata from fetch routes', async () => {
@@ -391,8 +395,9 @@ describe('beeGameAdapter prompt rules', () => {
     )
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.generateIntakeOptions({ idea: 'idea requiring LLM' }))
-      .rejects.toThrow('not found');
+    const request = beeGameAdapter.generateIntakeOptions({ idea: 'idea requiring LLM' });
+    await expect(request).rejects.toBeInstanceOf(Error);
+    await expect(request).rejects.toMatchObject({ message: expect.stringContaining('not found') });
     expect(fetchMock).not.toHaveBeenCalledWith('/api/beegame-intake/options', expect.anything());
   });
 
@@ -407,8 +412,11 @@ describe('beeGameAdapter prompt rules', () => {
     )
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring LLM' }))
-      .rejects.toThrow('Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。');
+    const request = beeGameAdapter.runIdeaIntake({ idea: 'idea requiring LLM' });
+    await expect(request).rejects.toBeInstanceOf(Error);
+    await expect(request).rejects.toMatchObject({
+      message: expect.stringContaining('Credit 不足。本次方案生成需要预扣 3 credits，你当前有 0 credits。'),
+    });
   });
 
 
@@ -669,9 +677,11 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' })).rejects.toThrow(
-      'BeeGame intake must return exactly 3 game mode options; received 0',
-    );
+    const request = beeGameAdapter.runIdeaIntake({ idea: 'idea requiring clarification' });
+    await expect(request).rejects.toBeInstanceOf(Error);
+    await expect(request).rejects.toMatchObject({
+      message: expect.stringContaining('BeeGame intake must return exactly 3 game mode options; received 0'),
+    });
   });
 
   it('creates new sessions in a project-specific workspace under the default Projects directory', async () => {
@@ -927,7 +937,11 @@ describe('beeGameAdapter prompt rules', () => {
             turnId: 'turn-1',
             type: 'assistant.message',
             text: 'LLM generated assistant message.',
-            payload: { type: 'assistant.message' },
+            payload: {
+              type: 'assistant.message',
+              sources: [{ id: 'history-source', title: 'Transcript source', domain: 'history.test' }],
+              citations: [{ id: 'history-citation', title: 'Transcript citation', url: 'https://history.test/citation' }],
+            },
             createdAt: '2026-06-21T00:00:02.000Z',
           },
         ]);
@@ -949,15 +963,82 @@ describe('beeGameAdapter prompt rules', () => {
       expect.objectContaining({
         sender: 'user',
         content: 'LLM generated user message',
+        turnId: 'turn-1',
       }),
       expect.objectContaining({
         sender: 'beegame',
         content: 'LLM generated assistant message.',
+        turnId: 'turn-1',
+        sources: [{ id: 'history-source', title: 'Transcript source', domain: 'history.test' }],
+        citations: [{ id: 'history-citation', title: 'Transcript citation', url: 'https://history.test/citation' }],
       }),
     ]));
     expect(fetchMock.mock.calls.some(([path, init]) =>
           String(path) === '/api/beegame-sessions' && init?.method === 'POST'
     )).toBe(false);
+  });
+
+  it('keeps thinking and text blocks from the same assistant message in source order', async () => {
+    const workspacePath = '/tmp/beegame-projects/block-order-game';
+    const transcriptPath = `/api/beegame-sessions/beegame_block_order/transcript?workspacePath=${encodeURIComponent(workspacePath)}`;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === transcriptPath) {
+        return jsonResponse([
+          {
+            id: 10,
+            sessionId: 'beegame_block_order',
+            turnId: 'turn-block-order',
+            type: 'assistant.message',
+            text: 'Thinking',
+            payload: {
+              type: 'assistant.message',
+              message: {
+                id: 'assistant-message-1',
+                role: 'assistant',
+                content: [{
+                  type: 'thinking',
+                  thinking: 'I am checking the workspace first.',
+                }],
+              },
+            },
+            createdAt: '2026-06-21T00:00:10.000Z',
+          },
+          {
+            id: 11,
+            sessionId: 'beegame_block_order',
+            turnId: 'turn-block-order',
+            type: 'assistant.message',
+            text: 'Workspace checked.',
+            payload: {
+              type: 'assistant.message',
+              message: {
+                id: 'assistant-message-1',
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Workspace checked.' }],
+              },
+            },
+            createdAt: '2026-06-21T00:00:11.000Z',
+          },
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { project } = seedBoundProject('beegame_block_order', workspacePath);
+
+    const history = await beeGameAdapter.getChatHistory(project.id) as Array<{
+      content: string;
+      contentBlocks?: Array<{ type: string; text?: string }>;
+    }>;
+    const assistant = history.find(message => message.content === 'Workspace checked.');
+
+    expect(assistant).toEqual(expect.objectContaining({
+      content: 'Workspace checked.',
+      contentBlocks: [
+        { type: 'thinking', text: 'I am checking the workspace first.' },
+        { type: 'text', text: 'Workspace checked.' },
+      ],
+    }));
   });
 
   it('loads compact chat history from newest to oldest with a stable cursor', async () => {
@@ -1958,7 +2039,13 @@ describe('beeGameAdapter prompt rules', () => {
             turnId: 'turn-1',
             type: 'tool.started',
             text: 'Bash',
-            payload: { type: 'tool.started', toolUseID: 'tool_b', toolName: 'Bash', input: { command: 'ls' } },
+            payload: {
+              type: 'tool.started',
+              toolUseID: 'tool_b',
+              toolName: 'Bash',
+              input: { command: 'ls' },
+              output: { gitDiff: '--- a/README.md\n+++ b/README.md\n@@\n-old\n+new' },
+            },
             createdAt: '2026-06-21T00:00:03.000Z',
           },
         ]);
@@ -1979,6 +2066,8 @@ describe('beeGameAdapter prompt rules', () => {
       'tool_a',
       'tool_b',
     ]);
+    expect(polled.messages[1]?.tool_diff).toBe('--- a/README.md\n+++ b/README.md\n@@\n-old\n+new');
+    expect(polled.messages[1]?.tool_input).toEqual({ command: 'ls' });
   });
 
   it('does not create a separate clarification protocol for permission events', async () => {
@@ -3314,8 +3403,9 @@ describe('beeGameAdapter prompt rules', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(beeGameAdapter.downloadProjectPackage('project_zip_retry'))
-      .rejects.toThrow('Session not found');
+    const request = beeGameAdapter.downloadProjectPackage('project_zip_retry');
+    await expect(request).rejects.toBeInstanceOf(Error);
+    await expect(request).rejects.toMatchObject({ message: expect.stringContaining('Session not found') });
     expect(packageAttempts).toBe(1);
     expect(fetchMock).not.toHaveBeenCalledWith(
       '/api/projects/project_zip_retry/session/ensure',

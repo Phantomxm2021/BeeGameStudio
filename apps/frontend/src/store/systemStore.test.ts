@@ -17,7 +17,7 @@ vi.mock('zustand/middleware', () => ({
   persist: <T,>(initializer: T) => initializer,
 }));
 
-import { useSystemStore } from './systemStore';
+import { applyThemeToDocument, useSystemStore } from './systemStore';
 import { api } from '../services/api';
 
 describe('systemStore token usage', () => {
@@ -30,6 +30,18 @@ describe('systemStore token usage', () => {
       authenticationStatus: 'initializing',
     });
     vi.clearAllMocks();
+  });
+
+  it('keeps the root theme class and color scheme synchronized', () => {
+    applyThemeToDocument(true);
+    expect(document.documentElement).toHaveClass('dark');
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+    expect(getComputedStyle(document.documentElement).colorScheme).toBe('dark');
+
+    applyThemeToDocument(false);
+    expect(document.documentElement).not.toHaveClass('dark');
+    expect(document.documentElement.style.colorScheme).toBe('light');
+    expect(getComputedStyle(document.documentElement).colorScheme).toBe('light');
   });
 
   it('keeps project and task token usage monotonic for cumulative snapshots', () => {

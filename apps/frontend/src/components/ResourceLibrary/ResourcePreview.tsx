@@ -75,7 +75,7 @@ export function ResourcePreview({ element, url, onMetrics, materialTextureBindin
   if (renderer === 'text') return <SafeTextPreview url={url} onPreviewError={onPreviewError} />
   if (renderer === 'model') {
     return (
-      <Suspense fallback={<div className="grid h-full w-full place-items-center"><span className="size-6 animate-spin rounded-full border-2 border-white/20 border-t-white/70" /></div>}>
+      <Suspense fallback={<div className="grid h-full w-full place-items-center"><span className="size-6 animate-spin rounded-full border-2 border-border border-t-foreground/70" /></div>}>
         <ModelPreview url={url} sourcePath={element.path} extension={extension} onMetrics={onMetrics} onMetricsError={onPreviewError} materialTextureBindings={materialTextureBindings} textureUrls={textureUrls} externalResourceUrls={externalResourceUrls} externalReferences={externalReferences} />
       </Suspense>
     )
@@ -95,7 +95,7 @@ function FontPreview({ url, onPreviewError }: { url: string; element: ResourceEl
     return () => { active = false; document.fonts.delete(font) }
   }, [url])
 
-  return <div className="grid h-full w-full place-items-center p-8"><p className="max-w-full break-words text-center text-4xl text-white" style={{ fontFamily: loaded ? 'resource-preview-font, sans-serif' : 'sans-serif' }}>The quick brown fox jumps over the lazy dog</p></div>
+  return <div className="grid h-full w-full place-items-center p-8"><p className="max-w-full break-words text-center text-4xl text-foreground" style={{ fontFamily: loaded ? 'resource-preview-font, sans-serif' : 'sans-serif' }}>The quick brown fox jumps over the lazy dog</p></div>
 }
 
 function SafeTextPreview({ url, onPreviewError }: { url: string; onPreviewError?: (error: Error) => void }) {
@@ -110,9 +110,9 @@ function SafeTextPreview({ url, onPreviewError }: { url: string; onPreviewError?
     return () => controller.abort()
   }, [url])
 
-  return <pre className="h-full w-full overflow-auto whitespace-pre-wrap break-words rounded bg-black/20 p-4 text-sm text-zinc-100">{content}</pre>
+  return <pre className="h-full w-full overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-4 text-sm text-foreground">{content}</pre>
 }
 
 function DocumentCard({ element, url }: { element: ResourceElement; url: string }) {
-  return <div className="grid h-full w-full place-items-center p-8"><div className="rounded-xl border border-white/10 bg-white/5 p-6 text-center text-zinc-200"><p className="font-medium">{element.name}</p><p className="mt-2 text-sm text-zinc-400">This file type cannot be previewed in the workspace.</p><a className="mt-4 inline-block text-sm text-amber-300 underline" href={url} download={element.name}>Download file</a></div></div>
+  return <div className="grid h-full w-full place-items-center p-8"><div className="rounded-xl border border-border bg-muted p-6 text-center text-foreground"><p className="font-medium">{element.name}</p><p className="mt-2 text-sm text-muted-foreground">This file type cannot be previewed in the workspace.</p><a className="mt-4 inline-block text-sm text-foreground underline" href={url} download={element.name}>Download file</a></div></div>
 }

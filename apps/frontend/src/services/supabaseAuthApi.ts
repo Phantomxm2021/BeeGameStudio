@@ -1,3 +1,10 @@
+import {
+  getOAuthRedirectUri,
+  isDesktopShell,
+  onDesktopOAuthCallback,
+  openExternal,
+} from '../lib/platform';
+
 export type BeeGameSupabaseUser = {
   id: string;
   email?: string;
@@ -57,6 +64,7 @@ let pendingRedirectConsumption: {
 } | null = null;
 let pendingSessionInitialization: Promise<BeeGameSupabaseSession | null> | null = null;
 let pendingSessionRefresh: Promise<BeeGameSupabaseSession | null> | null = null;
+let desktopOAuthListenerSetup = false;
 let httpOnlySessionUser: BeeGameSupabaseUser | null = null;
 let httpOnlySessionExpiresAt = 0;
 
@@ -262,10 +270,15 @@ export async function signInWithSupabaseOAuth(
   }
   const codeVerifier = createPkceCodeVerifier();
   const codeChallenge = await createPkceCodeChallenge(codeVerifier);
+  const state = createOAuthState();
+  const redirectTarget = new URL(getOAuthRedirectUri());
+  redirectTarget.searchParams.set('oauth_state', state);
+  const redirectTo = redirectTarget.toString();
   const invitationCode = options.invitationCode?.trim() || '';
   const pkceContext: Record<string, unknown> = {
     provider,
     codeVerifier,
+    state,
     createdAt: Date.now(),
   };
   let redirectUrl: string;
@@ -280,9 +293,10 @@ export async function signInWithSupabaseOAuth(
       body: JSON.stringify({
         provider,
         invitationCode,
-        redirectTo: window.location.origin,
+        redirectTo,
         codeChallenge,
         codeChallengeMethod: 'S256',
+        state,
         ...(provider === 'discord' ? { scopes: 'identify email' } : {}),
       }),
     });
@@ -300,17 +314,22 @@ export async function signInWithSupabaseOAuth(
   } else {
     const url = new URL(`${trimTrailingSlash(supabaseUrl)}/auth/v1/authorize`);
     url.searchParams.set('provider', provider);
-    url.searchParams.set('redirect_to', window.location.origin);
+    url.searchParams.set('redirect_to', redirectTo);
     url.searchParams.set('flow_type', 'pkce');
     url.searchParams.set('code_challenge', codeChallenge);
     url.searchParams.set('code_challenge_method', 'S256');
+    url.searchParams.set('state', state);
     if (provider === 'discord') {
       url.searchParams.set('scopes', 'identify email');
     }
     redirectUrl = url.toString();
   }
   sessionStorage.setItem(OAUTH_PKCE_STORAGE_KEY, JSON.stringify(pkceContext));
-  window.location.assign(redirectUrl);
+  if (isDesktopShell()) {
+    await openExternal(redirectUrl);
+  } else {
+    window.location.assign(redirectUrl);
+  }
 }
 
 export async function consumeSupabaseRedirectSession(): Promise<boolean> {
@@ -329,16 +348,44 @@ export async function consumeSupabaseRedirectSession(): Promise<boolean> {
   return promise;
 }
 
-async function consumeSupabaseRedirectSessionOnce(): Promise<boolean> {
-  const hash = window.location.hash.startsWith('#')
-    ? window.location.hash.slice(1)
-    : window.location.hash;
+export async function consumeSupabaseOAuthCallback(callbackUrl: string): Promise<boolean> {
+  let parsed: URL;
+  try {
+    parsed = new URL(callbackUrl);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'beegame:' || parsed.hostname !== 'oauth' || parsed.pathname !== '/callback') return false;
+  const callbackKey = parsed.toString();
+  if (pendingRedirectConsumption?.key === callbackKey) return pendingRedirectConsumption.promise;
+  const promise = consumeSupabaseRedirectSessionOnce(parsed, false).finally(() => {
+    if (pendingRedirectConsumption?.promise === promise) pendingRedirectConsumption = null;
+  });
+  pendingRedirectConsumption = { key: callbackKey, promise };
+  return promise;
+}
+
+async function consumeSupabaseRedirectSessionOnce(source?: URL, clearCallback = true): Promise<boolean> {
+  const hash = source?.hash.startsWith('#')
+    ? source.hash.slice(1)
+    : source?.hash ?? (window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash);
   const hashParams = new URLSearchParams(hash);
-  const searchParams = new URLSearchParams(window.location.search);
+  const searchParams = source?.searchParams ?? new URLSearchParams(window.location.search);
   const pkce = readStoredPkceContext();
+  // Supabase owns the top-level `state` value. The client nonce travels in
+  // redirect_to and is returned as `oauth_state`, so prefer it whenever both
+  // values are present.
+  const callbackState = searchParams.get('oauth_state')?.trim()
+    || searchParams.get('state')?.trim()
+    || hashParams.get('oauth_state')?.trim()
+    || hashParams.get('state')?.trim()
+    || '';
+  if (source && (!pkce?.state || !callbackState || callbackState !== pkce.state)) {
+    throw new Error('OAuth callback state did not match the sign-in request.');
+  }
   const error = readOAuthError(hashParams) ?? readOAuthError(searchParams);
   if (error) {
-    clearOAuthCallbackUrl();
+    if (clearCallback) clearOAuthCallbackUrl();
     sessionStorage.removeItem(OAUTH_PKCE_STORAGE_KEY);
     throw new Error(toUserFacingOAuthError(error, pkce?.provider));
   }
@@ -352,14 +399,14 @@ async function consumeSupabaseRedirectSessionOnce(): Promise<boolean> {
       user: { id: 'oauth' },
     });
     await redeemOAuthInvitationNonce(pkce?.invitationNonce, accessToken);
-    clearOAuthCallbackUrl();
+    if (clearCallback) clearOAuthCallbackUrl();
     return true;
   }
   const authCode = searchParams.get('code')?.trim() || '';
   if (!authCode) return false;
   const session = await exchangeSupabaseOAuthCode(authCode);
   await redeemOAuthInvitationNonce(pkce?.invitationNonce, session.accessToken);
-  clearOAuthCallbackUrl();
+  if (clearCallback) clearOAuthCallbackUrl();
   return true;
 }
 
@@ -443,6 +490,20 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
 export function initializeSupabaseSession(): Promise<BeeGameSupabaseSession | null> {
   if (pendingSessionInitialization) return pendingSessionInitialization;
   const initialization = (async () => {
+    if (!desktopOAuthListenerSetup) {
+      desktopOAuthListenerSetup = true;
+      onDesktopOAuthCallback((callbackUrl) => {
+        void consumeSupabaseOAuthCallback(callbackUrl)
+          .then((consumed) => {
+            if (consumed) window.location.reload();
+          })
+          .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : 'OAuth sign-in failed.';
+            window.dispatchEvent(new CustomEvent('beegame-oauth-error', { detail: { message } }));
+            console.error('OAuth callback could not be consumed:', error);
+          });
+      });
+    }
     await consumeSupabaseRedirectSession();
     return hydrateSupabaseSessionUser();
   })().finally(() => {
@@ -647,6 +708,7 @@ function readStoredPkceContext(): {
   provider?: SupabaseOAuthProvider
   codeVerifier?: string
   invitationNonce?: string
+  state?: string
 } | undefined {
   const raw = sessionStorage.getItem(OAUTH_PKCE_STORAGE_KEY);
   if (!raw) return undefined;
@@ -664,10 +726,12 @@ function readStoredPkceContext(): {
     const invitationNonce = typeof value.invitationNonce === 'string'
       ? value.invitationNonce.trim()
       : '';
+    const state = typeof value.state === 'string' ? value.state.trim() : '';
     return {
       provider,
       codeVerifier,
       ...(invitationNonce ? { invitationNonce } : {}),
+      ...(state ? { state } : {}),
     };
   } catch {
     return undefined;
@@ -926,11 +990,17 @@ function getOAuthCallbackKey(): string {
 }
 
 function clearOAuthCallbackUrl(): void {
-  window.history.replaceState({}, document.title, window.location.pathname);
+  history.replaceState({}, document.title, window.location.pathname);
 }
 
 function createPkceCodeVerifier(): string {
   const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+function createOAuthState(): string {
+  const bytes = new Uint8Array(24);
   window.crypto.getRandomValues(bytes);
   return base64UrlEncode(bytes);
 }

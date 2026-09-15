@@ -17,6 +17,7 @@
     "settings": "설정",
     "theme": "테마 전환",
     "darkMode": "다크 모드",
+    "lightMode": "라이트 모드",
     "language": "언어 선택",
     "systemSettings": "시스템 설정",
     "offline": "서버에 연결할 수 없음",

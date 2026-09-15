@@ -20,4 +20,17 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // beUI registry source is copied from the official registry. Its ref
+    // forwarding and browser-layout effects are intentional for these
+    // primitives and conflict with the app's stricter React compiler rules.
+    files: ['src/components/beui/registry/**/*.{ts,tsx}'],
+    rules: {
+      'react-hooks/exhaustive-deps': 'off',
+      'react-hooks/immutability': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

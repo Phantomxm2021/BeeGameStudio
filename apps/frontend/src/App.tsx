@@ -5,9 +5,10 @@
  */
 
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import ErrorBoundary from './components/Common/ErrorBoundary';
 import { useProjectStore } from './store/projectStore';
-import { useSystemStore } from './store/systemStore';
+import { applyThemeToDocument, useSystemStore } from './store/systemStore';
 import { useChatStore } from './store/chatStore';
 import { useToastContext } from './contexts/ToastContext';
 import { setToastErrorCallback, api } from './services/api';
@@ -42,15 +43,28 @@ function App() {
     bootstrapProjectFromBrief,
     setToastCallbacks,
     clearActiveProject,
-  } = useProjectStore();
+  } = useProjectStore(useShallow((state) => ({
+    loadProjects: state.loadProjects,
+    projects: state.projects,
+    activeProjectId: state.activeProjectId,
+    bootstrapProjectFromBrief: state.bootstrapProjectFromBrief,
+    setToastCallbacks: state.setToastCallbacks,
+    clearActiveProject: state.clearActiveProject,
+  })));
   const {
     loadCurrentUser,
     authenticationStatus,
     setAuthenticationStatus,
     currentUser,
     isDark,
-  } = useSystemStore();
-  const { loadHistory } = useChatStore();
+  } = useSystemStore(useShallow((state) => ({
+    loadCurrentUser: state.loadCurrentUser,
+    authenticationStatus: state.authenticationStatus,
+    setAuthenticationStatus: state.setAuthenticationStatus,
+    currentUser: state.currentUser,
+    isDark: state.isDark,
+  })));
+  const loadHistory = useChatStore((state) => state.loadHistory);
   const { showError, showSuccess } = useToastContext();
 
   const [lang, setLang] = useState<Language>('zh');
@@ -69,13 +83,9 @@ function App() {
     return () => window.removeEventListener('popstate', syncResourceRoute);
   }, []);
 
-  // Sync dark mode class to root element
+  // Keep the app shell and native controls on the same theme.
   useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    applyThemeToDocument(isDark);
   }, [isDark]);
 
   // Initialize toast callbacks
@@ -89,6 +99,15 @@ function App() {
     window.addEventListener(AUTHENTICATION_REQUIRED_EVENT, handleAuthenticationRequired);
     return () => window.removeEventListener(AUTHENTICATION_REQUIRED_EVENT, handleAuthenticationRequired);
   }, [setAuthenticationStatus]);
+
+  useEffect(() => {
+    const handleOAuthError = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: unknown }>).detail;
+      showError(typeof detail?.message === 'string' ? detail.message : '登录失败，请重试');
+    };
+    window.addEventListener('beegame-oauth-error', handleOAuthError);
+    return () => window.removeEventListener('beegame-oauth-error', handleOAuthError);
+  }, [showError]);
 
   // Initialize app data on mount
   useEffect(() => {
@@ -147,15 +166,22 @@ function App() {
 
   // Load chat history when active project changes
   useEffect(() => {
+    let cancelled = false;
     const loadChatHistory = async () => {
       if (!activeProjectId || !activeProject) {
         loadedHistoryProjectRef.current = null;
         return;
       }
       if (loadedHistoryProjectRef.current === activeProjectId) return;
+      const requestProjectId = activeProjectId;
 
       try {
-        const history = await api.getChatHistory(activeProjectId) as unknown;
+        const history = await api.getChatHistory(requestProjectId) as unknown;
+        // A project switch can happen while the request is in flight. The
+        // cleanup guard prevents late history from being committed to the
+        // next project, even when the store has not rendered yet.
+        const latestProjectId = useProjectStore.getState().activeProjectId;
+        if (cancelled || latestProjectId !== requestProjectId) return;
         const normalized = normalizeChatHistory(history);
         const currentMessages = useChatStore.getState().messages;
         const hasStreamingMessages = currentMessages.some((msg) => msg.id?.startsWith('streaming-'));
@@ -164,14 +190,15 @@ function App() {
         if (!hasStreamingMessages && (normalized.length > 0 || currentMessages.length === 0)) {
           loadHistory(normalized);
         }
-        loadedHistoryProjectRef.current = activeProjectId;
+        loadedHistoryProjectRef.current = requestProjectId;
       } catch (error) {
-        console.error('[App] Failed to load chat history:', error);
+        if (!cancelled) console.error('[App] Failed to load chat history:', error);
       }
     };
 
     loadChatHistory();
-  }, [activeProjectId, activeProject, loadHistory]); // Read messages from the store at resolve time to avoid history-load races.
+    return () => { cancelled = true; };
+  }, [activeProjectId, activeProject, loadHistory]);
 
   const handleStartProject = async (
     _projectName: string,
@@ -193,13 +220,13 @@ function App() {
   if (authenticationStatus === 'initializing') {
     return (
       <div
-        className="flex min-h-screen items-center justify-center bg-black px-6 text-center text-white"
+        className="flex min-h-screen items-center justify-center bg-background px-6 text-center text-foreground"
         role="status"
         aria-label="Initializing BeeGame"
       >
         <div className="flex max-w-sm flex-col items-center gap-4">
-          <span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" aria-hidden="true" />
-          <p className="text-sm font-medium tracking-[-0.01em] text-white/80">
+          <span className="size-7 animate-spin rounded-full border-2 border-border/20 border-t-ring" aria-hidden="true" />
+          <p className="text-sm font-medium tracking-[-0.01em] text-foreground">
             {authenticationInitializationError || '正在恢复登录状态…'}
           </p>
         </div>
@@ -211,7 +238,7 @@ function App() {
     <ErrorBoundary>
       {/* If we have an active project ID and valid project, render the Dashboard */}
       {authenticationStatus === 'authenticated' && activeProjectId && activeProject && !isResourceRoute ? (
-        <Suspense fallback={<div className="grid min-h-screen place-items-center bg-black"><span className="size-7 animate-spin rounded-full border-2 border-white/20 border-t-white/80" /></div>}>
+        <Suspense fallback={<div className="grid min-h-screen place-items-center bg-background"><span className="size-7 animate-spin rounded-full border-2 border-border/20 border-t-ring" /></div>}>
           <DashboardView
             projectId={activeProjectId}
             projectName={activeProject.name || 'Untitled Project'}
