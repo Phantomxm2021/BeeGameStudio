@@ -174,6 +174,8 @@ export type BeeGameEvent = {
   createdAt: Date
 }
 
+export type BeeGameEventSubscriber = (event: BeeGameEvent) => void
+
 export type BeeGameSession = {
   id: string
   cwd: string
@@ -629,6 +631,10 @@ export type BeeGameSessionUsageBillingBackend = {
 
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
+  private readonly eventSubscribers = new Map<
+    string,
+    Set<BeeGameEventSubscriber>
+  >()
   private readonly dashboardDataRoot: string
 
   constructor(
@@ -1025,6 +1031,27 @@ export class BeeGameSessionManager {
       .map(event => formatBeeGameEventForDisplay(event, record.language))
   }
 
+  subscribeEvents(
+    sessionId: string,
+    subscriber: BeeGameEventSubscriber,
+  ): () => void {
+    const record = this.sessions.get(sessionId)
+    if (!record) throw new Error('Session not found')
+    const subscribers = this.eventSubscribers.get(sessionId) ?? new Set()
+    const wrappedSubscriber: BeeGameEventSubscriber = event => {
+      if (isThinkingProtocolControlEvent(event)) return
+      subscriber(formatBeeGameEventForDisplay(event, record.language))
+    }
+    subscribers.add(wrappedSubscriber)
+    this.eventSubscribers.set(sessionId, subscribers)
+    return () => {
+      const current = this.eventSubscribers.get(sessionId)
+      if (!current) return
+      current.delete(wrappedSubscriber)
+      if (current.size === 0) this.eventSubscribers.delete(sessionId)
+    }
+  }
+
   hasInFlightToolSubmission(sessionId: string, toolName: string): boolean {
     const record = this.sessions.get(sessionId)
     if (!record) return false
@@ -1232,6 +1259,7 @@ export class BeeGameSessionManager {
       if (deletedWorkspacePath) deletedArtifactPaths.push(deletedWorkspacePath)
     }
     this.sessions.delete(sessionId)
+    this.eventSubscribers.delete(sessionId)
     return { deleted: true, deletedArtifactPaths }
   }
 
@@ -1251,6 +1279,7 @@ export class BeeGameSessionManager {
       { force: true },
     )
     this.sessions.delete(sessionId)
+    this.eventSubscribers.delete(sessionId)
   }
 
   async flushWorkflowUsage(sessionId: string): Promise<void> {
@@ -1319,6 +1348,7 @@ export class BeeGameSessionManager {
       }
     }
     await Promise.all(workflowDrains)
+    this.eventSubscribers.clear()
   }
 
   /**
@@ -2039,6 +2069,16 @@ export class BeeGameSessionManager {
     record.events.push(event)
     appendTranscriptEvent(record.transcriptPath, event)
     appendProjectRuntimeLog(record, event)
+    for (const subscriber of this.eventSubscribers.get(record.session.id) ?? []) {
+      try {
+        subscriber(event)
+      } catch (error) {
+        console.warn('[BeeGame] Event subscriber failed', {
+          sessionId: record.session.id,
+          cause: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
     if (record.workflowWorker && record.workflowRunId) {
       // Raw tool/system labels remain telemetry. Resource preparation exposes
       // only a small structural activity vocabulary so the card can explain

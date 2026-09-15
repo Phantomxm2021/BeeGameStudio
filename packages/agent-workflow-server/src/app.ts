@@ -2719,6 +2719,7 @@ export function createAgentWorkflowApp(
         request: c.req.raw,
         sessionId: sessionRef.sessionId,
         workspacePath: sessionRef.workspacePath,
+        live: Boolean(sessionRef.live),
         after,
         recoveredFromTranscript: !sessionRef.live,
         dashboardDataRoot,
@@ -6219,7 +6220,6 @@ async function getProjectRuntimeEvents(input: {
   }
 }
 
-const PROJECT_EVENTS_SSE_POLL_INTERVAL_MS = 250
 const PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS = 15_000
 const PROJECT_EVENTS_SSE_MAX_CONNECTION_MS = 25_000
 
@@ -6227,6 +6227,7 @@ function createProjectEventsSseStream(input: {
   request: Request
   sessionId: string
   workspacePath: string
+  live: boolean
   after: number
   recoveredFromTranscript: boolean
   dashboardDataRoot?: string
@@ -6263,64 +6264,90 @@ function createProjectEventsSseStream(input: {
         let after = input.after
         let lastHeartbeatAt = Date.now()
         const deadline = Date.now() + PROJECT_EVENTS_SSE_MAX_CONNECTION_MS
+        let pendingEvents: BeeGameEvent[] = []
+        let wake: (() => void) | undefined
+        const unsubscribe = input.live
+          ? input.beeGameSessions.subscribeEvents(input.sessionId, event => {
+              if (event.id <= after) return
+              pendingEvents.push(event)
+              wake?.()
+              wake = undefined
+            })
+          : undefined
+        const emitEvents = (events: BeeGameEvent[]) => {
+          const unseen = events.filter(event => event.id > after)
+          if (unseen.length === 0) return
+          after = unseen[unseen.length - 1]!.id
+          const payload = JSON.stringify({
+            sessionId: input.sessionId,
+            workspacePath: input.workspacePath,
+            events: unseen,
+            recoveredFromTranscript: input.recoveredFromTranscript,
+          })
+          controller.enqueue(
+            encoder.encode(
+              `id: ${after}\nevent: project-events\ndata: ${payload}\n\n`,
+            ),
+          )
+          lastHeartbeatAt = Date.now()
+        }
         try {
-          while (!closed && !signal.aborted && Date.now() < deadline) {
-            const events = (await getProjectRuntimeEvents({
+          emitEvents(
+            await getProjectRuntimeEvents({
               sessionId: input.sessionId,
               workspacePath: input.workspacePath,
               dashboardDataRoot: input.dashboardDataRoot,
               beeGameSessions: input.beeGameSessions,
-            })).filter(event => event.id > after)
-
-            if (events.length > 0) {
-              after = events[events.length - 1]!.id
-              const payload = JSON.stringify({
-                sessionId: input.sessionId,
-                workspacePath: input.workspacePath,
-                events,
-                recoveredFromTranscript: input.recoveredFromTranscript,
-              })
-              controller.enqueue(
-                encoder.encode(
-                  `id: ${after}\nevent: project-events\ndata: ${payload}\n\n`,
-                ),
-              )
-              lastHeartbeatAt = Date.now()
-            } else if (
+            }),
+          )
+          while (!closed && !signal.aborted && Date.now() < deadline) {
+            if (pendingEvents.length > 0) {
+              const events = pendingEvents
+              pendingEvents = []
+              emitEvents(events)
+              continue
+            }
+            const timeUntilDeadline = deadline - Date.now()
+            const timeUntilHeartbeat =
+              PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS -
+              (Date.now() - lastHeartbeatAt)
+            const waitMs = Math.max(
+              1,
+              Math.min(timeUntilDeadline, timeUntilHeartbeat),
+            )
+            await new Promise<void>(resolve => {
+              let timer: ReturnType<typeof setTimeout>
+              const finish = () => {
+                clearTimeout(timer)
+                signal.removeEventListener('abort', finish)
+                if (wake === finish) wake = undefined
+                resolve()
+              }
+              wake = finish
+              timer = setTimeout(finish, waitMs)
+              signal.addEventListener('abort', finish, { once: true })
+              if (signal.aborted) finish()
+            })
+            if (
+              !closed &&
+              !signal.aborted &&
               Date.now() - lastHeartbeatAt >=
-              PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS
+                PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS
             ) {
               controller.enqueue(encoder.encode(': heartbeat\n\n'))
               lastHeartbeatAt = Date.now()
             }
-
-            await waitForProjectEventsSseInterval(signal)
           }
           close()
         } catch (error) {
           fail(error)
         } finally {
+          unsubscribe?.()
+          wake = undefined
           signal.removeEventListener('abort', onAbort)
         }
       })()
     },
-  })
-}
-
-function waitForProjectEventsSseInterval(signal: AbortSignal): Promise<void> {
-  return new Promise(resolve => {
-    let timer: ReturnType<typeof setTimeout>
-    const finish = () => {
-      clearTimeout(timer)
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }
-    const onAbort = () => {
-      finish()
-    }
-    timer = setTimeout(finish, PROJECT_EVENTS_SSE_POLL_INTERVAL_MS)
-    signal.addEventListener('abort', onAbort, { once: true })
-    if (signal.aborted) onAbort()
   })
 }
 
